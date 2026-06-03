@@ -1,11 +1,5 @@
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use modbus_ui::{
-    AlternateScreen, EventResult,
-    style::{InputFieldStyle, TextStyle},
-    traits::HandleEvents,
-    types::Border,
-    widgets::{Text, TextBuilder},
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use modbus_ui::{AlternateScreen, style::TextStyle, types::Border, widgets::TextBuilder};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Rect},
