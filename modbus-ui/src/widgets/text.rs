@@ -87,23 +87,31 @@ impl StatefulWidget for &Text {
             area = inner.inner(margin.clone());
         }
 
-        let area = match self.horizontal_alignment {
-            HorizontalAlignment::Left => area,
-            HorizontalAlignment::Center => Layout::horizontal([
-                Constraint::Min(1),
-                Constraint::Length(state.len() as u16),
-                Constraint::Min(1),
-            ])
-            .split(area)[1],
-            HorizontalAlignment::Right => {
-                Layout::horizontal([Constraint::Min(1), Constraint::Length(state.len() as u16)])
-                    .split(area)[1]
-            }
-        };
-
         let text_style = self.style.general;
-        let input = Paragraph::new(UiText::from(state.as_str()).style(text_style));
-        input.render(area, buf);
+        let mut text_area = area.clone();
+        let (len, remain) = if (area.width as usize) < state.len() {
+            state
+                .chars()
+                .fold((0, String::new()), |(mut len, mut line), c| {
+                    line.push(c);
+                    len += 1;
+                    if len >= area.width as usize {
+                        let input = Paragraph::new(UiText::from(line).style(text_style));
+                        input.render(text_area, buf);
+                        text_area.y += 1;
+                        (0, String::new())
+                    } else {
+                        (len, line)
+                    }
+                })
+        } else {
+            (state.len(), state.to_owned())
+        };
+        if len > 0 {
+            let input = Paragraph::new(UiText::from(remain).style(text_style))
+                .alignment(self.horizontal_alignment);
+            input.render(text_area, buf);
+        }
     }
 }
 
