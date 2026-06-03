@@ -256,7 +256,6 @@ dependencies = [
  "derive_builder",
  "modbus-derive",
  "modbus-log",
- "modbus-lua",
  "modbus-mem",
  "modbus-net",
  "modbus-reg",
@@ -264,9 +263,7 @@ dependencies = [
  "modbus-util",
  "ratatui",
  "serde",
- "serde_json",
  "tokio",
- "toml",
 ]
 
 [[package]]
@@ -1220,6 +1217,7 @@ dependencies = [
  "derive-getters",
  "derive_builder",
  "derive_setters",
+ "getset",
  "itertools",
  "serde",
  "tokio-modbus",

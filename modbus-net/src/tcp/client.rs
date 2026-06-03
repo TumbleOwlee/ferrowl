@@ -188,7 +188,10 @@ impl Client {
                 .await;
                 ("ReadHoldingRegisters", res)
             }
-            _ => panic!("Invalid function code in operation."),
+            _ => (
+                "Unknown",
+                Ok(Ok(Err(tokio_modbus::ExceptionCode::IllegalFunction))),
+            ),
         };
         match result {
             (s, Ok(Ok(Ok(v)))) => (s, Ok(v)),
@@ -266,7 +269,7 @@ impl Client {
                                 id: id.clone(),
                                 slave_id: operation.slave_id,
                             };
-                            let ty = if fc == FunctionCode::ReadDiscreteInputs
+                            let ty = if fc == FunctionCode::ReadInputRegisters
                                 || fc == FunctionCode::ReadHoldingRegisters
                             {
                                 Type::Register

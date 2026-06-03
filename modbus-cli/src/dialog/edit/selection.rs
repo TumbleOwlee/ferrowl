@@ -240,8 +240,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 &mut self.success.state,
             );
         }
-        vertical_index += 1;
-        vertical_index += 1;
+        vertical_index += 2;
 
         StatefulWidget::render(
             &self.keybinds.widget,
@@ -407,7 +406,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some(("Reolution", HorizontalAlignment::Right).into()))
+                    .title(Some(("Resolution", HorizontalAlignment::Right).into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,

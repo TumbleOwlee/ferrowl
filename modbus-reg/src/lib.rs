@@ -4,8 +4,7 @@ pub mod traits;
 pub mod value;
 
 use derive_builder::Builder;
-use derive_getters::Getters;
-use derive_setters::Setters;
+use getset::{CopyGetters, Getters, Setters, WithSetters};
 use serde::{Deserialize, Serialize};
 use tokio_modbus::SlaveId;
 
@@ -14,45 +13,24 @@ pub use crate::format::{Alignment, Endian, Format};
 pub use crate::traits::{IntoVec, ParseFromU8};
 pub use crate::value::Value;
 
-#[derive(Setters)]
-pub struct Builder {
-    #[setters(into)]
-    slave_id: SlaveId,
-    access: Access,
-    kind: Kind,
-    address: Address,
-    format: Format,
-}
-
-impl Builder {
-    pub fn new(format: Format) -> Self {
-        Self {
-            slave_id: 0,
-            access: Access::ReadWrite,
-            kind: Kind::InputRegister,
-            address: Address::Virtual,
-            format,
-        }
-    }
-
-    pub fn build(self) -> Register {
-        Register {
-            slave_id: self.slave_id,
-            access: self.access,
-            kind: self.kind,
-            address: self.address,
-            format: self.format,
-        }
-    }
-}
-
-#[derive(Getters, Setters, Serialize, Deserialize, Debug, Clone, Builder)]
+#[derive(
+    Builder, Serialize, Deserialize, Debug, Clone, Getters, Setters, CopyGetters, WithSetters,
+)]
+#[getset(set = "pub")]
 pub struct Register {
-    #[setters(borrow_self, into, prefix = "set_")]
+    #[getset(get = "pub")]
+    #[builder(default = "0")]
     slave_id: SlaveId,
+    #[getset(get = "pub")]
+    #[builder(default = "Access::ReadWrite")]
     access: Access,
+    #[getset(get = "pub")]
+    #[builder(default = "Kind::InputRegister")]
     kind: Kind,
+    #[getset(get = "pub")]
+    #[builder(default = "Address::Virtual")]
     address: Address,
+    #[getset(get = "pub")]
     format: Format,
 }
 
@@ -259,12 +237,7 @@ impl Register {
                 let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
                     -i8::from_str_radix(s, 16)?
                 } else if let Some(s) = s.strip_prefix("0x") {
-                    let v = u8::from_str_radix(s, 16)?;
-                    if v > (i8::MAX as u8) {
-                        v as i8
-                    } else {
-                        return Err(anyhow::anyhow!("Value too large for i8."));
-                    }
+                    u8::from_str_radix(s, 16)? as i8
                 } else {
                     s.parse()?
                 };
@@ -277,12 +250,7 @@ impl Register {
                 let val: i16 = if let Some(s) = s.strip_prefix("-0x") {
                     -i16::from_str_radix(s, 16)?
                 } else if let Some(s) = s.strip_prefix("0x") {
-                    let v = u16::from_str_radix(s, 16)?;
-                    if v > (i16::MAX as u16) {
-                        v as i16
-                    } else {
-                        return Err(anyhow::anyhow!("Value too large for i16."));
-                    }
+                    u16::from_str_radix(s, 16)? as i16
                 } else {
                     s.parse()?
                 };
@@ -295,12 +263,7 @@ impl Register {
                 let val: i32 = if let Some(s) = s.strip_prefix("-0x") {
                     -i32::from_str_radix(s, 16)?
                 } else if let Some(s) = s.strip_prefix("0x") {
-                    let v = u32::from_str_radix(s, 16)?;
-                    if v > (i32::MAX as u32) {
-                        v as i32
-                    } else {
-                        return Err(anyhow::anyhow!("Value too large for i32."));
-                    }
+                    u32::from_str_radix(s, 16)? as i32
                 } else {
                     s.parse()?
                 };
@@ -313,12 +276,7 @@ impl Register {
                 let val: i64 = if let Some(s) = s.strip_prefix("-0x") {
                     -i64::from_str_radix(s, 16)?
                 } else if let Some(s) = s.strip_prefix("0x") {
-                    let v = u64::from_str_radix(s, 16)?;
-                    if v > (i64::MAX as u64) {
-                        v as i64
-                    } else {
-                        return Err(anyhow::anyhow!("Value too large for i64."));
-                    }
+                    u64::from_str_radix(s, 16)? as i64
                 } else {
                     s.parse()?
                 };
@@ -331,12 +289,7 @@ impl Register {
                 let val: i128 = if let Some(s) = s.strip_prefix("-0x") {
                     -i128::from_str_radix(s, 16)?
                 } else if let Some(s) = s.strip_prefix("0x") {
-                    let v = u128::from_str_radix(s, 16)?;
-                    if v > (i128::MAX as u128) {
-                        v as i128
-                    } else {
-                        return Err(anyhow::anyhow!("Value too large for i128."));
-                    }
+                    u128::from_str_radix(s, 16)? as i128
                 } else {
                     s.parse()?
                 };

@@ -162,50 +162,56 @@ fn main() {
         }
 
         // Check for events
-        if event::poll(Duration::from_millis(50)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Esc = key.code {
-                        break;
-                    } else {
-                        let event_result: EventResult = if i == 0 {
-                            edit_input_dialog.handle_events(key.modifiers, key.code)
-                        } else if i == 1 {
-                            edit_selection_dialog.handle_events(key.modifiers, key.code)
+        match event::poll(Duration::from_millis(50)) {
+            Ok(true) => {
+                if let Ok(Event::Key(key)) = event::read() {
+                    if key.kind == KeyEventKind::Press {
+                        if let KeyCode::Esc = key.code {
+                            break;
                         } else {
-                            table_view.handle_events(key.modifiers, key.code)
-                        };
-                        match event_result {
-                            EventResult::Unhandled(KeyModifiers::ALT, KeyCode::Char('k')) => {
-                                i = (i + 1) % 3;
-                            }
-                            EventResult::Unhandled(_, KeyCode::Enter) => {
-                                break;
-                            }
-                            EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
-                            | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
-                                if i == 0 {
-                                    edit_input_dialog.focus_previous();
-                                } else if i == 1 {
-                                    edit_selection_dialog.focus_previous();
-                                } else {
-                                    table_view.focus_previous();
+                            let event_result: EventResult = if i == 0 {
+                                edit_input_dialog.handle_events(key.modifiers, key.code)
+                            } else if i == 1 {
+                                edit_selection_dialog.handle_events(key.modifiers, key.code)
+                            } else {
+                                table_view.handle_events(key.modifiers, key.code)
+                            };
+                            match event_result {
+                                EventResult::Unhandled(KeyModifiers::ALT, KeyCode::Char('k')) => {
+                                    i = (i + 1) % 3;
                                 }
-                            }
-                            EventResult::Unhandled(_, KeyCode::Tab) => {
-                                if i == 0 {
-                                    edit_input_dialog.focus_next();
-                                } else if i == 1 {
-                                    edit_selection_dialog.focus_next();
-                                } else {
-                                    table_view.focus_next();
+                                EventResult::Unhandled(_, KeyCode::Enter) => {
+                                    break;
                                 }
+                                EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
+                                | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
+                                    if i == 0 {
+                                        edit_input_dialog.focus_previous();
+                                    } else if i == 1 {
+                                        edit_selection_dialog.focus_previous();
+                                    } else {
+                                        table_view.focus_previous();
+                                    }
+                                }
+                                EventResult::Unhandled(_, KeyCode::Tab) => {
+                                    if i == 0 {
+                                        edit_input_dialog.focus_next();
+                                    } else if i == 1 {
+                                        edit_selection_dialog.focus_next();
+                                    } else {
+                                        table_view.focus_next();
+                                    }
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                    } else {
+                        break;
                     }
                 }
             }
+            Ok(false) => {}
+            Err(_) => break,
         }
     }
 }

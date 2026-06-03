@@ -118,7 +118,7 @@ impl TableEntry<COLUMN_COUNT> for Definition {
         ]
     }
     fn height(&self) -> u16 {
-        return 3;
+        3
     }
 }
 

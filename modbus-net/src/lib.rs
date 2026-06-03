@@ -35,7 +35,7 @@ impl<T> Key<T>
 where
     T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync,
 {
-    pub fn from(id: T, slave_id: SlaveId) -> Self {
+    pub fn new(id: T, slave_id: SlaveId) -> Self {
         Self { id, slave_id }
     }
 
@@ -47,6 +47,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub enum ModbusError {
     Exception(ExceptionCode),
     Error(tokio_modbus::Error),
@@ -63,6 +64,9 @@ impl Display for ModbusError {
     }
 }
 
+impl std::error::Error for ModbusError {}
+
+#[derive(Debug)]
 pub enum SerialError {
     Error(tokio_serial::Error),
     Configuration(String),
@@ -77,6 +81,9 @@ impl Display for SerialError {
     }
 }
 
+impl std::error::Error for SerialError {}
+
+#[derive(Debug)]
 pub enum TcpError {
     Address(std::net::AddrParseError),
     Configuration(String),
@@ -95,6 +102,9 @@ impl Display for TcpError {
     }
 }
 
+impl std::error::Error for TcpError {}
+
+#[derive(Debug)]
 pub enum Error {
     Modbus(ModbusError),
     Serial(SerialError),
@@ -112,6 +122,8 @@ impl Display for Error {
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 impl From<TcpError> for Error {
     fn from(e: TcpError) -> Self {

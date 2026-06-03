@@ -33,7 +33,7 @@ where
         let mut idx: usize = 0;
         let mut val: u16 = 0;
         for v in self {
-            val &= *v.borrow() as u16;
+            val |= *v.borrow() as u16;
             idx += 1;
             if idx.is_multiple_of(2) {
                 values.push(val);
@@ -42,9 +42,9 @@ where
                 val <<= 8;
             }
         }
-        if idx != 0 {
-            values.push(val << 8);
+        if !idx.is_multiple_of(2) {
+            values.push(val);
         }
-        Ok(vec![])
+        Ok(values)
     }
 }

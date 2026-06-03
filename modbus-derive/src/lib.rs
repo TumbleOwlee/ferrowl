@@ -75,7 +75,7 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
                         // Unnamed fields are not supported for focus switching
                         return syn::Error::new_spanned(
                             &field,
-                            "FocusSwtich only works on named fields with ident.",
+                            "FocusSwitch only works on named fields with ident.",
                         )
                         .to_compile_error()
                         .into();
@@ -259,7 +259,7 @@ pub fn focusable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     named.named.push(focus_field);
                 }
                 _ => {
-                    unreachable!("FocusSwtich only works on named fields.");
+                    unreachable!("FocusSwitch only works on named fields.");
                 }
             }
 

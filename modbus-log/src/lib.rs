@@ -21,7 +21,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
         let next = (self.write + 1) % LOG_SIZE;
         if next == self.read {
-            self.read += 1;
+            self.read = (self.read + 1) % LOG_SIZE;
         }
         self.write = next;
     }
@@ -38,7 +38,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         let mut read = self.read;
         let mut msgs = Vec::with_capacity(cnt);
         while read != self.write && msgs.len() < cnt {
-            msgs.push(self.buffer[self.read].iter().collect::<String>());
+            msgs.push(self.buffer[read].iter().collect::<String>());
             read = (read + 1) % LOG_SIZE;
         }
         if msgs.is_empty() { None } else { Some(msgs) }
@@ -47,7 +47,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
     pub fn take(&mut self) -> Option<String> {
         if self.read != self.write {
             let msg = self.buffer[self.read].iter().collect::<String>();
-            self.read += 1;
+            self.read = (self.read + 1) % LOG_SIZE;
             Some(msg)
         } else {
             None
