@@ -124,3 +124,59 @@ impl Format {
         self.width() * 2
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Alignment, Endian, Format, Resolution, Width};
+
+    fn res() -> Resolution {
+        Resolution(1.0)
+    }
+
+    #[test]
+    fn ut_format_width() {
+        assert_eq!(Format::Ascii((Alignment::Left, Width(4))).width(), 4);
+        assert_eq!(Format::U8((Endian::Big, res())).width(), 1);
+        assert_eq!(Format::U16((Endian::Big, res())).width(), 1);
+        assert_eq!(Format::I8((Endian::Big, res())).width(), 1);
+        assert_eq!(Format::I16((Endian::Big, res())).width(), 1);
+        assert_eq!(Format::U32((Endian::Big, res())).width(), 2);
+        assert_eq!(Format::I32((Endian::Big, res())).width(), 2);
+        assert_eq!(Format::F32((Endian::Big, res())).width(), 2);
+        assert_eq!(Format::U64((Endian::Big, res())).width(), 4);
+        assert_eq!(Format::I64((Endian::Big, res())).width(), 4);
+        assert_eq!(Format::F64((Endian::Big, res())).width(), 4);
+        assert_eq!(Format::U128((Endian::Big, res())).width(), 8);
+        assert_eq!(Format::I128((Endian::Big, res())).width(), 8);
+    }
+
+    #[test]
+    fn ut_format_length() {
+        assert_eq!(Format::U8((Endian::Big, res())).length(), 2);
+        assert_eq!(Format::U32((Endian::Big, res())).length(), 4);
+        assert_eq!(Format::U64((Endian::Big, res())).length(), 8);
+        assert_eq!(Format::U128((Endian::Big, res())).length(), 16);
+        assert_eq!(Format::Ascii((Alignment::Left, Width(3))).length(), 6);
+    }
+
+    #[test]
+    fn ut_format_resolution() {
+        let r = Resolution(0.5);
+        assert!(Format::Ascii((Alignment::Left, Width(1))).resolution().is_none());
+        assert_eq!(
+            Format::U8((Endian::Big, r.clone())).resolution().unwrap().0,
+            0.5
+        );
+        assert_eq!(
+            Format::I16((Endian::Little, r.clone()))
+                .resolution()
+                .unwrap()
+                .0,
+            0.5
+        );
+        assert_eq!(
+            Format::F32((Endian::Big, r.clone())).resolution().unwrap().0,
+            0.5
+        );
+    }
+}

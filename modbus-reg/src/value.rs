@@ -105,3 +105,58 @@ impl Value {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Value;
+    use crate::format::Resolution;
+
+    fn res() -> Resolution {
+        Resolution(1.0)
+    }
+
+    #[test]
+    fn ut_value_as_str_no_scaling() {
+        assert_eq!(Value::U8((42, res())).as_str(), "42");
+        assert_eq!(Value::U16((1000, res())).as_str(), "1000");
+        assert_eq!(Value::I8((-1, res())).as_str(), "-1");
+        assert_eq!(Value::I16((-100, res())).as_str(), "-100");
+        assert_eq!(Value::Ascii("hello".to_string()).as_str(), "hello");
+    }
+
+    #[test]
+    fn ut_value_as_str_with_scaling() {
+        // Use resolution 2.0 so that integer * 2.0 is exact in f64
+        let r = Resolution(2.0);
+        assert_eq!(Value::U16((5, r.clone())).as_str(), "10");
+        assert_eq!(Value::I32((-3, r.clone())).as_str(), "-6");
+        assert_eq!(Value::F32((1.5f32, r.clone())).as_str(), "3");
+    }
+
+    #[test]
+    fn ut_value_as_hex_str() {
+        assert_eq!(Value::U8((0xFF, res())).as_hex_str(), "0xFF");
+        assert_eq!(Value::U16((0x1234, res())).as_hex_str(), "0x1234");
+        assert_eq!(Value::U32((0x12345678, res())).as_hex_str(), "0x12345678");
+        assert_eq!(Value::U64((0, res())).as_hex_str(), "0x0000000000000000");
+        // Negative i8 formatted as bit-pattern hex: -1i8 as u8 = 0xFF
+        assert_eq!(Value::I8((-1i8, res())).as_hex_str(), "0xFF");
+        assert_eq!(Value::I16((-1i16, res())).as_hex_str(), "0xFFFF");
+        // ASCII: each byte represented as 2 hex digits
+        assert_eq!(Value::Ascii("AB".to_string()).as_hex_str(), "0x4142");
+    }
+
+    #[test]
+    fn ut_value_as_hex_str_f32() {
+        let bits = 1.5f32.to_bits();
+        let expected = format!("0x{:08X}", bits);
+        assert_eq!(Value::F32((1.5f32, res())).as_hex_str(), expected);
+    }
+
+    #[test]
+    fn ut_value_as_hex_str_f64() {
+        let bits = 1.5f64.to_bits();
+        let expected = format!("0x{:016X}", bits);
+        assert_eq!(Value::F64((1.5f64, res())).as_hex_str(), expected);
+    }
+}

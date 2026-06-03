@@ -52,6 +52,31 @@ impl<T, E, F: FnOnce(E) -> String> Expect<F> for Result<T, E> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_str_macro_returns_string() {
+        let s: String = str!("hello");
+        assert_eq!(s, "hello".to_owned());
+    }
+
+    #[test]
+    fn ut_expect_ok_returns_value() {
+        let result: Result<i32, &str> = Ok(42);
+        let val = result.panic(|e| format!("error: {}", e));
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    #[should_panic(expected = "something went wrong: oops")]
+    fn ut_expect_err_panics_with_message() {
+        let result: Result<i32, &str> = Err("oops");
+        result.panic(|e| format!("something went wrong: {}", e));
+    }
+}
+
 #[macro_export]
 macro_rules! async_cloned {
     ($($n:ident),+; $body:block) => (

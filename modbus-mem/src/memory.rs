@@ -236,4 +236,86 @@ mod tests {
         assert!(slices.get(&Range::new(15, 10)).is_some());
         assert!(slices.get(&Range::new(5, 5)).is_some());
     }
+
+    #[test]
+    fn ut_memory_write_read_combined() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+
+        let values: Vec<u16> = vec![10, 20, 30, 40, 50];
+        assert!(memory.write(1u8, &Type::Coil, &Range::new(0, 5), &values));
+
+        let result = memory.read(1u8, &Type::Coil, &Range::new(0, 5));
+        assert_eq!(result, Some(values));
+    }
+
+    #[test]
+    fn ut_memory_write_read_partial_range() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Register), &[Range::new(0, 10)]);
+
+        let values: Vec<u16> = vec![1, 2, 3];
+        assert!(memory.write(1u8, &Type::Register, &Range::new(3, 3), &values));
+
+        let result = memory.read(1u8, &Type::Register, &Range::new(3, 3));
+        assert_eq!(result, Some(values));
+    }
+
+    #[test]
+    fn ut_memory_write_wrong_length() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+
+        let values: Vec<u16> = vec![1, 2, 3]; // length 3, range length 5
+        assert!(!memory.write(1u8, &Type::Coil, &Range::new(0, 5), &values));
+    }
+
+    #[test]
+    fn ut_memory_write_unknown_key() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+
+        let values: Vec<u16> = vec![1, 2, 3, 4, 5];
+        assert!(!memory.write(99u8, &Type::Coil, &Range::new(0, 5), &values));
+    }
+
+    #[test]
+    fn ut_memory_read_unknown_key() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[Range::new(0, 5)]);
+
+        assert!(memory.read(99u8, &Type::Coil, &Range::new(0, 5)).is_none());
+    }
+
+    #[test]
+    fn ut_memory_writable_wrong_type() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+
+        assert!(!memory.writable(&1u8, &Type::Register, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_readable_wrong_type() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Combined(Type::Register), &[Range::new(0, 5)]);
+
+        assert!(!memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_readonly_not_writable() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[Range::new(0, 5)]);
+
+        assert!(!memory.writable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_writeonly_not_readable() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Write(Type::Coil), &[Range::new(0, 5)]);
+
+        assert!(!memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
 }

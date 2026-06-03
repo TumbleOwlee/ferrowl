@@ -111,4 +111,53 @@ mod tests {
         let peak = log.peak_n(2);
         assert!(peak.is_none());
     }
+
+    #[test]
+    fn ut_log_empty() {
+        let log: Log<10, 5> = Log::init();
+        assert!(log.peak().is_none());
+        assert!(log.peak_n(1).is_none());
+    }
+
+    #[test]
+    fn ut_log_ring_overflow_evicts_oldest() {
+        // LOG_SIZE=3 can hold at most 2 messages
+        let mut log: Log<10, 3> = Log::init();
+        log.write("msg1______"); // fill all 10 chars
+        log.write("msg2______");
+        log.write("msg3______"); // evicts msg1
+
+        let msgs = log.peak_n(2).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert!(msgs[0].starts_with("msg2"));
+        assert!(msgs[1].starts_with("msg3"));
+    }
+
+    #[test]
+    fn ut_log_take_n_drains_all() {
+        let mut log: Log<10, 5> = Log::init();
+        log.write("aaaaaaaaaa");
+        log.write("bbbbbbbbbb");
+        log.write("cccccccccc");
+
+        // take_n(10) > available (3): returns all 3
+        let taken = log.take_n(10).unwrap();
+        assert_eq!(taken.len(), 3);
+
+        // now empty
+        assert!(log.take_n(1).is_none());
+    }
+
+    #[test]
+    fn ut_log_truncation() {
+        let mut log: Log<5, 3> = Log::init();
+        log.write("abcde");    // exactly MAX_LINE_LENGTH chars: not truncated
+        log.write("abcdefgh"); // 8 chars: truncated to first 5
+
+        let first = log.take().unwrap();
+        assert_eq!(&first, "abcde");
+
+        let second = log.take().unwrap();
+        assert_eq!(&second, "abcde");
+    }
 }

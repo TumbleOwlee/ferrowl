@@ -152,4 +152,57 @@ mod tests {
 
         assert_eq!(range0.partial_cmp(&range7), Some(Ordering::Equal));
     }
+
+    #[test]
+    fn ut_range_intersect_overlap() {
+        let a = Range::new(0, 10); // [0, 10)
+        let b = Range::new(5, 10); // [5, 15)
+        let r = a.intersect(&b).unwrap();
+        assert_eq!(r.start, 5);
+        assert_eq!(r.end, 10);
+        assert_eq!(r.length(), 5);
+    }
+
+    #[test]
+    fn ut_range_intersect_disjoint() {
+        let a = Range::new(0, 5);   // [0, 5)
+        let b = Range::new(10, 5);  // [10, 15)
+        assert!(a.intersect(&b).is_none());
+    }
+
+    #[test]
+    fn ut_range_intersect_adjacent_is_empty() {
+        // [0, 5) and [5, 10) touch at exactly one point → zero-length intersection
+        let a = Range::new(0, 5);
+        let b = Range::new(5, 5);
+        let r = a.intersect(&b).unwrap();
+        assert_eq!(r.length(), 0);
+    }
+
+    #[test]
+    fn ut_range_intersect_identical() {
+        let a = Range::new(5, 10);
+        let r = a.intersect(&a).unwrap();
+        assert_eq!(r.start, 5);
+        assert_eq!(r.end, 15);
+        assert_eq!(r.length(), 10);
+    }
+
+    #[test]
+    fn ut_range_intersect_contained() {
+        // b is fully inside a
+        let a = Range::new(0, 20);
+        let b = Range::new(5, 5);
+        let r = a.intersect(&b).unwrap();
+        assert_eq!(r.start, 5);
+        assert_eq!(r.end, 10);
+        assert_eq!(r.length(), 5);
+    }
+
+    #[test]
+    fn ut_range_intersect_symmetric() {
+        let a = Range::new(3, 7);
+        let b = Range::new(6, 8);
+        assert_eq!(a.intersect(&b), b.intersect(&a));
+    }
 }

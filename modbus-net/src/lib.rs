@@ -154,3 +154,61 @@ pub enum Command {
     WriteSingleRegister(SlaveId, Address, Value),
     WriteMultipleRegister(SlaveId, Address, Vec<Value>),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_key_new_stores_fields() {
+        let key = Key::new(42u8, 7);
+        assert_eq!(key.id, 42u8);
+        assert_eq!(key.slave_id, 7);
+    }
+
+    #[test]
+    fn ut_key_create_uses_default_id() {
+        let key = Key::<u8>::create(5);
+        assert_eq!(key.id, u8::default());
+        assert_eq!(key.slave_id, 5);
+    }
+
+    #[test]
+    fn ut_key_default_both_default() {
+        let key = Key::<u8>::default();
+        assert_eq!(key.id, u8::default());
+        assert_eq!(key.slave_id, SlaveId::default());
+    }
+
+    #[test]
+    fn ut_serial_error_configuration_display() {
+        let e = SerialError::Configuration("bad baud rate".to_string());
+        assert_eq!(e.to_string(), "Serial configuration error: bad baud rate");
+    }
+
+    #[test]
+    fn ut_tcp_error_configuration_display() {
+        let e = TcpError::Configuration("missing host".to_string());
+        assert_eq!(e.to_string(), "TCP configuration error: missing host");
+    }
+
+    #[test]
+    fn ut_modbus_error_exception_display() {
+        let e = ModbusError::Exception(ExceptionCode::IllegalFunction);
+        assert!(e.to_string().contains("Modbus exception"));
+    }
+
+    #[test]
+    fn ut_error_wraps_serial_display() {
+        let inner = SerialError::Configuration("oops".to_string());
+        let e = Error::from(inner);
+        assert!(e.to_string().contains("Serial configuration error: oops"));
+    }
+
+    #[test]
+    fn ut_error_wraps_tcp_display() {
+        let inner = TcpError::Configuration("no host".to_string());
+        let e = Error::from(inner);
+        assert!(e.to_string().contains("TCP configuration error: no host"));
+    }
+}
