@@ -4,17 +4,27 @@ mod dialog;
 mod instance;
 mod module;
 mod ui;
+mod view;
 
-use std::{io::Stdout, time::Duration};
+use std::{io::Stdout, sync::Arc, time::Duration};
 
 use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use modbus_mem::Memory;
+use modbus_reg::{
+    Access, Address, Alignment, Endian, Format, Kind, RegisterBuilder,
+    format::{Resolution, Width},
+};
 use modbus_ui::{AlternateScreen, EventResult, traits::HandleEvents};
 use modbus_util::{Expect, tokio::spawn_detach};
 use ratatui::layout::{Constraint, Layout, Rect};
 use tokio::runtime::Runtime;
 
-use crate::{dialog::EditInputDialog, dialog::EditSelectionDialog, module::Definition};
+use crate::{
+    dialog::{EditInputDialog, EditSelectionDialog},
+    module::Definition,
+    view::main::{DefinitionBuilder, TableView},
+};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -84,8 +94,52 @@ fn main() {
         handler(panic);
     }));
 
+    let memory = Arc::new(Memory::default());
+
+    let mut values = vec![];
+    for i in 0..10 {
+        values.push(
+            DefinitionBuilder::default()
+                .name(format!("Name {}", i))
+                .comment(format!("Some comment {}", i))
+                .register(
+                    RegisterBuilder::default()
+                        .slave_id(1)
+                        .access(Access::ReadWrite)
+                        .kind(Kind::InputRegister)
+                        .address(Address::Fixed(100))
+                        .format(Format::U16((Endian::Big, Resolution(1.0))))
+                        .build()
+                        .unwrap(),
+                )
+                .memory(memory.clone())
+                .build()
+                .unwrap(),
+        );
+    }
+
+    values.push(
+        DefinitionBuilder::default()
+            .name(format!("Name {}", 11))
+            .comment(format!("Some comment {}", 11))
+            .register(
+                RegisterBuilder::default()
+                    .slave_id(1)
+                    .access(Access::ReadWrite)
+                    .kind(Kind::InputRegister)
+                    .address(Address::Fixed(100))
+                    .format(Format::Ascii((Alignment::Left, Width(10))))
+                    .build()
+                    .unwrap(),
+            )
+            .memory(memory.clone())
+            .build()
+            .unwrap(),
+    );
+
     let mut edit_input_dialog = EditInputDialog::new();
     let mut edit_selection_dialog = EditSelectionDialog::new(vec!["Dog", "Cat", "Horse"]);
+    let mut table_view = TableView::new(values);
 
     let mut i = 0;
 
@@ -96,8 +150,10 @@ fn main() {
                 Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(f.area());
             if i == 0 {
                 edit_input_dialog.render(layout[0], f.buffer_mut());
-            } else {
+            } else if i == 1 {
                 edit_selection_dialog.render(layout[1], f.buffer_mut());
+            } else {
+                table_view.render(f.area(), f.buffer_mut());
             }
         }) {
             drop(screen);
@@ -112,21 +168,38 @@ fn main() {
                     if let KeyCode::Esc = key.code {
                         break;
                     } else {
-                        let event_result: EventResult =
-                            edit_input_dialog.handle_events(key.modifiers, key.code);
+                        let event_result: EventResult = if i == 0 {
+                            edit_input_dialog.handle_events(key.modifiers, key.code)
+                        } else if i == 1 {
+                            edit_selection_dialog.handle_events(key.modifiers, key.code)
+                        } else {
+                            table_view.handle_events(key.modifiers, key.code)
+                        };
                         match event_result {
                             EventResult::Unhandled(KeyModifiers::ALT, KeyCode::Char('k')) => {
-                                i = (i + 1) % 2;
+                                i = (i + 1) % 3;
                             }
                             EventResult::Unhandled(_, KeyCode::Enter) => {
                                 break;
                             }
                             EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
                             | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
-                                edit_input_dialog.focus_previous();
+                                if i == 0 {
+                                    edit_input_dialog.focus_previous();
+                                } else if i == 1 {
+                                    edit_selection_dialog.focus_previous();
+                                } else {
+                                    table_view.focus_previous();
+                                }
                             }
                             EventResult::Unhandled(_, KeyCode::Tab) => {
-                                edit_input_dialog.focus_next();
+                                if i == 0 {
+                                    edit_input_dialog.focus_next();
+                                } else if i == 1 {
+                                    edit_selection_dialog.focus_next();
+                                } else {
+                                    table_view.focus_next();
+                                }
                             }
                             _ => {}
                         }

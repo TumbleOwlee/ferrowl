@@ -4,7 +4,7 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Constraint as LConstraint, Layout, Margin, Rect},
     text::{Line, Text},
     widgets::{
         Block, Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, StatefulWidget,
@@ -19,9 +19,14 @@ use crate::{
     widgets::Title,
 };
 
+pub struct Width {
+    pub min: usize,
+    pub max: usize,
+}
+
 pub trait Header<const N: usize> {
     fn header() -> [String; N];
-    fn widths() -> [u16; N];
+    fn widths() -> [Width; N];
 }
 
 pub trait TableEntry<const N: usize> {
@@ -101,16 +106,16 @@ where
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let area = Layout::vertical([
-            Constraint::Length(self.margin.vertical),
-            Constraint::Min(2),
-            Constraint::Length(self.margin.vertical),
+            LConstraint::Length(self.margin.vertical),
+            LConstraint::Min(2),
+            LConstraint::Length(self.margin.vertical),
         ])
         .split(area)[1];
 
         let mut area = Layout::horizontal([
-            Constraint::Length(self.margin.horizontal),
-            Constraint::Min(1),
-            Constraint::Length(self.margin.horizontal),
+            LConstraint::Length(self.margin.horizontal),
+            LConstraint::Min(1),
+            LConstraint::Length(self.margin.horizontal),
         ])
         .split(area)[1];
 
@@ -139,14 +144,32 @@ where
             .collect::<Row>()
             .style(self.style.header.clone())
             .height(1);
-        let table_width = H::widths()
+
+        let column_max_widths = state.values().iter().fold([0; N], |mut init, item| {
+            let values = item.values();
+            for i in 0..N {
+                init[i] = std::cmp::max(init[i], values[i].len());
+            }
+            init
+        });
+        let column_widths: Vec<u16> = H::widths()
+            .iter()
+            .zip(column_max_widths.iter())
+            .map(|(w, max_w)| {
+                let Width { max, min } = w;
+                std::cmp::max(*min as u16, std::cmp::min(*max as u16, *max_w as u16))
+            })
+            .collect();
+
+        let table_width = column_widths
             .iter()
             .fold(0u16, |acc, w| acc + w + self.row_margin.vertical * 2);
-        state.set_total_width(std::cmp::max(table_width, area.width));
 
         let selected_style = &self.style.focused;
         let bar_style = &self.style.focused;
         let mut bar_height = 0;
+
+        state.set_total_width(std::cmp::max(table_width + 3, area.width));
 
         let rows = state.values().iter().enumerate().map(|(i, item)| {
             let color = self.style.rows.get(i % 2).unwrap();
@@ -156,14 +179,15 @@ where
             let row = item
                 .values()
                 .iter()
-                .zip(H::widths())
+                .zip(&column_widths)
                 .map(|(content, width)| {
                     let mut line_cnt = 0;
-                    let mut line = String::with_capacity(width as usize);
-                    let mut output =
-                        String::with_capacity(content.len() + (content.len() / width as usize) + 1);
+                    let mut line = String::with_capacity(*width as usize);
+                    let mut output = String::with_capacity(
+                        content.len() + (content.len() / *width as usize) + 1,
+                    );
                     for s in content.split_whitespace() {
-                        if line.len() + s.len() < width as usize {
+                        if line.len() + s.len() < *width as usize {
                             if !line.is_empty() {
                                 line += " ";
                             }
@@ -207,7 +231,14 @@ where
 
         let constraints = H::widths()
             .iter()
-            .map(|w| Constraint::Min(*w))
+            .zip(column_widths.iter())
+            .map(|(w, c)| {
+                if w.max > *c as usize {
+                    LConstraint::Min(*c + 2)
+                } else {
+                    LConstraint::Max(w.max as u16 + 2)
+                }
+            })
             .collect::<Vec<_>>();
 
         let bar = " █ ";

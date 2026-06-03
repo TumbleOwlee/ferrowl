@@ -19,6 +19,12 @@ pub enum Value {
     Ascii(String),
 }
 
+impl std::fmt::Display for Value {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "{}", self.as_str())
+    }
+}
+
 impl Value {
     pub fn as_str(&self) -> String {
         match self {

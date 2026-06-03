@@ -1,4 +1,4 @@
-use crate::dialog::edit::{Alignment, Endian, Format, ValueType}n;
+use crate::dialog::edit::{Alignment, Endian, Format, ValueType};
 use derive_builder::Builder;
 use modbus_derive::{Focus, focusable};
 use modbus_reg::format::{

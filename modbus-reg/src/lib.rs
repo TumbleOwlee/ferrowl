@@ -3,15 +3,16 @@ pub mod format;
 pub mod traits;
 pub mod value;
 
+use derive_builder::Builder;
 use derive_getters::Getters;
 use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use tokio_modbus::SlaveId;
 
-use crate::enums::{Access, Address, Kind};
-use crate::format::{Alignment, Endian, Format};
-use crate::traits::{IntoVec, ParseFromU8};
-use crate::value::Value;
+pub use crate::enums::{Access, Address, Kind};
+pub use crate::format::{Alignment, Endian, Format};
+pub use crate::traits::{IntoVec, ParseFromU8};
+pub use crate::value::Value;
 
 #[derive(Setters)]
 pub struct Builder {
@@ -45,7 +46,7 @@ impl Builder {
     }
 }
 
-#[derive(Getters, Setters, Serialize, Deserialize, Debug, Clone)]
+#[derive(Getters, Setters, Serialize, Deserialize, Debug, Clone, Builder)]
 pub struct Register {
     #[setters(borrow_self, into, prefix = "set_")]
     slave_id: SlaveId,

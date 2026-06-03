@@ -6,6 +6,19 @@ pub enum Alignment {
     Right,
 }
 
+impl std::fmt::Display for Alignment {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Alignment::Left => {
+                write!(fmt, "Left")
+            }
+            Alignment::Right => {
+                write!(fmt, "Right")
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Width(pub usize);
 
@@ -15,8 +28,27 @@ pub enum Endian {
     Big,
 }
 
+impl std::fmt::Display for Endian {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Endian::Little => {
+                write!(fmt, "Little Endian")
+            }
+            Endian::Big => {
+                write!(fmt, "Big Endian")
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Resolution(pub f64);
+
+impl std::fmt::Display for Resolution {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "{}", self.0)
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Format {
@@ -35,6 +67,28 @@ pub enum Format {
     F64((Endian, Resolution)),
 }
 
+impl std::fmt::Display for Format {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Format::Ascii((alignment, _)) => {
+                write!(fmt, "ASCII ({})", alignment)
+            }
+            Format::U8((e, _)) => write!(fmt, "U8 ({})", e),
+            Format::U16((e, _)) => write!(fmt, "U16 ({})", e),
+            Format::U32((e, _)) => write!(fmt, "U32 ({})", e),
+            Format::U64((e, _)) => write!(fmt, "U64 ({})", e),
+            Format::U128((e, _)) => write!(fmt, "U128 ({})", e),
+            Format::I8((e, _)) => write!(fmt, "I8 ({})", e),
+            Format::I16((e, _)) => write!(fmt, "I16 ({})", e),
+            Format::I32((e, _)) => write!(fmt, "I32 ({})", e),
+            Format::I64((e, _)) => write!(fmt, "I64 ({})", e),
+            Format::I128((e, _)) => write!(fmt, "I128 ({})", e),
+            Format::F32((e, _)) => write!(fmt, "F32 ({})", e),
+            Format::F64((e, _)) => write!(fmt, "F64 ({})", e),
+        }
+    }
+}
+
 impl Format {
     // The width in Modbus registers (u16) of the format
     pub fn width(&self) -> usize {
@@ -49,7 +103,7 @@ impl Format {
 
     pub fn resolution(&self) -> Option<Resolution> {
         match self {
-            Self::Ascii((_, w)) => None,
+            Self::Ascii((_, _)) => None,
             Self::U8((_, resolution))
             | Self::U16((_, resolution))
             | Self::I8((_, resolution))

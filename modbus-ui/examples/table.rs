@@ -6,7 +6,7 @@ use modbus_ui::{
     style::TableStyleBuilder,
     traits::HandleEvents,
     types::Border,
-    widgets::{Header, Table, TableBuilder, TableEntry},
+    widgets::{Header, Table, TableBuilder, TableEntry, Width},
 };
 use ratatui::{Frame, layout::Margin, style::palette::tailwind};
 use std::{io::Stdout, process::ExitCode, time::Duration};
@@ -31,8 +31,8 @@ impl Header<2> for ItemHeader {
         ["Name".to_string(), "Value".to_string()]
     }
 
-    fn widths() -> [u16; 2] {
-        [50, 50]
+    fn widths() -> [Width; 2] {
+        [Width { min: 50, max: 50 }, Width { min: 50, max: 50 }]
     }
 }
 

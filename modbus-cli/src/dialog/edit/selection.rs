@@ -29,31 +29,22 @@ where
     V: ToLabel + Clone,
 {
     // Label for the register
-    #[focus]
     pub label: Widget<InputFieldState, InputField<String>>,
     // Description for the register
-    #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
     // Address of the start register
-    #[focus]
     pub address: Widget<InputFieldState, InputField<u16>>,
     // Type selection
-    #[focus]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
     // Number format selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
     // Number endianess selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
     // Number resolution input
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
     // Text alignment selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     // Text length input
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     // Value input
     #[focus]
@@ -286,7 +277,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         EditSelectionDialogBuilder::<V>::default()
             .label(Widget {
                 state: InputFieldStateBuilder::default()
-                    .focused(true)
+                    .focused(false)
                     .disabled(false)
                     .placeholder(Some("Custom label...".to_string()))
                     .build()
@@ -465,7 +456,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             })
             .value(Widget {
                 state: SelectionStateBuilder::<V>::default()
-                    .focused(false)
+                    .focused(true)
                     .values(values)
                     .build()
                     .unwrap(),
@@ -518,7 +509,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .build()
                     .unwrap(),
             })
-            .focus(EditSelectionDialogFocus::Label)
+            .focus(EditSelectionDialogFocus::Value)
             .build()
             .unwrap()
     }
