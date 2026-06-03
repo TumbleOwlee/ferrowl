@@ -6,6 +6,7 @@ use modbus_log::Log;
 use modbus_mem::Memory;
 use modbus_mem::Range;
 use modbus_mem::Type;
+use modbus_net::SlaveId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -28,6 +29,7 @@ pub struct Config {
 pub struct Module {
     instance: Instance<Key>,
     definitions: Vec<Definition>,
+    memory: Arc<RwLock<Memory<modbus_net::Key<SlaveId>>>>,
     log: Arc<RwLock<Log<MAX_LINE_LENGTH, LOG_SIZE>>>,
 }
 
@@ -109,6 +111,7 @@ impl Module {
             instance,
             log,
             definitions: config.definitions,
+            memory,
         }
     }
 
