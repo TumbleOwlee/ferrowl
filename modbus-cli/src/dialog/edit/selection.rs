@@ -5,13 +5,16 @@ use modbus_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
 };
 use modbus_ui::{
-    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
-    style::{InputFieldStyle, SelectionStyle, TextStyle},
+    state::{
+        ButtonState, ButtonStateBuilder, InputFieldState, InputFieldStateBuilder, SelectionState,
+        SelectionStateBuilder,
+    },
+    style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
     types::Border,
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Validate, Widget,
+        Button, ButtonBuilder, GetValue, InputField, InputFieldBuilder, Selection,
+        SelectionBuilder, Text, TextBuilder, Validate, Widget,
     },
 };
 use ratatui::{
@@ -29,26 +32,38 @@ where
     V: ToLabel + Clone,
 {
     // Label for the register
+    #[focus]
     pub label: Widget<InputFieldState, InputField<String>>,
     // Description for the register
+    #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
     // Address of the start register
+    #[focus]
     pub address: Widget<InputFieldState, InputField<u16>>,
     // Type selection
+    #[focus]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
     // Number format selection
+    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
     // Number endianess selection
+    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
     // Number resolution input
+    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
     // Text alignment selection
+    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     // Text length input
+    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     // Value input
     #[focus]
     pub value: Widget<SelectionState<V>, Selection<V>>,
+    // Add button
+    #[focus]
+    pub add_button: Widget<ButtonState, Button>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
@@ -217,12 +232,27 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         }
         vertical_index += 1;
 
+        let horizontal_layout: [Rect; 3] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(7),
+            Constraint::Length(1),
+        ])
+        .areas(vertical_layout[vertical_index]);
+
         StatefulWidget::render(
             &self.value.widget,
-            vertical_layout[vertical_index],
+            horizontal_layout[0],
             buf,
             &mut self.value.state,
         );
+
+        StatefulWidget::render(
+            &self.add_button.widget,
+            horizontal_layout[1],
+            buf,
+            &mut self.add_button.state,
+        );
+
         vertical_index += 1;
 
         if !self.error.state.is_empty() {
@@ -272,6 +302,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             general: ratatui::prelude::Style::default().fg(tailwind::GREEN.c500),
         };
         let text_style = TextStyle::default();
+        let button_style = ButtonStyle {
+            focused: ratatui::prelude::Style::default().fg(tailwind::INDIGO.c400),
+            ..Default::default()
+        };
 
         EditSelectionDialogBuilder::<V>::default()
             .label(Widget {
@@ -467,6 +501,24 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         horizontal: 1,
                     })
                     .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .add_button(Widget {
+                state: ButtonStateBuilder::default()
+                    .focused(false)
+                    .label("ADD".to_string())
+                    .disabled(false)
+                    .build()
+                    .unwrap(),
+                widget: ButtonBuilder::default()
+                    .border_margin(Margin::new(1, 0))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 0,
+                    })
+                    .style(button_style.clone())
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
             })
