@@ -61,25 +61,24 @@ fn main() {
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
     // Create app state
-    let mut app = App::default();
-    app.texts = vec![
-        "Some special text".to_string(),
-        "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.".to_string()
-    ];
+    let mut app = App {
+        texts: vec![
+            "Some special text".to_string(),
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.".to_string()
+        ],
+    };
 
     loop {
         // Draw app
         screen.draw(|f| ui(f, &mut app)).unwrap();
 
         // Check for events
-        if event::poll(Duration::from_millis(50)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Esc = key.code {
-                        break;
-                    }
-                }
-            }
+        if event::poll(Duration::from_millis(50)).unwrap()
+            && let Event::Key(key) = event::read().unwrap()
+            && key.kind == KeyEventKind::Press
+            && let KeyCode::Esc = key.code
+        {
+            break;
         }
     }
 

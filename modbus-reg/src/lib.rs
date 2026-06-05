@@ -535,6 +535,16 @@ mod tests {
     }
 
     #[test]
+    fn ut_roundtrip_i32_little() {
+        let r = reg(i32_le());
+        for val in [-2147483648i32, -1, 0, 1, 2147483647] {
+            let words = r.encode(&val.to_string()).unwrap();
+            let decoded = r.decode(&words).unwrap();
+            assert_eq!(decoded.as_str(), val.to_string(), "val={}", val);
+        }
+    }
+
+    #[test]
     fn ut_encode_i32_neg_hex() {
         // "-0x01" → -1i32
         let r = reg(i32_be());

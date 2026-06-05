@@ -100,10 +100,10 @@ where
                     server
                         .serve(&on_connected, on_process_error)
                         .await
-                        .map_err(|e| Error::Server(e))
+                        .map_err(Error::Server)
                 }))
             }
-            Err(e) => Err(Error::Server(e).into()),
+            Err(e) => Err(Error::Server(e)),
         }
     }
 }
@@ -126,7 +126,7 @@ where
             slave_id: slave,
         };
 
-        tokio::task::block_in_place(|| {
+        let response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match request {
                     Request::ReadCoils(addr, cnt) => {
@@ -146,9 +146,9 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Ok(Response::ReadCoils(
+                                Ok(Response::ReadCoils(
                                             v.into_iter().map(|b| b != 0).collect(),
-                                )))
+                                ))
                             },
                             None => {
                                 (self.log)(format!(
@@ -157,7 +157,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
                         }
                     }
@@ -177,9 +177,9 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Ok(Response::ReadDiscreteInputs(
+                                Ok(Response::ReadDiscreteInputs(
                                             v.into_iter().map(|b| b != 0).collect(),
-                                )))},
+                                ))},
                             None => {
                                 (self.log)(format!(
                                         "ReadDiscreteInputs request for slave ID {} and range [{}, {}) failed.",
@@ -187,7 +187,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
                         }
                     }
@@ -211,7 +211,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Ok(Response::ReadInputRegisters(v)))
+                                Ok(Response::ReadInputRegisters(v))
                             },
                             None => {
                                 (self.log)(format!(
@@ -220,7 +220,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
                         }
                     }
@@ -244,7 +244,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Ok(Response::ReadHoldingRegisters(v)))
+                                Ok(Response::ReadHoldingRegisters(v))
                             },
                             None => {
                                 (self.log)(format!(
@@ -253,7 +253,7 @@ where
                                         addr,
                                         addr + cnt
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
                         }
                     }
@@ -280,10 +280,10 @@ where
                                         addr as usize + values.len(),
                                         values
                                 )).await;
-                                future::ready(Ok(Response::WriteMultipleRegisters(
+                                Ok(Response::WriteMultipleRegisters(
                                             addr,
                                             values.len() as u16,
-                                )))
+                                ))
                             },
                             false => {
                                 (self.log)(format!(
@@ -293,7 +293,7 @@ where
                                         addr as usize + values.len(),
                                         values
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
 
                         }
@@ -315,14 +315,14 @@ where
                                         "WriteSingleRegister request for slave ID {}, address {}, and value {} successful.",
                                         slave, addr, value
                                 )).await;
-                                future::ready(Ok(Response::WriteSingleRegister(addr, value)))
+                                Ok(Response::WriteSingleRegister(addr, value))
                             },
                             false => {
                                 (self.log)(format!(
                                         "WriteSingleRegister request for slave ID {}, address {}, and value {} failed.",
                                         slave, addr, value
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             },
                         }
                     }
@@ -343,7 +343,7 @@ where
                                         addr,
                                         addr as usize + values.len(), values
                                 )).await;
-                                future::ready(Ok(Response::WriteMultipleCoils(addr, values.len() as u16)))
+                                Ok(Response::WriteMultipleCoils(addr, values.len() as u16))
                             }
                             false => {
                                 (self.log)(format!(
@@ -352,7 +352,7 @@ where
                                         addr,
                                         addr as usize + values.len(), values
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             }
                         }
                     }
@@ -369,14 +369,14 @@ where
                                         "WriteSingleCoil request for slave ID {}, address {}, and value {} successful.",
                                         slave, addr, value
                                 )).await;
-                                future::ready(Ok(Response::WriteSingleCoil(addr, value)))
+                                Ok(Response::WriteSingleCoil(addr, value))
                             },
                             false => {
                                 (self.log)(format!(
                                         "WriteSingleCoil request for slave ID {}, address {}, and value {} failed.",
                                         slave, addr, value
                                 )).await;
-                                future::ready(Err(ExceptionCode::IllegalFunction))
+                                Err(ExceptionCode::IllegalFunction)
                             }
                         }
                     }
@@ -385,14 +385,14 @@ where
                                 "ReportServerId request received for slave ID {}. Unsupported function.",
                                 slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::MaskWriteRegister(_, _, _) => {
                         (self.log)(format!(
                                 "MaskWriteRegister request received for slave ID {}. Unsupported function.",
                                 slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::ReadWriteMultipleRegisters(read_addr, cnt, write_addr, values) => {
                         (self.log)(format!(
@@ -415,7 +415,7 @@ where
                                     "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                                     slave, read_addr, cnt, write_addr, values
                             )).await;
-                            return future::ready(Err(ExceptionCode::IllegalDataAddress));
+                            return Err(ExceptionCode::IllegalDataAddress);
                         }
                         let v = match guard.read(
                             key.clone(),
@@ -428,7 +428,7 @@ where
                                         "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                                         slave, read_addr, cnt, write_addr, values
                                 )).await;
-                                return future::ready(Err(ExceptionCode::IllegalFunction))
+                                return Err(ExceptionCode::IllegalFunction)
                             },
                         };
                         if !guard.write(
@@ -441,30 +441,31 @@ where
                                     "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                                     slave, read_addr, cnt, write_addr, values
                             )).await;
-                            return future::ready(Err(ExceptionCode::IllegalFunction));
+                            return Err(ExceptionCode::IllegalFunction);
                         }
                         (self.log)(format!(
                                 "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} successful.",
                                 slave, read_addr, cnt, write_addr, values
                         )).await;
-                        future::ready(Ok(Response::ReadWriteMultipleRegisters(v)))
+                        Ok(Response::ReadWriteMultipleRegisters(v))
                     }
                     Request::ReadDeviceIdentification(_, _) => {
                         (self.log)(format!(
                                 "ReadDeviceIdentification request received for slave ID {}. Unsupported function.",
                                 slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::Custom(func, _) => {
                         (self.log)(format!(
                                 "Custom function {} request received for slave ID {}. Unsupported function.",
                                 func, slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                 }
             })
-        })
+        });
+        future::ready(response)
     }
 }

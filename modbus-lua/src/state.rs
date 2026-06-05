@@ -71,16 +71,16 @@ mod tests {
         };
 
         let state = State::err(error.clone());
-        assert_eq!(false, state.is_ok());
-        assert_eq!(true, state.is_err());
-        assert_eq!(true, state.error().is_some());
+        assert!(!state.is_ok());
+        assert!(state.is_err());
+        assert!(state.error().is_some());
     }
 
     #[test]
     fn ut_state_ok() {
         let state = State::ok();
-        assert_eq!(true, state.is_ok());
-        assert_eq!(false, state.is_err());
-        assert_eq!(false, state.error().is_some());
+        assert!(state.is_ok());
+        assert!(!state.is_err());
+        assert!(!state.error().is_some());
     }
 }

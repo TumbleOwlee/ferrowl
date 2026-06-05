@@ -48,11 +48,11 @@ mod tests {
         let func = lua.load("local test = 1").into_function().unwrap();
         let mut script = Script::init(func);
         let result = script.exec();
-        assert_eq!(result.is_ok(), true);
+        assert!(result.is_ok());
 
         let func = lua.load("func()").into_function().unwrap();
         let mut script = Script::init(func);
         let result = script.exec();
-        assert_eq!(result.is_err(), true);
+        assert!(result.is_err());
     }
 }

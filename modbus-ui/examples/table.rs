@@ -103,20 +103,18 @@ fn main() -> ExitCode {
         screen.draw(|f| app.render(f)).unwrap();
 
         // Check for events
-        if event::poll(Duration::from_millis(50)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Esc = key.code {
-                        break;
-                    } else if let KeyCode::Char('d') = key.code {
-                        app.state.set_focused(!app.state.focused());
-                    } else if app.state.focused() {
-                        let event_result: EventResult =
-                            app.state.handle_events(key.modifiers, key.code);
-                        if let EventResult::Unhandled(_, KeyCode::Enter) = event_result {
-                            break;
-                        }
-                    }
+        if event::poll(Duration::from_millis(50)).unwrap()
+            && let Event::Key(key) = event::read().unwrap()
+            && key.kind == KeyEventKind::Press
+        {
+            if let KeyCode::Esc = key.code {
+                break;
+            } else if let KeyCode::Char('d') = key.code {
+                app.state.set_focused(!app.state.focused());
+            } else if app.state.focused() {
+                let event_result: EventResult = app.state.handle_events(key.modifiers, key.code);
+                if let EventResult::Unhandled(_, KeyCode::Enter) = event_result {
+                    break;
                 }
             }
         }

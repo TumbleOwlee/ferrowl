@@ -141,7 +141,7 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            area = inner.inner(margin.clone());
+            area = inner.inner(*margin);
         }
 
         let values = state
@@ -157,9 +157,9 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
         let offset = lines / 2;
 
         let mut start = std::cmp::max(0, selection as i32 - offset as i32);
-        let end = std::cmp::min(state.values().len() as i32, start + max_lines as i32);
+        let end = std::cmp::min(state.values().len() as i32, start + max_lines);
         if end == state.values().len() as i32 {
-            start = std::cmp::max(end - max_lines as i32, 0);
+            start = std::cmp::max(end - max_lines, 0);
         }
 
         for (n, (i, v)) in values
@@ -169,7 +169,7 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
             .enumerate()
         {
             let t = if i == selection {
-                let text = format!("{}", v);
+                let text = v.to_string();
                 let text_len = text.chars().count();
                 let width = area[n].width as usize;
                 let mut offset = state.horizontal_offset();
@@ -186,9 +186,9 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
                 };
 
                 if state.focused() {
-                    Text::from(text).style(self.style.focused.clone())
+                    Text::from(text).style(self.style.focused)
                 } else {
-                    Text::from(text).style(self.style.general.clone())
+                    Text::from(text).style(self.style.general)
                 }
             } else {
                 Text::from(v).style(self.style.rows[i % 2])

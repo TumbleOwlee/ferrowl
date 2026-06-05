@@ -1,5 +1,5 @@
 use crate::tcp::Config;
-use crate::{Command, Error, Key, ModbusError, Operation, TcpError};
+use crate::{Command, Error, Key, ModbusError, Operation, RunConfig, TcpError};
 
 use modbus_mem::{Memory, Type};
 use tokio::task::JoinHandle;
@@ -60,24 +60,16 @@ where
         let client = Client::connect(&guard).await?;
         let operations = self.operations.clone();
         let memory = self.memory.clone();
-        let timeout_ms = guard.timeout_ms;
-        let delay_ms = guard.delay_ms;
-        let interval_ms = guard.interval_ms;
+        let config = RunConfig {
+            log,
+            status,
+            timeout_ms: guard.timeout_ms,
+            delay_ms: guard.delay_ms,
+            interval_ms: guard.interval_ms,
+        };
         let id = self.id.clone();
         Ok(tokio::task::spawn(async move {
-            client
-                .run(
-                    id,
-                    operations,
-                    memory,
-                    receiver,
-                    log,
-                    status,
-                    timeout_ms,
-                    delay_ms,
-                    interval_ms,
-                )
-                .await
+            client.run(id, operations, memory, receiver, config).await
         }))
     }
 }
@@ -226,11 +218,7 @@ impl Client {
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<RwLock<Memory<Key<T>>>>,
         mut receiver: Receiver<Command>,
-        log: L,
-        status: S,
-        timeout_ms: usize,
-        delay_ms: usize,
-        interval_ms: usize,
+        config: RunConfig<L, S>,
     ) -> Result<(), Error>
     where
         T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
@@ -239,6 +227,13 @@ impl Client {
         for<'a> L::CallRefFuture<'a>: Send,
         for<'a> S::CallRefFuture<'a>: Send,
     {
+        let RunConfig {
+            log,
+            status,
+            timeout_ms,
+            delay_ms,
+            interval_ms,
+        } = config;
         let mut time: Option<Instant> = None;
 
         // Wait timeout until first operation
@@ -263,7 +258,6 @@ impl Client {
                     let end = range.end;
                     match self.read(&operation, timeout_ms, &log).await {
                         (s, Ok(values)) => {
-                            let fc = FunctionCode::from(fc);
                             let mut guard = memory.write().await;
                             let key = Key {
                                 id: id.clone(),

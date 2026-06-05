@@ -55,7 +55,7 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
                             }
                         } else {
                             // Invalid syntax for #[focus] attribute
-                            return syn::Error::new_spanned(&attr, "Invalid syntax for #[focus] attribute, expected #[focus(when = some_condition)]")
+                            return syn::Error::new_spanned(attr, "Invalid syntax for #[focus] attribute, expected #[focus(when = some_condition)]")
                                         .to_compile_error()
                                         .into();
                         }
@@ -74,7 +74,7 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
                     } else {
                         // Unnamed fields are not supported for focus switching
                         return syn::Error::new_spanned(
-                            &field,
+                            field,
                             "FocusSwitch only works on named fields with ident.",
                         )
                         .to_compile_error()
@@ -188,9 +188,13 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
             // Generate implementation for focus switching methods
             let focus_def = quote! {
                 impl #impl_generic #identifier #ty_generic #where_clause {
+                    // `% #def_len` collapses to `% 1` for single-field views; that is
+                    // correct (it always yields the one field) but trips `modulo_one`.
+                    #[allow(clippy::modulo_one)]
                     pub fn focus_previous(&mut self) {
                         #impl_previous
                     }
+                    #[allow(clippy::modulo_one)]
                     pub fn focus_next(&mut self) {
                         #impl_next
                     }

@@ -73,7 +73,7 @@ impl Value {
                 format!("{v}")
             }
             Self::F64((v, r)) => {
-                let v = *v as f64 * r.0;
+                let v = *v * r.0;
                 format!("{v}")
             }
             Self::Ascii(v) => v

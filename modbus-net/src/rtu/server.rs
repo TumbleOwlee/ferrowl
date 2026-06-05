@@ -121,7 +121,7 @@ where
                     rtu_server
                         .serve_forever(server)
                         .await
-                        .map_err(|e| Error::Server(e))
+                        .map_err(Error::Server)
                 }))
             }
             Err(e) => Err(SerialError::Error(e).into()),
@@ -147,7 +147,7 @@ where
             slave_id: slave,
         };
 
-        tokio::task::block_in_place(|| {
+        let response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match request {
                     Request::ReadCoils(addr, cnt) => {
@@ -159,10 +159,10 @@ where
                         )).await;
                         let guard = self.memory.read().await;
                         match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
-                            Some(v) => future::ready(Ok(Response::ReadCoils(
+                            Some(v) => Ok(Response::ReadCoils(
                                 v.into_iter().map(|b| b != 0).collect(),
-                            ))),
-                            None => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            )),
+                            None => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::ReadDiscreteInputs(addr, cnt) => {
@@ -174,10 +174,10 @@ where
                         )).await;
                         let guard = self.memory.read().await;
                         match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
-                            Some(v) => future::ready(Ok(Response::ReadDiscreteInputs(
+                            Some(v) => Ok(Response::ReadDiscreteInputs(
                                 v.into_iter().map(|b| b != 0).collect(),
-                            ))),
-                            None => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            )),
+                            None => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::ReadInputRegisters(addr, cnt) => {
@@ -193,8 +193,8 @@ where
                             &Type::Register,
                             &Range::new(addr as usize, cnt as usize),
                         ) {
-                            Some(v) => future::ready(Ok(Response::ReadInputRegisters(v))),
-                            None => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            Some(v) => Ok(Response::ReadInputRegisters(v)),
+                            None => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::ReadHoldingRegisters(addr, cnt) => {
@@ -210,8 +210,8 @@ where
                             &Type::Register,
                             &Range::new(addr as usize, cnt as usize),
                         ) {
-                            Some(v) => future::ready(Ok(Response::ReadHoldingRegisters(v))),
-                            None => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            Some(v) => Ok(Response::ReadHoldingRegisters(v)),
+                            None => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::WriteMultipleRegisters(addr, values) => {
@@ -229,11 +229,11 @@ where
                             &Range::new(addr as usize, values.len()),
                             &values,
                         ) {
-                            true => future::ready(Ok(Response::WriteMultipleRegisters(
+                            true => Ok(Response::WriteMultipleRegisters(
                                 addr,
                                 values.len() as u16,
-                            ))),
-                            false => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            )),
+                            false => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::WriteSingleRegister(addr, value) => {
@@ -248,8 +248,8 @@ where
                             &Range::new(addr as usize, 1),
                             &[value],
                         ) {
-                            true => future::ready(Ok(Response::WriteSingleRegister(addr, value))),
-                            false => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            true => Ok(Response::WriteSingleRegister(addr, value)),
+                            false => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::WriteMultipleCoils(addr, values) => {
@@ -262,10 +262,8 @@ where
                         let mut guard = self.memory.write().await;
                         let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
                         match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
-                            true => {
-                                future::ready(Ok(Response::WriteMultipleCoils(addr, values.len() as u16)))
-                            }
-                            false => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            true => Ok(Response::WriteMultipleCoils(addr, values.len() as u16)),
+                            false => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::WriteSingleCoil(addr, value) => {
@@ -276,8 +274,8 @@ where
                         let mut guard = self.memory.write().await;
                         let val = value as u16;
                         match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &[val]) {
-                            true => future::ready(Ok(Response::WriteSingleCoil(addr, value))),
-                            false => future::ready(Err(ExceptionCode::IllegalFunction)),
+                            true => Ok(Response::WriteSingleCoil(addr, value)),
+                            false => Err(ExceptionCode::IllegalFunction),
                         }
                     }
                     Request::ReportServerId => {
@@ -285,14 +283,14 @@ where
                             "ReportServerId request received for slave ID {}. Unsupported function.",
                             slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::MaskWriteRegister(_, _, _) => {
                         (self.log)(format!(
                             "MaskWriteRegister request received for slave ID {}. Unsupported function.",
                             slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::ReadWriteMultipleRegisters(read_addr, cnt, write_addr, values) => {
                         (self.log)(format!(
@@ -311,7 +309,7 @@ where
                             &Range::new(write_addr as usize, values.len()),
                         );
                         if !readable || !writable {
-                            return future::ready(Err(ExceptionCode::IllegalDataAddress));
+                            return Err(ExceptionCode::IllegalDataAddress);
                         }
                         let v = match guard.read(
                             key.clone(),
@@ -319,7 +317,7 @@ where
                             &Range::new(read_addr as usize, cnt as usize),
                         ) {
                             Some(v) => v,
-                            None => return future::ready(Err(ExceptionCode::IllegalFunction)),
+                            None => return Err(ExceptionCode::IllegalFunction),
                         };
                         if !guard.write(
                             key,
@@ -327,26 +325,27 @@ where
                             &Range::new(write_addr as usize, values.len()),
                             &values,
                         ) {
-                            return future::ready(Err(ExceptionCode::IllegalFunction));
+                            return Err(ExceptionCode::IllegalFunction);
                         }
-                        future::ready(Ok(Response::ReadWriteMultipleRegisters(v)))
+                        Ok(Response::ReadWriteMultipleRegisters(v))
                     }
                     Request::ReadDeviceIdentification(_, _) => {
                         (self.log)(format!(
                             "ReadDeviceIdentification request received for slave ID {}. Unsupported function.",
                             slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                     Request::Custom(func, _) => {
                         (self.log)(format!(
                             "Custom function {} request received for slave ID {}. Unsupported function.",
                             func, slave,
                         )).await;
-                        future::ready(Err(ExceptionCode::IllegalFunction))
+                        Err(ExceptionCode::IllegalFunction)
                     }
                 }
             })
-        })
+        });
+        future::ready(response)
     }
 }

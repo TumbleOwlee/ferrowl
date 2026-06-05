@@ -37,30 +37,30 @@ where
     where
         T: 'static + Module + UserData,
     {
-        if let Ok(ref mut ctx) = self.context {
-            if let Err(e) = ctx.add_module(value) {
-                self.context = Err(e);
-            };
+        if let Ok(ref mut ctx) = self.context
+            && let Err(e) = ctx.add_module(value)
+        {
+            self.context = Err(e);
         }
         self
     }
 
     /// Enable support of standard libraries in lua context
     pub fn with_stdlib(mut self) -> Self {
-        if let Ok(ref mut ctx) = self.context {
-            if let Err(e) = ctx.enable_stdlib() {
-                self.context = Err(e);
-            };
+        if let Ok(ref mut ctx) = self.context
+            && let Err(e) = ctx.enable_stdlib()
+        {
+            self.context = Err(e);
         }
         self
     }
 
     ///  Load a given script into the lua context and store it under the given key
     pub fn with_script(mut self, key: K, script: &str) -> Self {
-        if let Ok(ref mut ctx) = self.context {
-            if let Err(e) = ctx.load_script(key, script) {
-                self.context = Err(e);
-            };
+        if let Ok(ref mut ctx) = self.context
+            && let Err(e) = ctx.load_script(key, script)
+        {
+            self.context = Err(e);
         }
         self
     }

@@ -84,11 +84,11 @@ impl StatefulWidget for &Text {
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            area = inner.inner(margin.clone());
+            area = inner.inner(*margin);
         }
 
         let text_style = self.style.general;
-        let mut text_area = area.clone();
+        let mut text_area = area;
         let (len, remain) = if (area.width as usize) < state.len() {
             state
                 .chars()

@@ -78,37 +78,33 @@ impl HandleEvents for InputFieldState {
                 EventResult::Consumed
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
-                if !self.disabled {
-                    if self.cursor > 0 {
-                        if self.input.chars().count() >= self.cursor {
-                            self.input = self.input.chars().enumerate().fold(
-                                String::with_capacity(self.input.capacity() + 1),
-                                |mut s, (i, v)| {
-                                    if i != self.cursor - 1 {
-                                        s.push(v);
-                                    }
-                                    s
-                                },
-                            );
-                        }
-                        self.cursor -= 1;
-                    }
-                }
-                EventResult::Consumed
-            }
-            (KeyModifiers::NONE, KeyCode::Delete) => {
-                if !self.disabled {
-                    if self.input.chars().count() > self.cursor {
+                if !self.disabled && self.cursor > 0 {
+                    if self.input.chars().count() >= self.cursor {
                         self.input = self.input.chars().enumerate().fold(
                             String::with_capacity(self.input.capacity() + 1),
                             |mut s, (i, v)| {
-                                if i != self.cursor {
+                                if i != self.cursor - 1 {
                                     s.push(v);
                                 }
                                 s
                             },
                         );
                     }
+                    self.cursor -= 1;
+                }
+                EventResult::Consumed
+            }
+            (KeyModifiers::NONE, KeyCode::Delete) => {
+                if !self.disabled && self.input.chars().count() > self.cursor {
+                    self.input = self.input.chars().enumerate().fold(
+                        String::with_capacity(self.input.capacity() + 1),
+                        |mut s, (i, v)| {
+                            if i != self.cursor {
+                                s.push(v);
+                            }
+                            s
+                        },
+                    );
                 }
                 EventResult::Consumed
             }

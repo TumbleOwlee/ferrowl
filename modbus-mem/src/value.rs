@@ -24,7 +24,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn get_type(&self) -> Type {
+    pub fn get_type(&self) -> Type {
         match self {
             Kind::Read(t) | Kind::Write(t) | Kind::Combined(t) | Kind::Separated(t) => t.clone(),
         }

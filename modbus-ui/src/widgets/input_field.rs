@@ -193,7 +193,7 @@ where
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            area = inner.inner(margin.clone());
+            area = inner.inner(*margin);
         }
 
         let input = state.input();
@@ -245,7 +245,7 @@ where
             self.style.error
         };
 
-        let mut text_area = area.clone();
+        let mut text_area = area;
         let (len, remain) = text
             .chars()
             .fold((0, String::new()), |(mut len, mut line), c| {

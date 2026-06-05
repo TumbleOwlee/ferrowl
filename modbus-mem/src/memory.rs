@@ -55,7 +55,7 @@ where
         let mut range = range.clone();
         match self.slices.get_mut(&id) {
             Some(map) => {
-                let mut entries: Vec<_> = map.iter_mut().collect();
+                let entries: Vec<_> = map.iter_mut().collect();
                 for (r, slice) in entries.into_iter() {
                     if r.start <= range.start && r.end > range.start {
                         let start = std::cmp::min(range.start, r.end);
@@ -80,7 +80,7 @@ where
         let mut range = range.clone();
         match self.slices.get_mut(id) {
             Some(map) => {
-                let mut entries: Vec<_> = map.iter().collect();
+                let entries: Vec<_> = map.iter().collect();
                 for (r, slice) in entries.into_iter() {
                     if r.start <= range.start && r.end > range.start {
                         let start = std::cmp::min(range.start, r.end);
@@ -111,7 +111,7 @@ where
         match self.slices.get(&id) {
             Some(map) => {
                 let mut output: Vec<u16> = Vec::with_capacity(range.length());
-                let mut entries: Vec<_> = map.iter().collect();
+                let entries: Vec<_> = map.iter().collect();
                 for (r, slice) in entries.into_iter() {
                     if r.start <= range.start && r.end > range.start {
                         let start = std::cmp::min(range.start, r.end);
@@ -141,7 +141,7 @@ where
         let mut range = range.clone();
         match self.slices.get(id) {
             Some(map) => {
-                let mut entries: Vec<_> = map.iter().collect();
+                let entries: Vec<_> = map.iter().collect();
                 for (r, slice) in entries.into_iter() {
                     if r.start <= range.start && r.end > range.start {
                         let start = std::cmp::min(range.start, r.end);

@@ -19,7 +19,7 @@ pub enum Error {
 pub struct Converter {}
 
 impl Converter {
-    pub fn convert<'a, T: Serialize + DeserializeOwned>(
+    pub fn convert<T: Serialize + DeserializeOwned>(
         src: &str,
         src_type: FileType,
         dest: &str,

@@ -2,7 +2,7 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
 
 use crate::state::ButtonState;
-use crate::style::{ButtonStyle, TextStyle};
+use crate::style::ButtonStyle;
 use crate::traits::Margins;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect};
@@ -75,9 +75,9 @@ impl StatefulWidget for &Button {
             .style(style);
         let inner = block.inner(area);
         block.render(area, buf);
-        area = inner.inner(self.border_margin.clone());
+        area = inner.inner(self.border_margin);
 
-        let mut text_area = area.clone();
+        let mut text_area = area;
         let (len, remain) = if (area.width as usize) < state.label().len() {
             state
                 .label()

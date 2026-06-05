@@ -134,7 +134,7 @@ where
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            area = inner.inner(margin.clone());
+            area = inner.inner(*margin);
         }
 
         let header = H::header();
@@ -142,7 +142,7 @@ where
             .iter()
             .map(|c| Cell::from(c.as_str()))
             .collect::<Row>()
-            .style(self.style.header.clone())
+            .style(self.style.header)
             .height(1);
 
         // Count chars per column for maximal width
@@ -197,7 +197,7 @@ where
                         } else {
                             if !line.is_empty() {
                                 if output.is_empty() {
-                                    output += &format!("{line}");
+                                    output += &line.to_string();
                                 } else {
                                     output += &format!("\n{line}");
                                 }
@@ -264,7 +264,7 @@ where
         let bar = " █ ";
         let t = UiTable::new(rows, constraints)
             .header(header)
-            .row_highlight_style(selected_style.clone())
+            .row_highlight_style(*selected_style)
             .highlight_symbol({
                 Text::from({
                     let mut text = vec!["".into()];
@@ -275,7 +275,7 @@ where
                     text.append(&mut vec!["".into()]);
                     text
                 })
-                .style(bar_style.clone())
+                .style(*bar_style)
             })
             .column_spacing(1)
             .highlight_spacing(HighlightSpacing::Always);

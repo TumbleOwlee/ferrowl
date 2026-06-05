@@ -52,6 +52,16 @@ impl<T, E, F: FnOnce(E) -> String> Expect<F> for Result<T, E> {
     }
 }
 
+#[macro_export]
+macro_rules! async_cloned {
+    ($($n:ident),+; $body:block) => (
+        {
+            $( let $n = $n.clone(); )+
+            async move { $body }
+        }
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,14 +85,4 @@ mod tests {
         let result: Result<i32, &str> = Err("oops");
         result.panic(|e| format!("something went wrong: {}", e));
     }
-}
-
-#[macro_export]
-macro_rules! async_cloned {
-    ($($n:ident),+; $body:block) => (
-        {
-            $( let $n = $n.clone(); )+
-            async move { $body }
-        }
-    );
 }

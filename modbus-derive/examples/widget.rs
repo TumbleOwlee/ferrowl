@@ -36,8 +36,8 @@ struct App {
 
 fn main() {
     let mut app = AppBuilder::default()
-        .name(State::default())
-        .lastname(State::default())
+        .name(State)
+        .lastname(State)
         .focus(AppFocus::Name)
         .build()
         .expect("App builder failed.");

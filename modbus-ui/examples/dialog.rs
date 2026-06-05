@@ -57,7 +57,7 @@ impl Validate for Code {
     fn validate(input: &str) -> Result<(), String> {
         let code = input.parse::<usize>();
         if let Ok(code) = code {
-            if code >= 10000 && code <= 99999 {
+            if (10000..=99999).contains(&code) {
                 Ok(())
             } else {
                 Err("Invalid postal code".into())
@@ -100,11 +100,11 @@ struct Person {
 
 impl App {
     fn result(&self) -> Result<Person, String> {
-        if let Err(_) = Day::validate(self.day.state.input()) {
+        if Day::validate(self.day.state.input()).is_err() {
             Err("Invalid input for day".into())
-        } else if let Err(_) = Year::validate(self.year.state.input()) {
+        } else if Year::validate(self.year.state.input()).is_err() {
             Err("Invalid input for year".into())
-        } else if let Err(_) = Code::validate(self.code.state.input()) {
+        } else if Code::validate(self.code.state.input()).is_err() {
             Err("Invalid input for postal code".into())
         } else {
             let name = format!(
@@ -426,27 +426,26 @@ fn main() -> ExitCode {
         }
 
         // Check for events
-        if event::poll(Duration::from_millis(50)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Esc = key.code {
+        if event::poll(Duration::from_millis(50)).unwrap()
+            && let Event::Key(key) = event::read().unwrap()
+            && key.kind == KeyEventKind::Press
+        {
+            if let KeyCode::Esc = key.code {
+                break;
+            } else {
+                let event_result: EventResult = app.handle_events(key.modifiers, key.code);
+                match event_result {
+                    EventResult::Unhandled(_, KeyCode::Enter) => {
                         break;
-                    } else {
-                        let event_result: EventResult = app.handle_events(key.modifiers, key.code);
-                        match event_result {
-                            EventResult::Unhandled(_, KeyCode::Enter) => {
-                                break;
-                            }
-                            EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
-                            | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
-                                app.focus_previous();
-                            }
-                            EventResult::Unhandled(_, KeyCode::Tab) => {
-                                app.focus_next();
-                            }
-                            _ => {}
-                        }
                     }
+                    EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
+                    | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
+                        app.focus_previous();
+                    }
+                    EventResult::Unhandled(_, KeyCode::Tab) => {
+                        app.focus_next();
+                    }
+                    _ => {}
                 }
             }
         }

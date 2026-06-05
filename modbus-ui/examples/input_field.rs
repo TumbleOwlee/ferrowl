@@ -98,32 +98,30 @@ fn main() {
         screen.draw(|f| ui(f, &mut app)).unwrap();
 
         // Check for events
-        if event::poll(Duration::from_millis(50)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                if key.kind == KeyEventKind::Press {
-                    if let KeyCode::Esc = key.code {
+        if event::poll(Duration::from_millis(50)).unwrap()
+            && let Event::Key(key) = event::read().unwrap()
+            && key.kind == KeyEventKind::Press
+        {
+            if let KeyCode::Esc = key.code {
+                break;
+            } else {
+                let event_result = app.states[app.index].handle_events(key.modifiers, key.code);
+                match event_result {
+                    EventResult::Unhandled(_, KeyCode::Enter) => {
                         break;
-                    } else {
-                        let event_result =
-                            app.states[app.index].handle_events(key.modifiers, key.code);
-                        match event_result {
-                            EventResult::Unhandled(_, KeyCode::Enter) => {
-                                break;
-                            }
-                            EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
-                            | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
-                                app.states[app.index].set_focused(false);
-                                app.index = (app.index + INPUT_FIELDS - 1) % INPUT_FIELDS;
-                                app.states[app.index].set_focused(true);
-                            }
-                            EventResult::Unhandled(_, KeyCode::Tab) => {
-                                app.states[app.index].set_focused(false);
-                                app.index = (app.index + 1) % INPUT_FIELDS;
-                                app.states[app.index].set_focused(true);
-                            }
-                            _ => {}
-                        }
                     }
+                    EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::BackTab)
+                    | EventResult::Unhandled(KeyModifiers::SHIFT, KeyCode::Tab) => {
+                        app.states[app.index].set_focused(false);
+                        app.index = (app.index + INPUT_FIELDS - 1) % INPUT_FIELDS;
+                        app.states[app.index].set_focused(true);
+                    }
+                    EventResult::Unhandled(_, KeyCode::Tab) => {
+                        app.states[app.index].set_focused(false);
+                        app.index = (app.index + 1) % INPUT_FIELDS;
+                        app.states[app.index].set_focused(true);
+                    }
+                    _ => {}
                 }
             }
         }
