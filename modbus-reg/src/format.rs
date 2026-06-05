@@ -162,7 +162,11 @@ mod tests {
     #[test]
     fn ut_format_resolution() {
         let r = Resolution(0.5);
-        assert!(Format::Ascii((Alignment::Left, Width(1))).resolution().is_none());
+        assert!(
+            Format::Ascii((Alignment::Left, Width(1)))
+                .resolution()
+                .is_none()
+        );
         assert_eq!(
             Format::U8((Endian::Big, r.clone())).resolution().unwrap().0,
             0.5
@@ -175,7 +179,10 @@ mod tests {
             0.5
         );
         assert_eq!(
-            Format::F32((Endian::Big, r.clone())).resolution().unwrap().0,
+            Format::F32((Endian::Big, r.clone()))
+                .resolution()
+                .unwrap()
+                .0,
             0.5
         );
     }

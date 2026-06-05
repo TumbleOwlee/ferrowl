@@ -145,13 +145,16 @@ where
             .style(self.style.header.clone())
             .height(1);
 
+        // Count chars per column for maximal width
         let column_max_widths = state.values().iter().fold([0; N], |mut init, item| {
             let values = item.values();
             for i in 0..N {
-                init[i] = std::cmp::max(init[i], values[i].len());
+                init[i] = std::cmp::max(init[i], values[i].chars().count());
             }
             init
         });
+
+        // Get real column width respecting input constraints
         let column_widths: Vec<u16> = H::widths()
             .iter()
             .zip(column_max_widths.iter())
@@ -161,15 +164,14 @@ where
             })
             .collect();
 
-        let table_width = column_widths
-            .iter()
-            .fold(0u16, |acc, w| acc + w + self.row_margin.vertical * 2);
+        let column_spacings = 2 * (N as u16) + (N as u16 - 1);
+        let table_width = column_widths.iter().fold(column_spacings, |acc, w| acc + w) + 3;
 
         let selected_style = &self.style.focused;
         let bar_style = &self.style.focused;
         let mut bar_height = 0;
 
-        state.set_total_width(std::cmp::max(table_width + 3, area.width));
+        state.set_total_width(std::cmp::max(table_width, area.width));
 
         let rows = state.values().iter().enumerate().map(|(i, item)| {
             let color = self.style.rows.get(i % 2).unwrap();
@@ -184,31 +186,49 @@ where
                     let mut line_cnt = 0;
                     let mut line = String::with_capacity(*width as usize);
                     let mut output = String::with_capacity(
-                        content.len() + (content.len() / *width as usize) + 1,
+                        content.chars().count() + (content.chars().count() / *width as usize) + 1,
                     );
                     for s in content.split_whitespace() {
-                        if line.len() + s.len() < *width as usize {
+                        if line.chars().count() + s.chars().count() < *width as usize {
                             if !line.is_empty() {
                                 line += " ";
                             }
                             line += s;
                         } else {
-                            if output.is_empty() {
-                                output += &format!("{line}");
-                            } else {
-                                output += &format!("\n{line}");
+                            if !line.is_empty() {
+                                if output.is_empty() {
+                                    output += &format!("{line}");
+                                } else {
+                                    output += &format!("\n{line}");
+                                }
+                                line_cnt += 1;
                             }
-                            line_cnt += 1;
                             line.clear();
-                            line += s;
+                            let mut s = s.to_owned();
+                            while s.chars().count() > *width as usize {
+                                output += &format!(
+                                    "{}{}",
+                                    if output.is_empty() { "" } else { "\n" },
+                                    s.chars().take(*width as usize).collect::<String>()
+                                );
+                                s = s.chars().skip(*width as usize).collect::<String>();
+                                line_cnt += 1;
+                            }
+                            line += &s;
                         }
                     }
                     if !line.is_empty() {
-                        if output.is_empty() {
-                            output += &format!("{line}");
-                        } else {
-                            output += &format!("\n{line}");
+                        let mut s = line;
+                        while s.chars().count() > *width as usize {
+                            output += &format!(
+                                "{}{}",
+                                if output.is_empty() { "" } else { "\n" },
+                                s.chars().take(*width as usize).collect::<String>()
+                            );
+                            s = s.chars().skip(*width as usize).collect::<String>();
+                            line_cnt += 1;
                         }
+                        output += &format!("{}{}", if output.is_empty() { "" } else { "\n" }, s);
                         line_cnt += 1;
                     }
                     max_line_cnt = std::cmp::max(line_cnt, max_line_cnt);
@@ -234,9 +254,9 @@ where
             .zip(column_widths.iter())
             .map(|(w, c)| {
                 if w.max > *c as usize {
-                    LConstraint::Min(*c + 2)
+                    LConstraint::Length(*c + 2)
                 } else {
-                    LConstraint::Max(w.max as u16 + 2)
+                    LConstraint::Length(w.max as u16 + 2)
                 }
             })
             .collect::<Vec<_>>();
@@ -257,6 +277,7 @@ where
                 })
                 .style(bar_style.clone())
             })
+            .column_spacing(1)
             .highlight_spacing(HighlightSpacing::Always);
 
         state.set_visible_width(area.width);

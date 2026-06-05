@@ -57,7 +57,6 @@ mod tests {
     }
 }
 
-
 pub trait ParseFromU8<V> {
     fn parse(self) -> V;
 }

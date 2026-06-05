@@ -49,14 +49,9 @@ impl Header<COLUMN_COUNT> for TableHeader {
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
-            Width { min: 10, max: 20 },
-            Width { min: 10, max: 20 },
+            Width { min: 5, max: 20 },
+            Width { min: 0, max: 800 },
         ]
-        //let mut widths = [0; COLUMN_COUNT];
-        //for (i, h) in Self::header().iter().enumerate() {
-        //    widths[i] = h.len() as u16;
-        //}
-        //widths
     }
 }
 

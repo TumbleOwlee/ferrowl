@@ -1,4 +1,4 @@
-use crate::{module::Module, Context, Result};
+use crate::{Context, Result, module::Module};
 use mlua::UserData;
 use std::hash::Hash;
 

@@ -128,7 +128,7 @@ fn main() {
                     .access(Access::ReadWrite)
                     .kind(Kind::InputRegister)
                     .address(Address::Fixed(100))
-                    .format(Format::Ascii((Alignment::Left, Width(10))))
+                    .format(Format::Ascii((Alignment::Left, Width(40))))
                     .build()
                     .unwrap(),
             )

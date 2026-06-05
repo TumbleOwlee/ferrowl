@@ -165,8 +165,8 @@ mod tests {
 
     #[test]
     fn ut_range_intersect_disjoint() {
-        let a = Range::new(0, 5);   // [0, 5)
-        let b = Range::new(10, 5);  // [10, 15)
+        let a = Range::new(0, 5); // [0, 5)
+        let b = Range::new(10, 5); // [10, 15)
         assert!(a.intersect(&b).is_none());
     }
 

@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn ut_log_truncation() {
         let mut log: Log<5, 3> = Log::init();
-        log.write("abcde");    // exactly MAX_LINE_LENGTH chars: not truncated
+        log.write("abcde"); // exactly MAX_LINE_LENGTH chars: not truncated
         log.write("abcdefgh"); // 8 chars: truncated to first 5
 
         let first = log.take().unwrap();

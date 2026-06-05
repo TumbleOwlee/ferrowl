@@ -1,5 +1,5 @@
 use derive_builder::Builder;
-use modbus_derive::{focusable, Focus};
+use modbus_derive::{Focus, focusable};
 use modbus_ui::traits::IsFocus;
 
 #[derive(Default, Clone, Debug)]

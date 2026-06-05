@@ -1,4 +1,4 @@
-use crate::{module::Module, Error, Result, Script};
+use crate::{Error, Result, Script, module::Module};
 use mlua::{Lua, StdLib, UserData};
 use std::{collections::HashMap, hash::Hash};
 

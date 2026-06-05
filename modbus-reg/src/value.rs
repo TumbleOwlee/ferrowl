@@ -76,7 +76,16 @@ impl Value {
                 let v = *v as f64 * r.0;
                 format!("{v}")
             }
-            Self::Ascii(v) => v.to_string(),
+            Self::Ascii(v) => v
+                .chars()
+                .map(|c| {
+                    if c.is_whitespace() || c.is_ascii_graphic() {
+                        c
+                    } else {
+                        '.'
+                    }
+                })
+                .collect(),
         }
     }
 
