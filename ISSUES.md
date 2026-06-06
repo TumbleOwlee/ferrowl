@@ -1,0 +1,10 @@
+# Open Issues
+
+* Removing all predefined values in `EditSelectionDialog` doesn't switch to `EditInputDialog` and messes up `value` input field
+* Predefined values is only supported for integer type - should also support all other types
+* No option to add predefined values when non exist
+* No input field in `EditInputDialog` and `EditSelectionDialog` to display and edit the lua script in `update`
+* Background color of whole screen is not set, unused table space is kept default
+* Floating box over commandline whenever commandline is in focus to display supported commands
+* Support changing register type, e.g. `HoldingRegister` to `Coil`
+    * Requires better `EditInputDialog` and `EditSelectionDialog` since coils/discrete inputs only support boolean

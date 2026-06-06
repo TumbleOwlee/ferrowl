@@ -9,8 +9,8 @@ steps:
       - cargo check
       - cargo build --release
       - cargo build --release --target x86_64-pc-windows-gnu
-      - zip -j modbus-cli-windows.zip target/x86_64-pc-windows-gnu/release/modbus-cli-rs.exe
-      - tar -C target/release -cvf modbus-cli-unix.tar.gz modbus-cli-rs
+      - zip -j ferrowl-windows.zip target/x86_64-pc-windows-gnu/release/ferrowl.exe
+      - tar -C target/release -cvf ferrowl-unix.tar.gz ferrowl
     when:
       - event: tag
         ref: refs/tags/nightly
@@ -21,8 +21,8 @@ steps:
       api_key:
         from_secret: github_token
       files: 
-        - modbus-cli-unix.tar.gz
-        - modbus-cli-windows.zip
+        - ferrowl-unix.tar.gz
+        - ferrowl-windows.zip
       title: 'Nightly'
       checksum:
         - sha256

@@ -247,26 +247,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "crossterm",
- "derive_builder",
- "modbus-derive",
- "modbus-log",
- "modbus-mem",
- "modbus-net",
- "modbus-reg",
- "modbus-ui",
- "modbus-util",
- "ratatui",
- "serde",
- "tokio",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -650,6 +630,118 @@ checksum = "b95f7c0680e4142284cf8b22c14a476e87d61b004a3a0861872b32ef7ead40a2"
 dependencies = [
  "bit-set",
  "regex",
+]
+
+[[package]]
+name = "ferrowl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "derive_builder",
+ "ferrowl-derive",
+ "ferrowl-log",
+ "ferrowl-lua",
+ "ferrowl-mem",
+ "ferrowl-net",
+ "ferrowl-reg",
+ "ferrowl-ui",
+ "ferrowl-util",
+ "ratatui",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "ferrowl-derive"
+version = "0.1.0"
+dependencies = [
+ "convert_case 0.11.0",
+ "crossterm",
+ "derive_builder",
+ "ferrowl-ui",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "ferrowl-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
+name = "ferrowl-lua"
+version = "0.1.0"
+dependencies = [
+ "mlua",
+]
+
+[[package]]
+name = "ferrowl-mem"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "serde",
+]
+
+[[package]]
+name = "ferrowl-net"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ferrowl-mem",
+ "itertools",
+ "serde",
+ "tokio",
+ "tokio-modbus",
+ "tokio-serial",
+]
+
+[[package]]
+name = "ferrowl-reg"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "derive-getters",
+ "derive_builder",
+ "derive_setters",
+ "getset",
+ "itertools",
+ "serde",
+ "tokio-modbus",
+]
+
+[[package]]
+name = "ferrowl-ui"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "derive_builder",
+ "ferrowl-derive",
+ "getset",
+ "itertools",
+ "ratatui",
+]
+
+[[package]]
+name = "ferrowl-util"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "futures-util",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -1157,97 +1249,6 @@ dependencies = [
  "lua-src",
  "luajit-src",
  "pkg-config",
-]
-
-[[package]]
-name = "modbus-derive"
-version = "0.1.0"
-dependencies = [
- "convert_case 0.11.0",
- "crossterm",
- "derive_builder",
- "modbus-ui",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "modbus-log"
-version = "0.1.0"
-dependencies = [
- "anyhow",
-]
-
-[[package]]
-name = "modbus-lua"
-version = "0.1.0"
-dependencies = [
- "mlua",
-]
-
-[[package]]
-name = "modbus-mem"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "itertools",
- "serde",
-]
-
-[[package]]
-name = "modbus-net"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "itertools",
- "modbus-mem",
- "serde",
- "tokio",
- "tokio-modbus",
- "tokio-serial",
-]
-
-[[package]]
-name = "modbus-reg"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "derive-getters",
- "derive_builder",
- "derive_setters",
- "getset",
- "itertools",
- "serde",
- "tokio-modbus",
-]
-
-[[package]]
-name = "modbus-ui"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "derive_builder",
- "getset",
- "itertools",
- "modbus-derive",
- "ratatui",
-]
-
-[[package]]
-name = "modbus-util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "futures-util",
- "once_cell",
- "serde",
- "serde_json",
- "tokio",
- "toml",
 ]
 
 [[package]]

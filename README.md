@@ -20,7 +20,7 @@ This repository provides a Nightly build of the tool. Please check out the Relea
 
 <p align="center">
     <p align="center">
-        <img src="./images/modbus-cli-rs.png" style="border-radius: 8px">
+        <img src="./images/ferrowl.png" style="border-radius: 8px">
     </p>
 </p>
 
@@ -28,7 +28,7 @@ This repository provides a Nightly build of the tool. Please check out the Relea
 
 <p align="center">
     <p align="center">
-        <img src="./images/modbus-cli-rs-compact.jpg" style="border-radius: 8px">
+        <img src="./images/ferrowl-compact.jpg" style="border-radius: 8px">
     </p>
 </p>
 
@@ -59,7 +59,7 @@ Alternatively, you can also run it directly using the following command. Please 
 cargo run --release -- --config ./path/to/config.json tcp -i <ip> -p <port>
 
 # Or with the application already built
-modbus-cli-rs --config ./path/to/config.sjon tcp -i <ip> -p <port>
+ferrowl --config ./path/to/config.sjon tcp -i <ip> -p <port>
 ```
 
 ### Client Mode
@@ -68,7 +68,7 @@ modbus-cli-rs --config ./path/to/config.sjon tcp -i <ip> -p <port>
 cargo run --release -- --client --config ./path/to/config.json tcp -i <ip> -p <port>
 
 # Or with the application already built
-modbus-cli-rs --client --config ./path/to/config.sjon tcp -i <ip> -p <port>
+ferrowl --client --config ./path/to/config.sjon tcp -i <ip> -p <port>
 ```
 
 ## Keybindings
@@ -106,10 +106,10 @@ The tool currently supports the configuration in TOML and JSON format. Additiona
 
 ```bash
 # Convert JSON configuration to TOML (output: ./path/to/config.toml)
-modbus-cli-rs --config ./path/to/config.json convert toml
+ferrowl --config ./path/to/config.json convert toml
 
 # Convert TOML configuration to JSON (output: ./path/to/config.config)
-modbus-cli-rs --config ./path/to/config.toml convert json
+ferrowl --config ./path/to/config.toml convert json
 ```
 
 ## Configuration

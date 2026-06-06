@@ -1,64 +1,13 @@
-history_length = 30
-delay_afer_connect = 500
-interval_ms = 500
-contiguous_memory = []
+# General Ferrowl app config. Discovery order: ./config.toml,
+# ~/.config/ferrowl/config.toml, or --config <file>.
 
-[definitions.coil]
-slave_id = 1
-read_code = 1
-address = 0
-length = 1
-access = "ReadWrite"
-type = "U16"
+# Lines kept in each module's on-screen log ring.
+history_length = 80
 
-[definitions.discrete_input]
-slave_id = 1
-read_code = 2
-address = 1
-length = 1
-access = "ReadWrite"
-type = "U16"
+# Default modbus timing applied to every module.
+timeout_ms = 3000
+delay_ms = 1000
+interval_ms = 1000
 
-[definitions.input_register]
-slave_id = 1
-read_code = 3
-address = 2
-length = 1
-access = "ReadWrite"
-type = "U16"
-
-[definitions.holding_register]
-slave_id = 1
-read_code = 4
-address = 3
-length = 1
-access = "ReadWrite"
-type = "U16"
-
-[definitions.evse_state]
-slave_id = 1
-read_code = 4
-address = 5
-length = 1
-access = "ReadWrite"
-type = "I16"
-values = [
-    { name = "waiting", value = 0 },
-    { name = "plugged", value = 1 },
-    { name = "charging", value = 2 },
-    { name = "finishing", value = 3 },
-    { name = "error", value = -1 },
-]
-
-[definitions.expression]
-slave_id = 1
-read_code = 2
-address = 10
-length = 10
-access = "ReadWrite"
-type = "PackedAscii"
-virtual = true
-on_update = """
-local value = C_Register:GetInt("input_register")
-C_Register:Set("expression", "Tag: " .. value)
- """
+# Base path for per-module log files (tab name appended). Uncomment to enable.
+# log_file = "ferrowl.log"

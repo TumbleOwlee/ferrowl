@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
-    "modbus-lua",
-    "modbus-mem",
-    "modbus-reg",
-    "modbus-log",
-    "modbus-net",
-    "modbus-util",
-    "modbus-ui",
-    "modbus-cli",
-    "modbus-derive",
+    "ferrowl-lua",
+    "ferrowl-mem",
+    "ferrowl-reg",
+    "ferrowl-log",
+    "ferrowl-net",
+    "ferrowl-util",
+    "ferrowl-ui",
+    "ferrowl",
+    "ferrowl-derive",
 ]
