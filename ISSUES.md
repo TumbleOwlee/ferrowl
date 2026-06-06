@@ -8,3 +8,4 @@
 * Floating box over commandline whenever commandline is in focus to display supported commands
 * Support changing register type, e.g. `HoldingRegister` to `Coil`
     * Requires better `EditInputDialog` and `EditSelectionDialog` since coils/discrete inputs only support boolean
+* Add compact mode to remove the vertical row margins (currently it is set to 1) to be able to show more registers in the available view area
