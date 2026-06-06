@@ -219,6 +219,37 @@ where
         }
     }
 
+    pub fn read_unchecked(&self, id: K, range: &Range) -> Option<Vec<u16>> {
+        let mut range = range.clone();
+        match self.slices.get(&id) {
+            Some(map) => {
+                let mut output: Vec<u16> = Vec::with_capacity(range.length());
+                let entries: Vec<_> = map.iter().collect();
+                for (r, slice) in entries.into_iter() {
+                    if r.start <= range.start && r.end > range.start {
+                        let start = std::cmp::min(range.start, r.end);
+                        let end = std::cmp::min(range.end, r.end);
+                        let count = end - start;
+
+                        if count != 0 {
+                            if let Some(mut v) = slice.read_unchecked(&Range::new(start, count)) {
+                                output.append(&mut v)
+                            };
+                            range = Range::new(range.start + count, range.length() - count);
+                        }
+                    }
+                }
+
+                if range.length() == 0 {
+                    Some(output)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub fn readable(&self, id: &K, ty: &Type, range: &Range) -> bool {
         let mut range = range.clone();
         match self.slices.get(id) {

@@ -146,6 +146,32 @@ impl Slice {
         }
     }
 
+    pub fn read_unchecked(&self, range: &Range) -> Option<Vec<u16>> {
+        let readable = range.start >= self.range.start && range.end <= self.range.end;
+        if readable {
+            self.buffer
+                .iter()
+                .skip(range.start - self.range.start)
+                .take(range.length())
+                .fold_while(Some(Vec::with_capacity(range.length())), |init, val| {
+                    if let Some(mut values) = init {
+                        match val {
+                            Value::Read(_, r) => values.push(*r),
+                            Value::Combined(_, rw) => values.push(*rw),
+                            Value::Separated(_, (r, _)) => values.push(*r),
+                            Value::Write(_, r) => values.push(*r),
+                        };
+                        itertools::FoldWhile::Continue(Some(values))
+                    } else {
+                        itertools::FoldWhile::Done(None)
+                    }
+                })
+                .into_inner()
+        } else {
+            None
+        }
+    }
+
     pub fn readable(&self, ty: &Type, range: &Range) -> bool {
         let in_range = range.start >= self.range.start && range.end <= self.range.end;
         if in_range {

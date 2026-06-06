@@ -303,8 +303,23 @@ impl Client {
                             } else {
                                 Type::Coil
                             };
-                            if !guard.write(key, &ty, &range, &values) {
+                            if !guard.write_unchecked(key, &range, &values) {
                                 log(format!("{s} Failed because of failing memory update for [{start}, {end})."))
+                                    .await;
+                            } else {
+                                let mut hex_str = String::with_capacity(values.len() * 3 + 4);
+                                hex_str += "[";
+                                let mut first = true;
+                                for v in values.iter() {
+                                    if !first {
+                                        hex_str += &format!(" {:04x}", *v);
+                                    } else {
+                                        hex_str += &format!("{:04x}", *v);
+                                    }
+                                    first = false;
+                                }
+                                hex_str += "]";
+                                log(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
                                     .await;
                             }
                             index = (index + 1) % count;

@@ -19,9 +19,13 @@ use ratatui::{
 
 use crate::config::{
     AppConfig, DeviceConfig, ModuleSpec, Role, Session,
-    device::{AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, ValueType as DevValueType},
+    device::{
+        AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, ValueType as DevValueType,
+    },
 };
-use crate::dialog::{EditInputDialog, EditSelectionDialog, EditedRegister, SetupDialog, SetupValues};
+use crate::dialog::{
+    EditInputDialog, EditSelectionDialog, EditedRegister, SetupDialog, SetupValues,
+};
 use crate::module::Module;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, new_log_view};
@@ -120,7 +124,12 @@ impl Tab {
             .registers()
             .iter()
             .map(|(name, comment, register, values)| {
-                Definition::new(name.clone(), comment.clone(), register.clone(), values.clone())
+                Definition::new(
+                    name.clone(),
+                    comment.clone(),
+                    register.clone(),
+                    values.clone(),
+                )
             })
             .collect();
         Self {
@@ -267,7 +276,8 @@ impl App {
 
     async fn handle_dialog_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         // When the EditSelectionDialog has an open add sub-dialog, route all keys into it.
-        let has_sub = matches!(&self.overlay, Some(Overlay::EditSelection(d)) if d.has_sub_dialog());
+        let has_sub =
+            matches!(&self.overlay, Some(Overlay::EditSelection(d)) if d.has_sub_dialog());
         if has_sub {
             if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
                 match code {
@@ -364,12 +374,8 @@ impl App {
             return;
         };
         if def.named_values.is_empty() {
-            let dialog = EditInputDialog::from_register(
-                &def.name,
-                &def.comment,
-                &def.register,
-                &def.value,
-            );
+            let dialog =
+                EditInputDialog::from_register(&def.name, &def.comment, &def.register, &def.value);
             self.overlay = Some(Overlay::Edit(dialog));
         } else {
             let dialog = EditSelectionDialog::from_register(
@@ -644,7 +650,10 @@ impl App {
                         .unwrap_or_else(|| "device.toml".to_string())
                 });
                 match self.save_device(&path) {
-                    Ok(()) => self.log_active(format!("Saved device config to {path}")).await,
+                    Ok(()) => {
+                        self.log_active(format!("Saved device config to {path}"))
+                            .await
+                    }
                     Err(e) => self.log_active(format!("Save failed: {e}")).await,
                 }
             }
@@ -842,7 +851,7 @@ fn decode_definition(mut d: Definition, memory: &Memory<Key<u8>>, id: u8) -> Def
                 slave_id: *d.register.slave_id(),
             };
             let raw = memory
-                .read(key, &ty, &Range::new(*addr as usize, width))
+                .read_unchecked(key, &Range::new(*addr as usize, width))
                 .unwrap_or_else(|| vec![0; width]);
             d.value = match d.register.decode(&raw) {
                 Ok(v) => format!("{v}"),
@@ -853,9 +862,9 @@ fn decode_definition(mut d: Definition, memory: &Memory<Key<u8>>, id: u8) -> Def
             let mut first = true;
             for v in raw.iter() {
                 if !first {
-                    raw_str += &format!(" {:02x}", *v);
+                    raw_str += &format!(" {:04x}", *v);
                 } else {
-                    raw_str += &format!("{:02x}", *v);
+                    raw_str += &format!("{:04x}", *v);
                 }
                 first = false;
             }

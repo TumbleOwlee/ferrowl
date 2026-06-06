@@ -58,7 +58,7 @@ impl Read for RegisterBridge {
         let raw = self
             .memory
             .blocking_read()
-            .read(key, &mem_type(register), &Range::new(addr as usize, width))
+            .read_unchecked(key, &Range::new(addr as usize, width))
             .ok_or_else(|| Error::RuntimeError(format!("register '{name}' not readable")))?;
         let value = register
             .decode(&raw)
@@ -77,9 +77,8 @@ impl Write for RegisterBridge {
             id: self.id,
             slave_id: *register.slave_id(),
         };
-        let ok = self.memory.blocking_write().write(
+        let ok = self.memory.blocking_write().write_unchecked(
             key,
-            &mem_type(register),
             &Range::new(addr as usize, raw.len()),
             &raw,
         );
