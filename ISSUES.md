@@ -13,3 +13,4 @@
 * Changing value and type only changes type and drops value because memory is initialized -> Have to set value afterwards
 * A client module should not try to read registers with type `WriteOnly`
 * Client operations are not updated whenever a definition is changed, thus the client tries to e.g. read wrong or outdated addresses.
+* Add command to reload the current module (thus reloading the device configuration) with `:reload`
