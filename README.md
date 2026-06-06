@@ -1,4 +1,4 @@
-# Modbus CLI
+![Banner](./images/ferrowl_banner.svg)
 
 [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=check)](https://github-ci.code-ape.dev/repos/3) [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=nightly)](https://github-ci.code-ape.dev/repos/3)
 
