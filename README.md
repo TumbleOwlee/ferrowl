@@ -45,7 +45,7 @@ ferrowl --session session.toml
 
 If started without any additional parameters, the module setup dialog is shown. After the module is created, you can add registers using the `:add` command.
 
-> [!INFO]
+> [!IMPORTANT]
 > You can use *VIM*-like table navigation or alternatively the arrow keys. You can exit using the `:qa` command. Typing `:` will automatically switch to command mode. See the shown overlay for all available commands.
 
 ## Commands
