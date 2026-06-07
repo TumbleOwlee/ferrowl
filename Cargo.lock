@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-derive"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "convert_case 0.11.0",
  "crossterm",
@@ -669,21 +669,21 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-log"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
 ]
 
 [[package]]
 name = "ferrowl-lua"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "mlua",
 ]
 
 [[package]]
 name = "ferrowl-mem"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "itertools",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-net"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-reg"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "derive-getters",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ui"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "crossterm",
  "derive_builder",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-util"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
