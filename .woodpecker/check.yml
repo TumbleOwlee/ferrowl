@@ -2,8 +2,6 @@ steps:
   check:
     image: rust:latest
     commands:
-      - rustup toolchain install nightly
-      - rustup default nightly
       - cargo check
     when:
       - event: push
