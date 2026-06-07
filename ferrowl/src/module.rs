@@ -46,6 +46,8 @@ pub struct Module {
     sim_interval: Duration,
     /// The running simulation thread, if any (started in `start`, stopped in `stop`).
     sim: Option<SimHandle>,
+    /// Values for virtual registers (no Modbus address), keyed by register name.
+    virtual_values: HashMap<String, String>,
 }
 
 impl Module {
@@ -108,6 +110,7 @@ impl Module {
             scripts,
             sim_interval: Duration::from_millis(app.interval_ms.max(1) as u64),
             sim: None,
+            virtual_values: HashMap::new(),
         }
     }
 
@@ -135,6 +138,21 @@ impl Module {
 
     pub fn registers(&self) -> &[(String, String, Register, Vec<NamedValue>)] {
         &self.registers
+    }
+
+    /// Read back a virtual register's stored string value (returns `None` if not yet set).
+    pub fn virtual_value(&self, name: &str) -> Option<&str> {
+        self.virtual_values.get(name).map(String::as_str)
+    }
+
+    /// Store a string value for a virtual register (replaces any previous value).
+    pub fn set_virtual_value(&mut self, name: &str, val: String) {
+        self.virtual_values.insert(name.to_string(), val);
+    }
+
+    /// Return a clone of all virtual register values (for display in the table snapshot).
+    pub fn virtual_values(&self) -> HashMap<String, String> {
+        self.virtual_values.clone()
     }
 
     /// Replace one register's cached metadata (name, comment, register, named values).

@@ -1,5 +1,5 @@
 use crate::config::device::NamedValue;
-use crate::dialog::edit::{Alignment, Endian, Format, ValueType};
+use crate::dialog::edit::{Alignment, Endian, Format, KindOption, ValueType};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::format::{
@@ -40,6 +40,9 @@ pub struct EditInputDialog {
     // Address of the start register
     #[focus]
     pub address: Widget<InputFieldState, InputField<u16>>,
+    // Register kind selection (HoldingRegister, Coil, etc.)
+    #[focus]
+    pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
     // Type selection
     #[focus]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
@@ -76,7 +79,6 @@ pub struct EditInputDialog {
     // Preserved metadata not editable in this dialog (carried from the source register).
     pub base_slave_id: u8,
     pub base_access: Access,
-    pub base_kind: Kind,
     // Optional sub-dialog for adding a new named value entry.
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
@@ -189,8 +191,8 @@ impl EditInputDialog {
         );
         vertical_index += 1;
 
-        let horizontal_layout: [Rect; 2] =
-            Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+        let horizontal_layout: [Rect; 3] =
+            Layout::horizontal([Constraint::Min(1), Constraint::Min(1), Constraint::Min(1)])
                 .areas(vertical_layout[vertical_index]);
         vertical_index += 1;
 
@@ -202,8 +204,15 @@ impl EditInputDialog {
         );
 
         StatefulWidget::render(
-            &self.value_type.widget,
+            &self.kind.widget,
             horizontal_layout[1],
+            buf,
+            &mut self.kind.state,
+        );
+
+        StatefulWidget::render(
+            &self.value_type.widget,
+            horizontal_layout[2],
             buf,
             &mut self.value_type.state,
         );
@@ -388,6 +397,25 @@ impl EditInputDialog {
                         horizontal: 1,
                     })
                     .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .kind(Widget {
+                state: SelectionStateBuilder::default()
+                    .focused(false)
+                    .values(vec![
+                        KindOption(Kind::Coil),
+                        KindOption(Kind::DiscreteInput),
+                        KindOption(Kind::HoldingRegister),
+                        KindOption(Kind::InputRegister),
+                    ])
+                    .build()
+                    .unwrap(),
+                widget: SelectionBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Kind".into()))
+                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .style(selection_style.clone())
                     .build()
                     .unwrap(),
             })
@@ -624,7 +652,6 @@ impl EditInputDialog {
             ])
             .base_slave_id(0)
             .base_access(Access::ReadWrite)
-            .base_kind(Kind::HoldingRegister)
             .focus(EditInputDialogFocus::Label)
             .build()
             .unwrap()
@@ -657,7 +684,7 @@ impl EditInputDialog {
         }
         dialog.base_slave_id = *register.slave_id();
         dialog.base_access = register.access().clone();
-        dialog.base_kind = register.kind().clone();
+        dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {
             RegisterFormat::Ascii((align, width)) => {
@@ -728,7 +755,7 @@ impl EditInputDialog {
         let register = RegisterBuilder::default()
             .slave_id(self.base_slave_id)
             .access(self.base_access.clone())
-            .kind(self.base_kind.clone())
+            .kind(self.kind.state.get_value().0)
             .address(Address::Fixed(addr))
             .format(format)
             .build()
@@ -820,8 +847,8 @@ impl EditInputDialog {
 }
 
 use super::{
-    AddNamedValueDialog, alignment_index, endian_index, format_index, numeric_parts, set_input,
-    with_endian_resolution,
+    AddNamedValueDialog, alignment_index, endian_index, format_index, kind_index, numeric_parts,
+    set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::traits::HandleEvents;

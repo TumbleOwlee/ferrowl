@@ -7,6 +7,7 @@ pub use selection::*;
 use ferrowl_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
 };
+use ferrowl_reg::Kind;
 use ferrowl_ui::{
     state::InputFieldState,
     traits::ToLabel,
@@ -77,6 +78,31 @@ impl ToLabel for Alignment {
             TextAlignment::Left => "Left",
         }
         .to_string()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KindOption(pub Kind);
+
+impl ToLabel for KindOption {
+    fn to_label(&self) -> String {
+        match self.0 {
+            Kind::Coil => "Coil",
+            Kind::DiscreteInput => "Discrete Input",
+            Kind::HoldingRegister => "Holding Register",
+            Kind::InputRegister => "Input Register",
+        }
+        .to_string()
+    }
+}
+
+/// Index into the `kind` selection (order matches dialog `new()`).
+pub(super) fn kind_index(kind: &Kind) -> usize {
+    match kind {
+        Kind::Coil => 0,
+        Kind::DiscreteInput => 1,
+        Kind::HoldingRegister => 2,
+        Kind::InputRegister => 3,
     }
 }
 

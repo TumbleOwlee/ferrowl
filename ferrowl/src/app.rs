@@ -14,7 +14,8 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Style, palette::tailwind},
-    widgets::StatefulWidget,
+    text::{Line, Span},
+    widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
 
 use crate::config::{
@@ -218,13 +219,14 @@ impl App {
         let follow = self.focus != Focus::Log;
 
         // Clone shared handles + current rows so no `self.tabs` borrow is held across awaits.
-        let (log, memory, id, defs) = {
+        let (log, memory, id, defs, virtual_values) = {
             let tab = &self.tabs[active];
             (
                 tab.module.log(),
                 tab.module.memory(),
                 tab.module.id(),
                 tab.table.definitions().to_vec(),
+                tab.module.virtual_values(),
             )
         };
 
@@ -235,7 +237,7 @@ impl App {
         let updated = {
             let guard = memory.read().await;
             defs.into_iter()
-                .map(|d| decode_definition(d, &guard, id))
+                .map(|d| decode_definition(d, &guard, id, &virtual_values))
                 .collect::<Vec<_>>()
         };
 
@@ -858,13 +860,25 @@ impl App {
                 .await;
             return;
         };
+        // Virtual registers store their value in the module's virtual_values map (server only).
+        if let Address::Virtual = register.address() {
+            if role == Role::Server {
+                self.tabs[self.active]
+                    .module
+                    .set_virtual_value(register_name, value.to_string());
+                self.log_active(format!("set {register_name} = {value} (virtual)"))
+                    .await;
+            } else {
+                self.log_active(format!(
+                    ":set '{register_name}' is virtual — only writable on servers"
+                ))
+                .await;
+            }
+            return;
+        }
         let addr = match register.address() {
             Address::Fixed(a) => *a,
-            Address::Virtual => {
-                self.log_active(format!(":set '{register_name}' is virtual (no address)"))
-                    .await;
-                return;
-            }
+            Address::Virtual => unreachable!(),
         };
         let raw = match register.encode(value) {
             Ok(raw) => raw,
@@ -971,7 +985,12 @@ fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Comm
 }
 
 /// Decode one register's live value from the module memory snapshot.
-fn decode_definition(mut d: Definition, memory: &Memory<Key<u8>>, id: u8) -> Definition {
+fn decode_definition(
+    mut d: Definition,
+    memory: &Memory<Key<u8>>,
+    id: u8,
+    virtual_values: &std::collections::HashMap<String, String>,
+) -> Definition {
     match d.register.address() {
         Address::Fixed(addr) => {
             let width = d.register.format().width();
@@ -1005,7 +1024,11 @@ fn decode_definition(mut d: Definition, memory: &Memory<Key<u8>>, id: u8) -> Def
             d.raw_value = raw_str;
         }
         Address::Virtual => {
-            d.value.clear();
+            if let Some(v) = virtual_values.get(&d.name) {
+                d.value = v.clone();
+            } else {
+                d.value.clear();
+            }
             d.raw_value.clear();
         }
     }
@@ -1141,11 +1164,62 @@ fn render(
     }
 
     render_command(command, focus, cmd_area, buf);
+    if focus == Focus::Command {
+        render_command_help(cmd_area, buf);
+    }
 
     // Overlay dialog (drawn last; it clears its own area).
     if let Some(dialog) = overlay {
         dialog.render(area, buf);
     }
+}
+
+fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
+    const COLS: &[(&str, &str)] = &[
+        (":q / :qa",      "quit tab / quit all"),
+        (":e / :n",       "edit setup / new tab"),
+        (":l [path]",     "load device config"),
+        (":start / :stop / :restart", "control module"),
+        (":set <reg> <v>","write register value"),
+        (":w [path]",     "save session"),
+        (":wd [path]",    "save device config"),
+        (":log [file]",   "set log file"),
+        (":reload",       "reload device config"),
+        (":compact",      "toggle compact mode"),
+    ];
+    let popup_w: u16 = 54;
+    let popup_h: u16 = COLS.len() as u16 + 2;
+    let x = cmd_area.x;
+    let y = cmd_area.y.saturating_sub(popup_h);
+    let popup = Rect { x, y, width: popup_w.min(cmd_area.width), height: popup_h };
+
+    ratatui::prelude::Widget::render(Clear, popup, buf);
+    let block = Block::bordered().style(
+        Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+    );
+    let inner = block.inner(popup);
+    ratatui::prelude::Widget::render(block, popup, buf);
+
+    let lines: Vec<Line> = COLS
+        .iter()
+        .map(|(cmd, desc)| {
+            Line::from(vec![
+                Span::styled(
+                    format!("{cmd:<28}"),
+                    Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+                ),
+                Span::styled(
+                    desc.to_string(),
+                    Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
+                ),
+            ])
+        })
+        .collect();
+    ratatui::prelude::Widget::render(
+        Paragraph::new(lines).style(Style::default().bg(COLOR_SCHEME.bg)),
+        inner,
+        buf,
+    );
 }
 
 fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut Buffer) {
