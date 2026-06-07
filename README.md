@@ -1,4 +1,4 @@
-![Banner](./images/ferrowl_banner.svg)
+![Banner](./images/ferrowl-banner.svg)
 
 # Ferrowl - TUI Modbus Server + Client
 
