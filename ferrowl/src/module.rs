@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ferrowl_mem::{Kind as MemKind, Memory, Range};
 use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation, SlaveKind};
-use ferrowl_reg::{Access, Address, Register};
+use ferrowl_reg::{Access, Address, Kind, Register};
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
@@ -75,10 +75,9 @@ impl Module {
                         kind: def.register().kind().clone(),
                     },
                 };
-                let mem_kind = match def.access {
-                    AccessCfg::ReadOnly => MemKind::Read(def.mem_type()),
-                    AccessCfg::WriteOnly => MemKind::Write(def.mem_type()),
-                    AccessCfg::ReadWrite => MemKind::ReadWrite(def.mem_type()),
+                let mem_kind = match def.kind() {
+                    Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(def.mem_type()),
+                    Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(def.mem_type()),
                 };
                 memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
                 if def.access != AccessCfg::WriteOnly {
@@ -239,6 +238,13 @@ impl Module {
         if let Some(mut sim) = self.sim.take() {
             sim.stop();
         }
+    }
+
+    /// Replace the module's script list and restart the simulation thread so the new scripts take
+    /// effect. Any previously running sim thread is stopped first.
+    pub fn reload_scripts(&mut self, scripts: Vec<(String, String)>) {
+        self.scripts = scripts;
+        self.start_sim();
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).

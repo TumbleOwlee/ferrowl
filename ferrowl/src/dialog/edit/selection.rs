@@ -1,8 +1,8 @@
 use crate::config::device::NamedValue;
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
-    Alignment, Endian, Format, KindOption, ValueType, alignment_index, endian_index, format_index,
-    kind_index, numeric_parts, set_input, with_endian_resolution,
+    AccessOption, Alignment, Endian, Format, KindOption, ValueType, access_index, alignment_index,
+    endian_index, format_index, kind_index, numeric_parts, set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
@@ -15,16 +15,16 @@ use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder};
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{
-        ButtonState, ButtonStateBuilder, InputFieldState, InputFieldStateBuilder, SelectionState,
-        SelectionStateBuilder,
+        ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::HandleEvents,
     traits::ToLabel,
     types::Border,
     widgets::{
-        Button, ButtonBuilder, GetValue, InputField, InputFieldBuilder, Selection,
-        SelectionBuilder, Text, TextBuilder, Validate, Widget,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
+        InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate, Widget,
     },
 };
 use ratatui::{
@@ -135,7 +135,7 @@ impl AddNamedValueDialog {
                         .unwrap(),
                 },
                 Widget {
-                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
+                    state: "<Esc>: cancel | <Enter>: confirm / newline".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -276,12 +276,18 @@ where
     // Description for the register
     #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
+    // Slave ID for this register
+    #[focus]
+    pub slave_id: Widget<InputFieldState, InputField<u8>>,
     // Address of the start register
     #[focus]
     pub address: Widget<InputFieldState, InputField<u16>>,
     // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
+    // Access selection (ReadOnly / WriteOnly / ReadWrite)
+    #[focus]
+    pub access: Widget<SelectionState<AccessOption>, Selection<AccessOption>>,
     // Type selection
     #[focus]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
@@ -311,18 +317,16 @@ where
     pub delete_button: Widget<ButtonState, Button>,
     // Lua simulation script (optional multiline)
     #[focus]
-    pub update_script: Widget<InputFieldState, InputField<String>>,
+    pub update_script: Widget<CodeInputFieldState, CodeInputField>,
+    // Confirm button
+    #[focus]
+    pub confirm_button: Widget<ButtonState, Button>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
     pub success: Widget<String, Text>,
     // Keybinds display field
     pub keybinds: [Widget<String, Text>; 2],
-    // Register metadata preserved across edits
-    #[builder(default)]
-    pub base_slave_id: u8,
-    #[builder(default = "Access::ReadWrite")]
-    pub base_access: Access,
     // Optional add-value sub-dialog
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
@@ -332,6 +336,8 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
     fn validate(&self) -> Result<(), String> {
         if let Err(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
+        } else if let Err(e) = u8::validate(self.slave_id.state.input()) {
+            return Err(format!("Slave ID: {e}"));
         } else if let Err(e) = u16::validate(self.address.state.input()) {
             return Err(format!("Address: {e}"));
         }
@@ -363,7 +369,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27 + 2 + 2),
+            Constraint::Length(27 + 2 + 2 + 3 + 3),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -382,13 +388,15 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 10] = Layout::vertical([
+        let vertical_layout: [Rect; 12] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(6),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -412,23 +420,42 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         );
         vertical_index += 1;
 
+        let horizontal_layout: [Rect; 2] =
+            Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+                .areas(vertical_layout[vertical_index]);
+        vertical_index += 1;
+
+        StatefulWidget::render(
+            &self.slave_id.widget,
+            horizontal_layout[0],
+            buf,
+            &mut self.slave_id.state,
+        );
+
+        StatefulWidget::render(
+            &self.address.widget,
+            horizontal_layout[1],
+            buf,
+            &mut self.address.state,
+        );
+
         let horizontal_layout: [Rect; 3] =
             Layout::horizontal([Constraint::Min(1), Constraint::Min(1), Constraint::Min(1)])
                 .areas(vertical_layout[vertical_index]);
         vertical_index += 1;
 
         StatefulWidget::render(
-            &self.address.widget,
+            &self.kind.widget,
             horizontal_layout[0],
             buf,
-            &mut self.address.state,
+            &mut self.kind.state,
         );
 
         StatefulWidget::render(
-            &self.kind.widget,
+            &self.access.widget,
             horizontal_layout[1],
             buf,
-            &mut self.kind.state,
+            &mut self.access.state,
         );
 
         StatefulWidget::render(
@@ -548,6 +575,14 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         );
         vertical_index += 1;
 
+        StatefulWidget::render(
+            &self.confirm_button.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.confirm_button.state,
+        );
+        vertical_index += 1;
+
         if !self.error.state.is_empty() {
             StatefulWidget::render(
                 &self.error.widget,
@@ -639,6 +674,24 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .build()
                     .unwrap(),
             })
+            .slave_id(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("e.g. 1".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Slave ID".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
             .address(Widget {
                 state: InputFieldStateBuilder::default()
                     .focused(false)
@@ -671,6 +724,31 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Kind".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .access(Widget {
+                state: {
+                    let mut s = SelectionStateBuilder::default()
+                        .focused(false)
+                        .values(vec![
+                            AccessOption(ferrowl_reg::Access::ReadOnly),
+                            AccessOption(ferrowl_reg::Access::WriteOnly),
+                            AccessOption(ferrowl_reg::Access::ReadWrite),
+                        ])
+                        .build()
+                        .unwrap();
+                    s.set_selection(2);
+                    s
+                },
+                widget: SelectionBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Access".into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
@@ -857,21 +935,38 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
             })
             .update_script(Widget {
-                state: InputFieldStateBuilder::default()
+                state: CodeInputFieldStateBuilder::default()
                     .focused(false)
                     .disabled(false)
                     .placeholder(Some("-- Lua update script (optional)".to_string()))
                     .build()
                     .unwrap(),
-                widget: InputFieldBuilder::default()
+                widget: CodeInputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Lua Update".into()))
-                    .multiline(true)
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
                     })
                     .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .confirm_button(Widget {
+                state: ButtonStateBuilder::default()
+                    .focused(false)
+                    .label("Confirm".to_string())
+                    .disabled(false)
+                    .build()
+                    .unwrap(),
+                widget: ButtonBuilder::default()
+                    .border_margin(Margin::new(1, 0))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(button_style.clone())
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
             })
@@ -915,7 +1010,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         .unwrap(),
                 },
                 Widget {
-                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
+                    state: "<Esc>: cancel | <Enter>: confirm / newline".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -949,7 +1044,7 @@ impl EditSelectionDialog<NamedValue> {
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, comment);
         if let Some(script) = update {
-            set_input(&mut dialog.update_script, script);
+            dialog.update_script.state.set_content(script);
         }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
@@ -957,8 +1052,8 @@ impl EditSelectionDialog<NamedValue> {
         if let Address::Fixed(addr) = register.address() {
             set_input(&mut dialog.address, &addr.to_string());
         }
-        dialog.base_slave_id = *register.slave_id();
-        dialog.base_access = register.access().clone();
+        set_input(&mut dialog.slave_id, &register.slave_id().to_string());
+        dialog.access.state.set_selection(access_index(register.access()));
         dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {
@@ -1037,9 +1132,17 @@ impl EditSelectionDialog<NamedValue> {
             }
         };
 
+        let slave_id = self
+            .slave_id
+            .state
+            .input()
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Slave ID must be 0–255.".to_string())?;
+
         let register = RegisterBuilder::default()
-            .slave_id(self.base_slave_id)
-            .access(self.base_access.clone())
+            .slave_id(slave_id)
+            .access(self.access.state.get_value().0.clone())
             .kind(self.kind.state.get_value().0)
             .address(Address::Fixed(addr))
             .format(format)
@@ -1052,7 +1155,7 @@ impl EditSelectionDialog<NamedValue> {
         } else {
             Some(self.value.state.get_value().value.to_string())
         };
-        let update_script = self.update_script.state.input().trim().to_string();
+        let update_script = self.update_script.state.content().trim().to_string();
         let update = Some(if update_script.is_empty() {
             String::new()
         } else {
@@ -1125,6 +1228,14 @@ impl EditSelectionDialog<NamedValue> {
                 self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
             }
         }
+    }
+
+    pub fn is_update_script_focused(&self) -> bool {
+        matches!(self.focus, EditSelectionDialogFocus::UpdateScript)
+    }
+
+    pub fn is_confirm_button_focused(&self) -> bool {
+        matches!(self.focus, EditSelectionDialogFocus::ConfirmButton)
     }
 
     pub fn delete_selected(&mut self) {

@@ -1,5 +1,5 @@
 use crate::config::device::NamedValue;
-use crate::dialog::edit::{Alignment, Endian, Format, KindOption, ValueType};
+use crate::dialog::edit::{AccessOption, Alignment, Endian, Format, KindOption, ValueType};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::format::{
@@ -10,14 +10,14 @@ use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
     state::{
-        ButtonState, ButtonStateBuilder, InputFieldState, InputFieldStateBuilder, SelectionState,
-        SelectionStateBuilder,
+        ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     types::Border,
     widgets::{
-        Button, ButtonBuilder, GetValue, InputField, InputFieldBuilder, Selection,
-        SelectionBuilder, Text, TextBuilder, Validate, Widget,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
+        InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate, Widget,
     },
 };
 use ratatui::{
@@ -37,12 +37,18 @@ pub struct EditInputDialog {
     // Description for the register
     #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
+    // Slave ID for this register
+    #[focus]
+    pub slave_id: Widget<InputFieldState, InputField<u8>>,
     // Address of the start register
     #[focus]
     pub address: Widget<InputFieldState, InputField<u16>>,
     // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
+    // Access selection (ReadOnly / WriteOnly / ReadWrite)
+    #[focus]
+    pub access: Widget<SelectionState<AccessOption>, Selection<AccessOption>>,
     // Type selection (hidden for boolean kinds)
     #[focus(when = { !self.is_boolean_kind() })]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
@@ -71,16 +77,16 @@ pub struct EditInputDialog {
     pub add_button: Widget<ButtonState, Button>,
     // Lua simulation script (optional multiline)
     #[focus]
-    pub update_script: Widget<InputFieldState, InputField<String>>,
+    pub update_script: Widget<CodeInputFieldState, CodeInputField>,
+    // Confirm button
+    #[focus]
+    pub confirm_button: Widget<ButtonState, Button>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
     pub success: Widget<String, Text>,
     // Keybinds display field
     pub keybinds: [Widget<String, Text>; 2],
-    // Preserved metadata not editable in this dialog (carried from the source register).
-    pub base_slave_id: u8,
-    pub base_access: Access,
     // Optional sub-dialog for adding a new named value entry.
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
@@ -114,6 +120,8 @@ impl EditInputDialog {
     fn validate(&self) -> Result<(), String> {
         if let Err(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
+        } else if let Err(e) = u8::validate(self.slave_id.state.input()) {
+            return Err(format!("Slave ID: {e}"));
         } else if let Err(e) = u16::validate(self.address.state.input()) {
             return Err(format!("Address: {e}"));
         }
@@ -152,7 +160,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(34),
+            Constraint::Length(40),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -171,14 +179,16 @@ impl EditInputDialog {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 11] = Layout::vertical([
+        let vertical_layout: [Rect; 13] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(6),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -202,23 +212,42 @@ impl EditInputDialog {
         );
         vertical_index += 1;
 
+        let horizontal_layout: [Rect; 2] =
+            Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+                .areas(vertical_layout[vertical_index]);
+        vertical_index += 1;
+
+        StatefulWidget::render(
+            &self.slave_id.widget,
+            horizontal_layout[0],
+            buf,
+            &mut self.slave_id.state,
+        );
+
+        StatefulWidget::render(
+            &self.address.widget,
+            horizontal_layout[1],
+            buf,
+            &mut self.address.state,
+        );
+
         let horizontal_layout: [Rect; 3] =
             Layout::horizontal([Constraint::Min(1), Constraint::Min(1), Constraint::Min(1)])
                 .areas(vertical_layout[vertical_index]);
         vertical_index += 1;
 
         StatefulWidget::render(
-            &self.address.widget,
+            &self.kind.widget,
             horizontal_layout[0],
             buf,
-            &mut self.address.state,
+            &mut self.kind.state,
         );
 
         StatefulWidget::render(
-            &self.kind.widget,
+            &self.access.widget,
             horizontal_layout[1],
             buf,
-            &mut self.kind.state,
+            &mut self.access.state,
         );
 
         if self.is_boolean_kind() {
@@ -315,6 +344,14 @@ impl EditInputDialog {
         );
         vertical_index += 1;
 
+        StatefulWidget::render(
+            &self.confirm_button.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.confirm_button.state,
+        );
+        vertical_index += 1;
+
         if !self.error.state.is_empty() {
             StatefulWidget::render(
                 &self.error.widget,
@@ -404,6 +441,24 @@ impl EditInputDialog {
                     .build()
                     .unwrap(),
             })
+            .slave_id(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("e.g. 1".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Slave ID".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
             .address(Widget {
                 state: InputFieldStateBuilder::default()
                     .focused(false)
@@ -436,6 +491,31 @@ impl EditInputDialog {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Kind".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .access(Widget {
+                state: {
+                    let mut s = SelectionStateBuilder::default()
+                        .focused(false)
+                        .values(vec![
+                            AccessOption(Access::ReadOnly),
+                            AccessOption(Access::WriteOnly),
+                            AccessOption(Access::ReadWrite),
+                        ])
+                        .build()
+                        .unwrap();
+                    s.set_selection(2);
+                    s
+                },
+                widget: SelectionBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Access".into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
@@ -618,21 +698,38 @@ impl EditInputDialog {
                     .unwrap(),
             })
             .update_script(Widget {
-                state: InputFieldStateBuilder::default()
+                state: CodeInputFieldStateBuilder::default()
                     .focused(false)
                     .disabled(false)
                     .placeholder(Some("-- Lua update script (optional)".to_string()))
                     .build()
                     .unwrap(),
-                widget: InputFieldBuilder::default()
+                widget: CodeInputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Lua Update".into()))
-                    .multiline(true)
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
                     })
                     .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .confirm_button(Widget {
+                state: ButtonStateBuilder::default()
+                    .focused(false)
+                    .label("CONFIRM".to_string())
+                    .disabled(false)
+                    .build()
+                    .unwrap(),
+                widget: ButtonBuilder::default()
+                    .border_margin(Margin::new(1, 0))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(ButtonStyle::default())
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
             })
@@ -676,7 +773,7 @@ impl EditInputDialog {
                         .unwrap(),
                 },
                 Widget {
-                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
+                    state: "<Esc>: cancel | <Enter>: confirm / newline".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -688,8 +785,6 @@ impl EditInputDialog {
                         .unwrap(),
                 },
             ])
-            .base_slave_id(0)
-            .base_access(Access::ReadWrite)
             .focus(EditInputDialogFocus::Label)
             .build()
             .unwrap()
@@ -708,7 +803,7 @@ impl EditInputDialog {
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, comment);
         if let Some(script) = update {
-            set_input(&mut dialog.update_script, script);
+            dialog.update_script.state.set_content(script);
         }
         // Show the current value as a placeholder; <C-f> fills it in when the field is empty.
         if !value.is_empty() {
@@ -720,8 +815,8 @@ impl EditInputDialog {
         if let Address::Fixed(addr) = register.address() {
             set_input(&mut dialog.address, &addr.to_string());
         }
-        dialog.base_slave_id = *register.slave_id();
-        dialog.base_access = register.access().clone();
+        set_input(&mut dialog.slave_id, &register.slave_id().to_string());
+        dialog.access.state.set_selection(access_index(register.access()));
         dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {
@@ -794,9 +889,17 @@ impl EditInputDialog {
             }
         };
 
+        let slave_id = self
+            .slave_id
+            .state
+            .input()
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| "Slave ID must be 0–255.".to_string())?;
+
         let register = RegisterBuilder::default()
-            .slave_id(self.base_slave_id)
-            .access(self.base_access.clone())
+            .slave_id(slave_id)
+            .access(self.access.state.get_value().0.clone())
             .kind(self.kind.state.get_value().0)
             .address(Address::Fixed(addr))
             .format(format)
@@ -812,7 +915,7 @@ impl EditInputDialog {
             }
         };
 
-        let update_script = self.update_script.state.input().trim().to_string();
+        let update_script = self.update_script.state.content().trim().to_string();
         let update = Some(if update_script.is_empty() {
             String::new()
         } else {
@@ -888,11 +991,19 @@ impl EditInputDialog {
             self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         }
     }
+
+    pub fn is_update_script_focused(&self) -> bool {
+        matches!(self.focus, EditInputDialogFocus::UpdateScript)
+    }
+
+    pub fn is_confirm_button_focused(&self) -> bool {
+        matches!(self.focus, EditInputDialogFocus::ConfirmButton)
+    }
 }
 
 use super::{
-    AddNamedValueDialog, alignment_index, endian_index, format_index, kind_index, numeric_parts,
-    set_input, with_endian_resolution,
+    AddNamedValueDialog, access_index, alignment_index, endian_index, format_index, kind_index,
+    numeric_parts, set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::traits::HandleEvents;

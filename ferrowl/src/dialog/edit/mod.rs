@@ -7,7 +7,7 @@ pub use selection::*;
 use ferrowl_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
 };
-use ferrowl_reg::Kind;
+use ferrowl_reg::{Access, Kind};
 use ferrowl_ui::{
     state::InputFieldState,
     traits::ToLabel,
@@ -93,6 +93,29 @@ impl ToLabel for KindOption {
             Kind::InputRegister => "Input Register",
         }
         .to_string()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessOption(pub Access);
+
+impl ToLabel for AccessOption {
+    fn to_label(&self) -> String {
+        match self.0 {
+            Access::ReadOnly => "Read Only",
+            Access::WriteOnly => "Write Only",
+            Access::ReadWrite => "Read Write",
+        }
+        .to_string()
+    }
+}
+
+/// Index into the `access` selection (order matches dialog `new()`).
+pub(super) fn access_index(access: &Access) -> usize {
+    match access {
+        Access::ReadOnly => 0,
+        Access::WriteOnly => 1,
+        Access::ReadWrite => 2,
     }
 }
 

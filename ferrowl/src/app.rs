@@ -302,11 +302,32 @@ impl App {
             return false;
         }
 
-        match code {
-            KeyCode::Esc => self.close_overlay(),
-            KeyCode::Enter => self.confirm_overlay().await,
-            KeyCode::Char(' ') => {
-                if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
+        // Check whether the code input or confirm button is currently focused in the edit dialogs.
+        let update_script_focused = matches!(&self.overlay,
+            Some(Overlay::Edit(d)) if d.is_update_script_focused())
+            || matches!(&self.overlay,
+            Some(Overlay::EditSelection(d)) if d.is_update_script_focused());
+        let confirm_button_focused = matches!(&self.overlay,
+            Some(Overlay::Edit(d)) if d.is_confirm_button_focused())
+            || matches!(&self.overlay,
+            Some(Overlay::EditSelection(d)) if d.is_confirm_button_focused());
+
+        match (modifiers, code) {
+            (KeyModifiers::NONE, KeyCode::Esc) => self.close_overlay(),
+            // Enter inserts a newline when the code field is focused; otherwise it confirms.
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                if update_script_focused {
+                    if let Some(o) = self.overlay.as_mut() {
+                        o.handle_events(modifiers, code);
+                    }
+                } else {
+                    self.confirm_overlay().await;
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char(' ')) => {
+                if confirm_button_focused {
+                    self.confirm_overlay().await;
+                } else if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
                     d.handle_space();
                 } else if let Some(Overlay::Edit(d)) = self.overlay.as_mut() {
                     d.handle_space();
@@ -314,12 +335,12 @@ impl App {
                     o.handle_events(modifiers, code);
                 }
             }
-            KeyCode::BackTab => {
+            (KeyModifiers::NONE, KeyCode::BackTab) => {
                 if let Some(o) = self.overlay.as_mut() {
                     o.focus_previous();
                 }
             }
-            KeyCode::Tab => {
+            (KeyModifiers::NONE, KeyCode::Tab) => {
                 if let Some(o) = self.overlay.as_mut() {
                     o.focus_next();
                 }
@@ -480,10 +501,9 @@ impl App {
 
                 let mem_result = if let Address::Fixed(addr) = edited.register.address() {
                     let ty = mem_type(&edited.register);
-                    let kind = match edited.register.access() {
-                        Access::ReadOnly => MemKind::Read(ty),
-                        Access::WriteOnly => MemKind::Write(ty),
-                        Access::ReadWrite => MemKind::ReadWrite(ty),
+                    let kind = match edited.register.kind() {
+                        Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
+                        Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
                     };
                     Some((
                         tab.module.memory(),
@@ -538,6 +558,25 @@ impl App {
         // Issue 9: refresh client operations after register metadata changed.
         if let Some(tab) = self.tabs.get(active) {
             tab.module.rebuild_operations().await;
+        }
+
+        // Reload the Lua sim thread when the edit included a script change so the new script
+        // takes effect immediately rather than only on the next module start.
+        if edited.update.is_some() {
+            if let Some(tab) = self.tabs.get_mut(active) {
+                let scripts: Vec<(String, String)> = tab
+                    .device
+                    .definitions
+                    .iter()
+                    .filter_map(|(name, def)| {
+                        def.update
+                            .as_ref()
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|s| (name.clone(), s.clone()))
+                    })
+                    .collect();
+                tab.module.reload_scripts(scripts);
+            }
         }
 
         // Issue 8: re-apply the old value when only the format changed.
