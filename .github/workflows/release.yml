@@ -17,6 +17,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # The repo root is a virtual workspace manifest; point the action at the
+          # actual binary package so `cargo read-manifest` resolves a target.
+          SRC_DIR: "ferrowl"
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md LICENSE"
-          TOOLCHAIN_VERSION: stable
+          # The crate relies on nightly features (async_fn_traits, let_chains); also pinned
+          # by rust-toolchain.toml.
+          TOOLCHAIN_VERSION: nightly
