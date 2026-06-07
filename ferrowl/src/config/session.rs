@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 /// A pre-configured set of module instances.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Session {
+    /// Ferrowl version that wrote this file, stamped on save. Enables future compatibility
+    /// shims when loading configs produced by older releases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     #[serde(default)]
     pub modules: Vec<ModuleSpec>,
 }
@@ -107,6 +111,7 @@ mod tests {
 
     fn sample() -> Session {
         Session {
+            version: Some("0.1.0".into()),
             modules: vec![
                 ModuleSpec {
                     name: "evse-1".into(),

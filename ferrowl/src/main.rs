@@ -91,6 +91,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
     );
 
     let device = DeviceConfig {
+        version: None,
         comment: "demo device".to_string(),
         timeout_ms: None,
         delay_ms: None,

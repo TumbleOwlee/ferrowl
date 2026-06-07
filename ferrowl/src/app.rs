@@ -161,7 +161,11 @@ pub struct App {
 impl App {
     pub fn new(tabs: Vec<Tab>, app_cfg: AppConfig) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {
-            (Some(Overlay::Setup(SetupDialog::create())), Focus::Dialog)
+            let timing = (app_cfg.timeout_ms, app_cfg.delay_ms, app_cfg.interval_ms);
+            (
+                Some(Overlay::Setup(SetupDialog::create(timing))),
+                Focus::Dialog,
+            )
         } else {
             (None, Focus::Table)
         };
@@ -442,13 +446,12 @@ impl App {
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
+        let timing = crate::module::Module::resolve_timing(&tab.spec, &tab.device, &self.app_cfg);
         let dialog = SetupDialog::edit(
             &tab.spec.name,
             tab.spec.role,
             &tab.spec.endpoint,
-            tab.spec.timeout_ms,
-            tab.spec.delay_ms,
-            tab.spec.interval_ms,
+            (timing.timeout_ms, timing.delay_ms, timing.interval_ms),
         );
         self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
@@ -456,7 +459,9 @@ impl App {
 
     /// Open the new-module dialog (`:n`/`:new`).
     fn enter_new(&mut self) {
-        self.overlay = Some(Overlay::Setup(SetupDialog::create()));
+        let app = &self.app_cfg;
+        let dialog = SetupDialog::create((app.timeout_ms, app.delay_ms, app.interval_ms));
+        self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
     }
 
@@ -709,6 +714,10 @@ impl App {
         self.tabs[active].spec.timeout_ms = values.timeout_ms;
         self.tabs[active].spec.delay_ms = values.delay_ms;
         self.tabs[active].spec.interval_ms = values.interval_ms;
+        // Mirror into the device config so `:wd` persists the timing too.
+        self.tabs[active].device.timeout_ms = values.timeout_ms;
+        self.tabs[active].device.delay_ms = values.delay_ms;
+        self.tabs[active].device.interval_ms = values.interval_ms;
 
         let app_cfg = self.app_cfg.clone();
         let timing = crate::module::Module::resolve_timing(
@@ -737,8 +746,12 @@ impl App {
         &mut self,
         values: SetupValues,
         device_path: String,
-        device: crate::config::DeviceConfig,
+        mut device: crate::config::DeviceConfig,
     ) {
+        // Mirror timing into the device config so `:wd` persists it.
+        device.timeout_ms = values.timeout_ms;
+        device.delay_ms = values.delay_ms;
+        device.interval_ms = values.interval_ms;
         let spec = ModuleSpec {
             name: values.name,
             device: device_path,
@@ -978,7 +991,8 @@ impl App {
 
     /// Open the new-module dialog pre-filled with an optional device-config path (`:l`).
     fn enter_load(&mut self, path: Option<&str>) {
-        let mut dialog = SetupDialog::create();
+        let app = &self.app_cfg;
+        let mut dialog = SetupDialog::create((app.timeout_ms, app.delay_ms, app.interval_ms));
         if let Some(path) = path {
             dialog.config_path.state.set_input(path.to_string());
             dialog.config_path.state.set_cursor(path.chars().count());
@@ -1105,7 +1119,9 @@ impl App {
         let ty = FileType::from_path(path)
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
         let tab = self.tabs.get(self.active).ok_or("no active tab")?;
-        Converter::save(&tab.device, path, ty).map_err(|e| format!("{e:?}"))
+        let mut device = tab.device.clone();
+        device.version = Some(crate::config::VERSION.to_string());
+        Converter::save(&device, path, ty).map_err(|e| format!("{e:?}"))
     }
 
     /// Save the current module instances as a session file.
@@ -1113,6 +1129,7 @@ impl App {
         let ty = FileType::from_path(path)
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
         let session = Session {
+            version: Some(crate::config::VERSION.to_string()),
             modules: self.tabs.iter().map(|t| t.spec.clone()).collect(),
         };
         Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))

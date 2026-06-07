@@ -8,6 +8,10 @@ pub use session::{Endpoint, ModuleSpec, Role, Session};
 
 use ferrowl_util::convert::{Converter, FileType};
 
+/// Ferrowl version stamped into device/session files on save (see `DeviceConfig::version`,
+/// `Session::version`), so older configs can be detected for compatibility shims.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Error type for config loading.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {

@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 /// A device-type configuration file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DeviceConfig {
+    /// Ferrowl version that wrote this file, stamped on save. Enables future compatibility
+    /// shims when loading configs produced by older releases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     #[serde(default)]
     pub comment: String,
     /// Device-level timing defaults (ms). Used when a `ModuleSpec` does not override them; the
@@ -326,6 +330,7 @@ mod tests {
             },
         );
         DeviceConfig {
+            version: Some("0.1.0".to_string()),
             comment: "EVSE".to_string(),
             timeout_ms: Some(2000),
             delay_ms: None,
