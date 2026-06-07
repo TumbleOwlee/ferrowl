@@ -1,0 +1,205 @@
+#![feature(async_fn_traits)]
+
+mod app;
+mod cli;
+mod command;
+mod config;
+mod dialog;
+mod instance;
+mod lua;
+mod module;
+mod view;
+
+use std::collections::BTreeMap;
+use std::io::Stdout;
+
+use clap::Parser;
+use ferrowl_ui::AlternateScreen;
+use ferrowl_util::Expect;
+use tokio::runtime::Runtime;
+
+use crate::app::{App, Tab};
+use crate::cli::CliArgs;
+use crate::config::device::{
+    AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
+};
+use crate::config::{AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role};
+use crate::module::Module;
+
+/// In-code demo module shown when no `--module`/`--session` is given (not started, so it
+/// binds nothing).
+fn demo() -> (DeviceConfig, ModuleSpec) {
+    let reg =
+        |address: u16, value_type: ValueType, comment: &str, values: Vec<NamedValue>| RegisterDef {
+            slave_id: 1,
+            read_code: 4,
+            address: Some(address),
+            is_virtual: false,
+            access: AccessCfg::ReadWrite,
+            value_type,
+            endian: EndianCfg::Big,
+            resolution: 1.0,
+            length: 1,
+            alignment: AlignmentCfg::Left,
+            values,
+            update: None,
+            comment: comment.to_string(),
+        };
+
+    let mut definitions = BTreeMap::new();
+    definitions.insert(
+        "SetPoint".to_string(),
+        reg(0, ValueType::U16, "Limit set by external control.", vec![]),
+    );
+    definitions.insert(
+        "Power".to_string(),
+        reg(1, ValueType::U16, "Active power consumption.", vec![]),
+    );
+    definitions.insert(
+        "Current L1".to_string(),
+        reg(2, ValueType::I16, "Active current on L1", vec![]),
+    );
+    definitions.insert(
+        "Current L2".to_string(),
+        reg(3, ValueType::I16, "Active current on L2", vec![]),
+    );
+    definitions.insert(
+        "Current L3".to_string(),
+        reg(4, ValueType::I16, "Active current on L3.", vec![]),
+    );
+    definitions.insert(
+        "Mode".to_string(),
+        reg(
+            5,
+            ValueType::I16,
+            "Active mode.",
+            vec![
+                NamedValue {
+                    name: "Idle".into(),
+                    value: Scalar::Int(10),
+                },
+                NamedValue {
+                    name: "Present".into(),
+                    value: Scalar::Int(11),
+                },
+                NamedValue {
+                    name: "Charging".into(),
+                    value: Scalar::Int(12),
+                },
+            ],
+        ),
+    );
+
+    let device = DeviceConfig {
+        version: None,
+        comment: "demo device".to_string(),
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
+        read_ranges: Default::default(),
+        definitions,
+    };
+    let spec = ModuleSpec {
+        name: "demo".to_string(),
+        device: "<demo>".to_string(),
+        role: Role::Server,
+        endpoint: Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 5020,
+        },
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
+    };
+    (device, spec)
+}
+
+async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, String> {
+    let specs = args.module_specs()?;
+
+    if args.demo {
+        let (device, spec) = demo();
+        let mut module = Module::new(&spec, &device, app_cfg);
+
+        if let Err(e) = module.start().await {
+            module
+                .log()
+                .write()
+                .await
+                .write(&format!("Failed to start: {e}"));
+        } else {
+            module
+                .log()
+                .write()
+                .await
+                .write(&format!("Started server on {}", spec.endpoint));
+        }
+
+        return Ok(vec![Tab::from_module(spec, device, module)]);
+    }
+
+    let mut tabs = Vec::new();
+    for spec in &specs {
+        let device = match config::load_device(&spec.device) {
+            Ok(device) => device,
+            Err(e) => {
+                eprintln!(
+                    "Skipping '{}': failed to load '{}': {e}",
+                    spec.name, spec.device
+                );
+                continue;
+            }
+        };
+        let mut module = Module::new(spec, &device, app_cfg);
+        // CLI/session modules auto-start; start failures are surfaced into the module log.
+        if let Err(e) = module.start().await {
+            module
+                .log()
+                .write()
+                .await
+                .write(&format!("Failed to start: {e}"));
+        }
+        tabs.push(Tab::from_module(spec.clone(), device, module));
+    }
+    Ok(tabs)
+}
+
+fn main() {
+    let args = CliArgs::parse();
+
+    // Multi-threaded runtime so background modbus tasks can use `block_in_place`.
+    let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{}]", e));
+
+    // Release the terminal on panic so the error message is visible.
+    let handler = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        AlternateScreen::<Stdout>::release();
+        handler(panic);
+    }));
+
+    runtime.block_on(async move {
+        let mut app_cfg = config::resolve_app_config(args.config.as_deref());
+        if let Some(log) = &args.log {
+            app_cfg.log_file = Some(log.clone());
+        }
+        let tabs = match build_tabs(&args, &app_cfg).await {
+            Ok(tabs) => tabs,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                return;
+            }
+        };
+
+        let mut app = match App::new(tabs, app_cfg) {
+            Ok(app) => app,
+            Err(e) => {
+                eprintln!("Failed to set up screen: {e}");
+                return;
+            }
+        };
+        if let Err(e) = app.run().await {
+            AlternateScreen::<Stdout>::release();
+            eprintln!("UI error: {}", e);
+        }
+    });
+}

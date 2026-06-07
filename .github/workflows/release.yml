@@ -6,8 +6,6 @@ jobs:
   release:
     name: release ${{ matrix.target }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -21,4 +19,4 @@ jobs:
         with:
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md LICENSE"
-          TOOLCHAIN_VERSION: nightly
+          TOOLCHAIN_VERSION: stable

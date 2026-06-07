@@ -1,0 +1,88 @@
+use crate::common::ClientCore;
+use crate::tcp::Config;
+use crate::{Command, Error, Key, KeyParams, Operation, RunConfig, TcpError};
+
+use ferrowl_mem::Memory;
+use tokio::task::JoinHandle;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::sync::mpsc::Receiver;
+
+pub struct ClientBuilder<T: KeyParams> {
+    config: Arc<RwLock<Config>>,
+    operations: Arc<RwLock<Vec<Operation>>>,
+    memory: Arc<RwLock<Memory<Key<T>>>>,
+}
+
+impl<T: KeyParams> ClientBuilder<T> {
+    pub fn new(
+        config: Arc<RwLock<Config>>,
+        operations: Arc<RwLock<Vec<Operation>>>,
+        memory: Arc<RwLock<Memory<Key<T>>>>,
+    ) -> Self {
+        Self {
+            config,
+            operations,
+            memory,
+        }
+    }
+
+    pub async fn spawn<L, S>(
+        &self,
+        receiver: Receiver<Command>,
+        log: L,
+        status: S,
+    ) -> Result<JoinHandle<Result<(), Error>>, Error>
+    where
+        L: AsyncFn(String) -> () + Send + Sync + 'static,
+        S: AsyncFn(String) -> () + Send + Sync + 'static,
+        for<'a> L::CallRefFuture<'a>: Send,
+        for<'a> S::CallRefFuture<'a>: Send,
+    {
+        let guard = self.config.read().await;
+        let client = Client::connect(&guard).await?;
+        let operations = self.operations.clone();
+        let memory = self.memory.clone();
+        let config = RunConfig {
+            log,
+            status,
+            timeout_ms: guard.timeout_ms,
+            delay_ms: guard.delay_ms,
+            interval_ms: guard.interval_ms,
+        };
+        Ok(tokio::task::spawn(async move {
+            client
+                .core
+                .run::<T, _, _>(operations, memory, receiver, config)
+                .await
+        }))
+    }
+}
+
+/// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
+/// shared via [`ClientCore`](crate::common::ClientCore).
+pub struct Client {
+    pub(crate) core: ClientCore,
+}
+
+impl Client {
+    pub async fn connect(config: &Config) -> Result<Self, Error> {
+        let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
+            .parse()
+            .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(config.timeout_ms as u64),
+            tokio_modbus::client::tcp::connect(addr),
+        )
+        .await
+        {
+            Ok(Ok(context)) => Ok(Self {
+                core: ClientCore { context },
+            }),
+            Ok(Err(e)) => Err(TcpError::Error(e).into()),
+            Err(e) => Err(TcpError::Timeout(e).into()),
+        }
+    }
+}

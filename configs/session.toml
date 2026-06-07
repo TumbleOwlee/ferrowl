@@ -1,0 +1,22 @@
+# Session file: a set of module instances to start at once (ferrowl --session this.toml).
+# Each entry pairs a device-type file with a per-instance name, role and endpoint.
+
+[[modules]]
+name = "evse-1"
+device = "configs/evse.toml"
+role = "server"
+
+[modules.endpoint]
+transport = "tcp"
+ip = "127.0.0.1"
+port = 5020
+
+[[modules]]
+name = "evse-2"
+device = "configs/evse.toml"
+role = "server"
+
+[modules.endpoint]
+transport = "tcp"
+ip = "127.0.0.1"
+port = 5021
