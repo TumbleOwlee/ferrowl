@@ -61,7 +61,7 @@ impl Header<COLUMN_COUNT> for TableHeader {
     fn header() -> [String; COLUMN_COUNT] {
         [
             "Name".into(),
-            "Comment".into(),
+            "Description".into(),
             "Slave ID".into(),
             "Address".into(),
             "Access".into(),
@@ -96,7 +96,7 @@ impl Header<COLUMN_COUNT> for TableHeader {
 #[derive(Clone, Debug)]
 pub struct Definition {
     pub name: String,
-    pub comment: String,
+    pub description: String,
     pub register: Register,
     pub named_values: Vec<NamedValue>,
     pub value: String,
@@ -106,13 +106,13 @@ pub struct Definition {
 impl Definition {
     pub fn new(
         name: impl Into<String>,
-        comment: impl Into<String>,
+        description: impl Into<String>,
         register: Register,
         named_values: Vec<NamedValue>,
     ) -> Self {
         Self {
             name: name.into(),
-            comment: comment.into(),
+            description: description.into(),
             register,
             named_values,
             value: String::new(),
@@ -130,7 +130,7 @@ impl TableEntry<COLUMN_COUNT> for Definition {
 
         [
             self.name.clone(),
-            self.comment.clone(),
+            self.description.clone(),
             format!("{}", self.register.slave_id()),
             format!("{}", self.register.address()),
             format!("{}", self.register.access()),

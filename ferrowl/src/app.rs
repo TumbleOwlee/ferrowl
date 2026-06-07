@@ -130,10 +130,10 @@ impl Tab {
         let definitions = module
             .registers()
             .iter()
-            .map(|(name, comment, register, values)| {
+            .map(|(name, description, register, values)| {
                 Definition::new(
                     name.clone(),
-                    comment.clone(),
+                    description.clone(),
                     register.clone(),
                     values.clone(),
                 )
@@ -498,7 +498,7 @@ impl App {
         if def.named_values.is_empty() {
             let dialog = EditInputDialog::from_register(
                 &def.name,
-                &def.comment,
+                &def.description,
                 &def.register,
                 &def.value,
                 update_script,
@@ -507,7 +507,7 @@ impl App {
         } else {
             let dialog = EditSelectionDialog::from_register(
                 &def.name,
-                &def.comment,
+                &def.description,
                 &def.register,
                 def.named_values.clone(),
                 &def.value,
@@ -551,14 +551,14 @@ impl App {
             alignment: crate::config::device::AlignmentCfg::default(),
             values: named_values.clone(),
             update: edited.update.as_ref().filter(|s| !s.is_empty()).cloned(),
-            comment: edited.comment.clone(),
+            description: edited.description.clone(),
         };
         sync_register_def(&mut def, &edited.register);
 
         tab.device.definitions.insert(edited.name.clone(), def);
         tab.module.add_register(
             edited.name.clone(),
-            edited.comment.clone(),
+            edited.description.clone(),
             edited.register.clone(),
             named_values.clone(),
         );
@@ -580,7 +580,7 @@ impl App {
             let mut defs = tab.table.definitions().to_vec();
             defs.push(Definition::new(
                 edited.name.clone(),
-                edited.comment.clone(),
+                edited.description.clone(),
                 edited.register.clone(),
                 named_values,
             ));
@@ -643,14 +643,14 @@ impl App {
                 tab.module.update_register(
                     idx,
                     edited.name.clone(),
-                    edited.comment.clone(),
+                    edited.description.clone(),
                     edited.register.clone(),
                     named_values.clone(),
                 );
 
                 *slot = Definition::new(
                     edited.name.clone(),
-                    edited.comment.clone(),
+                    edited.description.clone(),
                     edited.register.clone(),
                     named_values,
                 );
@@ -658,10 +658,10 @@ impl App {
                 let mem_result = register_mem_binding(&edited.register)
                     .map(|(kind, key, range)| (tab.module.memory(), key, kind, range));
 
-                // Issue 11: look up by original name, update comment, handle rename.
+                // Issue 11: look up by original name, update description, handle rename.
                 if let Some(def) = tab.device.definitions.get_mut(&original_name) {
                     sync_register_def(def, &edited.register);
-                    def.comment = edited.comment.clone();
+                    def.description = edited.description.clone();
                     if let Some(nv) = &edited.named_values {
                         def.values = nv.clone();
                     }
@@ -910,10 +910,10 @@ impl App {
                     .module
                     .registers()
                     .iter()
-                    .map(|(name, comment, register, values)| {
+                    .map(|(name, description, register, values)| {
                         Definition::new(
                             name.clone(),
-                            comment.clone(),
+                            description.clone(),
                             register.clone(),
                             values.clone(),
                         )

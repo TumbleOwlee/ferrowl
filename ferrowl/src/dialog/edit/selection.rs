@@ -1028,7 +1028,7 @@ impl EditSelectionDialog<NamedValue> {
     /// `raw_value` is the hex memory string (e.g. `[000a]`) used for accurate integer matching.
     pub fn from_register(
         name: &str,
-        comment: &str,
+        description: &str,
         register: &Register,
         named_values: Vec<NamedValue>,
         current_value: &str,
@@ -1037,7 +1037,7 @@ impl EditSelectionDialog<NamedValue> {
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
         set_input(&mut dialog.label, name);
-        set_input(&mut dialog.description, comment);
+        set_input(&mut dialog.description, description);
         if let Some(script) = update {
             dialog.update_script.state.set_content(script);
         }
@@ -1097,7 +1097,7 @@ impl EditSelectionDialog<NamedValue> {
     pub fn apply(&self) -> Result<EditedRegister, String> {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
-        let comment = self.description.state.input().trim().to_string();
+        let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
         let format = match self.value_type.state.get_value() {
@@ -1159,7 +1159,7 @@ impl EditSelectionDialog<NamedValue> {
 
         Ok(EditedRegister {
             name,
-            comment,
+            description,
             register,
             value,
             named_values: Some(named_values),

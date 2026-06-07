@@ -159,7 +159,7 @@ port = 5020
 The device configuration can be saved using `:write-device` and contains the register information of the device and all necessary timings.
 
 ```toml
-comment = "EVSE charge point"
+description = "EVSE charge point"
 
 [definitions.setpoint]
 slave_id = 1
@@ -167,7 +167,7 @@ read_code = 4          # 4 = holding register
 address = 0
 type = "U16"
 access = "ReadWrite"
-comment = "charge setpoint (W)"
+description = "charge setpoint (W)"
 
 [definitions.power]
 slave_id = 1
@@ -175,7 +175,7 @@ read_code = 4
 address = 1
 type = "U16"
 access = "ReadWrite"
-comment = "active power (W)"
+description = "active power (W)"
 # Lua run every cycle: mirror the setpoint into the power register (server simulation).
 update = """
 C_Register:Set("power", C_Register:GetInt("setpoint"))
@@ -187,7 +187,7 @@ read_code = 4
 address = 2
 type = "I16"
 access = "ReadWrite"
-comment = "charge state"
+description = "charge state"
 values = [
     { name = "waiting", value = 0 },
     { name = "charging", value = 2 },
@@ -214,14 +214,14 @@ values = [
 | `alignment` | `Left` | ASCII alignment: `Left` or `Right`. |
 | `values` | `[]` | Named values for selection-style registers. |
 | `update` | *(none)* | Lua snippet run every simulation cycle. |
-| `comment` | `""` | Free-text description. |
+| `description` | `""` | Free-text description. |
 
 #### Device-level options
 
 Alongside `definitions`, a device file may carry a `version` (stamped automatically on save), default timings, and explicit client read ranges:
 
 ```toml
-comment = "EVSE charge point"
+description = "EVSE charge point"
 timeout_ms = 2000      # per-request timeout
 delay_ms = 1000        # delay before the first read
 interval_ms = 1000     # poll interval

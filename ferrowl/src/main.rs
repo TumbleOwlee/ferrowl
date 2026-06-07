@@ -29,8 +29,8 @@ use crate::module::Module;
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
 /// binds nothing).
 fn demo() -> (DeviceConfig, ModuleSpec) {
-    let reg =
-        |address: u16, value_type: ValueType, comment: &str, values: Vec<NamedValue>| RegisterDef {
+    let reg = |address: u16, value_type: ValueType, description: &str, values: Vec<NamedValue>| {
+        RegisterDef {
             slave_id: 1,
             read_code: 4,
             address: Some(address),
@@ -43,8 +43,9 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
             alignment: AlignmentCfg::Left,
             values,
             update: None,
-            comment: comment.to_string(),
-        };
+            description: description.to_string(),
+        }
+    };
 
     let mut definitions = BTreeMap::new();
     definitions.insert(
@@ -92,7 +93,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
 
     let device = DeviceConfig {
         version: None,
-        comment: "demo device".to_string(),
+        description: "demo device".to_string(),
         timeout_ms: None,
         delay_ms: None,
         interval_ms: None,

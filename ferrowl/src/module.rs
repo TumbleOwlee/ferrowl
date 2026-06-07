@@ -66,7 +66,7 @@ impl Module {
             let register = def.register();
             registers.push((
                 name.clone(),
-                def.comment.clone(),
+                def.description.clone(),
                 register.clone(),
                 def.values.clone(),
             ));
@@ -177,24 +177,25 @@ impl Module {
     pub fn add_register(
         &mut self,
         name: String,
-        comment: String,
+        description: String,
         register: Register,
         named_values: Vec<NamedValue>,
     ) {
-        self.registers.push((name, comment, register, named_values));
+        self.registers
+            .push((name, description, register, named_values));
     }
 
-    /// Replace one register's cached metadata (name, comment, register, named values).
+    /// Replace one register's cached metadata (name, description, register, named values).
     pub fn update_register(
         &mut self,
         idx: usize,
         name: String,
-        comment: String,
+        description: String,
         register: Register,
         named_values: Vec<NamedValue>,
     ) {
         if let Some(slot) = self.registers.get_mut(idx) {
-            *slot = (name, comment, register, named_values);
+            *slot = (name, description, register, named_values);
         }
     }
 

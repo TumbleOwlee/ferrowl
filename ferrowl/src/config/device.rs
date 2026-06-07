@@ -19,7 +19,7 @@ pub struct DeviceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default)]
-    pub comment: String,
+    pub description: String,
     /// Device-level timing defaults (ms). Used when a `ModuleSpec` does not override them; the
     /// global app config is the final fallback. See `Module::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,7 +126,7 @@ pub struct RegisterDef {
     #[serde(default)]
     pub update: Option<String>,
     #[serde(default)]
-    pub comment: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -343,7 +343,7 @@ mod tests {
                 alignment: AlignmentCfg::Left,
                 values: vec![],
                 update: None,
-                comment: "charge setpoint".to_string(),
+                description: "charge setpoint".to_string(),
             },
         );
         definitions.insert(
@@ -378,12 +378,12 @@ mod tests {
                     },
                 ],
                 update: Some("C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into()),
-                comment: String::new(),
+                description: String::new(),
             },
         );
         DeviceConfig {
             version: Some("0.1.0".to_string()),
-            comment: "EVSE".to_string(),
+            description: "EVSE".to_string(),
             timeout_ms: Some(2000),
             delay_ms: None,
             interval_ms: Some(800),

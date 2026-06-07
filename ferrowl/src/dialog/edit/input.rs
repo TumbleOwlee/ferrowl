@@ -101,7 +101,7 @@ pub struct EditInputDialog {
 #[derive(Debug, Clone)]
 pub struct EditedRegister {
     pub name: String,
-    pub comment: String,
+    pub description: String,
     pub register: Register,
     pub value: Option<String>,
     /// Updated named-value list from EditSelectionDialog; None means unchanged.
@@ -795,14 +795,14 @@ impl EditInputDialog {
     /// starts on the value field so editing the value (the common case) works immediately.
     pub fn from_register(
         name: &str,
-        comment: &str,
+        description: &str,
         register: &Register,
         value: &str,
         update: Option<&str>,
     ) -> Self {
         let mut dialog = Self::new();
         set_input(&mut dialog.label, name);
-        set_input(&mut dialog.description, comment);
+        set_input(&mut dialog.description, description);
         if let Some(script) = update {
             dialog.update_script.state.set_content(script);
         }
@@ -854,7 +854,7 @@ impl EditInputDialog {
     pub fn apply(&self) -> Result<EditedRegister, String> {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
-        let comment = self.description.state.input().trim().to_string();
+        let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
         let format = if self.is_boolean_kind() {
@@ -929,7 +929,7 @@ impl EditInputDialog {
 
         Ok(EditedRegister {
             name,
-            comment,
+            description,
             register,
             value,
             named_values,

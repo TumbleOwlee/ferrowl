@@ -1,6 +1,6 @@
 # Device-type config: an EVSE charge point. One file = one device type (registers only;
 # ip/port/role/name are per-instance, set via the setup dialog or CLI/session).
-comment = "EVSE charge point"
+description = "EVSE charge point"
 
 [definitions.setpoint]
 slave_id = 1
@@ -8,7 +8,7 @@ read_code = 4          # 4 = holding register
 address = 0
 type = "U16"
 access = "ReadWrite"
-comment = "charge setpoint (W)"
+description = "charge setpoint (W)"
 
 [definitions.power]
 slave_id = 1
@@ -16,7 +16,7 @@ read_code = 4
 address = 1
 type = "U16"
 access = "ReadWrite"
-comment = "active power (W)"
+description = "active power (W)"
 # Lua run every cycle: mirror the setpoint into the power register (server simulation).
 update = "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))"
 
@@ -26,7 +26,7 @@ read_code = 4
 address = 2
 type = "I16"
 access = "ReadWrite"
-comment = "charge state"
+description = "charge state"
 values = [
     { name = "waiting", value = 0 },
     { name = "charging", value = 2 },
