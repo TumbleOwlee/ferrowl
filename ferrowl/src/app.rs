@@ -442,7 +442,14 @@ impl App {
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
-        let dialog = SetupDialog::edit(&tab.spec.name, tab.spec.role, &tab.spec.endpoint);
+        let dialog = SetupDialog::edit(
+            &tab.spec.name,
+            tab.spec.role,
+            &tab.spec.endpoint,
+            tab.spec.timeout_ms,
+            tab.spec.delay_ms,
+            tab.spec.interval_ms,
+        );
         self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
     }
@@ -539,23 +546,12 @@ impl App {
             named_values.clone(),
         );
 
-        if let Address::Fixed(addr) = edited.register.address() {
-            let ty = mem_type(&edited.register);
-            let kind = match edited.register.kind() {
-                Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
-                Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
-            };
-            let key = Key {
-                id: SlaveKind {
-                    slave_id: *edited.register.slave_id(),
-                    kind: edited.register.kind().clone(),
-                },
-            };
-            tab.module.memory().write().await.add_ranges(
-                key,
-                &kind,
-                &[Range::new(*addr as usize, edited.register.format().width())],
-            );
+        if let Some((kind, key, range)) = register_mem_binding(&edited.register) {
+            tab.module
+                .memory()
+                .write()
+                .await
+                .add_ranges(key, &kind, &[range]);
         }
 
         if let Some(tab) = self.tabs.get(active) {
@@ -582,17 +578,7 @@ impl App {
             .unwrap_or(false)
         {
             if let Some(tab) = self.tabs.get_mut(active) {
-                let scripts: Vec<(String, String)> = tab
-                    .device
-                    .definitions
-                    .iter()
-                    .filter_map(|(name, def)| {
-                        def.update
-                            .as_ref()
-                            .filter(|s| !s.trim().is_empty())
-                            .map(|s| (name.clone(), s.clone()))
-                    })
-                    .collect();
+                let scripts = collect_scripts(&tab.device);
                 tab.module.reload_scripts(scripts);
             }
         }
@@ -644,26 +630,8 @@ impl App {
                     named_values,
                 );
 
-                let mem_result = if let Address::Fixed(addr) = edited.register.address() {
-                    let ty = mem_type(&edited.register);
-                    let kind = match edited.register.kind() {
-                        Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
-                        Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
-                    };
-                    Some((
-                        tab.module.memory(),
-                        Key {
-                            id: SlaveKind {
-                                slave_id: *edited.register.slave_id(),
-                                kind: edited.register.kind().clone(),
-                            },
-                        },
-                        kind,
-                        Range::new(*addr as usize, edited.register.format().width()),
-                    ))
-                } else {
-                    None
-                };
+                let mem_result = register_mem_binding(&edited.register)
+                    .map(|(kind, key, range)| (tab.module.memory(), key, kind, range));
 
                 // Issue 11: look up by original name, update comment, handle rename.
                 if let Some(def) = tab.device.definitions.get_mut(&original_name) {
@@ -709,17 +677,7 @@ impl App {
         // takes effect immediately rather than only on the next module start.
         if edited.update.is_some() {
             if let Some(tab) = self.tabs.get_mut(active) {
-                let scripts: Vec<(String, String)> = tab
-                    .device
-                    .definitions
-                    .iter()
-                    .filter_map(|(name, def)| {
-                        def.update
-                            .as_ref()
-                            .filter(|s| !s.trim().is_empty())
-                            .map(|s| (name.clone(), s.clone()))
-                    })
-                    .collect();
+                let scripts = collect_scripts(&tab.device);
                 tab.module.reload_scripts(scripts);
             }
         }
@@ -748,11 +706,19 @@ impl App {
         self.tabs[active].spec.name = values.name;
         self.tabs[active].spec.role = values.role;
         self.tabs[active].spec.endpoint = values.endpoint.clone();
+        self.tabs[active].spec.timeout_ms = values.timeout_ms;
+        self.tabs[active].spec.delay_ms = values.delay_ms;
+        self.tabs[active].spec.interval_ms = values.interval_ms;
 
         let app_cfg = self.app_cfg.clone();
+        let timing = crate::module::Module::resolve_timing(
+            &self.tabs[active].spec,
+            &self.tabs[active].device,
+            &app_cfg,
+        );
         if let Err(e) = self.tabs[active]
             .module
-            .reconfigure(&values.endpoint, values.role, &app_cfg)
+            .reconfigure(&values.endpoint, values.role, timing)
             .await
         {
             self.tabs[active]
@@ -778,6 +744,9 @@ impl App {
             device: device_path,
             role: values.role,
             endpoint: values.endpoint,
+            timeout_ms: values.timeout_ms,
+            delay_ms: values.delay_ms,
+            interval_ms: values.interval_ms,
         };
         let mut module = Module::new(&spec, &device, &self.app_cfg);
         if let Err(e) = module.start().await {
@@ -1165,6 +1134,39 @@ fn mem_type(register: &Register) -> Type {
     }
 }
 
+/// (name, script) pairs for every register carrying a non-empty `update` Lua snippet.
+fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(String, String)> {
+    device
+        .definitions
+        .iter()
+        .filter_map(|(name, def)| {
+            def.update
+                .as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| (name.clone(), s.clone()))
+        })
+        .collect()
+}
+
+/// Memory binding `(kind, key, range)` backing a fixed-address register, or `None` if virtual.
+fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<SlaveKind>, Range)> {
+    let Address::Fixed(addr) = register.address() else {
+        return None;
+    };
+    let ty = mem_type(register);
+    let kind = match register.kind() {
+        Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
+        Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
+    };
+    let key = Key {
+        id: SlaveKind {
+            slave_id: *register.slave_id(),
+            kind: register.kind().clone(),
+        },
+    };
+    Some((kind, key, Range::new(*addr as usize, register.format().width())))
+}
+
 /// Build the appropriate write command for a client, based on the register kind/width.
 fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Command {
     match register.kind() {
@@ -1258,67 +1260,27 @@ fn sync_register_def(def: &mut RegisterDef, register: &Register) {
         def.address = Some(*addr);
         def.is_virtual = false;
     }
+    // Every numeric format carries the same (endian, resolution) payload.
+    macro_rules! numeric {
+        ($vt:ident, $e:expr, $r:expr) => {{
+            def.value_type = DevValueType::$vt;
+            def.endian = endian_cfg($e);
+            def.resolution = $r.0;
+        }};
+    }
     match register.format() {
-        Format::U8((e, r)) => {
-            def.value_type = DevValueType::U8;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::U16((e, r)) => {
-            def.value_type = DevValueType::U16;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::U32((e, r)) => {
-            def.value_type = DevValueType::U32;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::U64((e, r)) => {
-            def.value_type = DevValueType::U64;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::U128((e, r)) => {
-            def.value_type = DevValueType::U128;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::I8((e, r)) => {
-            def.value_type = DevValueType::I8;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::I16((e, r)) => {
-            def.value_type = DevValueType::I16;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::I32((e, r)) => {
-            def.value_type = DevValueType::I32;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::I64((e, r)) => {
-            def.value_type = DevValueType::I64;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::I128((e, r)) => {
-            def.value_type = DevValueType::I128;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::F32((e, r)) => {
-            def.value_type = DevValueType::F32;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
-        Format::F64((e, r)) => {
-            def.value_type = DevValueType::F64;
-            def.endian = endian_cfg(e);
-            def.resolution = r.0;
-        }
+        Format::U8((e, r)) => numeric!(U8, e, r),
+        Format::U16((e, r)) => numeric!(U16, e, r),
+        Format::U32((e, r)) => numeric!(U32, e, r),
+        Format::U64((e, r)) => numeric!(U64, e, r),
+        Format::U128((e, r)) => numeric!(U128, e, r),
+        Format::I8((e, r)) => numeric!(I8, e, r),
+        Format::I16((e, r)) => numeric!(I16, e, r),
+        Format::I32((e, r)) => numeric!(I32, e, r),
+        Format::I64((e, r)) => numeric!(I64, e, r),
+        Format::I128((e, r)) => numeric!(I128, e, r),
+        Format::F32((e, r)) => numeric!(F32, e, r),
+        Format::F64((e, r)) => numeric!(F64, e, r),
         Format::Ascii((align, width)) => {
             def.value_type = DevValueType::Ascii;
             def.alignment = match align {

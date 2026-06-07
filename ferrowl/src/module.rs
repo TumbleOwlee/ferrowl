@@ -98,7 +98,8 @@ impl Module {
         let file_sink: FileSink = Arc::new(Mutex::new(None));
         open_sink(&file_sink, app.log_file.as_deref(), &spec.name);
 
-        let net_config = endpoint_to_config(&spec.endpoint, app);
+        let timing = Self::resolve_timing(spec, device, app);
+        let net_config = endpoint_to_config(&spec.endpoint, &timing);
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
         Self {
@@ -110,9 +111,22 @@ impl Module {
             log,
             file_sink,
             scripts,
-            sim_interval: Duration::from_millis(app.interval_ms.max(1) as u64),
+            sim_interval: Duration::from_millis(timing.interval_ms.max(1) as u64),
             sim: None,
             virtual_values: HashMap::new(),
+        }
+    }
+
+    /// Resolve effective timing for an instance: a `ModuleSpec` override wins, else the device
+    /// config value, else the global app config default.
+    pub fn resolve_timing(spec: &ModuleSpec, device: &DeviceConfig, app: &AppConfig) -> Timing {
+        Timing {
+            timeout_ms: spec.timeout_ms.or(device.timeout_ms).unwrap_or(app.timeout_ms),
+            delay_ms: spec.delay_ms.or(device.delay_ms).unwrap_or(app.delay_ms),
+            interval_ms: spec
+                .interval_ms
+                .or(device.interval_ms)
+                .unwrap_or(app.interval_ms),
         }
     }
 
@@ -272,7 +286,7 @@ impl Module {
         &mut self,
         endpoint: &Endpoint,
         role: Role,
-        app: &AppConfig,
+        timing: Timing,
     ) -> Result<(), Error> {
         // Best-effort stop of any running instance and its simulation thread; the caller is
         // expected to `start()` afterwards, which restarts the sim.
@@ -280,7 +294,8 @@ impl Module {
         let _ = self.instance.stop().await;
 
         self.rebuild_operations().await;
-        let net_config = endpoint_to_config(endpoint, app);
+        self.sim_interval = Duration::from_millis(timing.interval_ms.max(1) as u64);
+        let net_config = endpoint_to_config(endpoint, &timing);
         self.instance = build_instance(
             role,
             net_config,
@@ -360,14 +375,22 @@ pub(crate) fn append(sink: &FileSink, line: &str) {
     }
 }
 
-fn endpoint_to_config(endpoint: &Endpoint, app: &AppConfig) -> NetConfig {
+/// Resolved per-instance timing (ms). Built by [`Module::resolve_timing`].
+#[derive(Debug, Clone, Copy)]
+pub struct Timing {
+    pub timeout_ms: usize,
+    pub delay_ms: usize,
+    pub interval_ms: usize,
+}
+
+fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetConfig {
     match endpoint {
         Endpoint::Tcp { ip, port } => NetConfig::Tcp(ferrowl_net::tcp::Config {
             ip: ip.clone(),
             port: *port,
-            timeout_ms: app.timeout_ms,
-            delay_ms: app.delay_ms,
-            interval_ms: app.interval_ms,
+            timeout_ms: timing.timeout_ms,
+            delay_ms: timing.delay_ms,
+            interval_ms: timing.interval_ms,
         }),
         Endpoint::Rtu {
             path,
@@ -382,9 +405,9 @@ fn endpoint_to_config(endpoint: &Endpoint, app: &AppConfig) -> NetConfig {
             parity: parity.clone(),
             data_bits: *data_bits,
             stop_bits: *stop_bits,
-            timeout_ms: app.timeout_ms,
-            delay_ms: app.delay_ms,
-            interval_ms: app.interval_ms,
+            timeout_ms: timing.timeout_ms,
+            delay_ms: timing.delay_ms,
+            interval_ms: timing.interval_ms,
         }),
     }
 }

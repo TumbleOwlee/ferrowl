@@ -1,19 +1,19 @@
 // Crate
+use crate::common::{handle_request, serial_config_from};
 use crate::rtu::Config;
 use crate::{Error, Key, KeyParams, SerialError};
 
 // Workspace
-use ferrowl_mem::{Memory, Range, Type};
+use ferrowl_mem::Memory;
 
 // External
 use std::future;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_modbus::{FunctionCode, Request};
 use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 use tokio_modbus::server::rtu::Server as RtuServer;
-use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
+use tokio_serial::SerialStream;
 
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
@@ -60,48 +60,13 @@ where
         memory: Arc<RwLock<Memory<Key<T>>>>,
         log: L,
     ) -> Result<JoinHandle<Result<(), Error>>, Error> {
-        let mut builder = tokio_serial::new(&config.path, config.baud_rate);
-        if let Some(v) = config.data_bits {
-            builder = builder.data_bits(match v {
-                5 => DataBits::Five,
-                6 => DataBits::Six,
-                7 => DataBits::Seven,
-                8 => DataBits::Eight,
-                _ => {
-                    return Err(SerialError::Configuration(
-                        "Invalid data bits specified".to_string(),
-                    )
-                    .into());
-                }
-            });
-        }
-        if let Some(v) = config.stop_bits {
-            builder = builder.stop_bits(match v {
-                1 => StopBits::One,
-                2 => StopBits::Two,
-                _ => {
-                    return Err(SerialError::Configuration(
-                        "Invalid stop bits specified".to_string(),
-                    )
-                    .into());
-                }
-            });
-        }
-        if let Some(ref v) = config.parity {
-            let v = v.to_lowercase();
-            if v == "odd" {
-                builder = builder.parity(Parity::Odd);
-            } else if v == "even" {
-                builder = builder.parity(Parity::Even);
-            } else if v == "none" {
-                builder = builder.parity(Parity::None);
-            } else {
-                return Err(
-                    SerialError::Configuration("Invalid parity specified".to_string()).into(),
-                );
-            }
-        }
-
+        let builder = serial_config_from(
+            &config.path,
+            config.baud_rate,
+            config.data_bits,
+            config.stop_bits,
+            config.parity.as_deref(),
+        )?;
         match SerialStream::open(&builder) {
             Ok(serial_stream) => {
                 let rtu_server = RtuServer::new(serial_stream);
@@ -131,213 +96,9 @@ where
 
     fn call(&self, request: Self::Request) -> Self::Future {
         let SlaveRequest { slave, request } = request;
-
         let response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                match request {
-                    Request::ReadCoils(addr, cnt) => {
-                        (self.log)(format!(
-                            "ReadCoils request received for slave ID {} and range [{}, {}).",
-                            slave,
-                            addr,
-                            addr + cnt
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadCoils) };
-                        let guard = self.memory.read().await;
-                        match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
-                            Some(v) => Ok(Response::ReadCoils(
-                                v.into_iter().map(|b| b != 0).collect(),
-                            )),
-                            None => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::ReadDiscreteInputs(addr, cnt) => {
-                        (self.log)(format!(
-                            "ReadDiscreteInputs request received for slave ID {} and range [{}, {}).",
-                            slave,
-                            addr,
-                            addr + cnt
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs) };
-                        let guard = self.memory.read().await;
-                        match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
-                            Some(v) => Ok(Response::ReadDiscreteInputs(
-                                v.into_iter().map(|b| b != 0).collect(),
-                            )),
-                            None => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::ReadInputRegisters(addr, cnt) => {
-                        (self.log)(format!(
-                            "ReadInputRegisters request received for slave ID {} and range [{}, {}).",
-                            slave,
-                            addr,
-                            addr + cnt
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadInputRegisters) };
-                        let guard = self.memory.read().await;
-                        match guard.read(
-                            key,
-                            &Type::Register,
-                            &Range::new(addr as usize, cnt as usize),
-                        ) {
-                            Some(v) => Ok(Response::ReadInputRegisters(v)),
-                            None => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::ReadHoldingRegisters(addr, cnt) => {
-                        (self.log)(format!(
-                            "ReadHoldingRegisters request received for slave ID {} and range [{}, {}).",
-                            slave,
-                            addr,
-                            addr + cnt
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadHoldingRegisters) };
-                        let guard = self.memory.read().await;
-                        match guard.read(
-                            key,
-                            &Type::Register,
-                            &Range::new(addr as usize, cnt as usize),
-                        ) {
-                            Some(v) => Ok(Response::ReadHoldingRegisters(v)),
-                            None => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::WriteMultipleRegisters(addr, values) => {
-                        (self.log)(format!(
-                            "WriteMultipleRegisters request received for slave ID {}, range [{}, {}), and values {:?}.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(),
-                            values
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleRegisters) };
-                        let mut guard = self.memory.write().await;
-                        match guard.write(
-                            key,
-                            &Type::Register,
-                            &Range::new(addr as usize, values.len()),
-                            &values,
-                        ) {
-                            true => Ok(Response::WriteMultipleRegisters(
-                                addr,
-                                values.len() as u16,
-                            )),
-                            false => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::WriteSingleRegister(addr, value) => {
-                        (self.log)(format!(
-                            "WriteSingleRegister request received for slave ID {}, address {}, and value {}.",
-                            slave, addr, value
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleRegister) };
-                        let mut guard = self.memory.write().await;
-                        match guard.write(
-                            key,
-                            &Type::Register,
-                            &Range::new(addr as usize, 1),
-                            &[value],
-                        ) {
-                            true => Ok(Response::WriteSingleRegister(addr, value)),
-                            false => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::WriteMultipleCoils(addr, values) => {
-                        (self.log)(format!(
-                            "WriteMultipleCoils request received for slave ID {}, range [{}, {}), and values {:?}.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(), values
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleCoils) };
-                        let mut guard = self.memory.write().await;
-                        let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
-                        match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
-                            true => Ok(Response::WriteMultipleCoils(addr, values.len() as u16)),
-                            false => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::WriteSingleCoil(addr, value) => {
-                        (self.log)(format!(
-                            "WriteSingleCoil request received for slave ID {}, address {}, and value {}.",
-                            slave, addr, value
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleCoil) };
-                        let mut guard = self.memory.write().await;
-                        let val = value as u16;
-                        match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &[val]) {
-                            true => Ok(Response::WriteSingleCoil(addr, value)),
-                            false => Err(ExceptionCode::IllegalFunction),
-                        }
-                    }
-                    Request::ReportServerId => {
-                        (self.log)(format!(
-                            "ReportServerId request received for slave ID {}. Unsupported function.",
-                            slave,
-                        )).await;
-                        Err(ExceptionCode::IllegalFunction)
-                    }
-                    Request::MaskWriteRegister(_, _, _) => {
-                        (self.log)(format!(
-                            "MaskWriteRegister request received for slave ID {}. Unsupported function.",
-                            slave,
-                        )).await;
-                        Err(ExceptionCode::IllegalFunction)
-                    }
-                    Request::ReadWriteMultipleRegisters(read_addr, cnt, write_addr, values) => {
-                        (self.log)(format!(
-                            "ReadWriteMultipleRegisrters request received for slave ID {}, read address {}, count {}, write address {}, and values {:?}.",
-                            slave, read_addr, cnt, write_addr, values
-                        )).await;
-                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters) };
-                        let mut guard = self.memory.write().await;
-                        let readable = guard.readable(
-                            &key,
-                            &Type::Register,
-                            &Range::new(read_addr as usize, cnt as usize),
-                        );
-                        let writable = guard.writable(
-                            &key,
-                            &Type::Register,
-                            &Range::new(write_addr as usize, values.len()),
-                        );
-                        if !readable || !writable {
-                            return Err(ExceptionCode::IllegalDataAddress);
-                        }
-                        let v = match guard.read(
-                            key.clone(),
-                            &Type::Register,
-                            &Range::new(read_addr as usize, cnt as usize),
-                        ) {
-                            Some(v) => v,
-                            None => return Err(ExceptionCode::IllegalFunction),
-                        };
-                        if !guard.write(
-                            key,
-                            &Type::Register,
-                            &Range::new(write_addr as usize, values.len()),
-                            &values,
-                        ) {
-                            return Err(ExceptionCode::IllegalFunction);
-                        }
-                        Ok(Response::ReadWriteMultipleRegisters(v))
-                    }
-                    Request::ReadDeviceIdentification(_, _) => {
-                        (self.log)(format!(
-                            "ReadDeviceIdentification request received for slave ID {}. Unsupported function.",
-                            slave,
-                        )).await;
-                        Err(ExceptionCode::IllegalFunction)
-                    }
-                    Request::Custom(func, _) => {
-                        (self.log)(format!(
-                            "Custom function {} request received for slave ID {}. Unsupported function.",
-                            func, slave,
-                        )).await;
-                        Err(ExceptionCode::IllegalFunction)
-                    }
-                }
+                handle_request(slave, request, &self.memory, &self.log, false).await
             })
         });
         future::ready(response)

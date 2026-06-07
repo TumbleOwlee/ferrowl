@@ -20,6 +20,14 @@ pub struct ModuleSpec {
     #[serde(default)]
     pub role: Role,
     pub endpoint: Endpoint,
+    /// Per-instance timing overrides (ms). When unset, the device config — then the global
+    /// app config — supplies the value. See `Module::resolve_timing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -108,6 +116,9 @@ mod tests {
                         ip: "127.0.0.1".into(),
                         port: 5021,
                     },
+                    timeout_ms: None,
+                    delay_ms: None,
+                    interval_ms: None,
                 },
                 ModuleSpec {
                     name: "meter".into(),
@@ -120,6 +131,9 @@ mod tests {
                         data_bits: Some(8),
                         stop_bits: Some(1),
                     },
+                    timeout_ms: Some(750),
+                    delay_ms: None,
+                    interval_ms: Some(1500),
                 },
             ],
         }

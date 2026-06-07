@@ -5,7 +5,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::text::Text;
 use ratatui::widgets::Widget;
-use ratatui::widgets::{Block, Paragraph, StatefulWidget};
+use ratatui::widgets::{Paragraph, StatefulWidget};
 use std::marker::PhantomData;
 
 use crate::state::InputFieldState;
@@ -160,7 +160,7 @@ where
         ])
         .split(area)[1];
 
-        let mut area = Layout::horizontal([
+        let area = Layout::horizontal([
             Constraint::Length(self.margin.horizontal),
             Constraint::Min(1),
             Constraint::Length(self.margin.horizontal),
@@ -174,27 +174,23 @@ where
         };
 
         // Create block if border is required
-        if let Border::Full(margin) = &self.border {
-            let style = if state.focused() && !state.disabled() {
-                self.style.focused
-            } else {
-                self.style.general
-            };
-            let style = if valid.is_ok() {
-                style
-            } else {
-                self.style.error
-            };
-            let mut block = Block::bordered().style(style);
-            if let Some(title) = self.title.as_ref() {
-                block = block
-                    .title(title.name.as_str())
-                    .title_alignment(title.alignment);
-            }
-            let inner = block.inner(area);
-            block.render(area, buf);
-            area = inner.inner(*margin);
-        }
+        let border_style = if state.focused() && !state.disabled() {
+            self.style.focused
+        } else {
+            self.style.general
+        };
+        let border_style = if valid.is_ok() {
+            border_style
+        } else {
+            self.style.error
+        };
+        let area = crate::widgets::render_border(
+            area,
+            buf,
+            &self.border,
+            self.title.as_ref(),
+            border_style,
+        );
 
         let input = state.input();
         let mut text = if input.is_empty() {

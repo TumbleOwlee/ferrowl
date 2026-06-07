@@ -1,11 +1,12 @@
 #![feature(async_fn_traits)]
 
+mod common;
 pub mod rtu;
 pub mod tcp;
 
 use ferrowl_mem::Range;
 use ferrowl_reg::Kind;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use tokio_modbus::ExceptionCode;
 pub use tokio_modbus::{FunctionCode, SlaveId};
@@ -64,100 +65,46 @@ impl KeyParams for SlaveKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ModbusError {
+    #[error("Modbus exception: {0:?}")]
     Exception(ExceptionCode),
+    #[error("Modbus error: {0}")]
     Error(tokio_modbus::Error),
+    #[error("Modbus timeout: {0}")]
     Timeout(tokio::time::error::Elapsed),
 }
 
-impl Display for ModbusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ModbusError::Exception(code) => write!(f, "Modbus exception: {:?}", code),
-            ModbusError::Error(e) => write!(f, "Modbus error: {}", e),
-            ModbusError::Timeout(e) => write!(f, "Modbus timeout: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ModbusError {}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SerialError {
+    #[error("Serial error: {0}")]
     Error(tokio_serial::Error),
+    #[error("Serial configuration error: {0}")]
     Configuration(String),
 }
 
-impl Display for SerialError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SerialError::Error(e) => write!(f, "Serial error: {}", e),
-            SerialError::Configuration(e) => write!(f, "Serial configuration error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for SerialError {}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TcpError {
+    #[error("TCP address error: {0}")]
     Address(std::net::AddrParseError),
+    #[error("TCP configuration error: {0}")]
     Configuration(String),
+    #[error("TCP error: {0}")]
     Error(tokio::io::Error),
+    #[error("TCP timeout: {0}")]
     Timeout(tokio::time::error::Elapsed),
 }
 
-impl Display for TcpError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TcpError::Address(e) => write!(f, "TCP address error: {}", e),
-            TcpError::Configuration(e) => write!(f, "TCP configuration error: {}", e),
-            TcpError::Error(e) => write!(f, "TCP error: {}", e),
-            TcpError::Timeout(e) => write!(f, "TCP timeout: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for TcpError {}
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Modbus(ModbusError),
-    Serial(SerialError),
-    Tcp(TcpError),
+    #[error("{0}")]
+    Modbus(#[from] ModbusError),
+    #[error("{0}")]
+    Serial(#[from] SerialError),
+    #[error("{0}")]
+    Tcp(#[from] TcpError),
+    #[error("Server error: {0}")]
     Server(std::io::Error),
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Modbus(e) => write!(f, "{}", e),
-            Error::Serial(e) => write!(f, "{}", e),
-            Error::Tcp(e) => write!(f, "{}", e),
-            Error::Server(e) => write!(f, "Server error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<TcpError> for Error {
-    fn from(e: TcpError) -> Self {
-        Error::Tcp(e)
-    }
-}
-
-impl From<SerialError> for Error {
-    fn from(e: SerialError) -> Self {
-        Error::Serial(e)
-    }
-}
-
-impl From<ModbusError> for Error {
-    fn from(e: ModbusError) -> Self {
-        Error::Modbus(e)
-    }
 }
 
 pub type Address = u16;

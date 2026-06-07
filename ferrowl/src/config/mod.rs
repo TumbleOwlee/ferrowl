@@ -9,24 +9,13 @@ pub use session::{Endpoint, ModuleSpec, Role, Session};
 use ferrowl_util::convert::{Converter, FileType};
 
 /// Error type for config loading.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("invalid file (JSON/TOML): {0}")]
     UnknownFormat(String),
+    #[error("{0}")]
     Io(String),
 }
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::UnknownFormat(p) => {
-                write!(f, "invalid file (JSON/TOML): {p}")
-            }
-            ConfigError::Io(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 fn file_type(path: &str) -> Result<FileType, ConfigError> {
     FileType::from_path(path).ok_or_else(|| ConfigError::UnknownFormat(path.to_string()))

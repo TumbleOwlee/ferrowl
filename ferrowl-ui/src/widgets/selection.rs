@@ -5,7 +5,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
     text::Text,
-    widgets::{Block, StatefulWidget, Widget},
+    widgets::{StatefulWidget, Widget},
 };
 use std::marker::PhantomData;
 
@@ -119,7 +119,7 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
         ])
         .split(area)[1];
 
-        let mut area = Layout::horizontal([
+        let area = Layout::horizontal([
             Constraint::Length(self.margin.horizontal),
             Constraint::Min(1),
             Constraint::Length(self.margin.horizontal),
@@ -127,22 +127,18 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
         .split(area)[1];
 
         // Create block if border is required
-        if let Border::Full(margin) = &self.border {
-            let style = if state.focused() {
-                self.style.border
-            } else {
-                self.style.general
-            };
-            let mut block = Block::bordered().style(style);
-            if let Some(title) = self.title.as_ref() {
-                block = block
-                    .title(title.name.as_str())
-                    .title_alignment(title.alignment);
-            }
-            let inner = block.inner(area);
-            block.render(area, buf);
-            area = inner.inner(*margin);
-        }
+        let border_style = if state.focused() {
+            self.style.border
+        } else {
+            self.style.general
+        };
+        let area = crate::widgets::render_border(
+            area,
+            buf,
+            &self.border,
+            self.title.as_ref(),
+            border_style,
+        );
 
         let values = state
             .values()

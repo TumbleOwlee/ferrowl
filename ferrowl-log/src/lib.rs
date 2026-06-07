@@ -37,12 +37,17 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         self.write = next;
     }
 
+    /// The (timestamp, message) entry stored at ring index `idx`.
+    fn entry_at(&self, idx: usize) -> (u64, String) {
+        (
+            self.timestamps[idx],
+            self.buffer[idx].iter().collect::<String>(),
+        )
+    }
+
     pub fn peak(&self) -> Option<(u64, String)> {
         if self.read != self.write {
-            Some((
-                self.timestamps[self.read],
-                self.buffer[self.read].iter().collect::<String>(),
-            ))
+            Some(self.entry_at(self.read))
         } else {
             None
         }
@@ -52,10 +57,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         let mut read = self.read;
         let mut msgs = Vec::with_capacity(cnt);
         while read != self.write && msgs.len() < cnt {
-            msgs.push((
-                self.timestamps[read],
-                self.buffer[read].iter().collect::<String>(),
-            ));
+            msgs.push(self.entry_at(read));
             read = (read + 1) % LOG_SIZE;
         }
         if msgs.is_empty() { None } else { Some(msgs) }
@@ -63,10 +65,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
 
     pub fn take(&mut self) -> Option<(u64, String)> {
         if self.read != self.write {
-            let msg = (
-                self.timestamps[self.read],
-                self.buffer[self.read].iter().collect::<String>(),
-            );
+            let msg = self.entry_at(self.read);
             self.read = (self.read + 1) % LOG_SIZE;
             Some(msg)
         } else {
@@ -77,10 +76,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
     pub fn take_n(&mut self, cnt: usize) -> Option<Vec<(u64, String)>> {
         let mut msgs = Vec::with_capacity(cnt);
         while self.read != self.write && msgs.len() < cnt {
-            msgs.push((
-                self.timestamps[self.read],
-                self.buffer[self.read].iter().collect::<String>(),
-            ));
+            msgs.push(self.entry_at(self.read));
             self.read = (self.read + 1) % LOG_SIZE;
         }
         if msgs.is_empty() { None } else { Some(msgs) }

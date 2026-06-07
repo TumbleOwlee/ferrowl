@@ -1,50 +1,23 @@
-use std::fmt::Display;
 use tokio::sync::mpsc::error::SendError;
 
+#[derive(Debug, thiserror::Error)]
 pub enum InstanceError {
+    #[error("Instance is already active")]
     AlreadyActive,
+    #[error("Instance is not running")]
     NotRunning,
+    #[error("Failed to cancel instance")]
     CancelFailed,
+    #[error("Failed to send command to instance: {0}")]
     SendError(SendError<ferrowl_net::Command>),
+    #[error("Invalid operation specified")]
     InvalidOperation,
 }
 
-impl Display for InstanceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InstanceError::AlreadyActive => write!(f, "Instance is already active"),
-            InstanceError::NotRunning => write!(f, "Instance is not running"),
-            InstanceError::CancelFailed => write!(f, "Failed to cancel instance"),
-            InstanceError::SendError(e) => {
-                write!(f, "Failed to send command to instance: {}", e)
-            }
-            InstanceError::InvalidOperation => write!(f, "Invalid operation specified"),
-        }
-    }
-}
-
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Net(ferrowl_net::Error),
-    Instance(InstanceError),
-}
-
-impl From<InstanceError> for Error {
-    fn from(e: InstanceError) -> Self {
-        Error::Instance(e)
-    }
-}
-
-impl From<ferrowl_net::Error> for Error {
-    fn from(e: ferrowl_net::Error) -> Self {
-        Error::Net(e)
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Net(e) => write!(f, "Network error: {}", e),
-            Error::Instance(s) => write!(f, "Instance error: {}", s),
-        }
-    }
+    #[error("Network error: {0}")]
+    Net(#[from] ferrowl_net::Error),
+    #[error("Instance error: {0}")]
+    Instance(#[from] InstanceError),
 }

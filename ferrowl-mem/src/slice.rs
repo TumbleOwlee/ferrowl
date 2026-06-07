@@ -269,14 +269,14 @@ mod tests {
         }
 
         assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(200, 50)));
-        assert_eq!(slice.buffer.len(), 177);
+        assert_eq!(slice.buffer.len(), 127);
         assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 300);
+        assert_eq!(slice.range.end, 250);
 
         assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(0, 123)));
-        assert_eq!(slice.buffer.len(), 300);
+        assert_eq!(slice.buffer.len(), 250);
         assert_eq!(slice.range.start, 0);
-        assert_eq!(slice.range.end, 300);
+        assert_eq!(slice.range.end, 250);
 
         for (idx, value) in slice.buffer.iter().enumerate() {
             if idx < 123 {
@@ -367,7 +367,7 @@ mod tests {
 
         assert!(slice.readable(&Type::Coil, &Range::new(130, 10)));
         assert!(!slice.readable(&Type::Coil, &Range::new(175, 10)));
-        assert!(slice.readable(&Type::Coil, &Range::new(210, 10)));
+        assert!(!slice.readable(&Type::Coil, &Range::new(210, 10)));
         assert!(slice.readable(&Type::Coil, &Range::new(270, 10)));
     }
 
@@ -408,7 +408,7 @@ mod tests {
         }
 
         let values: Vec<u16> = (1..21).map(|c| 2 * c).collect();
-        for (v1, v2) in slice.buffer[240 - slice.range.start..]
+        for (v1, v2) in slice.buffer[250 - slice.range.start..]
             .iter_mut()
             .zip(values)
         {
@@ -419,12 +419,12 @@ mod tests {
             };
         }
 
-        let result = slice.read(&Range::new(240, 20));
+        let result = slice.read(&Range::new(250, 20));
         assert!(result.is_some());
         let result = result.unwrap();
         assert_eq!(result.len(), 20);
 
-        for (v1, v2) in slice.buffer[240 - slice.range.start..]
+        for (v1, v2) in slice.buffer[250 - slice.range.start..]
             .iter()
             .take(20)
             .zip(result.iter())

@@ -100,6 +100,9 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
         device,
         role,
         endpoint,
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
     })
 }
 

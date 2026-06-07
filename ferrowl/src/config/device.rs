@@ -17,6 +17,14 @@ use serde::{Deserialize, Serialize};
 pub struct DeviceConfig {
     #[serde(default)]
     pub comment: String,
+    /// Device-level timing defaults (ms). Used when a `ModuleSpec` does not override them; the
+    /// global app config is the final fallback. See `Module::resolve_timing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<usize>,
     pub definitions: BTreeMap<String, RegisterDef>,
 }
 
@@ -56,15 +64,50 @@ pub struct RegisterDef {
     pub comment: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NamedValue {
     pub name: String,
-    pub value: i64,
+    pub value: Scalar,
 }
 
 impl ToLabel for NamedValue {
     fn to_label(&self) -> String {
         self.name.clone()
+    }
+}
+
+/// A named-value payload. Untagged so the config file can write `value = 10`, `value = 1.5`
+/// or `value = "text"` without quoting numbers. Written to a register via its `Display` string,
+/// which `Register::encode` then interprets per the register's own format.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Scalar {
+    Int(i64),
+    Float(f64),
+    Text(String),
+}
+
+impl std::fmt::Display for Scalar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Scalar::Int(v) => write!(f, "{v}"),
+            Scalar::Float(v) => write!(f, "{v}"),
+            Scalar::Text(v) => write!(f, "{v}"),
+        }
+    }
+}
+
+impl Scalar {
+    /// Infer a scalar from user input: integer first, then float, else verbatim text.
+    pub fn from_input(s: &str) -> Self {
+        let t = s.trim();
+        if let Ok(i) = t.parse::<i64>() {
+            Scalar::Int(i)
+        } else if let Ok(f) = t.parse::<f64>() {
+            Scalar::Float(f)
+        } else {
+            Scalar::Text(s.to_string())
+        }
     }
 }
 
@@ -263,11 +306,19 @@ mod tests {
                 values: vec![
                     NamedValue {
                         name: "waiting".into(),
-                        value: 0,
+                        value: Scalar::Int(0),
                     },
                     NamedValue {
                         name: "charging".into(),
-                        value: 2,
+                        value: Scalar::Int(2),
+                    },
+                    NamedValue {
+                        name: "trickle".into(),
+                        value: Scalar::Float(1.5),
+                    },
+                    NamedValue {
+                        name: "label".into(),
+                        value: Scalar::Text("idle".into()),
                     },
                 ],
                 update: Some("C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into()),
@@ -276,6 +327,9 @@ mod tests {
         );
         DeviceConfig {
             comment: "EVSE".to_string(),
+            timeout_ms: Some(2000),
+            delay_ms: None,
+            interval_ms: Some(800),
             definitions,
         }
     }

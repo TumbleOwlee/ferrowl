@@ -121,6 +121,10 @@ pub struct SetupValues {
     pub name: String,
     pub role: Role,
     pub endpoint: Endpoint,
+    /// Optional per-instance timing overrides (ms); `None` falls back to device/app config.
+    pub timeout_ms: Option<usize>,
+    pub delay_ms: Option<usize>,
+    pub interval_ms: Option<usize>,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
@@ -155,6 +159,12 @@ pub struct SetupDialog {
     pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
+    #[focus]
+    pub timeout: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub delay: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub interval: Widget<InputFieldState, InputField<String>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
@@ -162,8 +172,24 @@ pub struct SetupDialog {
 
 impl SetupDialog {
     /// Edit an existing instance (`:e`).
-    pub fn edit(name: &str, role: Role, endpoint: &Endpoint) -> Self {
+    pub fn edit(
+        name: &str,
+        role: Role,
+        endpoint: &Endpoint,
+        timeout_ms: Option<usize>,
+        delay_ms: Option<usize>,
+        interval_ms: Option<usize>,
+    ) -> Self {
         let mut dialog = Self::build(name, DialogMode::Edit);
+        for (field, value) in [
+            (&mut dialog.timeout, timeout_ms),
+            (&mut dialog.delay, delay_ms),
+            (&mut dialog.interval, interval_ms),
+        ] {
+            if let Some(v) = value {
+                set_input(field, &v.to_string());
+            }
+        }
         dialog
             .role
             .state
@@ -273,6 +299,9 @@ impl SetupDialog {
                 vec![U8Choice(1), U8Choice(2)],
                 &selection_style,
             ))
+            .timeout(input("Timeout ms", None, "", &input_style, false))
+            .delay(input("Delay ms", None, "", &input_style, false))
+            .interval(input("Interval ms", None, "", &input_style, false))
             .error(Widget {
                 state: String::new(),
                 widget: TextBuilder::default()
@@ -365,10 +394,27 @@ impl SetupDialog {
                 }
             }
         };
+        let parse_ms = |input: &str, label: &str| -> Result<Option<usize>, String> {
+            let t = input.trim();
+            if t.is_empty() {
+                Ok(None)
+            } else {
+                t.parse::<usize>()
+                    .map(Some)
+                    .map_err(|_| format!("{label} must be a whole number of milliseconds."))
+            }
+        };
+        let timeout_ms = parse_ms(self.timeout.state.input(), "Timeout")?;
+        let delay_ms = parse_ms(self.delay.state.input(), "Delay")?;
+        let interval_ms = parse_ms(self.interval.state.input(), "Interval")?;
+
         Ok(SetupValues {
             name,
             role,
             endpoint,
+            timeout_ms,
+            delay_ms,
+            interval_ms,
         })
     }
 
@@ -383,9 +429,9 @@ impl SetupDialog {
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
         // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 3 } else { 1 };
-        // border(2) + inner margin(2) + name(3) + select(3) + endpoint + error(3) + keybinds(1)
-        // + optional config-path row (New mode).
-        let box_height = 14 + endpoint_rows * 3 + if is_new { 3 } else { 0 };
+        // border(2) + inner margin(2) + name(3) + select(3) + endpoint + timing(3) + error(3)
+        // + keybinds(1) + optional config-path row (New mode).
+        let box_height = 17 + endpoint_rows * 3 + if is_new { 3 } else { 0 };
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -420,6 +466,7 @@ impl SetupDialog {
         }
         constraints.push(Constraint::Length(3)); // transport + role
         constraints.push(Constraint::Length(endpoint_rows * 3)); // endpoint
+        constraints.push(Constraint::Length(3)); // timeout + delay + interval
         constraints.push(Constraint::Length(3)); // error
         constraints.push(Constraint::Length(1)); // keybinds
         let rows = Layout::vertical(constraints).split(inner);
@@ -482,6 +529,27 @@ impl SetupDialog {
         } else {
             render_pair(&mut self.ip, &mut self.port, endpoint_area, buf);
         }
+
+        let [timeout_area, delay_area, interval_area] = Layout::horizontal([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .areas(rows[idx]);
+        idx += 1;
+        StatefulWidget::render(
+            &self.timeout.widget,
+            timeout_area,
+            buf,
+            &mut self.timeout.state,
+        );
+        StatefulWidget::render(&self.delay.widget, delay_area, buf, &mut self.delay.state);
+        StatefulWidget::render(
+            &self.interval.widget,
+            interval_area,
+            buf,
+            &mut self.interval.state,
+        );
 
         let error_area = rows[idx];
         idx += 1;

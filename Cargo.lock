@@ -650,6 +650,7 @@ dependencies = [
  "ferrowl-util",
  "ratatui",
  "serde",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -699,6 +700,7 @@ dependencies = [
  "ferrowl-reg",
  "itertools",
  "serde",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-modbus",
  "tokio-serial",

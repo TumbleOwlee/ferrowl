@@ -10,8 +10,36 @@ pub use code_input_field::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 pub use input_field::*;
 use ratatui::layout::{HorizontalAlignment, Margin};
-use ratatui::widgets::{StatefulWidget, Widget as RenderWidget};
+use ratatui::style::Style;
+use ratatui::widgets::{Block, StatefulWidget, Widget as RenderWidget};
 use ratatui::{buffer::Buffer, layout::Rect};
+
+use crate::types::Border;
+
+/// If `border` is `Border::Full`, render a styled (optionally titled) bordered block into `area`
+/// and return the inner content rect (after the border's inner margin). For `Border::None` the
+/// `area` is returned unchanged. Shared by the input-field, selection and table widgets.
+pub fn render_border(
+    area: Rect,
+    buf: &mut Buffer,
+    border: &Border,
+    title: Option<&Title>,
+    style: Style,
+) -> Rect {
+    if let Border::Full(margin) = border {
+        let mut block = Block::bordered().style(style);
+        if let Some(title) = title {
+            block = block
+                .title(title.name.as_str())
+                .title_alignment(title.alignment);
+        }
+        let inner = block.inner(area);
+        block.render(area, buf);
+        inner.inner(*margin)
+    } else {
+        area
+    }
+}
 pub use selection::*;
 pub use table::*;
 pub use text::*;

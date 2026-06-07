@@ -31,7 +31,10 @@ where
             std::collections::hash_map::Entry::Occupied(_) => {}
         }
 
-        let m = self.slices.get_mut(&id).unwrap();
+        // Only `None` when the entry was vacant and `ranges` was empty: nothing to do.
+        let Some(m) = self.slices.get_mut(&id) else {
+            return true;
+        };
         for r in ranges {
             let val = m.iter_mut().find(|(range, _)| r.intersect(range).is_some());
             if let Some((range, _)) = val {
@@ -86,27 +89,15 @@ where
         if range.length() != values.len() || !self.writable(&id, ty, range) {
             return false;
         }
-
-        let mut idx = 0;
-        let mut range = range.clone();
         match self.slices.get_mut(&id) {
             Some(map) => {
-                let entries: Vec<_> = map.iter_mut().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            slice.write(&Range::new(start, count), &values[idx..(idx + count)]);
-                            range = Range::new(range.start + count, range.length() - count);
-                            idx += count;
-                        }
-                    }
-                }
-
-                range.length() == 0
+                let mut idx = 0;
+                walk_slices_mut(map, range, |slice, seg| {
+                    let count = seg.length();
+                    slice.write(&seg, &values[idx..(idx + count)]);
+                    idx += count;
+                    true
+                })
             }
             _ => false,
         }
@@ -118,57 +109,23 @@ where
         if range.length() != values.len() {
             return false;
         }
-
-        let mut idx = 0;
-        let mut range = range.clone();
         match self.slices.get_mut(&id) {
             Some(map) => {
-                let entries: Vec<_> = map.iter_mut().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            slice.write_unchecked(
-                                &Range::new(start, count),
-                                &values[idx..(idx + count)],
-                            );
-                            range = Range::new(range.start + count, range.length() - count);
-                            idx += count;
-                        }
-                    }
-                }
-
-                range.length() == 0
+                let mut idx = 0;
+                walk_slices_mut(map, range, |slice, seg| {
+                    let count = seg.length();
+                    slice.write_unchecked(&seg, &values[idx..(idx + count)]);
+                    idx += count;
+                    true
+                })
             }
             _ => false,
         }
     }
 
     pub fn writable(&mut self, id: &K, ty: &Type, range: &Range) -> bool {
-        let mut range = range.clone();
-        match self.slices.get_mut(id) {
-            Some(map) => {
-                let entries: Vec<_> = map.iter().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            if !slice.writable(ty, &Range::new(start, count)) {
-                                return false;
-                            }
-                            range = Range::new(range.start + count, range.length() - count);
-                        }
-                    }
-                }
-
-                range.length() == 0
-            }
+        match self.slices.get(id) {
+            Some(map) => walk_slices(map, range, |slice, seg| slice.writable(ty, &seg)),
             _ => false,
         }
     }
@@ -177,93 +134,89 @@ where
         if !self.readable(&id, ty, range) {
             return None;
         }
-
-        let mut range = range.clone();
         match self.slices.get(&id) {
             Some(map) => {
                 let mut output: Vec<u16> = Vec::with_capacity(range.length());
-                let entries: Vec<_> = map.iter().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            if let Some(mut v) = slice.read(&Range::new(start, count)) {
-                                output.append(&mut v)
-                            };
-                            range = Range::new(range.start + count, range.length() - count);
-                        }
+                let covered = walk_slices(map, range, |slice, seg| {
+                    if let Some(mut v) = slice.read(&seg) {
+                        output.append(&mut v);
                     }
-                }
-
-                if range.length() == 0 {
-                    Some(output)
-                } else {
-                    None
-                }
+                    true
+                });
+                if covered { Some(output) } else { None }
             }
             _ => None,
         }
     }
 
     pub fn read_unchecked(&self, id: K, range: &Range) -> Option<Vec<u16>> {
-        let mut range = range.clone();
         match self.slices.get(&id) {
             Some(map) => {
                 let mut output: Vec<u16> = Vec::with_capacity(range.length());
-                let entries: Vec<_> = map.iter().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            if let Some(mut v) = slice.read_unchecked(&Range::new(start, count)) {
-                                output.append(&mut v)
-                            };
-                            range = Range::new(range.start + count, range.length() - count);
-                        }
+                let covered = walk_slices(map, range, |slice, seg| {
+                    if let Some(mut v) = slice.read_unchecked(&seg) {
+                        output.append(&mut v);
                     }
-                }
-
-                if range.length() == 0 {
-                    Some(output)
-                } else {
-                    None
-                }
+                    true
+                });
+                if covered { Some(output) } else { None }
             }
             _ => None,
         }
     }
 
     pub fn readable(&self, id: &K, ty: &Type, range: &Range) -> bool {
-        let mut range = range.clone();
         match self.slices.get(id) {
-            Some(map) => {
-                let entries: Vec<_> = map.iter().collect();
-                for (r, slice) in entries.into_iter() {
-                    if r.start <= range.start && r.end > range.start {
-                        let start = std::cmp::min(range.start, r.end);
-                        let end = std::cmp::min(range.end, r.end);
-                        let count = end - start;
-
-                        if count != 0 {
-                            if !slice.readable(ty, &Range::new(start, count)) {
-                                return false;
-                            };
-                            range = Range::new(range.start + count, range.length() - count);
-                        }
-                    }
-                }
-
-                range.length() == 0
-            }
+            Some(map) => walk_slices(map, range, |slice, seg| slice.readable(ty, &seg)),
             _ => false,
         }
     }
+}
+
+/// Walk the slices intersecting `range` in ascending order, calling `f` with each slice and the
+/// sub-range that falls inside it. `f` returns `false` to abort (helper then returns `false`).
+/// Returns `true` iff the visited slices fully covered `range`.
+fn walk_slices<F>(map: &BTreeMap<Range, Slice>, range: &Range, mut f: F) -> bool
+where
+    F: FnMut(&Slice, Range) -> bool,
+{
+    let mut range = range.clone();
+    for (r, slice) in map.iter() {
+        if r.start <= range.start && r.end > range.start {
+            let start = std::cmp::min(range.start, r.end);
+            let end = std::cmp::min(range.end, r.end);
+            let count = end - start;
+            if count != 0 {
+                if !f(slice, Range::new(start, count)) {
+                    return false;
+                }
+                range = Range::new(range.start + count, range.length() - count);
+            }
+        }
+    }
+    range.length() == 0
+}
+
+/// Mutable counterpart of [`walk_slices`] for the write paths.
+fn walk_slices_mut<F>(map: &mut BTreeMap<Range, Slice>, range: &Range, mut f: F) -> bool
+where
+    F: FnMut(&mut Slice, Range) -> bool,
+{
+    let mut range = range.clone();
+    for (r, slice) in map.iter_mut() {
+        if r.start <= range.start && r.end > range.start {
+            let start = std::cmp::min(range.start, r.end);
+            let end = std::cmp::min(range.end, r.end);
+            let count = end - start;
+            if count != 0 {
+                if !f(slice, Range::new(start, count)) {
+                    return false;
+                }
+                range = Range::new(range.start + count, range.length() - count);
+            }
+        }
+    }
+    range.length() == 0
 }
 
 #[cfg(test)]

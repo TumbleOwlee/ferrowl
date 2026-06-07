@@ -1,4 +1,4 @@
-use crate::config::device::NamedValue;
+use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
     AccessOption, Alignment, Endian, Format, KindOption, ValueType, access_index, alignment_index,
@@ -55,7 +55,7 @@ pub struct AddNamedValueDialog {
     #[focus]
     pub label: Widget<InputFieldState, InputField<String>>,
     #[focus]
-    pub value: Widget<InputFieldState, InputField<i64>>,
+    pub value: Widget<InputFieldState, InputField<String>>,
     // Error display field
     pub error: Widget<String, Text>,
     pub keybinds: [Widget<String, Text>; 2],
@@ -159,8 +159,8 @@ impl AddNamedValueDialog {
         if self.label.state.input().trim().is_empty() {
             return Err("Label must not be empty.".to_string());
         }
-        if let Err(e) = i64::validate(self.value.state.input()) {
-            return Err(format!("Value: {e}"));
+        if self.value.state.input().trim().is_empty() {
+            return Err("Value must not be empty.".to_string());
         }
         Ok(())
     }
@@ -168,13 +168,8 @@ impl AddNamedValueDialog {
     pub fn apply(&self) -> Result<NamedValue, String> {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
-        let value: i64 = self
-            .value
-            .state
-            .input()
-            .trim()
-            .parse()
-            .map_err(|_| "Value must be an integer.".to_string())?;
+        // Accept int, float or text; the type is inferred from the input.
+        let value = Scalar::from_input(self.value.state.input());
         Ok(NamedValue { name, value })
     }
 
@@ -1080,13 +1075,15 @@ impl EditSelectionDialog<NamedValue> {
             }
         }
 
-        // Pre-select the matching named value. Prefer raw memory words (reliable for all
-        // formats/resolutions), fall back to parsing the decoded string as i64.
+        // Pre-select the matching named value. Integer values match the raw memory words (reliable
+        // across formats/resolutions); any value type also matches the decoded display string.
         let raw_int = parse_raw_value(raw_value);
-        if let Some(current) = raw_int.or_else(|| current_value.trim().parse::<i64>().ok()) {
-            if let Some(idx) = named_values.iter().position(|nv| nv.value == current) {
-                dialog.value.state.set_selection(idx);
-            }
+        let current = current_value.trim();
+        if let Some(idx) = named_values.iter().position(|nv| match &nv.value {
+            Scalar::Int(v) => raw_int == Some(*v) || current == v.to_string(),
+            other => current == other.to_string(),
+        }) {
+            dialog.value.state.set_selection(idx);
         }
 
         dialog

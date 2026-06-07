@@ -21,7 +21,7 @@ use tokio::runtime::Runtime;
 use crate::app::{App, Tab};
 use crate::cli::CliArgs;
 use crate::config::device::{
-    AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, ValueType,
+    AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
 use crate::config::{AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::module::Module;
@@ -76,15 +76,15 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
             vec![
                 NamedValue {
                     name: "Idle".into(),
-                    value: 10,
+                    value: Scalar::Int(10),
                 },
                 NamedValue {
                     name: "Present".into(),
-                    value: 11,
+                    value: Scalar::Int(11),
                 },
                 NamedValue {
                     name: "Charging".into(),
-                    value: 12,
+                    value: Scalar::Int(12),
                 },
             ],
         ),
@@ -92,6 +92,9 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
 
     let device = DeviceConfig {
         comment: "demo device".to_string(),
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
         definitions,
     };
     let spec = ModuleSpec {
@@ -102,6 +105,9 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
             ip: "127.0.0.1".to_string(),
             port: 5020,
         },
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
     };
     (device, spec)
 }

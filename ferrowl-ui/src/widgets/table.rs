@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint as LConstraint, Layout, Margin, Rect},
     text::{Line, Text},
     widgets::{
-        Block, Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, StatefulWidget,
+        Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, StatefulWidget,
         Table as UiTable, Widget,
     },
 };
@@ -112,7 +112,7 @@ where
         ])
         .split(area)[1];
 
-        let mut area = Layout::horizontal([
+        let area = Layout::horizontal([
             LConstraint::Length(self.margin.horizontal),
             LConstraint::Min(1),
             LConstraint::Length(self.margin.horizontal),
@@ -120,22 +120,18 @@ where
         .split(area)[1];
 
         // Create block if border is required
-        if let Border::Full(margin) = &self.border {
-            let style = if state.focused() {
-                self.style.border
-            } else {
-                self.style.general
-            };
-            let mut block = Block::bordered().style(style);
-            if let Some(title) = self.title.as_ref() {
-                block = block
-                    .title(title.name.as_str())
-                    .title_alignment(title.alignment);
-            }
-            let inner = block.inner(area);
-            block.render(area, buf);
-            area = inner.inner(*margin);
-        }
+        let border_style = if state.focused() {
+            self.style.border
+        } else {
+            self.style.general
+        };
+        let area = crate::widgets::render_border(
+            area,
+            buf,
+            &self.border,
+            self.title.as_ref(),
+            border_style,
+        );
 
         let header = H::header();
         let header = header

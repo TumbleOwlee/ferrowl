@@ -145,45 +145,30 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
                 let index = focuses.iter().position(|f| *f == self.focus).unwrap();
             };
 
-            // Generate code for iterating through focuses in reverse direction
-            let impl_previous = quote! {
-                #impl_general
+            // Forward and reverse traversal differ only by the per-step `delta` (forward = +1,
+            // reverse = +(len-1), i.e. -1 mod len).
+            let focus_loop = |delta: proc_macro2::TokenStream| {
+                quote! {
+                    #impl_general
 
-                let mut current_index = (index + #def_len - 1 ) % #def_len;
+                    let mut current_index = (index + #delta) % #def_len;
 
-                loop {
-                    let current_focus = focuses[current_index];
+                    loop {
+                        let current_focus = focuses[current_index];
 
-                    #impl_enable
+                        #impl_enable
 
-                    if current_index == index {
-                        break;
+                        if current_index == index {
+                            break;
+                        }
+
+                        // Iterate
+                        current_index = (current_index + #delta) % #def_len;
                     }
-
-                     // Iterate
-                     current_index = (current_index + #def_len - 1 ) % #def_len;
                 }
             };
-
-            // Generate code for iterating through focuses in forward direction
-            let impl_next = quote! {
-                #impl_general
-
-                let mut current_index = (index + 1) % #def_len;
-
-                loop {
-                    let current_focus = focuses[current_index];
-
-                    #impl_enable
-
-                    if current_index == index {
-                        break;
-                    }
-
-                    // Iterate
-                    current_index = (current_index + 1) % #def_len;
-                }
-            };
+            let impl_previous = focus_loop(quote! { (#def_len - 1) });
+            let impl_next = focus_loop(quote! { 1 });
 
             // Generate implementation for focus switching methods
             let focus_def = quote! {

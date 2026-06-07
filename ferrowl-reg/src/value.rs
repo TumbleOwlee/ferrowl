@@ -27,55 +27,26 @@ impl std::fmt::Display for Value {
 
 impl Value {
     pub fn as_str(&self) -> String {
+        // Every numeric variant scales by its resolution and prints the f64 result.
+        macro_rules! scaled {
+            ($v:expr, $r:expr) => {{
+                let v = *$v as f64 * $r.0;
+                format!("{v}")
+            }};
+        }
         match self {
-            Self::U8((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::U16((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::U32((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::U64((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::U128((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::I8((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::I16((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::I32((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::I64((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::I128((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::F32((v, r)) => {
-                let v = *v as f64 * r.0;
-                format!("{v}")
-            }
-            Self::F64((v, r)) => {
-                let v = *v * r.0;
-                format!("{v}")
-            }
+            Self::U8((v, r)) => scaled!(v, r),
+            Self::U16((v, r)) => scaled!(v, r),
+            Self::U32((v, r)) => scaled!(v, r),
+            Self::U64((v, r)) => scaled!(v, r),
+            Self::U128((v, r)) => scaled!(v, r),
+            Self::I8((v, r)) => scaled!(v, r),
+            Self::I16((v, r)) => scaled!(v, r),
+            Self::I32((v, r)) => scaled!(v, r),
+            Self::I64((v, r)) => scaled!(v, r),
+            Self::I128((v, r)) => scaled!(v, r),
+            Self::F32((v, r)) => scaled!(v, r),
+            Self::F64((v, r)) => scaled!(v, r),
             Self::Ascii(v) => v
                 .chars()
                 .map(|c| {
@@ -90,19 +61,25 @@ impl Value {
     }
 
     pub fn as_hex_str(&self) -> String {
+        // `0x` + zero-padded two's-complement hex, width = 2 hex digits per byte.
+        macro_rules! hex {
+            ($v:expr, $width:expr) => {
+                format!("0x{:01$X}", $v, $width)
+            };
+        }
         match self {
-            Self::U8((v, _)) => format!("0x{:01$X}", v, 2),
-            Self::U16((v, _)) => format!("0x{:01$X}", v, 4),
-            Self::U32((v, _)) => format!("0x{:01$X}", v, 8),
-            Self::U64((v, _)) => format!("0x{:01$X}", v, 16),
-            Self::U128((v, _)) => format!("0x{:01$X}", v, 32),
-            Self::I8((v, _)) => format!("0x{:01$X}", v, 2),
-            Self::I16((v, _)) => format!("0x{:01$X}", v, 4),
-            Self::I32((v, _)) => format!("0x{:01$X}", v, 8),
-            Self::I64((v, _)) => format!("0x{:01$X}", v, 16),
-            Self::I128((v, _)) => format!("0x{:01$X}", v, 32),
-            Self::F32((v, _)) => format!("0x{:01$X}", v.to_bits(), 8),
-            Self::F64((v, _)) => format!("0x{:01$X}", v.to_bits(), 16),
+            Self::U8((v, _)) => hex!(v, 2),
+            Self::U16((v, _)) => hex!(v, 4),
+            Self::U32((v, _)) => hex!(v, 8),
+            Self::U64((v, _)) => hex!(v, 16),
+            Self::U128((v, _)) => hex!(v, 32),
+            Self::I8((v, _)) => hex!(v, 2),
+            Self::I16((v, _)) => hex!(v, 4),
+            Self::I32((v, _)) => hex!(v, 8),
+            Self::I64((v, _)) => hex!(v, 16),
+            Self::I128((v, _)) => hex!(v, 32),
+            Self::F32((v, _)) => hex!(v.to_bits(), 8),
+            Self::F64((v, _)) => hex!(v.to_bits(), 16),
             Self::Ascii(v) => {
                 let bytes = v.as_bytes();
                 let mut str = "0x".to_string();

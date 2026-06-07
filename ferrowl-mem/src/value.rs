@@ -84,10 +84,6 @@ mod tests {
             Value::default(&Kind::ReadWrite(Type::Coil)),
             Value::ReadWrite(Type::Coil, 0)
         );
-        assert_eq!(
-            Value::default(&Kind::Separated(Type::Coil)),
-            Value::Separated(Type::Coil, (0, 0))
-        );
     }
 
     #[test]
@@ -103,14 +99,6 @@ mod tests {
         assert_eq!(
             Value::from_u16(&Kind::ReadWrite(Type::Coil), 3),
             Value::ReadWrite(Type::Coil, 3)
-        );
-        assert_eq!(
-            Value::from_u16(&Kind::Separated(Type::Coil), 4),
-            Value::Separated(Type::Coil, (4, 4))
-        );
-        assert_ne!(
-            Value::from_u16(&Kind::Separated(Type::Coil), 4),
-            Value::Separated(Type::Coil, (4, 5))
         );
     }
 

@@ -9,6 +9,7 @@ ferrowl-mem = { path = "../ferrowl-mem" }
 ferrowl-reg = { path = "../ferrowl-reg" }
 
 anyhow = "1.0.100"
+thiserror = "2.0"
 itertools = "0.14.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.48.0", features = ["time"] }

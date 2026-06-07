@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use ferrowl_lua::module::{Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
-use ferrowl_mem::{Range, Type};
+use ferrowl_mem::Range;
 use ferrowl_net::{Key, SlaveKind};
 use ferrowl_reg::{Address, Register, Value};
 
@@ -88,15 +88,6 @@ impl Write for RegisterBridge {
                 "write to '{name}' rejected (not writable)"
             )))
         }
-    }
-}
-
-/// Modbus memory type backing a register.
-fn mem_type(register: &Register) -> Type {
-    use ferrowl_reg::Kind;
-    match register.kind() {
-        Kind::Coil | Kind::DiscreteInput => Type::Coil,
-        Kind::HoldingRegister | Kind::InputRegister => Type::Register,
     }
 }
 
@@ -217,7 +208,7 @@ fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_mem::{Kind as MemKind, Memory};
+    use ferrowl_mem::{Kind as MemKind, Memory, Type};
     use ferrowl_net::SlaveKind;
     use ferrowl_reg::format::{Endian, Resolution};
     use ferrowl_reg::{Access, Format, Kind, RegisterBuilder};
