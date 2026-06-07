@@ -65,10 +65,10 @@ impl<T: KeyParams> Instance<T> {
         for<'a> L::CallRefFuture<'a>: Send,
         for<'a> S::CallRefFuture<'a>: Send,
     {
-        if let Some(h) = &self.handle {
-            if !h.is_finished() {
-                return Err(InstanceError::AlreadyActive.into());
-            }
+        if let Some(h) = &self.handle
+            && !h.is_finished()
+        {
+            return Err(InstanceError::AlreadyActive.into());
         }
 
         match &self.builder {
@@ -127,7 +127,11 @@ impl<T: KeyParams> Instance<T> {
             return Err(InstanceError::NotRunning.into());
         }
 
-        if let Ok(_) = self.send_command(ferrowl_net::Command::Terminate).await {
+        if self
+            .send_command(ferrowl_net::Command::Terminate)
+            .await
+            .is_ok()
+        {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 

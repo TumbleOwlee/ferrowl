@@ -198,9 +198,48 @@ values = [
 > [!INFO]
 > It's possible to create virtual registers using `virtual = true` to store values not accessible over Modbus.
 
+#### Register fields
+
+| Field | Default | Description |
+| ----- | ----- | ----- |
+| `type` | *(required)* | Value encoding: `U8`…`U128`, `I8`…`I128`, `F32`, `F64`, `Ascii`. |
+| `slave_id` | `0` | Modbus unit / slave id. |
+| `read_code` | `3` | Read function code: `1`=Coil, `2`=DiscreteInput, `3`=InputRegister, `4`=HoldingRegister. |
+| `address` | *(none)* | Start address. Omit (or set `virtual = true`) for a virtual register. |
+| `virtual` | `false` | Hold the value locally instead of mapping it to a Modbus address. |
+| `access` | `ReadWrite` | `ReadOnly`, `WriteOnly` or `ReadWrite`. |
+| `endian` | `Big` | Byte order: `Big` or `Little`. |
+| `resolution` | `1.0` | Scaling factor applied to the raw value. |
+| `length` | `1` | ASCII width in registers (ignored for numeric types). |
+| `alignment` | `Left` | ASCII alignment: `Left` or `Right`. |
+| `values` | `[]` | Named values for selection-style registers. |
+| `update` | *(none)* | Lua snippet run every simulation cycle. |
+| `comment` | `""` | Free-text description. |
+
+#### Device-level options
+
+Alongside `definitions`, a device file may carry a `version` (stamped automatically on save), default timings, and explicit client read ranges:
+
+```toml
+comment = "EVSE charge point"
+timeout_ms = 2000      # per-request timeout
+delay_ms = 1000        # delay before the first read
+interval_ms = 1000     # poll interval
+
+# Client read batching per function code. Each value is a comma-separated list of inclusive
+# address ranges (a bare "5" is the single address 5). When unset, contiguous registers are
+# auto-merged into requests.
+[read_ranges]
+holding = "0-100,140-160"
+input = "0-10"
+# coils / discrete are also available
+```
+
+Timing precedence is per-instance (session) → device → global app config.
+
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts configured in the `update` property. These scripts are executed each cycle and allow the full automatic simulation of full system. Besides the standard Lua libraries, the following modules are available to especially interact with the registers.
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts configured in the `update` property. These scripts are executed each cycle and allow the full automatic simulation of full system. Besides the standard Lua libraries, the modules `C_Time` and `C_Register` are exposed to interact with the registers and elapsed time.
 
 ### Module C_Time
 

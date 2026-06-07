@@ -29,10 +29,10 @@ use crate::dialog::{
 use crate::module::Module;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
-use crate::view::main::{Definition, TableView, cmp_definitions, column_index};
 use crate::view::main::TableHeader;
-use ferrowl_ui::widgets::Header;
+use crate::view::main::{Definition, TableView, cmp_definitions, column_index};
 use crate::view::tabs::render_tabs;
+use ferrowl_ui::widgets::Header;
 
 /// How often the UI redraws when no input arrives (drives live value updates).
 const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
@@ -101,7 +101,7 @@ impl Overlay {
 
 /// What confirming the active overlay should do (computed before mutating `self`).
 enum OverlayAction {
-    CreateModule(SetupValues, String, DeviceConfig),
+    CreateModule(SetupValues, String, Box<DeviceConfig>),
     ApplySetup(SetupValues),
     ApplyEdit(EditedRegister),
     AddRegister(EditedRegister),
@@ -400,7 +400,9 @@ impl App {
     async fn confirm_overlay(&mut self) {
         let action = match &self.overlay {
             Some(Overlay::Setup(d)) => d.resolve().ok().map(|o| match o.device {
-                Some((path, device)) => OverlayAction::CreateModule(o.values, path, device),
+                Some((path, device)) => {
+                    OverlayAction::CreateModule(o.values, path, Box::new(device))
+                }
                 None => OverlayAction::ApplySetup(o.values),
             }),
             Some(Overlay::Edit(d)) => d.apply().ok().map(OverlayAction::ApplyEdit),
@@ -413,38 +415,35 @@ impl App {
         };
 
         // Validate name uniqueness before applying an edit or add.
-        if let OverlayAction::ApplyEdit(ref edited) = action {
-            if let Some(tab) = self.tabs.get(self.active) {
-                if let Some(idx) = tab.table.selected_index() {
-                    let original = tab.table.definitions()[idx].name.clone();
-                    if edited.name != original && tab.device.definitions.contains_key(&edited.name)
-                    {
-                        let msg = format!("Name '{}' already in use", edited.name);
-                        match &mut self.overlay {
-                            Some(Overlay::Edit(d)) => d.error.state = msg,
-                            Some(Overlay::EditSelection(d)) => d.error.state = msg,
-                            _ => {}
-                        }
-                        return;
-                    }
+        if let OverlayAction::ApplyEdit(ref edited) = action
+            && let Some(tab) = self.tabs.get(self.active)
+            && let Some(idx) = tab.table.selected_index()
+        {
+            let original = tab.table.definitions()[idx].name.clone();
+            if edited.name != original && tab.device.definitions.contains_key(&edited.name) {
+                let msg = format!("Name '{}' already in use", edited.name);
+                match &mut self.overlay {
+                    Some(Overlay::Edit(d)) => d.error.state = msg,
+                    Some(Overlay::EditSelection(d)) => d.error.state = msg,
+                    _ => {}
                 }
+                return;
             }
         }
-        if let OverlayAction::AddRegister(ref edited) = action {
-            if let Some(tab) = self.tabs.get(self.active) {
-                if tab.device.definitions.contains_key(&edited.name) {
-                    let msg = format!("Name '{}' already in use", edited.name);
-                    if let Some(Overlay::Add(d)) = &mut self.overlay {
-                        d.error.state = msg;
-                    }
-                    return;
-                }
+        if let OverlayAction::AddRegister(ref edited) = action
+            && let Some(tab) = self.tabs.get(self.active)
+            && tab.device.definitions.contains_key(&edited.name)
+        {
+            let msg = format!("Name '{}' already in use", edited.name);
+            if let Some(Overlay::Add(d)) = &mut self.overlay {
+                d.error.state = msg;
             }
+            return;
         }
 
         match action {
             OverlayAction::CreateModule(values, path, device) => {
-                self.create_module(values, path, device).await
+                self.create_module(values, path, *device).await
             }
             OverlayAction::ApplySetup(values) => self.apply_setup(values).await,
             OverlayAction::ApplyEdit(edited) => self.apply_edit(edited).await,
@@ -594,11 +593,10 @@ impl App {
             .as_ref()
             .map(|s| !s.is_empty())
             .unwrap_or(false)
+            && let Some(tab) = self.tabs.get_mut(active)
         {
-            if let Some(tab) = self.tabs.get_mut(active) {
-                let scripts = collect_scripts(&tab.device);
-                tab.module.reload_scripts(scripts);
-            }
+            let scripts = collect_scripts(&tab.device);
+            tab.module.reload_scripts(scripts);
         }
 
         // Seed a virtual register with a default so its value/raw aren't blank before a script or
@@ -675,10 +673,10 @@ impl App {
                         };
                     }
                 }
-                if edited.name != original_name {
-                    if let Some(def) = tab.device.definitions.remove(&original_name) {
-                        tab.device.definitions.insert(edited.name.clone(), def);
-                    }
+                if edited.name != original_name
+                    && let Some(def) = tab.device.definitions.remove(&original_name)
+                {
+                    tab.device.definitions.insert(edited.name.clone(), def);
                 }
 
                 mem_result
@@ -702,18 +700,18 @@ impl App {
 
         // Reload the Lua sim thread when the edit included a script change so the new script
         // takes effect immediately rather than only on the next module start.
-        if edited.update.is_some() {
-            if let Some(tab) = self.tabs.get_mut(active) {
-                let scripts = collect_scripts(&tab.device);
-                tab.module.reload_scripts(scripts);
-            }
+        if edited.update.is_some()
+            && let Some(tab) = self.tabs.get_mut(active)
+        {
+            let scripts = collect_scripts(&tab.device);
+            tab.module.reload_scripts(scripts);
         }
 
         // Issue 8: re-apply the old value when only the format changed.
-        if let Some(v) = preserved_value {
-            if edited.value.is_none() {
-                self.set_value(&edited.name, &v).await;
-            }
+        if let Some(v) = preserved_value
+            && edited.value.is_none()
+        {
+            self.set_value(&edited.name, &v).await;
         }
 
         if let Some(value) = edited.value {
@@ -913,7 +911,12 @@ impl App {
                     .registers()
                     .iter()
                     .map(|(name, comment, register, values)| {
-                        Definition::new(name.clone(), comment.clone(), register.clone(), values.clone())
+                        Definition::new(
+                            name.clone(),
+                            comment.clone(),
+                            register.clone(),
+                            values.clone(),
+                        )
                     })
                     .collect();
                 let tab = &mut self.tabs[active];

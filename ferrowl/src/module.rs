@@ -371,10 +371,13 @@ fn fn_code_key(fc: FunctionCode) -> u8 {
 
 /// Readable register spans grouped by `(slave, function-code key)`, each value carrying the
 /// function code and a list of `(start, end)` spans. Used for both operation and memory planning.
+type ReadableSpanGroups =
+    std::collections::BTreeMap<(u8, u8), (FunctionCode, Kind, Vec<(usize, usize)>)>;
+
 fn group_readable_spans(
     registers: &[(String, String, Register, Vec<NamedValue>)],
     include_write_only: bool,
-) -> std::collections::BTreeMap<(u8, u8), (FunctionCode, Kind, Vec<(usize, usize)>)> {
+) -> ReadableSpanGroups {
     let mut groups = std::collections::BTreeMap::new();
     for (_, _, register, _) in registers {
         if let Address::Fixed(addr) = register.address() {

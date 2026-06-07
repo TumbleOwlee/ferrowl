@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ferrowl_lua::module::{Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write};
+use ferrowl_lua::module::{Read, RegisterModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_mem::Range;
 use ferrowl_net::{Key, SlaveKind};
@@ -190,8 +190,7 @@ pub fn run_sim(
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
-            .with_module(TimeModule::default())
-            .with_module(StaticsModule::default());
+            .with_module(TimeModule::default());
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
@@ -355,7 +354,6 @@ mod tests {
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
             .with_module(TimeModule::default())
-            .with_module(StaticsModule::default())
             .with_script(
                 "power".to_string(),
                 "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))",

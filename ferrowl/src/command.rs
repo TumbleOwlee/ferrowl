@@ -13,7 +13,10 @@ pub enum Cmd {
     Stop,
     Restart,
     Lua(LuaCommand),
-    Set { register: String, value: String },
+    Set {
+        register: String,
+        value: String,
+    },
     Write(Option<String>),
     WriteDevice(Option<String>),
     Log(Option<String>),

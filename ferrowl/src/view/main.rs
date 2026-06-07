@@ -22,7 +22,12 @@ pub const COLUMN_COUNT: usize = 11;
 /// Matching is case-insensitive and ignores spaces, so `slaveid`, `slave id`, and
 /// `Slave ID` all resolve to the same column. Returns `None` if nothing matches.
 pub fn column_index(name: &str) -> Option<usize> {
-    let normalize = |s: &str| s.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect::<String>();
+    let normalize = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
     let target = normalize(name);
     TableHeader::header()
         .iter()
@@ -32,7 +37,12 @@ pub fn column_index(name: &str) -> Option<usize> {
 /// Compare two register rows by the given column for `:order`. Both sides are taken from
 /// [`TableEntry::values`] (the displayed strings); numeric when both parse as `f64`,
 /// otherwise case-insensitive lexicographic. `descending` reverses the result.
-pub fn cmp_definitions(a: &Definition, b: &Definition, column: usize, descending: bool) -> std::cmp::Ordering {
+pub fn cmp_definitions(
+    a: &Definition,
+    b: &Definition,
+    column: usize,
+    descending: bool,
+) -> std::cmp::Ordering {
     let va = a.values();
     let vb = b.values();
     let sa = va.get(column).map(String::as_str).unwrap_or_default();
