@@ -1,0 +1,54 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Nightly is required (async_fn_traits, let_chains) and pinned by rust-toolchain.toml.
+      # rust-src gives the extractor a sysroot so std macros (assert!, format!, vec!, …) resolve.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # build-mode manual + a real cargo build: compiles dependencies so proc-macros
+      # (quote!, syn, ferrowl-derive, anyhow, …) expand and the build is traced. Buildless
+      # extraction (the default) cannot expand these and produced the macro-expansion errors.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: manual
+          config: |
+            paths-ignore:
+              - target
+              - "**/examples/**"
+              - "**/tests/**"
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
