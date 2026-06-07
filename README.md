@@ -195,7 +195,7 @@ values = [
 ]
 ```
 
-> [!INFO]
+> [!IMPORTANT]
 > It's possible to create virtual registers using `virtual = true` to store values not accessible over Modbus.
 
 #### Register fields
