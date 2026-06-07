@@ -1,5 +1,4 @@
-use std::fmt::Debug;
-use std::hash::Hash;
+use ferrowl_net::KeyParams;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
@@ -10,7 +9,7 @@ pub enum Client {
 
 pub enum Server<T, L>
 where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
+    T: KeyParams,
     L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
     for<'a> L::CallRefFuture<'a>: Send,
 {
@@ -30,4 +29,13 @@ pub struct ServerHandle {
 pub enum Handle {
     Server(ServerHandle),
     Client(ClientHandle),
+}
+
+impl Handle {
+    pub fn is_finished(&self) -> bool {
+        match self {
+            Handle::Server(h) => h.handle.is_finished(),
+            Handle::Client(h) => h.handle.is_finished(),
+        }
+    }
 }

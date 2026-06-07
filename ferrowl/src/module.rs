@@ -6,22 +6,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ferrowl_mem::{Kind as MemKind, Memory, Range};
-use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation};
+use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation, SlaveKind};
 use ferrowl_reg::{Access, Address, Register};
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
-use crate::config::{AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role, device::{AccessCfg, NamedValue}};
+use crate::config::{
+    AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role,
+    device::{AccessCfg, NamedValue},
+};
 use crate::instance::Instance;
 use crate::instance::config::{ClientConfig, ServerConfig};
 use crate::instance::error::Error;
 use crate::lua::{SimHandle, run_sim};
 
-/// Memory/key id type (the modbus "device" id `T`). A single instance uses one id; memory
-/// is keyed by `Key { id, slave_id }`.
-type Id = u8;
-
-pub type ModuleMemory = Arc<RwLock<Memory<Key<Id>>>>;
+pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKind>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Optional per-module log file, shared into the log/status callbacks; swappable at runtime so
 /// `:log` takes effect on already-running modules.
@@ -31,8 +30,7 @@ pub type FileSink = Arc<Mutex<Option<BufWriter<std::fs::File>>>>;
 /// device), plus its register set, shared memory and ring log.
 pub struct Module {
     name: String,
-    id: Id,
-    instance: Instance<Id>,
+    instance: Instance<SlaveKind>,
     registers: Vec<(String, String, Register, Vec<NamedValue>)>,
     /// Shared operations list — owned here so it can be updated in-place without rebuilding the
     /// network instance (the instance holds a clone of the same Arc).
@@ -53,15 +51,18 @@ pub struct Module {
 impl Module {
     /// Build a module from an instance spec, its device-type config and global timing.
     pub fn new(spec: &ModuleSpec, device: &DeviceConfig, app: &AppConfig) -> Self {
-        let id: Id = 0;
-
-        let mut memory = Memory::<Key<Id>>::default();
+        let mut memory = Memory::<Key<SlaveKind>>::default();
         let mut operations: Vec<Operation> = Vec::new();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
         let mut scripts: Vec<(String, String)> = Vec::new();
 
         for (name, def) in &device.definitions {
-            registers.push((name.clone(), def.comment.clone(), def.register(), def.values.clone()));
+            registers.push((
+                name.clone(),
+                def.comment.clone(),
+                def.register(),
+                def.values.clone(),
+            ));
             if let Some(code) = &def.update
                 && !code.trim().is_empty()
             {
@@ -69,13 +70,15 @@ impl Module {
             }
             if let Some(range) = def.mem_range() {
                 let key = Key {
-                    id,
-                    slave_id: def.slave_id,
+                    id: SlaveKind {
+                        slave_id: def.slave_id,
+                        kind: def.register().kind().clone(),
+                    },
                 };
                 let mem_kind = match def.access {
                     AccessCfg::ReadOnly => MemKind::Read(def.mem_type()),
                     AccessCfg::WriteOnly => MemKind::Write(def.mem_type()),
-                    AccessCfg::ReadWrite => MemKind::Combined(def.mem_type()),
+                    AccessCfg::ReadWrite => MemKind::ReadWrite(def.mem_type()),
                 };
                 memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
                 if def.access != AccessCfg::WriteOnly {
@@ -96,11 +99,10 @@ impl Module {
         open_sink(&file_sink, app.log_file.as_deref(), &spec.name);
 
         let net_config = endpoint_to_config(&spec.endpoint, app);
-        let instance = build_instance(id, spec.role, net_config, operations.clone(), memory.clone());
+        let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
         Self {
             name: spec.name.clone(),
-            id,
             instance,
             registers,
             operations,
@@ -122,10 +124,6 @@ impl Module {
 
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn id(&self) -> Id {
-        self.id
     }
 
     pub fn memory(&self) -> ModuleMemory {
@@ -228,7 +226,6 @@ impl Module {
             .collect();
         self.sim = run_sim(
             self.memory.clone(),
-            self.id,
             registers,
             self.scripts.clone(),
             self.sim_interval,
@@ -266,7 +263,12 @@ impl Module {
 
         self.rebuild_operations().await;
         let net_config = endpoint_to_config(endpoint, app);
-        self.instance = build_instance(self.id, role, net_config, self.operations.clone(), self.memory.clone());
+        self.instance = build_instance(
+            role,
+            net_config,
+            self.operations.clone(),
+            self.memory.clone(),
+        );
         Ok(())
     }
 }
@@ -365,32 +367,27 @@ fn endpoint_to_config(endpoint: &Endpoint, app: &AppConfig) -> NetConfig {
 }
 
 fn build_instance(
-    id: Id,
     role: Role,
     config: NetConfig,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
-) -> Instance<Id> {
+) -> Instance<SlaveKind> {
     match (role, config) {
         (Role::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(ClientConfig {
-            id,
             config: Arc::new(RwLock::new(cfg)),
             operations,
             memory,
         }),
         (Role::Server, NetConfig::Tcp(cfg)) => Instance::with_tcp_server(ServerConfig {
-            id,
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
         (Role::Client, NetConfig::Rtu(cfg)) => Instance::with_rtu_client(ClientConfig {
-            id,
             config: Arc::new(RwLock::new(cfg)),
             operations,
             memory,
         }),
         (Role::Server, NetConfig::Rtu(cfg)) => Instance::with_rtu_server(ServerConfig {
-            id,
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
@@ -400,7 +397,7 @@ fn build_instance(
 #[cfg(test)]
 mod tests {
     use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
-    use ferrowl_net::Key;
+    use ferrowl_net::{Key, SlaveKind};
     use ferrowl_reg::format::{Endian, Resolution};
     use ferrowl_reg::{Access, Address, Format, Kind, RegisterBuilder};
 
@@ -424,14 +421,16 @@ mod tests {
     // Replicates the server `:set`/edit write path + the table decode read path.
     #[test]
     fn ut_server_value_write_roundtrip() {
-        let mut memory: Memory<Key<u8>> = Memory::default();
+        let mut memory: Memory<Key<SlaveKind>> = Memory::default();
         let key = Key {
-            id: 0u8,
-            slave_id: 1u8,
+            id: SlaveKind {
+                slave_id: 1u8,
+                kind: Kind::HoldingRegister,
+            },
         };
         memory.add_ranges(
             key.clone(),
-            &MemKind::Combined(Type::Register),
+            &MemKind::ReadWrite(Type::Register),
             &[Range::new(0, 1)],
         );
 

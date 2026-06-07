@@ -43,23 +43,25 @@ pub struct EditInputDialog {
     // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
-    // Type selection
-    #[focus]
+    // Type selection (hidden for boolean kinds)
+    #[focus(when = { !self.is_boolean_kind() })]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
+    // Static "Boolean" label shown instead of Type selector for Coil/DiscreteInput
+    pub boolean_type: Widget<String, Text>,
     // Number format selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
     // Number endianess selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
     // Number resolution input
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
     // Text alignment selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     // Text length input
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     // Value input
     #[focus]
@@ -102,6 +104,13 @@ pub struct EditedRegister {
 }
 
 impl EditInputDialog {
+    fn is_boolean_kind(&self) -> bool {
+        matches!(
+            self.kind.state.get_value().0,
+            Kind::Coil | Kind::DiscreteInput
+        )
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let Err(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
@@ -109,15 +118,17 @@ impl EditInputDialog {
             return Err(format!("Address: {e}"));
         }
 
-        match self.value_type.state.values()[self.value_type.state.selection()] {
-            ValueType::Number => {
-                if let Err(e) = f64::validate(self.number_resolution.state.input()) {
-                    return Err(format!("Resolution: {e}"));
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    if let Err(e) = f64::validate(self.number_resolution.state.input()) {
+                        return Err(format!("Resolution: {e}"));
+                    }
                 }
-            }
-            ValueType::Text => {
-                if let Err(e) = usize::validate(self.text_width.state.input()) {
-                    return Err(format!("Width: {e}"));
+                ValueType::Text => {
+                    if let Err(e) = usize::validate(self.text_width.state.input()) {
+                        return Err(format!("Width: {e}"));
+                    }
                 }
             }
         }
@@ -210,61 +221,72 @@ impl EditInputDialog {
             &mut self.kind.state,
         );
 
-        StatefulWidget::render(
-            &self.value_type.widget,
-            horizontal_layout[2],
-            buf,
-            &mut self.value_type.state,
-        );
+        if self.is_boolean_kind() {
+            StatefulWidget::render(
+                &self.boolean_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.boolean_type.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.value_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.value_type.state,
+            );
+        }
 
-        match self.value_type.state.values()[self.value_type.state.selection()] {
-            ValueType::Number => {
-                let horizontal_layout: [Rect; 3] = Layout::horizontal([
-                    Constraint::Min(1),
-                    Constraint::Min(1),
-                    Constraint::Min(1),
-                ])
-                .areas(vertical_layout[vertical_index]);
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    let horizontal_layout: [Rect; 3] = Layout::horizontal([
+                        Constraint::Min(1),
+                        Constraint::Min(1),
+                        Constraint::Min(1),
+                    ])
+                    .areas(vertical_layout[vertical_index]);
 
-                StatefulWidget::render(
-                    &self.number_format.widget,
-                    horizontal_layout[0],
-                    buf,
-                    &mut self.number_format.state,
-                );
+                    StatefulWidget::render(
+                        &self.number_format.widget,
+                        horizontal_layout[0],
+                        buf,
+                        &mut self.number_format.state,
+                    );
 
-                StatefulWidget::render(
-                    &self.number_endian.widget,
-                    horizontal_layout[1],
-                    buf,
-                    &mut self.number_endian.state,
-                );
+                    StatefulWidget::render(
+                        &self.number_endian.widget,
+                        horizontal_layout[1],
+                        buf,
+                        &mut self.number_endian.state,
+                    );
 
-                StatefulWidget::render(
-                    &self.number_resolution.widget,
-                    horizontal_layout[2],
-                    buf,
-                    &mut self.number_resolution.state,
-                );
-            }
-            ValueType::Text => {
-                let horizontal_layout: [Rect; 2] =
-                    Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
-                        .areas(vertical_layout[vertical_index]);
+                    StatefulWidget::render(
+                        &self.number_resolution.widget,
+                        horizontal_layout[2],
+                        buf,
+                        &mut self.number_resolution.state,
+                    );
+                }
+                ValueType::Text => {
+                    let horizontal_layout: [Rect; 2] =
+                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+                            .areas(vertical_layout[vertical_index]);
 
-                StatefulWidget::render(
-                    &self.text_alignment.widget,
-                    horizontal_layout[0],
-                    buf,
-                    &mut self.text_alignment.state,
-                );
+                    StatefulWidget::render(
+                        &self.text_alignment.widget,
+                        horizontal_layout[0],
+                        buf,
+                        &mut self.text_alignment.state,
+                    );
 
-                StatefulWidget::render(
-                    &self.text_width.widget,
-                    horizontal_layout[1],
-                    buf,
-                    &mut self.text_width.state,
-                );
+                    StatefulWidget::render(
+                        &self.text_width.widget,
+                        horizontal_layout[1],
+                        buf,
+                        &mut self.text_width.state,
+                    );
+                }
             }
         }
         vertical_index += 1;
@@ -414,7 +436,10 @@ impl EditInputDialog {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Kind".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -433,6 +458,19 @@ impl EditInputDialog {
                         horizontal: 1,
                     })
                     .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .boolean_type(Widget {
+                state: "Boolean".to_string(),
+                widget: TextBuilder::default()
+                    .title(Some(("Type", HorizontalAlignment::Right).into()))
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(text_style.clone())
                     .build()
                     .unwrap(),
             })
@@ -725,30 +763,34 @@ impl EditInputDialog {
             .parse::<u16>()
             .map_err(|_| "Address must be a number.".to_string())?;
 
-        let format = match self.value_type.state.get_value() {
-            ValueType::Number => {
-                let selected = self.number_format.state.get_value();
-                let endian = self.number_endian.state.get_value().0;
-                let resolution = Resolution(
-                    self.number_resolution
+        let format = if self.is_boolean_kind() {
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0)))
+        } else {
+            match self.value_type.state.get_value() {
+                ValueType::Number => {
+                    let selected = self.number_format.state.get_value();
+                    let endian = self.number_endian.state.get_value().0;
+                    let resolution = Resolution(
+                        self.number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?,
+                    );
+                    with_endian_resolution(&selected.0, endian, resolution)
+                }
+                ValueType::Text => {
+                    let alignment = self.text_alignment.state.get_value().0;
+                    let width = self
+                        .text_width
                         .state
                         .input()
                         .trim()
-                        .parse::<f64>()
-                        .map_err(|_| "Resolution must be a number.".to_string())?,
-                );
-                with_endian_resolution(&selected.0, endian, resolution)
-            }
-            ValueType::Text => {
-                let alignment = self.text_alignment.state.get_value().0;
-                let width = self
-                    .text_width
-                    .state
-                    .input()
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| "Width must be a number.".to_string())?;
-                RegisterFormat::Ascii((alignment, Width(width)))
+                        .parse::<usize>()
+                        .map_err(|_| "Width must be a number.".to_string())?;
+                    RegisterFormat::Ascii((alignment, Width(width)))
+                }
             }
         };
 
@@ -842,6 +884,8 @@ impl EditInputDialog {
     pub fn handle_space(&mut self) {
         if let EditInputDialogFocus::AddButton = self.focus {
             self.open_add_dialog();
+        } else {
+            self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         }
     }
 }

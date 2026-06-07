@@ -696,6 +696,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ferrowl-mem",
+ "ferrowl-reg",
  "itertools",
  "serde",
  "tokio",

@@ -61,9 +61,7 @@ impl Slice {
                 .skip(range.start - self.range.start)
                 .take(range.length())
                 .fold_while(true, |_, mem| match mem {
-                    Value::Write(t, _) | Value::Combined(t, _) | Value::Separated(t, _)
-                        if t == ty =>
-                    {
+                    Value::Write(t, _) | Value::ReadWrite(t, _) if t == ty => {
                         itertools::FoldWhile::Continue(true)
                     }
                     _ => itertools::FoldWhile::Done(false),
@@ -87,8 +85,7 @@ impl Slice {
             {
                 match mem {
                     Value::Write(_, w) => *w = *val,
-                    Value::Combined(_, rw) => *rw = *val,
-                    Value::Separated(_, (_, w)) => *w = *val,
+                    Value::ReadWrite(_, rw) => *rw = *val,
                     Value::Read(_, _) => {}
                 };
             }
@@ -111,8 +108,7 @@ impl Slice {
             {
                 match mem {
                     Value::Write(_, w) => *w = *val,
-                    Value::Combined(_, rw) => *rw = *val,
-                    Value::Separated(_, (_, w)) => *w = *val,
+                    Value::ReadWrite(_, rw) => *rw = *val,
                     Value::Read(_, r) => *r = *val,
                 };
             }
@@ -131,8 +127,7 @@ impl Slice {
                     if let Some(mut values) = init {
                         match val {
                             Value::Read(_, r) => values.push(*r),
-                            Value::Combined(_, rw) => values.push(*rw),
-                            Value::Separated(_, (r, _)) => values.push(*r),
+                            Value::ReadWrite(_, rw) => values.push(*rw),
                             Value::Write(_, _) => return itertools::FoldWhile::Done(None),
                         };
                         itertools::FoldWhile::Continue(Some(values))
@@ -157,8 +152,7 @@ impl Slice {
                     if let Some(mut values) = init {
                         match val {
                             Value::Read(_, r) => values.push(*r),
-                            Value::Combined(_, rw) => values.push(*rw),
-                            Value::Separated(_, (r, _)) => values.push(*r),
+                            Value::ReadWrite(_, rw) => values.push(*rw),
                             Value::Write(_, r) => values.push(*r),
                         };
                         itertools::FoldWhile::Continue(Some(values))
@@ -180,9 +174,7 @@ impl Slice {
                 .skip(range.start - self.range.start)
                 .take(range.length())
                 .fold_while(true, |_, mem| match mem {
-                    Value::Read(t, _) | Value::Combined(t, _) | Value::Separated(t, _)
-                        if t == ty =>
-                    {
+                    Value::Read(t, _) | Value::ReadWrite(t, _) if t == ty => {
                         itertools::FoldWhile::Continue(true)
                     }
                     _ => itertools::FoldWhile::Done(false),
@@ -216,20 +208,12 @@ mod tests {
             assert_eq!(*value, Value::Write(Type::Coil, 0));
         }
 
-        let slice = Slice::from_range(&Kind::Combined(Type::Coil), Range::new(123, 45));
+        let slice = Slice::from_range(&Kind::ReadWrite(Type::Coil), Range::new(123, 45));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for value in slice.buffer.iter() {
-            assert_eq!(*value, Value::Combined(Type::Coil, 0));
-        }
-
-        let slice = Slice::from_range(&Kind::Separated(Type::Coil), Range::new(123, 45));
-        assert_eq!(slice.buffer.len(), 45);
-        assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 168);
-        for value in slice.buffer.iter() {
-            assert_eq!(*value, Value::Separated(Type::Coil, (0, 0)));
+            assert_eq!(*value, Value::ReadWrite(Type::Coil, 0));
         }
     }
 
@@ -256,22 +240,12 @@ mod tests {
 
         let values: Vec<u16> = (1..46).collect();
         let slice =
-            Slice::from_value_range(&Kind::Combined(Type::Coil), ValueRange::new(123, &values));
+            Slice::from_value_range(&Kind::ReadWrite(Type::Coil), ValueRange::new(123, &values));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for (v1, v2) in slice.buffer.iter().zip(values) {
-            assert_eq!(*v1, Value::Combined(Type::Coil, v2));
-        }
-
-        let values: Vec<u16> = (1..46).collect();
-        let slice =
-            Slice::from_value_range(&Kind::Separated(Type::Coil), ValueRange::new(123, &values));
-        assert_eq!(slice.buffer.len(), 45);
-        assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 168);
-        for (v1, v2) in slice.buffer.iter().zip(values) {
-            assert_eq!(*v1, Value::Separated(Type::Coil, (v2, v2)));
+            assert_eq!(*v1, Value::ReadWrite(Type::Coil, v2));
         }
     }
 
@@ -294,42 +268,25 @@ mod tests {
             }
         }
 
-        assert!(!slice.extend(&Kind::Separated(Type::Coil), &Range::new(240, 10)));
-        assert_eq!(slice.buffer.len(), 77);
-        assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 200);
-
-        assert!(!slice.extend(&Kind::Separated(Type::Coil), &Range::new(0, 10)));
-        assert_eq!(slice.buffer.len(), 77);
-        assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 200);
-
-        assert!(slice.extend(&Kind::Separated(Type::Coil), &Range::new(200, 50)));
-        assert_eq!(slice.buffer.len(), 127);
-        assert_eq!(slice.range.start, 123);
-        assert_eq!(slice.range.end, 250);
-
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(250, 50)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(200, 50)));
         assert_eq!(slice.buffer.len(), 177);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 300);
 
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(0, 123)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(0, 123)));
         assert_eq!(slice.buffer.len(), 300);
         assert_eq!(slice.range.start, 0);
         assert_eq!(slice.range.end, 300);
 
         for (idx, value) in slice.buffer.iter().enumerate() {
             if idx < 123 {
-                assert_eq!(*value, Value::Combined(Type::Coil, 0));
+                assert_eq!(*value, Value::ReadWrite(Type::Coil, 0));
             } else if idx < 168 {
                 assert_eq!(*value, Value::Read(Type::Coil, 0));
             } else if idx < 200 {
                 assert_eq!(*value, Value::Write(Type::Coil, 0));
             } else if idx < 250 {
-                assert_eq!(*value, Value::Separated(Type::Coil, (0, 0)));
-            } else if idx < 300 {
-                assert_eq!(*value, Value::Combined(Type::Coil, 0));
+                assert_eq!(*value, Value::ReadWrite(Type::Coil, 0));
             } else {
                 unreachable!();
             }
@@ -340,8 +297,8 @@ mod tests {
     fn ut_slice_writable() {
         let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(123, 45));
         assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&Kind::Separated(Type::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(250, 50)));
+        assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(250, 50)));
 
         assert!(!slice.writable(&Type::Coil, &Range::new(130, 10)));
         assert!(slice.writable(&Type::Coil, &Range::new(175, 10)));
@@ -353,8 +310,8 @@ mod tests {
     fn ut_slice_write() {
         let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(123, 45));
         assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&Kind::Separated(Type::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(250, 50)));
+        assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(250, 50)));
 
         let values: Vec<u16> = (1..21).collect();
         assert!(slice.write(&Range::new(175, 20), &values));
@@ -365,9 +322,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, w) => assert_eq!(w, v2),
-                Value::Separated(_, (_, w)) => assert_eq!(w, v2),
                 Value::Read(_, _) => unreachable!(),
-                Value::Combined(_, rw) => assert_eq!(rw, v2),
+                Value::ReadWrite(_, rw) => assert_eq!(rw, v2),
             };
         }
 
@@ -380,9 +336,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, w) => assert_eq!(w, v2),
-                Value::Separated(_, (_, w)) => assert_eq!(w, v2),
                 Value::Read(_, _) => unreachable!(),
-                Value::Combined(_, rw) => assert_eq!(rw, v2),
+                Value::ReadWrite(_, rw) => assert_eq!(rw, v2),
             };
         }
 
@@ -407,8 +362,8 @@ mod tests {
     fn ut_slice_readable() {
         let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(123, 45));
         assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&Kind::Separated(Type::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(250, 50)));
+        assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(250, 50)));
 
         assert!(slice.readable(&Type::Coil, &Range::new(130, 10)));
         assert!(!slice.readable(&Type::Coil, &Range::new(175, 10)));
@@ -420,8 +375,8 @@ mod tests {
     fn ut_slice_read() {
         let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(123, 45));
         assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&Kind::Separated(Type::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&Kind::Combined(Type::Coil), &Range::new(250, 50)));
+        assert!(slice.extend(&Kind::Write(Type::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(250, 50)));
 
         let values: Vec<u16> = (1..21).collect();
         for (v1, v2) in slice.buffer[130 - slice.range.start..]
@@ -430,9 +385,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, _) => unreachable!(),
-                Value::Separated(_, (r, _)) => *r = v2,
                 Value::Read(_, r) => *r = v2,
-                Value::Combined(_, rw) => *rw = v2,
+                Value::ReadWrite(_, rw) => *rw = v2,
             };
         }
 
@@ -448,9 +402,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, _) => unreachable!(),
-                Value::Separated(_, (r, _)) => assert_eq!(r, v2),
                 Value::Read(_, r) => assert_eq!(r, v2),
-                Value::Combined(_, rw) => assert_eq!(rw, v2),
+                Value::ReadWrite(_, rw) => assert_eq!(rw, v2),
             };
         }
 
@@ -461,9 +414,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, _) => unreachable!(),
-                Value::Separated(_, (r, _)) => *r = v2,
                 Value::Read(_, r) => *r = v2,
-                Value::Combined(_, rw) => *rw = v2,
+                Value::ReadWrite(_, rw) => *rw = v2,
             };
         }
 
@@ -479,9 +431,8 @@ mod tests {
         {
             match v1 {
                 Value::Write(_, _) => unreachable!(),
-                Value::Separated(_, (r, _)) => assert_eq!(r, v2),
                 Value::Read(_, r) => assert_eq!(r, v2),
-                Value::Combined(_, rw) => assert_eq!(rw, v2),
+                Value::ReadWrite(_, rw) => assert_eq!(rw, v2),
             };
         }
 

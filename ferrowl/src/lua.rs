@@ -10,7 +10,7 @@ use std::time::Duration;
 use ferrowl_lua::module::{Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_mem::{Range, Type};
-use ferrowl_net::Key;
+use ferrowl_net::{Key, SlaveKind};
 use ferrowl_reg::{Address, Register, Value};
 
 use crate::module::{FileSink, ModuleLog, ModuleMemory, append};
@@ -20,17 +20,12 @@ use crate::module::{FileSink, ModuleLog, ModuleMemory, append};
 /// off a runtime worker thread).
 pub struct RegisterBridge {
     memory: ModuleMemory,
-    id: u8,
     registers: HashMap<String, Register>,
 }
 
 impl RegisterBridge {
-    pub fn new(memory: ModuleMemory, id: u8, registers: HashMap<String, Register>) -> Self {
-        Self {
-            memory,
-            id,
-            registers,
-        }
+    pub fn new(memory: ModuleMemory, registers: HashMap<String, Register>) -> Self {
+        Self { memory, registers }
     }
 
     fn lookup(&self, name: &str) -> Result<(&Register, u16)> {
@@ -52,8 +47,10 @@ impl Read for RegisterBridge {
         let (register, addr) = self.lookup(&name)?;
         let width = register.format().width();
         let key = Key {
-            id: self.id,
-            slave_id: *register.slave_id(),
+            id: SlaveKind {
+                slave_id: *register.slave_id(),
+                kind: register.kind().clone(),
+            },
         };
         let raw = self
             .memory
@@ -74,8 +71,10 @@ impl Write for RegisterBridge {
             .encode(&value)
             .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?;
         let key = Key {
-            id: self.id,
-            slave_id: *register.slave_id(),
+            id: SlaveKind {
+                slave_id: *register.slave_id(),
+                kind: register.kind().clone(),
+            },
         };
         let ok = self.memory.blocking_write().write_unchecked(
             key,
@@ -148,7 +147,6 @@ impl Drop for SimHandle {
 #[allow(clippy::too_many_arguments)]
 pub fn run_sim(
     memory: ModuleMemory,
-    id: u8,
     registers: HashMap<String, Register>,
     scripts: Vec<(String, String)>,
     interval: Duration,
@@ -162,7 +160,7 @@ pub fn run_sim(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, id, registers);
+        let bridge = RegisterBridge::new(memory, registers);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -220,6 +218,7 @@ fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
 mod tests {
     use super::*;
     use ferrowl_mem::{Kind as MemKind, Memory};
+    use ferrowl_net::SlaveKind;
     use ferrowl_reg::format::{Endian, Resolution};
     use ferrowl_reg::{Access, Format, Kind, RegisterBuilder};
     use tokio::sync::RwLock;
@@ -237,12 +236,18 @@ mod tests {
 
     /// Memory holding two U16 registers (setpoint@0, power@1), both read/write.
     fn evse_memory() -> ModuleMemory {
-        let mut memory: Memory<Key<u8>> = Memory::default();
+        let mut memory: Memory<Key<SlaveKind>> = Memory::default();
         let key = Key {
-            id: 0u8,
-            slave_id: 1u8,
+            id: SlaveKind {
+                slave_id: 1u8,
+                kind: Kind::HoldingRegister,
+            },
         };
-        memory.add_ranges(key, &MemKind::Combined(Type::Register), &[Range::new(0, 2)]);
+        memory.add_ranges(
+            key,
+            &MemKind::ReadWrite(Type::Register),
+            &[Range::new(0, 2)],
+        );
         Arc::new(RwLock::new(memory))
     }
 
@@ -255,7 +260,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_write_then_read() {
-        let bridge = RegisterBridge::new(evse_memory(), 0, evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), evse_registers());
         bridge
             .write("setpoint".to_string(), "100".to_string())
             .expect("write");
@@ -267,7 +272,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_unknown_register_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), 0, evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), evse_registers());
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), "1".to_string()).is_err());
     }
@@ -276,7 +281,7 @@ mod tests {
     #[test]
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
-        let bridge = RegisterBridge::new(memory.clone(), 0, evse_registers());
+        let bridge = RegisterBridge::new(memory.clone(), evse_registers());
         bridge
             .write("setpoint".to_string(), "42".to_string())
             .expect("seed setpoint");
@@ -298,7 +303,12 @@ mod tests {
         let power = memory
             .blocking_read()
             .read(
-                Key { id: 0, slave_id: 1 },
+                Key {
+                    id: SlaveKind {
+                        slave_id: 1,
+                        kind: Kind::HoldingRegister,
+                    },
+                },
                 &Type::Register,
                 &Range::new(1, 1),
             )

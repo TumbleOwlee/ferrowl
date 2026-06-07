@@ -2,10 +2,11 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Kind {
     Coil,
     DiscreteInput,
+    #[default]
     HoldingRegister,
     InputRegister,
 }

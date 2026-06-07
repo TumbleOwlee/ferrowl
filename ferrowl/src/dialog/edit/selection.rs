@@ -301,13 +301,13 @@ where
     #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     // Value selection
-    #[focus]
+    #[focus(when = {!self.value.state.values().is_empty()})]
     pub value: Widget<SelectionState<V>, Selection<V>>,
     // Add button
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
     // Delete button
-    #[focus]
+    #[focus(when = {!self.value.state.values().is_empty()})]
     pub delete_button: Widget<ButtonState, Button>,
     // Lua simulation script (optional multiline)
     #[focus]
@@ -649,7 +649,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Address".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -668,7 +671,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Kind".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -1115,15 +1121,19 @@ impl EditSelectionDialog<NamedValue> {
         match self.focus {
             EditSelectionDialogFocus::AddButton => self.open_add_dialog(),
             EditSelectionDialogFocus::DeleteButton => self.delete_selected(),
-            _ => {}
+            _ => {
+                self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+            }
         }
     }
 
     pub fn delete_selected(&mut self) {
         let idx = self.value.state.selection();
         let vals = self.value.state.values_mut();
+        let mut is_empty = vals.is_empty();
         if !vals.is_empty() {
             vals.remove(idx);
+            is_empty = vals.is_empty();
             if !vals.is_empty() {
                 let new_idx = if idx >= vals.len() {
                     vals.len() - 1
@@ -1134,6 +1144,10 @@ impl EditSelectionDialog<NamedValue> {
             } else {
                 self.value.state.set_selection(0);
             }
+        }
+
+        if is_empty {
+            self.focus_previous();
         }
     }
 }

@@ -172,7 +172,7 @@ where
                 self.move_to_left();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('G')) => {
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('G')) => {
                 self.move_to_bottom();
                 EventResult::Consumed
             }

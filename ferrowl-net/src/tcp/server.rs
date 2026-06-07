@@ -1,38 +1,29 @@
 // Crate
 use crate::tcp::Config;
-use crate::{Error, Key, TcpError};
+use crate::{Error, Key, KeyParams, TcpError};
 
 // Workspace
 use ferrowl_mem::{Memory, Range, Type};
 
 // External
-use std::fmt::Debug;
 use std::future;
-use std::hash::Hash;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_modbus::Request;
+use tokio_modbus::{FunctionCode, Request};
 use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 use tokio_modbus::server::tcp::{Server as TcpServer, accept_tcp_connection};
 
-pub struct ServerBuilder<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
-    id: T,
+pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     memory: Arc<RwLock<Memory<Key<T>>>>,
 }
 
-impl<T> ServerBuilder<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
-    pub fn new(id: T, config: Arc<RwLock<Config>>, memory: Arc<RwLock<Memory<Key<T>>>>) -> Self {
-        Self { id, config, memory }
+impl<T: KeyParams> ServerBuilder<T> {
+    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<RwLock<Memory<Key<T>>>>) -> Self {
+        Self { config, memory }
     }
 
     pub async fn spawn<L>(&self, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
@@ -41,33 +32,31 @@ where
         for<'a> L::CallRefFuture<'a>: Send,
     {
         let guard = self.config.read().await;
-        Server::run(self.id.clone(), &guard, self.memory.clone(), log).await
+        Server::run(&guard, self.memory.clone(), log).await
     }
 }
 
 pub struct Server<T, L>
 where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
+    T: KeyParams,
     L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
     for<'a> L::CallRefFuture<'a>: Send,
 {
-    id: T,
     memory: Arc<RwLock<Memory<Key<T>>>>,
     log: L,
 }
 
 impl<T, L> Server<T, L>
 where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
+    T: KeyParams,
     L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
     for<'a> L::CallRefFuture<'a>: Send,
 {
-    fn new(id: T, memory: Arc<RwLock<Memory<Key<T>>>>, log: L) -> Self {
-        Self { id, memory, log }
+    fn new(memory: Arc<RwLock<Memory<Key<T>>>>, log: L) -> Self {
+        Self { memory, log }
     }
 
     async fn run(
-        id: T,
         config: &Config,
         memory: Arc<RwLock<Memory<Key<T>>>>,
         log: L,
@@ -80,10 +69,9 @@ where
                 let server = TcpServer::new(listener);
                 let memory = memory.clone();
                 let log = log.clone();
-                let id = id.clone();
                 Ok(tokio::task::spawn(async move {
                     let new_request_handler = |_socket_addr| {
-                        Ok(Some(Server::new(id.clone(), memory.clone(), log.clone())))
+                        Ok(Some(Server::new(memory.clone(), log.clone())))
                     };
                     let on_connected = |stream, socket_addr| async move {
                         accept_tcp_connection(stream, socket_addr, new_request_handler)
@@ -110,7 +98,7 @@ where
 
 impl<T, L> tokio_modbus::server::Service for Server<T, L>
 where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync,
+    T: KeyParams,
     L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
     for<'a> L::CallRefFuture<'a>: Send,
 {
@@ -121,10 +109,6 @@ where
 
     fn call(&self, request: Self::Request) -> Self::Future {
         let SlaveRequest { slave, request } = request;
-        let key = Key::<T> {
-            id: self.id.clone(),
-            slave_id: slave,
-        };
 
         let response = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
@@ -136,6 +120,7 @@ where
                                 addr,
                                 addr + cnt
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadCoils) };
                         let guard = self.memory.read().await;
                         match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                             Some(v) =>
@@ -168,6 +153,7 @@ where
                                 addr,
                                 addr + cnt
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs) };
                         let guard = self.memory.read().await;
                         match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                             Some(v) => {
@@ -198,6 +184,7 @@ where
                                 addr,
                                 addr + cnt
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadInputRegisters) };
                         let guard = self.memory.read().await;
                         match guard.read(
                             key,
@@ -231,6 +218,7 @@ where
                                 addr,
                                 addr + cnt
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadHoldingRegisters) };
                         let guard = self.memory.read().await;
                         match guard.read(
                             key,
@@ -265,6 +253,7 @@ where
                                 addr as usize + values.len(),
                                 values
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleRegisters) };
                         let mut guard = self.memory.write().await;
                         match guard.write(
                             key,
@@ -303,6 +292,7 @@ where
                                 "WriteSingleRegister request received for slave ID {}, address {}, and value {}.",
                                 slave, addr, value
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleRegister) };
                         let mut guard = self.memory.write().await;
                         match guard.write(
                             key,
@@ -333,6 +323,7 @@ where
                                 addr,
                                 addr as usize + values.len(), values
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleCoils) };
                         let mut guard = self.memory.write().await;
                         let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
                         match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
@@ -361,6 +352,7 @@ where
                                 "WriteSingleCoil request received for slave ID {}, address {}, and value {}.",
                                 slave, addr, value
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleCoil) };
                         let mut guard = self.memory.write().await;
                         let val = value as u16;
                         match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &[val]) {
@@ -399,6 +391,7 @@ where
                                 "ReadWriteMultipleRegisrters request received for slave ID {}, read address {}, count {}, write address {}, and values {:?}.",
                                 slave, read_addr, cnt, write_addr, values
                         )).await;
+                        let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters) };
                         let mut guard = self.memory.write().await;
                         let readable = guard.readable(
                             &key,

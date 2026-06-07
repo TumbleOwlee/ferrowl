@@ -45,42 +45,31 @@ where
                             match kind {
                                 Kind::Read(t2) if *t1 == *t2 => {}
                                 Kind::Write(t2) if *t1 == *t2 => {
-                                    slice.buffer[i] = Value::Separated(*t1, (*v1, 0));
+                                    slice.buffer[i] = Value::ReadWrite(*t1, *v1);
                                 }
-                                Kind::Separated(t2) if *t1 == *t2 => {}
                                 _ => {
-                                    println!("{:?} ; {:?}", slice.buffer[i], kind);
                                     return false;
                                 }
                             }
                         } else if let Value::Write(t1, v1) = &slice.buffer[i] {
                             match kind {
                                 Kind::Read(t2) if *t1 == *t2 => {
-                                    slice.buffer[i] = Value::Separated(*t1, (0, *v1));
+                                    slice.buffer[i] = Value::ReadWrite(*t1, *v1);
                                 }
                                 Kind::Write(t2) if *t1 == *t2 => {}
-                                Kind::Separated(t2) if *t1 == *t2 => {}
                                 _ => {
-                                    println!("{:?} ; {:?}", slice.buffer[i], kind);
                                     return false;
                                 }
                             }
-                        } else if let Value::Combined(t1, _v1) = &slice.buffer[i] {
+                        } else if let Value::ReadWrite(t1, _v1) = &slice.buffer[i] {
                             match kind {
-                                Kind::Combined(t2) if *t1 == *t2 => {}
+                                Kind::ReadWrite(t2) if *t1 == *t2 => {}
                                 _ => {
-                                    println!("{:?} ; {:?}", slice.buffer[i], kind);
                                     return false;
                                 }
                             }
-                        } else if let Value::Separated(t1, _v1) = &slice.buffer[i] {
-                            match kind {
-                                Kind::Separated(t2) if *t1 == *t2 => {}
-                                _ => {
-                                    println!("{:?} ; {:?}", slice.buffer[i], kind);
-                                    return false;
-                                }
-                            }
+                        } else {
+                            return false;
                         }
                     }
                 }
@@ -292,12 +281,8 @@ mod tests {
             Value::Write(Type::Coil, 0)
         );
         assert_eq!(
-            Value::default(&Kind::Combined(Type::Coil)),
-            Value::Combined(Type::Coil, 0)
-        );
-        assert_eq!(
-            Value::default(&Kind::Separated(Type::Coil)),
-            Value::Separated(Type::Coil, (0, 0))
+            Value::default(&Kind::ReadWrite(Type::Coil)),
+            Value::ReadWrite(Type::Coil, 0)
         );
     }
 
@@ -353,7 +338,7 @@ mod tests {
     #[test]
     fn ut_memory_write_read_combined() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
 
         let values: Vec<u16> = vec![10, 20, 30, 40, 50];
         assert!(memory.write(1u8, &Type::Coil, &Range::new(0, 5), &values));
@@ -365,7 +350,7 @@ mod tests {
     #[test]
     fn ut_memory_write_read_partial_range() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Register), &[Range::new(0, 10)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Register), &[Range::new(0, 10)]);
 
         let values: Vec<u16> = vec![1, 2, 3];
         assert!(memory.write(1u8, &Type::Register, &Range::new(3, 3), &values));
@@ -377,7 +362,7 @@ mod tests {
     #[test]
     fn ut_memory_write_wrong_length() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
 
         let values: Vec<u16> = vec![1, 2, 3]; // length 3, range length 5
         assert!(!memory.write(1u8, &Type::Coil, &Range::new(0, 5), &values));
@@ -386,7 +371,7 @@ mod tests {
     #[test]
     fn ut_memory_write_unknown_key() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
 
         let values: Vec<u16> = vec![1, 2, 3, 4, 5];
         assert!(!memory.write(99u8, &Type::Coil, &Range::new(0, 5), &values));
@@ -403,7 +388,7 @@ mod tests {
     #[test]
     fn ut_memory_writable_wrong_type() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Coil), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
 
         assert!(!memory.writable(&1u8, &Type::Register, &Range::new(0, 5)));
     }
@@ -411,7 +396,7 @@ mod tests {
     #[test]
     fn ut_memory_readable_wrong_type() {
         let mut memory: Memory<u8> = Memory::default();
-        memory.add_ranges(1u8, &Kind::Combined(Type::Register), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Register), &[Range::new(0, 5)]);
 
         assert!(!memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
     }

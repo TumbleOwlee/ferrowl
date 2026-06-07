@@ -4,6 +4,7 @@ pub mod rtu;
 pub mod tcp;
 
 use ferrowl_mem::Range;
+use ferrowl_reg::Kind;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use tokio_modbus::ExceptionCode;
@@ -22,27 +23,43 @@ pub struct Operation {
     pub range: Range,
 }
 
-#[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
-pub struct Key<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync,
-{
-    pub id: T,
-    pub slave_id: SlaveId,
+pub trait KeyParams: Hash + Eq + Clone + Default + Debug + Send + Sync + 'static {
+    fn from_slave_fn(slave_id: SlaveId, fn_code: FunctionCode) -> Self;
 }
 
-impl<T> Key<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync,
-{
-    pub fn new(id: T, slave_id: SlaveId) -> Self {
-        Self { id, slave_id }
-    }
+#[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
+pub struct Key<T: KeyParams> {
+    pub id: T,
+}
 
-    pub fn create(slave_id: SlaveId) -> Self {
+impl<T: KeyParams> Key<T> {
+    pub fn new(id: T) -> Self {
+        Self { id }
+    }
+}
+
+/// Default concrete key params: slave address + register kind.
+#[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
+pub struct SlaveKind {
+    pub slave_id: SlaveId,
+    pub kind: Kind,
+}
+
+impl KeyParams for SlaveKind {
+    fn from_slave_fn(slave_id: SlaveId, fn_code: FunctionCode) -> Self {
         Self {
-            id: T::default(),
             slave_id,
+            kind: match fn_code {
+                FunctionCode::ReadCoils
+                | FunctionCode::WriteSingleCoil
+                | FunctionCode::WriteMultipleCoils => Kind::Coil,
+                FunctionCode::ReadDiscreteInputs => Kind::DiscreteInput,
+                FunctionCode::ReadHoldingRegisters
+                | FunctionCode::WriteSingleRegister
+                | FunctionCode::WriteMultipleRegisters => Kind::HoldingRegister,
+                FunctionCode::ReadInputRegisters => Kind::InputRegister,
+                _ => Kind::HoldingRegister,
+            },
         }
     }
 }
@@ -171,23 +188,22 @@ mod tests {
 
     #[test]
     fn ut_key_new_stores_fields() {
-        let key = Key::new(42u8, 7);
-        assert_eq!(key.id, 42u8);
-        assert_eq!(key.slave_id, 7);
+        let sk = SlaveKind { slave_id: 7, kind: Kind::HoldingRegister };
+        let key = Key::new(sk.clone());
+        assert_eq!(key.id, sk);
     }
 
     #[test]
-    fn ut_key_create_uses_default_id() {
-        let key = Key::<u8>::create(5);
-        assert_eq!(key.id, u8::default());
-        assert_eq!(key.slave_id, 5);
+    fn ut_key_default_is_slave_kind_default() {
+        let key = Key::<SlaveKind>::default();
+        assert_eq!(key.id, SlaveKind::default());
     }
 
     #[test]
-    fn ut_key_default_both_default() {
-        let key = Key::<u8>::default();
-        assert_eq!(key.id, u8::default());
-        assert_eq!(key.slave_id, SlaveId::default());
+    fn ut_slave_kind_from_slave_fn_coil() {
+        let sk = SlaveKind::from_slave_fn(3, FunctionCode::ReadCoils);
+        assert_eq!(sk.slave_id, 3);
+        assert_eq!(sk.kind, Kind::Coil);
     }
 
     #[test]

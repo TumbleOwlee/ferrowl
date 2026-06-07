@@ -11,22 +11,20 @@ pub enum Type {
 pub enum Value {
     Read(Type, u16),
     Write(Type, u16),
-    Combined(Type, u16),
-    Separated(Type, (u16, u16)),
+    ReadWrite(Type, u16),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Read(Type),
     Write(Type),
-    Combined(Type),
-    Separated(Type),
+    ReadWrite(Type),
 }
 
 impl Kind {
     pub fn get_type(&self) -> Type {
         match self {
-            Kind::Read(t) | Kind::Write(t) | Kind::Combined(t) | Kind::Separated(t) => *t,
+            Kind::Read(t) | Kind::Write(t) | Kind::ReadWrite(t) => *t,
         }
     }
 }
@@ -40,8 +38,7 @@ impl Value {
         match kind {
             Kind::Read(t) => Value::Read(*t, init),
             Kind::Write(t) => Value::Write(*t, init),
-            Kind::Combined(t) => Value::Combined(*t, init),
-            Kind::Separated(t) => Value::Separated(*t, (init, init)),
+            Kind::ReadWrite(t) => Value::ReadWrite(*t, init),
         }
     }
 }
@@ -84,8 +81,8 @@ mod tests {
             Value::Write(Type::Coil, 0)
         );
         assert_eq!(
-            Value::default(&Kind::Combined(Type::Coil)),
-            Value::Combined(Type::Coil, 0)
+            Value::default(&Kind::ReadWrite(Type::Coil)),
+            Value::ReadWrite(Type::Coil, 0)
         );
         assert_eq!(
             Value::default(&Kind::Separated(Type::Coil)),
@@ -104,8 +101,8 @@ mod tests {
             Value::Write(Type::Coil, 2)
         );
         assert_eq!(
-            Value::from_u16(&Kind::Combined(Type::Coil), 3),
-            Value::Combined(Type::Coil, 3)
+            Value::from_u16(&Kind::ReadWrite(Type::Coil), 3),
+            Value::ReadWrite(Type::Coil, 3)
         );
         assert_eq!(
             Value::from_u16(&Kind::Separated(Type::Coil), 4),

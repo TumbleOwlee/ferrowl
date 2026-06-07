@@ -1,11 +1,9 @@
 use crate::tcp::Config;
-use crate::{Command, Error, Key, ModbusError, Operation, RunConfig, TcpError};
+use crate::{Command, Error, Key, KeyParams, ModbusError, Operation, RunConfig, TcpError};
 
-use ferrowl_mem::{Memory, Type};
+use ferrowl_mem::Memory;
 use tokio::task::JoinHandle;
 
-use std::fmt::Debug;
-use std::hash::Hash;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,28 +14,19 @@ use tokio_modbus::FunctionCode;
 use tokio_modbus::client::Context;
 use tokio_modbus::prelude::{Client as ModbusClient, Reader, Slave, SlaveContext, Writer};
 
-pub struct ClientBuilder<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
-    id: T,
+pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: Arc<RwLock<Memory<Key<T>>>>,
 }
 
-impl<T> ClientBuilder<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
+impl<T: KeyParams> ClientBuilder<T> {
     pub fn new(
-        id: T,
         config: Arc<RwLock<Config>>,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<RwLock<Memory<Key<T>>>>,
     ) -> Self {
         Self {
-            id,
             config,
             operations,
             memory,
@@ -67,9 +56,8 @@ where
             delay_ms: guard.delay_ms,
             interval_ms: guard.interval_ms,
         };
-        let id = self.id.clone();
         Ok(tokio::task::spawn(async move {
-            client.run(id, operations, memory, receiver, config).await
+            client.run::<T, _, _>(operations, memory, receiver, config).await
         }))
     }
 }
@@ -214,14 +202,13 @@ impl Client {
 
     pub async fn run<T, L, S>(
         mut self,
-        id: T,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<RwLock<Memory<Key<T>>>>,
         mut receiver: Receiver<Command>,
         config: RunConfig<L, S>,
     ) -> Result<(), Error>
     where
-        T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
+        T: KeyParams,
         L: AsyncFn(String) -> () + Send + 'static,
         S: AsyncFn(String) -> () + Send + 'static,
         for<'a> L::CallRefFuture<'a>: Send,
@@ -259,17 +246,7 @@ impl Client {
                     match self.read(&operation, timeout_ms, &log).await {
                         (s, Ok(values)) => {
                             let mut guard = memory.write().await;
-                            let key = Key {
-                                id: id.clone(),
-                                slave_id: operation.slave_id,
-                            };
-                            let ty = if fc == FunctionCode::ReadInputRegisters
-                                || fc == FunctionCode::ReadHoldingRegisters
-                            {
-                                Type::Register
-                            } else {
-                                Type::Coil
-                            };
+                            let key = Key { id: T::from_slave_fn(operation.slave_id, fc) };
                             if !guard.write_unchecked(key, &range, &values) {
                                 log(format!("{s} Failed because of failing memory update for [{start}, {end})."))
                                     .await;

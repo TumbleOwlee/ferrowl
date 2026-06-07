@@ -8,25 +8,17 @@ use config::{ClientConfig, ServerConfig};
 use error::{Error, InstanceError};
 use handle::Handle;
 
-use std::fmt::Debug;
-use std::hash::Hash;
+use ferrowl_net::KeyParams;
 
-pub struct Instance<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
+pub struct Instance<T: KeyParams> {
     builder: Builder<T>,
     handle: Option<Handle>,
 }
 
-impl<T> Instance<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
+impl<T: KeyParams> Instance<T> {
     pub fn with_tcp_client(config: ClientConfig<T, ferrowl_net::tcp::Config>) -> Self {
         Self {
             builder: Builder::TcpClient(ferrowl_net::tcp::ClientBuilder::new(
-                config.id,
                 config.config,
                 config.operations,
                 config.memory,
@@ -38,7 +30,6 @@ where
     pub fn with_rtu_client(config: ClientConfig<T, ferrowl_net::rtu::Config>) -> Self {
         Self {
             builder: Builder::RtuClient(ferrowl_net::rtu::ClientBuilder::new(
-                config.id,
                 config.config,
                 config.operations,
                 config.memory,
@@ -50,7 +41,6 @@ where
     pub fn with_tcp_server(config: ServerConfig<T, ferrowl_net::tcp::Config>) -> Self {
         Self {
             builder: Builder::TcpServer(ferrowl_net::tcp::ServerBuilder::new(
-                config.id,
                 config.config,
                 config.memory,
             )),
@@ -61,7 +51,6 @@ where
     pub fn with_rtu_server(config: ServerConfig<T, ferrowl_net::rtu::Config>) -> Self {
         Self {
             builder: Builder::RtuServer(ferrowl_net::rtu::ServerBuilder::new(
-                config.id,
                 config.config,
                 config.memory,
             )),
@@ -76,8 +65,10 @@ where
         for<'a> L::CallRefFuture<'a>: Send,
         for<'a> S::CallRefFuture<'a>: Send,
     {
-        if self.handle.is_some() {
-            return Err(InstanceError::AlreadyActive.into());
+        if let Some(h) = &self.handle {
+            if !h.is_finished() {
+                return Err(InstanceError::AlreadyActive.into());
+            }
         }
 
         match &self.builder {
@@ -134,6 +125,10 @@ where
     pub async fn stop(&mut self) -> Result<(), Error> {
         if self.handle.is_none() {
             return Err(InstanceError::NotRunning.into());
+        }
+
+        if let Ok(_) = self.send_command(ferrowl_net::Command::Terminate).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
         let handle = self.handle.take();

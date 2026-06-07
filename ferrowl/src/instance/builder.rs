@@ -1,11 +1,6 @@
-use ferrowl_net::*;
-use std::fmt::Debug;
-use std::hash::Hash;
+use ferrowl_net::{KeyParams, tcp, rtu};
 
-pub enum Builder<T>
-where
-    T: Hash + Debug + PartialEq + Eq + Clone + Default + Send + Sync + 'static,
-{
+pub enum Builder<T: KeyParams> {
     TcpClient(tcp::ClientBuilder<T>),
     TcpServer(tcp::ServerBuilder<T>),
     RtuClient(rtu::ClientBuilder<T>),

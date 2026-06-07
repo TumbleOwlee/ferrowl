@@ -4,7 +4,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_log::Log;
 use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
-use ferrowl_net::{Command, Key};
+use ferrowl_net::{Command, Key, SlaveKind};
 use ferrowl_reg::{Access, Address, Kind, Register};
 use ferrowl_ui::traits::HandleEvents;
 use ferrowl_ui::{AlternateScreen, COLOR_SCHEME};
@@ -219,12 +219,11 @@ impl App {
         let follow = self.focus != Focus::Log;
 
         // Clone shared handles + current rows so no `self.tabs` borrow is held across awaits.
-        let (log, memory, id, defs, virtual_values) = {
+        let (log, memory, defs, virtual_values) = {
             let tab = &self.tabs[active];
             (
                 tab.module.log(),
                 tab.module.memory(),
-                tab.module.id(),
                 tab.table.definitions().to_vec(),
                 tab.module.virtual_values(),
             )
@@ -237,7 +236,7 @@ impl App {
         let updated = {
             let guard = memory.read().await;
             defs.into_iter()
-                .map(|d| decode_definition(d, &guard, id, &virtual_values))
+                .map(|d| decode_definition(d, &guard, &virtual_values))
                 .collect::<Vec<_>>()
         };
 
@@ -355,7 +354,8 @@ impl App {
             if let Some(tab) = self.tabs.get(self.active) {
                 if let Some(idx) = tab.table.selected_index() {
                     let original = tab.table.definitions()[idx].name.clone();
-                    if edited.name != original && tab.device.definitions.contains_key(&edited.name) {
+                    if edited.name != original && tab.device.definitions.contains_key(&edited.name)
+                    {
                         let msg = format!("Name '{}' already in use", edited.name);
                         match &mut self.overlay {
                             Some(Overlay::Edit(d)) => d.error.state = msg,
@@ -483,13 +483,15 @@ impl App {
                     let kind = match edited.register.access() {
                         Access::ReadOnly => MemKind::Read(ty),
                         Access::WriteOnly => MemKind::Write(ty),
-                        Access::ReadWrite => MemKind::Combined(ty),
+                        Access::ReadWrite => MemKind::ReadWrite(ty),
                     };
                     Some((
                         tab.module.memory(),
                         Key {
-                            id: tab.module.id(),
-                            slave_id: *edited.register.slave_id(),
+                            id: SlaveKind {
+                                slave_id: *edited.register.slave_id(),
+                                kind: edited.register.kind().clone(),
+                            },
                         },
                         kind,
                         Range::new(*addr as usize, edited.register.format().width()),
@@ -506,7 +508,11 @@ impl App {
                         def.values = nv.clone();
                     }
                     if let Some(script) = &edited.update {
-                        def.update = if script.is_empty() { None } else { Some(script.clone()) };
+                        def.update = if script.is_empty() {
+                            None
+                        } else {
+                            Some(script.clone())
+                        };
                     }
                 }
                 if edited.name != original_name {
@@ -649,6 +655,11 @@ impl App {
                 self.pending_g = true;
                 self.forward_nav(modifiers, code); // `g` still scrolls to top in the table
             }
+            (KeyModifiers::SHIFT, KeyCode::Char('g'))
+            | (KeyModifiers::NONE, KeyCode::Char('G'))
+            | (KeyModifiers::SHIFT, KeyCode::Char('G')) => {
+                self.forward_nav(modifiers, code); // `g` still scrolls to top in the table
+            }
             _ => self.forward_nav(modifiers, code),
         }
         false
@@ -701,12 +712,15 @@ impl App {
 
     async fn reload_module(&mut self) {
         let active = self.active;
-        let Some(tab) = self.tabs.get(active) else { return };
+        let Some(tab) = self.tabs.get(active) else {
+            return;
+        };
         let path = tab.spec.device.clone();
         let device = match crate::config::load_device(&path) {
             Ok(d) => d,
             Err(e) => {
-                self.log_active(format!(":reload failed to load '{path}': {e}")).await;
+                self.log_active(format!(":reload failed to load '{path}': {e}"))
+                    .await;
                 return;
             }
         };
@@ -891,16 +905,18 @@ impl App {
 
         match role {
             Role::Server => {
-                let (memory, id) = {
+                let memory = {
                     let tab = &self.tabs[self.active];
-                    (tab.module.memory(), tab.module.id())
+                    tab.module.memory()
                 };
                 let ok = {
                     let mut guard = memory.write().await;
                     guard.write_unchecked(
                         Key {
-                            id,
-                            slave_id: slave,
+                            id: SlaveKind {
+                                slave_id: slave,
+                                kind: register.kind().clone(),
+                            },
                         },
                         &Range::new(addr as usize, raw.len()),
                         &raw,
@@ -987,8 +1003,7 @@ fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Comm
 /// Decode one register's live value from the module memory snapshot.
 fn decode_definition(
     mut d: Definition,
-    memory: &Memory<Key<u8>>,
-    id: u8,
+    memory: &Memory<Key<SlaveKind>>,
     virtual_values: &std::collections::HashMap<String, String>,
 ) -> Definition {
     match d.register.address() {
@@ -999,8 +1014,10 @@ fn decode_definition(
                 Kind::HoldingRegister | Kind::InputRegister => Type::Register,
             };
             let key = Key {
-                id,
-                slave_id: *d.register.slave_id(),
+                id: SlaveKind {
+                    slave_id: *d.register.slave_id(),
+                    kind: d.register.kind().clone(),
+                },
             };
             let raw = memory
                 .read_unchecked(key, &Range::new(*addr as usize, width))
@@ -1176,27 +1193,30 @@ fn render(
 
 fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
     const COLS: &[(&str, &str)] = &[
-        (":q / :qa",      "quit tab / quit all"),
-        (":e / :n",       "edit setup / new tab"),
-        (":l [path]",     "load device config"),
+        (":q / :qa", "quit tab / quit all"),
+        (":e / :n", "edit setup / new tab"),
+        (":l [path]", "load device config"),
         (":start / :stop / :restart", "control module"),
-        (":set <reg> <v>","write register value"),
-        (":w [path]",     "save session"),
-        (":wd [path]",    "save device config"),
-        (":log [file]",   "set log file"),
-        (":reload",       "reload device config"),
-        (":compact",      "toggle compact mode"),
+        (":set <reg> <v>", "write register value"),
+        (":w [path]", "save session"),
+        (":wd [path]", "save device config"),
+        (":log [file]", "set log file"),
+        (":reload", "reload device config"),
+        (":compact", "toggle compact mode"),
     ];
     let popup_w: u16 = 54;
     let popup_h: u16 = COLS.len() as u16 + 2;
     let x = cmd_area.x;
     let y = cmd_area.y.saturating_sub(popup_h);
-    let popup = Rect { x, y, width: popup_w.min(cmd_area.width), height: popup_h };
+    let popup = Rect {
+        x,
+        y,
+        width: popup_w.min(cmd_area.width),
+        height: popup_h,
+    };
 
     ratatui::prelude::Widget::render(Clear, popup, buf);
-    let block = Block::bordered().style(
-        Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
-    );
+    let block = Block::bordered().style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg));
     let inner = block.inner(popup);
     ratatui::prelude::Widget::render(block, popup, buf);
 
