@@ -29,7 +29,9 @@ use crate::dialog::{
 use crate::module::Module;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
-use crate::view::main::{Definition, TableView};
+use crate::view::main::{Definition, TableView, cmp_definitions, column_index};
+use crate::view::main::TableHeader;
+use ferrowl_ui::widgets::Header;
 use crate::view::tabs::render_tabs;
 
 /// How often the UI redraws when no input arrives (drives live value updates).
@@ -113,6 +115,9 @@ pub struct Tab {
     pub device: DeviceConfig,
     pub table: TableView,
     pub module: Module,
+    /// Active table ordering for `:order` — `(column index, descending)`, or `None` for
+    /// device-definition order. Re-applied each `refresh_snapshot` so live columns stay sorted.
+    pub sort: Option<(usize, bool)>,
     log_view: LogView,
 }
 
@@ -140,6 +145,7 @@ impl Tab {
             device,
             table: TableView::new(definitions),
             module,
+            sort: None,
             log_view: new_log_view(),
         }
     }
@@ -224,13 +230,14 @@ impl App {
         let follow = self.focus != Focus::Log;
 
         // Clone shared handles + current rows so no `self.tabs` borrow is held across awaits.
-        let (log, memory, defs, virtual_store) = {
+        let (log, memory, defs, virtual_store, sort) = {
             let tab = &self.tabs[active];
             (
                 tab.module.log(),
                 tab.module.memory(),
                 tab.table.definitions().to_vec(),
                 tab.module.virtual_store(),
+                tab.sort,
             )
         };
 
@@ -239,12 +246,16 @@ impl App {
             guard.peak_n(LOG_SIZE).unwrap_or_default()
         };
         let virtual_values = virtual_store.read().await.clone();
-        let updated = {
+        let mut updated = {
             let guard = memory.read().await;
             defs.into_iter()
                 .map(|d| decode_definition(d, &guard, &virtual_values))
                 .collect::<Vec<_>>()
         };
+        // Re-apply the active ordering so live columns (Value/Raw Value) stay sorted.
+        if let Some((column, descending)) = sort {
+            updated.sort_by(|a, b| cmp_definitions(a, b, column, descending));
+        }
 
         let entries: Vec<LogEntry> = lines
             .into_iter()
@@ -889,6 +900,41 @@ impl App {
         }
     }
 
+    /// Apply (or clear) the active tab's table ordering for `:order`.
+    async fn set_order(&mut self, column: Option<&str>, descending: bool) {
+        let active = self.active;
+        if active >= self.tabs.len() {
+            return;
+        }
+        match column {
+            None => {
+                let original = self.tabs[active]
+                    .module
+                    .registers()
+                    .iter()
+                    .map(|(name, comment, register, values)| {
+                        Definition::new(name.clone(), comment.clone(), register.clone(), values.clone())
+                    })
+                    .collect();
+                let tab = &mut self.tabs[active];
+                tab.sort = None;
+                tab.table.set_definitions(original);
+                self.log_active("Order cleared".to_string()).await;
+            }
+            Some(name) => match column_index(name) {
+                None => self.log_active(format!("Unknown column '{name}'")).await,
+                Some(idx) => {
+                    let tab = &mut self.tabs[active];
+                    tab.sort = Some((idx, descending));
+                    tab.table.sort_definitions(idx, descending);
+                    let header = TableHeader::header()[idx].clone();
+                    let dir = if descending { "DESC" } else { "ASC" };
+                    self.log_active(format!("Ordered by {header} {dir}")).await;
+                }
+            },
+        }
+    }
+
     async fn reload_module(&mut self) {
         let active = self.active;
         let Some(tab) = self.tabs.get(active) else {
@@ -1018,6 +1064,9 @@ impl App {
             },
             Cmd::Compact => self.toggle_compact(),
             Cmd::Reload => self.reload_module().await,
+            Cmd::Order { column, descending } => {
+                self.set_order(column.as_deref(), descending).await
+            }
             Cmd::Unknown(name) => self.log_active(format!("Unknown command ':{name}'")).await,
         }
         false
@@ -1425,20 +1474,25 @@ fn render(
 
 fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
     const COLS: &[(&str, &str)] = &[
-        (":q / :qa", "quit tab / quit all"),
-        (":e / :n", "edit setup / new tab"),
-        (":l [path]", "load device config"),
-        (":a / :add", "add register to device"),
-        (":start / :stop / :restart", "control module"),
-        (":set <reg> <v>", "write register value"),
-        (":w [path]", "save session"),
-        (":wd [path]", "save device config"),
+        (":q | :quit", "quit tab"),
+        (":qa | :qall", "quit all tabs"),
+        (":e | :edit", "edit module setup"),
+        (":n | :new", "new module tab"),
+        (":l | :load [path]", "load device config"),
+        (":a | :add", "add register to device"),
+        (":start", "start module"),
+        (":stop", "stop module"),
+        (":restart", "restart module"),
+        (":set <reg> <val>", "write register value"),
+        (":s | :save | :w | :write [path]", "save session"),
+        (":wd | :write-device [path]", "save device config"),
         (":log [file]", "set log file"),
-        (":lua start|stop", "start/stop lua execution"),
+        (":lua start|stop", "start|stop lua execution"),
         (":reload", "reload device config"),
         (":compact", "toggle compact mode"),
+        (":order [col] [asc|desc]", "sort table by column"),
     ];
-    let popup_w: u16 = 54;
+    let popup_w: u16 = 62;
     let popup_h: u16 = COLS.len() as u16 + 2;
     let x = cmd_area.x;
     let y = cmd_area.y.saturating_sub(popup_h);
@@ -1459,7 +1513,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
         .map(|(cmd, desc)| {
             Line::from(vec![
                 Span::styled(
-                    format!("{cmd:<28}"),
+                    format!("{cmd:<34}"),
                     Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
                 ),
                 Span::styled(

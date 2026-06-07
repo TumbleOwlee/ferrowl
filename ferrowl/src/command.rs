@@ -20,6 +20,10 @@ pub enum Cmd {
     Add,
     Compact,
     Reload,
+    Order {
+        column: Option<String>,
+        descending: bool,
+    },
     Unknown(String),
     Empty,
 }
@@ -54,18 +58,62 @@ pub fn parse(input: &str) -> Cmd {
             Some("stop") => Cmd::Lua(LuaCommand::Stop),
             _ => Cmd::Unknown(format!("lua {}", args.join(" ")).trim().to_string()),
         },
-        "set" => Cmd::Set {
-            register: args.first().copied().unwrap_or_default().to_string(),
-            value: args.get(1..).map(|rest| rest.join(" ")).unwrap_or_default(),
-        },
+        "set" => {
+            // Everything after the `set` token; the register name may be double-quoted to
+            // allow whitespace (e.g. `set "Slave Mode" idle`).
+            let rest = input
+                .trim_start()
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r)
+                .unwrap_or("")
+                .trim_start();
+            parse_set(rest)
+        }
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "wd" | "write-device" => Cmd::WriteDevice(first()),
         "log" => Cmd::Log(first()),
         "a" | "add" => Cmd::Add,
         "compact" => Cmd::Compact,
         "reload" => Cmd::Reload,
+        "order" => {
+            let mut cols = args.as_slice();
+            let mut descending = false;
+            if let Some((last, rest)) = cols.split_last() {
+                match last.to_ascii_lowercase().as_str() {
+                    "asc" => cols = rest,
+                    "desc" => {
+                        descending = true;
+                        cols = rest;
+                    }
+                    _ => {}
+                }
+            }
+            let column = if cols.is_empty() {
+                None
+            } else {
+                Some(cols.join(" "))
+            };
+            Cmd::Order { column, descending }
+        }
         other => Cmd::Unknown(other.to_string()),
     }
+}
+
+/// Split the `:set` argument string into `(register, value)`. A leading double-quote lets
+/// the register name contain whitespace; otherwise the register is the first token.
+fn parse_set(rest: &str) -> Cmd {
+    let (register, value) = if let Some(after) = rest.strip_prefix('"') {
+        match after.split_once('"') {
+            Some((reg, val)) => (reg.to_string(), val.trim_start().to_string()),
+            None => (after.to_string(), String::new()), // unterminated quote
+        }
+    } else {
+        match rest.split_once(char::is_whitespace) {
+            Some((reg, val)) => (reg.to_string(), val.trim_start().to_string()),
+            None => (rest.to_string(), String::new()),
+        }
+    };
+    Cmd::Set { register, value }
 }
 
 #[cfg(test)]
@@ -118,6 +166,42 @@ mod tests {
     }
 
     #[test]
+    fn ut_set_quoted() {
+        // quoted register name with whitespace.
+        assert_eq!(
+            parse("set \"Slave Mode\" idle"),
+            Cmd::Set {
+                register: "Slave Mode".to_string(),
+                value: "idle".to_string()
+            }
+        );
+        // quoted name + value with spaces.
+        assert_eq!(
+            parse("set \"My Reg\" hello world"),
+            Cmd::Set {
+                register: "My Reg".to_string(),
+                value: "hello world".to_string()
+            }
+        );
+        // quoted name, missing value.
+        assert_eq!(
+            parse("set \"My Reg\""),
+            Cmd::Set {
+                register: "My Reg".to_string(),
+                value: String::new()
+            }
+        );
+        // unterminated quote -> whole remainder is the register name.
+        assert_eq!(
+            parse("set \"My Reg"),
+            Cmd::Set {
+                register: "My Reg".to_string(),
+                value: String::new()
+            }
+        );
+    }
+
+    #[test]
     fn ut_optional_paths() {
         assert_eq!(parse("w"), Cmd::Write(None));
         assert_eq!(
@@ -139,6 +223,50 @@ mod tests {
         // Missing/invalid subcommand falls through to Unknown.
         assert_eq!(parse("lua"), Cmd::Unknown("lua".to_string()));
         assert_eq!(parse("lua wat"), Cmd::Unknown("lua wat".to_string()));
+    }
+
+    #[test]
+    fn ut_order() {
+        // bare -> clear
+        assert_eq!(
+            parse("order"),
+            Cmd::Order {
+                column: None,
+                descending: false
+            }
+        );
+        // column only -> ASC default
+        assert_eq!(
+            parse("order name"),
+            Cmd::Order {
+                column: Some("name".to_string()),
+                descending: false
+            }
+        );
+        // explicit ASC stripped
+        assert_eq!(
+            parse("order Address ASC"),
+            Cmd::Order {
+                column: Some("Address".to_string()),
+                descending: false
+            }
+        );
+        // multi-word column + DESC (case-insensitive)
+        assert_eq!(
+            parse("order slave id desc"),
+            Cmd::Order {
+                column: Some("slave id".to_string()),
+                descending: true
+            }
+        );
+        // direction-only -> treated as clear
+        assert_eq!(
+            parse("order desc"),
+            Cmd::Order {
+                column: None,
+                descending: true
+            }
+        );
     }
 
     #[test]

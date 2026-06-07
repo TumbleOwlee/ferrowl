@@ -18,6 +18,32 @@ use std::fmt::Debug;
 
 pub const COLUMN_COUNT: usize = 11;
 
+/// Resolve a user-supplied column name to its index in [`TableHeader::header`].
+/// Matching is case-insensitive and ignores spaces, so `slaveid`, `slave id`, and
+/// `Slave ID` all resolve to the same column. Returns `None` if nothing matches.
+pub fn column_index(name: &str) -> Option<usize> {
+    let normalize = |s: &str| s.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect::<String>();
+    let target = normalize(name);
+    TableHeader::header()
+        .iter()
+        .position(|h| normalize(h) == target)
+}
+
+/// Compare two register rows by the given column for `:order`. Both sides are taken from
+/// [`TableEntry::values`] (the displayed strings); numeric when both parse as `f64`,
+/// otherwise case-insensitive lexicographic. `descending` reverses the result.
+pub fn cmp_definitions(a: &Definition, b: &Definition, column: usize, descending: bool) -> std::cmp::Ordering {
+    let va = a.values();
+    let vb = b.values();
+    let sa = va.get(column).map(String::as_str).unwrap_or_default();
+    let sb = vb.get(column).map(String::as_str).unwrap_or_default();
+    let ord = match (sa.parse::<f64>(), sb.parse::<f64>()) {
+        (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
+        _ => sa.to_lowercase().cmp(&sb.to_lowercase()),
+    };
+    if descending { ord.reverse() } else { ord }
+}
+
 #[derive(Clone, Debug)]
 pub struct TableHeader {}
 
@@ -171,6 +197,13 @@ impl TableView {
     /// Replace the register rows (keeps the table's selection/scroll state).
     pub fn set_definitions(&mut self, values: Vec<Definition>) {
         self.table.state.set_values(values);
+    }
+
+    /// Stable-sort the register rows by `column` (see [`cmp_definitions`]).
+    pub fn sort_definitions(&mut self, column: usize, descending: bool) {
+        let mut values = self.definitions().to_vec();
+        values.sort_by(|a, b| cmp_definitions(a, b, column, descending));
+        self.set_definitions(values);
     }
 
     /// The currently selected register row, if any.
