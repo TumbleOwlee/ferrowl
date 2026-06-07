@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ferrowl_mem::{Kind as MemKind, Memory, Range};
 use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation};
-use ferrowl_reg::{Address, Register};
+use ferrowl_reg::{Access, Address, Register};
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
@@ -34,6 +34,9 @@ pub struct Module {
     id: Id,
     instance: Instance<Id>,
     registers: Vec<(String, String, Register, Vec<NamedValue>)>,
+    /// Shared operations list — owned here so it can be updated in-place without rebuilding the
+    /// network instance (the instance holds a clone of the same Arc).
+    operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
     log: ModuleLog,
     file_sink: FileSink,
@@ -73,11 +76,13 @@ impl Module {
                     AccessCfg::ReadWrite => MemKind::Combined(def.mem_type()),
                 };
                 memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
-                operations.push(Operation {
-                    slave_id: def.slave_id,
-                    fn_code: def.function_code(),
-                    range,
-                });
+                if def.access != AccessCfg::WriteOnly {
+                    operations.push(Operation {
+                        slave_id: def.slave_id,
+                        fn_code: def.function_code(),
+                        range,
+                    });
+                }
             }
         }
 
@@ -89,13 +94,14 @@ impl Module {
         open_sink(&file_sink, app.log_file.as_deref(), &spec.name);
 
         let net_config = endpoint_to_config(&spec.endpoint, app);
-        let instance = build_instance(id, spec.role, net_config, operations, memory.clone());
+        let instance = build_instance(id, spec.role, net_config, operations.clone(), memory.clone());
 
         Self {
             name: spec.name.clone(),
             id,
             instance,
             registers,
+            operations,
             memory,
             log,
             file_sink,
@@ -129,6 +135,38 @@ impl Module {
 
     pub fn registers(&self) -> &[(String, String, Register, Vec<NamedValue>)] {
         &self.registers
+    }
+
+    /// Replace one register's cached metadata (name, comment, register, named values).
+    pub fn update_register(
+        &mut self,
+        idx: usize,
+        name: String,
+        comment: String,
+        register: Register,
+        named_values: Vec<NamedValue>,
+    ) {
+        if let Some(slot) = self.registers.get_mut(idx) {
+            *slot = (name, comment, register, named_values);
+        }
+    }
+
+    /// Rebuild the shared operations list from the current register cache. The network instance
+    /// sees the change immediately because it holds a clone of the same Arc.
+    pub async fn rebuild_operations(&self) {
+        let mut ops = Vec::new();
+        for (_, _, register, _) in &self.registers {
+            if let Address::Fixed(addr) = register.address()
+                && *register.access() != Access::WriteOnly
+            {
+                ops.push(Operation {
+                    slave_id: *register.slave_id(),
+                    fn_code: function_code(register),
+                    range: Range::new(*addr as usize, register.format().width()),
+                });
+            }
+        }
+        *self.operations.write().await = ops;
     }
 
     /// Start the underlying client/server, routing its log + status into the ring log and (if
@@ -208,20 +246,9 @@ impl Module {
         self.stop_sim();
         let _ = self.instance.stop().await;
 
-        let mut operations: Vec<Operation> = Vec::new();
-        for (_, _, register, _) in &self.registers {
-            if let Address::Fixed(addr) = register.address() {
-                operations.push(Operation {
-                    slave_id: *register.slave_id(),
-                    fn_code: function_code(register),
-                    range: Range::new(*addr as usize, register.format().width()),
-                });
-            }
-        }
-
-        let operations = Arc::new(RwLock::new(operations));
+        self.rebuild_operations().await;
         let net_config = endpoint_to_config(endpoint, app);
-        self.instance = build_instance(self.id, role, net_config, operations, self.memory.clone());
+        self.instance = build_instance(self.id, role, net_config, self.operations.clone(), self.memory.clone());
         Ok(())
     }
 }

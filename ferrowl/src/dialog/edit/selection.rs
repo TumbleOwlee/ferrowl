@@ -1,9 +1,9 @@
 use crate::config::device::NamedValue;
+use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
     Alignment, Endian, Format, ValueType, alignment_index, endian_index, format_index,
     numeric_parts, set_input, with_endian_resolution,
 };
-use crate::dialog::EditedRegister;
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
@@ -14,12 +14,12 @@ use ferrowl_reg::format::{
 use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder};
 use ferrowl_ui::{
     COLOR_SCHEME,
-    traits::HandleEvents,
     state::{
         ButtonState, ButtonStateBuilder, InputFieldState, InputFieldStateBuilder, SelectionState,
         SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
+    traits::HandleEvents,
     traits::ToLabel,
     types::Border,
     widgets::{
@@ -31,9 +31,19 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
     style::palette::tailwind,
-    widgets::{Block, StatefulWidget, Widget as UiWidget},
+    widgets::{Block, Paragraph, StatefulWidget, Widget as UiWidget},
 };
 use std::fmt::Debug;
+
+/// Parse a raw memory string like `[00a0 0001]` into an i64 (big-endian word combination).
+fn parse_raw_value(raw: &str) -> Option<i64> {
+    let inner = raw.trim().strip_prefix('[')?.strip_suffix(']')?;
+    let mut result: u64 = 0;
+    for word in inner.split_whitespace() {
+        result = (result << 16) | u64::from_str_radix(word, 16).ok()?;
+    }
+    Some(result as i64)
+}
 
 // ---------------------------------------------------------------------------
 // AddNamedValueDialog — small inline sub-dialog for creating a new NamedValue
@@ -46,8 +56,9 @@ pub struct AddNamedValueDialog {
     pub label: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub value: Widget<InputFieldState, InputField<i64>>,
+    // Error display field
     pub error: Widget<String, Text>,
-    pub keybinds: Widget<String, Text>,
+    pub keybinds: [Widget<String, Text>; 2],
 }
 
 impl AddNamedValueDialog {
@@ -71,7 +82,10 @@ impl AddNamedValueDialog {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Label".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -86,28 +100,53 @@ impl AddNamedValueDialog {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Value".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
             })
             .error(Widget {
-                state: String::new(),
+                state: "".to_string(),
                 widget: TextBuilder::default()
-                    .margin(Margin { vertical: 0, horizontal: 1 })
-                    .style(error_style)
+                    .title(Some("Error".into()))
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(error_style.clone())
                     .build()
                     .unwrap(),
             })
-            .keybinds(Widget {
-                state: "<Tab>: next  |  <Enter>: add  |  <Esc>: cancel".to_string(),
-                widget: TextBuilder::default()
-                    .margin(Margin { vertical: 0, horizontal: 1 })
-                    .horizontal_alignment(HorizontalAlignment::Center)
-                    .style(text_style)
-                    .build()
-                    .unwrap(),
-            })
+            .keybinds([
+                Widget {
+                    state: "<Tab>: next".to_string(),
+                    widget: TextBuilder::default()
+                        .margin(Margin {
+                            vertical: 0,
+                            horizontal: 1,
+                        })
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .style(text_style.clone())
+                        .build()
+                        .unwrap(),
+                },
+                Widget {
+                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
+                    widget: TextBuilder::default()
+                        .margin(Margin {
+                            vertical: 0,
+                            horizontal: 1,
+                        })
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .style(text_style.clone())
+                        .build()
+                        .unwrap(),
+                },
+            ])
             .focus(AddNamedValueDialogFocus::Label)
             .build()
             .unwrap()
@@ -146,14 +185,19 @@ impl AddNamedValueDialog {
             Err(e) => self.error.state = e,
         }
 
-        let horizontal_layout: [Rect; 3] =
-            Layout::horizontal([Constraint::Min(1), Constraint::Max(50), Constraint::Min(1)])
-                .areas(area);
+        let horizontal_layout: [Rect; 3] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(60),
+            Constraint::Min(1),
+        ])
+        .areas(area);
 
         // 2 border + 2 margin-vertical + 3 label + 3 value + 1 error + 1 keybinds = 12
+        let error_height = if self.error.state.is_empty() { 0 } else { 3 };
+        let total_height = 2 + 2 + 3 + 3 + error_height + 1 + 1 + 1;
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(12),
+            Constraint::Length(total_height),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -171,22 +215,47 @@ impl AddNamedValueDialog {
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vertical_layout[1], buf);
         block.render(vertical_layout[1], buf);
 
-        let inner_layout: [Rect; 4] = Layout::vertical([
+        let inner_layout: [Rect; 6] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(error_height),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
         .areas(inner);
 
-        StatefulWidget::render(&self.label.widget, inner_layout[0], buf, &mut self.label.state);
-        StatefulWidget::render(&self.value.widget, inner_layout[1], buf, &mut self.value.state);
-        StatefulWidget::render(&self.error.widget, inner_layout[2], buf, &mut self.error.state);
         StatefulWidget::render(
-            &self.keybinds.widget,
-            inner_layout[3],
+            &self.label.widget,
+            inner_layout[0],
             buf,
-            &mut self.keybinds.state,
+            &mut self.label.state,
+        );
+        StatefulWidget::render(
+            &self.value.widget,
+            inner_layout[1],
+            buf,
+            &mut self.value.state,
+        );
+        if !self.error.state.is_empty() {
+            StatefulWidget::render(
+                &self.error.widget,
+                inner_layout[2],
+                buf,
+                &mut self.error.state,
+            );
+        }
+        StatefulWidget::render(
+            &self.keybinds[0].widget,
+            inner_layout[4],
+            buf,
+            &mut self.keybinds[0].state,
+        );
+        StatefulWidget::render(
+            &self.keybinds[1].widget,
+            inner_layout[5],
+            buf,
+            &mut self.keybinds[1].state,
         );
     }
 }
@@ -237,12 +306,15 @@ where
     // Delete button
     #[focus]
     pub delete_button: Widget<ButtonState, Button>,
+    // Lua simulation script (optional multiline)
+    #[focus]
+    pub update_script: Widget<InputFieldState, InputField<String>>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
     pub success: Widget<String, Text>,
     // Keybinds display field
-    pub keybinds: Widget<String, Text>,
+    pub keybinds: [Widget<String, Text>; 2],
     // Register metadata preserved across edits
     #[builder(default)]
     pub base_slave_id: u8,
@@ -290,7 +362,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(18 + 2 + 2 + 3),
+            Constraint::Length(27 + 2 + 2),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -309,13 +381,15 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 8] = Layout::vertical([
+        let vertical_layout: [Rect; 10] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(6),
             Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
@@ -417,12 +491,37 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         ])
         .areas(vertical_layout[vertical_index]);
 
-        StatefulWidget::render(
-            &self.value.widget,
-            horizontal_layout[0],
-            buf,
-            &mut self.value.state,
-        );
+        if self.value.state.values().is_empty() {
+            let text = TextBuilder::default()
+                .margin(Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                })
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .style(TextStyle {
+                    general: ratatui::style::Style::default()
+                        .fg(COLOR_SCHEME.hi)
+                        .bg(COLOR_SCHEME.bg),
+                })
+                .multiline(true)
+                .build()
+                .unwrap();
+            let mut message: String = "No predefined values — reopen to use free-text input".into();
+            StatefulWidget::render(&text, horizontal_layout[0], buf, &mut message);
+        } else {
+            StatefulWidget::render(
+                &self.value.widget,
+                horizontal_layout[0],
+                buf,
+                &mut self.value.state,
+            );
+            StatefulWidget::render(
+                &self.delete_button.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.delete_button.state,
+            );
+        }
 
         StatefulWidget::render(
             &self.add_button.widget,
@@ -431,13 +530,14 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             &mut self.add_button.state,
         );
 
-        StatefulWidget::render(
-            &self.delete_button.widget,
-            horizontal_layout[2],
-            buf,
-            &mut self.delete_button.state,
-        );
+        vertical_index += 1;
 
+        StatefulWidget::render(
+            &self.update_script.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.update_script.state,
+        );
         vertical_index += 1;
 
         if !self.error.state.is_empty() {
@@ -458,10 +558,17 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         vertical_index += 2;
 
         StatefulWidget::render(
-            &self.keybinds.widget,
+            &self.keybinds[0].widget,
             vertical_layout[vertical_index],
             buf,
-            &mut self.keybinds.state,
+            &mut self.keybinds[0].state,
+        );
+        vertical_index += 1;
+        StatefulWidget::render(
+            &self.keybinds[1].widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.keybinds[1].state,
         );
 
         // Render add sub-dialog on top if open — centred within the main dialog box.
@@ -497,7 +604,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Label".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -513,7 +623,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Description".into()))
                     .multiline(true)
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -528,7 +641,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Address".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -542,7 +658,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Type", HorizontalAlignment::Right).into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -569,7 +688,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Format", HorizontalAlignment::Left).into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -586,7 +708,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Endian", HorizontalAlignment::Center).into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -602,7 +727,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Resolution", HorizontalAlignment::Right).into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -619,7 +747,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Alignment".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -634,7 +765,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Width", HorizontalAlignment::Right).into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(input_style.clone())
                     .build()
                     .unwrap(),
@@ -648,7 +782,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: SelectionBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Value".into()))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(selection_style.clone())
                     .build()
                     .unwrap(),
@@ -662,7 +799,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
                 widget: ButtonBuilder::default()
                     .border_margin(Margin::new(1, 0))
-                    .margin(Margin { vertical: 0, horizontal: 0 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 0,
+                    })
                     .style(button_style.clone())
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
@@ -677,9 +817,31 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
                 widget: ButtonBuilder::default()
                     .border_margin(Margin::new(1, 0))
-                    .margin(Margin { vertical: 0, horizontal: 0 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 0,
+                    })
                     .style(button_style.clone())
                     .horizontal_alignment(HorizontalAlignment::Center)
+                    .build()
+                    .unwrap(),
+            })
+            .update_script(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("-- Lua update script (optional)".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Lua Update".into()))
+                    .multiline(true)
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
                     .build()
                     .unwrap(),
             })
@@ -688,7 +850,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: TextBuilder::default()
                     .title(Some("Error".into()))
                     .border(Border::Full(Margin::new(1, 0)))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(error_style.clone())
                     .build()
                     .unwrap(),
@@ -698,20 +863,40 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: TextBuilder::default()
                     .title(Some("Success".into()))
                     .border(Border::Full(Margin::new(1, 0)))
-                    .margin(Margin { vertical: 0, horizontal: 1 })
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
                     .style(success_style.clone())
                     .build()
                     .unwrap(),
             })
-            .keybinds(Widget {
-                state: "<Tab>: next | <ENTER>: Confirm | <Esc>: cancel | <Space>: ADD/DEL".to_string(),
-                widget: TextBuilder::default()
-                    .margin(Margin { vertical: 0, horizontal: 1 })
-                    .horizontal_alignment(HorizontalAlignment::Center)
-                    .style(text_style.clone())
-                    .build()
-                    .unwrap(),
-            })
+            .keybinds([
+                Widget {
+                    state: "<Tab>: next | <Space>: press button".to_string(),
+                    widget: TextBuilder::default()
+                        .margin(Margin {
+                            vertical: 0,
+                            horizontal: 1,
+                        })
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .style(text_style.clone())
+                        .build()
+                        .unwrap(),
+                },
+                Widget {
+                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
+                    widget: TextBuilder::default()
+                        .margin(Margin {
+                            vertical: 0,
+                            horizontal: 1,
+                        })
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .style(text_style.clone())
+                        .build()
+                        .unwrap(),
+                },
+            ])
             .focus(EditSelectionDialogFocus::Value)
             .build()
             .unwrap()
@@ -720,16 +905,22 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
 impl EditSelectionDialog<NamedValue> {
     /// Build the dialog pre-filled from an existing register, its named values, and current value.
+    /// `raw_value` is the hex memory string (e.g. `[000a]`) used for accurate integer matching.
     pub fn from_register(
         name: &str,
         comment: &str,
         register: &Register,
         named_values: Vec<NamedValue>,
         current_value: &str,
+        raw_value: &str,
+        update: Option<&str>,
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, comment);
+        if let Some(script) = update {
+            set_input(&mut dialog.update_script, script);
+        }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
         dialog.focus = EditSelectionDialogFocus::Value;
@@ -764,8 +955,10 @@ impl EditSelectionDialog<NamedValue> {
             }
         }
 
-        // Pre-select the matching named value for the current register value.
-        if let Ok(current) = current_value.trim().parse::<i64>() {
+        // Pre-select the matching named value. Prefer raw memory words (reliable for all
+        // formats/resolutions), fall back to parsing the decoded string as i64.
+        let raw_int = parse_raw_value(raw_value);
+        if let Some(current) = raw_int.or_else(|| current_value.trim().parse::<i64>().ok()) {
             if let Some(idx) = named_values.iter().position(|nv| nv.value == current) {
                 dialog.value.state.set_selection(idx);
             }
@@ -829,6 +1022,12 @@ impl EditSelectionDialog<NamedValue> {
         } else {
             Some(self.value.state.get_value().value.to_string())
         };
+        let update_script = self.update_script.state.input().trim().to_string();
+        let update = Some(if update_script.is_empty() {
+            String::new()
+        } else {
+            update_script
+        });
 
         Ok(EditedRegister {
             name,
@@ -836,6 +1035,7 @@ impl EditSelectionDialog<NamedValue> {
             register,
             value,
             named_values: Some(named_values),
+            update,
         })
     }
 
@@ -901,7 +1101,11 @@ impl EditSelectionDialog<NamedValue> {
         if !vals.is_empty() {
             vals.remove(idx);
             if !vals.is_empty() {
-                let new_idx = if idx >= vals.len() { vals.len() - 1 } else { idx };
+                let new_idx = if idx >= vals.len() {
+                    vals.len() - 1
+                } else {
+                    idx
+                };
                 self.value.state.set_selection(new_idx);
             } else {
                 self.value.state.set_selection(0);

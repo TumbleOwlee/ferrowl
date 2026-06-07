@@ -270,13 +270,12 @@ where
             .row_highlight_style(*selected_style)
             .highlight_symbol({
                 Text::from({
-                    let mut text = vec!["".into()];
-                    text.append(
-                        &mut itertools::repeat_n(bar.into(), bar_height as usize)
-                            .collect::<Vec<Line>>(),
-                    );
-                    text.append(&mut vec!["".into()]);
-                    text
+                    let spacing = itertools::repeat_n("".into(), self.row_margin.vertical as usize);
+                    spacing
+                        .clone()
+                        .chain(itertools::repeat_n(bar.into(), bar_height as usize))
+                        .chain(spacing)
+                        .collect::<Vec<Line>>()
                 })
                 .style(*bar_style)
             })

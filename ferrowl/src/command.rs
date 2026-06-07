@@ -5,6 +5,7 @@
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd {
     Quit,
+    QuitAll,
     Edit,
     New,
     Load(Option<String>),
@@ -15,6 +16,8 @@ pub enum Cmd {
     Write(Option<String>),
     WriteDevice(Option<String>),
     Log(Option<String>),
+    Compact,
+    Reload,
     Unknown(String),
     Empty,
 }
@@ -30,6 +33,7 @@ pub fn parse(input: &str) -> Cmd {
 
     match name {
         "q" | "q!" | "quit" => Cmd::Quit,
+        "qa" | "qa!" | "qall" => Cmd::QuitAll,
         "e" | "edit" => Cmd::Edit,
         "n" | "new" => Cmd::New,
         "l" | "load" => Cmd::Load(first()),
@@ -43,6 +47,8 @@ pub fn parse(input: &str) -> Cmd {
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "wd" | "write-device" => Cmd::WriteDevice(first()),
         "log" => Cmd::Log(first()),
+        "compact" => Cmd::Compact,
+        "reload" => Cmd::Reload,
         other => Cmd::Unknown(other.to_string()),
     }
 }

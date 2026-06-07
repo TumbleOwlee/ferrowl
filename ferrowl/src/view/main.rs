@@ -1,7 +1,7 @@
+use crate::config::device::NamedValue;
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::Register;
-use crate::config::device::NamedValue;
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
@@ -40,12 +40,12 @@ impl Header<COLUMN_COUNT> for TableHeader {
 
     fn widths() -> [Width; COLUMN_COUNT] {
         [
+            Width { min: 15, max: 30 },
+            Width { min: 25, max: 40 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
-            Width { min: 10, max: 20 },
-            Width { min: 10, max: 20 },
-            Width { min: 10, max: 20 },
+            Width { min: 20, max: 30 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
@@ -118,6 +118,8 @@ pub struct TableView {
     #[focus]
     pub table:
         Widget<TableState<Definition, COLUMN_COUNT>, Table<Definition, TableHeader, COLUMN_COUNT>>,
+    #[builder(default)]
+    pub compact: bool,
 }
 
 impl TableView {
@@ -150,6 +152,12 @@ impl TableView {
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         StatefulWidget::render(&self.table.widget, area, buf, &mut self.table.state);
+    }
+
+    pub fn set_compact(&mut self, compact: bool) {
+        self.compact = compact;
+        let vertical = if compact { 0 } else { 1 };
+        self.table.widget.set_row_margin(Margin { vertical, horizontal: 0 });
     }
 
     /// Current register rows.

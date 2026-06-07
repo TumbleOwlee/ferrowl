@@ -275,18 +275,28 @@ impl App {
     }
 
     async fn handle_dialog_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        // When the EditSelectionDialog has an open add sub-dialog, route all keys into it.
-        let has_sub =
-            matches!(&self.overlay, Some(Overlay::EditSelection(d)) if d.has_sub_dialog());
+        // When either edit dialog has an open add sub-dialog, route all keys into it.
+        let has_sub = matches!(&self.overlay,
+            Some(Overlay::EditSelection(d)) if d.has_sub_dialog())
+            || matches!(&self.overlay,
+            Some(Overlay::Edit(d)) if d.has_sub_dialog());
         if has_sub {
-            if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
-                match code {
+            match self.overlay.as_mut() {
+                Some(Overlay::EditSelection(d)) => match code {
                     KeyCode::Esc => d.close_add_dialog(),
                     KeyCode::Enter => d.confirm_add_dialog(),
                     KeyCode::Tab => d.add_dialog_focus_next(),
                     KeyCode::BackTab => d.add_dialog_focus_previous(),
                     _ => d.add_dialog_handle_events(modifiers, code),
-                }
+                },
+                Some(Overlay::Edit(d)) => match code {
+                    KeyCode::Esc => d.close_add_dialog(),
+                    KeyCode::Enter => d.confirm_add_dialog(),
+                    KeyCode::Tab => d.add_dialog_focus_next(),
+                    KeyCode::BackTab => d.add_dialog_focus_previous(),
+                    _ => d.add_dialog_handle_events(modifiers, code),
+                },
+                _ => {}
             }
             return false;
         }
@@ -296,6 +306,8 @@ impl App {
             KeyCode::Enter => self.confirm_overlay().await,
             KeyCode::Char(' ') => {
                 if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
+                    d.handle_space();
+                } else if let Some(Overlay::Edit(d)) = self.overlay.as_mut() {
                     d.handle_space();
                 } else if let Some(o) = self.overlay.as_mut() {
                     o.handle_events(modifiers, code);
@@ -335,6 +347,25 @@ impl App {
         let Some(action) = action else {
             return;
         };
+
+        // Validate name uniqueness before applying an edit.
+        if let OverlayAction::ApplyEdit(ref edited) = action {
+            if let Some(tab) = self.tabs.get(self.active) {
+                if let Some(idx) = tab.table.selected_index() {
+                    let original = tab.table.definitions()[idx].name.clone();
+                    if edited.name != original && tab.device.definitions.contains_key(&edited.name) {
+                        let msg = format!("Name '{}' already in use", edited.name);
+                        match &mut self.overlay {
+                            Some(Overlay::Edit(d)) => d.error.state = msg,
+                            Some(Overlay::EditSelection(d)) => d.error.state = msg,
+                            _ => {}
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
         match action {
             OverlayAction::CreateModule(values, path, device) => {
                 self.create_module(values, path, device).await
@@ -373,9 +404,20 @@ impl App {
         else {
             return;
         };
+        let update_script = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| tab.device.definitions.get(&def.name))
+            .and_then(|d| d.update.as_deref());
+
         if def.named_values.is_empty() {
-            let dialog =
-                EditInputDialog::from_register(&def.name, &def.comment, &def.register, &def.value);
+            let dialog = EditInputDialog::from_register(
+                &def.name,
+                &def.comment,
+                &def.register,
+                &def.value,
+                update_script,
+            );
             self.overlay = Some(Overlay::Edit(dialog));
         } else {
             let dialog = EditSelectionDialog::from_register(
@@ -384,6 +426,8 @@ impl App {
                 &def.register,
                 def.named_values.clone(),
                 &def.value,
+                &def.raw_value,
+                update_script,
             );
             self.overlay = Some(Overlay::EditSelection(dialog));
         }
@@ -392,23 +436,47 @@ impl App {
 
     /// Apply edited register metadata to the selected row, then optionally write its value.
     async fn apply_edit(&mut self, edited: EditedRegister) {
+        use crate::config::session::Role;
         let active = self.active;
+        let mut preserved_value: Option<String> = None;
         let mem_update = if let Some(tab) = self.tabs.get_mut(active)
             && let Some(idx) = tab.table.selected_index()
         {
             let mut defs = tab.table.definitions().to_vec();
             let update = if let Some(slot) = defs.get_mut(idx) {
+                let original_name = slot.name.clone();
                 let named_values = edited
                     .named_values
                     .clone()
                     .unwrap_or_else(|| slot.named_values.clone());
+
+                // Issue 8: preserve current value on servers when the format changes but address
+                // stays the same and the user left the value field blank.
+                if tab.spec.role == Role::Server
+                    && edited.value.is_none()
+                    && slot.register.address() == edited.register.address()
+                    && !slot.value.is_empty()
+                {
+                    preserved_value = Some(slot.value.clone());
+                }
+
+                // Issue 9: keep module's register cache in sync so rebuild_operations is correct.
+                tab.module.update_register(
+                    idx,
+                    edited.name.clone(),
+                    edited.comment.clone(),
+                    edited.register.clone(),
+                    named_values.clone(),
+                );
+
                 *slot = Definition::new(
                     edited.name.clone(),
                     edited.comment.clone(),
                     edited.register.clone(),
                     named_values,
                 );
-                if let Address::Fixed(addr) = edited.register.address() {
+
+                let mem_result = if let Address::Fixed(addr) = edited.register.address() {
                     let ty = mem_type(&edited.register);
                     let kind = match edited.register.access() {
                         Access::ReadOnly => MemKind::Read(ty),
@@ -426,20 +494,30 @@ impl App {
                     ))
                 } else {
                     None
+                };
+
+                // Issue 11: look up by original name, update comment, handle rename.
+                if let Some(def) = tab.device.definitions.get_mut(&original_name) {
+                    sync_register_def(def, &edited.register);
+                    def.comment = edited.comment.clone();
+                    if let Some(nv) = &edited.named_values {
+                        def.values = nv.clone();
+                    }
+                    if let Some(script) = &edited.update {
+                        def.update = if script.is_empty() { None } else { Some(script.clone()) };
+                    }
                 }
+                if edited.name != original_name {
+                    if let Some(def) = tab.device.definitions.remove(&original_name) {
+                        tab.device.definitions.insert(edited.name.clone(), def);
+                    }
+                }
+
+                mem_result
             } else {
                 None
             };
             tab.table.set_definitions(defs);
-
-            // Keep DeviceConfig in sync with the edited register.
-            if let Some(def) = tab.device.definitions.get_mut(&edited.name) {
-                sync_register_def(def, &edited.register);
-                if let Some(nv) = &edited.named_values {
-                    def.values = nv.clone();
-                }
-            }
-
             update
         } else {
             None
@@ -447,6 +525,18 @@ impl App {
 
         if let Some((memory, key, kind, range)) = mem_update {
             memory.write().await.add_ranges(key, &kind, &[range]);
+        }
+
+        // Issue 9: refresh client operations after register metadata changed.
+        if let Some(tab) = self.tabs.get(active) {
+            tab.module.rebuild_operations().await;
+        }
+
+        // Issue 8: re-apply the old value when only the format changed.
+        if let Some(v) = preserved_value {
+            if edited.value.is_none() {
+                self.set_value(&edited.name, &v).await;
+            }
         }
 
         if let Some(value) = edited.value {
@@ -552,6 +642,7 @@ impl App {
             (_, KeyCode::Tab) => self.toggle_pane(),
             (_, KeyCode::Char(']')) => self.next_tab(),
             (_, KeyCode::Char('[')) => self.prev_tab(),
+            (KeyModifiers::NONE, KeyCode::Char('z')) => self.toggle_compact(),
             (KeyModifiers::NONE, KeyCode::Char('g')) => {
                 self.pending_g = true;
                 self.forward_nav(modifiers, code); // `g` still scrolls to top in the table
@@ -600,6 +691,38 @@ impl App {
         }
     }
 
+    fn toggle_compact(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.table.set_compact(!tab.table.compact);
+        }
+    }
+
+    async fn reload_module(&mut self) {
+        let active = self.active;
+        let Some(tab) = self.tabs.get(active) else { return };
+        let path = tab.spec.device.clone();
+        let device = match crate::config::load_device(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                self.log_active(format!(":reload failed to load '{path}': {e}")).await;
+                return;
+            }
+        };
+        let _ = self.tabs[active].module.stop().await;
+        let mut module = Module::new(&self.tabs[active].spec, &device, &self.app_cfg);
+        if let Err(e) = module.start().await {
+            self.log_active(format!(":reload start error: {e}")).await;
+        }
+        let spec = self.tabs[active].spec.clone();
+        let new_tab = Tab::from_module(spec, device, module);
+        let log_view = std::mem::replace(&mut self.tabs[active].log_view, new_tab.log_view);
+        self.tabs[active] = Tab {
+            log_view,
+            ..new_tab
+        };
+        self.log_active(format!(":reload done — '{path}'")).await;
+    }
+
     fn next_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active + 1) % self.tabs.len();
@@ -617,7 +740,15 @@ impl App {
         use crate::command::Cmd;
         match crate::command::parse(input) {
             Cmd::Empty => {}
-            Cmd::Quit => return true,
+            Cmd::Quit => {
+                if self.tabs.len() <= 1 {
+                    return true;
+                }
+                let _ = self.tabs[self.active].module.stop().await;
+                self.tabs.remove(self.active);
+                self.active = self.active.min(self.tabs.len() - 1);
+            }
+            Cmd::QuitAll => return true,
             Cmd::Edit => self.enter_setup(),
             Cmd::New => self.enter_new(),
             Cmd::Load(path) => self.enter_load(path.as_deref()),
@@ -668,6 +799,8 @@ impl App {
                 }
                 None => self.log_active(":log requires <file>".to_string()).await,
             },
+            Cmd::Compact => self.toggle_compact(),
+            Cmd::Reload => self.reload_module().await,
             Cmd::Unknown(name) => self.log_active(format!("Unknown command ':{name}'")).await,
         }
         false
@@ -997,6 +1130,7 @@ fn render(
     .areas(area);
 
     let buf = frame.buffer_mut();
+    buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
 
     let names: Vec<String> = tabs.iter().map(|t| t.name.clone()).collect();
     render_tabs(&names, active, tabs_area, buf);

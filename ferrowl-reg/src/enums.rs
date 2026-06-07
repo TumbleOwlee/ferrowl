@@ -21,7 +21,7 @@ impl Display for Kind {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Address {
     Fixed(u16),
     Virtual,
@@ -36,7 +36,7 @@ impl Display for Address {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Access {
     ReadOnly,
     WriteOnly,

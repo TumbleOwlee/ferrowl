@@ -1,3 +1,4 @@
+use crate::config::device::NamedValue;
 use crate::dialog::edit::{Alignment, Endian, Format, ValueType};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
@@ -8,12 +9,15 @@ use ferrowl_reg::format::{
 use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
-    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
-    style::{InputFieldStyle, SelectionStyle, TextStyle},
+    state::{
+        ButtonState, ButtonStateBuilder, InputFieldState, InputFieldStateBuilder, SelectionState,
+        SelectionStateBuilder,
+    },
+    style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     types::Border,
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Validate, Widget,
+        Button, ButtonBuilder, GetValue, InputField, InputFieldBuilder, Selection,
+        SelectionBuilder, Text, TextBuilder, Validate, Widget,
     },
 };
 use ratatui::{
@@ -57,6 +61,12 @@ pub struct EditInputDialog {
     // Value input
     #[focus]
     pub value: Widget<InputFieldState, InputField<String>>,
+    // Button to add a predefined named value
+    #[focus]
+    pub add_button: Widget<ButtonState, Button>,
+    // Lua simulation script (optional multiline)
+    #[focus]
+    pub update_script: Widget<InputFieldState, InputField<String>>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
@@ -67,6 +77,12 @@ pub struct EditInputDialog {
     pub base_slave_id: u8,
     pub base_access: Access,
     pub base_kind: Kind,
+    // Optional sub-dialog for adding a new named value entry.
+    #[builder(default)]
+    pub add_dialog: Option<AddNamedValueDialog>,
+    // Named values accumulated via the ADD button in this session.
+    #[builder(default)]
+    pub pending_named_values: Vec<NamedValue>,
 }
 
 /// The result of confirming the edit dialog: updated register metadata + an optional value to
@@ -79,6 +95,8 @@ pub struct EditedRegister {
     pub value: Option<String>,
     /// Updated named-value list from EditSelectionDialog; None means unchanged.
     pub named_values: Option<Vec<crate::config::device::NamedValue>>,
+    /// Lua update script content; None means unchanged (field not shown).
+    pub update: Option<String>,
 }
 
 impl EditInputDialog {
@@ -121,7 +139,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(25),
+            Constraint::Length(34),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -134,17 +152,20 @@ impl EditInputDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title("Edit");
-        let area = block.inner(vertical_layout[1]).inner(Margin::new(2, 1));
-        ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vertical_layout[1], buf);
-        block.render(vertical_layout[1], buf);
+        let dialog_box = vertical_layout[1];
+        let area = block.inner(dialog_box).inner(Margin::new(2, 1));
+        ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
+        block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 9] = Layout::vertical([
+        let vertical_layout: [Rect; 11] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -247,6 +268,22 @@ impl EditInputDialog {
         );
         vertical_index += 1;
 
+        StatefulWidget::render(
+            &self.add_button.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.add_button.state,
+        );
+        vertical_index += 1;
+
+        StatefulWidget::render(
+            &self.update_script.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.update_script.state,
+        );
+        vertical_index += 1;
+
         if !self.error.state.is_empty() {
             StatefulWidget::render(
                 &self.error.widget,
@@ -277,6 +314,10 @@ impl EditInputDialog {
             buf,
             &mut self.keybinds[1].state,
         );
+
+        if let Some(d) = self.add_dialog.as_mut() {
+            d.render(dialog_box, buf);
+        }
     }
 
     pub fn new() -> Self {
@@ -492,6 +533,43 @@ impl EditInputDialog {
                     .build()
                     .unwrap(),
             })
+            .add_button(Widget {
+                state: ButtonStateBuilder::default()
+                    .focused(false)
+                    .label("ADD PREDEFINED".to_string())
+                    .disabled(false)
+                    .build()
+                    .unwrap(),
+                widget: ButtonBuilder::default()
+                    .border_margin(Margin::new(1, 0))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(ButtonStyle::default())
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .build()
+                    .unwrap(),
+            })
+            .update_script(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("-- Lua update script (optional)".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Lua Update".into()))
+                    .multiline(true)
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
             .error(Widget {
                 state: "".to_string(),
                 widget: TextBuilder::default()
@@ -520,7 +598,7 @@ impl EditInputDialog {
             })
             .keybinds([
                 Widget {
-                    state: "<C-f>: fill value | <Tab>: next | <Enter>: confirm".to_string(),
+                    state: "<Space>: press button | <C-f>: fill value | <Tab>: next".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -532,7 +610,7 @@ impl EditInputDialog {
                         .unwrap(),
                 },
                 Widget {
-                    state: "<Esc>: cancel".to_string(),
+                    state: "<Esc>: cancel | <Enter>: confirm".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -554,10 +632,19 @@ impl EditInputDialog {
 
     /// Build the dialog pre-filled from an existing register and its current value. Focus
     /// starts on the value field so editing the value (the common case) works immediately.
-    pub fn from_register(name: &str, comment: &str, register: &Register, value: &str) -> Self {
+    pub fn from_register(
+        name: &str,
+        comment: &str,
+        register: &Register,
+        value: &str,
+        update: Option<&str>,
+    ) -> Self {
         let mut dialog = Self::new();
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, comment);
+        if let Some(script) = update {
+            set_input(&mut dialog.update_script, script);
+        }
         // Show the current value as a placeholder; <C-f> fills it in when the field is empty.
         if !value.is_empty() {
             dialog.value.state.set_placeholder(Some(value.to_string()));
@@ -656,15 +743,85 @@ impl EditInputDialog {
             }
         };
 
+        let update_script = self.update_script.state.input().trim().to_string();
+        let update = Some(if update_script.is_empty() {
+            String::new()
+        } else {
+            update_script
+        });
+
+        let named_values = if self.pending_named_values.is_empty() {
+            None
+        } else {
+            Some(self.pending_named_values.clone())
+        };
+
         Ok(EditedRegister {
             name,
             comment,
             register,
             value,
-            named_values: None,
+            named_values,
+            update,
         })
+    }
+
+    pub fn has_sub_dialog(&self) -> bool {
+        self.add_dialog.is_some()
+    }
+
+    pub fn open_add_dialog(&mut self) {
+        self.add_dialog = Some(AddNamedValueDialog::new());
+    }
+
+    pub fn close_add_dialog(&mut self) {
+        self.add_dialog = None;
+    }
+
+    pub fn confirm_add_dialog(&mut self) {
+        let result = self.add_dialog.as_ref().map(|d| d.apply());
+        match result {
+            Some(Ok(nv)) => {
+                self.pending_named_values.push(nv);
+                self.add_dialog = None;
+            }
+            Some(Err(e)) => {
+                if let Some(d) = self.add_dialog.as_mut() {
+                    d.error.state = e;
+                }
+            }
+            None => {}
+        }
+    }
+
+    pub fn add_dialog_focus_next(&mut self) {
+        if let Some(d) = self.add_dialog.as_mut() {
+            d.focus_next();
+        }
+    }
+
+    pub fn add_dialog_focus_previous(&mut self) {
+        if let Some(d) = self.add_dialog.as_mut() {
+            d.focus_previous();
+        }
+    }
+
+    pub fn add_dialog_handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+        if let Some(d) = self.add_dialog.as_mut() {
+            let _ = d.handle_events(modifiers, code);
+        }
+    }
+
+    pub fn handle_space(&mut self) {
+        if let EditInputDialogFocus::AddButton = self.focus {
+            self.open_add_dialog();
+        }
     }
 }
 
-use super::{alignment_index, endian_index, format_index, numeric_parts, set_input,
-    with_endian_resolution};
+use super::{
+    AddNamedValueDialog, alignment_index, endian_index, format_index, numeric_parts, set_input,
+    with_endian_resolution,
+};
+use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::traits::HandleEvents;
