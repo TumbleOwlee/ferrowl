@@ -315,7 +315,10 @@ mod tests {
             _ => panic!("expected Int"),
         }
         assert_eq!(
-            virtual_store.blocking_read().get("calc").map(String::as_str),
+            virtual_store
+                .blocking_read()
+                .get("calc")
+                .map(String::as_str),
             Some("7")
         );
     }

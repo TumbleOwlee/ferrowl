@@ -167,8 +167,7 @@ impl StatefulWidget for &CodeInputField {
                 .iter()
                 .collect();
             let content_rect = Rect::new(content_x, y, content_width as u16, 1);
-            Paragraph::new(Text::from(visible).style(self.style.general))
-                .render(content_rect, buf);
+            Paragraph::new(Text::from(visible).style(self.style.general)).render(content_rect, buf);
 
             if state.focused() && !state.disabled() && line_idx == active {
                 let cursor_in_view = cursor_col.saturating_sub(h_scroll) as u16;

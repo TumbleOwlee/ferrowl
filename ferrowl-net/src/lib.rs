@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn ut_key_new_stores_fields() {
-        let sk = SlaveKind { slave_id: 7, kind: Kind::HoldingRegister };
+        let sk = SlaveKind {
+            slave_id: 7,
+            kind: Kind::HoldingRegister,
+        };
         let key = Key::new(sk.clone());
         assert_eq!(key.id, sk);
     }

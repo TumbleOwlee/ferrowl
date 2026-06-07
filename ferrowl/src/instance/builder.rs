@@ -1,4 +1,4 @@
-use ferrowl_net::{KeyParams, tcp, rtu};
+use ferrowl_net::{KeyParams, rtu, tcp};
 
 pub enum Builder<T: KeyParams> {
     TcpClient(tcp::ClientBuilder<T>),

@@ -157,7 +157,10 @@ impl TableView {
     pub fn set_compact(&mut self, compact: bool) {
         self.compact = compact;
         let vertical = if compact { 0 } else { 1 };
-        self.table.widget.set_row_margin(Margin { vertical, horizontal: 0 });
+        self.table.widget.set_row_margin(Margin {
+            vertical,
+            horizontal: 0,
+        });
     }
 
     /// Current register rows.

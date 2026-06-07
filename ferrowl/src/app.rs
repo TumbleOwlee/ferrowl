@@ -932,7 +932,7 @@ impl App {
 
     /// Execute a parsed `:` command. Returns `true` when the app should quit.
     async fn run_command(&mut self, input: &str) -> bool {
-        use crate::command::Cmd;
+        use crate::command::{Cmd, LuaCommand};
         match crate::command::parse(input) {
             Cmd::Empty => {}
             Cmd::Quit => {
@@ -953,6 +953,27 @@ impl App {
             Cmd::Restart => {
                 self.stop_module().await;
                 self.start_module().await;
+            }
+            Cmd::Lua(action) => {
+                let msg = if let Some(tab) = self.tabs.get_mut(self.active) {
+                    match action {
+                        LuaCommand::Start => {
+                            tab.module.start_lua();
+                            if tab.module.lua_running() {
+                                "Lua simulation started".to_string()
+                            } else {
+                                "No Lua scripts to run".to_string()
+                            }
+                        }
+                        LuaCommand::Stop => {
+                            tab.module.stop_lua();
+                            "Lua simulation stopped".to_string()
+                        }
+                    }
+                } else {
+                    return false;
+                };
+                self.log_active(format!("{} {}", self.active, msg)).await;
             }
             Cmd::Set { register, value } => {
                 if register.is_empty() || value.is_empty() {
@@ -1210,7 +1231,11 @@ fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<SlaveKind>,
             kind: register.kind().clone(),
         },
     };
-    Some((kind, key, Range::new(*addr as usize, register.format().width())))
+    Some((
+        kind,
+        key,
+        Range::new(*addr as usize, register.format().width()),
+    ))
 }
 
 /// Build the appropriate write command for a client, based on the register kind/width.
@@ -1263,7 +1288,11 @@ fn decode_definition(
             match virtual_values.get(&d.name) {
                 Some(v) => {
                     d.value = v.clone();
-                    d.raw_value = d.register.encode(v).map(|raw| raw_hex(&raw)).unwrap_or_default();
+                    d.raw_value = d
+                        .register
+                        .encode(v)
+                        .map(|raw| raw_hex(&raw))
+                        .unwrap_or_default();
                 }
                 None => {
                     d.value.clear();

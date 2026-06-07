@@ -70,9 +70,8 @@ where
                 let memory = memory.clone();
                 let log = log.clone();
                 Ok(tokio::task::spawn(async move {
-                    let new_request_handler = |_socket_addr| {
-                        Ok(Some(Server::new(memory.clone(), log.clone())))
-                    };
+                    let new_request_handler =
+                        |_socket_addr| Ok(Some(Server::new(memory.clone(), log.clone())));
                     let on_connected = |stream, socket_addr| async move {
                         accept_tcp_connection(stream, socket_addr, new_request_handler)
                     };

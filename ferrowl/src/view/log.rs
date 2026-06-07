@@ -35,7 +35,10 @@ impl Header<2> for LogHeader {
     fn widths() -> [Width; 2] {
         [
             Width { min: 23, max: 23 },
-            Width { min: 0, max: 100_000 },
+            Width {
+                min: 0,
+                max: 100_000,
+            },
         ]
     }
 }

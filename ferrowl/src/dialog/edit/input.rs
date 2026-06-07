@@ -818,7 +818,10 @@ impl EditInputDialog {
             Address::Virtual => set_input(&mut dialog.address, "virtual"),
         }
         set_input(&mut dialog.slave_id, &register.slave_id().to_string());
-        dialog.access.state.set_selection(access_index(register.access()));
+        dialog
+            .access
+            .state
+            .set_selection(access_index(register.access()));
         dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {

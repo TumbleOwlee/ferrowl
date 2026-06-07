@@ -7,16 +7,16 @@
 use crate::{Command, Error, Key, KeyParams, ModbusError, Operation, RunConfig, SlaveId};
 
 use ferrowl_mem::{Memory, Range, Type};
-use tokio_modbus::Request;
-use tokio_modbus::prelude::{ExceptionCode, Response};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::sleep;
 use tokio_modbus::FunctionCode;
+use tokio_modbus::Request;
 use tokio_modbus::client::Context;
 use tokio_modbus::prelude::{Client as ModbusClient, Reader, Slave, SlaveContext, Writer};
+use tokio_modbus::prelude::{ExceptionCode, Response};
 use tokio_serial::{DataBits, Parity, SerialPortBuilder, StopBits};
 
 use crate::SerialError;
@@ -244,7 +244,9 @@ impl ClientCore {
                     match self.read(&operation, timeout_ms, &log).await {
                         (s, Ok(values)) => {
                             let mut guard = memory.write().await;
-                            let key = Key { id: T::from_slave_fn(operation.slave_id, fc) };
+                            let key = Key {
+                                id: T::from_slave_fn(operation.slave_id, fc),
+                            };
                             if !guard.write_unchecked(key, &range, &values) {
                                 log(format!("{s} Failed because of failing memory update for [{start}, {end})."))
                                     .await;
@@ -475,7 +477,9 @@ where
                 addr + cnt
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadCoils) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::ReadCoils),
+            };
             let guard = memory.read().await;
             match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                 Some(v) => {
@@ -512,7 +516,9 @@ where
                 addr + cnt
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs),
+            };
             let guard = memory.read().await;
             match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                 Some(v) => {
@@ -551,9 +557,15 @@ where
                 addr + cnt
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadInputRegisters) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::ReadInputRegisters),
+            };
             let guard = memory.read().await;
-            match guard.read(key, &Type::Register, &Range::new(addr as usize, cnt as usize)) {
+            match guard.read(
+                key,
+                &Type::Register,
+                &Range::new(addr as usize, cnt as usize),
+            ) {
                 Some(v) => {
                     if verbose {
                         (log)(format!(
@@ -588,9 +600,15 @@ where
                 addr + cnt
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadHoldingRegisters) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::ReadHoldingRegisters),
+            };
             let guard = memory.read().await;
-            match guard.read(key, &Type::Register, &Range::new(addr as usize, cnt as usize)) {
+            match guard.read(
+                key,
+                &Type::Register,
+                &Range::new(addr as usize, cnt as usize),
+            ) {
                 Some(v) => {
                     if verbose {
                         (log)(format!(
@@ -626,7 +644,9 @@ where
                 values
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleRegisters) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::WriteMultipleRegisters),
+            };
             let mut guard = memory.write().await;
             match guard.write(
                 key,
@@ -668,9 +688,16 @@ where
                 slave, addr, value
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleRegister) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::WriteSingleRegister),
+            };
             let mut guard = memory.write().await;
-            match guard.write(key, &Type::Register, &Range::new(addr as usize, 1), &[value]) {
+            match guard.write(
+                key,
+                &Type::Register,
+                &Range::new(addr as usize, 1),
+                &[value],
+            ) {
                 true => {
                     if verbose {
                         (log)(format!(
@@ -702,7 +729,9 @@ where
                 values
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteMultipleCoils) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::WriteMultipleCoils),
+            };
             let mut guard = memory.write().await;
             let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
             match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
@@ -740,7 +769,9 @@ where
                 slave, addr, value
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::WriteSingleCoil) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::WriteSingleCoil),
+            };
             let mut guard = memory.write().await;
             let val = value as u16;
             match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &[val]) {
@@ -788,7 +819,9 @@ where
                 slave, read_addr, cnt, write_addr, values
             ))
             .await;
-            let key = Key { id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters) };
+            let key = Key {
+                id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters),
+            };
             let mut guard = memory.write().await;
             let readable = guard.readable(
                 &key,

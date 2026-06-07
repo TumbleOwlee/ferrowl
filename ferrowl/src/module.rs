@@ -120,7 +120,7 @@ impl Module {
             file_sink,
             scripts,
             read_ranges: device.read_ranges.clone(),
-            sim_interval: Duration::from_millis(timing.interval_ms.max(1) as u64),
+            sim_interval: Duration::from_millis(timing.interval_ms.max(1000) as u64),
             sim: None,
             virtual_values: Arc::new(RwLock::new(virtual_init)),
         }
@@ -130,7 +130,10 @@ impl Module {
     /// config value, else the global app config default.
     pub fn resolve_timing(spec: &ModuleSpec, device: &DeviceConfig, app: &AppConfig) -> Timing {
         Timing {
-            timeout_ms: spec.timeout_ms.or(device.timeout_ms).unwrap_or(app.timeout_ms),
+            timeout_ms: spec
+                .timeout_ms
+                .or(device.timeout_ms)
+                .unwrap_or(app.timeout_ms),
             delay_ms: spec.delay_ms.or(device.delay_ms).unwrap_or(app.delay_ms),
             interval_ms: spec
                 .interval_ms
@@ -258,11 +261,28 @@ impl Module {
         }
     }
 
+    /// Start the Lua simulation thread (`:lua start`). No-op when there are no `update` scripts.
+    pub fn start_lua(&mut self) {
+        self.start_sim();
+    }
+
+    /// Stop the Lua simulation thread (`:lua stop`).
+    pub fn stop_lua(&mut self) {
+        self.stop_sim();
+    }
+
+    /// Whether the Lua simulation thread is currently running.
+    pub fn lua_running(&self) -> bool {
+        self.sim.is_some()
+    }
+
     /// Replace the module's script list and restart the simulation thread so the new scripts take
     /// effect. Any previously running sim thread is stopped first.
     pub fn reload_scripts(&mut self, scripts: Vec<(String, String)>) {
         self.scripts = scripts;
-        self.start_sim();
+        if self.sim.take().is_some() {
+            self.start_sim();
+        }
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).
@@ -295,7 +315,7 @@ impl Module {
                 .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
         }
         self.rebuild_operations().await;
-        self.sim_interval = Duration::from_millis(timing.interval_ms.max(1) as u64);
+        self.sim_interval = Duration::from_millis(timing.interval_ms.max(1000) as u64);
         let net_config = endpoint_to_config(endpoint, &timing);
         self.instance = build_instance(
             role,
@@ -395,7 +415,8 @@ fn build_read_operations(
             // bridging the gaps *between* those registers but trimmed to their actual extent
             // (leading/trailing space inside the range is not read). Registers outside every
             // explicit range are auto-merged into their own requests.
-            let mut windows: Vec<(usize, usize)> = explicit.iter().map(|r| (r.start, r.end)).collect();
+            let mut windows: Vec<(usize, usize)> =
+                explicit.iter().map(|r| (r.start, r.end)).collect();
             windows.sort_unstable();
             let windows = merge_spans(&windows);
 
@@ -675,7 +696,12 @@ mod tests {
         addr: u16,
         format: Format,
         access: Access,
-    ) -> (String, String, ferrowl_reg::Register, Vec<crate::config::device::NamedValue>) {
+    ) -> (
+        String,
+        String,
+        ferrowl_reg::Register,
+        Vec<crate::config::device::NamedValue>,
+    ) {
         let register = RegisterBuilder::default()
             .slave_id(slave)
             .access(access)
@@ -687,8 +713,24 @@ mod tests {
         (String::new(), String::new(), register, vec![])
     }
 
-    fn u16reg(slave: u8, kind: Kind, addr: u16, access: Access) -> (String, String, ferrowl_reg::Register, Vec<crate::config::device::NamedValue>) {
-        entry(slave, kind, addr, Format::U16((Endian::Big, Resolution(1.0))), access)
+    fn u16reg(
+        slave: u8,
+        kind: Kind,
+        addr: u16,
+        access: Access,
+    ) -> (
+        String,
+        String,
+        ferrowl_reg::Register,
+        Vec<crate::config::device::NamedValue>,
+    ) {
+        entry(
+            slave,
+            kind,
+            addr,
+            Format::U16((Endian::Big, Resolution(1.0))),
+            access,
+        )
     }
 
     #[test]

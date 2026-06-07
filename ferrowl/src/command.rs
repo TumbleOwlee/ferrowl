@@ -12,6 +12,7 @@ pub enum Cmd {
     Start,
     Stop,
     Restart,
+    Lua(LuaCommand),
     Set { register: String, value: String },
     Write(Option<String>),
     WriteDevice(Option<String>),
@@ -21,6 +22,13 @@ pub enum Cmd {
     Reload,
     Unknown(String),
     Empty,
+}
+
+/// Sub-command of `:lua` — start or stop the module's Lua simulation thread.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LuaCommand {
+    Start,
+    Stop,
 }
 
 /// Parse a command line (without the leading `:`).
@@ -41,6 +49,11 @@ pub fn parse(input: &str) -> Cmd {
         "start" => Cmd::Start,
         "stop" => Cmd::Stop,
         "restart" => Cmd::Restart,
+        "lua" => match args.first().copied() {
+            Some("start") => Cmd::Lua(LuaCommand::Start),
+            Some("stop") => Cmd::Lua(LuaCommand::Stop),
+            _ => Cmd::Unknown(format!("lua {}", args.join(" ")).trim().to_string()),
+        },
         "set" => Cmd::Set {
             register: args.first().copied().unwrap_or_default().to_string(),
             value: args.get(1..).map(|rest| rest.join(" ")).unwrap_or_default(),
@@ -117,6 +130,15 @@ mod tests {
         );
         assert_eq!(parse("log run.log"), Cmd::Log(Some("run.log".to_string())));
         assert_eq!(parse("log"), Cmd::Log(None));
+    }
+
+    #[test]
+    fn ut_lua() {
+        assert_eq!(parse("lua start"), Cmd::Lua(LuaCommand::Start));
+        assert_eq!(parse("lua stop"), Cmd::Lua(LuaCommand::Stop));
+        // Missing/invalid subcommand falls through to Unknown.
+        assert_eq!(parse("lua"), Cmd::Unknown("lua".to_string()));
+        assert_eq!(parse("lua wat"), Cmd::Unknown("lua wat".to_string()));
     }
 
     #[test]
