@@ -13,38 +13,65 @@ use ferrowl_mem::Range;
 use ferrowl_net::{Key, SlaveKind};
 use ferrowl_reg::{Address, Register, Value};
 
-use crate::module::{FileSink, ModuleLog, ModuleMemory, append};
+use crate::module::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
-/// Bridges Lua register access (`C_Register`) to the module's shared `Memory`. Runs on the
-/// dedicated simulation thread, so the tokio `RwLock` is locked with its `blocking_*` ops (safe
-/// off a runtime worker thread).
+/// Bridges Lua register access (`C_Register`) to the module's shared `Memory` (fixed-address
+/// registers) and `VirtualStore` (virtual registers). Runs on the dedicated simulation thread, so
+/// the tokio `RwLock`s are locked with their `blocking_*` ops (safe off a runtime worker thread).
 pub struct RegisterBridge {
     memory: ModuleMemory,
+    virtual_store: VirtualStore,
     registers: HashMap<String, Register>,
 }
 
 impl RegisterBridge {
-    pub fn new(memory: ModuleMemory, registers: HashMap<String, Register>) -> Self {
-        Self { memory, registers }
+    pub fn new(
+        memory: ModuleMemory,
+        virtual_store: VirtualStore,
+        registers: HashMap<String, Register>,
+    ) -> Self {
+        Self {
+            memory,
+            virtual_store,
+            registers,
+        }
     }
 
-    fn lookup(&self, name: &str) -> Result<(&Register, u16)> {
-        let register = self
-            .registers
+    fn register(&self, name: &str) -> Result<&Register> {
+        self.registers
             .get(name)
-            .ok_or_else(|| Error::RuntimeError(format!("unknown register '{name}'")))?;
-        match register.address() {
-            Address::Fixed(addr) => Ok((register, *addr)),
-            Address::Virtual => Err(Error::RuntimeError(format!(
-                "register '{name}' is virtual (no address)"
-            ))),
-        }
+            .ok_or_else(|| Error::RuntimeError(format!("unknown register '{name}'")))
+    }
+}
+
+/// Infer a Lua `ValueType` from a virtual register's stored string (int, then float, else string).
+fn parse_value_type(s: &str) -> ValueType {
+    let t = s.trim();
+    if let Ok(i) = t.parse::<i128>() {
+        ValueType::Int(i)
+    } else if let Ok(f) = t.parse::<f64>() {
+        ValueType::Float(f)
+    } else {
+        ValueType::String(s.to_string())
     }
 }
 
 impl Read for RegisterBridge {
     fn read(&self, name: String) -> Result<ValueType> {
-        let (register, addr) = self.lookup(&name)?;
+        let register = self.register(&name)?;
+        let addr = match register.address() {
+            Address::Fixed(addr) => *addr,
+            Address::Virtual => {
+                return self
+                    .virtual_store
+                    .blocking_read()
+                    .get(&name)
+                    .map(|s| parse_value_type(s))
+                    .ok_or_else(|| {
+                        Error::RuntimeError(format!("virtual register '{name}' not set"))
+                    });
+            }
+        };
         let width = register.format().width();
         let key = Key {
             id: SlaveKind {
@@ -66,7 +93,14 @@ impl Read for RegisterBridge {
 
 impl Write for RegisterBridge {
     fn write(&self, name: String, value: String) -> Result<()> {
-        let (register, addr) = self.lookup(&name)?;
+        let register = self.register(&name)?;
+        let addr = match register.address() {
+            Address::Fixed(addr) => *addr,
+            Address::Virtual => {
+                self.virtual_store.blocking_write().insert(name, value);
+                return Ok(());
+            }
+        };
         let raw = register
             .encode(&value)
             .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?;
@@ -138,6 +172,7 @@ impl Drop for SimHandle {
 #[allow(clippy::too_many_arguments)]
 pub fn run_sim(
     memory: ModuleMemory,
+    virtual_store: VirtualStore,
     registers: HashMap<String, Register>,
     scripts: Vec<(String, String)>,
     interval: Duration,
@@ -151,7 +186,7 @@ pub fn run_sim(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, registers);
+        let bridge = RegisterBridge::new(memory, virtual_store, registers);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -249,9 +284,45 @@ mod tests {
         registers
     }
 
+    fn vstore() -> VirtualStore {
+        Arc::new(RwLock::new(HashMap::new()))
+    }
+
+    #[test]
+    fn ut_bridge_virtual_register_roundtrip() {
+        let virtual_store = vstore();
+        let mut registers = evse_registers();
+        registers.insert(
+            "calc".to_string(),
+            RegisterBuilder::default()
+                .slave_id(1u8)
+                .access(Access::ReadWrite)
+                .kind(Kind::HoldingRegister)
+                .address(ferrowl_reg::Address::Virtual)
+                .format(Format::U16((Endian::Big, Resolution(1.0))))
+                .build()
+                .unwrap(),
+        );
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store.clone(), registers);
+
+        // Reading before any write errors; after a write the value round-trips via the store.
+        assert!(bridge.read("calc".to_string()).is_err());
+        bridge
+            .write("calc".to_string(), "7".to_string())
+            .expect("virtual write");
+        match bridge.read("calc".to_string()).expect("virtual read") {
+            ValueType::Int(v) => assert_eq!(v, 7),
+            _ => panic!("expected Int"),
+        }
+        assert_eq!(
+            virtual_store.blocking_read().get("calc").map(String::as_str),
+            Some("7")
+        );
+    }
+
     #[test]
     fn ut_bridge_write_then_read() {
-        let bridge = RegisterBridge::new(evse_memory(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
         bridge
             .write("setpoint".to_string(), "100".to_string())
             .expect("write");
@@ -263,7 +334,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_unknown_register_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), "1".to_string()).is_err());
     }
@@ -272,7 +343,7 @@ mod tests {
     #[test]
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
-        let bridge = RegisterBridge::new(memory.clone(), evse_registers());
+        let bridge = RegisterBridge::new(memory.clone(), vstore(), evse_registers());
         bridge
             .write("setpoint".to_string(), "42".to_string())
             .expect("seed setpoint");

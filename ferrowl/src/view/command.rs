@@ -8,7 +8,7 @@ use ferrowl_ui::{
     types::Border,
     widgets::{InputField, InputFieldBuilder, Widget},
 };
-use ratatui::{layout::Margin, style::palette::tailwind};
+use ratatui::layout::Margin;
 
 /// The composed command line: an `InputField` plus its input/cursor state.
 pub type CommandLine = Widget<InputFieldState, InputField<String>>;

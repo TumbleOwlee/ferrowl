@@ -1,21 +1,5 @@
-use ferrowl_net::KeyParams;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
-
-pub enum Client {
-    Tcp(ferrowl_net::tcp::Client),
-    Rtu(ferrowl_net::rtu::Client),
-}
-
-pub enum Server<T, L>
-where
-    T: KeyParams,
-    L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-    for<'a> L::CallRefFuture<'a>: Send,
-{
-    Tcp(ferrowl_net::tcp::Server<T, L>),
-    Rtu(ferrowl_net::rtu::Server<T, L>),
-}
 
 pub struct ClientHandle {
     pub handle: JoinHandle<Result<(), ferrowl_net::Error>>,

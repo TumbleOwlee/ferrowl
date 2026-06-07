@@ -1,5 +1,7 @@
 use crate::config::device::NamedValue;
-use crate::dialog::edit::{AccessOption, Alignment, Endian, Format, KindOption, ValueType};
+use crate::dialog::edit::{
+    AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
+};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::format::{
@@ -23,7 +25,6 @@ use ferrowl_ui::{
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
-    style::palette::tailwind,
     widgets::{Block, StatefulWidget, Widget as UiWidget},
 };
 use std::fmt::Debug;
@@ -42,7 +43,7 @@ pub struct EditInputDialog {
     pub slave_id: Widget<InputFieldState, InputField<u8>>,
     // Address of the start register
     #[focus]
-    pub address: Widget<InputFieldState, InputField<u16>>,
+    pub address: Widget<InputFieldState, InputField<String>>,
     // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
@@ -122,7 +123,7 @@ impl EditInputDialog {
             return Err(format!("Label: {e}"));
         } else if let Err(e) = u8::validate(self.slave_id.state.input()) {
             return Err(format!("Slave ID: {e}"));
-        } else if let Err(e) = u16::validate(self.address.state.input()) {
+        } else if let Err(e) = parse_address(self.address.state.input()) {
             return Err(format!("Address: {e}"));
         }
 
@@ -463,7 +464,7 @@ impl EditInputDialog {
                 state: InputFieldStateBuilder::default()
                     .focused(false)
                     .disabled(false)
-                    .placeholder(Some("e.g. 100".to_string()))
+                    .placeholder(Some("100 or 'virtual'".to_string()))
                     .build()
                     .unwrap(),
                 widget: InputFieldBuilder::default()
@@ -812,8 +813,9 @@ impl EditInputDialog {
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
         dialog.focus = EditInputDialogFocus::Value;
-        if let Address::Fixed(addr) = register.address() {
-            set_input(&mut dialog.address, &addr.to_string());
+        match register.address() {
+            Address::Fixed(addr) => set_input(&mut dialog.address, &addr.to_string()),
+            Address::Virtual => set_input(&mut dialog.address, "virtual"),
         }
         set_input(&mut dialog.slave_id, &register.slave_id().to_string());
         dialog.access.state.set_selection(access_index(register.access()));
@@ -850,13 +852,7 @@ impl EditInputDialog {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
         let comment = self.description.state.input().trim().to_string();
-        let addr = self
-            .address
-            .state
-            .input()
-            .trim()
-            .parse::<u16>()
-            .map_err(|_| "Address must be a number.".to_string())?;
+        let address = parse_address(self.address.state.input())?;
 
         let format = if self.is_boolean_kind() {
             RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0)))
@@ -901,7 +897,7 @@ impl EditInputDialog {
             .slave_id(slave_id)
             .access(self.access.state.get_value().0.clone())
             .kind(self.kind.state.get_value().0)
-            .address(Address::Fixed(addr))
+            .address(address)
             .format(format)
             .build()
             .expect("all register fields are set");

@@ -96,6 +96,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
         timeout_ms: None,
         delay_ms: None,
         interval_ms: None,
+        read_ranges: Default::default(),
         definitions,
     };
     let spec = ModuleSpec {

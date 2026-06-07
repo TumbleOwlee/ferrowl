@@ -4,7 +4,7 @@ use ferrowl_ui::COLOR_SCHEME;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style, palette::tailwind},
+    style::Style,
     text::Line,
     widgets::{Tabs, Widget},
 };

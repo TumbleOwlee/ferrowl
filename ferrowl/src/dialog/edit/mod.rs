@@ -7,7 +7,21 @@ pub use selection::*;
 use ferrowl_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
 };
-use ferrowl_reg::{Access, Kind};
+use ferrowl_reg::{Access, Address, Kind};
+
+/// Parse an address-field value: the literal `virtual` (case-insensitive) selects a virtual
+/// register (no Modbus address), otherwise a `u16` address.
+pub(super) fn parse_address(input: &str) -> Result<Address, String> {
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("virtual") {
+        Ok(Address::Virtual)
+    } else {
+        trimmed
+            .parse::<u16>()
+            .map(Address::Fixed)
+            .map_err(|_| "Address must be a number or 'virtual'.".to_string())
+    }
+}
 use ferrowl_ui::{
     state::InputFieldState,
     traits::ToLabel,

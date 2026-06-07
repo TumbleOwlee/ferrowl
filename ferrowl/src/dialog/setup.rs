@@ -23,6 +23,7 @@ use ratatui::{
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
 
+use crate::config::device::ReadRanges;
 use crate::config::{DeviceConfig, Endpoint, Role};
 
 /// Edit an existing instance, or create a new module (with an optional config path).
@@ -124,6 +125,8 @@ pub struct SetupValues {
     pub timeout_ms: Option<usize>,
     pub delay_ms: Option<usize>,
     pub interval_ms: Option<usize>,
+    /// Explicit per-function-code read ranges (client only), applied to the device config.
+    pub read_ranges: ReadRanges,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
@@ -158,12 +161,20 @@ pub struct SetupDialog {
     pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
-    #[focus(when = {self.role.get_value() == Role::Client})]
+    #[focus]
     pub timeout: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.role.get_value() == Role::Client})]
+    #[focus]
     pub delay: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.role.get_value() == Role::Client})]
+    #[focus]
     pub interval: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub holding_ranges: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub input_ranges: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub coil_ranges: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub discrete_ranges: Widget<InputFieldState, InputField<String>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
@@ -172,8 +183,14 @@ pub struct SetupDialog {
 impl SetupDialog {
     /// Edit an existing instance (`:e`). `timing` is the effective (resolved) timeout/delay/
     /// interval in ms used to prefill the inputs (shown only for clients).
-    pub fn edit(name: &str, role: Role, endpoint: &Endpoint, timing: (usize, usize, usize)) -> Self {
-        let mut dialog = Self::build(name, DialogMode::Edit, timing);
+    pub fn edit(
+        name: &str,
+        role: Role,
+        endpoint: &Endpoint,
+        timing: (usize, usize, usize),
+        ranges: &ReadRanges,
+    ) -> Self {
+        let mut dialog = Self::build(name, DialogMode::Edit, timing, ranges);
         dialog
             .role
             .state
@@ -208,10 +225,15 @@ impl SetupDialog {
     /// Create a new module (`:n`/`:new`), with an optional device-config path. `timing` prefills
     /// the (client-only) timeout/delay/interval inputs with the global app defaults.
     pub fn create(timing: (usize, usize, usize)) -> Self {
-        Self::build("", DialogMode::New, timing)
+        Self::build("", DialogMode::New, timing, &ReadRanges::default())
     }
 
-    fn build(name: &str, mode: DialogMode, timing: (usize, usize, usize)) -> Self {
+    fn build(
+        name: &str,
+        mode: DialogMode,
+        timing: (usize, usize, usize),
+        ranges: &ReadRanges,
+    ) -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
         let error_style = TextStyle {
@@ -287,6 +309,16 @@ impl SetupDialog {
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
             .interval(input("Interval ms", None, "", &input_style, false))
+            .holding_ranges(input(
+                "Holding ranges",
+                None,
+                "0-100,140-160",
+                &input_style,
+                false,
+            ))
+            .input_ranges(input("Input ranges", None, "0-9", &input_style, false))
+            .coil_ranges(input("Coil ranges", None, "0-31", &input_style, false))
+            .discrete_ranges(input("Discrete ranges", None, "0-31", &input_style, false))
             .error(Widget {
                 state: String::new(),
                 widget: TextBuilder::default()
@@ -322,6 +354,18 @@ impl SetupDialog {
         set_input(&mut dialog.timeout, &timeout_ms.to_string());
         set_input(&mut dialog.delay, &delay_ms.to_string());
         set_input(&mut dialog.interval, &interval_ms.to_string());
+
+        // Prefill explicit read ranges from the device config.
+        for (field, value) in [
+            (&mut dialog.holding_ranges, &ranges.holding),
+            (&mut dialog.input_ranges, &ranges.input),
+            (&mut dialog.coil_ranges, &ranges.coils),
+            (&mut dialog.discrete_ranges, &ranges.discrete),
+        ] {
+            if let Some(v) = value {
+                set_input(field, v);
+            }
+        }
         dialog
     }
 
@@ -396,15 +440,19 @@ impl SetupDialog {
                     .map_err(|_| format!("{label} must be a whole number of milliseconds."))
             }
         };
-        // Timing applies to polling clients only; servers never poll.
-        let (timeout_ms, delay_ms, interval_ms) = if role == Role::Client {
-            (
-                parse_ms(self.timeout.state.input(), "Timeout")?,
-                parse_ms(self.delay.state.input(), "Delay")?,
-                parse_ms(self.interval.state.input(), "Interval")?,
-            )
-        } else {
-            (None, None, None)
+        // Timing and explicit read ranges are shown and captured for all roles.
+        let opt = |s: &str| {
+            let t = s.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
+        let timeout_ms = parse_ms(self.timeout.state.input(), "Timeout")?;
+        let delay_ms = parse_ms(self.delay.state.input(), "Delay")?;
+        let interval_ms = parse_ms(self.interval.state.input(), "Interval")?;
+        let read_ranges = ReadRanges {
+            holding: opt(self.holding_ranges.state.input()),
+            input: opt(self.input_ranges.state.input()),
+            coils: opt(self.coil_ranges.state.input()),
+            discrete: opt(self.discrete_ranges.state.input()),
         };
 
         Ok(SetupValues {
@@ -414,6 +462,7 @@ impl SetupDialog {
             timeout_ms,
             delay_ms,
             interval_ms,
+            read_ranges,
         })
     }
 
@@ -426,16 +475,11 @@ impl SetupDialog {
 
         let is_new = self.mode == DialogMode::New;
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
-        // Timing only applies to (and is shown for) polling clients.
-        let is_client = self.role.state.get_value() == Role::Client;
         // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 3 } else { 1 };
-        // border(2) + inner margin(2) + name(3) + select(3) + endpoint + error(3) + keybinds(1)
-        // + optional config-path row (New mode) + optional timing row (client only).
-        let box_height = 14
-            + endpoint_rows * 3
-            + if is_new { 3 } else { 0 }
-            + if is_client { 3 } else { 0 };
+        // border(2) + inner margin(2) + name(3) + select(3) + endpoint + timing(3) + ranges(6)
+        // + error(3) + keybinds(1) + optional config-path row (New mode).
+        let box_height = 23 + endpoint_rows * 3 + if is_new { 3 } else { 0 };
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -470,9 +514,9 @@ impl SetupDialog {
         }
         constraints.push(Constraint::Length(3)); // transport + role
         constraints.push(Constraint::Length(endpoint_rows * 3)); // endpoint
-        if is_client {
-            constraints.push(Constraint::Length(3)); // timeout + delay + interval
-        }
+        constraints.push(Constraint::Length(3)); // timeout + delay + interval
+        constraints.push(Constraint::Length(3)); // holding + input ranges
+        constraints.push(Constraint::Length(3)); // coil + discrete ranges
         constraints.push(Constraint::Length(3)); // error
         constraints.push(Constraint::Length(1)); // keybinds
         let rows = Layout::vertical(constraints).split(inner);
@@ -536,7 +580,7 @@ impl SetupDialog {
             render_pair(&mut self.ip, &mut self.port, endpoint_area, buf);
         }
 
-        if is_client {
+        {
             let [timeout_area, delay_area, interval_area] = Layout::horizontal([
                 Constraint::Percentage(34),
                 Constraint::Percentage(33),
@@ -557,6 +601,21 @@ impl SetupDialog {
                 buf,
                 &mut self.interval.state,
             );
+
+            render_pair(
+                &mut self.holding_ranges,
+                &mut self.input_ranges,
+                rows[idx],
+                buf,
+            );
+            idx += 1;
+            render_pair(
+                &mut self.coil_ranges,
+                &mut self.discrete_ranges,
+                rows[idx],
+                buf,
+            );
+            idx += 1;
         }
 
         let error_area = rows[idx];

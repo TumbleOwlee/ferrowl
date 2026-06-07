@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 
 use ferrowl_mem::{Range, Type};
-use ferrowl_net::FunctionCode;
 use ferrowl_reg::{
     Access, Address, Format, Kind, Register, RegisterBuilder,
     format::{Alignment, Endian, Resolution, Width},
@@ -29,7 +28,69 @@ pub struct DeviceConfig {
     pub delay_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<usize>,
+    /// Explicit address ranges a client reads in one Modbus request per function code (gaps
+    /// included). When empty for a code, contiguous registers are auto-merged instead.
+    #[serde(default, skip_serializing_if = "ReadRanges::is_empty")]
+    pub read_ranges: ReadRanges,
     pub definitions: BTreeMap<String, RegisterDef>,
+}
+
+/// Per-function-code explicit read ranges. Each string is a comma-separated list of inclusive
+/// address ranges, e.g. `"0-100,140-160"` (a bare `"5"` is the single address 5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ReadRanges {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coils: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discrete: Option<String>,
+}
+
+impl ReadRanges {
+    pub fn is_empty(&self) -> bool {
+        self.holding.is_none()
+            && self.input.is_none()
+            && self.coils.is_none()
+            && self.discrete.is_none()
+    }
+
+    /// Parsed ranges configured for `kind` (empty when none configured or unparsable).
+    pub fn ranges_for(&self, kind: Kind) -> Vec<Range> {
+        let spec = match kind {
+            Kind::HoldingRegister => &self.holding,
+            Kind::InputRegister => &self.input,
+            Kind::Coil => &self.coils,
+            Kind::DiscreteInput => &self.discrete,
+        };
+        spec.as_deref().map(parse_ranges).unwrap_or_default()
+    }
+}
+
+/// Parse `"0-100,140-160"` (inclusive bounds; bare `"5"` = single address) into memory ranges.
+/// Malformed or reversed entries are skipped.
+fn parse_ranges(spec: &str) -> Vec<Range> {
+    spec.split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            match part.split_once('-') {
+                Some((a, b)) => {
+                    let start = a.trim().parse::<usize>().ok()?;
+                    let end = b.trim().parse::<usize>().ok()?;
+                    (end >= start).then(|| Range::new(start, end - start + 1))
+                }
+                None => {
+                    let addr = part.parse::<usize>().ok()?;
+                    Some(Range::new(addr, 1))
+                }
+            }
+        })
+        .collect()
 }
 
 /// A single register definition within a device type.
@@ -206,15 +267,6 @@ impl RegisterDef {
         }
     }
 
-    pub fn function_code(&self) -> FunctionCode {
-        match self.kind() {
-            Kind::Coil => FunctionCode::ReadCoils,
-            Kind::DiscreteInput => FunctionCode::ReadDiscreteInputs,
-            Kind::HoldingRegister => FunctionCode::ReadHoldingRegisters,
-            Kind::InputRegister => FunctionCode::ReadInputRegisters,
-        }
-    }
-
     pub fn mem_type(&self) -> Type {
         match self.kind() {
             Kind::Coil | Kind::DiscreteInput => Type::Coil,
@@ -335,6 +387,10 @@ mod tests {
             timeout_ms: Some(2000),
             delay_ms: None,
             interval_ms: Some(800),
+            read_ranges: ReadRanges {
+                holding: Some("0-100,140-160".to_string()),
+                ..Default::default()
+            },
             definitions,
         }
     }

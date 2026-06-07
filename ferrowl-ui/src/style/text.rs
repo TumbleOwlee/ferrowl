@@ -1,7 +1,7 @@
 use crate::COLOR_SCHEME;
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]

@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Style, palette::tailwind},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
@@ -224,13 +224,13 @@ impl App {
         let follow = self.focus != Focus::Log;
 
         // Clone shared handles + current rows so no `self.tabs` borrow is held across awaits.
-        let (log, memory, defs, virtual_values) = {
+        let (log, memory, defs, virtual_store) = {
             let tab = &self.tabs[active];
             (
                 tab.module.log(),
                 tab.module.memory(),
                 tab.table.definitions().to_vec(),
-                tab.module.virtual_values(),
+                tab.module.virtual_store(),
             )
         };
 
@@ -238,6 +238,7 @@ impl App {
             let guard = log.read().await;
             guard.peak_n(LOG_SIZE).unwrap_or_default()
         };
+        let virtual_values = virtual_store.read().await.clone();
         let updated = {
             let guard = memory.read().await;
             defs.into_iter()
@@ -452,6 +453,7 @@ impl App {
             tab.spec.role,
             &tab.spec.endpoint,
             (timing.timeout_ms, timing.delay_ms, timing.interval_ms),
+            &tab.device.read_ranges,
         );
         self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
@@ -588,6 +590,15 @@ impl App {
             }
         }
 
+        // Seed a virtual register with a default so its value/raw aren't blank before a script or
+        // `:set` runs; an explicit value below overrides it.
+        if let Address::Virtual = edited.register.address() {
+            let default = crate::module::default_value(&edited.register);
+            if let Some(tab) = self.tabs.get(active) {
+                tab.module.set_virtual_value(&edited.name, default).await;
+            }
+        }
+
         if let Some(value) = edited.value {
             self.set_value(&edited.name, &value).await;
         }
@@ -714,10 +725,11 @@ impl App {
         self.tabs[active].spec.timeout_ms = values.timeout_ms;
         self.tabs[active].spec.delay_ms = values.delay_ms;
         self.tabs[active].spec.interval_ms = values.interval_ms;
-        // Mirror into the device config so `:wd` persists the timing too.
+        // Mirror into the device config so `:wd` persists the timing + read ranges too.
         self.tabs[active].device.timeout_ms = values.timeout_ms;
         self.tabs[active].device.delay_ms = values.delay_ms;
         self.tabs[active].device.interval_ms = values.interval_ms;
+        self.tabs[active].device.read_ranges = values.read_ranges.clone();
 
         let app_cfg = self.app_cfg.clone();
         let timing = crate::module::Module::resolve_timing(
@@ -727,7 +739,7 @@ impl App {
         );
         if let Err(e) = self.tabs[active]
             .module
-            .reconfigure(&values.endpoint, values.role, timing)
+            .reconfigure(&values.endpoint, values.role, timing, values.read_ranges)
             .await
         {
             self.tabs[active]
@@ -748,10 +760,11 @@ impl App {
         device_path: String,
         mut device: crate::config::DeviceConfig,
     ) {
-        // Mirror timing into the device config so `:wd` persists it.
+        // Mirror timing + read ranges into the device config so `:wd` persists them.
         device.timeout_ms = values.timeout_ms;
         device.delay_ms = values.delay_ms;
         device.interval_ms = values.interval_ms;
+        device.read_ranges = values.read_ranges.clone();
         let spec = ModuleSpec {
             name: values.name,
             device: device_path,
@@ -1047,7 +1060,8 @@ impl App {
             if role == Role::Server {
                 self.tabs[self.active]
                     .module
-                    .set_virtual_value(register_name, value.to_string());
+                    .set_virtual_value(register_name, value.to_string())
+                    .await;
                 self.log_active(format!("set {register_name} = {value} (virtual)"))
                     .await;
             } else {
@@ -1105,6 +1119,21 @@ impl App {
                 let result = self.tabs[self.active].module.send_command(command).await;
                 match result {
                     Ok(()) => {
+                        // Write-only registers are never polled back, so mirror the value into
+                        // local memory immediately so the table reflects what was sent.
+                        if *register.access() == Access::WriteOnly {
+                            let memory = self.tabs[self.active].module.memory();
+                            memory.write().await.write_unchecked(
+                                Key {
+                                    id: SlaveKind {
+                                        slave_id: slave,
+                                        kind: register.kind().clone(),
+                                    },
+                                },
+                                &Range::new(addr as usize, raw.len()),
+                                &raw,
+                            );
+                        }
                         self.log_active(format!("set {register_name} = {value} (sent)"))
                             .await
                     }
@@ -1213,10 +1242,6 @@ fn decode_definition(
     match d.register.address() {
         Address::Fixed(addr) => {
             let width = d.register.format().width();
-            let ty = match d.register.kind() {
-                Kind::Coil | Kind::DiscreteInput => Type::Coil,
-                Kind::HoldingRegister | Kind::InputRegister => Type::Register,
-            };
             let key = Key {
                 id: SlaveKind {
                     slave_id: *d.register.slave_id(),
@@ -1230,30 +1255,38 @@ fn decode_definition(
                 Ok(v) => format!("{v}"),
                 Err(_) => "Error".to_string(),
             };
-            let mut raw_str = String::with_capacity(raw.len() * 3 + 4);
-            raw_str += "[";
-            let mut first = true;
-            for v in raw.iter() {
-                if !first {
-                    raw_str += &format!(" {:04x}", *v);
-                } else {
-                    raw_str += &format!("{:04x}", *v);
-                }
-                first = false;
-            }
-            raw_str += "]";
-            d.raw_value = raw_str;
+            d.raw_value = raw_hex(&raw);
         }
         Address::Virtual => {
-            if let Some(v) = virtual_values.get(&d.name) {
-                d.value = v.clone();
-            } else {
-                d.value.clear();
+            // No Modbus address: value comes from the virtual store (Lua sim / server `:set`);
+            // derive the raw view by re-encoding it through the register's format.
+            match virtual_values.get(&d.name) {
+                Some(v) => {
+                    d.value = v.clone();
+                    d.raw_value = d.register.encode(v).map(|raw| raw_hex(&raw)).unwrap_or_default();
+                }
+                None => {
+                    d.value.clear();
+                    d.raw_value.clear();
+                }
             }
-            d.raw_value.clear();
         }
     }
     d
+}
+
+/// Format register words as `[aaaa bbbb …]` lowercase hex for the table's raw column.
+fn raw_hex(raw: &[u16]) -> String {
+    let mut out = String::with_capacity(raw.len() * 5 + 2);
+    out.push('[');
+    for (i, v) in raw.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        out += &format!("{v:04x}");
+    }
+    out.push(']');
+    out
 }
 
 /// Sync the mutable `RegisterDef` fields (address, format, access, kind) from an edited
@@ -1273,9 +1306,15 @@ fn sync_register_def(def: &mut RegisterDef, register: &Register) {
         Kind::HoldingRegister => 4,
         Kind::InputRegister => 3,
     };
-    if let Address::Fixed(addr) = register.address() {
-        def.address = Some(*addr);
-        def.is_virtual = false;
+    match register.address() {
+        Address::Fixed(addr) => {
+            def.address = Some(*addr);
+            def.is_virtual = false;
+        }
+        Address::Virtual => {
+            def.address = None;
+            def.is_virtual = true;
+        }
     }
     // Every numeric format carries the same (endian, resolution) payload.
     macro_rules! numeric {
