@@ -1434,6 +1434,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
         (":w [path]", "save session"),
         (":wd [path]", "save device config"),
         (":log [file]", "set log file"),
+        (":lua start|stop", "start/stop lua execution"),
         (":reload", "reload device config"),
         (":compact", "toggle compact mode"),
     ];
