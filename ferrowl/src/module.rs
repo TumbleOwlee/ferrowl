@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ferrowl_mem::{Kind as MemKind, Memory, Range};
 use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation, SlaveKind};
@@ -19,6 +19,7 @@ use crate::instance::Instance;
 use crate::instance::config::{ClientConfig, ServerConfig};
 use crate::instance::error::Error;
 use crate::lua::{SimHandle, run_sim};
+use crate::view::log::format_timestamp;
 
 pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKind>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
@@ -150,6 +151,17 @@ impl Module {
     /// Return a clone of all virtual register values (for display in the table snapshot).
     pub fn virtual_values(&self) -> HashMap<String, String> {
         self.virtual_values.clone()
+    }
+
+    /// Append a brand-new register to the module's cached register list.
+    pub fn add_register(
+        &mut self,
+        name: String,
+        comment: String,
+        register: Register,
+        named_values: Vec<NamedValue>,
+    ) {
+        self.registers.push((name, comment, register, named_values));
     }
 
     /// Replace one register's cached metadata (name, comment, register, named values).
@@ -333,12 +345,17 @@ fn module_log_path(base: &str, name: &str) -> PathBuf {
     }
 }
 
-/// Append a line to the file sink (if any), flushing so it's durable.
+/// Append a timestamped line to the file sink (if any), flushing so it's durable.
 pub(crate) fn append(sink: &FileSink, line: &str) {
     if let Ok(mut guard) = sink.lock()
         && let Some(writer) = guard.as_mut()
     {
-        let _ = writeln!(writer, "{line}");
+        let ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let ts = format_timestamp(ms);
+        let _ = writeln!(writer, "[{ts}] {line}");
         let _ = writer.flush();
     }
 }

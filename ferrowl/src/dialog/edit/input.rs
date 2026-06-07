@@ -999,6 +999,29 @@ impl EditInputDialog {
     pub fn is_confirm_button_focused(&self) -> bool {
         matches!(self.focus, EditInputDialogFocus::ConfirmButton)
     }
+
+    /// Convert this dialog into an EditSelectionDialog, preserving shared field state.
+    /// Called when the first named value is added and the dialog should switch to selection mode.
+    pub fn to_edit_selection_dialog(
+        &self,
+    ) -> super::selection::EditSelectionDialog<crate::config::device::NamedValue> {
+        let values = self.pending_named_values.clone();
+        let mut d = super::selection::EditSelectionDialog::new(values);
+        d.label.state = self.label.state.clone();
+        d.description.state = self.description.state.clone();
+        d.slave_id.state = self.slave_id.state.clone();
+        d.address.state = self.address.state.clone();
+        d.kind.state = self.kind.state.clone();
+        d.access.state = self.access.state.clone();
+        d.value_type.state = self.value_type.state.clone();
+        d.number_format.state = self.number_format.state.clone();
+        d.number_endian.state = self.number_endian.state.clone();
+        d.number_resolution.state = self.number_resolution.state.clone();
+        d.text_alignment.state = self.text_alignment.state.clone();
+        d.text_width.state = self.text_width.state.clone();
+        d.update_script.state = self.update_script.state.clone();
+        d
+    }
 }
 
 use super::{

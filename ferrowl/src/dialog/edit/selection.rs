@@ -1238,6 +1238,26 @@ impl EditSelectionDialog<NamedValue> {
         matches!(self.focus, EditSelectionDialogFocus::ConfirmButton)
     }
 
+    /// Convert this dialog into an EditInputDialog, preserving all shared field state.
+    /// Called when all named values are removed and the dialog should switch to free-text mode.
+    pub fn to_edit_input_dialog(&self) -> super::input::EditInputDialog {
+        let mut d = super::input::EditInputDialog::new();
+        d.label.state = self.label.state.clone();
+        d.description.state = self.description.state.clone();
+        d.slave_id.state = self.slave_id.state.clone();
+        d.address.state = self.address.state.clone();
+        d.kind.state = self.kind.state.clone();
+        d.access.state = self.access.state.clone();
+        d.value_type.state = self.value_type.state.clone();
+        d.number_format.state = self.number_format.state.clone();
+        d.number_endian.state = self.number_endian.state.clone();
+        d.number_resolution.state = self.number_resolution.state.clone();
+        d.text_alignment.state = self.text_alignment.state.clone();
+        d.text_width.state = self.text_width.state.clone();
+        d.update_script.state = self.update_script.state.clone();
+        d
+    }
+
     pub fn delete_selected(&mut self) {
         let idx = self.value.state.selection();
         let vals = self.value.state.values_mut();

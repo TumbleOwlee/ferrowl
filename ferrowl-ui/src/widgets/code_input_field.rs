@@ -120,7 +120,21 @@ impl StatefulWidget for &CodeInputField {
         // Gutter width: digit count of line_count + 1 separator space
         let gutter_width = line_count.to_string().len() as u16 + 1;
         let content_x = area.x + gutter_width;
-        let content_width = area.width.saturating_sub(gutter_width);
+        let content_width = area.width.saturating_sub(gutter_width) as usize;
+
+        // Adjust horizontal scroll so the cursor stays in view on the active line.
+        let cursor_col = state.cursor_col();
+        let h_scroll = state.h_scroll();
+        let h_scroll = if content_width == 0 {
+            0
+        } else if cursor_col < h_scroll {
+            cursor_col
+        } else if cursor_col >= h_scroll + content_width {
+            cursor_col + 1 - content_width
+        } else {
+            h_scroll
+        };
+        state.set_h_scroll(h_scroll);
 
         for (row, line_idx) in (scroll..scroll + visible_height).enumerate() {
             let y = area.y + row as u16;
@@ -146,14 +160,20 @@ impl StatefulWidget for &CodeInputField {
             }
 
             let line = &state.lines()[line_idx];
-            let content_rect = Rect::new(content_x, y, content_width, 1);
-            Paragraph::new(Text::from(line.as_str()).style(self.style.general))
+            let chars: Vec<char> = line.chars().collect();
+            let visible: String = chars
+                .get(h_scroll..h_scroll.saturating_add(content_width).min(chars.len()))
+                .unwrap_or(&[])
+                .iter()
+                .collect();
+            let content_rect = Rect::new(content_x, y, content_width as u16, 1);
+            Paragraph::new(Text::from(visible).style(self.style.general))
                 .render(content_rect, buf);
 
             if state.focused() && !state.disabled() && line_idx == active {
-                let col = state.cursor_col().min(content_width as usize) as u16;
-                if col < content_width {
-                    buf[(content_x + col, y)].set_style(self.style.cursor);
+                let cursor_in_view = cursor_col.saturating_sub(h_scroll) as u16;
+                if (cursor_in_view as usize) < content_width {
+                    buf[(content_x + cursor_in_view, y)].set_style(self.style.cursor);
                 }
             }
         }

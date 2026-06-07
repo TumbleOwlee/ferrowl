@@ -180,6 +180,14 @@ where
                 self.move_to_top();
                 EventResult::Consumed
             }
+            (KeyModifiers::NONE, KeyCode::Char('0')) => {
+                self.move_to_left();
+                EventResult::Consumed
+            }
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('$')) => {
+                self.move_to_right();
+                EventResult::Consumed
+            }
             _ => EventResult::Unhandled(modifiers, code),
         }
     }

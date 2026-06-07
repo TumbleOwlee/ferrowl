@@ -1,5 +1,8 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub struct Log<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> {
     buffer: [[char; MAX_LINE_LENGTH]; LOG_SIZE],
+    timestamps: [u64; LOG_SIZE],
     write: usize,
     read: usize,
 }
@@ -10,12 +13,17 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
 
         Self {
             buffer,
+            timestamps: [0u64; LOG_SIZE],
             write: 0,
             read: 0,
         }
     }
 
     pub fn write(&mut self, msg: &str) {
+        self.timestamps[self.write] = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         for (dst, src) in self.buffer[self.write].iter_mut().zip(
             msg.chars()
                 .chain(std::iter::repeat_n('\0', MAX_LINE_LENGTH)),
@@ -29,27 +37,36 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         self.write = next;
     }
 
-    pub fn peak(&self) -> Option<String> {
+    pub fn peak(&self) -> Option<(u64, String)> {
         if self.read != self.write {
-            Some(self.buffer[self.read].iter().collect::<String>())
+            Some((
+                self.timestamps[self.read],
+                self.buffer[self.read].iter().collect::<String>(),
+            ))
         } else {
             None
         }
     }
 
-    pub fn peak_n(&self, cnt: usize) -> Option<Vec<String>> {
+    pub fn peak_n(&self, cnt: usize) -> Option<Vec<(u64, String)>> {
         let mut read = self.read;
         let mut msgs = Vec::with_capacity(cnt);
         while read != self.write && msgs.len() < cnt {
-            msgs.push(self.buffer[read].iter().collect::<String>());
+            msgs.push((
+                self.timestamps[read],
+                self.buffer[read].iter().collect::<String>(),
+            ));
             read = (read + 1) % LOG_SIZE;
         }
         if msgs.is_empty() { None } else { Some(msgs) }
     }
 
-    pub fn take(&mut self) -> Option<String> {
+    pub fn take(&mut self) -> Option<(u64, String)> {
         if self.read != self.write {
-            let msg = self.buffer[self.read].iter().collect::<String>();
+            let msg = (
+                self.timestamps[self.read],
+                self.buffer[self.read].iter().collect::<String>(),
+            );
             self.read = (self.read + 1) % LOG_SIZE;
             Some(msg)
         } else {
@@ -57,10 +74,13 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
     }
 
-    pub fn take_n(&mut self, cnt: usize) -> Option<Vec<String>> {
+    pub fn take_n(&mut self, cnt: usize) -> Option<Vec<(u64, String)>> {
         let mut msgs = Vec::with_capacity(cnt);
         while self.read != self.write && msgs.len() < cnt {
-            msgs.push(self.buffer[self.read].iter().collect::<String>());
+            msgs.push((
+                self.timestamps[self.read],
+                self.buffer[self.read].iter().collect::<String>(),
+            ));
             self.read = (self.read + 1) % LOG_SIZE;
         }
         if msgs.is_empty() { None } else { Some(msgs) }
@@ -78,11 +98,11 @@ mod tests {
 
         let peak = log.peak();
         assert!(peak.is_some());
-        assert_eq!(peak.unwrap(), "some messa");
+        assert_eq!(peak.unwrap().1, "some messa");
 
         let take = log.take();
         assert!(take.is_some());
-        assert_eq!(take.unwrap(), "some messa");
+        assert_eq!(take.unwrap().1, "some messa");
 
         let take = log.take();
         assert!(take.is_none());
@@ -126,14 +146,14 @@ mod tests {
     fn ut_log_ring_overflow_evicts_oldest() {
         // LOG_SIZE=3 can hold at most 2 messages
         let mut log: Log<10, 3> = Log::init();
-        log.write("msg1______"); // fill all 10 chars
+        log.write("msg1______");
         log.write("msg2______");
         log.write("msg3______"); // evicts msg1
 
         let msgs = log.peak_n(2).unwrap();
         assert_eq!(msgs.len(), 2);
-        assert!(msgs[0].starts_with("msg2"));
-        assert!(msgs[1].starts_with("msg3"));
+        assert!(msgs[0].1.starts_with("msg2"));
+        assert!(msgs[1].1.starts_with("msg3"));
     }
 
     #[test]
@@ -143,24 +163,21 @@ mod tests {
         log.write("bbbbbbbbbb");
         log.write("cccccccccc");
 
-        // take_n(10) > available (3): returns all 3
         let taken = log.take_n(10).unwrap();
         assert_eq!(taken.len(), 3);
-
-        // now empty
         assert!(log.take_n(1).is_none());
     }
 
     #[test]
     fn ut_log_truncation() {
         let mut log: Log<5, 3> = Log::init();
-        log.write("abcde"); // exactly MAX_LINE_LENGTH chars: not truncated
-        log.write("abcdefgh"); // 8 chars: truncated to first 5
+        log.write("abcde");
+        log.write("abcdefgh");
 
         let first = log.take().unwrap();
-        assert_eq!(&first, "abcde");
+        assert_eq!(&first.1, "abcde");
 
         let second = log.take().unwrap();
-        assert_eq!(&second, "abcde");
+        assert_eq!(&second.1, "abcde");
     }
 }

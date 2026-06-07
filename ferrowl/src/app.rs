@@ -1,6 +1,3 @@
-use std::io::Stdout;
-use std::time::Duration;
-
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_log::Log;
 use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
@@ -17,6 +14,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
+use std::io::Stdout;
+use std::time::Duration;
 
 use crate::config::{
     AppConfig, DeviceConfig, ModuleSpec, Role, Session,
@@ -29,7 +28,7 @@ use crate::dialog::{
 };
 use crate::module::Module;
 use crate::view::command::{CommandLine, new_command_line};
-use crate::view::log::{LogEntry, LogView, new_log_view};
+use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 use crate::view::main::{Definition, TableView};
 use crate::view::tabs::render_tabs;
 
@@ -55,13 +54,14 @@ enum Overlay {
     Setup(SetupDialog),
     Edit(EditInputDialog),
     EditSelection(EditSelectionDialog<NamedValue>),
+    Add(EditInputDialog),
 }
 
 impl Overlay {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self {
             Overlay::Setup(d) => d.render(area, buf),
-            Overlay::Edit(d) => d.render(area, buf),
+            Overlay::Edit(d) | Overlay::Add(d) => d.render(area, buf),
             Overlay::EditSelection(d) => d.render(area, buf),
         }
     }
@@ -69,7 +69,7 @@ impl Overlay {
     fn focus_next(&mut self) {
         match self {
             Overlay::Setup(d) => d.focus_next(),
-            Overlay::Edit(d) => d.focus_next(),
+            Overlay::Edit(d) | Overlay::Add(d) => d.focus_next(),
             Overlay::EditSelection(d) => d.focus_next(),
         }
     }
@@ -77,7 +77,7 @@ impl Overlay {
     fn focus_previous(&mut self) {
         match self {
             Overlay::Setup(d) => d.focus_previous(),
-            Overlay::Edit(d) => d.focus_previous(),
+            Overlay::Edit(d) | Overlay::Add(d) => d.focus_previous(),
             Overlay::EditSelection(d) => d.focus_previous(),
         }
     }
@@ -87,7 +87,7 @@ impl Overlay {
             Overlay::Setup(d) => {
                 let _ = d.handle_events(modifiers, code);
             }
-            Overlay::Edit(d) => {
+            Overlay::Edit(d) | Overlay::Add(d) => {
                 let _ = d.handle_events(modifiers, code);
             }
             Overlay::EditSelection(d) => {
@@ -102,6 +102,7 @@ enum OverlayAction {
     CreateModule(SetupValues, String, DeviceConfig),
     ApplySetup(SetupValues),
     ApplyEdit(EditedRegister),
+    AddRegister(EditedRegister),
 }
 
 /// Per-module UI state shown under one tab: the owning `Module` plus its register table and
@@ -242,7 +243,10 @@ impl App {
 
         let entries: Vec<LogEntry> = lines
             .into_iter()
-            .map(|l| LogEntry(l.trim_end_matches('\u{0}').to_string()))
+            .map(|(ts, msg)| LogEntry {
+                timestamp: format_timestamp(ts),
+                message: msg.trim_end_matches('\u{0}').to_string(),
+            })
             .collect();
 
         let tab = &mut self.tabs[active];
@@ -280,7 +284,9 @@ impl App {
         let has_sub = matches!(&self.overlay,
             Some(Overlay::EditSelection(d)) if d.has_sub_dialog())
             || matches!(&self.overlay,
-            Some(Overlay::Edit(d)) if d.has_sub_dialog());
+            Some(Overlay::Edit(d)) if d.has_sub_dialog())
+            || matches!(&self.overlay,
+            Some(Overlay::Add(d)) if d.has_sub_dialog());
         if has_sub {
             match self.overlay.as_mut() {
                 Some(Overlay::EditSelection(d)) => match code {
@@ -290,7 +296,7 @@ impl App {
                     KeyCode::BackTab => d.add_dialog_focus_previous(),
                     _ => d.add_dialog_handle_events(modifiers, code),
                 },
-                Some(Overlay::Edit(d)) => match code {
+                Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => match code {
                     KeyCode::Esc => d.close_add_dialog(),
                     KeyCode::Enter => d.confirm_add_dialog(),
                     KeyCode::Tab => d.add_dialog_focus_next(),
@@ -304,11 +310,11 @@ impl App {
 
         // Check whether the code input or confirm button is currently focused in the edit dialogs.
         let update_script_focused = matches!(&self.overlay,
-            Some(Overlay::Edit(d)) if d.is_update_script_focused())
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) if d.is_update_script_focused())
             || matches!(&self.overlay,
             Some(Overlay::EditSelection(d)) if d.is_update_script_focused());
         let confirm_button_focused = matches!(&self.overlay,
-            Some(Overlay::Edit(d)) if d.is_confirm_button_focused())
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) if d.is_confirm_button_focused())
             || matches!(&self.overlay,
             Some(Overlay::EditSelection(d)) if d.is_confirm_button_focused());
 
@@ -329,13 +335,13 @@ impl App {
                     self.confirm_overlay().await;
                 } else if let Some(Overlay::EditSelection(d)) = self.overlay.as_mut() {
                     d.handle_space();
-                } else if let Some(Overlay::Edit(d)) = self.overlay.as_mut() {
+                } else if let Some(Overlay::Edit(d) | Overlay::Add(d)) = self.overlay.as_mut() {
                     d.handle_space();
                 } else if let Some(o) = self.overlay.as_mut() {
                     o.handle_events(modifiers, code);
                 }
             }
-            (KeyModifiers::NONE, KeyCode::BackTab) => {
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
                 if let Some(o) = self.overlay.as_mut() {
                     o.focus_previous();
                 }
@@ -351,6 +357,25 @@ impl App {
                 }
             }
         }
+
+        // Auto-switch: EditSelectionDialog → EditInputDialog when all named values are removed.
+        // Auto-switch: EditInputDialog → EditSelectionDialog when the first named value is added.
+        let new_overlay = match &self.overlay {
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d))
+                if !d.pending_named_values.is_empty() =>
+            {
+                let new_d = d.to_edit_selection_dialog();
+                Some(Overlay::EditSelection(new_d))
+            }
+            Some(Overlay::EditSelection(d)) if d.value.state.values().is_empty() => {
+                Some(Overlay::Edit(d.to_edit_input_dialog()))
+            }
+            _ => None,
+        };
+        if let Some(o) = new_overlay {
+            self.overlay = Some(o);
+        }
+
         false
     }
 
@@ -364,13 +389,14 @@ impl App {
             }),
             Some(Overlay::Edit(d)) => d.apply().ok().map(OverlayAction::ApplyEdit),
             Some(Overlay::EditSelection(d)) => d.apply().ok().map(OverlayAction::ApplyEdit),
+            Some(Overlay::Add(d)) => d.apply().ok().map(OverlayAction::AddRegister),
             None => None,
         };
         let Some(action) = action else {
             return;
         };
 
-        // Validate name uniqueness before applying an edit.
+        // Validate name uniqueness before applying an edit or add.
         if let OverlayAction::ApplyEdit(ref edited) = action {
             if let Some(tab) = self.tabs.get(self.active) {
                 if let Some(idx) = tab.table.selected_index() {
@@ -388,6 +414,17 @@ impl App {
                 }
             }
         }
+        if let OverlayAction::AddRegister(ref edited) = action {
+            if let Some(tab) = self.tabs.get(self.active) {
+                if tab.device.definitions.contains_key(&edited.name) {
+                    let msg = format!("Name '{}' already in use", edited.name);
+                    if let Some(Overlay::Add(d)) = &mut self.overlay {
+                        d.error.state = msg;
+                    }
+                    return;
+                }
+            }
+        }
 
         match action {
             OverlayAction::CreateModule(values, path, device) => {
@@ -395,6 +432,7 @@ impl App {
             }
             OverlayAction::ApplySetup(values) => self.apply_setup(values).await,
             OverlayAction::ApplyEdit(edited) => self.apply_edit(edited).await,
+            OverlayAction::AddRegister(edited) => self.apply_add(edited).await,
         }
         self.close_overlay();
     }
@@ -455,6 +493,113 @@ impl App {
             self.overlay = Some(Overlay::EditSelection(dialog));
         }
         self.focus = Focus::Dialog;
+    }
+
+    /// Open a blank EditInputDialog to create a new register (`:add`).
+    fn enter_add(&mut self) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        self.overlay = Some(Overlay::Add(EditInputDialog::new()));
+        self.focus = Focus::Dialog;
+    }
+
+    /// Insert a newly-created register (from the `:add` dialog) into the active tab.
+    async fn apply_add(&mut self, edited: EditedRegister) {
+        let active = self.active;
+        let Some(tab) = self.tabs.get_mut(active) else {
+            return;
+        };
+
+        let named_values = edited.named_values.clone().unwrap_or_default();
+
+        // Build a RegisterDef from the edited register; reuse sync_register_def for format fields.
+        let mut def = RegisterDef {
+            slave_id: 0,
+            read_code: 4,
+            address: None,
+            is_virtual: false,
+            access: crate::config::device::AccessCfg::ReadWrite,
+            value_type: crate::config::device::ValueType::U16,
+            endian: crate::config::device::EndianCfg::default(),
+            resolution: 1.0,
+            length: 1,
+            alignment: crate::config::device::AlignmentCfg::default(),
+            values: named_values.clone(),
+            update: edited.update.as_ref().filter(|s| !s.is_empty()).cloned(),
+            comment: edited.comment.clone(),
+        };
+        sync_register_def(&mut def, &edited.register);
+
+        tab.device.definitions.insert(edited.name.clone(), def);
+        tab.module.add_register(
+            edited.name.clone(),
+            edited.comment.clone(),
+            edited.register.clone(),
+            named_values.clone(),
+        );
+
+        if let Address::Fixed(addr) = edited.register.address() {
+            let ty = mem_type(&edited.register);
+            let kind = match edited.register.kind() {
+                Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
+                Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
+            };
+            let key = Key {
+                id: SlaveKind {
+                    slave_id: *edited.register.slave_id(),
+                    kind: edited.register.kind().clone(),
+                },
+            };
+            tab.module.memory().write().await.add_ranges(
+                key,
+                &kind,
+                &[Range::new(*addr as usize, edited.register.format().width())],
+            );
+        }
+
+        if let Some(tab) = self.tabs.get(active) {
+            tab.module.rebuild_operations().await;
+        }
+
+        // Update table view.
+        if let Some(tab) = self.tabs.get_mut(active) {
+            let mut defs = tab.table.definitions().to_vec();
+            defs.push(Definition::new(
+                edited.name.clone(),
+                edited.comment.clone(),
+                edited.register.clone(),
+                named_values,
+            ));
+            tab.table.set_definitions(defs);
+        }
+
+        // Reload Lua sim when the new register has an update script.
+        if edited
+            .update
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        {
+            if let Some(tab) = self.tabs.get_mut(active) {
+                let scripts: Vec<(String, String)> = tab
+                    .device
+                    .definitions
+                    .iter()
+                    .filter_map(|(name, def)| {
+                        def.update
+                            .as_ref()
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|s| (name.clone(), s.clone()))
+                    })
+                    .collect();
+                tab.module.reload_scripts(scripts);
+            }
+        }
+
+        if let Some(value) = edited.value {
+            self.set_value(&edited.name, &value).await;
+        }
     }
 
     /// Apply edited register metadata to the selected row, then optionally write its value.
@@ -805,6 +950,7 @@ impl App {
             }
             Cmd::QuitAll => return true,
             Cmd::Edit => self.enter_setup(),
+            Cmd::Add => self.enter_add(),
             Cmd::New => self.enter_new(),
             Cmd::Load(path) => self.enter_load(path.as_deref()),
             Cmd::Start => self.start_module().await,
@@ -1235,6 +1381,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
         (":q / :qa", "quit tab / quit all"),
         (":e / :n", "edit setup / new tab"),
         (":l [path]", "load device config"),
+        (":a / :add", "add register to device"),
         (":start / :stop / :restart", "control module"),
         (":set <reg> <v>", "write register value"),
         (":w [path]", "save session"),
