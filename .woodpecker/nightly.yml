@@ -5,6 +5,7 @@ steps:
       - apt-get update && apt-get install -y mingw-w64 zip
       - rustup target add x86_64-pc-windows-gnu
       - cargo check
+      - cargo test
       - cargo build --release
       - cargo build --release --target x86_64-pc-windows-gnu
       - zip -j ferrowl-windows.zip target/x86_64-pc-windows-gnu/release/ferrowl.exe

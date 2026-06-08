@@ -3,6 +3,7 @@ steps:
     image: rust:latest
     commands:
       - cargo check
+      - cargo test
     when:
       - event: push
       - event: manual
