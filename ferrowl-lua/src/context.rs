@@ -116,3 +116,69 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Context;
+    use std::time::Duration;
+
+    fn key(s: &str) -> String {
+        s.to_string()
+    }
+
+    #[test]
+    fn ut_load_script_rejects_invalid_lua() {
+        let mut ctx = Context::<String>::default();
+        assert!(
+            ctx.load_script(key("bad"), "this is not ! valid lua")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ut_load_script_rejects_duplicate_key() {
+        let mut ctx = Context::<String>::default();
+        assert!(ctx.load_script(key("a"), "local x = 1").is_ok());
+        // Second load under the same key must not overwrite; it returns a bind error.
+        assert!(ctx.load_script(key("a"), "local y = 2").is_err());
+    }
+
+    #[test]
+    fn ut_call_missing_key_is_ok() {
+        let mut ctx = Context::<String>::default();
+        // No script registered for the key: nothing to run, so it succeeds vacuously.
+        assert!(ctx.call(&key("nope")).is_ok());
+    }
+
+    #[test]
+    fn ut_call_runs_script_and_surfaces_runtime_error() {
+        let mut ctx = Context::<String>::default();
+        ctx.load_script(key("ok"), "local x = 1 + 1").unwrap();
+        ctx.load_script(key("boom"), "error('kaboom')").unwrap();
+        assert!(ctx.call(&key("ok")).is_ok());
+        let err = ctx.call(&key("boom")).unwrap_err();
+        assert!(err.to_string().contains("kaboom"));
+    }
+
+    #[test]
+    fn ut_call_all_collects_errors() {
+        let mut ctx = Context::<String>::default();
+        ctx.load_script(key("ok"), "local x = 1").unwrap();
+        ctx.load_script(key("boom"), "error('x')").unwrap();
+        // Duration::ZERO means every script is eligible to run.
+        let errs = ctx.call_all(Duration::ZERO).unwrap_err();
+        assert_eq!(errs.len(), 1);
+    }
+
+    #[test]
+    fn ut_refresh_skips_recently_executed_script() {
+        let mut ctx = Context::<String>::default();
+        // A failing script that would error if executed.
+        ctx.load_script(key("boom"), "error('x')").unwrap();
+        // Just loaded, so its last-execution age is ~0; a one-hour window skips it entirely,
+        // proving the throttle: no execution means no error.
+        assert!(ctx.refresh(&key("boom"), Duration::from_secs(3600)).is_ok());
+        // Without the throttle the same script does run and surfaces its error.
+        assert!(ctx.call(&key("boom")).is_err());
+    }
+}

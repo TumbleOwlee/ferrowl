@@ -1569,7 +1569,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    q  quit    Tab  table/log    ] [  tabs    gt gT  tabs",
+            "  :  command    |    Tab  table/log    |    ] [  tabs    |    gt gT  tabs",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }

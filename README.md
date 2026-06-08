@@ -50,7 +50,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 
 ## Commands
 
-| Keybind | Description |
+| Command | Description |
 | ----- | ----- |
 | `:q \| :quit` | Quit tab / Close active module |
 | `:qa \| :qall` | Close all tabs / Exit applciation |
@@ -87,6 +87,8 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `g` | Move to top of table |
 | `0` | Move to left edge of table |
 | `$` | Move to right edge of table |
+| `gt \| ]` | Switch to next tab |
+| `gT \| [` | Switch to previous tab |
 
 ## Impressions
 

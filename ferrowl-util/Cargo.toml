@@ -14,3 +14,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt", "sync", "time"] }
 toml = "0.9.11"
+
+[dev-dependencies]
+# The `#[tokio::main]` doctests in `tokio.rs` need the macro + multi-thread runtime, which the
+# library itself does not depend on. Declared here so `cargo test -p ferrowl-util` is self-contained
+# (previously these passed only via workspace-wide feature unification).
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }

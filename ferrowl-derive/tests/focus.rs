@@ -5,6 +5,8 @@ use ferrowl_ui::traits::IsFocus;
 #[derive(Default, Clone, Debug)]
 struct Widget {
     focused: bool,
+    /// Number of events routed to this widget, used to assert event dispatch targets.
+    events: u32,
 }
 
 impl ferrowl_ui::traits::SetFocus for Widget {
@@ -25,6 +27,7 @@ impl ferrowl_ui::traits::HandleEvents for Widget {
         _modifiers: crossterm::event::KeyModifiers,
         _code: crossterm::event::KeyCode,
     ) -> ferrowl_ui::EventResult {
+        self.events += 1;
         ferrowl_ui::EventResult::Consumed
     }
 }
@@ -81,4 +84,38 @@ fn ut_focus_previous_reverses_next() {
     app.focus_next(); // → Second
     app.focus_previous(); // → First
     assert!(app.first.is_focused());
+}
+
+#[test]
+fn ut_exactly_one_widget_focused_after_switch() {
+    let mut app = make_app();
+    app.focus_next(); // → Second
+    let focused = [&app.first, &app.second, &app.third]
+        .iter()
+        .filter(|w| w.is_focused())
+        .count();
+    assert_eq!(focused, 1);
+    assert!(app.second.is_focused());
+
+    app.focus_next(); // → Third; previous (Second) must be cleared
+    assert!(!app.second.is_focused());
+    assert!(app.third.is_focused());
+}
+
+#[test]
+fn ut_handle_events_routes_to_focused_widget() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = make_app(); // focus = First
+    app.handle_events(KeyModifiers::NONE, KeyCode::Char('a'));
+    assert_eq!(app.first.events, 1);
+    assert_eq!(app.second.events, 0);
+    assert_eq!(app.third.events, 0);
+
+    app.focus_next(); // → Second
+    app.handle_events(KeyModifiers::NONE, KeyCode::Char('b'));
+    assert_eq!(app.first.events, 1);
+    assert_eq!(app.second.events, 1);
+    assert_eq!(app.third.events, 0);
 }

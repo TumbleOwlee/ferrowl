@@ -300,7 +300,8 @@ impl ClientCore {
                 match cmd {
                     Command::Terminate => {
                         let _ = self.context.disconnect().await;
-                        log.invoke("Client gracefully terminated.".to_string()).await;
+                        log.invoke("Client gracefully terminated.".to_string())
+                            .await;
                         status.invoke("Client disconnected".to_string()).await;
                         return Ok(());
                     }
@@ -973,5 +974,124 @@ mod tests {
         };
         let fut = f.invoke("hi".to_string());
         assert_send_fut(&fut);
+    }
+
+    // ---- handle_request -------------------------------------------------------------------
+
+    use crate::SlaveKind;
+    use ferrowl_mem::Kind as MemKind;
+    use ferrowl_reg::Kind as RegKind;
+    use std::sync::Mutex;
+    use tokio_modbus::Request;
+    use tokio_modbus::prelude::Response;
+
+    /// Build a memory map for slave `1`, holding registers `[0,4)`, seeded with `seed` at addr 0,
+    /// wrapped in the `Arc<RwLock<_>>` that `handle_request` expects.
+    fn seeded_memory(seed: &[u16]) -> Arc<RwLock<Memory<Key<SlaveKind>>>> {
+        let key = Key {
+            id: SlaveKind {
+                slave_id: 1,
+                kind: RegKind::HoldingRegister,
+            },
+        };
+        let mut mem = Memory::<Key<SlaveKind>>::default();
+        mem.add_ranges(
+            key.clone(),
+            &MemKind::ReadWrite(Type::Register),
+            &[Range::new(0, 4)],
+        );
+        if !seed.is_empty() {
+            mem.write(key, &Type::Register, &Range::new(0, seed.len()), seed);
+        }
+        Arc::new(RwLock::new(mem))
+    }
+
+    /// A `LogFn` that records every line into a shared buffer for assertions.
+    fn recording_log() -> (impl LogFn + Clone, Arc<Mutex<Vec<String>>>) {
+        let buf = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = buf.clone();
+        let log = move |s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().unwrap().push(s);
+            }
+        };
+        (log, buf)
+    }
+
+    #[tokio::test]
+    async fn ut_handle_read_holding_returns_seeded_values() {
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let resp = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadHoldingRegisters(0, 2),
+            &mem,
+            &log,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![10, 20]));
+    }
+
+    #[tokio::test]
+    async fn ut_handle_read_unknown_slave_is_illegal_function() {
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        // Slave 2 has no registered ranges, so the lookup fails.
+        let err = handle_request::<SlaveKind, _>(
+            2,
+            Request::ReadHoldingRegisters(0, 2),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    #[tokio::test]
+    async fn ut_handle_write_single_register_persists() {
+        let mem = seeded_memory(&[]);
+        let (log, _) = recording_log();
+        handle_request::<SlaveKind, _>(1, Request::WriteSingleRegister(1, 99), &mem, &log, false)
+            .await
+            .unwrap();
+        let resp = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadHoldingRegisters(1, 1),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![99]));
+    }
+
+    #[tokio::test]
+    async fn ut_handle_verbose_logs_outcome_quiet_when_off() {
+        let mem = seeded_memory(&[1, 2]);
+
+        // verbose = true: a "received" line plus a "successful" line.
+        let (log, buf) = recording_log();
+        handle_request::<SlaveKind, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, true)
+            .await
+            .unwrap();
+        let verbose = buf.lock().unwrap().clone();
+        assert_eq!(verbose.len(), 2);
+        assert!(verbose[0].contains("received"));
+        assert!(verbose[1].contains("successful"));
+
+        // verbose = false: only the "received" line.
+        let (log, buf) = recording_log();
+        handle_request::<SlaveKind, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, false)
+            .await
+            .unwrap();
+        let quiet = buf.lock().unwrap().clone();
+        assert_eq!(quiet.len(), 1);
+        assert!(quiet[0].contains("received"));
     }
 }

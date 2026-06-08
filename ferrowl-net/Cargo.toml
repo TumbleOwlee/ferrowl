@@ -20,3 +20,8 @@ tokio-modbus = { version = "0.17.0", features = [
 ] }
 tokio-serial = "5.4.5"
 clap = { version = "4.5.51", features = ["derive"] }
+
+[dev-dependencies]
+# Async test harness for the `handle_request` server logic (the crate's own tokio dep is
+# `time`-only since the library never spins up a runtime itself).
+tokio = { version = "1.48.0", features = ["rt", "macros", "sync", "time"] }
