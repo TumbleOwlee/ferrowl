@@ -168,6 +168,7 @@ address = 0
 type = "U16"
 access = "ReadWrite"
 description = "charge setpoint (W)"
+default = 0            # start at zero watts on every load
 
 [definitions.power]
 slave_id = 1
@@ -176,6 +177,7 @@ address = 1
 type = "U16"
 access = "ReadWrite"
 description = "active power (W)"
+default = 0
 # Lua run every cycle: mirror the setpoint into the power register (server simulation).
 update = """
 C_Register:Set("power", C_Register:GetInt("setpoint"))
@@ -188,6 +190,7 @@ address = 2
 type = "I16"
 access = "ReadWrite"
 description = "charge state"
+default = 0            # start in the "waiting" state
 values = [
     { name = "waiting", value = 0 },
     { name = "charging", value = 2 },
@@ -213,6 +216,7 @@ values = [
 | `length` | `1` | ASCII width in registers (ignored for numeric types). |
 | `alignment` | `Left` | ASCII alignment: `Left` or `Right`. |
 | `values` | `[]` | Named values for selection-style registers. |
+| `default` | *(none)* | Default value written to memory on startup / configuration load. |
 | `update` | *(none)* | Lua snippet run every simulation cycle. |
 | `description` | `""` | Free-text description. |
 
