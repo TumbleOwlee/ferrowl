@@ -23,7 +23,7 @@ pub fn render_tabs(names: &[String], active: usize, area: Rect, buf: &mut Buffer
         .highlight_style(
             Style::default()
                 .bg(COLOR_SCHEME.hi)
-                .fg(COLOR_SCHEME.hi_bg)
+                .fg(COLOR_SCHEME.text_dark)
                 .bold(),
         )
         .divider("│");

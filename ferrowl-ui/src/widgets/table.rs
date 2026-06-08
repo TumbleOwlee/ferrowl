@@ -172,8 +172,12 @@ where
         let column_spacings = 2 * (N as u16) + (N as u16 - 1);
         let table_width = column_widths.iter().fold(column_spacings, |acc, w| acc + w) + 3;
 
-        let selected_style = &self.style.focused;
-        let bar_style = &self.style.focused;
+        let selected_style = if state.focused() {
+            &self.style.focused
+        } else {
+            &self.style.unfocused_selected
+        };
+        let bar_style = selected_style;
         let mut bar_height = 0;
 
         state.set_total_width(std::cmp::max(table_width, area.width));

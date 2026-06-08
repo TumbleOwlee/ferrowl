@@ -3,7 +3,6 @@ use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::Register;
 use ferrowl_ui::{
-    COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
@@ -11,7 +10,6 @@ use ferrowl_ui::{
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
-    style::palette::tailwind,
     widgets::StatefulWidget,
 };
 use std::fmt::Debug;
@@ -165,14 +163,7 @@ impl TableView {
                 state: TableStateBuilder::default().values(values).build().unwrap(),
                 widget: TableBuilder::default()
                     .style(
-                        TableStyleBuilder::default()
-                            .focused(
-                                ratatui::style::Style::default()
-                                    .bg(tailwind::INDIGO.c900)
-                                    .fg(COLOR_SCHEME.text),
-                            )
-                            .build()
-                            .unwrap(),
+                        TableStyleBuilder::default().build().unwrap(),
                     )
                     .row_margin(Margin {
                         vertical: 1,

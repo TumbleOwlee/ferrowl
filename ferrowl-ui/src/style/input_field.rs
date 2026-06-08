@@ -12,7 +12,7 @@ pub struct InputFieldStyle {
     pub focused: Style,
     #[builder(default = "Style::default().fg(COLOR_SCHEME.placeholder)")]
     pub placeholder: Style,
-    #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.hi)")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.text_dark).bg(COLOR_SCHEME.hi)")]
     pub cursor: Style,
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.error).bg(COLOR_SCHEME.bg)")]

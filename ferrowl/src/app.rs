@@ -1474,6 +1474,7 @@ fn render(
     render_tabs(&names, active, tabs_area, buf);
 
     if let Some(tab) = tabs.get_mut(active) {
+        tab.table.table.state.set_focused(focus == Focus::Table);
         tab.table.render(table_area, buf);
         StatefulWidget::render(&tab.log_view.widget, log_area, buf, &mut tab.log_view.state);
     }

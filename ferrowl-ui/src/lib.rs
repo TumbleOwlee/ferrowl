@@ -12,6 +12,7 @@ use ratatui::style::{Color, palette::tailwind};
 
 pub struct ColorScheme {
     pub text: Color,
+    pub text_dark: Color,
     pub hi: Color,
     pub hi_bg: Color,
     pub bg: Color,
@@ -23,13 +24,14 @@ pub struct ColorScheme {
 }
 
 pub const COLOR_SCHEME: ColorScheme = ColorScheme {
-    text: tailwind::WHITE,
-    hi: tailwind::INDIGO.c400,
-    hi_bg: tailwind::INDIGO.c950,
-    bg: tailwind::STONE.c950,
-    border: tailwind::WHITE,
-    row: [tailwind::SLATE.c950, tailwind::SLATE.c800],
-    placeholder: tailwind::NEUTRAL.c500,
+    text: Color::White,                // white   #FFFFFF
+    text_dark: Color::Black,           // black   #000000
+    hi: Color::Rgb(196, 154, 99),      // amber gold  #C49A63
+    hi_bg: Color::Rgb(155, 121, 73),   // mid amber   #5A4618
+    bg: Color::Rgb(13, 16, 20),        // deep dark   #0D1014
+    border: Color::Rgb(156, 138, 114), // warm stone  #9C8A72
+    row: [Color::Rgb(27, 32, 37), Color::Rgb(39, 44, 50)],
+    placeholder: Color::Rgb(110, 95, 78), // dim clay   #6E5F4E
     error: tailwind::RED.c500,
-    success: tailwind::GREEN.c500,
+    success: Color::Rgb(143, 179, 154), // sage green  #8FB39A
 };
