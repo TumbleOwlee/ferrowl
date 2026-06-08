@@ -9,7 +9,7 @@ Ferrowl is a TUI application, written in Rust, to provide Modbus Client and Serv
 If you prefer a GUI application, this tool is not the right choice. In these cases refer to GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
 
 > [!WARNING]
-> Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configurations files and their management. Therefore, a compatibility layer is planned but is *currently* not available. It will be added as fast as possible.
+> Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configurations files and their management. You can migrate configuration files create by versions prior to **v0.4.0** using the `migrate` subcommand - e.g. `ferrowl migrate -i old-config.json -o new-config.json` (supports JSON and TOML as input and output).
 
 ## Goal
 
@@ -54,7 +54,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | ----- | ----- |
 | `:q \| :quit` | Quit tab / Close active module |
 | `:qa \| :qall` | Close all tabs / Exit applciation |
-| `:e \| :edit` | Edit current module | 
+| `:e \| :edit` | Edit current module |
 | `:n \| :new` | Create new module |
 | `:l \| :load [PATH]` | Load device configuration |
 | `:a \| :add` | Add new register to module |
@@ -68,7 +68,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `:lua start\|stop` | Start/Stop lua execution |
 | `:reload` | Reload device configuration |
 | `:compact` | Toggle compact table mode |
-| `:order [col] [asc\|desc]` | Sort table by column | 
+| `:order [col] [asc\|desc]` | Sort table by column |
 
 ## Keybindings
 
