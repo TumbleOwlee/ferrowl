@@ -7,6 +7,7 @@ mod config;
 mod dialog;
 mod instance;
 mod lua;
+mod migrate;
 mod module;
 mod view;
 
@@ -19,7 +20,7 @@ use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
 
 use crate::app::{App, Tab};
-use crate::cli::CliArgs;
+use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
@@ -167,6 +168,11 @@ async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, Str
 
 fn main() {
     let args = CliArgs::parse();
+
+    if let Some(SubCommand::Migrate(ref migrate_args)) = args.command {
+        migrate::run(migrate_args);
+        return;
+    }
 
     // Multi-threaded runtime so background modbus tasks can use `block_in_place`.
     let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{}]", e));

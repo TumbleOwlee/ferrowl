@@ -4,13 +4,17 @@
 
 use std::collections::HashMap;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 use crate::config::{self, Endpoint, ModuleSpec, Role};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Ferrowl — a modbus client/server TUI", long_about = None)]
 pub struct CliArgs {
+    /// Migrate a v0.3.9 config to the current device config format instead of starting the TUI.
+    #[command(subcommand)]
+    pub command: Option<SubCommand>,
+
     /// Path to the general app config (overrides the default discovery).
     #[arg(long, value_name = "FILE")]
     pub config: Option<String>,
@@ -31,6 +35,26 @@ pub struct CliArgs {
     /// Demo mode
     #[arg(long)]
     pub demo: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SubCommand {
+    /// Migrate a v0.3.9 (`modbus-cli-rs`) configuration file to the current device config format.
+    ///
+    /// Reads a TOML or JSON config from INPUT and writes a converted DeviceConfig to OUTPUT.
+    /// Warnings about dropped or approximated fields are printed to stderr.
+    Migrate(MigrateArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct MigrateArgs {
+    /// Path to the v0.3.9 configuration file (.toml or .json).
+    #[arg(long, short, value_name = "FILE")]
+    pub input: String,
+
+    /// Destination path for the converted device config (.toml or .json).
+    #[arg(long, short, value_name = "FILE")]
+    pub output: String,
 }
 
 impl CliArgs {
