@@ -46,7 +46,7 @@ jobs:
         - language: actions
           build-mode: none
         - language: rust
-          build-mode: none
+          build-mode: manual
         # CodeQL supports the following values keywords for 'language': 'actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'
         # Use `c-cpp` to analyze code written in C, C++ or both
         # Use 'java-kotlin' to analyze code written in Java, Kotlin or both
@@ -62,9 +62,14 @@ jobs:
     # Nightly is required (async_fn_traits, let_chains) and pinned by rust-toolchain.toml.
     # rust-src gives the extractor a sysroot so std macros (assert!, format!, vec!, …) resolve.
     - name: Install Rust toolchain
+      if: matrix.language == 'rust'
       uses: dtolnay/rust-toolchain@nightly
       with:
         components: rust-src
+
+    - name: Cache cargo
+      if: matrix.language == 'rust'
+      uses: Swatinem/rust-cache@v2
 
     # Add any setup steps before running the `github/codeql-action/init` action.
     # This includes steps like installing compilers or runtimes (`actions/setup-node`
@@ -78,6 +83,13 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        # Keep build artifacts and generated files out of extraction — indexing target/
+        # produces "semantic analyzer unavailable" noise on dependency build-script output.
+        config: |
+          paths-ignore:
+            - target
+            - "**/examples/**"
+            - "**/tests/**"
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
         # Prefix the list here with "+" to use these queries and those in the config file.
@@ -91,16 +103,13 @@ jobs:
     # to build your code.
     # ℹ️ Command-line programs to run using the OS shell.
     # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
+    # Compile the workspace so CodeQL traces a real build: dependencies are built and
+    # proc-macros (quote!, syn, ferrowl-derive, anyhow, …) expand. Buildless extraction
+    # cannot expand these and is what produced the macro-expansion errors / low coverage.
     - name: Run manual build steps
       if: matrix.build-mode == 'manual'
       shell: bash
-      run: |
-        echo 'If you are using a "manual" build mode for one or more of the' \
-          'languages you are analyzing, replace this with the commands to build' \
-          'your code, for example:'
-        echo '  make bootstrap'
-        echo '  make release'
-        exit 1
+      run: cargo build --workspace --all-targets
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
