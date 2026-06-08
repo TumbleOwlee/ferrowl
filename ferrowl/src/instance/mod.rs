@@ -8,7 +8,7 @@ use config::{ClientConfig, ServerConfig};
 use error::{Error, InstanceError};
 use handle::Handle;
 
-use ferrowl_net::KeyParams;
+use ferrowl_net::{KeyParams, LogFn};
 
 pub struct Instance<T: KeyParams> {
     builder: Builder<T>,
@@ -60,10 +60,8 @@ impl<T: KeyParams> Instance<T> {
 
     pub async fn start<L, S>(&mut self, log: L, status: S) -> Result<(), Error>
     where
-        L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-        S: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-        for<'a> L::CallRefFuture<'a>: Send,
-        for<'a> S::CallRefFuture<'a>: Send,
+        L: LogFn + Clone,
+        S: LogFn + Clone,
     {
         if let Some(h) = &self.handle
             && !h.is_finished()

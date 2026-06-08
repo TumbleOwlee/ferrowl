@@ -1,6 +1,6 @@
 use crate::common::ClientCore;
 use crate::tcp::Config;
-use crate::{Command, Error, Key, KeyParams, Operation, RunConfig, TcpError};
+use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, TcpError};
 
 use ferrowl_mem::Memory;
 use tokio::task::JoinHandle;
@@ -36,10 +36,8 @@ impl<T: KeyParams> ClientBuilder<T> {
         status: S,
     ) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
-        L: AsyncFn(String) -> () + Send + Sync + 'static,
-        S: AsyncFn(String) -> () + Send + Sync + 'static,
-        for<'a> L::CallRefFuture<'a>: Send,
-        for<'a> S::CallRefFuture<'a>: Send,
+        L: LogFn,
+        S: LogFn,
     {
         let guard = self.config.read().await;
         let client = Client::connect(&guard).await?;

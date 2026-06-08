@@ -95,20 +95,16 @@ impl Module {
                     Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(def.mem_type()),
                 };
                 memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
-                if let Some(default) = &def.default {
-                    if let Ok(raw) = register.encode(&default.to_string()) {
-                        let write_key = Key {
-                            id: SlaveKind {
-                                slave_id: def.slave_id,
-                                kind: def.register().kind().clone(),
-                            },
-                        };
-                        memory.write_unchecked(
-                            write_key,
-                            &Range::new(range.start, raw.len()),
-                            &raw,
-                        );
-                    }
+                if let Some(default) = &def.default
+                    && let Ok(raw) = register.encode(&default.to_string())
+                {
+                    let write_key = Key {
+                        id: SlaveKind {
+                            slave_id: def.slave_id,
+                            kind: def.register().kind().clone(),
+                        },
+                    };
+                    memory.write_unchecked(write_key, &Range::new(range.start, raw.len()), &raw);
                 }
             }
         }
@@ -235,14 +231,22 @@ impl Module {
         let result = self
             .instance
             .start(
-                async move |s: String| {
-                    log.write().await.write(&s);
-                    append(&log_sink, &s);
+                move |s: String| {
+                    let log = log.clone();
+                    let log_sink = log_sink.clone();
+                    async move {
+                        log.write().await.write(&s);
+                        append(&log_sink, &s);
+                    }
                 },
-                async move |s: String| {
-                    let line = format!("[status] {s}");
-                    status.write().await.write(&line);
-                    append(&status_sink, &line);
+                move |s: String| {
+                    let status = status.clone();
+                    let status_sink = status_sink.clone();
+                    async move {
+                        let line = format!("[status] {s}");
+                        status.write().await.write(&line);
+                        append(&status_sink, &line);
+                    }
                 },
             )
             .await;
@@ -763,8 +767,10 @@ mod tests {
         use super::build_read_operations;
         use crate::config::device::ReadRanges;
         use ferrowl_net::FunctionCode;
-        let mut read_ranges = ReadRanges::default();
-        read_ranges.holding = Some("0-2".to_string());
+        let mut read_ranges = ReadRanges {
+            holding: Some("0-2".to_string()),
+            ..Default::default()
+        };
 
         // Contiguous holding registers 0,1,2 merge into one request because of read ranges;
         // a 4th at 5 stays separate (gap is never read). A write-only register is excluded entirely.

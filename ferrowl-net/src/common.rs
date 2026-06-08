@@ -4,7 +4,7 @@
 //! context is *constructed* differs (socket connect vs serial open). Everything after that —
 //! the read/run loop and the server request handler — is identical and lives here.
 
-use crate::{Command, Error, Key, KeyParams, ModbusError, Operation, RunConfig, SlaveId};
+use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunConfig, SlaveId};
 
 use ferrowl_mem::{Memory, Range, Type};
 use std::sync::Arc;
@@ -88,12 +88,11 @@ impl ClientCore {
         log: &L,
     ) -> (&'static str, Result<Vec<u16>, ModbusError>)
     where
-        L: AsyncFn(String) -> () + Send + 'static,
-        for<'a> L::CallRefFuture<'a>: Send,
+        L: LogFn,
     {
         let result = match op.fn_code {
             FunctionCode::ReadCoils => {
-                (log)(format!(
+                log.invoke(format!(
                     "Perform ReadCoils request for slave ID {} and range [{}, {}).",
                     op.slave_id, op.range.start, op.range.end,
                 ))
@@ -113,7 +112,7 @@ impl ClientCore {
                 ("ReadCoils", res)
             }
             FunctionCode::ReadDiscreteInputs => {
-                (log)(format!(
+                log.invoke(format!(
                     "Perform ReadDiscreteInputs request for slave ID {} and range [{}, {}).",
                     op.slave_id, op.range.start, op.range.end,
                 ))
@@ -133,7 +132,7 @@ impl ClientCore {
                 ("ReadDiscreteInputs", res)
             }
             FunctionCode::ReadInputRegisters => {
-                (log)(format!(
+                log.invoke(format!(
                     "Perform ReadInputRegisters request for slave ID {} and range [{}, {}).",
                     op.slave_id, op.range.start, op.range.end,
                 ))
@@ -150,7 +149,7 @@ impl ClientCore {
                 ("ReadInputRegisters", res)
             }
             FunctionCode::ReadHoldingRegisters => {
-                (log)(format!(
+                log.invoke(format!(
                     "Perform ReadHoldingRegisters request for slave ID {} and range [{}, {}).",
                     op.slave_id, op.range.start, op.range.end,
                 ))
@@ -207,10 +206,8 @@ impl ClientCore {
     ) -> Result<(), Error>
     where
         T: KeyParams,
-        L: AsyncFn(String) -> () + Send + 'static,
-        S: AsyncFn(String) -> () + Send + 'static,
-        for<'a> L::CallRefFuture<'a>: Send,
-        for<'a> S::CallRefFuture<'a>: Send,
+        L: LogFn,
+        S: LogFn,
     {
         let RunConfig {
             log,
@@ -248,7 +245,7 @@ impl ClientCore {
                                 id: T::from_slave_fn(operation.slave_id, fc),
                             };
                             if !guard.write_unchecked(key, &range, &values) {
-                                log(format!("{s} Failed because of failing memory update for [{start}, {end})."))
+                                log.invoke(format!("{s} Failed because of failing memory update for [{start}, {end})."))
                                     .await;
                             } else {
                                 let mut hex_str = String::with_capacity(values.len() * 3 + 4);
@@ -263,7 +260,7 @@ impl ClientCore {
                                     first = false;
                                 }
                                 hex_str += "]";
-                                log(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
+                                log.invoke(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
                                     .await;
                             }
                             index = (index + 1) % count;
@@ -271,14 +268,14 @@ impl ClientCore {
                         }
                         (s, Err(ModbusError::Timeout(e))) => {
                             let _ = self.context.disconnect().await;
-                            log(format!(
+                            log.invoke(format!(
                                     "{s} request to read [{start}, {end}) timed out. Disconnecting client. [{e:?}]"
                                 )).await;
                             return Err(ModbusError::Timeout(e).into());
                         }
                         (s, Err(ModbusError::Error(e))) => {
                             let _ = self.context.disconnect().await;
-                            log(format!(
+                            log.invoke(format!(
                                     "{s} request to read [{start}, {end}) failed. Disconnecting client. [{e:?}]"
                                 )).await;
                             return Err(ModbusError::Error(e).into());
@@ -286,7 +283,7 @@ impl ClientCore {
                         (s, Err(ModbusError::Exception(e))) => {
                             retries += 1;
                             if retries >= MAX_RETRIES {
-                                log(format!(
+                                log.invoke(format!(
                                     "{s} request to read [{start}, {end}) invalid. [{e}]"
                                 ))
                                 .await;
@@ -303,8 +300,8 @@ impl ClientCore {
                 match cmd {
                     Command::Terminate => {
                         let _ = self.context.disconnect().await;
-                        log("Client gracefully terminated.".to_string()).await;
-                        status("Client disconnected".to_string()).await;
+                        log.invoke("Client gracefully terminated.".to_string()).await;
+                        status.invoke("Client disconnected".to_string()).await;
                         return Ok(());
                     }
                     Command::WriteSingleCoil(slave, addr, coil) => {
@@ -317,26 +314,26 @@ impl ClientCore {
                         {
                             Err(e) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleCoil request to {addr} with {coil} timed out. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Timeout(e).into());
                             }
                             Ok(Err(e)) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleCoil request to {addr} with {coil} failed. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Error(e).into());
                             }
                             Ok(Ok(Err(e))) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleCoil request to {addr} with {coil} invalid. [{e:?}]"
                                 ))
                                 .await;
                             }
                             Ok(Ok(Ok(_))) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleCoil request to {addr} with {coil} successfully executed."
                                 )).await;
                             }
@@ -352,25 +349,25 @@ impl ClientCore {
                         {
                             Err(e) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleCoils request to {addr} with {coils:?} timed out. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Timeout(e).into());
                             }
                             Ok(Err(e)) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleCoils request to {addr} with {coils:?} failed. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Error(e).into());
                             }
                             Ok(Ok(Err(e))) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleCoils request to {addr} with {coils:?} failed. [{e:?}]"
                                 )).await;
                             }
                             Ok(_) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleCoils request to {addr} with {coils:?} successfully executed."
                                 )).await;
                             }
@@ -386,25 +383,25 @@ impl ClientCore {
                         {
                             Err(e) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleRegister request to {addr} with {value} timed out. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Timeout(e).into());
                             }
                             Ok(Err(e)) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleRegister request to {addr} with {value} failed. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Error(e).into());
                             }
                             Ok(Ok(Err(e))) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleRegister request to {addr} with {value} invalid. [{e:?}]"
                                 )).await;
                             }
                             Ok(_) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteSingleRegister request to {addr} with {value} successfully executed."
                                 )).await;
                             }
@@ -420,25 +417,25 @@ impl ClientCore {
                         {
                             Err(e) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleRegister request to {addr} with {values:?} timed out. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Timeout(e).into());
                             }
                             Ok(Err(e)) => {
                                 let _ = self.context.disconnect().await;
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleRegister request to {addr} with {values:?} failed. Disconnecting client. [{e:?}]"
                                 )).await;
                                 return Err(ModbusError::Error(e).into());
                             }
                             Ok(Ok(Err(e))) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleRegister request to {addr} with {values:?} invalid. [{e:?}]"
                                 )).await;
                             }
                             Ok(_) => {
-                                log(format!(
+                                log.invoke(format!(
                                     "WriteMultipleRegister request to {addr} with {values:?} successfully executed."
                                 )).await;
                             }
@@ -465,12 +462,11 @@ pub(crate) async fn handle_request<T, L>(
 ) -> Result<Response, ExceptionCode>
 where
     T: KeyParams,
-    L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-    for<'a> L::CallRefFuture<'a>: Send,
+    L: LogFn + Clone,
 {
     match request {
         Request::ReadCoils(addr, cnt) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadCoils request received for slave ID {} and range [{}, {}).",
                 slave,
                 addr,
@@ -484,7 +480,7 @@ where
             match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                 Some(v) => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadCoils request for slave ID {} and range [{}, {}) successful.",
                             slave,
                             addr,
@@ -496,7 +492,7 @@ where
                 }
                 None => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadCoils request for slave ID {} and range [{}, {}) failed.",
                             slave,
                             addr,
@@ -509,7 +505,7 @@ where
             }
         }
         Request::ReadDiscreteInputs(addr, cnt) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadDiscreteInputs request received for slave ID {} and range [{}, {}).",
                 slave,
                 addr,
@@ -523,7 +519,7 @@ where
             match guard.read(key, &Type::Coil, &Range::new(addr as usize, cnt as usize)) {
                 Some(v) => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadDiscreteInputs request for slave ID {} and range [{}, {}) successful.",
                             slave,
                             addr,
@@ -537,7 +533,7 @@ where
                 }
                 None => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadDiscreteInputs request for slave ID {} and range [{}, {}) failed.",
                             slave,
                             addr,
@@ -550,7 +546,7 @@ where
             }
         }
         Request::ReadInputRegisters(addr, cnt) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadInputRegisters request received for slave ID {} and range [{}, {}).",
                 slave,
                 addr,
@@ -568,7 +564,7 @@ where
             ) {
                 Some(v) => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadInputRegisters request for slave ID {} and range [{}, {}) successful.",
                             slave,
                             addr,
@@ -580,7 +576,7 @@ where
                 }
                 None => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadInputRegisters request for slave ID {} and range [{}, {}) failed.",
                             slave,
                             addr,
@@ -593,7 +589,7 @@ where
             }
         }
         Request::ReadHoldingRegisters(addr, cnt) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadHoldingRegisters request received for slave ID {} and range [{}, {}).",
                 slave,
                 addr,
@@ -611,7 +607,7 @@ where
             ) {
                 Some(v) => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadHoldingRegisters request for slave ID {} and range [{}, {}) successful.",
                             slave,
                             addr,
@@ -623,7 +619,7 @@ where
                 }
                 None => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadHoldingRegisters request for slave ID {} and range [{}, {}) failed.",
                             slave,
                             addr,
@@ -636,7 +632,7 @@ where
             }
         }
         Request::WriteMultipleRegisters(addr, values) => {
-            (log)(format!(
+            log.invoke(format!(
                 "WriteMultipleRegisters request received for slave ID {}, range [{}, {}), and values {:?}.",
                 slave,
                 addr,
@@ -656,7 +652,7 @@ where
             ) {
                 true => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} successful.",
                             slave,
                             addr,
@@ -669,7 +665,7 @@ where
                 }
                 false => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} failed.",
                             slave,
                             addr,
@@ -683,7 +679,7 @@ where
             }
         }
         Request::WriteSingleRegister(addr, value) => {
-            (log)(format!(
+            log.invoke(format!(
                 "WriteSingleRegister request received for slave ID {}, address {}, and value {}.",
                 slave, addr, value
             ))
@@ -700,7 +696,7 @@ where
             ) {
                 true => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteSingleRegister request for slave ID {}, address {}, and value {} successful.",
                             slave, addr, value
                         ))
@@ -710,7 +706,7 @@ where
                 }
                 false => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteSingleRegister request for slave ID {}, address {}, and value {} failed.",
                             slave, addr, value
                         ))
@@ -721,7 +717,7 @@ where
             }
         }
         Request::WriteMultipleCoils(addr, values) => {
-            (log)(format!(
+            log.invoke(format!(
                 "WriteMultipleCoils request received for slave ID {}, range [{}, {}), and values {:?}.",
                 slave,
                 addr,
@@ -737,7 +733,7 @@ where
             match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
                 true => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} successful.",
                             slave,
                             addr,
@@ -750,7 +746,7 @@ where
                 }
                 false => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} failed.",
                             slave,
                             addr,
@@ -764,7 +760,7 @@ where
             }
         }
         Request::WriteSingleCoil(addr, value) => {
-            (log)(format!(
+            log.invoke(format!(
                 "WriteSingleCoil request received for slave ID {}, address {}, and value {}.",
                 slave, addr, value
             ))
@@ -777,7 +773,7 @@ where
             match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &[val]) {
                 true => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteSingleCoil request for slave ID {}, address {}, and value {} successful.",
                             slave, addr, value
                         ))
@@ -787,7 +783,7 @@ where
                 }
                 false => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "WriteSingleCoil request for slave ID {}, address {}, and value {} failed.",
                             slave, addr, value
                         ))
@@ -798,7 +794,7 @@ where
             }
         }
         Request::ReportServerId => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReportServerId request received for slave ID {}. Unsupported function.",
                 slave,
             ))
@@ -806,7 +802,7 @@ where
             Err(ExceptionCode::IllegalFunction)
         }
         Request::MaskWriteRegister(_, _, _) => {
-            (log)(format!(
+            log.invoke(format!(
                 "MaskWriteRegister request received for slave ID {}. Unsupported function.",
                 slave,
             ))
@@ -814,7 +810,7 @@ where
             Err(ExceptionCode::IllegalFunction)
         }
         Request::ReadWriteMultipleRegisters(read_addr, cnt, write_addr, values) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadWriteMultipleRegisrters request received for slave ID {}, read address {}, count {}, write address {}, and values {:?}.",
                 slave, read_addr, cnt, write_addr, values
             ))
@@ -835,7 +831,7 @@ where
             );
             if !readable || !writable {
                 if verbose {
-                    (log)(format!(
+                    log.invoke(format!(
                         "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                         slave, read_addr, cnt, write_addr, values
                     ))
@@ -851,7 +847,7 @@ where
                 Some(v) => v,
                 None => {
                     if verbose {
-                        (log)(format!(
+                        log.invoke(format!(
                             "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                             slave, read_addr, cnt, write_addr, values
                         ))
@@ -867,7 +863,7 @@ where
                 &values,
             ) {
                 if verbose {
-                    (log)(format!(
+                    log.invoke(format!(
                         "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
                         slave, read_addr, cnt, write_addr, values
                     ))
@@ -876,7 +872,7 @@ where
                 return Err(ExceptionCode::IllegalFunction);
             }
             if verbose {
-                (log)(format!(
+                log.invoke(format!(
                     "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} successful.",
                     slave, read_addr, cnt, write_addr, values
                 ))
@@ -885,7 +881,7 @@ where
             Ok(Response::ReadWriteMultipleRegisters(v))
         }
         Request::ReadDeviceIdentification(_, _) => {
-            (log)(format!(
+            log.invoke(format!(
                 "ReadDeviceIdentification request received for slave ID {}. Unsupported function.",
                 slave,
             ))
@@ -893,12 +889,89 @@ where
             Err(ExceptionCode::IllegalFunction)
         }
         Request::Custom(func, _) => {
-            (log)(format!(
+            log.invoke(format!(
                 "Custom function {} request received for slave ID {}. Unsupported function.",
                 func, slave,
             ))
             .await;
             Err(ExceptionCode::IllegalFunction)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+
+    #[test]
+    fn ut_serial_config_valid_minimal() {
+        // No optional fields set: builder construction must succeed.
+        assert!(serial_config_from("/dev/null", 9600, None, None, None).is_ok());
+    }
+
+    #[test]
+    fn ut_serial_config_valid_full() {
+        let r = serial_config_from("/dev/null", 19200, Some(8), Some(1), Some("even"));
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn ut_serial_config_parity_case_insensitive() {
+        // Parity is lower-cased before matching, so mixed case is accepted.
+        assert!(serial_config_from("/dev/null", 9600, None, None, Some("ODD")).is_ok());
+        assert!(serial_config_from("/dev/null", 9600, None, None, Some("None")).is_ok());
+    }
+
+    #[test]
+    fn ut_serial_config_rejects_bad_data_bits() {
+        let e = serial_config_from("/dev/null", 9600, Some(9), None, None).unwrap_err();
+        assert!(matches!(e, SerialError::Configuration(_)));
+        assert!(e.to_string().contains("data bits"));
+    }
+
+    #[test]
+    fn ut_serial_config_rejects_bad_stop_bits() {
+        let e = serial_config_from("/dev/null", 9600, None, Some(3), None).unwrap_err();
+        assert!(matches!(e, SerialError::Configuration(_)));
+        assert!(e.to_string().contains("stop bits"));
+    }
+
+    #[test]
+    fn ut_serial_config_rejects_bad_parity() {
+        let e = serial_config_from("/dev/null", 9600, None, None, Some("bogus")).unwrap_err();
+        assert!(matches!(e, SerialError::Configuration(_)));
+        assert!(e.to_string().contains("parity"));
+    }
+
+    #[test]
+    fn ut_serial_config_accepts_all_data_bit_widths() {
+        for bits in [5u8, 6, 7, 8] {
+            assert!(serial_config_from("/dev/null", 9600, Some(bits), None, None).is_ok());
+        }
+    }
+
+    // Verifies the stable `LogFn` blanket impl (replacing the former nightly `async_fn_traits`
+    // bound) is satisfied by an ordinary closure returning a `Send` async block. Compile-time
+    // check only — no runtime needed (this crate's tokio has no `rt` feature).
+    #[test]
+    fn ut_logfn_impl_for_closure_returning_async_block() {
+        fn assert_logfn<L: LogFn>(_: &L) {}
+        let f = move |s: String| async move {
+            let _ = s.len();
+        };
+        assert_logfn(&f);
+    }
+
+    // The future a `LogFn` hands back must be `Send` (background tasks are spawned onto a
+    // multi-threaded runtime); pin it behind a `Send` bound to lock that in.
+    #[test]
+    fn ut_logfn_future_is_send() {
+        fn assert_send_fut<F: Future + Send>(_: &F) {}
+        let f = |s: String| async move {
+            let _ = s;
+        };
+        let fut = f.invoke("hi".to_string());
+        assert_send_fut(&fut);
     }
 }

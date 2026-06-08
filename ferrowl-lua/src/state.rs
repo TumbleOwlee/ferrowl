@@ -81,6 +81,6 @@ mod tests {
         let state = State::ok();
         assert!(state.is_ok());
         assert!(!state.is_err());
-        assert!(!state.error().is_some());
+        assert!(state.error().is_none());
     }
 }

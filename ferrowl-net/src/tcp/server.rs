@@ -1,7 +1,7 @@
 // Crate
 use crate::common::handle_request;
 use crate::tcp::Config;
-use crate::{Error, Key, KeyParams, TcpError};
+use crate::{Error, Key, KeyParams, LogFn, TcpError};
 
 // Workspace
 use ferrowl_mem::Memory;
@@ -28,8 +28,7 @@ impl<T: KeyParams> ServerBuilder<T> {
 
     pub async fn spawn<L>(&self, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
-        L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-        for<'a> L::CallRefFuture<'a>: Send,
+        L: LogFn + Clone,
     {
         let guard = self.config.read().await;
         Server::run(&guard, self.memory.clone(), log).await
@@ -39,8 +38,7 @@ impl<T: KeyParams> ServerBuilder<T> {
 pub struct Server<T, L>
 where
     T: KeyParams,
-    L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-    for<'a> L::CallRefFuture<'a>: Send,
+    L: LogFn + Clone,
 {
     memory: Arc<RwLock<Memory<Key<T>>>>,
     log: L,
@@ -49,8 +47,7 @@ where
 impl<T, L> Server<T, L>
 where
     T: KeyParams,
-    L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-    for<'a> L::CallRefFuture<'a>: Send,
+    L: LogFn + Clone,
 {
     fn new(memory: Arc<RwLock<Memory<Key<T>>>>, log: L) -> Self {
         Self { memory, log }
@@ -79,7 +76,8 @@ where
                     let on_process_error = move |err| {
                         tokio::task::block_in_place(|| {
                             tokio::runtime::Handle::current().block_on(async {
-                                on_process_log(format!("Server processing failed. [{}]", err))
+                                on_process_log
+                                    .invoke(format!("Server processing failed. [{}]", err))
                                     .await;
                             })
                         })
@@ -98,8 +96,7 @@ where
 impl<T, L> tokio_modbus::server::Service for Server<T, L>
 where
     T: KeyParams,
-    L: AsyncFn(String) -> () + Clone + Send + Sync + 'static,
-    for<'a> L::CallRefFuture<'a>: Send,
+    L: LogFn + Clone,
 {
     type Request = SlaveRequest<'static>;
     type Exception = ExceptionCode;

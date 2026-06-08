@@ -1,5 +1,3 @@
-#![feature(async_fn_traits)]
-
 mod app;
 mod cli;
 mod command;

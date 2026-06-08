@@ -73,31 +73,6 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (y as i32, m as u32, d as u32)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn epoch_is_1970_01_01() {
-        assert_eq!(format_timestamp(0), "1970-01-01 00:00:00.000");
-    }
-
-    #[test]
-    fn known_date_with_millis() {
-        // 2026-06-07 12:34:56.789 UTC
-        // days = 20611, time = 12*3600 + 34*60 + 56 = 45296 s, ms = 789
-        let ms: u64 = 20611 * 86400 * 1000 + 45296 * 1000 + 789;
-        assert_eq!(format_timestamp(ms), "2026-06-07 12:34:56.789");
-    }
-
-    #[test]
-    fn leap_day() {
-        // 2024-02-29 is day 19782 since epoch
-        let ms: u64 = 19782 * 86400 * 1000;
-        assert_eq!(format_timestamp(ms), "2024-02-29 00:00:00.000");
-    }
-}
-
 /// Build an empty log view with a border and "Log" title.
 pub fn new_log_view() -> LogView {
     Widget {
@@ -121,5 +96,30 @@ pub fn new_log_view() -> LogView {
             )
             .build()
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_is_1970_01_01() {
+        assert_eq!(format_timestamp(0), "1970-01-01 00:00:00.000");
+    }
+
+    #[test]
+    fn known_date_with_millis() {
+        // 2026-06-07 12:34:56.789 UTC
+        // days = 20611, time = 12*3600 + 34*60 + 56 = 45296 s, ms = 789
+        let ms: u64 = 20611 * 86400 * 1000 + 45296 * 1000 + 789;
+        assert_eq!(format_timestamp(ms), "2026-06-07 12:34:56.789");
+    }
+
+    #[test]
+    fn leap_day() {
+        // 2024-02-29 is day 19782 since epoch
+        let ms: u64 = 19782 * 86400 * 1000;
+        assert_eq!(format_timestamp(ms), "2024-02-29 00:00:00.000");
     }
 }

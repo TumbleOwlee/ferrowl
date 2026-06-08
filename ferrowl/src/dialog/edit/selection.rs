@@ -1058,6 +1058,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 impl EditSelectionDialog<NamedValue> {
     /// Build the dialog pre-filled from an existing register, its named values, and current value.
     /// `raw_value` is the hex memory string (e.g. `[000a]`) used for accurate integer matching.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_register(
         name: &str,
         description: &str,
@@ -1314,10 +1315,10 @@ impl EditSelectionDialog<NamedValue> {
         d.update_script.state = self.update_script.state.clone();
         // Convert selected default → text (skip sentinel at index 0).
         let sel = self.default_value.state.selection();
-        if sel > 0 {
-            if let Some(nv) = self.default_value.state.values().get(sel) {
-                set_input(&mut d.default_value, &nv.value.to_string());
-            }
+        if sel > 0
+            && let Some(nv) = self.default_value.state.values().get(sel)
+        {
+            set_input(&mut d.default_value, &nv.value.to_string());
         }
         d
     }

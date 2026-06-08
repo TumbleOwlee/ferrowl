@@ -1075,13 +1075,12 @@ impl EditInputDialog {
         default_vals.extend_from_slice(&values);
         *d.default_value.state.values_mut() = default_vals;
         let default_text = self.default_value.state.input().trim().to_string();
-        if !default_text.is_empty() {
-            if let Some(idx) = values
+        if !default_text.is_empty()
+            && let Some(idx) = values
                 .iter()
                 .position(|nv| nv.value.to_string() == default_text)
-            {
-                d.default_value.state.set_selection(idx + 1);
-            }
+        {
+            d.default_value.state.set_selection(idx + 1);
         }
         d
     }
