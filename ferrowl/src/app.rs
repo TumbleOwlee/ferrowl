@@ -489,11 +489,14 @@ impl App {
         else {
             return;
         };
-        let update_script = self
+        let (update_script, current_default) = self
             .tabs
             .get(self.active)
             .and_then(|tab| tab.device.definitions.get(&def.name))
-            .and_then(|d| d.update.as_deref());
+            .map(|d| (d.update.as_deref(), d.default.as_ref()))
+            .unzip();
+        let update_script = update_script.flatten();
+        let current_default = current_default.flatten();
 
         if def.named_values.is_empty() {
             let dialog = EditInputDialog::from_register(
@@ -502,6 +505,7 @@ impl App {
                 &def.register,
                 &def.value,
                 update_script,
+                current_default,
             );
             self.overlay = Some(Overlay::Edit(dialog));
         } else {
@@ -513,6 +517,7 @@ impl App {
                 &def.value,
                 &def.raw_value,
                 update_script,
+                current_default,
             );
             self.overlay = Some(Overlay::EditSelection(dialog));
         }
@@ -552,6 +557,7 @@ impl App {
             values: named_values.clone(),
             update: edited.update.as_ref().filter(|s| !s.is_empty()).cloned(),
             description: edited.description.clone(),
+            default: edited.default.clone(),
         };
         sync_register_def(&mut def, &edited.register);
 
@@ -599,12 +605,19 @@ impl App {
             tab.module.reload_scripts(scripts);
         }
 
-        // Seed a virtual register with a default so its value/raw aren't blank before a script or
-        // `:set` runs; an explicit value below overrides it.
+        // Seed a virtual register with a zero/empty value so it shows up before a script or
+        // `:set` runs. The configured default or explicit value below will override this.
         if let Address::Virtual = edited.register.address() {
-            let default = crate::module::default_value(&edited.register);
+            let seed = crate::module::default_value(&edited.register);
             if let Some(tab) = self.tabs.get(active) {
-                tab.module.set_virtual_value(&edited.name, default).await;
+                tab.module.set_virtual_value(&edited.name, seed).await;
+            }
+        }
+
+        // Apply configured default as the initial value when no explicit value was given.
+        if edited.value.is_none() {
+            if let Some(ref default_scalar) = edited.default {
+                self.set_value(&edited.name, &default_scalar.to_string()).await;
             }
         }
 
@@ -672,6 +685,7 @@ impl App {
                             Some(script.clone())
                         };
                     }
+                    def.default = edited.default.clone();
                 }
                 if edited.name != original_name
                     && let Some(def) = tab.device.definitions.remove(&original_name)

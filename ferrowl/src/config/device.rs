@@ -127,6 +127,9 @@ pub struct RegisterDef {
     pub update: Option<String>,
     #[serde(default)]
     pub description: String,
+    /// Default value written to memory on configuration load / startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Scalar>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -344,6 +347,7 @@ mod tests {
                 values: vec![],
                 update: None,
                 description: "charge setpoint".to_string(),
+                default: None,
             },
         );
         definitions.insert(
@@ -379,6 +383,7 @@ mod tests {
                 ],
                 update: Some("C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into()),
                 description: String::new(),
+                default: None,
             },
         );
         DeviceConfig {

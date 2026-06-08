@@ -45,6 +45,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
             values,
             update: None,
             description: description.to_string(),
+            default: None,
         }
     };
 

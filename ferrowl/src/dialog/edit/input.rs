@@ -1,4 +1,4 @@
-use crate::config::device::NamedValue;
+use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::edit::{
     AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
 };
@@ -73,6 +73,9 @@ pub struct EditInputDialog {
     // Value input
     #[focus]
     pub value: Widget<InputFieldState, InputField<String>>,
+    // Default value stored in the device config and applied on startup
+    #[focus]
+    pub default_value: Widget<InputFieldState, InputField<String>>,
     // Button to add a predefined named value
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
@@ -108,6 +111,8 @@ pub struct EditedRegister {
     pub named_values: Option<Vec<crate::config::device::NamedValue>>,
     /// Lua update script content; None means unchanged (field not shown).
     pub update: Option<String>,
+    /// Default value to store in the device config (applied on startup). None = no default.
+    pub default: Option<Scalar>,
 }
 
 impl EditInputDialog {
@@ -161,7 +166,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(40),
+            Constraint::Length(43),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -180,9 +185,10 @@ impl EditInputDialog {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 13] = Layout::vertical([
+        let vertical_layout: [Rect; 14] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -326,6 +332,14 @@ impl EditInputDialog {
             vertical_layout[vertical_index],
             buf,
             &mut self.value.state,
+        );
+        vertical_index += 1;
+
+        StatefulWidget::render(
+            &self.default_value.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.default_value.state,
         );
         vertical_index += 1;
 
@@ -680,6 +694,24 @@ impl EditInputDialog {
                     .build()
                     .unwrap(),
             })
+            .default_value(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("Default value (applied on startup)...".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Default".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
             .add_button(Widget {
                 state: ButtonStateBuilder::default()
                     .focused(false)
@@ -799,12 +831,16 @@ impl EditInputDialog {
         register: &Register,
         value: &str,
         update: Option<&str>,
+        default: Option<&Scalar>,
     ) -> Self {
         let mut dialog = Self::new();
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         if let Some(script) = update {
             dialog.update_script.state.set_content(script);
+        }
+        if let Some(def) = default {
+            set_input(&mut dialog.default_value, &def.to_string());
         }
         // Show the current value as a placeholder; <C-f> fills it in when the field is empty.
         if !value.is_empty() {
@@ -927,6 +963,15 @@ impl EditInputDialog {
             Some(self.pending_named_values.clone())
         };
 
+        let default = {
+            let s = self.default_value.state.input().trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(Scalar::from_input(s))
+            }
+        };
+
         Ok(EditedRegister {
             name,
             description,
@@ -934,6 +979,7 @@ impl EditInputDialog {
             value,
             named_values,
             update,
+            default,
         })
     }
 
@@ -1004,8 +1050,9 @@ impl EditInputDialog {
     pub fn to_edit_selection_dialog(
         &self,
     ) -> super::selection::EditSelectionDialog<crate::config::device::NamedValue> {
+        use crate::config::device::{NamedValue, Scalar};
         let values = self.pending_named_values.clone();
-        let mut d = super::selection::EditSelectionDialog::new(values);
+        let mut d = super::selection::EditSelectionDialog::new(values.clone());
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();
@@ -1019,6 +1066,23 @@ impl EditInputDialog {
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
         d.update_script.state = self.update_script.state.clone();
+
+        // Set up default selection with sentinel and try to match prior text default.
+        let mut default_vals = vec![NamedValue {
+            name: "(no default)".to_string(),
+            value: Scalar::Text("".into()),
+        }];
+        default_vals.extend_from_slice(&values);
+        *d.default_value.state.values_mut() = default_vals;
+        let default_text = self.default_value.state.input().trim().to_string();
+        if !default_text.is_empty() {
+            if let Some(idx) = values
+                .iter()
+                .position(|nv| nv.value.to_string() == default_text)
+            {
+                d.default_value.state.set_selection(idx + 1);
+            }
+        }
         d
     }
 }

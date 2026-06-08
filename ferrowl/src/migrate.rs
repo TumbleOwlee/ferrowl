@@ -343,6 +343,7 @@ fn convert_def(
         values,
         update: src.on_update,
         description: src.description,
+        default: None,
     })
 }
 

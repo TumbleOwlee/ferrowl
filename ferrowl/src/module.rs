@@ -76,7 +76,12 @@ impl Module {
                 scripts.push((name.clone(), code.clone()));
             }
             if let Address::Virtual = register.address() {
-                virtual_init.insert(name.clone(), default_value(&register));
+                let init = def
+                    .default
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| default_value(&register));
+                virtual_init.insert(name.clone(), init);
             }
             if let Some(range) = def.mem_range() {
                 let key = Key {
@@ -90,6 +95,21 @@ impl Module {
                     Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(def.mem_type()),
                 };
                 memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
+                if let Some(default) = &def.default {
+                    if let Ok(raw) = register.encode(&default.to_string()) {
+                        let write_key = Key {
+                            id: SlaveKind {
+                                slave_id: def.slave_id,
+                                kind: def.register().kind().clone(),
+                            },
+                        };
+                        memory.write_unchecked(
+                            write_key,
+                            &Range::new(range.start, raw.len()),
+                            &raw,
+                        );
+                    }
+                }
             }
         }
         // Cover gaps inside explicit read ranges (Read cells) so a batched client read can store

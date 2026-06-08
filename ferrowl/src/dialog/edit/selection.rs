@@ -304,6 +304,9 @@ where
     // Value selection
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub value: Widget<SelectionState<V>, Selection<V>>,
+    // Default value selection (same options as value, plus a leading "no default" sentinel)
+    #[focus(when = {!self.value.state.values().is_empty()})]
+    pub default_value: Widget<SelectionState<V>, Selection<V>>,
     // Add button
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
@@ -364,7 +367,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27 + 2 + 2 + 3 + 3),
+            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -383,9 +386,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 12] = Layout::vertical([
+        let vertical_layout: [Rect; 13] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -562,6 +566,16 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         vertical_index += 1;
 
+        if !self.default_value.state.values().is_empty() {
+            StatefulWidget::render(
+                &self.default_value.widget,
+                vertical_layout[vertical_index],
+                buf,
+                &mut self.default_value.state,
+            );
+        }
+        vertical_index += 1;
+
         StatefulWidget::render(
             &self.update_script.widget,
             vertical_layout[vertical_index],
@@ -616,6 +630,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
     }
 
     pub fn new(values: Vec<V>) -> Self {
+        let default_values = values.clone();
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
         let error_style = TextStyle {
@@ -893,6 +908,23 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .build()
                     .unwrap(),
             })
+            .default_value(Widget {
+                state: SelectionStateBuilder::<V>::default()
+                    .focused(false)
+                    .values(default_values)
+                    .build()
+                    .unwrap(),
+                widget: SelectionBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Default".into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
             .add_button(Widget {
                 state: ButtonStateBuilder::default()
                     .focused(false)
@@ -1034,12 +1066,29 @@ impl EditSelectionDialog<NamedValue> {
         current_value: &str,
         raw_value: &str,
         update: Option<&str>,
+        default: Option<&Scalar>,
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         if let Some(script) = update {
             dialog.update_script.state.set_content(script);
+        }
+        // Populate default selection: sentinel at index 0, then all named values.
+        let mut default_vals = vec![NamedValue {
+            name: "(no default)".to_string(),
+            value: Scalar::Text("".into()),
+        }];
+        default_vals.extend_from_slice(&named_values);
+        *dialog.default_value.state.values_mut() = default_vals;
+        if let Some(def) = default {
+            let def_str = def.to_string();
+            if let Some(idx) = named_values
+                .iter()
+                .position(|nv| nv.value.to_string() == def_str)
+            {
+                dialog.default_value.state.set_selection(idx + 1);
+            }
         }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
@@ -1157,6 +1206,16 @@ impl EditSelectionDialog<NamedValue> {
             update_script
         });
 
+        let default = {
+            let sel = self.default_value.state.selection();
+            let vals = self.default_value.state.values();
+            if sel == 0 || vals.len() <= 1 {
+                None
+            } else {
+                Some(vals[sel].value.clone())
+            }
+        };
+
         Ok(EditedRegister {
             name,
             description,
@@ -1164,6 +1223,7 @@ impl EditSelectionDialog<NamedValue> {
             value,
             named_values: Some(named_values),
             update,
+            default,
         })
     }
 
@@ -1183,9 +1243,11 @@ impl EditSelectionDialog<NamedValue> {
         let result = self.add_dialog.as_ref().map(|d| d.apply());
         match result {
             Some(Ok(nv)) => {
-                self.value.state.values_mut().push(nv);
+                self.value.state.values_mut().push(nv.clone());
                 let idx = self.value.state.values().len() - 1;
                 self.value.state.set_selection(idx);
+                // Keep default selection in sync: append after the sentinel.
+                self.default_value.state.values_mut().push(nv);
                 self.add_dialog = None;
             }
             Some(Err(e)) => {
@@ -1250,6 +1312,13 @@ impl EditSelectionDialog<NamedValue> {
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
         d.update_script.state = self.update_script.state.clone();
+        // Convert selected default → text (skip sentinel at index 0).
+        let sel = self.default_value.state.selection();
+        if sel > 0 {
+            if let Some(nv) = self.default_value.state.values().get(sel) {
+                set_input(&mut d.default_value, &nv.value.to_string());
+            }
+        }
         d
     }
 
@@ -1269,6 +1338,24 @@ impl EditSelectionDialog<NamedValue> {
                 self.value.state.set_selection(new_idx);
             } else {
                 self.value.state.set_selection(0);
+            }
+
+            // Sync default selection: idx+1 because sentinel sits at position 0.
+            let default_idx = idx + 1;
+            let default_vals = self.default_value.state.values_mut();
+            if default_idx < default_vals.len() {
+                default_vals.remove(default_idx);
+                let default_sel = self.default_value.state.selection();
+                if default_sel >= default_idx {
+                    // If exactly the deleted entry was selected, reset to "no default";
+                    // otherwise shift the selection down to stay on the same item.
+                    let new_sel = if default_sel == default_idx {
+                        0
+                    } else {
+                        default_sel - 1
+                    };
+                    self.default_value.state.set_selection(new_sel);
+                }
             }
         }
 
