@@ -17,8 +17,8 @@
 //! | Contiguous ranges   | `[[contiguous_memory]]`      | `[read_ranges]`                     |
 //! | Connect delay       | `delay_after_connect_ms`     | `delay_ms`                          |
 //!
-//! Fields with no device-config equivalent (`history_length`, per-register `default`, `reverse`)
-//! are dropped; a warning is emitted for each one.
+//! Fields with no device-config equivalent (`history_length`, `reverse`) are dropped; a warning
+//! is emitted for each one. Per-register `default` is now preserved.
 
 use std::collections::BTreeMap;
 
@@ -307,12 +307,6 @@ fn convert_def(
              has no equivalent in the current format and was dropped"
         ));
     }
-    if src.default.is_some() {
-        warnings.push(format!(
-            "'{reg_name}': 'default' has no equivalent in device config and was dropped"
-        ));
-    }
-
     let access = parse_access(&src.access).map_err(|e| format!("access: {e}"))?;
 
     let address = match src.address {
@@ -343,7 +337,7 @@ fn convert_def(
         values,
         update: src.on_update,
         description: src.description,
-        default: None,
+        default: src.default.map(Scalar::from),
     })
 }
 
@@ -454,7 +448,7 @@ mod tests {
                 description: "RPM setpoint".into(),
                 on_update: None,
                 values: vec![],
-                default: None,
+                default: Some(LegacyScalar::Int(1500)),
             },
         );
         definitions.insert(
@@ -619,12 +613,13 @@ mod tests {
         assert_eq!(device.read_ranges.holding, Some("100-200".into()));
         assert_eq!(device.read_ranges.input, Some("0-15".into()));
 
-        // setpoint_rpm: old read_code=3 (Holding) → new read_code=4
+        // setpoint_rpm: old read_code=3 (Holding) → new read_code=4; default preserved
         let rpm = &device.definitions["setpoint_rpm"];
         assert_eq!(rpm.read_code, 4);
         assert_eq!(rpm.value_type, ValueType::U32);
         assert_eq!(rpm.endian, EndianCfg::Big);
         assert_eq!(rpm.address, Some(0x1000));
+        assert!(matches!(rpm.default, Some(Scalar::Int(1500))));
 
         // temperature_f32le: old read_code=4 (Input) → new read_code=3; endian=Little
         let temp = &device.definitions["temperature_f32le"];
