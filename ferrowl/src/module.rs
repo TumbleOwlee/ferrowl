@@ -430,10 +430,15 @@ fn build_read_operations(
         let limit = read_limit(fc);
         spans.sort_unstable();
 
+        // Collect sorted register boundaries before spans is consumed, so the emit loop can
+        // snap split points back to a register boundary and never cut a register in half.
+        let reg_starts: Vec<usize> = spans.iter().map(|&(s, _)| s).collect();
+        let reg_ends: Vec<usize> = spans.iter().map(|&(_, e)| e).collect();
+
         let explicit = read_ranges.ranges_for(kind);
         let batches = if explicit.is_empty() {
-            // No explicit ranges: auto-merge contiguous registers.
-            auto_merge(&spans, limit)
+            // No explicit ranges: Do not merge registers at all.
+            spans
         } else {
             // Each explicit range groups the registers that fall inside it into a single read,
             // bridging the gaps *between* those registers but trimmed to their actual extent
@@ -458,16 +463,31 @@ fn build_read_operations(
             }
             let mut batches: Vec<(usize, usize)> = bounds.into_iter().flatten().collect();
             uncovered.sort_unstable();
-            batches.extend(auto_merge(&uncovered, limit));
+            batches.extend(&uncovered);
             batches.sort_unstable();
             batches
         };
 
         // Emit each batch, splitting so no request exceeds the protocol limit.
+        // If the naive cut point falls inside a register, snap back to that register's start
+        // so a register is never read in half (e.g. a U128 spanning 120-128 must not split at 125).
+        // Cuts that land in gaps between registers are left as-is.
         for (start, end) in batches {
             let mut s = start;
             while s < end {
-                let e = (s + limit).min(end);
+                let naive_e = (s + limit).min(end);
+                let e = if naive_e < end {
+                    // Find the last register whose start < naive_e.
+                    let idx = reg_starts.partition_point(|&rs| rs < naive_e);
+                    if idx > 0 && reg_ends[idx - 1] > naive_e {
+                        // naive_e bisects register [reg_starts[idx-1], reg_ends[idx-1]); snap back.
+                        reg_starts[idx - 1]
+                    } else {
+                        naive_e
+                    }
+                } else {
+                    naive_e
+                };
                 ops.push(Operation {
                     slave_id: slave,
                     fn_code: fc,
@@ -478,25 +498,6 @@ fn build_read_operations(
         }
     }
     ops
-}
-
-/// Merge a sorted span list into batches, extending while contiguous/overlapping and within the
-/// per-request limit (register-boundary aligned).
-fn auto_merge(spans: &[(usize, usize)], limit: usize) -> Vec<(usize, usize)> {
-    let mut out: Vec<(usize, usize)> = Vec::new();
-    let mut iter = spans.iter().copied();
-    if let Some((mut bs, mut be)) = iter.next() {
-        for (s, e) in iter {
-            if s <= be && e - bs <= limit {
-                be = be.max(e);
-            } else {
-                out.push((bs, be));
-                (bs, be) = (s, e);
-            }
-        }
-        out.push((bs, be));
-    }
-    out
 }
 
 /// For every function code with explicit read ranges, the gap cells (inside those ranges but not
@@ -762,10 +763,11 @@ mod tests {
         use super::build_read_operations;
         use crate::config::device::ReadRanges;
         use ferrowl_net::FunctionCode;
-        let none = ReadRanges::default();
+        let mut read_ranges = ReadRanges::default();
+        read_ranges.holding = Some("0-2".to_string());
 
-        // Contiguous holding registers 0,1,2 merge into one request; a 4th at 5 stays separate
-        // (gap is never read). A write-only register is excluded entirely.
+        // Contiguous holding registers 0,1,2 merge into one request because of read ranges;
+        // a 4th at 5 stays separate (gap is never read). A write-only register is excluded entirely.
         let regs = vec![
             u16reg(1, Kind::HoldingRegister, 0, Access::ReadWrite),
             u16reg(1, Kind::HoldingRegister, 1, Access::ReadOnly),
@@ -773,7 +775,7 @@ mod tests {
             u16reg(1, Kind::HoldingRegister, 5, Access::ReadOnly),
             u16reg(1, Kind::HoldingRegister, 3, Access::WriteOnly),
         ];
-        let ops = build_read_operations(&regs, &none);
+        let ops = build_read_operations(&regs, &read_ranges);
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].fn_code, FunctionCode::ReadHoldingRegisters);
         assert_eq!((ops[0].range.start, ops[0].range.end), (0, 3));
@@ -784,9 +786,10 @@ mod tests {
             u16reg(1, Kind::Coil, 0, Access::ReadOnly),
             u16reg(1, Kind::HoldingRegister, 0, Access::ReadOnly),
         ];
-        let ops = build_read_operations(&regs, &none);
+        let ops = build_read_operations(&regs, &read_ranges);
         assert_eq!(ops.len(), 2);
 
+        read_ranges.holding = Some("0-150".to_string());
         // Contiguous span exceeding the 125-register limit splits. 16 contiguous U128 (8 words
         // each) cover [0,128): 15 fit in [0,120), the 16th opens a new request at [120,128).
         let regs: Vec<_> = (0..16)
@@ -800,7 +803,7 @@ mod tests {
                 )
             })
             .collect();
-        let ops = build_read_operations(&regs, &none);
+        let ops = build_read_operations(&regs, &read_ranges);
         assert_eq!(ops.len(), 2);
         assert_eq!((ops[0].range.start, ops[0].range.end), (0, 120));
         assert_eq!((ops[1].range.start, ops[1].range.end), (120, 128));

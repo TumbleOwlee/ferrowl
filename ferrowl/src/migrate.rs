@@ -27,8 +27,8 @@ use serde::Deserialize;
 
 use crate::cli::MigrateArgs;
 use crate::config::device::{
-    AccessCfg, AlignmentCfg, DeviceConfig, EndianCfg, NamedValue, ReadRanges, RegisterDef,
-    Scalar, ValueType,
+    AccessCfg, AlignmentCfg, DeviceConfig, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
+    ValueType,
 };
 
 // ── Legacy structure definitions ─────────────────────────────────────────────
@@ -252,7 +252,13 @@ fn convert_ranges(src: &[LegacyMemoryRange], warnings: &mut Vec<String>) -> Read
         }
     }
 
-    let join = |v: Vec<String>| if v.is_empty() { None } else { Some(v.join(",")) };
+    let join = |v: Vec<String>| {
+        if v.is_empty() {
+            None
+        } else {
+            Some(v.join(","))
+        }
+    };
     ReadRanges {
         holding: join(holding),
         input: join(input),
@@ -314,7 +320,9 @@ fn convert_def(
         Some(a) => {
             let raw = a.resolve()?;
             if raw > u16::MAX as u32 {
-                return Err(format!("address 0x{raw:04x} exceeds the 16-bit register range"));
+                return Err(format!(
+                    "address 0x{raw:04x} exceeds the 16-bit register range"
+                ));
             }
             Some(raw as u16)
         }
@@ -567,7 +575,10 @@ mod tests {
 
     #[test]
     fn ut_address_hex_parse() {
-        assert_eq!(LegacyAddress::Str("0x1000".into()).resolve().unwrap(), 0x1000);
+        assert_eq!(
+            LegacyAddress::Str("0x1000".into()).resolve().unwrap(),
+            0x1000
+        );
         assert_eq!(LegacyAddress::Str("0X00FF".into()).resolve().unwrap(), 0xFF);
         assert_eq!(LegacyAddress::Int(42).resolve().unwrap(), 42);
     }

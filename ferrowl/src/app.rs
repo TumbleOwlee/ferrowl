@@ -617,7 +617,8 @@ impl App {
         // Apply configured default as the initial value when no explicit value was given.
         if edited.value.is_none() {
             if let Some(ref default_scalar) = edited.default {
-                self.set_value(&edited.name, &default_scalar.to_string()).await;
+                self.set_value(&edited.name, &default_scalar.to_string())
+                    .await;
             }
         }
 

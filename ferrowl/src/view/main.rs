@@ -162,9 +162,7 @@ impl TableView {
             .table(Widget {
                 state: TableStateBuilder::default().values(values).build().unwrap(),
                 widget: TableBuilder::default()
-                    .style(
-                        TableStyleBuilder::default().build().unwrap(),
-                    )
+                    .style(TableStyleBuilder::default().build().unwrap())
                     .row_margin(Margin {
                         vertical: 1,
                         horizontal: 0,
