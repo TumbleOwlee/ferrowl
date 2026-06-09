@@ -304,15 +304,15 @@ where
     // Value selection
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub value: Widget<SelectionState<V>, Selection<V>>,
-    // Default value selection (same options as value, plus a leading "no default" sentinel)
-    #[focus(when = {!self.value.state.values().is_empty()})]
-    pub default_value: Widget<SelectionState<V>, Selection<V>>,
     // Add button
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
     // Delete button
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub delete_button: Widget<ButtonState, Button>,
+    // Default value selection (same options as value, plus a leading "no default" sentinel)
+    #[focus(when = {!self.value.state.values().is_empty()})]
+    pub default_value: Widget<SelectionState<V>, Selection<V>>,
     // Lua simulation script (optional multiline)
     #[focus]
     pub update_script: Widget<CodeInputFieldState, CodeInputField>,
