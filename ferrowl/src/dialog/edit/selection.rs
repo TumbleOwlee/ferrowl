@@ -1,9 +1,9 @@
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
-    AccessOption, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption, ValueType,
-    access_index, alignment_index, endian_index, format_index, kind_index, numeric_parts,
-    parse_address, set_input, with_endian_resolution,
+    AccessOption, AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption,
+    SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index, kind_index,
+    numeric_parts, parse_address, set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
@@ -43,216 +43,6 @@ pub fn parse_raw_value(raw: &str) -> Option<i64> {
         result = (result << 16) | u64::from_str_radix(word, 16).ok()?;
     }
     Some(result as i64)
-}
-
-// ---------------------------------------------------------------------------
-// AddNamedValueDialog — small inline sub-dialog for creating a new NamedValue
-// ---------------------------------------------------------------------------
-
-#[focusable]
-#[derive(Builder, Clone, Debug, Focus)]
-pub struct AddNamedValueDialog {
-    #[focus]
-    pub label: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub value: Widget<InputFieldState, InputField<String>>,
-    // Error display field
-    pub error: Widget<String, Text>,
-    pub keybinds: [Widget<String, Text>; 2],
-}
-
-impl AddNamedValueDialog {
-    pub fn new() -> Self {
-        let input_style = InputFieldStyle::default();
-        let error_style = TextStyle {
-            general: ratatui::prelude::Style::default()
-                .fg(COLOR_SCHEME.error)
-                .bg(COLOR_SCHEME.bg),
-        };
-        let text_style = TextStyle::default();
-
-        AddNamedValueDialogBuilder::default()
-            .label(Widget {
-                state: InputFieldStateBuilder::default()
-                    .focused(true)
-                    .disabled(false)
-                    .placeholder(Some("Name...".to_string()))
-                    .build()
-                    .unwrap(),
-                widget: InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some("Label".into()))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(input_style.clone())
-                    .build()
-                    .unwrap(),
-            })
-            .value(Widget {
-                state: InputFieldStateBuilder::default()
-                    .focused(false)
-                    .disabled(false)
-                    .placeholder(Some("0".to_string()))
-                    .build()
-                    .unwrap(),
-                widget: InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some("Value".into()))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(input_style.clone())
-                    .build()
-                    .unwrap(),
-            })
-            .error(Widget {
-                state: "".to_string(),
-                widget: TextBuilder::default()
-                    .title(Some("Error".into()))
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(error_style.clone())
-                    .build()
-                    .unwrap(),
-            })
-            .keybinds([
-                Widget {
-                    state: "<Tab>: next".to_string(),
-                    widget: TextBuilder::default()
-                        .margin(Margin {
-                            vertical: 0,
-                            horizontal: 1,
-                        })
-                        .horizontal_alignment(HorizontalAlignment::Center)
-                        .style(text_style.clone())
-                        .build()
-                        .unwrap(),
-                },
-                Widget {
-                    state: "<Esc>: cancel | <Enter>: confirm / newline".to_string(),
-                    widget: TextBuilder::default()
-                        .margin(Margin {
-                            vertical: 0,
-                            horizontal: 1,
-                        })
-                        .horizontal_alignment(HorizontalAlignment::Center)
-                        .style(text_style.clone())
-                        .build()
-                        .unwrap(),
-                },
-            ])
-            .focus(AddNamedValueDialogFocus::Label)
-            .build()
-            .unwrap()
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        if let Err(e) = String::validate(self.label.state.input()) {
-            return Err(format!("Label: {e}"));
-        }
-        if self.label.state.input().trim().is_empty() {
-            return Err("Label must not be empty.".to_string());
-        }
-        if self.value.state.input().trim().is_empty() {
-            return Err("Value must not be empty.".to_string());
-        }
-        Ok(())
-    }
-
-    pub fn apply(&self) -> Result<NamedValue, String> {
-        self.validate()?;
-        let name = self.label.state.input().trim().to_string();
-        // Accept int, float or text; the type is inferred from the input.
-        let value = Scalar::from_input(self.value.state.input());
-        Ok(NamedValue { name, value })
-    }
-
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        // Show validation error inline.
-        match self.validate() {
-            Ok(_) => self.error.state.clear(),
-            Err(e) => self.error.state = e,
-        }
-
-        let horizontal_layout: [Rect; 3] = Layout::horizontal([
-            Constraint::Min(1),
-            Constraint::Length(60),
-            Constraint::Min(1),
-        ])
-        .areas(area);
-
-        // 2 border + 2 margin-vertical + 3 label + 3 value + 1 error + 1 keybinds = 12
-        let error_height = if self.error.state.is_empty() { 0 } else { 3 };
-        let total_height = 2 + 2 + 3 + 3 + error_height + 1 + 1 + 1;
-        let vertical_layout: [Rect; 3] = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(total_height),
-            Constraint::Min(1),
-        ])
-        .areas(horizontal_layout[1]);
-
-        let block = Block::bordered()
-            .style(
-                ratatui::prelude::Style::default()
-                    .fg(COLOR_SCHEME.hi)
-                    .bg(COLOR_SCHEME.bg),
-            )
-            .title_alignment(HorizontalAlignment::Center)
-            .title("Add Value");
-
-        let inner = block.inner(vertical_layout[1]).inner(Margin::new(2, 1));
-        ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vertical_layout[1], buf);
-        block.render(vertical_layout[1], buf);
-
-        let inner_layout: [Rect; 6] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(error_height),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .areas(inner);
-
-        StatefulWidget::render(
-            &self.label.widget,
-            inner_layout[0],
-            buf,
-            &mut self.label.state,
-        );
-        StatefulWidget::render(
-            &self.value.widget,
-            inner_layout[1],
-            buf,
-            &mut self.value.state,
-        );
-        if !self.error.state.is_empty() {
-            StatefulWidget::render(
-                &self.error.widget,
-                inner_layout[2],
-                buf,
-                &mut self.error.state,
-            );
-        }
-        StatefulWidget::render(
-            &self.keybinds[0].widget,
-            inner_layout[4],
-            buf,
-            &mut self.keybinds[0].state,
-        );
-        StatefulWidget::render(
-            &self.keybinds[1].widget,
-            inner_layout[5],
-            buf,
-            &mut self.keybinds[1].state,
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -896,8 +686,8 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 state: SelectionStateBuilder::default()
                     .focused(false)
                     .values(vec![
-                        Alignment(TextAlignment::Right),
                         Alignment(TextAlignment::Left),
+                        Alignment(TextAlignment::Right),
                     ])
                     .build()
                     .unwrap(),
@@ -1286,56 +1076,6 @@ impl EditSelectionDialog<NamedValue> {
         })
     }
 
-    pub fn has_sub_dialog(&self) -> bool {
-        self.add_dialog.is_some()
-    }
-
-    pub fn open_add_dialog(&mut self) {
-        self.add_dialog = Some(AddNamedValueDialog::new());
-    }
-
-    pub fn close_add_dialog(&mut self) {
-        self.add_dialog = None;
-    }
-
-    pub fn confirm_add_dialog(&mut self) {
-        let result = self.add_dialog.as_ref().map(|d| d.apply());
-        match result {
-            Some(Ok(nv)) => {
-                self.value.state.values_mut().push(nv.clone());
-                let idx = self.value.state.values().len() - 1;
-                self.value.state.set_selection(idx);
-                // Keep default selection in sync: append after the sentinel.
-                self.default_value.state.values_mut().push(nv);
-                self.add_dialog = None;
-            }
-            Some(Err(e)) => {
-                if let Some(d) = self.add_dialog.as_mut() {
-                    d.error.state = e;
-                }
-            }
-            None => {}
-        }
-    }
-
-    pub fn add_dialog_focus_next(&mut self) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            d.focus_next();
-        }
-    }
-
-    pub fn add_dialog_focus_previous(&mut self) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            d.focus_previous();
-        }
-    }
-
-    pub fn add_dialog_handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            let _ = d.handle_events(modifiers, code);
-        }
-    }
-
     pub fn handle_space(&mut self) {
         match self.focus {
             EditSelectionDialogFocus::AddButton => self.open_add_dialog(),
@@ -1349,46 +1089,6 @@ impl EditSelectionDialog<NamedValue> {
 
     pub fn is_delete_register_button_focused(&self) -> bool {
         matches!(self.focus, EditSelectionDialogFocus::DeleteRegisterButton)
-    }
-
-    pub fn set_name_error(&mut self, msg: String) {
-        self.name_error = Some(msg);
-    }
-
-    pub fn clear_name_error(&mut self) {
-        self.name_error = None;
-    }
-
-    pub fn has_confirm_delete(&self) -> bool {
-        self.confirm_delete.is_some()
-    }
-
-    pub fn open_confirm_delete(&mut self) {
-        let name = self.label.state.input().trim().to_string();
-        self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
-    }
-
-    pub fn close_confirm_delete(&mut self) {
-        self.confirm_delete = None;
-    }
-
-    pub fn confirm_delete_focus_next(&mut self) {
-        if let Some(d) = self.confirm_delete.as_mut() {
-            d.focus_next();
-        }
-    }
-
-    pub fn confirm_delete_focus_previous(&mut self) {
-        if let Some(d) = self.confirm_delete.as_mut() {
-            d.focus_previous();
-        }
-    }
-
-    pub fn confirm_delete_is_confirmed(&self) -> bool {
-        self.confirm_delete
-            .as_ref()
-            .map(|d| d.is_confirm_focused())
-            .unwrap_or(false)
     }
 
     pub fn is_update_script_focused(&self) -> bool {
@@ -1467,5 +1167,39 @@ impl EditSelectionDialog<NamedValue> {
         if is_empty {
             self.focus_previous();
         }
+    }
+}
+
+impl SubDialogs for EditSelectionDialog<NamedValue> {
+    fn add_dialog_opt(&self) -> Option<&AddNamedValueDialog> {
+        self.add_dialog.as_ref()
+    }
+
+    fn add_dialog_slot(&mut self) -> &mut Option<AddNamedValueDialog> {
+        &mut self.add_dialog
+    }
+
+    fn confirm_delete_opt(&self) -> Option<&ConfirmDeleteDialog> {
+        self.confirm_delete.as_ref()
+    }
+
+    fn confirm_delete_slot(&mut self) -> &mut Option<ConfirmDeleteDialog> {
+        &mut self.confirm_delete
+    }
+
+    fn name_error_slot(&mut self) -> &mut Option<String> {
+        &mut self.name_error
+    }
+
+    fn register_label(&self) -> String {
+        self.label.state.input().trim().to_string()
+    }
+
+    fn accept_named_value(&mut self, nv: NamedValue) {
+        self.value.state.values_mut().push(nv.clone());
+        let idx = self.value.state.values().len() - 1;
+        self.value.state.set_selection(idx);
+        // Keep default selection in sync: append after the sentinel.
+        self.default_value.state.values_mut().push(nv);
     }
 }

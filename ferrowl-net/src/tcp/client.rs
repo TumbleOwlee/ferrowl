@@ -1,4 +1,4 @@
-use crate::common::ClientCore;
+use crate::client_core::ClientCore;
 use crate::tcp::Config;
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, TcpError};
 
@@ -60,7 +60,7 @@ impl<T: KeyParams> ClientBuilder<T> {
 }
 
 /// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
-/// shared via [`ClientCore`](crate::common::ClientCore).
+/// shared via the internal `ClientCore`.
 pub struct Client {
     pub(crate) core: ClientCore,
 }

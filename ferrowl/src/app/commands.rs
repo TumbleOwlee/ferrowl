@@ -1,0 +1,346 @@
+//! Execution of `:` commands against the active tab: module lifecycle, value writes,
+//! ordering and persistence.
+
+use ferrowl_mem::Range;
+use ferrowl_net::{Key, SlaveKind};
+use ferrowl_reg::{Access, Address};
+use ferrowl_ui::widgets::Header;
+use ferrowl_util::convert::{Converter, FileType};
+
+use crate::config::{Role, Session};
+use crate::module::Module;
+use crate::view::main::TableHeader;
+use crate::view::main::{Definition, column_index};
+
+use super::registers::write_command;
+use super::{App, Tab};
+
+impl App {
+    /// Execute a parsed `:` command. Returns `true` when the app should quit.
+    pub(super) async fn run_command(&mut self, input: &str) -> bool {
+        use crate::command::{Cmd, LuaCommand};
+        match crate::command::parse(input) {
+            Cmd::Empty => {}
+            Cmd::Quit => {
+                if self.tabs.len() <= 1 {
+                    return true;
+                }
+                let _ = self.tabs[self.active].module.stop().await;
+                self.tabs.remove(self.active);
+                self.active = self.active.min(self.tabs.len() - 1);
+            }
+            Cmd::QuitAll => return true,
+            Cmd::Edit => self.enter_setup(),
+            Cmd::Add => self.enter_add(),
+            Cmd::New => self.enter_new(),
+            Cmd::Load(path) => self.enter_load(path.as_deref()),
+            Cmd::Start => self.start_module().await,
+            Cmd::Stop => self.stop_module().await,
+            Cmd::Restart => {
+                self.stop_module().await;
+                self.start_module().await;
+            }
+            Cmd::Lua(action) => {
+                let msg = if let Some(tab) = self.tabs.get_mut(self.active) {
+                    match action {
+                        LuaCommand::Start => {
+                            tab.module.start_lua();
+                            if tab.module.lua_running() {
+                                "Lua simulation started".to_string()
+                            } else {
+                                "No Lua scripts to run".to_string()
+                            }
+                        }
+                        LuaCommand::Stop => {
+                            tab.module.stop_lua();
+                            "Lua simulation stopped".to_string()
+                        }
+                    }
+                } else {
+                    return false;
+                };
+                self.log_active(format!("{} {}", self.active, msg)).await;
+            }
+            Cmd::Set { register, value } => {
+                if register.is_empty() || value.is_empty() {
+                    self.log_active(":set requires <register> <value>".to_string())
+                        .await;
+                } else {
+                    self.set_value(&register, &value).await;
+                }
+            }
+            Cmd::Write(path) => {
+                let path = path.unwrap_or_else(|| "session.toml".to_string());
+                match self.save_session(&path) {
+                    Ok(()) => self.log_active(format!("Saved session to {path}")).await,
+                    Err(e) => self.log_active(format!("Save failed: {e}")).await,
+                }
+            }
+            Cmd::WriteDevice(path) => {
+                const DEFAULT_PATH: &str = "device.toml";
+                let path = if let Some(p) = &path {
+                    p
+                } else {
+                    match self.tabs.get(self.active) {
+                        Some(t) if !t.spec.device.is_empty() => &t.spec.device,
+                        Some(t) if t.spec.device.is_empty() => {
+                            self.log_active("No configuration file path configured.".to_string())
+                                .await;
+                            return false;
+                        }
+                        _ => DEFAULT_PATH,
+                    }
+                };
+                match self.save_device(path) {
+                    Ok(()) => {
+                        self.log_active(format!("Saved device config to {path}"))
+                            .await
+                    }
+                    Err(e) => self.log_active(format!("Save failed: {e}")).await,
+                }
+            }
+            Cmd::Log(file) => match file {
+                Some(file) => {
+                    self.app_cfg.log_file = Some(file.clone());
+                    for tab in &self.tabs {
+                        tab.module.set_log_base(Some(&file));
+                    }
+                    self.log_active(format!("Logging to files based on {file}"))
+                        .await;
+                }
+                None => self.log_active(":log requires <file>".to_string()).await,
+            },
+            Cmd::Compact => self.toggle_compact(),
+            Cmd::Reload => self.reload_module().await,
+            Cmd::Order { column, descending } => {
+                self.set_order(column.as_deref(), descending).await
+            }
+            Cmd::Unknown(name) => self.log_active(format!("Unknown command ':{name}'")).await,
+        }
+        false
+    }
+
+    /// Apply (or clear) the active tab's table ordering for `:order`.
+    async fn set_order(&mut self, column: Option<&str>, descending: bool) {
+        let active = self.active;
+        if active >= self.tabs.len() {
+            return;
+        }
+        match column {
+            None => {
+                let original = self.tabs[active]
+                    .module
+                    .registers()
+                    .iter()
+                    .map(|(name, description, register, values)| {
+                        Definition::new(
+                            name.clone(),
+                            description.clone(),
+                            register.clone(),
+                            values.clone(),
+                        )
+                    })
+                    .collect();
+                let tab = &mut self.tabs[active];
+                tab.sort = None;
+                tab.table.set_definitions(original);
+                self.log_active("Order cleared".to_string()).await;
+            }
+            Some(name) => match column_index(name) {
+                None => self.log_active(format!("Unknown column '{name}'")).await,
+                Some(idx) => {
+                    let tab = &mut self.tabs[active];
+                    tab.sort = Some((idx, descending));
+                    tab.table.sort_definitions(idx, descending);
+                    let header = TableHeader::header()[idx].clone();
+                    let dir = if descending { "DESC" } else { "ASC" };
+                    self.log_active(format!("Ordered by {header} {dir}")).await;
+                }
+            },
+        }
+    }
+
+    async fn reload_module(&mut self) {
+        let active = self.active;
+        let Some(tab) = self.tabs.get(active) else {
+            return;
+        };
+        if tab.spec.device.is_empty() {
+            self.log_active("No configuration file path configured. Reload aborted.".to_string())
+                .await;
+            return;
+        }
+        let path = tab.spec.device.clone();
+        let device = match crate::config::load_device(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                self.log_active(format!(":reload failed to load '{path}': {e}"))
+                    .await;
+                return;
+            }
+        };
+        let _ = self.tabs[active].module.stop().await;
+        let mut module = Module::new(&self.tabs[active].spec, &device, &self.app_cfg);
+        if let Err(e) = module.start().await {
+            self.log_active(format!(":reload start error: {e}")).await;
+        }
+        let spec = self.tabs[active].spec.clone();
+        let new_tab = Tab::from_module(spec, device, module);
+        let log_view = std::mem::replace(&mut self.tabs[active].log_view, new_tab.log_view);
+        self.tabs[active] = Tab {
+            log_view,
+            ..new_tab
+        };
+        self.log_active(format!(":reload done — '{path}'")).await;
+    }
+
+    pub(super) async fn start_module(&mut self) {
+        let active = self.active;
+        if active >= self.tabs.len() {
+            return;
+        }
+        let result = self.tabs[active].module.start().await;
+        let msg = match result {
+            Ok(()) => format!("Started on {}", self.tabs[active].spec.endpoint),
+            Err(e) => format!("Start failed: {e}"),
+        };
+        self.tabs[active].module.log().write().await.write(&msg);
+    }
+
+    async fn stop_module(&mut self) {
+        let active = self.active;
+        if active >= self.tabs.len() {
+            return;
+        }
+        let result = self.tabs[active].module.stop().await;
+        let msg = match result {
+            Ok(()) => "Stopped".to_string(),
+            Err(e) => format!("Stop failed: {e}"),
+        };
+        self.tabs[active].module.log().write().await.write(&msg);
+    }
+
+    /// Write a value to a register on the active module: local memory for servers, a modbus
+    /// write command for clients.
+    pub(super) async fn set_value(&mut self, register_name: &str, value: &str) {
+        let resolved = self.tabs.get(self.active).and_then(|tab| {
+            tab.table
+                .definitions()
+                .iter()
+                .find(|d| d.name == register_name)
+                .map(|d| (d.register.clone(), tab.spec.role))
+        });
+        let Some((register, role)) = resolved else {
+            self.log_active(format!(":set unknown register '{register_name}'"))
+                .await;
+            return;
+        };
+        // Virtual registers store their value in the module's virtual_values map (server only).
+        if let Address::Virtual = register.address() {
+            if role == Role::Server {
+                self.tabs[self.active]
+                    .module
+                    .set_virtual_value(register_name, value.to_string())
+                    .await;
+                self.log_active(format!("set {register_name} = {value} (virtual)"))
+                    .await;
+            } else {
+                self.log_active(format!(
+                    ":set '{register_name}' is virtual — only writable on servers"
+                ))
+                .await;
+            }
+            return;
+        }
+        let addr = match register.address() {
+            Address::Fixed(a) => *a,
+            Address::Virtual => unreachable!(),
+        };
+        let raw = match register.encode(value) {
+            Ok(raw) => raw,
+            Err(e) => {
+                self.log_active(format!(":set encode error: {e}")).await;
+                return;
+            }
+        };
+        let slave = *register.slave_id();
+
+        match role {
+            Role::Server => {
+                let memory = {
+                    let tab = &self.tabs[self.active];
+                    tab.module.memory()
+                };
+                let ok = {
+                    let mut guard = memory.write().await;
+                    guard.write_unchecked(
+                        Key {
+                            id: SlaveKind {
+                                slave_id: slave,
+                                kind: register.kind().clone(),
+                            },
+                        },
+                        &Range::new(addr as usize, raw.len()),
+                        &raw,
+                    )
+                };
+                if ok {
+                    self.log_active(format!("set {register_name} = {value}"))
+                        .await;
+                } else {
+                    self.log_active(format!(
+                        ":set '{register_name}' rejected (addr {addr}, slave {slave}, {raw:?} not writable)"
+                    ))
+                    .await;
+                }
+            }
+            Role::Client => {
+                let command = write_command(&register, slave, addr, &raw);
+                let result = self.tabs[self.active].module.send_command(command).await;
+                match result {
+                    Ok(()) => {
+                        // Write-only registers are never polled back, so mirror the value into
+                        // local memory immediately so the table reflects what was sent.
+                        if *register.access() == Access::WriteOnly {
+                            let memory = self.tabs[self.active].module.memory();
+                            memory.write().await.write_unchecked(
+                                Key {
+                                    id: SlaveKind {
+                                        slave_id: slave,
+                                        kind: register.kind().clone(),
+                                    },
+                                },
+                                &Range::new(addr as usize, raw.len()),
+                                &raw,
+                            );
+                        }
+                        self.log_active(format!("set {register_name} = {value} (sent)"))
+                            .await
+                    }
+                    Err(e) => self.log_active(format!(":set failed: {e}")).await,
+                }
+            }
+        }
+    }
+
+    /// Save the active tab's device configuration to a file.
+    fn save_device(&self, path: &str) -> Result<(), String> {
+        let ty = FileType::from_path(path)
+            .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
+        let tab = self.tabs.get(self.active).ok_or("no active tab")?;
+        let mut device = tab.device.clone();
+        device.version = Some(crate::config::VERSION.to_string());
+        Converter::save(&device, path, ty).map_err(|e| format!("{e:?}"))
+    }
+
+    /// Save the current module instances as a session file.
+    fn save_session(&self, path: &str) -> Result<(), String> {
+        let ty = FileType::from_path(path)
+            .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
+        let session = Session {
+            version: Some(crate::config::VERSION.to_string()),
+            modules: self.tabs.iter().map(|t| t.spec.clone()).collect(),
+        };
+        Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))
+    }
+}

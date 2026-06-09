@@ -1,10 +1,14 @@
+mod add_value;
 mod confirm;
 mod input;
 mod selection;
+mod subdialog;
 
+pub use add_value::*;
 pub use confirm::*;
 pub use input::*;
 pub use selection::*;
+pub use subdialog::*;
 
 use ferrowl_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
@@ -155,8 +159,8 @@ pub(super) fn set_input<T: Validate>(
 
 pub(super) fn alignment_index(alignment: &TextAlignment) -> usize {
     match alignment {
-        TextAlignment::Right => 0,
-        TextAlignment::Left => 1,
+        TextAlignment::Left => 0,
+        TextAlignment::Right => 1,
     }
 }
 

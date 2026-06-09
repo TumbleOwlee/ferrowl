@@ -1065,52 +1065,6 @@ impl EditInputDialog {
         })
     }
 
-    pub fn has_sub_dialog(&self) -> bool {
-        self.add_dialog.is_some()
-    }
-
-    pub fn open_add_dialog(&mut self) {
-        self.add_dialog = Some(AddNamedValueDialog::new());
-    }
-
-    pub fn close_add_dialog(&mut self) {
-        self.add_dialog = None;
-    }
-
-    pub fn confirm_add_dialog(&mut self) {
-        let result = self.add_dialog.as_ref().map(|d| d.apply());
-        match result {
-            Some(Ok(nv)) => {
-                self.pending_named_values.push(nv);
-                self.add_dialog = None;
-            }
-            Some(Err(e)) => {
-                if let Some(d) = self.add_dialog.as_mut() {
-                    d.error.state = e;
-                }
-            }
-            None => {}
-        }
-    }
-
-    pub fn add_dialog_focus_next(&mut self) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            d.focus_next();
-        }
-    }
-
-    pub fn add_dialog_focus_previous(&mut self) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            d.focus_previous();
-        }
-    }
-
-    pub fn add_dialog_handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        if let Some(d) = self.add_dialog.as_mut() {
-            let _ = d.handle_events(modifiers, code);
-        }
-    }
-
     pub fn handle_space(&mut self) {
         match self.focus {
             EditInputDialogFocus::AddButton => self.open_add_dialog(),
@@ -1123,46 +1077,6 @@ impl EditInputDialog {
 
     pub fn is_delete_register_button_focused(&self) -> bool {
         matches!(self.focus, EditInputDialogFocus::DeleteRegisterButton)
-    }
-
-    pub fn set_name_error(&mut self, msg: String) {
-        self.name_error = Some(msg);
-    }
-
-    pub fn clear_name_error(&mut self) {
-        self.name_error = None;
-    }
-
-    pub fn has_confirm_delete(&self) -> bool {
-        self.confirm_delete.is_some()
-    }
-
-    pub fn open_confirm_delete(&mut self) {
-        let name = self.label.state.input().trim().to_string();
-        self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
-    }
-
-    pub fn close_confirm_delete(&mut self) {
-        self.confirm_delete = None;
-    }
-
-    pub fn confirm_delete_focus_next(&mut self) {
-        if let Some(d) = self.confirm_delete.as_mut() {
-            d.focus_next();
-        }
-    }
-
-    pub fn confirm_delete_focus_previous(&mut self) {
-        if let Some(d) = self.confirm_delete.as_mut() {
-            d.focus_previous();
-        }
-    }
-
-    pub fn confirm_delete_is_confirmed(&self) -> bool {
-        self.confirm_delete
-            .as_ref()
-            .map(|d| d.is_confirm_focused())
-            .unwrap_or(false)
     }
 
     pub fn is_update_script_focused(&self) -> bool {
@@ -1215,9 +1129,39 @@ impl EditInputDialog {
     }
 }
 
+impl SubDialogs for EditInputDialog {
+    fn add_dialog_opt(&self) -> Option<&AddNamedValueDialog> {
+        self.add_dialog.as_ref()
+    }
+
+    fn add_dialog_slot(&mut self) -> &mut Option<AddNamedValueDialog> {
+        &mut self.add_dialog
+    }
+
+    fn confirm_delete_opt(&self) -> Option<&ConfirmDeleteDialog> {
+        self.confirm_delete.as_ref()
+    }
+
+    fn confirm_delete_slot(&mut self) -> &mut Option<ConfirmDeleteDialog> {
+        &mut self.confirm_delete
+    }
+
+    fn name_error_slot(&mut self) -> &mut Option<String> {
+        &mut self.name_error
+    }
+
+    fn register_label(&self) -> String {
+        self.label.state.input().trim().to_string()
+    }
+
+    fn accept_named_value(&mut self, nv: NamedValue) {
+        self.pending_named_values.push(nv);
+    }
+}
+
 use super::{
-    AddNamedValueDialog, ConfirmDeleteDialog, access_index, alignment_index, endian_index,
-    format_index, kind_index, numeric_parts, set_input, with_endian_resolution,
+    AddNamedValueDialog, ConfirmDeleteDialog, SubDialogs, access_index, alignment_index,
+    endian_index, format_index, kind_index, numeric_parts, set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::traits::HandleEvents;

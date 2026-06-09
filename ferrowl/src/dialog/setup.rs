@@ -401,12 +401,10 @@ impl SetupDialog {
             return Err("Name is required.".into());
         }
         let config_path = self.config_path.state.input().trim().to_string();
-        if !config_path.is_empty() {
-            if let None = FileType::from_path(&config_path) {
-                return Err(format!(
-                    "Unknown format for '{config_path}' (use .toml or .json)"
-                ));
-            }
+        if !config_path.is_empty() && FileType::from_path(&config_path).is_none() {
+            return Err(format!(
+                "Unknown format for '{config_path}' (use .toml or .json)"
+            ));
         }
         let role = self.role.state.get_value();
         let endpoint = match self.transport.state.get_value() {

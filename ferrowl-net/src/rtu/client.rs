@@ -1,4 +1,5 @@
-use crate::common::{ClientCore, serial_config_from};
+use crate::client_core::ClientCore;
+use crate::common::serial_config_from;
 use crate::rtu::Config;
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, SerialError};
 
@@ -61,7 +62,7 @@ impl<T: KeyParams> ClientBuilder<T> {
 }
 
 /// A connected Modbus RTU client. Connection setup is serial-specific; the read/command loop is
-/// shared via [`ClientCore`](crate::common::ClientCore).
+/// shared via the internal `ClientCore`.
 pub struct Client {
     pub(crate) core: ClientCore,
 }

@@ -1,6 +1,7 @@
 // Crate
-use crate::common::{handle_request, serial_config_from};
+use crate::common::serial_config_from;
 use crate::rtu::Config;
+use crate::server_core::handle_request;
 use crate::{Error, Key, KeyParams, LogFn, SerialError};
 
 // Workspace
