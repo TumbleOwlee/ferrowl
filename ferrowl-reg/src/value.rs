@@ -47,16 +47,7 @@ impl Value {
             Self::I128((v, r)) => scaled!(v, r),
             Self::F32((v, r)) => scaled!(v, r),
             Self::F64((v, r)) => scaled!(v, r),
-            Self::Ascii(v) => v
-                .chars()
-                .map(|c| {
-                    if c.is_whitespace() || c.is_ascii_graphic() {
-                        c
-                    } else {
-                        '.'
-                    }
-                })
-                .collect(),
+            Self::Ascii(v) => v.chars().collect(),
         }
     }
 

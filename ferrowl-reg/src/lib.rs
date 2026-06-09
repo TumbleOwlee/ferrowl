@@ -36,176 +36,184 @@ pub struct Register {
 
 impl Register {
     pub fn decode(&self, bytes: &[u16]) -> anyhow::Result<Value> {
-        let width = self.format.width();
-        if bytes.len() < width {
-            Err(anyhow::anyhow!(format!(
-                "Too few bytes to parse {:?}",
-                self.format
-            )))
-        } else {
-            let bytes = bytes
-                .iter()
-                .take(width)
-                .flat_map(|v| [(v >> 8) as u8, (v & 0xFF) as u8]);
-
-            // Big-endian parses the byte stream as-is; little-endian reverses it first.
-            macro_rules! decode_int {
-                ($variant:ident, $e:expr, $r:expr) => {
-                    Ok(Value::$variant((
-                        match $e {
-                            Endian::Big => bytes.parse(),
-                            Endian::Little => bytes.rev().parse(),
-                        },
-                        $r.clone(),
-                    )))
-                };
-            }
-            // U8/I8 occupy a single register, so parse a u16 then narrow.
-            macro_rules! decode_byte {
-                ($variant:ident, $ty:ty, $e:expr, $r:expr) => {
-                    Ok(Value::$variant((
-                        match $e {
-                            Endian::Big => ParseFromU8::<u16>::parse(bytes) as $ty,
-                            Endian::Little => ParseFromU8::<u16>::parse(bytes.rev()) as $ty,
-                        },
-                        $r.clone(),
-                    )))
-                };
-            }
-            match &self.format {
-                Format::U8((e, r)) => decode_byte!(U8, u8, e, r),
-                Format::I8((e, r)) => decode_byte!(I8, i8, e, r),
-                Format::U16((e, r)) => decode_int!(U16, e, r),
-                Format::U32((e, r)) => decode_int!(U32, e, r),
-                Format::U64((e, r)) => decode_int!(U64, e, r),
-                Format::U128((e, r)) => decode_int!(U128, e, r),
-                Format::I16((e, r)) => decode_int!(I16, e, r),
-                Format::I32((e, r)) => decode_int!(I32, e, r),
-                Format::I64((e, r)) => decode_int!(I64, e, r),
-                Format::I128((e, r)) => decode_int!(I128, e, r),
-                Format::F32((e, r)) => {
-                    let u: u32 = match e {
-                        Endian::Big => bytes.parse(),
-                        Endian::Little => bytes.rev().parse(),
-                    };
-                    Ok(Value::F32((f32::from_bits(u), r.clone())))
-                }
-                Format::F64((e, r)) => {
-                    let u: u64 = match e {
-                        Endian::Big => bytes.parse(),
-                        Endian::Little => bytes.rev().parse(),
-                    };
-                    Ok(Value::F64((f64::from_bits(u), r.clone())))
-                }
-                Format::Ascii(_) => Ok(Value::Ascii(
-                    String::from_utf8(bytes.collect())
-                        .map_err(|_| anyhow::anyhow!("Parse PackedAscii failed."))?,
-                )),
-            }
-        }
+        decode(&self.format, bytes)
     }
 
     pub fn encode(&self, s: &str) -> anyhow::Result<Vec<u16>> {
-        // Multi-byte unsigned: parse decimal or `0x` hex, then split to register words.
-        macro_rules! encode_uint {
-            ($ty:ty, $e:expr, $s:expr) => {{
-                let val: $ty = if let Some(s) = $s.strip_prefix("0x") {
-                    <$ty>::from_str_radix(s, 16)?
-                } else {
-                    $s.parse()?
-                };
-                Ok(match $e {
-                    Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                    Endian::Little => val.to_le_bytes().iter().into_vec()?,
-                })
-            }};
-        }
-        // Multi-byte signed: also accept `-0x` hex; `$uty` is the same-width unsigned type
-        // used to reinterpret a `0x` literal as a bit pattern.
-        macro_rules! encode_int {
-            ($ty:ty, $uty:ty, $e:expr, $s:expr) => {{
-                let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
-                    -<$ty>::from_str_radix(s, 16)?
-                } else if let Some(s) = $s.strip_prefix("0x") {
-                    <$uty>::from_str_radix(s, 16)? as $ty
-                } else {
-                    $s.parse()?
-                };
-                Ok(match $e {
-                    Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                    Endian::Little => val.to_le_bytes().iter().into_vec()?,
-                })
-            }};
-        }
-        match &self.format {
-            Format::F32((e, _)) => {
-                let val: f32 = if let Some(s) = s.strip_prefix("0x") {
-                    u32::from_str_radix(s, 16).map(f32::from_bits)?
-                } else {
-                    s.parse()?
-                };
-                Ok(match e {
-                    Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                    Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-                })
-            }
-            Format::F64((e, _)) => {
-                let val: f64 = if let Some(s) = s.strip_prefix("0x") {
-                    u64::from_str_radix(s, 16).map(f64::from_bits)?
-                } else {
-                    s.parse()?
-                };
-                Ok(match e {
-                    Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                    Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-                })
-            }
-            Format::Ascii((a, w)) => {
-                let length = 2 * w.0;
+        encode(&self.format, s)
+    }
+}
 
-                let mut zeroes = itertools::repeat_n(0, 0);
-                if s.len() < length {
-                    zeroes = itertools::repeat_n(0u8, length - s.len());
-                }
+pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
+    let width = format.width();
+    if bytes.len() < width {
+        Err(anyhow::anyhow!(format!(
+            "Too few bytes to parse {:?}",
+            format
+        )))
+    } else {
+        let bytes = bytes
+            .iter()
+            .take(width)
+            .flat_map(|v| [(v >> 8) as u8, (v & 0xFF) as u8]);
 
-                match a {
-                    Alignment::Left => Ok(s.bytes().chain(zeroes).take(length).into_vec()?),
-                    Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
-                }
-            }
-            Format::U8((e, _)) => {
-                let val: u8 = if let Some(s) = s.strip_prefix("0x") {
-                    u8::from_str_radix(s, 16)?
-                } else {
-                    s.parse()?
-                };
-                Ok(match e {
-                    Endian::Big => vec![val as u16],
-                    Endian::Little => vec![(val as u16) << 8],
-                })
-            }
-            Format::U16((e, _)) => encode_uint!(u16, e, s),
-            Format::U32((e, _)) => encode_uint!(u32, e, s),
-            Format::U64((e, _)) => encode_uint!(u64, e, s),
-            Format::U128((e, _)) => encode_uint!(u128, e, s),
-            Format::I8((e, _)) => {
-                let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
-                    -i8::from_str_radix(s, 16)?
-                } else if let Some(s) = s.strip_prefix("0x") {
-                    u8::from_str_radix(s, 16)? as i8
-                } else {
-                    s.parse()?
-                };
-                Ok(match e {
-                    Endian::Big => vec![val as u16],
-                    Endian::Little => vec![(val as u16) << 8],
-                })
-            }
-            Format::I16((e, _)) => encode_int!(i16, u16, e, s),
-            Format::I32((e, _)) => encode_int!(i32, u32, e, s),
-            Format::I64((e, _)) => encode_int!(i64, u64, e, s),
-            Format::I128((e, _)) => encode_int!(i128, u128, e, s),
+        // Big-endian parses the byte stream as-is; little-endian reverses it first.
+        macro_rules! decode_int {
+            ($variant:ident, $e:expr, $r:expr) => {
+                Ok(Value::$variant((
+                    match $e {
+                        Endian::Big => bytes.parse(),
+                        Endian::Little => bytes.rev().parse(),
+                    },
+                    $r.clone(),
+                )))
+            };
         }
+        // U8/I8 occupy a single register, so parse a u16 then narrow.
+        macro_rules! decode_byte {
+            ($variant:ident, $ty:ty, $e:expr, $r:expr) => {
+                Ok(Value::$variant((
+                    match $e {
+                        Endian::Big => ParseFromU8::<u16>::parse(bytes) as $ty,
+                        Endian::Little => ParseFromU8::<u16>::parse(bytes.rev()) as $ty,
+                    },
+                    $r.clone(),
+                )))
+            };
+        }
+        match format {
+            Format::U8((e, r)) => decode_byte!(U8, u8, e, r),
+            Format::I8((e, r)) => decode_byte!(I8, i8, e, r),
+            Format::U16((e, r)) => decode_int!(U16, e, r),
+            Format::U32((e, r)) => decode_int!(U32, e, r),
+            Format::U64((e, r)) => decode_int!(U64, e, r),
+            Format::U128((e, r)) => decode_int!(U128, e, r),
+            Format::I16((e, r)) => decode_int!(I16, e, r),
+            Format::I32((e, r)) => decode_int!(I32, e, r),
+            Format::I64((e, r)) => decode_int!(I64, e, r),
+            Format::I128((e, r)) => decode_int!(I128, e, r),
+            Format::F32((e, r)) => {
+                let u: u32 = match e {
+                    Endian::Big => bytes.parse(),
+                    Endian::Little => bytes.rev().parse(),
+                };
+                Ok(Value::F32((f32::from_bits(u), r.clone())))
+            }
+            Format::F64((e, r)) => {
+                let u: u64 = match e {
+                    Endian::Big => bytes.parse(),
+                    Endian::Little => bytes.rev().parse(),
+                };
+                Ok(Value::F64((f64::from_bits(u), r.clone())))
+            }
+            Format::Ascii(_) => Ok(Value::Ascii(
+                String::from_utf8(bytes.collect())
+                    .map_err(|_| anyhow::anyhow!("Parse PackedAscii failed."))?,
+            )),
+        }
+    }
+}
+
+pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
+    // Multi-byte unsigned: parse decimal or `0x` hex, then split to register words.
+    macro_rules! encode_uint {
+        ($ty:ty, $e:expr, $s:expr) => {{
+            let val: $ty = if let Some(s) = $s.strip_prefix("0x") {
+                <$ty>::from_str_radix(s, 16)?
+            } else {
+                $s.parse()?
+            };
+            Ok(match $e {
+                Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_le_bytes().iter().into_vec()?,
+            })
+        }};
+    }
+    // Multi-byte signed: also accept `-0x` hex; `$uty` is the same-width unsigned type
+    // used to reinterpret a `0x` literal as a bit pattern.
+    macro_rules! encode_int {
+        ($ty:ty, $uty:ty, $e:expr, $s:expr) => {{
+            let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
+                -<$ty>::from_str_radix(s, 16)?
+            } else if let Some(s) = $s.strip_prefix("0x") {
+                <$uty>::from_str_radix(s, 16)? as $ty
+            } else {
+                $s.parse()?
+            };
+            Ok(match $e {
+                Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_le_bytes().iter().into_vec()?,
+            })
+        }};
+    }
+    match format {
+        Format::F32((e, _)) => {
+            let val: f32 = if let Some(s) = s.strip_prefix("0x") {
+                u32::from_str_radix(s, 16).map(f32::from_bits)?
+            } else {
+                s.parse()?
+            };
+            Ok(match e {
+                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+            })
+        }
+        Format::F64((e, _)) => {
+            let val: f64 = if let Some(s) = s.strip_prefix("0x") {
+                u64::from_str_radix(s, 16).map(f64::from_bits)?
+            } else {
+                s.parse()?
+            };
+            Ok(match e {
+                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+            })
+        }
+        Format::Ascii((a, w)) => {
+            let length = 2 * w.0;
+
+            let mut zeroes = itertools::repeat_n(0, 0);
+            if s.len() < length {
+                zeroes = itertools::repeat_n(0u8, length - s.len());
+            }
+
+            match a {
+                Alignment::Left => Ok(s.bytes().chain(zeroes).take(length).into_vec()?),
+                Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
+            }
+        }
+        Format::U8((e, _)) => {
+            let val: u8 = if let Some(s) = s.strip_prefix("0x") {
+                u8::from_str_radix(s, 16)?
+            } else {
+                s.parse()?
+            };
+            Ok(match e {
+                Endian::Big => vec![val as u16],
+                Endian::Little => vec![(val as u16) << 8],
+            })
+        }
+        Format::U16((e, _)) => encode_uint!(u16, e, s),
+        Format::U32((e, _)) => encode_uint!(u32, e, s),
+        Format::U64((e, _)) => encode_uint!(u64, e, s),
+        Format::U128((e, _)) => encode_uint!(u128, e, s),
+        Format::I8((e, _)) => {
+            let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
+                -i8::from_str_radix(s, 16)?
+            } else if let Some(s) = s.strip_prefix("0x") {
+                u8::from_str_radix(s, 16)? as i8
+            } else {
+                s.parse()?
+            };
+            Ok(match e {
+                Endian::Big => vec![val as u16],
+                Endian::Little => vec![(val as u16) << 8],
+            })
+        }
+        Format::I16((e, _)) => encode_int!(i16, u16, e, s),
+        Format::I32((e, _)) => encode_int!(i32, u32, e, s),
+        Format::I64((e, _)) => encode_int!(i64, u64, e, s),
+        Format::I128((e, _)) => encode_int!(i128, u128, e, s),
     }
 }
 

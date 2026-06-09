@@ -56,6 +56,9 @@ where
     #[getset(get = "pub")]
     #[builder(default = "Margin::default()")]
     row_margin: Margin,
+    #[getset(get = "pub")]
+    #[builder(default = "[true; N]")]
+    split_by_whitespace: [bool; N],
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<V>,
@@ -191,29 +194,45 @@ where
                 .values()
                 .iter()
                 .zip(&column_widths)
-                .map(|(content, width)| {
+                .enumerate()
+                .map(|(col, (content, width))| {
                     let mut line_cnt = 0;
                     let mut line = String::with_capacity(*width as usize);
                     let mut output = String::with_capacity(
                         content.chars().count() + (content.chars().count() / *width as usize) + 1,
                     );
-                    for s in content.split_whitespace() {
-                        if line.chars().count() + s.chars().count() < *width as usize {
-                            if !line.is_empty() {
-                                line += " ";
-                            }
-                            line += s;
-                        } else {
-                            if !line.is_empty() {
-                                if output.is_empty() {
-                                    output += &line.to_string();
-                                } else {
-                                    output += &format!("\n{line}");
+                    if self.split_by_whitespace[col] {
+                        for s in content.split_whitespace() {
+                            if line.chars().count() + s.chars().count() < *width as usize {
+                                if !line.is_empty() {
+                                    line += " ";
                                 }
-                                line_cnt += 1;
+                                line += s;
+                            } else {
+                                if !line.is_empty() {
+                                    if output.is_empty() {
+                                        output += &line.to_string();
+                                    } else {
+                                        output += &format!("\n{line}");
+                                    }
+                                    line_cnt += 1;
+                                }
+                                line.clear();
+                                let mut s = s.to_owned();
+                                while s.chars().count() > *width as usize {
+                                    output += &format!(
+                                        "{}{}",
+                                        if output.is_empty() { "" } else { "\n" },
+                                        s.chars().take(*width as usize).collect::<String>()
+                                    );
+                                    s = s.chars().skip(*width as usize).collect::<String>();
+                                    line_cnt += 1;
+                                }
+                                line += &s;
                             }
-                            line.clear();
-                            let mut s = s.to_owned();
+                        }
+                        if !line.is_empty() {
+                            let mut s = line;
                             while s.chars().count() > *width as usize {
                                 output += &format!(
                                     "{}{}",
@@ -223,11 +242,12 @@ where
                                 s = s.chars().skip(*width as usize).collect::<String>();
                                 line_cnt += 1;
                             }
-                            line += &s;
+                            output +=
+                                &format!("{}{}", if output.is_empty() { "" } else { "\n" }, s);
+                            line_cnt += 1;
                         }
-                    }
-                    if !line.is_empty() {
-                        let mut s = line;
+                    } else {
+                        let mut s = content.clone();
                         while s.chars().count() > *width as usize {
                             output += &format!(
                                 "{}{}",

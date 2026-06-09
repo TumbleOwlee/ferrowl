@@ -86,7 +86,7 @@ impl Header<COLUMN_COUNT> for TableHeader {
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
             Width { min: 10, max: 20 },
-            Width { min: 5, max: 20 },
+            Width { min: 5, max: 40 },
             Width { min: 0, max: 800 },
         ]
     }
@@ -132,13 +132,24 @@ impl TableEntry<COLUMN_COUNT> for Definition {
         // Show value and it's name if available
         let raw_value = &self.raw_value;
         let raw_int = parse_raw_value(raw_value);
-        let mut value = self.value.trim().to_string();
+        let mut value = self.value.to_string();
         if let Some(named) = self.named_values.iter().find(|nv| match &nv.value {
             Scalar::Int(v) => raw_int == Some(*v) || value == v.to_string(),
             other => value == other.to_string(),
         }) {
             value = format!("{} ({})", named.name, value);
         }
+
+        let value: String = value
+            .chars()
+            .map(|c| {
+                if c == ' ' || c.is_ascii_graphic() {
+                    c
+                } else {
+                    '.'
+                }
+            })
+            .collect();
 
         [
             self.name.clone(),
@@ -177,6 +188,9 @@ impl TableView {
                 state: TableStateBuilder::default().values(values).build().unwrap(),
                 widget: TableBuilder::default()
                     .style(TableStyleBuilder::default().build().unwrap())
+                    .split_by_whitespace([
+                        true, true, true, true, true, true, true, true, true, false, true,
+                    ])
                     .row_margin(Margin {
                         vertical: 1,
                         horizontal: 0,

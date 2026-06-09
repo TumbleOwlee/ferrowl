@@ -8,7 +8,7 @@ use ferrowl_reg::format::{
     Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
     Width,
 };
-use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder};
+use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
     state::{
@@ -150,6 +150,13 @@ impl EditInputDialog {
                 ValueType::Number => {
                     if let Err(e) = f64::validate(self.number_resolution.state.input()) {
                         return Err(format!("Resolution: {e}"));
+                    }
+                    let v = self.value.state.input();
+                    let s = v.trim();
+                    let format =
+                        &self.number_format.state.values()[self.number_format.state.selection()].0;
+                    if let Err(e) = encode(format, s) {
+                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
                     }
                 }
                 ValueType::Text => {
@@ -679,8 +686,8 @@ impl EditInputDialog {
                 state: SelectionStateBuilder::default()
                     .focused(false)
                     .values(vec![
-                        Alignment(TextAlignment::Right),
                         Alignment(TextAlignment::Left),
+                        Alignment(TextAlignment::Right),
                     ])
                     .build()
                     .unwrap(),
@@ -898,9 +905,30 @@ impl EditInputDialog {
         if let Some(def) = default {
             set_input(&mut dialog.default_value, &def.to_string());
         }
-        // Show the current value as a placeholder; <C-f> fills it in when the field is empty.
-        if !value.is_empty() {
-            dialog.value.state.set_placeholder(Some(value.to_string()));
+        // Pre-populate the value field so the user can edit or clear it directly.
+        let is_ascii = matches!(register.format(), RegisterFormat::Ascii(_));
+        if is_ascii {
+            let value: String = if matches!(
+                register.format(),
+                RegisterFormat::Ascii((ferrowl_reg::Alignment::Left, _))
+            ) {
+                let value: String = value
+                    .chars()
+                    .rev()
+                    .skip_while(|c| !c.is_ascii_graphic())
+                    .map(|c| if !c.is_ascii_graphic() { ' ' } else { c })
+                    .collect();
+                value.chars().rev().collect()
+            } else {
+                value
+                    .chars()
+                    .skip_while(|c| !c.is_ascii_graphic())
+                    .map(|c| if !c.is_ascii_graphic() { ' ' } else { c })
+                    .collect()
+            };
+            set_input(&mut dialog.value, &value);
+        } else {
+            set_input(&mut dialog.value, value);
         }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
@@ -979,6 +1007,7 @@ impl EditInputDialog {
                 }
             }
         };
+        let is_ascii = matches!(format, RegisterFormat::Ascii(_));
 
         let slave_id = self
             .slave_id
@@ -997,15 +1026,12 @@ impl EditInputDialog {
             .build()
             .expect("all register fields are set");
 
-        let value = {
-            let v = self.value.state.input().trim();
-            if v.is_empty() {
-                None
-            } else {
-                Some(v.to_string())
-            }
+        let input = self.value.state.input().to_string();
+        let value = if is_ascii || !input.trim().is_empty() {
+            Some(input)
+        } else {
+            None
         };
-
         let update_script = self.update_script.state.content().trim().to_string();
         let update = Some(if update_script.is_empty() {
             String::new()
