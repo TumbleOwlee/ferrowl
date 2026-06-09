@@ -36,7 +36,7 @@ use ratatui::{
 use std::fmt::Debug;
 
 /// Parse a raw memory string like `[00a0 0001]` into an i64 (big-endian word combination).
-fn parse_raw_value(raw: &str) -> Option<i64> {
+pub fn parse_raw_value(raw: &str) -> Option<i64> {
     let inner = raw.trim().strip_prefix('[')?.strip_suffix(']')?;
     let mut result: u64 = 0;
     for word in inner.split_whitespace() {

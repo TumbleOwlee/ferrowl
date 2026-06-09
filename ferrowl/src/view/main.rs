@@ -1,4 +1,7 @@
-use crate::config::device::NamedValue;
+use crate::{
+    config::device::{NamedValue, Scalar},
+    dialog::parse_raw_value,
+};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::Register;
@@ -126,6 +129,17 @@ impl TableEntry<COLUMN_COUNT> for Definition {
             None => "None".into(),
         };
 
+        // Show value and it's name if available
+        let raw_value = &self.raw_value;
+        let raw_int = parse_raw_value(raw_value);
+        let mut value = self.value.trim().to_string();
+        if let Some(named) = self.named_values.iter().find(|nv| match &nv.value {
+            Scalar::Int(v) => raw_int == Some(*v) || value == v.to_string(),
+            other => value == other.to_string(),
+        }) {
+            value = format!("{} ({})", named.name, value);
+        }
+
         [
             self.name.clone(),
             self.description.clone(),
@@ -136,7 +150,7 @@ impl TableEntry<COLUMN_COUNT> for Definition {
             format!("{}", self.register.format()),
             format!("{}", self.register.format().width()),
             resolution,
-            self.value.clone(),
+            value,
             self.raw_value.clone(),
         ]
     }
