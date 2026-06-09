@@ -3,6 +3,8 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::{Color, Style};
 
+/// Styles for [`Table`](crate::widgets::Table): selected row (focused and
+/// unfocused), border, header, and alternating rows.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct TableStyle {

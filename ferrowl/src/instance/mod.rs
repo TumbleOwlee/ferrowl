@@ -1,3 +1,5 @@
+//! Lifecycle wrapper around a single Modbus client or server task.
+
 pub mod builder;
 pub mod config;
 pub mod error;
@@ -10,6 +12,11 @@ use handle::Handle;
 
 use ferrowl_net::{KeyParams, LogFn};
 
+/// A startable/stoppable Modbus endpoint (TCP/RTU x client/server).
+///
+/// Construct with one of the `with_*` constructors, then [`start`](Self::start)
+/// to spawn the background task and [`stop`](Self::stop) to terminate it.
+/// The same instance can be restarted after it stops.
 pub struct Instance<T: KeyParams> {
     builder: Builder<T>,
     handle: Option<Handle>,
@@ -58,6 +65,8 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    /// Spawns the endpoint's background task. Fails with
+    /// [`InstanceError::AlreadyActive`] if it is still running.
     pub async fn start<L, S>(&mut self, log: L, status: S) -> Result<(), Error>
     where
         L: LogFn + Clone,
@@ -120,6 +129,8 @@ impl<T: KeyParams> Instance<T> {
         Ok(())
     }
 
+    /// Stops the running task: asks clients to terminate gracefully, then
+    /// aborts the task if it is still alive.
     pub async fn stop(&mut self) -> Result<(), Error> {
         if self.handle.is_none() {
             return Err(InstanceError::NotRunning.into());
@@ -170,6 +181,8 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    /// Forwards a write/terminate command to a running client. Errors if no
+    /// task is running or the instance is a server.
     pub async fn send_command(&self, command: ferrowl_net::Command) -> Result<(), Error> {
         if self.handle.is_none() {
             return Err(InstanceError::NotRunning.into());

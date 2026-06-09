@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::Style;
 
+/// Style for [`Text`](crate::widgets::Text) display widgets.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct TextStyle {

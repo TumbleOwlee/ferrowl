@@ -3,6 +3,8 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::Style;
 
+/// Styles for [`Selection`](crate::widgets::Selection): focused item,
+/// border, normal text, and alternating rows.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct SelectionStyle {

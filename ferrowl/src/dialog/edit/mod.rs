@@ -1,3 +1,5 @@
+//! Register edit dialogs and their shared parsing/formatting helpers.
+
 mod add_value;
 mod confirm;
 mod input;

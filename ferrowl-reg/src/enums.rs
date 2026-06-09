@@ -1,13 +1,20 @@
+//! Enums describing a register's table, address, and access rights.
+
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+/// The four Modbus register tables a value can live in.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Kind {
+    /// Single-bit, read/write (function codes 1, 5, 15).
     Coil,
+    /// Single-bit, read-only (function code 2).
     DiscreteInput,
+    /// 16-bit, read/write (function codes 3, 6, 16).
     #[default]
     HoldingRegister,
+    /// 16-bit, read-only (function code 4).
     InputRegister,
 }
 
@@ -22,9 +29,12 @@ impl Display for Kind {
     }
 }
 
+/// Where a register is located in the device address space.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Address {
+    /// A concrete Modbus address.
     Fixed(u16),
+    /// No fixed address; the register is computed or script-provided.
     Virtual,
 }
 
@@ -37,10 +47,14 @@ impl Display for Address {
     }
 }
 
+/// Allowed access direction for a register.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Access {
+    /// Register can only be read.
     ReadOnly,
+    /// Register can only be written.
     WriteOnly,
+    /// Register can be read and written.
     ReadWrite,
 }
 

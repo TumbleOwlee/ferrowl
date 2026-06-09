@@ -14,6 +14,10 @@ use crate::traits::Margins;
 use crate::types::Border;
 use crate::widgets::Title;
 
+/// A multi-line text editor (e.g. for Lua snippets) rendered from a
+/// [`CodeInputFieldState`](crate::state::CodeInputFieldState), with line
+/// numbers and vertical/horizontal scrolling. Configure border, title,
+/// margins, and [`InputFieldStyle`] via [`CodeInputFieldBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct CodeInputField {

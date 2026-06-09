@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 use tokio_modbus::server::tcp::{Server as TcpServer, accept_tcp_connection};
 
+/// Builds and spawns a Modbus TCP server task answering requests from the
+/// shared `memory`.
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     memory: Arc<RwLock<Memory<Key<T>>>>,
@@ -26,6 +28,8 @@ impl<T: KeyParams> ServerBuilder<T> {
         Self { config, memory }
     }
 
+    /// Binds the configured listen address and spawns the accept loop as a
+    /// tokio task. `log` receives log lines.
     pub async fn spawn<L>(&self, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
         L: LogFn + Clone,
@@ -35,6 +39,9 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
+/// Modbus TCP server: a [`tokio_modbus::server::Service`] that answers
+/// each request directly from the shared memory. One instance is created
+/// per accepted connection.
 pub struct Server<T, L>
 where
     T: KeyParams,

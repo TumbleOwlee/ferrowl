@@ -1,6 +1,14 @@
+//! Helper traits for converting between byte streams and register words.
+
 use std::borrow::Borrow;
 
+/// Builds an integer from a big-endian stream of bytes.
+///
+/// Implemented for every `Iterator<Item = u8>`: each byte shifts the
+/// accumulator left by 8 bits, so the first byte ends up most significant.
+/// Reverse the iterator first to parse little-endian data.
 pub trait ParseFromU8<V> {
+    /// Consumes the iterator and folds its bytes into a `V`.
     fn parse(self) -> V;
 }
 
@@ -19,7 +27,13 @@ where
     }
 }
 
+/// Packs a byte stream into register words.
+///
+/// Implemented for every iterator over `u8` (or references to it): bytes are
+/// paired big-endian into `u16` words; a trailing odd byte becomes the high
+/// byte of the final word.
 pub trait IntoVec<T> {
+    /// Consumes the iterator and packs its items into a `Vec<T>`.
     fn into_vec(self) -> anyhow::Result<Vec<T>>;
 }
 

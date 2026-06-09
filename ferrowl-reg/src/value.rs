@@ -1,7 +1,14 @@
+//! Typed values decoded from raw register words.
+
 use serde::{Deserialize, Serialize};
 
 use crate::format::Resolution;
 
+/// A decoded register value: the typed raw value plus, for numeric variants,
+/// the display [`Resolution`] it is scaled by when formatted.
+///
+/// Produced by [`decode`](crate::decode); the `Display` implementation
+/// delegates to [`as_str`](Self::as_str).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
     U8((u8, Resolution)),
@@ -26,6 +33,8 @@ impl std::fmt::Display for Value {
 }
 
 impl Value {
+    /// Formats the value for display: numeric variants are multiplied by
+    /// their resolution and printed as decimal, ASCII is returned verbatim.
     pub fn as_str(&self) -> String {
         // Every numeric variant scales by its resolution and prints the f64 result.
         macro_rules! scaled {
@@ -51,6 +60,9 @@ impl Value {
         }
     }
 
+    /// Formats the unscaled raw value as `0x`-prefixed, zero-padded hex
+    /// (two's complement for signed, IEEE 754 bits for floats, one byte per
+    /// character for ASCII).
     pub fn as_hex_str(&self) -> String {
         // `0x` + zero-padded two's-complement hex, width = 2 hex digits per byte.
         macro_rules! hex {

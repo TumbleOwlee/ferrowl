@@ -11,6 +11,10 @@ use std::io::{Stdout, Write, stdout};
 
 use crate::traits::Init;
 
+/// RAII wrapper around a ratatui terminal on the alternate screen.
+///
+/// Creation enables raw mode and enters the alternate screen on the output
+/// `W` (stdout or stderr via [`Init`]); dropping restores the terminal.
 pub struct AlternateScreen<W>
 where
     W: Write + Init,
@@ -22,6 +26,8 @@ impl<W> AlternateScreen<W>
 where
     W: Write + Init,
 {
+    /// Enables raw mode, enters the alternate screen, and sets up the
+    /// ratatui terminal.
     pub fn new() -> Result<Self, std::io::Error> {
         enable_raw_mode().unwrap();
 
@@ -37,6 +43,7 @@ where
         Ok(Self { terminal })
     }
 
+    /// Draws a frame using the given render callback.
     pub fn draw<F>(
         &mut self,
         render_callback: F,
@@ -47,6 +54,8 @@ where
         self.terminal.draw(render_callback)
     }
 
+    /// Restores the terminal (leave alternate screen, disable raw mode)
+    /// without a value to drop — for use from panic/exit handlers.
     pub fn release() {
         // restore terminal
         disable_raw_mode().expect("Disable raw mode failed.");

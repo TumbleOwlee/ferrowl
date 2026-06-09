@@ -1,3 +1,6 @@
+//! Selection-based register edit dialog: enum-like properties picked from
+//! lists instead of typed.
+
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{

@@ -1,5 +1,8 @@
+//! Error types for instance lifecycle operations.
+
 use tokio::sync::mpsc::error::SendError;
 
+/// Errors from instance lifecycle management (start/stop/command).
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceError {
     #[error("Instance is already active")]
@@ -14,6 +17,8 @@ pub enum InstanceError {
     InvalidOperation,
 }
 
+/// Combined error type: network errors from ferrowl-net or local
+/// [`InstanceError`]s.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Network error: {0}")]

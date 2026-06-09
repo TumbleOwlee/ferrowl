@@ -34,6 +34,7 @@ pub struct ModuleSpec {
     pub interval_ms: Option<usize>,
 }
 
+/// Whether a module polls a remote device (client) or simulates one (server).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {

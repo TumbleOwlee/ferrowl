@@ -1,15 +1,20 @@
+//! Join handles for running instance tasks.
+
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
+/// Handle of a running client task plus the channel its commands go through.
 pub struct ClientHandle {
     pub handle: JoinHandle<Result<(), ferrowl_net::Error>>,
     pub sender: Sender<ferrowl_net::Command>,
 }
 
+/// Handle of a running server task.
 pub struct ServerHandle {
     pub handle: JoinHandle<Result<(), ferrowl_net::Error>>,
 }
 
+/// Handle of a running instance, by role.
 pub enum Handle {
     Server(ServerHandle),
     Client(ClientHandle),

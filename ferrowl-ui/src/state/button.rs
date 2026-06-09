@@ -7,6 +7,9 @@ use crate::{
     traits::{HandleEvents, IsFocus, SetFocus},
 };
 
+/// State of a [`Button`](crate::widgets::Button): label, focus, and
+/// disabled flag. Buttons consume no keys themselves; activation is decided
+/// by the surrounding view.
 #[derive(Builder, Debug, Default, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct ButtonState {

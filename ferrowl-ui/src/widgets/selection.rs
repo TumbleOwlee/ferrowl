@@ -17,6 +17,10 @@ use crate::{
 };
 use crate::{style::SelectionStyle, widgets::Title};
 
+/// A vertical pick-one list rendered from a
+/// [`SelectionState`](crate::state::SelectionState); items are labeled via
+/// their [`ToLabel`] impl. Configure border, title, margins, and
+/// [`SelectionStyle`] via [`SelectionBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct Selection<ValueType>

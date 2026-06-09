@@ -11,6 +11,9 @@ use ratatui::text::Text as UiText;
 use ratatui::widgets::Widget;
 use ratatui::widgets::{Block, Paragraph, StatefulWidget};
 
+/// A read-only text display; its `StatefulWidget` state is the `String` to
+/// show. Border, title, margins, alignment, and [`TextStyle`] are
+/// configured via [`TextBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct Text {

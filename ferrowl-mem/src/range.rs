@@ -4,9 +4,15 @@ use std::{
     fmt::{Debug, Display},
 };
 
+/// A half-open address range `[start, end)`.
+///
+/// Ordering compares `start` first, then `end`, so ranges sort by position
+/// in the address space (used as `BTreeMap` keys in [`Memory`](crate::Memory)).
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct Range {
+    /// First address contained in the range.
     pub start: usize,
+    /// First address past the end of the range.
     pub end: usize,
 }
 
@@ -17,6 +23,7 @@ impl Display for Range {
 }
 
 impl Range {
+    /// Creates the range `[start, start + size)`.
     pub fn new(start: usize, size: usize) -> Self {
         Self {
             start,
@@ -24,10 +31,13 @@ impl Range {
         }
     }
 
+    /// Returns the number of addresses in the range.
     pub fn length(&self) -> usize {
         self.end - self.start
     }
 
+    /// Returns the overlap of `self` and `range`, or `None` if they are
+    /// disjoint or merely adjacent (zero-length overlap).
     pub fn intersect(&self, range: &Range) -> Option<Range> {
         let start = std::cmp::max(self.start, range.start);
         let end = std::cmp::min(self.end, range.end);

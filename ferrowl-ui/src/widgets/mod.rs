@@ -1,3 +1,6 @@
+//! Stateful ratatui widgets: button, text, single-/multi-line input,
+//! selection list, and table.
+
 mod button;
 mod code_input_field;
 mod input_field;
@@ -51,6 +54,9 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// A widget title with horizontal alignment, shown in the border line.
+/// Convertible from `&str`/`String` (left-aligned) or a
+/// `(name, alignment)` tuple.
 #[derive(Debug, Clone)]
 pub struct Title {
     name: String,
@@ -90,12 +96,17 @@ impl From<(String, HorizontalAlignment)> for Title {
     }
 }
 
+/// Extracts the current value a widget represents (input text, selected
+/// item, selected row, …).
 pub trait GetValue {
     type ValueType;
 
     fn get_value(&self) -> Self::ValueType;
 }
 
+/// Pairs a widget `W` with its state `S` so the pair can be stored, focused,
+/// rendered, and fed events as one unit. All widget traits are forwarded to
+/// the appropriate half (`state` for behavior, `widget` for rendering).
 #[derive(Debug, Clone)]
 pub struct Widget<S, W> {
     pub state: S,

@@ -132,6 +132,7 @@ pub struct RegisterDef {
     pub default: Option<Scalar>,
 }
 
+/// A human-readable name for one specific register value (enum-like state).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NamedValue {
     pub name: String,
@@ -197,6 +198,7 @@ pub enum ValueType {
     Ascii,
 }
 
+/// Config-file spelling of register access rights.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum AccessCfg {
@@ -206,6 +208,7 @@ pub enum AccessCfg {
     ReadWrite,
 }
 
+/// Config-file spelling of byte order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum EndianCfg {
@@ -214,6 +217,7 @@ pub enum EndianCfg {
     Little,
 }
 
+/// Config-file spelling of ASCII alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum AlignmentCfg {

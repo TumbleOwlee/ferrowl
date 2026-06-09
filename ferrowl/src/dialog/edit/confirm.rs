@@ -1,3 +1,5 @@
+//! Yes/no confirmation dialog guarding register deletion.
+
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_ui::{

@@ -1,3 +1,5 @@
+//! Load, save, and convert serde-serializable data as TOML or JSON files.
+
 use clap::ValueEnum;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
@@ -5,15 +7,20 @@ use std::{
     io::{BufReader, Write},
 };
 
+/// Supported config file formats.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum FileType {
     Toml,
     Json,
 }
 
+/// Error raised by [`Converter`] operations, carrying a human-readable
+/// message that includes the underlying cause.
 #[derive(Debug)]
 pub enum Error {
+    /// Writing or serializing failed.
     Serialize(String),
+    /// Reading or deserializing failed.
     Deserialize(String),
 }
 
@@ -33,6 +40,8 @@ impl FileType {
     }
 }
 
+/// Namespace for file (de)serialization helpers; all methods are associated
+/// functions.
 pub struct Converter {}
 
 impl Converter {
@@ -61,6 +70,8 @@ impl Converter {
         write!(file, "{}", content)
             .map_err(|e| Error::Serialize(format!("Failed to write {} [{}].", path, e)))
     }
+    /// Re-serialize a file from `src_type` to `dest_type` by round-tripping
+    /// it through `T`.
     pub fn convert<T: Serialize + DeserializeOwned>(
         src: &str,
         src_type: FileType,

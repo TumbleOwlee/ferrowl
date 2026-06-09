@@ -1,6 +1,9 @@
 use crate::module::Module;
 use mlua::{Result, UserData};
 
+/// Lua module `C_Time`: elapsed time since module creation.
+///
+/// Exposed Lua methods: `Get` (seconds) and `GetMs` (milliseconds).
 pub struct Time {
     start: std::time::Instant,
 }

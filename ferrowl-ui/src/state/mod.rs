@@ -1,3 +1,5 @@
+//! State types backing the widgets in [`crate::widgets`].
+
 mod button;
 mod code_input_field;
 mod input_field;

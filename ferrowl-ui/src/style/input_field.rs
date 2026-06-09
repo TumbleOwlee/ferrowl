@@ -3,6 +3,8 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::Style;
 
+/// Styles for input fields: normal, focused, placeholder text, cursor cell,
+/// and invalid-input error.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct InputFieldStyle {

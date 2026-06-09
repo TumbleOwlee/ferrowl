@@ -1,3 +1,6 @@
+//! The [`Module`]: one running Modbus endpoint with its registers, shared
+//! memory, log, and optional Lua simulation.
+
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};

@@ -6,6 +6,12 @@ use crate::value::{Kind, Type, Value};
 use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
+/// Register storage for multiple devices, keyed by `K` (e.g. a unit/slave id).
+///
+/// Each key maps to a set of non-overlapping [`Slice`]s ordered by address.
+/// Regions must be declared up front with [`add_ranges`](Self::add_ranges);
+/// reads and writes only succeed on addresses that are fully covered by
+/// declared slices and permit the requested access.
 #[derive(Debug, Default)]
 pub struct Memory<K>
 where
@@ -18,6 +24,13 @@ impl<K> Memory<K>
 where
     K: Hash + Eq + Clone + Default,
 {
+    /// Declares memory regions for device `id` with the given access `kind`.
+    ///
+    /// Ranges overlapping an existing slice are merged into it; compatible
+    /// access kinds on overlapping cells are widened to `ReadWrite` (a read
+    /// range over a write cell, or vice versa). Returns `false` if an overlap
+    /// has an incompatible register [`Type`] or access combination, in which
+    /// case the memory may be left partially updated.
     pub fn add_ranges(&mut self, id: K, kind: &Kind, ranges: &[Range]) -> bool {
         let mut ranges = ranges.iter().sorted_by(|r1, r2| r1.start.cmp(&r2.start));
         match self.slices.entry(id.clone()) {
@@ -85,6 +98,10 @@ where
         true
     }
 
+    /// Writes `values` to device `id` starting at `range.start`.
+    ///
+    /// Fails (returns `false`) if the value count does not match the range
+    /// length, or if any addressed cell is not writable as type `ty`.
     pub fn write(&mut self, id: K, ty: &Type, range: &Range, values: &[u16]) -> bool {
         if range.length() != values.len() || !self.writable(&id, ty, range) {
             return false;
@@ -123,6 +140,7 @@ where
         }
     }
 
+    /// Returns `true` if every cell in `range` exists and accepts writes of type `ty`.
     pub fn writable(&mut self, id: &K, ty: &Type, range: &Range) -> bool {
         match self.slices.get(id) {
             Some(map) => walk_slices(map, range, |slice, seg| slice.writable(ty, &seg)),
@@ -130,6 +148,10 @@ where
         }
     }
 
+    /// Reads the values in `range` from device `id`.
+    ///
+    /// Returns `None` if any addressed cell is missing or not readable as
+    /// type `ty`.
     pub fn read(&self, id: K, ty: &Type, range: &Range) -> Option<Vec<u16>> {
         if !self.readable(&id, ty, range) {
             return None;
@@ -149,6 +171,8 @@ where
         }
     }
 
+    /// Reads values regardless of cell kind — returns the stored value of
+    /// `Write` cells too. Returns `None` only if `range` is not fully covered.
     pub fn read_unchecked(&self, id: K, range: &Range) -> Option<Vec<u16>> {
         match self.slices.get(&id) {
             Some(map) => {
@@ -165,6 +189,7 @@ where
         }
     }
 
+    /// Returns `true` if every cell in `range` exists and is readable as type `ty`.
     pub fn readable(&self, id: &K, ty: &Type, range: &Range) -> bool {
         match self.slices.get(id) {
             Some(map) => walk_slices(map, range, |slice, seg| slice.readable(ty, &seg)),

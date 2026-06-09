@@ -7,6 +7,11 @@ use crate::EventResult;
 use crate::traits::{HandleEvents, IsFocus, SetFocus};
 use crate::widgets::{GetValue, TableEntry};
 
+/// State of a [`Table`](crate::widgets::Table) over rows of type `V` with
+/// `N` columns: row selection, plus vertical and horizontal scrolling.
+///
+/// Handles vim-style (`hjkl`, `g`/`G`, `0`/`$`) and arrow/Home/End
+/// navigation.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct TableState<V, const N: usize>

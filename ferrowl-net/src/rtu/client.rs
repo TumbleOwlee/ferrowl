@@ -12,6 +12,8 @@ use tokio::sync::mpsc::Receiver;
 use tokio_modbus::prelude::{Slave, rtu};
 use tokio_serial::SerialStream;
 
+/// Builds and spawns a Modbus RTU client task that polls `operations` into
+/// the shared `memory` and executes incoming [`Command`]s.
 pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
@@ -31,6 +33,9 @@ impl<T: KeyParams> ClientBuilder<T> {
         }
     }
 
+    /// Opens the serial port and spawns the client loop as a tokio task.
+    /// `log` receives log lines, `status` receives connection status
+    /// updates, and `receiver` delivers write/terminate [`Command`]s.
     pub async fn spawn<L, S>(
         &self,
         receiver: Receiver<Command>,
@@ -68,6 +73,8 @@ pub struct Client {
 }
 
 impl Client {
+    /// Opens the configured serial port and attaches it to the configured
+    /// slave address.
     pub async fn connect(config: &Config) -> Result<Self, Error> {
         let builder = serial_config_from(
             &config.path,

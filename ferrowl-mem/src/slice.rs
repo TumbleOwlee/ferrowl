@@ -1,16 +1,26 @@
+//! Contiguous runs of memory cells backing a [`Memory`](crate::Memory).
+
 use crate::{range::Range, value::Type};
 use itertools::Itertools;
 use std::fmt::Debug;
 
 use crate::value::{Kind, Value, ValueRange};
 
+/// A contiguous run of [`Value`] cells covering an address [`Range`].
+///
+/// `buffer[i]` holds the cell at address `range.start + i`; the buffer
+/// length always equals `range.length()`.
 #[derive(Debug)]
 pub struct Slice {
+    /// The address range covered by this slice.
     pub range: Range,
+    /// One cell per address, in ascending address order.
     pub buffer: Vec<Value>,
 }
 
 impl Slice {
+    /// Creates a slice covering `range` with zero-initialized cells of the
+    /// given access `kind`.
     pub fn from_range(kind: &Kind, range: Range) -> Self {
         Self {
             buffer: vec![Value::default(kind); range.length()],
@@ -18,6 +28,8 @@ impl Slice {
         }
     }
 
+    /// Creates a slice from existing values, giving every cell the access
+    /// rights of `kind`.
     pub fn from_value_range<'a>(kind: &Kind, range: ValueRange<'a>) -> Self {
         Self {
             buffer: range
@@ -29,6 +41,9 @@ impl Slice {
         }
     }
 
+    /// Grows the slice by `range`, filling new cells with zero-initialized
+    /// values of `kind`. `range` must be directly adjacent to the slice
+    /// (ending at its start or starting at its end); returns `false` otherwise.
     pub fn extend(&mut self, kind: &Kind, range: &Range) -> bool {
         // Extend slice while maintaining data consistency
         if range.end == self.range.start {
@@ -53,6 +68,8 @@ impl Slice {
         }
     }
 
+    /// Returns `true` if `range` lies within the slice and every cell in it
+    /// accepts writes of type `ty`.
     pub fn writable(&self, ty: &Type, range: &Range) -> bool {
         let in_range = range.start >= self.range.start && range.end <= self.range.end;
         if in_range {
@@ -72,6 +89,9 @@ impl Slice {
         }
     }
 
+    /// Writes `values` into `range`, skipping read-only cells silently.
+    /// Returns `false` if `range` is out of bounds or the value count does
+    /// not match the range length.
     pub fn write(&mut self, range: &Range, values: &[u16]) -> bool {
         let in_range = range.start >= self.range.start && range.end <= self.range.end;
         let writable = range.length() == values.len() && in_range;
@@ -116,6 +136,8 @@ impl Slice {
         ok
     }
 
+    /// Reads the values in `range`. Returns `None` if `range` is out of
+    /// bounds or contains a write-only cell.
     pub fn read(&self, range: &Range) -> Option<Vec<u16>> {
         let readable = range.start >= self.range.start && range.end <= self.range.end;
         if readable {
@@ -141,6 +163,8 @@ impl Slice {
         }
     }
 
+    /// Reads values regardless of cell kind — write-only cells return their
+    /// stored value. Returns `None` only if `range` is out of bounds.
     pub fn read_unchecked(&self, range: &Range) -> Option<Vec<u16>> {
         let readable = range.start >= self.range.start && range.end <= self.range.end;
         if readable {
@@ -166,6 +190,8 @@ impl Slice {
         }
     }
 
+    /// Returns `true` if `range` lies within the slice and every cell in it
+    /// is readable as type `ty`.
     pub fn readable(&self, ty: &Type, range: &Range) -> bool {
         let in_range = range.start >= self.range.start && range.end <= self.range.end;
         if in_range {

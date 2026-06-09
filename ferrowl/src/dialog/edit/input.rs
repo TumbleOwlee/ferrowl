@@ -1,3 +1,5 @@
+//! Free-text register edit dialog: every register property as an input field.
+
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::edit::{
     AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,

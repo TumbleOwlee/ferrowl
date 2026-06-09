@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
+/// Builds and spawns a Modbus TCP client task that polls `operations` into
+/// the shared `memory` and executes incoming [`Command`]s.
 pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
@@ -29,6 +31,9 @@ impl<T: KeyParams> ClientBuilder<T> {
         }
     }
 
+    /// Connects to the configured endpoint and spawns the client loop as a
+    /// tokio task. `log` receives log lines, `status` receives connection
+    /// status updates, and `receiver` delivers write/terminate [`Command`]s.
     pub async fn spawn<L, S>(
         &self,
         receiver: Receiver<Command>,
@@ -66,6 +71,8 @@ pub struct Client {
 }
 
 impl Client {
+    /// Opens a TCP connection to `config.ip:config.port`, bounded by the
+    /// configured timeout.
     pub async fn connect(config: &Config) -> Result<Self, Error> {
         let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
             .parse()

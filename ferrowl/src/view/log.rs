@@ -1,3 +1,5 @@
+//! Log pane: scrollable table of timestamped module log lines.
+
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{TableState, TableStateBuilder},

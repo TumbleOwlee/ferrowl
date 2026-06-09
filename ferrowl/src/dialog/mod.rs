@@ -1,3 +1,5 @@
+//! Modal dialogs: register editing and module setup.
+
 mod edit;
 mod setup;
 

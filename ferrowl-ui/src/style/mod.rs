@@ -1,3 +1,5 @@
+//! Per-widget style bundles, defaulting to [`COLOR_SCHEME`](crate::COLOR_SCHEME).
+
 mod button;
 mod input_field;
 mod selection;

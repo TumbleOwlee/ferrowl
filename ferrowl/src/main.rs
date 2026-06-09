@@ -1,3 +1,10 @@
+//! ferrowl — a terminal UI for inspecting and simulating Modbus devices.
+//!
+//! Each configured module (a device definition plus a TCP/RTU endpoint and
+//! client/server role) runs as a background task and is shown as a tab in
+//! the TUI. Entry point: parse CLI args, build the tabs, then hand control
+//! to [`App::run`].
+
 mod app;
 mod cli;
 mod command;
@@ -115,6 +122,9 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
     (device, spec)
 }
 
+/// Builds one UI tab per configured module, starting each module's
+/// background task. Start failures are written to the module's log; modules
+/// whose device config fails to load are skipped with a warning on stderr.
 async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 

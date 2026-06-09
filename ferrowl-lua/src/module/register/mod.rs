@@ -4,6 +4,12 @@ use crate::module::{Module, ValueType};
 use mlua::{Result, UserData};
 use traits::{Read, Write};
 
+/// Lua module `C_Register`: gives scripts typed read/write access to named
+/// registers through a host-provided [`Read`]/[`Write`] handle.
+///
+/// Exposed Lua methods: `GetInt`, `GetFloat`, `GetString`, `GetBool`
+/// (each takes a register name and errors on type mismatch) and
+/// `Set(name, value)`.
 pub struct Register<T>
 where
     T: Write + Read + 'static,
@@ -15,6 +21,7 @@ impl<T> Register<T>
 where
     T: Write + Read + 'static,
 {
+    /// Creates the module around the host's register access handle.
     pub fn init(handle: T) -> Self {
         Self { handle }
     }

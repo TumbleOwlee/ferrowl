@@ -14,7 +14,13 @@ use crate::traits::Margins;
 use crate::types::Border;
 use crate::widgets::Title;
 
+/// Validates raw input text for an [`InputField`].
+///
+/// Implemented for `String` (always valid) and all numeric primitives
+/// (valid if the text parses as that type); invalid input is rendered with
+/// the field's error style.
 pub trait Validate {
+    /// Returns `Err` with a message if `input` is not a valid value.
     fn validate(input: &str) -> Result<(), String>;
 }
 
@@ -52,6 +58,11 @@ generate_validate!(i128);
 generate_validate!(f32);
 generate_validate!(f64);
 
+/// A single-line text input rendered from an
+/// [`InputFieldState`](crate::state::InputFieldState), typed by the
+/// [`Validate`] impl of `ValueType` so invalid text is styled as an error.
+/// Configure border, title, margins, and [`InputFieldStyle`] via
+/// [`InputFieldBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct InputField<ValueType>

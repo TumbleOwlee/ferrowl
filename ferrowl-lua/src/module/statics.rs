@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use crate::module::{Module, ValueType};
 use mlua::{Result, UserData};
 
+/// Lua module `C_Statics`: read-only key/value store of host-provided
+/// constants.
+///
+/// Exposed Lua methods: `GetInt`, `GetFloat`, `GetString`, `GetBool` — each
+/// takes a key and errors if the key is missing or holds a different type.
 #[allow(dead_code)]
 #[derive(Default)]
 pub struct Statics {
@@ -25,10 +30,12 @@ impl UserData for Statics {
 }
 
 impl Statics {
+    /// Creates the module pre-populated with `data`.
     pub fn from(data: HashMap<String, ValueType>) -> Self {
         Self { data }
     }
 
+    /// Inserts a value, returning the previous value stored under `key`.
     pub fn add(&mut self, key: String, value: ValueType) -> Option<ValueType> {
         self.data.insert(key, value)
     }

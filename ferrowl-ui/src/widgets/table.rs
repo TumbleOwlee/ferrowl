@@ -19,21 +19,29 @@ use crate::{
     widgets::Title,
 };
 
+/// Minimum and maximum width of a table column, in characters.
 pub struct Width {
     pub min: usize,
     pub max: usize,
 }
 
+/// Static description of a table's `N` columns: header labels and widths.
 pub trait Header<const N: usize> {
     fn header() -> [String; N];
     fn widths() -> [Width; N];
 }
 
+/// A row that can be displayed in an `N`-column [`Table`].
 pub trait TableEntry<const N: usize> {
+    /// The cell text for each column.
     fn values(&self) -> [String; N];
+    /// The row height in lines.
     fn height(&self) -> u16;
 }
 
+/// A scrollable table of [`TableEntry`] rows with an `N`-column [`Header`],
+/// rendered from a [`TableState`](crate::state::TableState). Configure
+/// border, title, margins, and [`TableStyle`] via [`TableBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct Table<V, H, const N: usize>

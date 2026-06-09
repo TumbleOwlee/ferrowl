@@ -10,6 +10,10 @@ use ratatui::text::Text as UiText;
 use ratatui::widgets::Widget;
 use ratatui::widgets::{Block, Paragraph, StatefulWidget};
 
+/// A bordered push button rendered from a
+/// [`ButtonState`](crate::state::ButtonState) (label, focus, disabled).
+/// Layout (margins, alignment, multiline) and [`ButtonStyle`] are
+/// configured on the widget via [`ButtonBuilder`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct Button {

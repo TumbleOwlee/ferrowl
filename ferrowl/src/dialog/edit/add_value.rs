@@ -1,3 +1,5 @@
+//! Sub-dialog for adding a named value (label + scalar) to a register.
+
 use crate::config::device::{NamedValue, Scalar};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};

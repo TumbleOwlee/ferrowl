@@ -1,3 +1,5 @@
+//! Main register table view: one row per register with its decoded value.
+
 use crate::{
     config::device::{NamedValue, Scalar},
     dialog::parse_raw_value,

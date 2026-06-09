@@ -4,6 +4,10 @@ use crate::format::{Alignment, Endian, Format};
 use crate::traits::{IntoVec, ParseFromU8};
 use crate::value::Value;
 
+/// Decodes raw register words into a typed [`Value`] according to `format`.
+///
+/// Only the first `format.width()` words are consumed; errors if `bytes` is
+/// shorter than that, or if ASCII data is not valid UTF-8.
 pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
     let width = format.width();
     if bytes.len() < width {
@@ -74,6 +78,13 @@ pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
     }
 }
 
+/// Parses a user-entered string into raw register words according to `format`.
+///
+/// Numeric input accepts decimal or `0x`-prefixed hex (`-0x` for negative
+/// signed values; a plain `0x` literal on a signed/float format is taken as
+/// the bit pattern). ASCII input is zero-padded or truncated to the format
+/// width according to its alignment. Note that resolution is *not* applied —
+/// the string is the raw value.
 pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
     // Multi-byte unsigned: parse decimal or `0x` hex, then split to register words.
     macro_rules! encode_uint {

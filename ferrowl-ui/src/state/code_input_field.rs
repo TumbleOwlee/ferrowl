@@ -5,6 +5,8 @@ use getset::{CopyGetters, Getters, Setters};
 use crate::EventResult;
 use crate::traits::{HandleEvents, IsFocus, SetFocus};
 
+/// State of a multi-line [`CodeInputField`](crate::widgets::CodeInputField)
+/// editor: line buffer, cursor (line + column), and scroll offsets.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct CodeInputFieldState {
@@ -35,10 +37,13 @@ pub struct CodeInputFieldState {
 }
 
 impl CodeInputFieldState {
+    /// Returns the full text with lines joined by `\n`.
     pub fn content(&self) -> String {
         self.lines.join("\n")
     }
 
+    /// Replaces the full text, resetting scroll and placing the cursor at
+    /// the end of the last line.
     pub fn set_content(&mut self, s: &str) {
         self.lines = s.split('\n').map(|l| l.to_string()).collect();
         if self.lines.is_empty() {

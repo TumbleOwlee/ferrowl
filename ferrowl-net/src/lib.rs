@@ -1,3 +1,12 @@
+//! Modbus client and server implementations over TCP and RTU (serial).
+//!
+//! Both transports expose the same shape: a `ClientBuilder`/`ServerBuilder`
+//! that spawns a background tokio task working against a shared
+//! [`Memory`](ferrowl_mem::Memory). Clients poll the [`Operation`]s they are
+//! given and accept write [`Command`]s over a channel; servers answer
+//! incoming requests directly from memory. Memory is keyed by [`Key`]
+//! parameterized over [`KeyParams`] (default: [`SlaveKind`]).
+
 mod client_core;
 mod common;
 pub mod rtu;
@@ -32,12 +41,15 @@ where
     }
 }
 
+/// Transport-specific connection settings.
 #[derive(Debug, Clone)]
 pub enum Config {
     Tcp(tcp::Config),
     Rtu(rtu::Config),
 }
 
+/// A single recurring Modbus operation a client performs each poll cycle:
+/// the function code applied to an address range on a slave.
 #[derive(Debug, Clone)]
 pub struct Operation {
     pub slave_id: SlaveId,
@@ -45,10 +57,18 @@ pub struct Operation {
     pub range: Range,
 }
 
+/// Parameters identifying a memory region for a request.
+///
+/// Implementations derive a key from the slave id and the requested function
+/// code, deciding how the shared [`Memory`](ferrowl_mem::Memory) is
+/// partitioned. See [`SlaveKind`] for the default.
 pub trait KeyParams: Hash + Eq + Clone + Default + Debug + Send + Sync + 'static {
+    /// Derives the key for a request addressed at `slave_id` with `fn_code`.
     fn from_slave_fn(slave_id: SlaveId, fn_code: FunctionCode) -> Self;
 }
 
+/// Memory key wrapping [`KeyParams`]; used as the device key of the shared
+/// [`Memory`](ferrowl_mem::Memory).
 #[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
 pub struct Key<T: KeyParams> {
     pub id: T,
@@ -60,7 +80,9 @@ impl<T: KeyParams> Key<T> {
     }
 }
 
-/// Default concrete key params: slave address + register kind.
+/// Default concrete key params: slave address + register kind. Each
+/// (slave, register table) pair gets its own memory region; the kind is
+/// derived from the request's function code.
 #[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
 pub struct SlaveKind {
     pub slave_id: SlaveId,
@@ -86,6 +108,7 @@ impl KeyParams for SlaveKind {
     }
 }
 
+/// Errors from Modbus protocol operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ModbusError {
     #[error("Modbus exception: {0:?}")]
@@ -96,6 +119,7 @@ pub enum ModbusError {
     Timeout(tokio::time::error::Elapsed),
 }
 
+/// Errors from the serial (RTU) transport.
 #[derive(Debug, thiserror::Error)]
 pub enum SerialError {
     #[error("Serial error: {0}")]
@@ -104,6 +128,7 @@ pub enum SerialError {
     Configuration(String),
 }
 
+/// Errors from the TCP transport.
 #[derive(Debug, thiserror::Error)]
 pub enum TcpError {
     #[error("TCP address error: {0}")]
@@ -116,6 +141,7 @@ pub enum TcpError {
     Timeout(tokio::time::error::Elapsed),
 }
 
+/// Top-level error type unifying protocol, transport, and server errors.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
@@ -128,11 +154,16 @@ pub enum Error {
     Server(std::io::Error),
 }
 
+/// A Modbus register address.
 pub type Address = u16;
+/// A raw 16-bit register value.
 pub type Value = u16;
+/// A coil (single-bit) value.
 pub type Coil = bool;
 
+/// Commands sent to a running client task through its command channel.
 pub enum Command {
+    /// Stop the client loop.
     Terminate,
     WriteSingleCoil(SlaveId, Address, Coil),
     WriteMultipleCoils(SlaveId, Address, Vec<Coil>),

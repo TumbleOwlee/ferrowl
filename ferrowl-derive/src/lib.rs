@@ -1,3 +1,9 @@
+//! Proc macros for keyboard focus handling in ferrowl UI views.
+//!
+//! Use [`macro@focusable`] to inject a `focus` state field into a view
+//! struct, then `#[derive(Focus)]` with `#[focus]` field attributes to
+//! generate focus cycling and event dispatch for its widgets.
+
 extern crate proc_macro;
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
@@ -14,6 +20,19 @@ struct Definition {
     when: Option<Expr>,
 }
 
+/// Derives focus cycling and event dispatch for a view struct.
+///
+/// For every field marked `#[focus]` (optionally gated with
+/// `#[focus(when = condition)]`), the macro generates:
+///
+/// - a `<StructName>Focus` enum with one variant per focusable field,
+/// - `focus_previous()`/`focus_next()` methods that cycle focus through the
+///   marked fields (skipping those whose `when` condition is false) and call
+///   `SetFocus::set_focused` on the widgets,
+/// - a `HandleEvents` impl forwarding key events to the focused widget.
+///
+/// The struct must have a `focus: <StructName>Focus` field — usually
+/// injected with [`macro@focusable`].
 #[proc_macro_derive(Focus, attributes(focus))]
 pub fn derive_focus(item: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(item as syn::DeriveInput);
@@ -227,6 +246,9 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
     }
 }
 
+/// Attribute that appends a private `focus: <StructName>Focus` field to a
+/// struct, wiring it up for `#[derive(Focus)]`. Must appear *above* the
+/// derive so the field exists when the derive runs.
 #[proc_macro_attribute]
 pub fn focusable(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(item as syn::DeriveInput);

@@ -1,3 +1,5 @@
+//! Modbus RTU (serial) client and server.
+
 mod client;
 mod server;
 
@@ -7,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub use client::{Client, ClientBuilder};
 pub use server::{Server, ServerBuilder};
 
+/// Modbus RTU serial settings; doubles as the clap argument group for RTU
+/// mode.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, Args)]
 pub struct Config {
     /// The device path to use for communication.

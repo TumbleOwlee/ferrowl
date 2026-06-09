@@ -3,6 +3,7 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::Style;
 
+/// Styles for [`Button`](crate::widgets::Button): normal and focused.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct ButtonStyle {

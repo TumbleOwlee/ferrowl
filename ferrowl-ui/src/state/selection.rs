@@ -9,6 +9,11 @@ use crate::traits::SetFocus;
 use crate::traits::ToLabel;
 use crate::widgets::GetValue;
 
+/// State of a [`Selection`](crate::widgets::Selection) list: the candidate
+/// `values`, the selected index, and a horizontal scroll offset.
+///
+/// Handles vim-style (`hjkl`) and arrow-key navigation; vertical movement
+/// wraps around.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct SelectionState<ValueType>

@@ -1,3 +1,10 @@
+//! Embedded Lua scripting built on [`mlua`].
+//!
+//! A [`Context`] owns a Lua VM plus a set of keyed [`Script`]s and is
+//! assembled with [`ContextBuilder`]. Host functionality is exposed to Lua
+//! through [`module`]s (registers, static values, time) registered as
+//! global userdata objects.
+
 mod builder;
 mod context;
 pub mod module;

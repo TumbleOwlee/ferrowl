@@ -6,6 +6,12 @@ use crate::EventResult;
 use crate::traits::{HandleEvents, IsFocus, SetFocus};
 use crate::widgets::GetValue;
 
+/// State of a single-line [`InputField`](crate::widgets::InputField): text,
+/// cursor position (in characters), focus/disabled flags, and an optional
+/// placeholder.
+///
+/// Handles character insertion, Backspace/Delete, Home/End, cursor
+/// movement, and Ctrl+F to fill an empty field from its placeholder.
 #[derive(Builder, Debug, Default, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct InputFieldState {

@@ -1,5 +1,14 @@
+//! Fixed-size, allocation-free ring buffer for log messages.
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// A ring buffer holding up to `LOG_SIZE - 1` timestamped log lines of at
+/// most `MAX_LINE_LENGTH` characters each.
+///
+/// Storage is fully inline (no heap allocation on write): longer messages
+/// are truncated, shorter ones padded with `'\0'`. When the buffer is full,
+/// writing evicts the oldest entry. Entries carry the Unix timestamp in
+/// milliseconds taken at write time.
 pub struct Log<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> {
     buffer: [[char; MAX_LINE_LENGTH]; LOG_SIZE],
     timestamps: [u64; LOG_SIZE],
@@ -8,6 +17,7 @@ pub struct Log<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> {
 }
 
 impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, LOG_SIZE> {
+    /// Creates an empty log.
     pub fn init() -> Self {
         let buffer = [['\0'; MAX_LINE_LENGTH]; LOG_SIZE];
 
@@ -19,6 +29,8 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
     }
 
+    /// Appends `msg` with the current timestamp, truncating it to
+    /// `MAX_LINE_LENGTH` characters. Evicts the oldest entry if full.
     pub fn write(&mut self, msg: &str) {
         self.timestamps[self.write] = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -45,6 +57,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         )
     }
 
+    /// Returns the oldest entry without removing it, or `None` if empty.
     pub fn peak(&self) -> Option<(u64, String)> {
         if self.read != self.write {
             Some(self.entry_at(self.read))
@@ -53,6 +66,8 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
     }
 
+    /// Returns up to `cnt` entries, oldest first, without removing them.
+    /// `None` if the log is empty.
     pub fn peak_n(&self, cnt: usize) -> Option<Vec<(u64, String)>> {
         let mut read = self.read;
         let mut msgs = Vec::with_capacity(cnt);
@@ -63,6 +78,7 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         if msgs.is_empty() { None } else { Some(msgs) }
     }
 
+    /// Removes and returns the oldest entry, or `None` if empty.
     pub fn take(&mut self) -> Option<(u64, String)> {
         if self.read != self.write {
             let msg = self.entry_at(self.read);
@@ -73,6 +89,8 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
     }
 
+    /// Removes and returns up to `cnt` entries, oldest first. `None` if the
+    /// log is empty.
     pub fn take_n(&mut self, cnt: usize) -> Option<Vec<(u64, String)>> {
         let mut msgs = Vec::with_capacity(cnt);
         while self.read != self.write && msgs.len() < cnt {

@@ -1,3 +1,5 @@
+//! Application, device, and session configuration loading (TOML/JSON).
+
 pub mod app;
 pub mod device;
 pub mod session;

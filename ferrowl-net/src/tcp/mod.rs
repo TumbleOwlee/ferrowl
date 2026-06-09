@@ -1,3 +1,5 @@
+//! Modbus TCP client and server.
+
 mod client;
 mod server;
 
@@ -7,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub use client::{Client, ClientBuilder};
 pub use server::{Server, ServerBuilder};
 
+/// Modbus TCP connection settings; doubles as the clap argument group for
+/// TCP mode.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, Args)]
 pub struct Config {
     /// The interface to use for the service or the ip to connect to in client mode.

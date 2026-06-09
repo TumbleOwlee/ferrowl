@@ -1,3 +1,7 @@
+//! Small general-purpose helpers shared across the ferrowl crates:
+//! config file (de)serialization ([`convert`]), tracked tokio task spawning
+//! ([`tokio`]), and a few ergonomic macros and traits.
+
 pub mod convert;
 pub mod tokio;
 
@@ -52,6 +56,21 @@ impl<T, E, F: FnOnce(E) -> String> Expect<F> for Result<T, E> {
     }
 }
 
+/// Clones the listed bindings, then moves the clones into an `async move`
+/// block — shorthand for the common "clone before spawning" pattern.
+///
+/// # Examples
+///
+/// ```rust
+/// use ferrowl_util::async_cloned;
+///
+/// let name = String::from("ferrowl");
+/// let fut = async_cloned!(name; {
+///     format!("hello {}", name)
+/// });
+/// // `name` is still usable here; the future owns a clone.
+/// assert_eq!(name, "ferrowl");
+/// ```
 #[macro_export]
 macro_rules! async_cloned {
     ($($n:ident),+; $body:block) => (

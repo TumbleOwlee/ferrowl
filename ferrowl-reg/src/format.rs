@@ -1,5 +1,8 @@
+//! Data formats describing how raw register words are interpreted.
+
 use serde::{Deserialize, Serialize};
 
+/// Text alignment of an ASCII value inside its fixed-width register block.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Alignment {
     Left,
@@ -19,9 +22,11 @@ impl std::fmt::Display for Alignment {
     }
 }
 
+/// Width of an ASCII value, in 16-bit registers (2 characters each).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Width(pub usize);
 
+/// Byte order of a multi-byte value across registers.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Endian {
     Little,
@@ -41,6 +46,8 @@ impl std::fmt::Display for Endian {
     }
 }
 
+/// Scale factor applied when displaying a numeric value
+/// (`displayed = raw * resolution`).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Resolution(pub f64);
 
@@ -50,6 +57,11 @@ impl std::fmt::Display for Resolution {
     }
 }
 
+/// How the raw register words of a value are interpreted.
+///
+/// Numeric variants carry the byte order ([`Endian`]) and display scale
+/// ([`Resolution`]); [`Ascii`](Self::Ascii) carries its [`Alignment`] and
+/// [`Width`] in registers.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Format {
     Ascii((Alignment, Width)),
@@ -90,7 +102,7 @@ impl std::fmt::Display for Format {
 }
 
 impl Format {
-    // The width in Modbus registers (u16) of the format
+    /// The width of the format in Modbus registers (`u16` words).
     pub fn width(&self) -> usize {
         match self {
             Self::Ascii((_, w)) => w.0,
@@ -101,6 +113,7 @@ impl Format {
         }
     }
 
+    /// The display scale factor, or `None` for ASCII formats.
     pub fn resolution(&self) -> Option<Resolution> {
         match self {
             Self::Ascii((_, _)) => None,
@@ -119,7 +132,7 @@ impl Format {
         }
     }
 
-    /// The length in bytes (u8) of the format
+    /// The length of the format in bytes (two per register).
     pub fn length(&self) -> usize {
         self.width() * 2
     }

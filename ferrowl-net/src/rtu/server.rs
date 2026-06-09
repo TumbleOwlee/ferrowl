@@ -16,6 +16,8 @@ use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 use tokio_modbus::server::rtu::Server as RtuServer;
 use tokio_serial::SerialStream;
 
+/// Builds and spawns a Modbus RTU server task answering requests from the
+/// shared `memory`.
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     memory: Arc<RwLock<Memory<Key<T>>>>,
@@ -26,6 +28,8 @@ impl<T: KeyParams> ServerBuilder<T> {
         Self { config, memory }
     }
 
+    /// Opens the configured serial port and spawns the serve loop as a
+    /// tokio task. `log` receives log lines.
     pub async fn spawn<L>(&self, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
         L: LogFn + Clone,
@@ -35,6 +39,8 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
+/// Modbus RTU server: a [`tokio_modbus::server::Service`] that answers
+/// each request directly from the shared memory.
 pub struct Server<T, L>
 where
     T: KeyParams,
