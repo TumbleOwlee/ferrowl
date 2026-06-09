@@ -17,6 +17,7 @@ use ferrowl_ui::{
         Widget,
     },
 };
+use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -119,6 +120,7 @@ impl ToLabel for U8Choice {
 /// The validated per-instance settings.
 pub struct SetupValues {
     pub name: String,
+    pub config_path: String,
     pub role: Role,
     pub endpoint: Endpoint,
     /// Optional per-instance timing overrides (ms); `None` falls back to device/app config.
@@ -141,7 +143,7 @@ pub struct SetupOutcome {
 pub struct SetupDialog {
     #[focus]
     pub name: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.mode == DialogMode::New})]
+    #[focus]
     pub config_path: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
@@ -185,12 +187,13 @@ impl SetupDialog {
     /// interval in ms used to prefill the inputs (shown only for clients).
     pub fn edit(
         name: &str,
+        config_path: &str,
         role: Role,
         endpoint: &Endpoint,
         timing: (usize, usize, usize),
         ranges: &ReadRanges,
     ) -> Self {
-        let mut dialog = Self::build(name, DialogMode::Edit, timing, ranges);
+        let mut dialog = Self::build(name, config_path, DialogMode::Edit, timing, ranges);
         dialog
             .role
             .state
@@ -225,11 +228,12 @@ impl SetupDialog {
     /// Create a new module (`:n`/`:new`), with an optional device-config path. `timing` prefills
     /// the (client-only) timeout/delay/interval inputs with the global app defaults.
     pub fn create(timing: (usize, usize, usize)) -> Self {
-        Self::build("", DialogMode::New, timing, &ReadRanges::default())
+        Self::build("", "", DialogMode::New, timing, &ReadRanges::default())
     }
 
     fn build(
         name: &str,
+        config_path: &str,
         mode: DialogMode,
         timing: (usize, usize, usize),
         ranges: &ReadRanges,
@@ -244,16 +248,18 @@ impl SetupDialog {
 
         let mut name_field = input("Name", None, "module name", &input_style, true);
         set_input(&mut name_field, name);
+        let mut config_path_field = input(
+            "Config Path (optional)",
+            None,
+            "device.toml",
+            &input_style,
+            false,
+        );
+        set_input(&mut config_path_field, config_path);
 
         let mut dialog = SetupDialogBuilder::default()
             .name(name_field)
-            .config_path(input(
-                "Config Path (optional)",
-                None,
-                "configs/device.toml",
-                &input_style,
-                false,
-            ))
+            .config_path(config_path_field)
             .transport(selection(
                 "Transport",
                 None,
@@ -328,6 +334,7 @@ impl SetupDialog {
                         vertical: 0,
                         horizontal: 1,
                     })
+                    .multiline(true)
                     .style(error_style)
                     .build()
                     .unwrap(),
@@ -393,6 +400,14 @@ impl SetupDialog {
         if name.is_empty() {
             return Err("Name is required.".into());
         }
+        let config_path = self.config_path.state.input().trim().to_string();
+        if !config_path.is_empty() {
+            if let None = FileType::from_path(&config_path) {
+                return Err(format!(
+                    "Unknown format for '{config_path}' (use .toml or .json)"
+                ));
+            }
+        }
         let role = self.role.state.get_value();
         let endpoint = match self.transport.state.get_value() {
             Transport::Tcp => {
@@ -457,6 +472,7 @@ impl SetupDialog {
 
         Ok(SetupValues {
             name,
+            config_path,
             role,
             endpoint,
             timeout_ms,
@@ -477,9 +493,9 @@ impl SetupDialog {
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
         // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 3 } else { 1 };
-        // border(2) + inner margin(2) + name(3) + select(3) + endpoint + timing(3) + ranges(6)
-        // + error(3) + keybinds(1) + optional config-path row (New mode).
-        let box_height = 23 + endpoint_rows * 3 + if is_new { 3 } else { 0 };
+        // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
+        // + error(4) + keybinds(1) + optional config-path row (New mode).
+        let box_height = 27 + endpoint_rows * 3;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -508,32 +524,30 @@ impl SetupDialog {
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vcenter, buf);
         block.render(vcenter, buf);
 
-        let mut constraints = vec![Constraint::Length(3)]; // name
-        if is_new {
-            constraints.push(Constraint::Length(3)); // config path
-        }
-        constraints.push(Constraint::Length(3)); // transport + role
-        constraints.push(Constraint::Length(endpoint_rows * 3)); // endpoint
-        constraints.push(Constraint::Length(3)); // timeout + delay + interval
-        constraints.push(Constraint::Length(3)); // holding + input ranges
-        constraints.push(Constraint::Length(3)); // coil + discrete ranges
-        constraints.push(Constraint::Length(3)); // error
-        constraints.push(Constraint::Length(1)); // keybinds
+        let constraints = vec![
+            Constraint::Length(3),                 // name
+            Constraint::Length(3),                 // config path
+            Constraint::Length(3),                 // transport + role
+            Constraint::Length(endpoint_rows * 3), // endpoint
+            Constraint::Length(3),                 // timeout + delay + interval
+            Constraint::Length(3),                 // holding + input ranges
+            Constraint::Length(3),                 // coil + discrete ranges
+            Constraint::Length(4),                 // error
+            Constraint::Length(1),                 // keybinds
+        ];
         let rows = Layout::vertical(constraints).split(inner);
 
         let mut idx = 0;
         StatefulWidget::render(&self.name.widget, rows[idx], buf, &mut self.name.state);
         idx += 1;
 
-        if is_new {
-            StatefulWidget::render(
-                &self.config_path.widget,
-                rows[idx],
-                buf,
-                &mut self.config_path.state,
-            );
-            idx += 1;
-        }
+        StatefulWidget::render(
+            &self.config_path.widget,
+            rows[idx],
+            buf,
+            &mut self.config_path.state,
+        );
+        idx += 1;
 
         let [transport_area, role_area] =
             Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])

@@ -102,7 +102,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
     };
     let spec = ModuleSpec {
         name: "demo".to_string(),
-        device: "<demo>".to_string(),
+        device: String::new(),
         role: Role::Server,
         endpoint: Endpoint::Tcp {
             ip: "127.0.0.1".to_string(),

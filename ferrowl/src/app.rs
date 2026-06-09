@@ -528,6 +528,7 @@ impl App {
         let timing = crate::module::Module::resolve_timing(&tab.spec, &tab.device, &self.app_cfg);
         let dialog = SetupDialog::edit(
             &tab.spec.name,
+            &tab.spec.device,
             tab.spec.role,
             &tab.spec.endpoint,
             (timing.timeout_ms, timing.delay_ms, timing.interval_ms),
@@ -811,6 +812,7 @@ impl App {
             return;
         }
         self.tabs[active].name = values.name.clone();
+        self.tabs[active].spec.device = values.config_path.clone();
         self.tabs[active].spec.name = values.name;
         self.tabs[active].spec.role = values.role;
         self.tabs[active].spec.endpoint = values.endpoint.clone();
@@ -1065,6 +1067,13 @@ impl App {
         let Some(tab) = self.tabs.get(active) else {
             return;
         };
+        if tab.spec.device.is_empty() {
+            self.log_active(format!(
+                "No configuration file path configured. Reload aborted."
+            ))
+            .await;
+            return;
+        }
         let path = tab.spec.device.clone();
         let device = match crate::config::load_device(&path) {
             Ok(d) => d,
@@ -1162,13 +1171,21 @@ impl App {
                 }
             }
             Cmd::WriteDevice(path) => {
-                let path = path.unwrap_or_else(|| {
-                    self.tabs
-                        .get(self.active)
-                        .map(|t| t.spec.device.clone())
-                        .unwrap_or_else(|| "device.toml".to_string())
-                });
-                match self.save_device(&path) {
+                const DEFAULT_PATH: &str = "device.toml";
+                let path = if let Some(p) = &path {
+                    &p
+                } else {
+                    match self.tabs.get(self.active) {
+                        Some(t) if !t.spec.device.is_empty() => &t.spec.device,
+                        Some(t) if t.spec.device.is_empty() => {
+                            self.log_active("No configuration file path configured.".to_string())
+                                .await;
+                            return false;
+                        }
+                        _ => DEFAULT_PATH,
+                    }
+                };
+                match self.save_device(path) {
                     Ok(()) => {
                         self.log_active(format!("Saved device config to {path}"))
                             .await
