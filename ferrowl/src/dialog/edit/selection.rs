@@ -1,9 +1,9 @@
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
-    AccessOption, Alignment, Endian, Format, KindOption, ValueType, access_index, alignment_index,
-    endian_index, format_index, kind_index, numeric_parts, parse_address, set_input,
-    with_endian_resolution,
+    AccessOption, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption, ValueType,
+    access_index, alignment_index, endian_index, format_index, kind_index, numeric_parts,
+    parse_address, set_input, with_endian_resolution,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
@@ -319,6 +319,9 @@ where
     // Confirm button
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
+    // Delete-register button (only focusable when editing an existing register)
+    #[focus(when = { self.deletable })]
+    pub delete_register_button: Widget<ButtonState, Button>,
     // Error display field
     pub error: Widget<String, Text>,
     // Success display field
@@ -328,6 +331,16 @@ where
     // Optional add-value sub-dialog
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
+    // Whether this dialog edits an existing register (enables the delete button).
+    #[builder(default)]
+    pub deletable: bool,
+    // Optional confirmation box guarding register deletion.
+    #[builder(default)]
+    pub confirm_delete: Option<ConfirmDeleteDialog>,
+    // Name-conflict error set by the app at confirm time. Survives the per-frame `validate()`
+    // refresh (which can't see other registers) until the user edits the dialog again.
+    #[builder(default)]
+    pub name_error: Option<String>,
 }
 
 impl<V: ToLabel + Clone> EditSelectionDialog<V> {
@@ -357,7 +370,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self.validate() {
-            Ok(_) => self.error.state.clear(),
+            Ok(_) => match &self.name_error {
+                Some(e) => self.error.state = e.clone(),
+                None => self.error.state.clear(),
+            },
             Err(e) => self.error.state = e,
         }
 
@@ -379,7 +395,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .bg(COLOR_SCHEME.bg),
             )
             .title_alignment(HorizontalAlignment::Center)
-            .title("Edit");
+            .title(if self.deletable { "Edit" } else { "Add" });
         let dialog_box = vertical_layout[1]; // preserved for sub-dialog rendering
         let area = block.inner(dialog_box).inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
@@ -584,12 +600,30 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         );
         vertical_index += 1;
 
-        StatefulWidget::render(
-            &self.confirm_button.widget,
-            vertical_layout[vertical_index],
-            buf,
-            &mut self.confirm_button.state,
-        );
+        if self.deletable {
+            let buttons: [Rect; 2] =
+                Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
+                    .areas(vertical_layout[vertical_index]);
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                buttons[0],
+                buf,
+                &mut self.confirm_button.state,
+            );
+            StatefulWidget::render(
+                &self.delete_register_button.widget,
+                buttons[1],
+                buf,
+                &mut self.delete_register_button.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                vertical_layout[vertical_index],
+                buf,
+                &mut self.confirm_button.state,
+            );
+        }
         vertical_index += 1;
 
         if !self.error.state.is_empty() {
@@ -625,6 +659,11 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         // Render add sub-dialog on top if open — centred within the main dialog box.
         if let Some(d) = self.add_dialog.as_mut() {
+            d.render(dialog_box, buf);
+        }
+
+        // Render the delete-confirmation box on top if open.
+        if let Some(d) = self.confirm_delete.as_mut() {
             d.render(dialog_box, buf);
         }
     }
@@ -979,6 +1018,24 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .build()
                     .unwrap(),
             })
+            .delete_register_button(Widget {
+                state: ButtonStateBuilder::default()
+                    .focused(false)
+                    .label("DELETE".to_string())
+                    .disabled(false)
+                    .build()
+                    .unwrap(),
+                widget: ButtonBuilder::default()
+                    .border_margin(Margin::new(1, 0))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(button_style.clone())
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .build()
+                    .unwrap(),
+            })
             .confirm_button(Widget {
                 state: ButtonStateBuilder::default()
                     .focused(false)
@@ -1070,6 +1127,7 @@ impl EditSelectionDialog<NamedValue> {
         default: Option<&Scalar>,
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
+        dialog.deletable = true;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         if let Some(script) = update {
@@ -1282,10 +1340,55 @@ impl EditSelectionDialog<NamedValue> {
         match self.focus {
             EditSelectionDialogFocus::AddButton => self.open_add_dialog(),
             EditSelectionDialogFocus::DeleteButton => self.delete_selected(),
+            EditSelectionDialogFocus::DeleteRegisterButton => self.open_confirm_delete(),
             _ => {
                 self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
             }
         }
+    }
+
+    pub fn is_delete_register_button_focused(&self) -> bool {
+        matches!(self.focus, EditSelectionDialogFocus::DeleteRegisterButton)
+    }
+
+    pub fn set_name_error(&mut self, msg: String) {
+        self.name_error = Some(msg);
+    }
+
+    pub fn clear_name_error(&mut self) {
+        self.name_error = None;
+    }
+
+    pub fn has_confirm_delete(&self) -> bool {
+        self.confirm_delete.is_some()
+    }
+
+    pub fn open_confirm_delete(&mut self) {
+        let name = self.label.state.input().trim().to_string();
+        self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
+    }
+
+    pub fn close_confirm_delete(&mut self) {
+        self.confirm_delete = None;
+    }
+
+    pub fn confirm_delete_focus_next(&mut self) {
+        if let Some(d) = self.confirm_delete.as_mut() {
+            d.focus_next();
+        }
+    }
+
+    pub fn confirm_delete_focus_previous(&mut self) {
+        if let Some(d) = self.confirm_delete.as_mut() {
+            d.focus_previous();
+        }
+    }
+
+    pub fn confirm_delete_is_confirmed(&self) -> bool {
+        self.confirm_delete
+            .as_ref()
+            .map(|d| d.is_confirm_focused())
+            .unwrap_or(false)
     }
 
     pub fn is_update_script_focused(&self) -> bool {
@@ -1300,6 +1403,7 @@ impl EditSelectionDialog<NamedValue> {
     /// Called when all named values are removed and the dialog should switch to free-text mode.
     pub fn to_edit_input_dialog(&self) -> super::input::EditInputDialog {
         let mut d = super::input::EditInputDialog::new();
+        d.deletable = self.deletable;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();

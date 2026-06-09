@@ -1,6 +1,8 @@
+mod confirm;
 mod input;
 mod selection;
 
+pub use confirm::*;
 pub use input::*;
 pub use selection::*;
 

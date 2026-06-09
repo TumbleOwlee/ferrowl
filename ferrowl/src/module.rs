@@ -201,6 +201,11 @@ impl Module {
             .push((name, description, register, named_values));
     }
 
+    /// Remove a register from the module's cached register list by name (no-op if absent).
+    pub fn remove_register_by_name(&mut self, name: &str) {
+        self.registers.retain(|(n, _, _, _)| n != name);
+    }
+
     /// Replace one register's cached metadata (name, description, register, named values).
     pub fn update_register(
         &mut self,

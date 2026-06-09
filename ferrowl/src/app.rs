@@ -297,6 +297,54 @@ impl App {
 
     async fn handle_dialog_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         // When either edit dialog has an open add sub-dialog, route all keys into it.
+        // Route keys to the delete-confirmation box while it is open; it takes priority over the
+        // underlying edit dialog.
+        let has_confirm_delete = matches!(&self.overlay,
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) if d.has_confirm_delete())
+            || matches!(&self.overlay,
+            Some(Overlay::EditSelection(d)) if d.has_confirm_delete());
+        if has_confirm_delete {
+            match code {
+                KeyCode::Esc => match self.overlay.as_mut() {
+                    Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => d.close_confirm_delete(),
+                    Some(Overlay::EditSelection(d)) => d.close_confirm_delete(),
+                    _ => {}
+                },
+                KeyCode::Tab => match self.overlay.as_mut() {
+                    Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => d.confirm_delete_focus_next(),
+                    Some(Overlay::EditSelection(d)) => d.confirm_delete_focus_next(),
+                    _ => {}
+                },
+                KeyCode::BackTab => match self.overlay.as_mut() {
+                    Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => {
+                        d.confirm_delete_focus_previous()
+                    }
+                    Some(Overlay::EditSelection(d)) => d.confirm_delete_focus_previous(),
+                    _ => {}
+                },
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let confirmed = matches!(&self.overlay,
+                        Some(Overlay::Edit(d)) | Some(Overlay::Add(d))
+                            if d.confirm_delete_is_confirmed())
+                        || matches!(&self.overlay,
+                        Some(Overlay::EditSelection(d)) if d.confirm_delete_is_confirmed());
+                    if confirmed {
+                        self.delete_selected_register().await;
+                    } else {
+                        match self.overlay.as_mut() {
+                            Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => {
+                                d.close_confirm_delete()
+                            }
+                            Some(Overlay::EditSelection(d)) => d.close_confirm_delete(),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+
         let has_sub = matches!(&self.overlay,
             Some(Overlay::EditSelection(d)) if d.has_sub_dialog())
             || matches!(&self.overlay,
@@ -324,6 +372,14 @@ impl App {
             return false;
         }
 
+        // Any keystroke reaching the main dialog body clears a pending name-conflict error so it
+        // disappears as the user edits the name. A confirm re-checks and re-sets it below.
+        match self.overlay.as_mut() {
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => d.clear_name_error(),
+            Some(Overlay::EditSelection(d)) => d.clear_name_error(),
+            _ => {}
+        }
+
         // Check whether the code input or confirm button is currently focused in the edit dialogs.
         let update_script_focused = matches!(&self.overlay,
             Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) if d.is_update_script_focused())
@@ -333,14 +389,26 @@ impl App {
             Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) if d.is_confirm_button_focused())
             || matches!(&self.overlay,
             Some(Overlay::EditSelection(d)) if d.is_confirm_button_focused());
+        let delete_register_button_focused = matches!(&self.overlay,
+            Some(Overlay::Edit(d)) | Some(Overlay::Add(d))
+                if d.is_delete_register_button_focused())
+            || matches!(&self.overlay,
+            Some(Overlay::EditSelection(d)) if d.is_delete_register_button_focused());
 
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => self.close_overlay(),
-            // Enter inserts a newline when the code field is focused; otherwise it confirms.
+            // Enter inserts a newline when the code field is focused; opens the delete-confirm box
+            // when the delete button is focused; otherwise it confirms the dialog.
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if update_script_focused {
                     if let Some(o) = self.overlay.as_mut() {
                         o.handle_events(modifiers, code);
+                    }
+                } else if delete_register_button_focused {
+                    match self.overlay.as_mut() {
+                        Some(Overlay::Edit(d)) | Some(Overlay::Add(d)) => d.open_confirm_delete(),
+                        Some(Overlay::EditSelection(d)) => d.open_confirm_delete(),
+                        _ => {}
                     }
                 } else {
                     self.confirm_overlay().await;
@@ -423,8 +491,8 @@ impl App {
             if edited.name != original && tab.device.definitions.contains_key(&edited.name) {
                 let msg = format!("Name '{}' already in use", edited.name);
                 match &mut self.overlay {
-                    Some(Overlay::Edit(d)) => d.error.state = msg,
-                    Some(Overlay::EditSelection(d)) => d.error.state = msg,
+                    Some(Overlay::Edit(d)) => d.set_name_error(msg),
+                    Some(Overlay::EditSelection(d)) => d.set_name_error(msg),
                     _ => {}
                 }
                 return;
@@ -436,7 +504,7 @@ impl App {
         {
             let msg = format!("Name '{}' already in use", edited.name);
             if let Some(Overlay::Add(d)) = &mut self.overlay {
-                d.error.state = msg;
+                d.set_name_error(msg);
             }
             return;
         }
@@ -808,6 +876,45 @@ impl App {
         }
         self.tabs.push(Tab::from_module(spec, device, module));
         self.active = self.tabs.len() - 1;
+    }
+
+    /// Delete the register currently selected in the table, removing it from the device config,
+    /// the module's register cache, and the table view, then rebuild operations so it is no longer
+    /// polled/served. Closes the overlay afterwards.
+    async fn delete_selected_register(&mut self) {
+        let active = self.active;
+        let name = self
+            .tabs
+            .get(active)
+            .and_then(|tab| tab.table.selected())
+            .map(|def| def.name.clone());
+        let Some(name) = name else {
+            self.close_overlay();
+            return;
+        };
+
+        if let Some(tab) = self.tabs.get_mut(active) {
+            tab.device.definitions.remove(&name);
+            tab.module.remove_register_by_name(&name);
+            let mut defs = tab.table.definitions().to_vec();
+            defs.retain(|d| d.name != name);
+            tab.table.set_definitions(defs);
+            // Reset the table selection to the first remaining row (or none if empty).
+            tab.table.select_first();
+        }
+
+        // Drop the deleted register from the read plan.
+        if let Some(tab) = self.tabs.get(active) {
+            tab.module.rebuild_operations().await;
+        }
+
+        // Reload the Lua sim in case the removed register carried an update script.
+        if let Some(tab) = self.tabs.get_mut(active) {
+            let scripts = collect_scripts(&tab.device);
+            tab.module.reload_scripts(scripts);
+        }
+
+        self.close_overlay();
     }
 
     fn close_overlay(&mut self) {

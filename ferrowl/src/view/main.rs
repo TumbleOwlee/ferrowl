@@ -215,4 +215,9 @@ impl TableView {
     pub fn selected_index(&self) -> Option<usize> {
         self.table.state.table_state().selected()
     }
+
+    /// Select the first register row (or clear the selection when the table is empty).
+    pub fn select_first(&mut self) {
+        self.table.state.move_to_top();
+    }
 }
