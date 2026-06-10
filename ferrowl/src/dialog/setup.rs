@@ -409,31 +409,34 @@ impl SetupDialog {
         let role = self.role.state.get_value();
         let endpoint = match self.transport.state.get_value() {
             Transport::Tcp => {
-                let ip = self.ip.state.input().trim().to_string();
+                let mut ip = self.ip.state.input().trim().to_string();
                 if ip.is_empty() {
-                    return Err("IP address is required.".into());
+                    ip = "127.0.0.1".to_string();
                 }
-                let port = self
-                    .port
-                    .state
-                    .input()
-                    .trim()
-                    .parse::<u16>()
-                    .map_err(|_| "Port must be a number (0-65535).".to_string())?;
+                let port = self.port.state.input();
+                let port = if !port.is_empty() {
+                    port.trim()
+                        .parse::<u16>()
+                        .map_err(|_| "Port must be a number (0-65535).".to_string())?
+                } else {
+                    502
+                };
                 Endpoint::Tcp { ip, port }
             }
             Transport::Rtu => {
-                let path = self.path.state.input().trim().to_string();
+                let mut path = self.path.state.input().trim().to_string();
                 if path.is_empty() {
-                    return Err("Serial path is required.".into());
+                    path = "/dev/ttyUSB0".to_string();
                 }
-                let baud_rate = self
-                    .baud
-                    .state
-                    .input()
-                    .trim()
-                    .parse::<u32>()
-                    .map_err(|_| "Baud rate must be a number.".to_string())?;
+                let baud_rate = self.baud.state.input();
+                let baud_rate = if !baud_rate.is_empty() {
+                    baud_rate
+                        .trim()
+                        .parse::<u32>()
+                        .map_err(|_| "Baud rate must be a number.".to_string())?
+                } else {
+                    19200
+                };
                 Endpoint::Rtu {
                     path,
                     baud_rate,
