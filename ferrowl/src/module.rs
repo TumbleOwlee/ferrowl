@@ -358,6 +358,10 @@ impl Module {
         );
         Ok(())
     }
+
+    pub fn is_instance_active(&self) -> bool {
+        self.instance.active()
+    }
 }
 
 /// Initial display value for a register: its format decoded from all-zero words (e.g. "0").

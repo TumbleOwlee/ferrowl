@@ -1,6 +1,6 @@
 //! Whole-frame rendering: tab bar, register table, log pane, command line and overlay.
 
-use ferrowl_ui::COLOR_SCHEME;
+use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -21,12 +21,14 @@ pub(super) fn render(
     active: usize,
     focus: Focus,
     command: &mut CommandLine,
+    online: bool,
     overlay: Option<&mut Overlay>,
 ) {
     let area = frame.area();
-    let [tabs_area, table_area, log_area, cmd_area] = Layout::vertical([
+    let [tabs_area, table_area, status_area, log_area, cmd_area] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
+        Constraint::Length(1),
         Constraint::Length(10),
         Constraint::Length(1),
     ])
@@ -37,6 +39,26 @@ pub(super) fn render(
 
     let names: Vec<String> = tabs.iter().map(|t| t.name.clone()).collect();
     render_tabs(&names, active, tabs_area, buf);
+
+    let status = TextBuilder::default()
+        .horizontal_alignment(ratatui::layout::HorizontalAlignment::Center)
+        .style(TextStyle {
+            general: ratatui::prelude::Style::default()
+                .bg(if online {
+                    COLOR_SCHEME.success
+                } else {
+                    COLOR_SCHEME.error
+                })
+                .fg(if online {
+                    COLOR_SCHEME.text_dark
+                } else {
+                    COLOR_SCHEME.text
+                })
+                .bold(),
+        })
+        .build()
+        .unwrap();
+    StatefulWidget::render(&status, status_area, buf, &mut "ONLINE".to_string());
 
     if let Some(tab) = tabs.get_mut(active) {
         tab.table.table.state.set_focused(focus == Focus::Table);

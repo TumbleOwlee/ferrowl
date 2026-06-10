@@ -23,6 +23,14 @@ pub struct Instance<T: KeyParams> {
 }
 
 impl<T: KeyParams> Instance<T> {
+    pub fn active(&self) -> bool {
+        if let Some(h) = &self.handle {
+            !h.is_finished()
+        } else {
+            false
+        }
+    }
+
     pub fn with_tcp_client(config: ClientConfig<T, ferrowl_net::tcp::Config>) -> Self {
         Self {
             builder: Builder::TcpClient(ferrowl_net::tcp::ClientBuilder::new(
