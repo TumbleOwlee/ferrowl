@@ -132,7 +132,7 @@ pub struct SetupValues {
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
-/// `"<new>"`) and the loaded (or empty) device config.
+/// `""`) and the loaded (or empty) device config.
 pub struct SetupOutcome {
     pub values: SetupValues,
     pub device: Option<(String, DeviceConfig)>,
@@ -383,7 +383,7 @@ impl SetupDialog {
         let device = if self.mode == DialogMode::New {
             let path = self.config_path.state.input().trim().to_string();
             if path.is_empty() {
-                Some(("<new>".to_string(), DeviceConfig::default()))
+                Some(("".to_string(), DeviceConfig::default()))
             } else {
                 let device =
                     crate::config::load_device(&path).map_err(|e| format!("Config: {e}"))?;
