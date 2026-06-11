@@ -431,7 +431,9 @@ mod tests {
             timeout_ms: Some(2000),
             delay_ms: None,
             interval_ms: Some(800),
-            log_file: Some("ferrowl.log".to_string()),
+            // `log_file` is `#[serde(skip)]` (runtime-only), so it never survives a
+            // config roundtrip — leave it None to match the loaded value.
+            log_file: None,
             read_ranges: ReadRanges {
                 holding: Some("0-100,140-160".to_string()),
                 ..Default::default()
