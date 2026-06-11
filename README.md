@@ -15,6 +15,29 @@ If you prefer a GUI application, this tool is not the right choice. In these cas
 
 Provide a CLI application to simulate Modbus Servers and Clients, visualize the states of all registers, make register manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs based on the Modbus protocol.
 
+## Architecture
+
+The project is organized as a Cargo workspace and builds the `ferrowl` binary. See the following image for the dependencies between the different crates of the workspace and their provided functionality.
+
+<p align="center">
+    <img src="./images/architecture.svg">
+</p>
+
+
+| Crate | Responsibility |
+| ----- | ----- |
+| `ferrowl` | Binary. Event/redraw loop, tabs, views, dialogs, `:` commands, session & device configuration, `migrate` subcommand. |
+| `ferrowl-ui` | Reusable [ratatui](https://ratatui.rs) building blocks: widgets with their state types, styling and alternate-screen handling. |
+| `ferrowl-derive` | Proc macros that generate keyboard focus cycling and event dispatch for UI views. |
+| `ferrowl-reg` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
+| `ferrowl-mem` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
+| `ferrowl-net` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
+| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register` and `C_Time` modules to `update` scripts. |
+| `ferrowl-log` | Fixed-size, allocation-free ring buffer backing the per-module log pane. |
+| `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
+
+All runtime interaction meets in the shared memory of a module: the network task polls a remote server (client role) or answers incoming requests (server role) against it, the Lua simulation thread reads and writes it through the `C_Register` bridge, and the UI decodes its raw words into the typed values shown in the register table.
+
 ## Nightly Build
 
 This repository provides an updated Nightly build - available on the Release page. Prebuilt executables are provided for Unix and Windows.

@@ -1,0 +1,96 @@
+<svg width="100%" viewBox="0 0 880 624" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Ferrowl workspace architecture — the TUI binary drives per-tab modules that share a register memory between the network tasks, the Lua simulation and the log</title>
+<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs) renders through ferrowl-ui and ferrowl-derive. Each tab is a Module combining ferrowl-reg (register descriptions and codecs), ferrowl-mem (shared register memory), ferrowl-lua (update scripts) and ferrowl-log (ring log). ferrowl-net runs the TCP/RTU client or server task against the shared memory and talks to external Modbus peers. ferrowl-util provides shared helpers.</desc>
+<defs>
+<linearGradient id="archGrad" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#2D333A"/>
+<stop offset="1" stop-color="#1B2025"/>
+</linearGradient>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M0 0 L10 5 L0 10 z" fill="#C49A63"/>
+</marker>
+</defs>
+
+<rect x="4" y="4" width="872" height="616" rx="20" fill="url(#archGrad)" stroke="#12161A" stroke-width="2"/>
+<rect x="12" y="12" width="856" height="600" rx="14" fill="none" stroke="#E0CDB4" stroke-opacity="0.12"/>
+
+<g font-family="ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace" text-anchor="middle">
+
+<text x="440" y="44" font-size="18" font-weight="bold" fill="#E0CDB4">ferrowl — workspace architecture</text>
+
+<!-- TUI layer -->
+<rect x="40" y="70" width="550" height="110" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
+<text x="315" y="100" font-size="14" font-weight="bold" fill="#E0CDB4">ferrowl (binary)</text>
+<text x="315" y="126" font-size="12" fill="#A8B2BB">App event &amp; redraw loop · tabs · views · dialogs</text>
+<text x="315" y="146" font-size="12" fill="#A8B2BB">: command line · session &amp; device configuration</text>
+
+<rect x="620" y="70" width="220" height="62" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.35"/>
+<text x="730" y="94" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ui</text>
+<text x="730" y="116" font-size="11" fill="#A8B2BB">ratatui widgets · state · styles</text>
+
+<rect x="620" y="148" width="220" height="46" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.35"/>
+<text x="730" y="167" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-derive</text>
+<text x="730" y="184" font-size="11" fill="#A8B2BB">focus-handling proc-macros</text>
+
+<line x1="620" y1="101" x2="594" y2="101" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="730" y1="148" x2="730" y2="136" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- App drives modules -->
+<line x1="315" y1="180" x2="315" y2="216" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="330" y="203" font-size="11" font-style="italic" fill="#C49A63" text-anchor="start">builds &amp; drives modules</text>
+
+<!-- Module container -->
+<rect x="40" y="220" width="800" height="180" rx="12" fill="#C9A87E" fill-opacity="0.03" stroke="#AD8166" stroke-dasharray="6 4"/>
+<text x="60" y="246" font-size="13" font-weight="bold" fill="#C9A87E" text-anchor="start">Module — one per tab (Modbus client or server)</text>
+
+<rect x="60" y="262" width="175" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="147.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-reg</text>
+<text x="147.5" y="310" font-size="11" fill="#A8B2BB">register descriptions</text>
+<text x="147.5" y="326" font-size="11" fill="#A8B2BB">encode / decode raw</text>
+<text x="147.5" y="342" font-size="11" fill="#A8B2BB">words ↔ typed values</text>
+
+<rect x="275" y="262" width="175" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="362.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-mem</text>
+<text x="362.5" y="310" font-size="11" fill="#A8B2BB">shared register space</text>
+<text x="362.5" y="326" font-size="11" fill="#A8B2BB">Arc&lt;RwLock&lt;Memory&gt;&gt;</text>
+<text x="362.5" y="342" font-size="11" fill="#A8B2BB">access-checked cells</text>
+
+<rect x="490" y="262" width="175" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="577.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-lua</text>
+<text x="577.5" y="310" font-size="11" fill="#A8B2BB">Lua VM (mlua)</text>
+<text x="577.5" y="326" font-size="11" fill="#A8B2BB">runs update scripts</text>
+<text x="577.5" y="342" font-size="11" fill="#A8B2BB">C_Register · C_Time</text>
+
+<rect x="695" y="262" width="125" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="757.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-log</text>
+<text x="757.5" y="310" font-size="11" fill="#A8B2BB">ring buffer</text>
+<text x="757.5" y="326" font-size="11" fill="#A8B2BB">feeds the</text>
+<text x="757.5" y="342" font-size="11" fill="#A8B2BB">log pane</text>
+
+<line x1="239" y1="315" x2="271" y2="315" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="454" y1="315" x2="486" y2="315" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="667" y1="315" x2="691" y2="315" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Network layer -->
+<line x1="362.5" y1="368" x2="362.5" y2="436" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text x="375" y="424" font-size="11" font-style="italic" fill="#C49A63" text-anchor="start">reads / writes register words</text>
+
+<rect x="180" y="440" width="400" height="90" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
+<text x="380" y="464" font-size="14" font-weight="bold" fill="#E0CDB4">ferrowl-net</text>
+<text x="380" y="486" font-size="11" fill="#A8B2BB">TCP &amp; RTU transports (tokio-modbus)</text>
+<text x="380" y="502" font-size="11" fill="#A8B2BB">client: polls operations · sends write commands</text>
+<text x="380" y="518" font-size="11" fill="#A8B2BB">server: answers requests from shared memory</text>
+
+<rect x="620" y="440" width="220" height="90" rx="10" fill="none" stroke="#6F7880" stroke-dasharray="6 4"/>
+<text x="730" y="470" font-size="12" font-weight="bold" fill="#A8B2BB">external Modbus peers</text>
+<text x="730" y="492" font-size="11" fill="#8A949D">PLCs · meters · tools</text>
+<text x="730" y="508" font-size="11" fill="#8A949D">TCP/IP · serial (RTU)</text>
+
+<line x1="584" y1="485" x2="616" y2="485" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+
+<!-- Shared helpers -->
+<rect x="40" y="560" width="800" height="38" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.18"/>
+<text x="440" y="584" font-size="12" fill="#A8B2BB"><tspan font-weight="bold" fill="#E0CDB4">ferrowl-util</tspan> — config (de)serialization · tracked task spawning · shared helpers</text>
+
+</g>
+</svg>
