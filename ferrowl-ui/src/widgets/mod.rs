@@ -4,6 +4,7 @@
 mod button;
 mod code_input_field;
 mod input_field;
+mod scrolling_tabs;
 mod selection;
 mod table;
 mod text;
@@ -12,6 +13,7 @@ pub use button::*;
 pub use code_input_field::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 pub use input_field::*;
+pub use scrolling_tabs::*;
 use ratatui::layout::{HorizontalAlignment, Margin};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, StatefulWidget, Widget as RenderWidget};
