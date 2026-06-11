@@ -101,12 +101,16 @@ impl App {
             }
             Cmd::Log(file) => match file {
                 Some(file) => {
-                    self.app_cfg.log_file = Some(file.clone());
-                    for tab in &self.tabs {
-                        tab.module.set_log_base(Some(&file));
+                    if file == "clear" {
+                        self.tabs[self.active].module.log().write().await.clear();
+                    } else {
+                        self.app_cfg.log_file = Some(file.clone());
+                        for tab in &self.tabs {
+                            tab.module.set_log_base(Some(&file));
+                        }
+                        self.log_active(format!("Logging to files based on {file}"))
+                            .await;
                     }
-                    self.log_active(format!("Logging to files based on {file}"))
-                        .await;
                 }
                 None => self.log_active(":log requires <file>".to_string()).await,
             },

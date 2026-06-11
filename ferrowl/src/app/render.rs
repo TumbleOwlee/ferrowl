@@ -97,6 +97,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
         (":s | :save | :w | :write [path]", "save session"),
         (":wd | :write-device [path]", "save device config"),
         (":log [file]", "set log file"),
+        (":log clear", "clear log view"),
         (":lua start|stop", "start|stop lua execution"),
         (":reload", "reload device config"),
         (":compact", "toggle compact mode"),

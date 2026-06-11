@@ -99,6 +99,11 @@ impl<const MAX_LINE_LENGTH: usize, const LOG_SIZE: usize> Log<MAX_LINE_LENGTH, L
         }
         if msgs.is_empty() { None } else { Some(msgs) }
     }
+
+    pub fn clear(&mut self) {
+        self.write = 0;
+        self.read = 0;
+    }
 }
 
 #[cfg(test)]
