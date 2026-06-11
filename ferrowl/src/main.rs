@@ -100,7 +100,6 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
 
     let device = DeviceConfig {
         version: None,
-        description: "demo device".to_string(),
         timeout_ms: None,
         delay_ms: None,
         interval_ms: None,

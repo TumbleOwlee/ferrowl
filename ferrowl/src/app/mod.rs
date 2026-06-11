@@ -274,11 +274,10 @@ impl App {
         // Disjoint field borrows so the render closure can hold the view state while
         // `screen.draw` holds `&mut screen`.
         let screen = &mut self.screen;
-        let online = if self.tabs.len() > 0 {
-            self.tabs[self.active].module.is_instance_active()
-        } else {
-            false
-        };
+        let online = self
+            .tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.module.is_instance_active());
         let tabs = &mut self.tabs;
         let command = &mut self.command;
         let overlay = self.overlay.as_mut();

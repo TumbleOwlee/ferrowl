@@ -41,6 +41,10 @@ ferrowl --demo
 
 # Or with an existing session file
 ferrowl --session session.toml
+
+# Or with a device configuration only (starts a TCP client polling 127.0.0.1:5020,
+# matching the --demo server; use --module for a custom endpoint or role)
+ferrowl --device device.toml
 ```
 
 If started without any additional parameters, the module setup dialog is shown. After the module is created, you can add registers using the `:add` command.
@@ -53,7 +57,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | Command | Description |
 | ----- | ----- |
 | `:q \| :quit` | Quit tab / Close active module |
-| `:qa \| :qall` | Close all tabs / Exit applciation |
+| `:qa \| :qall` | Close all tabs / Exit application |
 | `:e \| :edit` | Edit current module |
 | `:n \| :new` | Create new module |
 | `:l \| :load [PATH]` | Load device configuration |
@@ -64,7 +68,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `:set <reg> <val>` | Write register value |
 | `:s \| :save \| :w \| :write [PATH]` | Save session |
 | `:wd \| :write-device [PATH]` | Save device configuration |
-| `:log [FILE]` | Set log output file |
+| `:log [FILE]` | Set log output file for the active tab (`:log clear` clears the ring log) |
 | `:lua start\|stop` | Start/Stop lua execution |
 | `:reload` | Reload device configuration |
 | `:compact` | Toggle compact table mode |
@@ -241,7 +245,7 @@ input = "0-10"
 # coils / discrete are also available
 ```
 
-Timing precedence is per-instance (session) → device → global app config.
+Timing precedence is per-instance (session) → device → built-in defaults (3000/1000/1000 ms).
 
 ## Lua Support
 

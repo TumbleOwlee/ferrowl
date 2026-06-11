@@ -74,8 +74,8 @@ impl<T: ToLabel + Clone> StatefulWidget for &ScrollingTabs<T> {
             remaining -= cost;
             start = i;
         }
-        for i in (sel + 1)..n {
-            let cost = div_w + widths[i];
+        for (i, &width) in widths.iter().enumerate().skip(sel + 1) {
+            let cost = div_w + width;
             if remaining < cost {
                 break;
             }

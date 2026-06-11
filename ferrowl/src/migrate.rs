@@ -353,9 +353,7 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
     let mut warnings: Vec<String> = Vec::new();
 
     if legacy.history_length.is_some() {
-        warnings.push(
-            "'history_length' has no equivalent in device config; dropped".into(),
-        );
+        warnings.push("'history_length' has no equivalent in device config; dropped".into());
     }
 
     let read_ranges = convert_ranges(&legacy.contiguous_memory, &mut warnings);
@@ -372,7 +370,6 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
 
     let device = DeviceConfig {
         version: Some(crate::config::VERSION.to_string()),
-        description: String::new(),
         timeout_ms: legacy.timeout_ms.map(|v| v as usize),
         delay_ms: legacy.delay_after_connect_ms.map(|v| v as usize),
         interval_ms: legacy.interval_ms.map(|v| v as usize),

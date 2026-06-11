@@ -74,7 +74,9 @@ impl CliArgs {
     }
 }
 
-/// Parse a single `--device` value into a [`ModuleSpec`].
+/// Build a [`ModuleSpec`] for a `--device` flag: a TCP client polling the default demo
+/// endpoint 127.0.0.1:5020 (matches the `--demo` server). Endpoint/role are not
+/// configurable here — use `--module` for full control.
 pub fn create_module_spec_by_device(name: String, device: String) -> ModuleSpec {
     ModuleSpec {
         name,
@@ -208,6 +210,21 @@ mod tests {
                 parity: None,
                 data_bits: None,
                 stop_bits: None,
+            }
+        );
+    }
+
+    #[test]
+    fn ut_device_spec_defaults() {
+        let spec = create_module_spec_by_device("Device 0".to_string(), "d.toml".to_string());
+        assert_eq!(spec.name, "Device 0");
+        assert_eq!(spec.device, "d.toml");
+        assert_eq!(spec.role, Role::Client);
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020
             }
         );
     }

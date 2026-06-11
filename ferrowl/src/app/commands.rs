@@ -102,7 +102,9 @@ impl App {
             Cmd::Log(file) => match file {
                 Some(file) => {
                     if file == "clear" {
-                        self.tabs[self.active].module.log().write().await.clear();
+                        if let Some(tab) = self.tabs.get(self.active) {
+                            tab.module.log().write().await.clear();
+                        }
                     } else if let Some(tab) = self.tabs.get_mut(self.active) {
                         tab.device.log_file = Some(file.clone());
                         tab.module.set_log_base(Some(&file));
