@@ -53,11 +53,7 @@ impl ToLabel for Transport {
 
 impl ToLabel for Role {
     fn to_label(&self) -> String {
-        match self {
-            Role::Client => "Client",
-            Role::Server => "Server",
-        }
-        .to_string()
+        format!("{self}")
     }
 }
 

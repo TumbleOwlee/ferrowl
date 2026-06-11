@@ -131,19 +131,20 @@ async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, Str
     if args.demo {
         let (device, spec) = demo();
         let mut module = Module::new(&spec, &device, app_cfg);
+        let role = spec.role;
 
         if let Err(e) = module.start().await {
             module
                 .log()
                 .write()
                 .await
-                .write(&format!("Failed to start: {e}"));
+                .write(&format!("Failed to start {role}: {e}"));
         } else {
             module
                 .log()
                 .write()
                 .await
-                .write(&format!("Started server on {}", spec.endpoint));
+                .write(&format!("Started {role} on {}", spec.endpoint));
         }
 
         return Ok(vec![Tab::from_module(spec, device, module)]);
@@ -161,6 +162,7 @@ async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, Str
                 continue;
             }
         };
+        let role = spec.role;
         let mut module = Module::new(spec, &device, app_cfg);
         // CLI/session modules auto-start; start failures are surfaced into the module log.
         if let Err(e) = module.start().await {
@@ -168,7 +170,13 @@ async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, Str
                 .log()
                 .write()
                 .await
-                .write(&format!("Failed to start: {e}"));
+                .write(&format!("Failed to start {role}: {e}"));
+        } else {
+            module
+                .log()
+                .write()
+                .await
+                .write(&format!("Started {role} on {}", spec.endpoint));
         }
         tabs.push(Tab::from_module(spec.clone(), device, module));
     }

@@ -199,10 +199,11 @@ impl App {
         if active >= self.tabs.len() {
             return;
         }
+        let role = self.tabs[active].spec.role.to_string();
         let result = self.tabs[active].module.start().await;
         let msg = match result {
-            Ok(()) => format!("Started on {}", self.tabs[active].spec.endpoint),
-            Err(e) => format!("Start failed: {e}"),
+            Ok(()) => format!("Started {role} on {}", self.tabs[active].spec.endpoint),
+            Err(e) => format!("Start {role} failed: {e}"),
         };
         self.tabs[active].module.log().write().await.write(&msg);
     }
@@ -212,10 +213,11 @@ impl App {
         if active >= self.tabs.len() {
             return;
         }
+        let role = self.tabs[active].spec.role.to_string();
         let result = self.tabs[active].module.stop().await;
         let msg = match result {
-            Ok(()) => "Stopped".to_string(),
-            Err(e) => format!("Stop failed: {e}"),
+            Ok(()) => format!("Stopped {role}"),
+            Err(e) => format!("Stop {role} failed: {e}"),
         };
         self.tabs[active].module.log().write().await.write(&msg);
     }

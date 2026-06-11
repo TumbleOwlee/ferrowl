@@ -43,6 +43,15 @@ pub enum Role {
     Server,
 }
 
+impl std::fmt::Display for Role {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Role::Client => write!(fmt, "Client"),
+            Role::Server => write!(fmt, "Server"),
+        }
+    }
+}
+
 /// Transport endpoint for a module instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "lowercase")]
