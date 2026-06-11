@@ -5,15 +5,16 @@ use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
 use crate::dialog::edit::{
     AccessOption, AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption,
-    SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index, kind_index,
-    numeric_parts, parse_address, set_input, with_endian_resolution,
+    SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index,
+    is_integer_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
+    with_numeric_parts,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
 use ferrowl_reg::format::{
-    Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
-    Width,
+    Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
+    Resolution, Width,
 };
 use ferrowl_reg::{Address, Register, RegisterBuilder};
 use ferrowl_ui::{
@@ -88,6 +89,9 @@ where
     // Number resolution input
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
+    // Bit-field mask input (integer formats only)
+    #[focus(when = {self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
+    pub number_bitmask: Widget<InputFieldState, InputField<String>>,
     // Text alignment selection
     #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
@@ -150,6 +154,13 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             ValueType::Number => {
                 if let Err(e) = f64::validate(self.number_resolution.state.input()) {
                     return Err(format!("Resolution: {e}"));
+                }
+                let format =
+                    &self.number_format.state.values()[self.number_format.state.selection()].0;
+                if is_integer_format(format)
+                    && let Err(e) = parse_bitmask(self.number_bitmask.state.input())
+                {
+                    return Err(format!("Bitmask: {e}"));
                 }
             }
             ValueType::Text => {
@@ -275,33 +286,41 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         match self.value_type.state.values()[self.value_type.state.selection()] {
             ValueType::Number => {
-                let horizontal_layout: [Rect; 3] = Layout::horizontal([
-                    Constraint::Min(1),
-                    Constraint::Min(1),
-                    Constraint::Min(1),
-                ])
-                .areas(vertical_layout[vertical_index]);
+                // Integer formats get a 4th column for the bitmask; floats keep 3.
+                let integer = is_integer_format(&self.number_format.get_value().0);
+                let columns = if integer { 4 } else { 3 };
+                let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
+                    .split(vertical_layout[vertical_index]);
 
                 StatefulWidget::render(
                     &self.number_format.widget,
-                    horizontal_layout[0],
+                    cells[0],
                     buf,
                     &mut self.number_format.state,
                 );
 
                 StatefulWidget::render(
                     &self.number_endian.widget,
-                    horizontal_layout[1],
+                    cells[1],
                     buf,
                     &mut self.number_endian.state,
                 );
 
                 StatefulWidget::render(
                     &self.number_resolution.widget,
-                    horizontal_layout[2],
+                    cells[2],
                     buf,
                     &mut self.number_resolution.state,
                 );
+
+                if integer {
+                    StatefulWidget::render(
+                        &self.number_bitmask.widget,
+                        cells[3],
+                        buf,
+                        &mut self.number_bitmask.state,
+                    );
+                }
             }
             ValueType::Text => {
                 let horizontal_layout: [Rect; 2] =
@@ -620,16 +639,56 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 state: SelectionStateBuilder::default()
                     .focused(false)
                     .values(vec![
-                        Format(RegisterFormat::U8((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::U64((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::U128((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::I8((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::I16((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::I32((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::I64((RegisterEndian::Big, Resolution(1.0)))),
-                        Format(RegisterFormat::I128((RegisterEndian::Big, Resolution(1.0)))),
+                        Format(RegisterFormat::U8((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::U16((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::U32((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::U64((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::U128((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::I8((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::I16((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::I32((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::I64((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
+                        Format(RegisterFormat::I128((
+                            RegisterEndian::Big,
+                            Resolution(1.0),
+                            BitField::default(),
+                        ))),
                         Format(RegisterFormat::F32((RegisterEndian::Big, Resolution(1.0)))),
                         Format(RegisterFormat::F64((RegisterEndian::Big, Resolution(1.0)))),
                     ])
@@ -677,6 +736,24 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some(("Resolution", HorizontalAlignment::Right).into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(input_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .number_bitmask(Widget {
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("0xFFFF".to_string()))
+                    .build()
+                    .unwrap(),
+                widget: InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some(("Bitmask", HorizontalAlignment::Right).into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
@@ -966,7 +1043,7 @@ impl EditSelectionDialog<NamedValue> {
                 set_input(&mut dialog.text_width, &width.0.to_string());
             }
             numeric => {
-                let (endian, resolution) = numeric_parts(numeric);
+                let (endian, resolution, bitfield) = numeric_parts(numeric);
                 dialog.value_type.state.set_selection(0);
                 dialog
                     .number_format
@@ -977,6 +1054,10 @@ impl EditSelectionDialog<NamedValue> {
                     .state
                     .set_selection(endian_index(&endian));
                 set_input(&mut dialog.number_resolution, &resolution.0.to_string());
+                // Show the mask only when it actually selects a sub-field.
+                if !bitfield.is_full() {
+                    set_input(&mut dialog.number_bitmask, &format!("0x{:X}", bitfield.mask));
+                }
             }
         }
 
@@ -1013,7 +1094,14 @@ impl EditSelectionDialog<NamedValue> {
                         .parse::<f64>()
                         .map_err(|_| "Resolution must be a number.".to_string())?,
                 );
-                with_endian_resolution(&selected.0, endian, resolution)
+                // Bitmask applies to integer formats only; floats ignore it.
+                let bitfield = if is_integer_format(&selected.0) {
+                    parse_bitmask(self.number_bitmask.state.input())
+                        .map_err(|e| format!("Bitmask {e}."))?
+                } else {
+                    BitField::default()
+                };
+                with_numeric_parts(&selected.0, endian, resolution, bitfield)
             }
             ValueType::Text => {
                 let alignment = self.text_alignment.state.get_value().0;
@@ -1117,6 +1205,7 @@ impl EditSelectionDialog<NamedValue> {
         d.number_format.state = self.number_format.state.clone();
         d.number_endian.state = self.number_endian.state.clone();
         d.number_resolution.state = self.number_resolution.state.clone();
+        d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
         d.update_script.state = self.update_script.state.clone();

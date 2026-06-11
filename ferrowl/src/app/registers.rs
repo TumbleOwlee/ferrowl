@@ -164,27 +164,42 @@ pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
             def.is_virtual = true;
         }
     }
-    // Every numeric format carries the same (endian, resolution) payload.
-    macro_rules! numeric {
+    // Integer formats carry (endian, resolution, bitfield); the bitfield is
+    // written back as a hex string (or cleared when it's the full no-op mask).
+    macro_rules! integer {
+        ($vt:ident, $e:expr, $r:expr, $bf:expr) => {{
+            def.value_type = DevValueType::$vt;
+            def.endian = endian_cfg($e);
+            def.resolution = $r.0;
+            def.bitmask = if $bf.is_full() {
+                None
+            } else {
+                Some(format!("0x{:X}", $bf.mask))
+            };
+        }};
+    }
+    // Float formats carry only (endian, resolution); they never have a bitfield.
+    macro_rules! float {
         ($vt:ident, $e:expr, $r:expr) => {{
             def.value_type = DevValueType::$vt;
             def.endian = endian_cfg($e);
             def.resolution = $r.0;
+            def.bitmask = None;
         }};
     }
     match register.format() {
-        Format::U8((e, r)) => numeric!(U8, e, r),
-        Format::U16((e, r)) => numeric!(U16, e, r),
-        Format::U32((e, r)) => numeric!(U32, e, r),
-        Format::U64((e, r)) => numeric!(U64, e, r),
-        Format::U128((e, r)) => numeric!(U128, e, r),
-        Format::I8((e, r)) => numeric!(I8, e, r),
-        Format::I16((e, r)) => numeric!(I16, e, r),
-        Format::I32((e, r)) => numeric!(I32, e, r),
-        Format::I64((e, r)) => numeric!(I64, e, r),
-        Format::I128((e, r)) => numeric!(I128, e, r),
-        Format::F32((e, r)) => numeric!(F32, e, r),
-        Format::F64((e, r)) => numeric!(F64, e, r),
+        Format::U8((e, r, bf)) => integer!(U8, e, r, bf),
+        Format::U16((e, r, bf)) => integer!(U16, e, r, bf),
+        Format::U32((e, r, bf)) => integer!(U32, e, r, bf),
+        Format::U64((e, r, bf)) => integer!(U64, e, r, bf),
+        Format::U128((e, r, bf)) => integer!(U128, e, r, bf),
+        Format::I8((e, r, bf)) => integer!(I8, e, r, bf),
+        Format::I16((e, r, bf)) => integer!(I16, e, r, bf),
+        Format::I32((e, r, bf)) => integer!(I32, e, r, bf),
+        Format::I64((e, r, bf)) => integer!(I64, e, r, bf),
+        Format::I128((e, r, bf)) => integer!(I128, e, r, bf),
+        Format::F32((e, r)) => float!(F32, e, r),
+        Format::F64((e, r)) => float!(F64, e, r),
         Format::Ascii((align, width)) => {
             def.value_type = DevValueType::Ascii;
             def.alignment = match align {
@@ -192,6 +207,7 @@ pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
                 ferrowl_reg::format::Alignment::Right => AlignmentCfg::Right,
             };
             def.length = width.0;
+            def.bitmask = None;
         }
     }
 }

@@ -45,6 +45,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
             value_type,
             endian: EndianCfg::Big,
             resolution: 1.0,
+            bitmask: None,
             length: 1,
             alignment: AlignmentCfg::Left,
             values,

@@ -359,6 +359,7 @@ impl App {
             value_type: crate::config::device::ValueType::U16,
             endian: crate::config::device::EndianCfg::default(),
             resolution: 1.0,
+            bitmask: None,
             length: 1,
             alignment: crate::config::device::AlignmentCfg::default(),
             values: named_values.clone(),

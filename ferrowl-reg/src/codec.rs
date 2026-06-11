@@ -7,7 +7,8 @@ use crate::value::Value;
 /// Decodes raw register words into a typed [`Value`] according to `format`.
 ///
 /// Only the first `format.width()` words are consumed; errors if `bytes` is
-/// shorter than that, or if ASCII data is not valid UTF-8.
+/// shorter than that, or if ASCII data is not valid UTF-8. For integer formats
+/// the configured [`BitField`] is applied: `field = (raw & mask) >> shift`.
 pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
     let width = format.width();
     if bytes.len() < width {
@@ -21,41 +22,41 @@ pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
             .take(width)
             .flat_map(|v| [(v >> 8) as u8, (v & 0xFF) as u8]);
 
-        // Big-endian parses the byte stream as-is; little-endian reverses it first.
+        // Big-endian parses the byte stream as-is; little-endian reverses it
+        // first. The raw word is taken in the unsigned domain (`$uty`) so the
+        // mask/shift act on the bit pattern, then cast to the target type.
         macro_rules! decode_int {
-            ($variant:ident, $e:expr, $r:expr) => {
-                Ok(Value::$variant((
-                    match $e {
-                        Endian::Big => bytes.parse(),
-                        Endian::Little => bytes.rev().parse(),
-                    },
-                    $r.clone(),
-                )))
-            };
+            ($variant:ident, $uty:ty, $ty:ty, $e:expr, $r:expr, $bf:expr) => {{
+                let raw: $uty = match $e {
+                    Endian::Big => bytes.parse(),
+                    Endian::Little => bytes.rev().parse(),
+                };
+                let field = (((raw as u128) & $bf.mask) >> $bf.shift()) as $ty;
+                Ok(Value::$variant((field, $r.clone())))
+            }};
         }
         // U8/I8 occupy a single register, so parse a u16 then narrow.
         macro_rules! decode_byte {
-            ($variant:ident, $ty:ty, $e:expr, $r:expr) => {
-                Ok(Value::$variant((
-                    match $e {
-                        Endian::Big => ParseFromU8::<u16>::parse(bytes) as $ty,
-                        Endian::Little => ParseFromU8::<u16>::parse(bytes.rev()) as $ty,
-                    },
-                    $r.clone(),
-                )))
-            };
+            ($variant:ident, $ty:ty, $e:expr, $r:expr, $bf:expr) => {{
+                let raw: u16 = match $e {
+                    Endian::Big => ParseFromU8::<u16>::parse(bytes),
+                    Endian::Little => ParseFromU8::<u16>::parse(bytes.rev()),
+                };
+                let field = (((raw as u128) & $bf.mask) >> $bf.shift()) as $ty;
+                Ok(Value::$variant((field, $r.clone())))
+            }};
         }
         match format {
-            Format::U8((e, r)) => decode_byte!(U8, u8, e, r),
-            Format::I8((e, r)) => decode_byte!(I8, i8, e, r),
-            Format::U16((e, r)) => decode_int!(U16, e, r),
-            Format::U32((e, r)) => decode_int!(U32, e, r),
-            Format::U64((e, r)) => decode_int!(U64, e, r),
-            Format::U128((e, r)) => decode_int!(U128, e, r),
-            Format::I16((e, r)) => decode_int!(I16, e, r),
-            Format::I32((e, r)) => decode_int!(I32, e, r),
-            Format::I64((e, r)) => decode_int!(I64, e, r),
-            Format::I128((e, r)) => decode_int!(I128, e, r),
+            Format::U8((e, r, bf)) => decode_byte!(U8, u8, e, r, bf),
+            Format::I8((e, r, bf)) => decode_byte!(I8, i8, e, r, bf),
+            Format::U16((e, r, bf)) => decode_int!(U16, u16, u16, e, r, bf),
+            Format::U32((e, r, bf)) => decode_int!(U32, u32, u32, e, r, bf),
+            Format::U64((e, r, bf)) => decode_int!(U64, u64, u64, e, r, bf),
+            Format::U128((e, r, bf)) => decode_int!(U128, u128, u128, e, r, bf),
+            Format::I16((e, r, bf)) => decode_int!(I16, u16, i16, e, r, bf),
+            Format::I32((e, r, bf)) => decode_int!(I32, u32, i32, e, r, bf),
+            Format::I64((e, r, bf)) => decode_int!(I64, u64, i64, e, r, bf),
+            Format::I128((e, r, bf)) => decode_int!(I128, u128, i128, e, r, bf),
             Format::F32((e, r)) => {
                 let u: u32 = match e {
                     Endian::Big => bytes.parse(),
@@ -84,16 +85,20 @@ pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
 /// signed values; a plain `0x` literal on a signed/float format is taken as
 /// the bit pattern). ASCII input is zero-padded or truncated to the format
 /// width according to its alignment. Note that resolution is *not* applied —
-/// the string is the raw value.
+/// the string is the raw value. For an integer format the value is placed
+/// according to the [`BitField`] (`raw = (value << shift) & mask`) with all
+/// other bits left zero.
 pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
-    // Multi-byte unsigned: parse decimal or `0x` hex, then split to register words.
+    // Multi-byte unsigned: parse decimal or `0x` hex, position per the bit-field,
+    // then split to register words.
     macro_rules! encode_uint {
-        ($ty:ty, $e:expr, $s:expr) => {{
+        ($ty:ty, $e:expr, $s:expr, $bf:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("0x") {
                 <$ty>::from_str_radix(s, 16)?
             } else {
                 $s.parse()?
             };
+            let val = ((((val as u128) << $bf.shift()) & $bf.mask)) as $ty;
             Ok(match $e {
                 Endian::Big => val.to_be_bytes().iter().into_vec()?,
                 Endian::Little => val.to_le_bytes().iter().into_vec()?,
@@ -101,9 +106,10 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
         }};
     }
     // Multi-byte signed: also accept `-0x` hex; `$uty` is the same-width unsigned type
-    // used to reinterpret a `0x` literal as a bit pattern.
+    // used both to reinterpret a `0x` literal as a bit pattern and to apply the
+    // bit-field in the unsigned domain.
     macro_rules! encode_int {
-        ($ty:ty, $uty:ty, $e:expr, $s:expr) => {{
+        ($ty:ty, $uty:ty, $e:expr, $s:expr, $bf:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
                 -<$ty>::from_str_radix(s, 16)?
             } else if let Some(s) = $s.strip_prefix("0x") {
@@ -111,6 +117,8 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
             } else {
                 $s.parse()?
             };
+            let val =
+                (((((val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
             Ok(match $e {
                 Endian::Big => val.to_be_bytes().iter().into_vec()?,
                 Endian::Little => val.to_le_bytes().iter().into_vec()?,
@@ -153,22 +161,23 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
                 Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
             }
         }
-        Format::U8((e, _)) => {
+        Format::U8((e, _, bf)) => {
             let val: u8 = if let Some(s) = s.strip_prefix("0x") {
                 u8::from_str_radix(s, 16)?
             } else {
                 s.parse()?
             };
+            let val = ((((val as u128) << bf.shift()) & bf.mask)) as u8;
             Ok(match e {
                 Endian::Big => vec![val as u16],
                 Endian::Little => vec![(val as u16) << 8],
             })
         }
-        Format::U16((e, _)) => encode_uint!(u16, e, s),
-        Format::U32((e, _)) => encode_uint!(u32, e, s),
-        Format::U64((e, _)) => encode_uint!(u64, e, s),
-        Format::U128((e, _)) => encode_uint!(u128, e, s),
-        Format::I8((e, _)) => {
+        Format::U16((e, _, bf)) => encode_uint!(u16, e, s, bf),
+        Format::U32((e, _, bf)) => encode_uint!(u32, e, s, bf),
+        Format::U64((e, _, bf)) => encode_uint!(u64, e, s, bf),
+        Format::U128((e, _, bf)) => encode_uint!(u128, e, s, bf),
+        Format::I8((e, _, bf)) => {
             let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
                 -i8::from_str_radix(s, 16)?
             } else if let Some(s) = s.strip_prefix("0x") {
@@ -176,21 +185,52 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
             } else {
                 s.parse()?
             };
+            let val = (((((val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
             Ok(match e {
                 Endian::Big => vec![val as u16],
                 Endian::Little => vec![(val as u16) << 8],
             })
         }
-        Format::I16((e, _)) => encode_int!(i16, u16, e, s),
-        Format::I32((e, _)) => encode_int!(i32, u32, e, s),
-        Format::I64((e, _)) => encode_int!(i64, u64, e, s),
-        Format::I128((e, _)) => encode_int!(i128, u128, e, s),
+        Format::I16((e, _, bf)) => encode_int!(i16, u16, e, s, bf),
+        Format::I32((e, _, bf)) => encode_int!(i32, u32, e, s, bf),
+        Format::I64((e, _, bf)) => encode_int!(i64, u64, e, s, bf),
+        Format::I128((e, _, bf)) => encode_int!(i128, u128, e, s, bf),
+    }
+}
+
+/// Per-word mask selecting the bits an integer [`BitField`] format owns, laid
+/// out in the same endian order as [`encode`]. Full-width integers (and float/
+/// ASCII formats) yield all-`0xFFFF` words, so a read-modify-write merge against
+/// them overwrites the whole value as before.
+pub fn mask_words(format: &Format) -> Vec<u16> {
+    macro_rules! mask_uint {
+        ($ty:ty, $e:expr, $bf:expr) => {{
+            let m = $bf.mask as $ty;
+            match $e {
+                Endian::Big => m.to_be_bytes().iter().into_vec().unwrap_or_default(),
+                Endian::Little => m.to_le_bytes().iter().into_vec().unwrap_or_default(),
+            }
+        }};
+    }
+    match format {
+        Format::U8((e, _, bf)) | Format::I8((e, _, bf)) => {
+            let m = bf.mask as u8;
+            match e {
+                Endian::Big => vec![m as u16],
+                Endian::Little => vec![(m as u16) << 8],
+            }
+        }
+        Format::U16((e, _, bf)) | Format::I16((e, _, bf)) => mask_uint!(u16, e, bf),
+        Format::U32((e, _, bf)) | Format::I32((e, _, bf)) => mask_uint!(u32, e, bf),
+        Format::U64((e, _, bf)) | Format::I64((e, _, bf)) => mask_uint!(u64, e, bf),
+        Format::U128((e, _, bf)) | Format::I128((e, _, bf)) => mask_uint!(u128, e, bf),
+        Format::F32(_) | Format::F64(_) | Format::Ascii(_) => vec![0xFFFFu16; format.width()],
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::format::{Alignment, Endian, Format, Resolution, Width};
+    use crate::format::{Alignment, BitField, Endian, Format, Resolution, Width};
     use crate::value::Value;
     use crate::{Register, RegisterBuilder};
 
@@ -202,28 +242,32 @@ mod tests {
         Resolution(1.0)
     }
 
+    fn bf() -> BitField {
+        BitField::default()
+    }
+
     // --- Format helpers ---
 
     fn u8_be() -> Format {
-        Format::U8((Endian::Big, res()))
+        Format::U8((Endian::Big, res(), bf()))
     }
     fn u8_le() -> Format {
-        Format::U8((Endian::Little, res()))
+        Format::U8((Endian::Little, res(), bf()))
     }
     fn u32_be() -> Format {
-        Format::U32((Endian::Big, res()))
+        Format::U32((Endian::Big, res(), bf()))
     }
     fn u32_le() -> Format {
-        Format::U32((Endian::Little, res()))
+        Format::U32((Endian::Little, res(), bf()))
     }
     fn i8_be() -> Format {
-        Format::I8((Endian::Big, res()))
+        Format::I8((Endian::Big, res(), bf()))
     }
     fn i32_be() -> Format {
-        Format::I32((Endian::Big, res()))
+        Format::I32((Endian::Big, res(), bf()))
     }
     fn i32_le() -> Format {
-        Format::I32((Endian::Little, res()))
+        Format::I32((Endian::Little, res(), bf()))
     }
     fn f32_be() -> Format {
         Format::F32((Endian::Big, res()))
@@ -237,7 +281,11 @@ mod tests {
     #[test]
     fn ut_decode_too_few_bytes() {
         assert!(reg(u32_be()).decode(&[0x0001]).is_err());
-        assert!(reg(Format::U64((Endian::Big, res()))).decode(&[]).is_err());
+        assert!(
+            reg(Format::U64((Endian::Big, res(), bf())))
+                .decode(&[])
+                .is_err()
+        );
     }
 
     // --- U8 decode ---
@@ -543,10 +591,98 @@ mod tests {
 
     #[test]
     fn ut_decode_u16_with_resolution() {
-        let r = reg(Format::U16((Endian::Big, Resolution(0.5))));
+        let r = reg(Format::U16((Endian::Big, Resolution(0.5), bf())));
         let words = r.encode("2048").unwrap();
         let decoded = r.decode(&words).unwrap();
         // 2048 * 0.5 = 1024.0
         assert_eq!(decoded.as_str(), "1024");
+    }
+
+    // --- Bit-field mask + derived shift ---
+
+    fn u16_be_mask(mask: u128) -> Format {
+        Format::U16((Endian::Big, res(), BitField { mask }))
+    }
+
+    #[test]
+    fn ut_decode_u16_high_byte_field() {
+        // mask 0xFF00 → shift 8: raw 0xAB12 reads as 0xAB.
+        match reg(u16_be_mask(0xFF00)).decode(&[0xAB12]).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0xAB),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_decode_u16_low_byte_field() {
+        // mask 0x00FF → shift 0: raw 0xAB12 reads as 0x12.
+        match reg(u16_be_mask(0x00FF)).decode(&[0xAB12]).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0x12),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_encode_u16_high_byte_field() {
+        // value 0x12 placed into mask 0xFF00 → word 0x1200, other bits zero.
+        assert_eq!(reg(u16_be_mask(0xFF00)).encode("0x12").unwrap(), vec![0x1200u16]);
+    }
+
+    #[test]
+    fn ut_roundtrip_u16_field() {
+        let r = reg(u16_be_mask(0x0FF0));
+        let words = r.encode("0xAB").unwrap();
+        // 0xAB << 4 & 0x0FF0 = 0x0AB0
+        assert_eq!(words, vec![0x0AB0u16]);
+        match r.decode(&words).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0xAB),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_full_mask_is_noop() {
+        // Default (full) mask encodes/decodes exactly like before.
+        let r = reg(u16_be_mask(u128::MAX));
+        assert_eq!(r.encode("0xABCD").unwrap(), vec![0xABCDu16]);
+        match r.decode(&[0xABCD]).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0xABCD),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_mask_words_layout() {
+        // U16 mask laid out as a single word.
+        assert_eq!(reg(u16_be_mask(0xFF00)).write_mask(), vec![0xFF00u16]);
+        // Full U16 mask narrows to 0xFFFF.
+        assert_eq!(reg(u16_be_mask(u128::MAX)).write_mask(), vec![0xFFFFu16]);
+        // U32 big-endian mask spans two words.
+        let r = reg(Format::U32((Endian::Big, res(), BitField { mask: 0xFFFF_0000 })));
+        assert_eq!(r.write_mask(), vec![0xFFFFu16, 0x0000u16]);
+        // U8 full mask only owns the low byte of its word.
+        assert_eq!(reg(u8_be()).write_mask(), vec![0x00FFu16]);
+    }
+
+    #[test]
+    fn ut_merge_write_preserves_sibling_bits() {
+        // Two U16 regs aliasing one address: low byte and high byte.
+        let low = reg(u16_be_mask(0x00FF));
+        let high = reg(u16_be_mask(0xFF00));
+        // Start empty, write low = 0x12 → 0x0012.
+        let mem = low.merge_write(&[0x0000], &low.encode("0x12").unwrap());
+        assert_eq!(mem, vec![0x0012u16]);
+        // Write high = 0x34 into the same word → 0x3412, low byte preserved.
+        let mem = high.merge_write(&mem, &high.encode("0x34").unwrap());
+        assert_eq!(mem, vec![0x3412u16]);
+        // Both fields decode back independently.
+        match low.decode(&mem).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0x12),
+            _ => panic!("Wrong variant"),
+        }
+        match high.decode(&mem).unwrap() {
+            Value::U16((v, _)) => assert_eq!(v, 0x34),
+            _ => panic!("Wrong variant"),
+        }
     }
 }

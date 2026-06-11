@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use ferrowl_mem::{Range, Type};
 use ferrowl_reg::{
     Access, Address, Format, Kind, Register, RegisterBuilder,
-    format::{Alignment, Endian, Resolution, Width},
+    format::{Alignment, BitField, Endian, Resolution, Width},
 };
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
@@ -120,6 +120,11 @@ pub struct RegisterDef {
     pub endian: EndianCfg,
     #[serde(default = "default_resolution")]
     pub resolution: f64,
+    /// Optional bit-field mask for integer types, as a hex (`"0xFF00"`) or decimal
+    /// string. The shift is derived from the mask's trailing zeros. Omitted ⇒ the
+    /// full value (no masking). Ignored for float and ASCII types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bitmask: Option<String>,
     /// ASCII width in registers (ignored for numeric types).
     #[serde(default = "default_length")]
     pub length: usize,
@@ -232,6 +237,21 @@ pub enum AlignmentCfg {
     Right,
 }
 
+/// Parse a config `bitmask` string into a [`BitField`]. Accepts `0x`-prefixed hex
+/// or decimal; `None`, empty, or an unparseable value yields the full mask (no-op).
+pub fn parse_bitmask(s: Option<&str>) -> BitField {
+    let mask = match s.map(str::trim).filter(|s| !s.is_empty()) {
+        None => u128::MAX,
+        Some(s) => s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .map(|hex| u128::from_str_radix(hex, 16))
+            .unwrap_or_else(|| s.parse::<u128>())
+            .unwrap_or(u128::MAX),
+    };
+    BitField { mask }
+}
+
 fn default_read_code() -> u8 {
     3
 }
@@ -287,20 +307,28 @@ impl RegisterDef {
         }
     }
 
+    /// The configured bit-field for integer types: parses [`bitmask`](Self::bitmask)
+    /// (hex `0x…` or decimal) into a [`BitField`], defaulting to the full mask when
+    /// absent or unparseable.
+    pub fn bitfield(&self) -> BitField {
+        parse_bitmask(self.bitmask.as_deref())
+    }
+
     pub fn format(&self) -> Format {
         let res = Resolution(self.resolution);
         let endian: Endian = self.endian.into();
+        let bf = self.bitfield();
         match self.value_type {
-            ValueType::U8 => Format::U8((endian, res)),
-            ValueType::U16 => Format::U16((endian, res)),
-            ValueType::U32 => Format::U32((endian, res)),
-            ValueType::U64 => Format::U64((endian, res)),
-            ValueType::U128 => Format::U128((endian, res)),
-            ValueType::I8 => Format::I8((endian, res)),
-            ValueType::I16 => Format::I16((endian, res)),
-            ValueType::I32 => Format::I32((endian, res)),
-            ValueType::I64 => Format::I64((endian, res)),
-            ValueType::I128 => Format::I128((endian, res)),
+            ValueType::U8 => Format::U8((endian, res, bf)),
+            ValueType::U16 => Format::U16((endian, res, bf)),
+            ValueType::U32 => Format::U32((endian, res, bf)),
+            ValueType::U64 => Format::U64((endian, res, bf)),
+            ValueType::U128 => Format::U128((endian, res, bf)),
+            ValueType::I8 => Format::I8((endian, res, bf)),
+            ValueType::I16 => Format::I16((endian, res, bf)),
+            ValueType::I32 => Format::I32((endian, res, bf)),
+            ValueType::I64 => Format::I64((endian, res, bf)),
+            ValueType::I128 => Format::I128((endian, res, bf)),
             ValueType::F32 => Format::F32((endian, res)),
             ValueType::F64 => Format::F64((endian, res)),
             ValueType::Ascii => Format::Ascii((self.alignment.into(), Width(self.length))),
@@ -352,6 +380,7 @@ mod tests {
                 value_type: ValueType::U16,
                 endian: EndianCfg::Big,
                 resolution: 1.0,
+                bitmask: None,
                 length: 1,
                 alignment: AlignmentCfg::Left,
                 values: vec![],
@@ -371,6 +400,7 @@ mod tests {
                 value_type: ValueType::I16,
                 endian: EndianCfg::Big,
                 resolution: 1.0,
+                bitmask: None,
                 length: 1,
                 alignment: AlignmentCfg::Left,
                 values: vec![
@@ -435,5 +465,26 @@ mod tests {
         assert!(matches!(def.kind(), Kind::HoldingRegister));
         assert!(matches!(def.mem_type(), Type::Register));
         assert_eq!(def.format().width(), 1);
+    }
+
+    #[test]
+    fn ut_parse_bitmask() {
+        assert_eq!(parse_bitmask(Some("0xFF00")).mask, 0xFF00);
+        assert_eq!(parse_bitmask(Some("0xFF00")).shift(), 8);
+        assert_eq!(parse_bitmask(Some("65280")).mask, 65280);
+        // Absent, empty, or garbage → full mask (no-op).
+        assert!(parse_bitmask(None).is_full());
+        assert!(parse_bitmask(Some("   ")).is_full());
+        assert!(parse_bitmask(Some("nonsense")).is_full());
+    }
+
+    #[test]
+    fn ut_bitmask_threaded_into_format() {
+        let mut def = sample().definitions["setpoint"].clone();
+        def.bitmask = Some("0x0FF0".to_string());
+        assert_eq!(def.format().bitfield().mask, 0x0FF0);
+        // Float types ignore the bitmask (full default).
+        def.value_type = ValueType::F32;
+        assert!(def.format().bitfield().is_full());
     }
 }

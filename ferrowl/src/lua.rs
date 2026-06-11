@@ -244,7 +244,7 @@ mod tests {
     use super::*;
     use ferrowl_mem::{Kind as MemKind, Memory, Type};
     use ferrowl_net::SlaveKind;
-    use ferrowl_reg::format::{Endian, Resolution};
+    use ferrowl_reg::format::{BitField, Endian, Resolution};
     use ferrowl_reg::{Access, Format, Kind, RegisterBuilder};
     use tokio::sync::RwLock;
 
@@ -254,7 +254,7 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(addr))
-            .format(Format::U16((Endian::Big, Resolution(1.0))))
+            .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
             .build()
             .unwrap()
     }
@@ -298,7 +298,7 @@ mod tests {
                 .access(Access::ReadWrite)
                 .kind(Kind::HoldingRegister)
                 .address(ferrowl_reg::Address::Virtual)
-                .format(Format::U16((Endian::Big, Resolution(1.0))))
+                .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
                 .build()
                 .unwrap(),
         );
