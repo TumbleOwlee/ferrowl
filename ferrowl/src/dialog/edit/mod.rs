@@ -13,7 +13,8 @@ pub use selection::*;
 pub use subdialog::*;
 
 use ferrowl_reg::format::{
-    Alignment as TextAlignment, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+    Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
+    Resolution,
 };
 use ferrowl_reg::{Access, Address, Kind};
 
@@ -192,44 +193,82 @@ pub(super) fn format_index(format: &RegisterFormat) -> usize {
     }
 }
 
-pub(super) fn numeric_parts(format: &RegisterFormat) -> (RegisterEndian, Resolution) {
+pub(super) fn numeric_parts(format: &RegisterFormat) -> (RegisterEndian, Resolution, BitField) {
     match format {
-        RegisterFormat::U8((e, r))
-        | RegisterFormat::U16((e, r))
-        | RegisterFormat::U32((e, r))
-        | RegisterFormat::U64((e, r))
-        | RegisterFormat::U128((e, r))
-        | RegisterFormat::I8((e, r))
-        | RegisterFormat::I16((e, r))
-        | RegisterFormat::I32((e, r))
-        | RegisterFormat::I64((e, r))
-        | RegisterFormat::I128((e, r))
-        | RegisterFormat::F32((e, r))
-        | RegisterFormat::F64((e, r)) => (e.clone(), r.clone()),
-        RegisterFormat::Ascii(_) => (RegisterEndian::Big, Resolution(1.0)),
+        RegisterFormat::U8((e, r, bf))
+        | RegisterFormat::U16((e, r, bf))
+        | RegisterFormat::U32((e, r, bf))
+        | RegisterFormat::U64((e, r, bf))
+        | RegisterFormat::U128((e, r, bf))
+        | RegisterFormat::I8((e, r, bf))
+        | RegisterFormat::I16((e, r, bf))
+        | RegisterFormat::I32((e, r, bf))
+        | RegisterFormat::I64((e, r, bf))
+        | RegisterFormat::I128((e, r, bf)) => (e.clone(), r.clone(), bf.clone()),
+        RegisterFormat::F32((e, r)) | RegisterFormat::F64((e, r)) => {
+            (e.clone(), r.clone(), BitField::default())
+        }
+        RegisterFormat::Ascii(_) => (RegisterEndian::Big, Resolution(1.0), BitField::default()),
     }
 }
 
-/// Rebuild a numeric format of the same variant as `format` with the given endian/resolution.
-pub(super) fn with_endian_resolution(
+/// Whether `format` is an integer type (carries a [`BitField`]); false for
+/// floats and ASCII. Used to gate the bitmask input field in the edit dialogs.
+pub(super) fn is_integer_format(format: &RegisterFormat) -> bool {
+    matches!(
+        format,
+        RegisterFormat::U8(_)
+            | RegisterFormat::U16(_)
+            | RegisterFormat::U32(_)
+            | RegisterFormat::U64(_)
+            | RegisterFormat::U128(_)
+            | RegisterFormat::I8(_)
+            | RegisterFormat::I16(_)
+            | RegisterFormat::I32(_)
+            | RegisterFormat::I64(_)
+            | RegisterFormat::I128(_)
+    )
+}
+
+/// Parse a bitmask input field (`0x`-prefixed hex or decimal). Empty ⇒ the full
+/// no-op mask. Returns a user-facing error string on a malformed value.
+pub(super) fn parse_bitmask(s: &str) -> Result<BitField, String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return Ok(BitField::default());
+    }
+    let mask = if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        u128::from_str_radix(hex, 16).map_err(|_| "must be a hex (0x…) or decimal number")?
+    } else {
+        t.parse::<u128>()
+            .map_err(|_| "must be a hex (0x…) or decimal number")?
+    };
+    Ok(BitField { mask })
+}
+
+/// Rebuild a numeric format of the same variant as `format` with the given
+/// endian/resolution. Integer variants also carry `bitfield`; floats ignore it.
+pub(super) fn with_numeric_parts(
     format: &RegisterFormat,
     endian: RegisterEndian,
     resolution: Resolution,
+    bitfield: BitField,
 ) -> RegisterFormat {
-    let pair = (endian, resolution);
+    let int = (endian.clone(), resolution.clone(), bitfield);
+    let float = (endian, resolution);
     match format {
-        RegisterFormat::U8(_) => RegisterFormat::U8(pair),
-        RegisterFormat::U16(_) => RegisterFormat::U16(pair),
-        RegisterFormat::U32(_) => RegisterFormat::U32(pair),
-        RegisterFormat::U64(_) => RegisterFormat::U64(pair),
-        RegisterFormat::U128(_) => RegisterFormat::U128(pair),
-        RegisterFormat::I8(_) => RegisterFormat::I8(pair),
-        RegisterFormat::I16(_) => RegisterFormat::I16(pair),
-        RegisterFormat::I32(_) => RegisterFormat::I32(pair),
-        RegisterFormat::I64(_) => RegisterFormat::I64(pair),
-        RegisterFormat::I128(_) => RegisterFormat::I128(pair),
-        RegisterFormat::F32(_) => RegisterFormat::F32(pair),
-        RegisterFormat::F64(_) => RegisterFormat::F64(pair),
-        RegisterFormat::Ascii(_) => RegisterFormat::U16(pair),
+        RegisterFormat::U8(_) => RegisterFormat::U8(int),
+        RegisterFormat::U16(_) => RegisterFormat::U16(int),
+        RegisterFormat::U32(_) => RegisterFormat::U32(int),
+        RegisterFormat::U64(_) => RegisterFormat::U64(int),
+        RegisterFormat::U128(_) => RegisterFormat::U128(int),
+        RegisterFormat::I8(_) => RegisterFormat::I8(int),
+        RegisterFormat::I16(_) => RegisterFormat::I16(int),
+        RegisterFormat::I32(_) => RegisterFormat::I32(int),
+        RegisterFormat::I64(_) => RegisterFormat::I64(int),
+        RegisterFormat::I128(_) => RegisterFormat::I128(int),
+        RegisterFormat::F32(_) => RegisterFormat::F32(float),
+        RegisterFormat::F64(_) => RegisterFormat::F64(float),
+        RegisterFormat::Ascii(_) => RegisterFormat::U16(int),
     }
 }

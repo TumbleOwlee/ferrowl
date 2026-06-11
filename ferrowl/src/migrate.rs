@@ -340,6 +340,7 @@ fn convert_def(
         value_type,
         endian,
         resolution: src.resolution,
+        bitmask: None,
         length: src.length,
         alignment: AlignmentCfg::Left,
         values,

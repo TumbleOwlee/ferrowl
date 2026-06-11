@@ -19,7 +19,7 @@ use tokio_modbus::SlaveId;
 
 pub use crate::codec::{decode, encode};
 pub use crate::enums::{Access, Address, Kind};
-pub use crate::format::{Alignment, Endian, Format};
+pub use crate::format::{Alignment, BitField, Endian, Format};
 pub use crate::traits::{IntoVec, ParseFromU8};
 pub use crate::value::Value;
 
@@ -58,8 +58,32 @@ impl Register {
     }
 
     /// Parses a user-entered string into raw register words using this
-    /// register's [`Format`].
+    /// register's [`Format`]. For a bit-field format the field is positioned
+    /// per its mask/shift with all other bits left zero.
     pub fn encode(&self, s: &str) -> anyhow::Result<Vec<u16>> {
         encode(&self.format, s)
+    }
+
+    /// Per-word mask selecting the bits this register owns (all `0xFFFF` for a
+    /// full-width format). Used to read-modify-write a value while preserving
+    /// bits belonging to sibling registers that alias the same address.
+    pub fn write_mask(&self) -> Vec<u16> {
+        crate::codec::mask_words(&self.format)
+    }
+
+    /// Merge freshly [`encode`](Self::encode)d `value` words into the existing
+    /// `old` words: `(old & !mask) | (value & mask)` per word, using
+    /// [`write_mask`](Self::write_mask). Missing `old` words are treated as 0.
+    pub fn merge_write(&self, old: &[u16], value: &[u16]) -> Vec<u16> {
+        let mask = self.write_mask();
+        value
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let m = mask.get(i).copied().unwrap_or(0xFFFF);
+                let o = old.get(i).copied().unwrap_or(0);
+                (o & !m) | (v & m)
+            })
+            .collect()
     }
 }

@@ -711,7 +711,7 @@ fn build_instance(
 mod tests {
     use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
     use ferrowl_net::{Key, SlaveKind};
-    use ferrowl_reg::format::{Endian, Resolution};
+    use ferrowl_reg::format::{BitField, Endian, Resolution};
     use ferrowl_reg::{Access, Address, Format, Kind, RegisterBuilder};
 
     #[test]
@@ -810,7 +810,7 @@ mod tests {
             slave,
             kind,
             addr,
-            Format::U16((Endian::Big, Resolution(1.0))),
+            Format::U16((Endian::Big, Resolution(1.0), BitField::default())),
             access,
         )
     }
@@ -857,7 +857,7 @@ mod tests {
                     1,
                     Kind::HoldingRegister,
                     i * 8,
-                    Format::U128((Endian::Big, Resolution(1.0))),
+                    Format::U128((Endian::Big, Resolution(1.0), BitField::default())),
                     Access::ReadOnly,
                 )
             })
@@ -880,14 +880,14 @@ mod tests {
                 1,
                 Kind::HoldingRegister,
                 20,
-                Format::U128((Endian::Big, Resolution(1.0))), // width 8 -> 20..28
+                Format::U128((Endian::Big, Resolution(1.0), BitField::default())), // width 8 -> 20..28
                 Access::ReadWrite,
             ),
             entry(
                 1,
                 Kind::HoldingRegister,
                 30,
-                Format::U16((Endian::Big, Resolution(1.0))), // 30..31
+                Format::U16((Endian::Big, Resolution(1.0), BitField::default())), // 30..31
                 Access::ReadWrite,
             ),
         ];
@@ -951,7 +951,7 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((Endian::Big, Resolution(1.0))))
+            .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
             .build()
             .unwrap();
 

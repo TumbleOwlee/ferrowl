@@ -280,17 +280,19 @@ impl App {
                     tab.module.memory()
                 };
                 let ok = {
-                    let mut guard = memory.write().await;
-                    guard.write_unchecked(
-                        Key {
-                            id: SlaveKind {
-                                slave_id: slave,
-                                kind: register.kind().clone(),
-                            },
+                    let key = Key {
+                        id: SlaveKind {
+                            slave_id: slave,
+                            kind: register.kind().clone(),
                         },
-                        &Range::new(addr as usize, raw.len()),
-                        &raw,
-                    )
+                    };
+                    let range = Range::new(addr as usize, raw.len());
+                    let mut guard = memory.write().await;
+                    // Read-modify-write: merge the masked field into the existing word so a
+                    // sibling register aliasing this address keeps its bits.
+                    let old = guard.read_unchecked(key.clone(), &range).unwrap_or_default();
+                    let merged = register.merge_write(&old, &raw);
+                    guard.write_unchecked(key, &range, &merged)
                 };
                 if ok {
                     self.log_active(format!("set {register_name} = {value}"))
@@ -303,7 +305,26 @@ impl App {
                 }
             }
             Role::Client => {
-                let command = write_command(&register, slave, addr, &raw);
+                let key = Key {
+                    id: SlaveKind {
+                        slave_id: slave,
+                        kind: register.kind().clone(),
+                    },
+                };
+                let range = Range::new(addr as usize, raw.len());
+                // Read-modify-write against the local mirror (last polled value) so a masked
+                // write preserves the bits of any sibling register sharing this address. An
+                // unpolled address mirrors zeros, leaving the out-of-mask bits 0.
+                let merged = {
+                    let memory = self.tabs[self.active].module.memory();
+                    let old = memory
+                        .read()
+                        .await
+                        .read_unchecked(key.clone(), &range)
+                        .unwrap_or_default();
+                    register.merge_write(&old, &raw)
+                };
+                let command = write_command(&register, slave, addr, &merged);
                 let result = self.tabs[self.active].module.send_command(command).await;
                 match result {
                     Ok(()) => {
@@ -311,16 +332,7 @@ impl App {
                         // local memory immediately so the table reflects what was sent.
                         if *register.access() == Access::WriteOnly {
                             let memory = self.tabs[self.active].module.memory();
-                            memory.write().await.write_unchecked(
-                                Key {
-                                    id: SlaveKind {
-                                        slave_id: slave,
-                                        kind: register.kind().clone(),
-                                    },
-                                },
-                                &Range::new(addr as usize, raw.len()),
-                                &raw,
-                            );
+                            memory.write().await.write_unchecked(key, &range, &merged);
                         }
                         self.log_active(format!("set {register_name} = {value} (sent)"))
                             .await
