@@ -15,7 +15,9 @@ use crate::traits::ToLabel;
 /// A tab bar that scrolls horizontally to keep the selected tab visible.
 ///
 /// The visible range is computed each render by anchoring on the selected tab
-/// and greedily expanding left then right until the available width is filled.
+/// and keeping it centered: the left side fills at most half the remaining
+/// width, the right side fills the rest, and unused width on either side
+/// rolls over to the other.
 /// Configure style and divider via [`ScrollingTabsBuilder`]; tab data lives in
 /// [`ScrollingTabsState`].
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
@@ -59,11 +61,16 @@ impl<T: ToLabel + Clone> StatefulWidget for &ScrollingTabs<T> {
         let mut remaining = area.width.saturating_sub(widths[sel]);
         let (mut start, mut end) = (sel, sel);
 
+        // Keep the selected tab centered: the left side may take at most half
+        // the leftover width, the right side takes whatever remains, and any
+        // width the right side can't use rolls back to the left.
+        let mut left_budget = remaining / 2;
         for i in (0..sel).rev() {
             let cost = widths[i] + div_w;
-            if remaining < cost {
+            if left_budget < cost {
                 break;
             }
+            left_budget -= cost;
             remaining -= cost;
             start = i;
         }
@@ -74,6 +81,14 @@ impl<T: ToLabel + Clone> StatefulWidget for &ScrollingTabs<T> {
             }
             remaining -= cost;
             end = i;
+        }
+        for i in (0..start).rev() {
+            let cost = widths[i] + div_w;
+            if remaining < cost {
+                break;
+            }
+            remaining -= cost;
+            start = i;
         }
 
         // Tabs adds one space of padding on each side, matching the +2 in `widths`.
