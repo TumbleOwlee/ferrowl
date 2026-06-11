@@ -24,8 +24,8 @@ pub struct ModuleSpec {
     #[serde(default)]
     pub role: Role,
     pub endpoint: Endpoint,
-    /// Per-instance timing overrides (ms). When unset, the device config — then the global
-    /// app config — supplies the value. See `Module::resolve_timing`.
+    /// Per-instance timing overrides (ms). When unset, the device config — then the built-in
+    /// default — supplies the value. See `Module::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

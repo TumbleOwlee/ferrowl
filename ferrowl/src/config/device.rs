@@ -11,6 +11,11 @@ use ferrowl_reg::{
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
 
+/// Fallback timing (ms) when neither the module spec nor the device config sets a value.
+pub const DEFAULT_TIMEOUT_MS: usize = 3000;
+pub const DEFAULT_DELAY_MS: usize = 1000;
+pub const DEFAULT_INTERVAL_MS: usize = 1000;
+
 /// A device-type configuration file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DeviceConfig {
@@ -21,13 +26,16 @@ pub struct DeviceConfig {
     #[serde(default)]
     pub description: String,
     /// Device-level timing defaults (ms). Used when a `ModuleSpec` does not override them; the
-    /// global app config is the final fallback. See `Module::resolve_timing`.
+    /// built-in defaults (`DEFAULT_*_MS`) are the final fallback. See `Module::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<usize>,
+    /// Base path for per-module log files (tab name appended as suffix). `None` disables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_file: Option<String>,
     /// Explicit address ranges a client reads in one Modbus request per function code (gaps
     /// included). When empty for a code, contiguous registers are auto-merged instead.
     #[serde(default, skip_serializing_if = "ReadRanges::is_empty")]
@@ -396,6 +404,7 @@ mod tests {
             timeout_ms: Some(2000),
             delay_ms: None,
             interval_ms: Some(800),
+            log_file: Some("ferrowl.log".to_string()),
             read_ranges: ReadRanges {
                 holding: Some("0-100,140-160".to_string()),
                 ..Default::default()

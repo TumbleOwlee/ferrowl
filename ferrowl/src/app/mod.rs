@@ -18,7 +18,10 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::Duration;
 
-use crate::config::{AppConfig, DeviceConfig, ModuleSpec, device::NamedValue};
+use crate::config::{
+    DeviceConfig, ModuleSpec,
+    device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS, NamedValue},
+};
 use crate::dialog::{
     EditInputDialog, EditSelectionDialog, EditedRegister, SetupDialog, SetupValues,
 };
@@ -156,14 +159,13 @@ pub struct App {
     focus: Focus,
     command: CommandLine,
     overlay: Option<Overlay>,
-    app_cfg: AppConfig,
     pending_g: bool,
 }
 
 impl App {
-    pub fn new(tabs: Vec<Tab>, app_cfg: AppConfig) -> std::io::Result<Self> {
+    pub fn new(tabs: Vec<Tab>) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {
-            let timing = (app_cfg.timeout_ms, app_cfg.delay_ms, app_cfg.interval_ms);
+            let timing = (DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS);
             (
                 Some(Overlay::Setup(SetupDialog::create(timing))),
                 Focus::Dialog,
@@ -178,7 +180,6 @@ impl App {
             focus,
             command: new_command_line(),
             overlay,
-            app_cfg,
             pending_g: false,
         })
     }

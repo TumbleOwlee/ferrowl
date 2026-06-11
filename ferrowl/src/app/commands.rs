@@ -103,13 +103,13 @@ impl App {
                 Some(file) => {
                     if file == "clear" {
                         self.tabs[self.active].module.log().write().await.clear();
-                    } else {
-                        self.app_cfg.log_file = Some(file.clone());
-                        for tab in &self.tabs {
-                            tab.module.set_log_base(Some(&file));
-                        }
-                        self.log_active(format!("Logging to files based on {file}"))
-                            .await;
+                    } else if let Some(tab) = self.tabs.get_mut(self.active) {
+                        tab.device.log_file = Some(file.clone());
+                        tab.module.set_log_base(Some(&file));
+                        self.log_active(format!(
+                            "Logging this tab to files based on {file} (':wd' to persist)"
+                        ))
+                        .await;
                     }
                 }
                 None => self.log_active(":log requires <file>".to_string()).await,
@@ -184,7 +184,7 @@ impl App {
             }
         };
         let _ = self.tabs[active].module.stop().await;
-        let mut module = Module::new(&self.tabs[active].spec, &device, &self.app_cfg);
+        let mut module = Module::new(&self.tabs[active].spec, &device);
         if let Err(e) = module.start().await {
             self.log_active(format!(":reload start error: {e}")).await;
         }

@@ -15,10 +15,6 @@ pub struct CliArgs {
     #[command(subcommand)]
     pub command: Option<SubCommand>,
 
-    /// Path to the general app config (overrides the default discovery).
-    #[arg(long, value_name = "FILE")]
-    pub config: Option<String>,
-
     /// A module to start, e.g.
     /// --module name=evse-1,device=configs/evse.toml,transport=tcp,ip=10.0.0.5,port=502,role=server
     #[arg(long = "module", value_name = "KEY=VAL,...")]
@@ -28,9 +24,9 @@ pub struct CliArgs {
     #[arg(long = "session", value_name = "FILE")]
     pub sessions: Vec<String>,
 
-    /// Base path for per-module log files (tab name appended as suffix).
-    #[arg(long, value_name = "FILE")]
-    pub log: Option<String>,
+    /// A device configuration used to initialize module.
+    #[arg(long = "device", value_name = "FILE")]
+    pub devices: Vec<String>,
 
     /// Demo mode
     #[arg(long)]
@@ -68,7 +64,29 @@ impl CliArgs {
         for spec in &self.modules {
             specs.push(parse_module_spec(spec)?);
         }
+        for (num, device) in self.devices.iter().enumerate() {
+            specs.push(create_module_spec_by_device(
+                format!("Device {num}"),
+                device.clone(),
+            ));
+        }
         Ok(specs)
+    }
+}
+
+/// Parse a single `--device` value into a [`ModuleSpec`].
+pub fn create_module_spec_by_device(name: String, device: String) -> ModuleSpec {
+    ModuleSpec {
+        name,
+        device,
+        role: Role::Client,
+        endpoint: Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 5020,
+        },
+        timeout_ms: None,
+        delay_ms: None,
+        interval_ms: None,
     }
 }
 

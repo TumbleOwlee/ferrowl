@@ -1,7 +1,0 @@
-{
-    "history_length": 80,
-    "timeout_ms": 3000,
-    "delay_ms": 1000,
-    "interval_ms": 1000,
-    "log_file": null
-}

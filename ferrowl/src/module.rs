@@ -15,8 +15,8 @@ use tokio::sync::RwLock;
 
 use crate::app::LogRing;
 use crate::config::{
-    AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role,
-    device::{NamedValue, ReadRanges},
+    DeviceConfig, Endpoint, ModuleSpec, Role,
+    device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS, NamedValue, ReadRanges},
 };
 use crate::instance::Instance;
 use crate::instance::config::{ClientConfig, ServerConfig};
@@ -49,7 +49,7 @@ pub struct Module {
     scripts: Vec<(String, String)>,
     /// Explicit per-function-code read ranges from the device config (empty = auto-merge).
     read_ranges: ReadRanges,
-    /// Simulation cycle period, derived from `AppConfig::interval_ms`.
+    /// Simulation cycle period, derived from the resolved `interval_ms`.
     sim_interval: Duration,
     /// The running simulation thread, if any (started in `start`, stopped in `stop`).
     sim: Option<SimHandle>,
@@ -58,8 +58,8 @@ pub struct Module {
 }
 
 impl Module {
-    /// Build a module from an instance spec, its device-type config and global timing.
-    pub fn new(spec: &ModuleSpec, device: &DeviceConfig, app: &AppConfig) -> Self {
+    /// Build a module from an instance spec and its device-type config.
+    pub fn new(spec: &ModuleSpec, device: &DeviceConfig) -> Self {
         let mut memory = Memory::<Key<SlaveKind>>::default();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
         let mut scripts: Vec<(String, String)> = Vec::new();
@@ -123,9 +123,9 @@ impl Module {
         let log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
 
         let file_sink: FileSink = Arc::new(Mutex::new(None));
-        open_sink(&file_sink, app.log_file.as_deref(), &spec.name);
+        open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
-        let timing = Self::resolve_timing(spec, device, app);
+        let timing = Self::resolve_timing(spec, device);
         let net_config = endpoint_to_config(&spec.endpoint, &timing);
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
@@ -146,18 +146,18 @@ impl Module {
     }
 
     /// Resolve effective timing for an instance: a `ModuleSpec` override wins, else the device
-    /// config value, else the global app config default.
-    pub fn resolve_timing(spec: &ModuleSpec, device: &DeviceConfig, app: &AppConfig) -> Timing {
+    /// config value, else the built-in default.
+    pub fn resolve_timing(spec: &ModuleSpec, device: &DeviceConfig) -> Timing {
         Timing {
             timeout_ms: spec
                 .timeout_ms
                 .or(device.timeout_ms)
-                .unwrap_or(app.timeout_ms),
-            delay_ms: spec.delay_ms.or(device.delay_ms).unwrap_or(app.delay_ms),
+                .unwrap_or(DEFAULT_TIMEOUT_MS),
+            delay_ms: spec.delay_ms.or(device.delay_ms).unwrap_or(DEFAULT_DELAY_MS),
             interval_ms: spec
                 .interval_ms
                 .or(device.interval_ms)
-                .unwrap_or(app.interval_ms),
+                .unwrap_or(DEFAULT_INTERVAL_MS),
         }
     }
 
@@ -729,6 +729,47 @@ mod tests {
             module_log_path("out", "m"),
             std::path::PathBuf::from("out.m")
         );
+    }
+
+    #[test]
+    fn ut_resolve_timing_fallback() {
+        use super::Module;
+        use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
+        use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+
+        let mut spec = ModuleSpec {
+            name: "m".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 502,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+        };
+        let mut device = DeviceConfig::default();
+
+        // No spec/device values: built-in defaults.
+        let timing = Module::resolve_timing(&spec, &device);
+        assert_eq!(timing.timeout_ms, DEFAULT_TIMEOUT_MS);
+        assert_eq!(timing.delay_ms, DEFAULT_DELAY_MS);
+        assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
+
+        // Device values beat the defaults.
+        device.timeout_ms = Some(2000);
+        device.delay_ms = Some(500);
+        let timing = Module::resolve_timing(&spec, &device);
+        assert_eq!(timing.timeout_ms, 2000);
+        assert_eq!(timing.delay_ms, 500);
+        assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
+
+        // Spec overrides beat the device values.
+        spec.timeout_ms = Some(100);
+        let timing = Module::resolve_timing(&spec, &device);
+        assert_eq!(timing.timeout_ms, 100);
+        assert_eq!(timing.delay_ms, 500);
     }
 
     fn entry(

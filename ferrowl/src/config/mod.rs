@@ -1,10 +1,8 @@
-//! Application, device, and session configuration loading (TOML/JSON).
+//! Device and session configuration loading (TOML/JSON).
 
-pub mod app;
 pub mod device;
 pub mod session;
 
-pub use app::AppConfig;
 pub use device::DeviceConfig;
 pub use session::{Endpoint, ModuleSpec, Role, Session};
 
@@ -42,37 +40,3 @@ pub fn load_session(path: &str) -> Result<Session, ConfigError> {
     load(path)
 }
 
-/// Resolve the general app config: explicit `--config`, else `./config.toml`, else
-/// `~/.config/ferrowl/config.toml`. Returns the default config when none exists.
-pub fn resolve_app_config(explicit: Option<&str>) -> AppConfig {
-    let candidates: Vec<String> = match explicit {
-        Some(p) => vec![p.to_string()],
-        None => {
-            let mut c = vec!["./config.toml".to_string()];
-            if let Some(home) = home_config_path() {
-                c.push(home);
-            }
-            c
-        }
-    };
-    for path in candidates {
-        if std::path::Path::new(&path).exists()
-            && let Ok(cfg) = load::<AppConfig>(&path)
-        {
-            return cfg;
-        }
-    }
-    AppConfig::default()
-}
-
-fn home_config_path() -> Option<String> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
-        && !xdg.is_empty()
-    {
-        return Some(format!("{xdg}/ferrowl/config.toml"));
-    }
-    std::env::var("HOME")
-        .ok()
-        .filter(|h| !h.is_empty())
-        .map(|home| format!("{home}/.config/ferrowl/config.toml"))
-}

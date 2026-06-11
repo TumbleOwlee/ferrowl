@@ -4,7 +4,10 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_reg::Address;
 
-use crate::config::{ModuleSpec, device::RegisterDef};
+use crate::config::{
+    ModuleSpec,
+    device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS, RegisterDef},
+};
 use crate::dialog::{
     EditInputDialog, EditSelectionDialog, EditedRegister, SetupDialog, SetupValues, SubDialogs,
 };
@@ -249,7 +252,7 @@ impl App {
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
-        let timing = crate::module::Module::resolve_timing(&tab.spec, &tab.device, &self.app_cfg);
+        let timing = crate::module::Module::resolve_timing(&tab.spec, &tab.device);
         let dialog = SetupDialog::edit(
             &tab.spec.name,
             &tab.spec.device,
@@ -264,16 +267,15 @@ impl App {
 
     /// Open the new-module dialog (`:n`/`:new`).
     pub(super) fn enter_new(&mut self) {
-        let app = &self.app_cfg;
-        let dialog = SetupDialog::create((app.timeout_ms, app.delay_ms, app.interval_ms));
+        let dialog = SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS));
         self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
     }
 
     /// Open the new-module dialog pre-filled with an optional device-config path (`:l`).
     pub(super) fn enter_load(&mut self, path: Option<&str>) {
-        let app = &self.app_cfg;
-        let mut dialog = SetupDialog::create((app.timeout_ms, app.delay_ms, app.interval_ms));
+        let mut dialog =
+            SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS));
         if let Some(path) = path {
             dialog.config_path.state.set_input(path.to_string());
             dialog.config_path.state.set_cursor(path.chars().count());
@@ -561,12 +563,8 @@ impl App {
         self.tabs[active].device.interval_ms = values.interval_ms;
         self.tabs[active].device.read_ranges = values.read_ranges.clone();
 
-        let app_cfg = self.app_cfg.clone();
-        let timing = crate::module::Module::resolve_timing(
-            &self.tabs[active].spec,
-            &self.tabs[active].device,
-            &app_cfg,
-        );
+        let timing =
+            crate::module::Module::resolve_timing(&self.tabs[active].spec, &self.tabs[active].device);
         if let Err(e) = self.tabs[active]
             .module
             .reconfigure(&values.endpoint, values.role, timing, values.read_ranges)
@@ -604,7 +602,7 @@ impl App {
             delay_ms: values.delay_ms,
             interval_ms: values.interval_ms,
         };
-        let mut module = Module::new(&spec, &device, &self.app_cfg);
+        let mut module = Module::new(&spec, &device);
         if let Err(e) = module.start().await {
             module
                 .log()

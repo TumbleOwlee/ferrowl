@@ -29,7 +29,7 @@ use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
-use crate::config::{AppConfig, DeviceConfig, Endpoint, ModuleSpec, Role};
+use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::module::Module;
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
@@ -104,6 +104,7 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
         timeout_ms: None,
         delay_ms: None,
         interval_ms: None,
+        log_file: None,
         read_ranges: Default::default(),
         definitions,
     };
@@ -125,12 +126,12 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
 /// Builds one UI tab per configured module, starting each module's
 /// background task. Start failures are written to the module's log; modules
 /// whose device config fails to load are skipped with a warning on stderr.
-async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, String> {
+async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 
     if args.demo {
         let (device, spec) = demo();
-        let mut module = Module::new(&spec, &device, app_cfg);
+        let mut module = Module::new(&spec, &device);
         let role = spec.role;
 
         if let Err(e) = module.start().await {
@@ -163,7 +164,7 @@ async fn build_tabs(args: &CliArgs, app_cfg: &AppConfig) -> Result<Vec<Tab>, Str
             }
         };
         let role = spec.role;
-        let mut module = Module::new(spec, &device, app_cfg);
+        let mut module = Module::new(spec, &device);
         // CLI/session modules auto-start; start failures are surfaced into the module log.
         if let Err(e) = module.start().await {
             module
@@ -202,11 +203,7 @@ fn main() {
     }));
 
     runtime.block_on(async move {
-        let mut app_cfg = config::resolve_app_config(args.config.as_deref());
-        if let Some(log) = &args.log {
-            app_cfg.log_file = Some(log.clone());
-        }
-        let tabs = match build_tabs(&args, &app_cfg).await {
+        let tabs = match build_tabs(&args).await {
             Ok(tabs) => tabs,
             Err(e) => {
                 eprintln!("Error: {e}");
@@ -214,7 +211,7 @@ fn main() {
             }
         };
 
-        let mut app = match App::new(tabs, app_cfg) {
+        let mut app = match App::new(tabs) {
             Ok(app) => app,
             Err(e) => {
                 eprintln!("Failed to set up screen: {e}");

@@ -354,9 +354,7 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
 
     if legacy.history_length.is_some() {
         warnings.push(
-            "'history_length' has no equivalent in device config \
-             (set it in configs/config.toml instead); dropped"
-                .into(),
+            "'history_length' has no equivalent in device config; dropped".into(),
         );
     }
 
@@ -378,6 +376,7 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
         timeout_ms: legacy.timeout_ms.map(|v| v as usize),
         delay_ms: legacy.delay_after_connect_ms.map(|v| v as usize),
         interval_ms: legacy.interval_ms.map(|v| v as usize),
+        log_file: None,
         read_ranges,
         definitions,
     };
