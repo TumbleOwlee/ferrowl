@@ -165,8 +165,6 @@ port = 5020
 The device configuration can be saved using `:write-device` and contains the register information of the device and all necessary timings.
 
 ```toml
-description = "EVSE charge point"
-
 [definitions.setpoint]
 slave_id = 1
 read_code = 4          # 4 = holding register
