@@ -144,7 +144,7 @@ impl Validate for ConfigPath {
 
         if input.is_empty() {
             ValidateResult::None
-        } else if let Some(_) = FileType::from_path(input) {
+        } else if FileType::from_path(input).is_some() {
             if path.exists() {
                 match crate::config::load_device(input) {
                     Ok(_) => ValidateResult::Success,

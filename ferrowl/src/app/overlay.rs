@@ -306,12 +306,14 @@ impl App {
         let update_script = update_script.flatten();
         let current_default = current_default.flatten();
 
+        // Dialogs edit the raw (unscaled) value — the form `Register::encode` and `:set` accept.
+        let unscaled = def.value.clone().unscaled().to_string();
         if def.named_values.is_empty() {
             let dialog = EditInputDialog::from_register(
                 &def.name,
                 &def.description,
                 &def.register,
-                &def.value,
+                &unscaled,
                 update_script,
                 current_default,
             );
@@ -322,7 +324,7 @@ impl App {
                 &def.description,
                 &def.register,
                 def.named_values.clone(),
-                &def.value,
+                &unscaled,
                 &def.raw_value,
                 update_script,
                 current_default,
@@ -459,7 +461,8 @@ impl App {
                     && slot.register.address() == edited.register.address()
                     && !slot.value.is_empty()
                 {
-                    preserved_value = Some(slot.value.clone());
+                    // Unscaled string: `set_value` re-encodes it, and `encode` takes raw values.
+                    preserved_value = Some(slot.value.clone().unscaled().to_string());
                 }
 
                 // Issue 9: keep module's register cache in sync so rebuild_operations is correct.

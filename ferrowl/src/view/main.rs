@@ -6,7 +6,7 @@ use crate::{
 };
 use derive_builder::Builder;
 use ferrowl_derive::{Focus, focusable};
-use ferrowl_reg::Register;
+use ferrowl_reg::{Register, Value};
 use ferrowl_ui::{
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
@@ -102,7 +102,7 @@ pub struct Definition {
     pub description: String,
     pub register: Register,
     pub named_values: Vec<NamedValue>,
-    pub value: String,
+    pub value: Value,
     pub raw_value: String,
 }
 
@@ -118,7 +118,7 @@ impl Definition {
             description: description.into(),
             register,
             named_values,
-            value: String::new(),
+            value: Value::Ascii(String::new()),
             raw_value: String::new(),
         }
     }

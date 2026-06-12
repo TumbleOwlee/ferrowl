@@ -9,7 +9,7 @@ Ferrowl is a TUI application, written in Rust, to provide Modbus Client and Serv
 If you prefer a GUI application, this tool is not the right choice. In these cases refer to GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
 
 > [!WARNING]
-> Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configurations files and their management. You can migrate configuration files create by versions prior to **v0.4.0** using the `migrate` subcommand - e.g. `ferrowl migrate -i old-config.json -o new-config.json` (supports JSON and TOML as input and output).
+> Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configuration files and their management. You can migrate configuration files created by versions prior to **v0.4.0** using the `migrate` subcommand - e.g. `ferrowl migrate -i old-config.json -o new-config.json` (supports JSON and TOML as input and output).
 
 ## Goal
 
@@ -91,7 +91,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `:set <reg> <val>` | Write register value |
 | `:s \| :save \| :w \| :write [PATH]` | Save session |
 | `:wd \| :write-device [PATH]` | Save device configuration |
-| `:log [FILE]` | Set log output file for the active tab (`:log clear` clears the ring log) |
+| `:log <FILE>\|clear` | Set log output file for the active tab (`:log clear` clears the ring log) |
 | `:lua start\|stop` | Start/Stop lua execution |
 | `:reload` | Reload device configuration |
 | `:compact` | Toggle compact table mode |
@@ -114,6 +114,7 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `g` | Move to top of table |
 | `0` | Move to left edge of table |
 | `$` | Move to right edge of table |
+| `z` | Toggle compact table mode |
 | `gt \| ]` | Switch to next tab |
 | `gT \| [` | Switch to previous tab |
 
@@ -169,18 +170,31 @@ If started without any additional parameters, the module setup dialog is shown. 
 
 ### Session Configuration
 
-The seesion configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information.
+The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Each module may also override the device timings per instance via `timeout_ms`, `delay_ms` and `interval_ms`.
 
 ```toml
 [[modules]]
 name = "evse-1"
 device = "configs/evse.toml"
 role = "server"
+interval_ms = 500      # optional per-instance timing override
 
 [modules.endpoint]
 transport = "tcp"
 ip = "127.0.0.1"
 port = 5020
+```
+
+Besides TCP, a serial RTU endpoint is supported. `parity` (`even`, `odd` or `none`, case-insensitive), `data_bits` and `stop_bits` are optional; `baud_rate` defaults to `19200`.
+
+```toml
+[modules.endpoint]
+transport = "rtu"
+path = "/dev/ttyUSB0"
+baud_rate = 19200
+parity = "none"
+data_bits = 8
+stop_bits = 1
 ```
 
 ### Device Configuration
@@ -239,7 +253,8 @@ values = [
 | `virtual` | `false` | Hold the value locally instead of mapping it to a Modbus address. |
 | `access` | `ReadWrite` | `ReadOnly`, `WriteOnly` or `ReadWrite`. |
 | `endian` | `Big` | Byte order: `Big` or `Little`. |
-| `resolution` | `1.0` | Scaling factor applied to the raw value. |
+| `resolution` | `1.0` | Scaling factor applied to the raw value for display; edit dialogs and `:set` take the unscaled raw value. |
+| `bitmask` | *(none)* | Bit-field mask for integer types, as a hex (`"0xFF00"`) or decimal string; the shift is derived from the mask's trailing zeros. Ignored for float and ASCII types. |
 | `length` | `1` | ASCII width in registers (ignored for numeric types). |
 | `alignment` | `Left` | ASCII alignment: `Left` or `Right`. |
 | `values` | `[]` | Named values for selection-style registers. |

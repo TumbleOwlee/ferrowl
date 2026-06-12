@@ -44,18 +44,6 @@ impl RegisterBridge {
     }
 }
 
-/// Infer a Lua `ValueType` from a virtual register's stored string (int, then float, else string).
-fn parse_value_type(s: &str) -> ValueType {
-    let t = s.trim();
-    if let Ok(i) = t.parse::<i128>() {
-        ValueType::Int(i)
-    } else if let Ok(f) = t.parse::<f64>() {
-        ValueType::Float(f)
-    } else {
-        ValueType::String(s.to_string())
-    }
-}
-
 impl Read for RegisterBridge {
     fn read(&self, name: String) -> Result<ValueType> {
         let register = self.register(&name)?;
@@ -66,7 +54,7 @@ impl Read for RegisterBridge {
                     .virtual_store
                     .blocking_read()
                     .get(&name)
-                    .map(|s| parse_value_type(s))
+                    .map(|v| value_to_type(v.clone()))
                     .ok_or_else(|| {
                         Error::RuntimeError(format!("virtual register '{name}' not set"))
                     });
@@ -97,6 +85,7 @@ impl Write for RegisterBridge {
         let addr = match register.address() {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
+                let value = crate::module::str_to_value(&value, register);
                 self.virtual_store.blocking_write().insert(name, value);
                 return Ok(());
             }
@@ -325,8 +314,8 @@ mod tests {
             virtual_store
                 .blocking_read()
                 .get("calc")
-                .map(String::as_str),
-            Some("7")
+                .map(|v| v.clone().unscaled().to_string()),
+            Some("7".to_string())
         );
     }
 
