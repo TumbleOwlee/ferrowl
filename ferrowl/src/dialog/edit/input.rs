@@ -21,7 +21,8 @@ use ferrowl_ui::{
     types::Border,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
-        InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate, Widget,
+        InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,
+        ValidateResult, Widget,
     },
 };
 use ratatui::{
@@ -142,9 +143,9 @@ impl EditInputDialog {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if let Err(e) = String::validate(self.label.state.input()) {
+        if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
-        } else if let Err(e) = u8::validate(self.slave_id.state.input()) {
+        } else if let ValidateResult::Error(e) = u8::validate(self.slave_id.state.input()) {
             return Err(format!("Slave ID: {e}"));
         } else if let Err(e) = parse_address(self.address.state.input()) {
             return Err(format!("Address: {e}"));
@@ -153,7 +154,9 @@ impl EditInputDialog {
         if !self.is_boolean_kind() {
             match self.value_type.state.values()[self.value_type.state.selection()] {
                 ValueType::Number => {
-                    if let Err(e) = f64::validate(self.number_resolution.state.input()) {
+                    if let ValidateResult::Error(e) =
+                        f64::validate(self.number_resolution.state.input())
+                    {
                         return Err(format!("Resolution: {e}"));
                     }
                     let format =
@@ -170,7 +173,8 @@ impl EditInputDialog {
                     }
                 }
                 ValueType::Text => {
-                    if let Err(e) = usize::validate(self.text_width.state.input()) {
+                    if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
+                    {
                         return Err(format!("Width: {e}"));
                     }
                 }
@@ -731,7 +735,7 @@ impl EditInputDialog {
                     .unwrap(),
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some(("Resolution", HorizontalAlignment::Right).into()))
+                    .title(Some(("Resolution", HorizontalAlignment::Center).into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
@@ -1043,7 +1047,10 @@ impl EditInputDialog {
                 set_input(&mut dialog.number_resolution, &resolution.0.to_string());
                 // Show the mask only when it actually selects a sub-field.
                 if !bitfield.is_full() {
-                    set_input(&mut dialog.number_bitmask, &format!("0x{:X}", bitfield.mask));
+                    set_input(
+                        &mut dialog.number_bitmask,
+                        &format!("0x{:X}", bitfield.mask),
+                    );
                 }
             }
         }

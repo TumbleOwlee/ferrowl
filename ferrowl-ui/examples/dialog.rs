@@ -13,7 +13,10 @@ use ferrowl_ui::{
     style::{InputFieldStyle, SelectionStyle},
     traits::{HandleEvents, Margins},
     types::Border,
-    widgets::{InputField, InputFieldBuilder, Selection, SelectionBuilder, Validate, Widget},
+    widgets::{
+        InputField, InputFieldBuilder, Selection, SelectionBuilder, Validate, ValidateResult,
+        Widget,
+    },
 };
 
 use ferrowl_derive::{Focus, focusable};
@@ -22,16 +25,16 @@ use ferrowl_derive::{Focus, focusable};
 struct Day {}
 
 impl Validate for Day {
-    fn validate(input: &str) -> Result<(), String> {
+    fn validate(input: &str) -> ValidateResult {
         let day = input.parse::<usize>();
         if let Ok(day) = day {
             if day < 32 {
-                Ok(())
+                ValidateResult::Success
             } else {
-                Err("Invalid day input".into())
+                ValidateResult::Error("Invalid day input".into())
             }
         } else {
-            Err("Input is not numerical".into())
+            ValidateResult::Error("Input is not numerical".into())
         }
     }
 }
@@ -40,12 +43,12 @@ impl Validate for Day {
 struct Year {}
 
 impl Validate for Year {
-    fn validate(input: &str) -> Result<(), String> {
+    fn validate(input: &str) -> ValidateResult {
         let year = input.parse::<usize>();
         if year.is_ok() {
-            Ok(())
+            ValidateResult::Success
         } else {
-            Err("Input is not numerical".into())
+            ValidateResult::Error("Input is not numerical".into())
         }
     }
 }
@@ -54,16 +57,16 @@ impl Validate for Year {
 struct Code {}
 
 impl Validate for Code {
-    fn validate(input: &str) -> Result<(), String> {
+    fn validate(input: &str) -> ValidateResult {
         let code = input.parse::<usize>();
         if let Ok(code) = code {
             if (10000..=99999).contains(&code) {
-                Ok(())
+                ValidateResult::Success
             } else {
-                Err("Invalid postal code".into())
+                ValidateResult::Error("Invalid postal code".into())
             }
         } else {
-            Err("Input is not numerical".into())
+            ValidateResult::Error("Input is not numerical".into())
         }
     }
 }
@@ -100,11 +103,11 @@ struct Person {
 
 impl App {
     fn result(&self) -> Result<Person, String> {
-        if Day::validate(self.day.state.input()).is_err() {
+        if let ValidateResult::Error(_) = Day::validate(self.day.state.input()) {
             Err("Invalid input for day".into())
-        } else if Year::validate(self.year.state.input()).is_err() {
+        } else if let ValidateResult::Error(_) = Year::validate(self.year.state.input()) {
             Err("Invalid input for year".into())
-        } else if Code::validate(self.code.state.input()).is_err() {
+        } else if let ValidateResult::Error(_) = Code::validate(self.code.state.input()) {
             Err("Invalid input for postal code".into())
         } else {
             let name = format!(

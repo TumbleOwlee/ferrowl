@@ -243,9 +243,18 @@ mod tests {
             Format::U16((Endian::Big, res(), bitfield.clone())).bitfield(),
             bitfield
         );
-        assert_eq!(Format::U16((Endian::Big, res(), bitfield)).bitfield().shift(), 8);
+        assert_eq!(
+            Format::U16((Endian::Big, res(), bitfield))
+                .bitfield()
+                .shift(),
+            8
+        );
         assert!(Format::F32((Endian::Big, res())).bitfield().is_full());
-        assert!(Format::Ascii((Alignment::Left, Width(1))).bitfield().is_full());
+        assert!(
+            Format::Ascii((Alignment::Left, Width(1)))
+                .bitfield()
+                .is_full()
+        );
     }
 
     #[test]

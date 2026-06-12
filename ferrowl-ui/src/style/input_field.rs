@@ -8,17 +8,24 @@ use ratatui::style::Style;
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct InputFieldStyle {
+    #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg)")]
     pub general: Style,
+    #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg)")]
     pub focused: Style,
-    #[builder(default = "Style::default().fg(COLOR_SCHEME.placeholder)")]
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.placeholder).bg(COLOR_SCHEME.bg)")]
     pub placeholder: Style,
+    #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.text_dark).bg(COLOR_SCHEME.hi)")]
     pub cursor: Style,
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.error).bg(COLOR_SCHEME.bg)")]
     pub error: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.success).bg(COLOR_SCHEME.bg)")]
+    pub success: Style,
 }
 
 impl Default for InputFieldStyle {

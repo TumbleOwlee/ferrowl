@@ -39,4 +39,3 @@ pub fn load_device(path: &str) -> Result<DeviceConfig, ConfigError> {
 pub fn load_session(path: &str) -> Result<Session, ConfigError> {
     load(path)
 }
-

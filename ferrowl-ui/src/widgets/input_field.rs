@@ -14,6 +14,12 @@ use crate::traits::Margins;
 use crate::types::Border;
 use crate::widgets::Title;
 
+pub enum ValidateResult {
+    Success,
+    None,
+    Error(String),
+}
+
 /// Validates raw input text for an [`InputField`].
 ///
 /// Implemented for `String` (always valid) and all numeric primitives
@@ -21,23 +27,23 @@ use crate::widgets::Title;
 /// the field's error style.
 pub trait Validate {
     /// Returns `Err` with a message if `input` is not a valid value.
-    fn validate(input: &str) -> Result<(), String>;
+    fn validate(input: &str) -> ValidateResult;
 }
 
 impl Validate for String {
-    fn validate(_input: &str) -> Result<(), String> {
-        Ok(())
+    fn validate(_input: &str) -> ValidateResult {
+        ValidateResult::None
     }
 }
 
 macro_rules! generate_validate {
     ($v:ty) => {
         impl Validate for $v {
-            fn validate(input: &str) -> Result<(), String> {
+            fn validate(input: &str) -> ValidateResult {
                 let result = input.parse::<$v>();
                 match result {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(format!("{}", e)),
+                    Ok(_) => ValidateResult::None,
+                    Err(e) => ValidateResult::Error(format!("{}", e)),
                 }
             }
         }
@@ -178,22 +184,13 @@ where
         ])
         .split(area)[1];
 
-        let valid = if state.input().is_empty() {
-            Ok(())
-        } else {
-            ValueType::validate(state.input())
-        };
+        let valid = ValueType::validate(state.input());
 
         // Create block if border is required
         let border_style = if state.focused() && !state.disabled() {
             self.style.focused
         } else {
             self.style.general
-        };
-        let border_style = if valid.is_ok() {
-            border_style
-        } else {
-            self.style.error
         };
         let area = crate::widgets::render_border(
             area,
@@ -246,10 +243,12 @@ where
 
         let text_style = if state.input().is_empty() {
             self.style.placeholder
-        } else if valid.is_ok() {
-            self.style.general
         } else {
-            self.style.error
+            match valid {
+                ValidateResult::Success => self.style.success,
+                ValidateResult::None => self.style.general,
+                ValidateResult::Error(_) => self.style.error,
+            }
         };
 
         let mut text_area = area;

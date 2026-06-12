@@ -98,7 +98,7 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
             } else {
                 $s.parse()?
             };
-            let val = ((((val as u128) << $bf.shift()) & $bf.mask)) as $ty;
+            let val = (((val as u128) << $bf.shift()) & $bf.mask) as $ty;
             Ok(match $e {
                 Endian::Big => val.to_be_bytes().iter().into_vec()?,
                 Endian::Little => val.to_le_bytes().iter().into_vec()?,
@@ -117,8 +117,7 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
             } else {
                 $s.parse()?
             };
-            let val =
-                (((((val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
+            let val = (((((val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
             Ok(match $e {
                 Endian::Big => val.to_be_bytes().iter().into_vec()?,
                 Endian::Little => val.to_le_bytes().iter().into_vec()?,
@@ -167,7 +166,7 @@ pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
             } else {
                 s.parse()?
             };
-            let val = ((((val as u128) << bf.shift()) & bf.mask)) as u8;
+            let val = (((val as u128) << bf.shift()) & bf.mask) as u8;
             Ok(match e {
                 Endian::Big => vec![val as u16],
                 Endian::Little => vec![(val as u16) << 8],
@@ -625,7 +624,10 @@ mod tests {
     #[test]
     fn ut_encode_u16_high_byte_field() {
         // value 0x12 placed into mask 0xFF00 → word 0x1200, other bits zero.
-        assert_eq!(reg(u16_be_mask(0xFF00)).encode("0x12").unwrap(), vec![0x1200u16]);
+        assert_eq!(
+            reg(u16_be_mask(0xFF00)).encode("0x12").unwrap(),
+            vec![0x1200u16]
+        );
     }
 
     #[test]
@@ -658,7 +660,11 @@ mod tests {
         // Full U16 mask narrows to 0xFFFF.
         assert_eq!(reg(u16_be_mask(u128::MAX)).write_mask(), vec![0xFFFFu16]);
         // U32 big-endian mask spans two words.
-        let r = reg(Format::U32((Endian::Big, res(), BitField { mask: 0xFFFF_0000 })));
+        let r = reg(Format::U32((
+            Endian::Big,
+            res(),
+            BitField { mask: 0xFFFF_0000 },
+        )));
         assert_eq!(r.write_mask(), vec![0xFFFFu16, 0x0000u16]);
         // U8 full mask only owns the low byte of its word.
         assert_eq!(reg(u8_be()).write_mask(), vec![0x00FFu16]);
