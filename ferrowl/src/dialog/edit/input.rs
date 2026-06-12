@@ -171,6 +171,13 @@ impl EditInputDialog {
                     if let Err(e) = encode(format, s) {
                         return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
                     }
+                    let v = self.default_value.state.input();
+                    let s = v.trim();
+                    if !s.is_empty()
+                        && let Err(e) = encode(format, s)
+                    {
+                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
+                    }
                 }
                 ValueType::Text => {
                     if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
@@ -202,7 +209,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(43),
+            Constraint::Length(44),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -232,7 +239,7 @@ impl EditInputDialog {
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -917,6 +924,7 @@ impl EditInputDialog {
                         vertical: 0,
                         horizontal: 1,
                     })
+                    .multiline(true)
                     .style(error_style.clone())
                     .build()
                     .unwrap(),

@@ -329,7 +329,7 @@ mod tests {
         let r = reg(u8_be());
         let words = r.encode("200").unwrap();
         let decoded = r.decode(&words).unwrap();
-        assert_eq!(decoded.as_str(), "200");
+        assert_eq!(decoded.to_string(), "200");
     }
 
     #[test]
@@ -337,7 +337,7 @@ mod tests {
         let r = reg(u8_le());
         let words = r.encode("42").unwrap();
         let decoded = r.decode(&words).unwrap();
-        assert_eq!(decoded.as_str(), "42");
+        assert_eq!(decoded.to_string(), "42");
     }
 
     // --- I8 decode ---
@@ -386,7 +386,7 @@ mod tests {
         for val in [-128i8, -1, 0, 1, 127] {
             let words = r.encode(&val.to_string()).unwrap();
             let decoded = r.decode(&words).unwrap();
-            assert_eq!(decoded.as_str(), val.to_string());
+            assert_eq!(decoded.to_string(), val.to_string());
         }
     }
 
@@ -445,7 +445,7 @@ mod tests {
         let r = reg(u32_be());
         let words = r.encode("123456789").unwrap();
         let decoded = r.decode(&words).unwrap();
-        assert_eq!(decoded.as_str(), "123456789");
+        assert_eq!(decoded.to_string(), "123456789");
     }
 
     #[test]
@@ -453,7 +453,7 @@ mod tests {
         let r = reg(u32_le());
         let words = r.encode("987654321").unwrap();
         let decoded = r.decode(&words).unwrap();
-        assert_eq!(decoded.as_str(), "987654321");
+        assert_eq!(decoded.to_string(), "987654321");
     }
 
     // --- I32 round-trip ---
@@ -464,7 +464,7 @@ mod tests {
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
             let words = r.encode(&val.to_string()).unwrap();
             let decoded = r.decode(&words).unwrap();
-            assert_eq!(decoded.as_str(), val.to_string(), "val={}", val);
+            assert_eq!(decoded.to_string(), val.to_string(), "val={}", val);
         }
     }
 
@@ -474,7 +474,7 @@ mod tests {
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
             let words = r.encode(&val.to_string()).unwrap();
             let decoded = r.decode(&words).unwrap();
-            assert_eq!(decoded.as_str(), val.to_string(), "val={}", val);
+            assert_eq!(decoded.to_string(), val.to_string(), "val={}", val);
         }
     }
 
@@ -594,7 +594,7 @@ mod tests {
         let words = r.encode("2048").unwrap();
         let decoded = r.decode(&words).unwrap();
         // 2048 * 0.5 = 1024.0
-        assert_eq!(decoded.as_str(), "1024");
+        assert_eq!(decoded.to_string(), "1024");
     }
 
     // --- Bit-field mask + derived shift ---

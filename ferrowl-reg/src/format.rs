@@ -51,6 +51,12 @@ impl std::fmt::Display for Endian {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Resolution(pub f64);
 
+impl Default for Resolution {
+    fn default() -> Self {
+        Resolution(1.0)
+    }
+}
+
 impl std::fmt::Display for Resolution {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(fmt, "{}", self.0)

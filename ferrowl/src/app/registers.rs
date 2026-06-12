@@ -3,7 +3,7 @@
 
 use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
 use ferrowl_net::{Command, Key, SlaveKind};
-use ferrowl_reg::{Access, Address, Kind, Register};
+use ferrowl_reg::{Access, Address, Kind, Register, Value};
 
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType,
@@ -81,7 +81,7 @@ pub(super) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u1
 pub(super) fn decode_definition(
     mut d: Definition,
     memory: &Memory<Key<SlaveKind>>,
-    virtual_values: &std::collections::HashMap<String, String>,
+    virtual_values: &std::collections::HashMap<String, Value>,
 ) -> Definition {
     match d.register.address() {
         Address::Fixed(addr) => {
@@ -96,8 +96,8 @@ pub(super) fn decode_definition(
                 .read_unchecked(key, &Range::new(*addr as usize, width))
                 .unwrap_or_else(|| vec![0; width]);
             d.value = match d.register.decode(&raw) {
-                Ok(v) => format!("{v}"),
-                Err(_) => "Error".to_string(),
+                Ok(v) => v,
+                Err(_) => Value::Ascii("Error".to_string()),
             };
             d.raw_value = raw_hex(&raw);
         }
@@ -109,12 +109,12 @@ pub(super) fn decode_definition(
                     d.value = v.clone();
                     d.raw_value = d
                         .register
-                        .encode(v)
+                        .encode(&v.clone().unscaled().to_string())
                         .map(|raw| raw_hex(&raw))
                         .unwrap_or_default();
                 }
                 None => {
-                    d.value.clear();
+                    d.value = Value::Ascii(String::new());
                     d.raw_value.clear();
                 }
             }

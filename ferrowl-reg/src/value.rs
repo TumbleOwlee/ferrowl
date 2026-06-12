@@ -4,11 +4,46 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Resolution;
 
+/// A decoded register value: the typed raw value plus.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum UnscaledValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(f32),
+    F64(f64),
+    Ascii(String),
+}
+
+impl std::fmt::Display for UnscaledValue {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::U8(v) => write!(fmt, "{}", v),
+            Self::U16(v) => write!(fmt, "{}", v),
+            Self::U32(v) => write!(fmt, "{}", v),
+            Self::U64(v) => write!(fmt, "{}", v),
+            Self::U128(v) => write!(fmt, "{}", v),
+            Self::I8(v) => write!(fmt, "{}", v),
+            Self::I16(v) => write!(fmt, "{}", v),
+            Self::I32(v) => write!(fmt, "{}", v),
+            Self::I64(v) => write!(fmt, "{}", v),
+            Self::I128(v) => write!(fmt, "{}", v),
+            Self::F32(v) => write!(fmt, "{}", v),
+            Self::F64(v) => write!(fmt, "{}", v),
+            Self::Ascii(v) => write!(fmt, "{}", v),
+        }
+    }
+}
+
 /// A decoded register value: the typed raw value plus, for numeric variants,
 /// the display [`Resolution`] it is scaled by when formatted.
-///
-/// Produced by [`decode`](crate::decode); the `Display` implementation
-/// delegates to [`as_str`](Self::as_str).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
     U8((u8, Resolution)),
@@ -28,36 +63,57 @@ pub enum Value {
 
 impl std::fmt::Display for Value {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(fmt, "{}", self.as_str())
+        let val = {
+            // Every numeric variant scales by its resolution and prints the f64 result.
+            macro_rules! scaled {
+                ($v:expr, $r:expr) => {{
+                    let v = *$v as f64 * $r.0;
+                    format!("{v}")
+                }};
+            }
+            match self {
+                Self::U8((v, r)) => scaled!(v, r),
+                Self::U16((v, r)) => scaled!(v, r),
+                Self::U32((v, r)) => scaled!(v, r),
+                Self::U64((v, r)) => scaled!(v, r),
+                Self::U128((v, r)) => scaled!(v, r),
+                Self::I8((v, r)) => scaled!(v, r),
+                Self::I16((v, r)) => scaled!(v, r),
+                Self::I32((v, r)) => scaled!(v, r),
+                Self::I64((v, r)) => scaled!(v, r),
+                Self::I128((v, r)) => scaled!(v, r),
+                Self::F32((v, r)) => scaled!(v, r),
+                Self::F64((v, r)) => scaled!(v, r),
+                Self::Ascii(v) => v.chars().collect(),
+            }
+        };
+        write!(fmt, "{}", val)
     }
 }
 
 impl Value {
-    /// Formats the value for display: numeric variants are multiplied by
-    /// their resolution and printed as decimal, ASCII is returned verbatim.
-    pub fn as_str(&self) -> String {
-        // Every numeric variant scales by its resolution and prints the f64 result.
-        macro_rules! scaled {
-            ($v:expr, $r:expr) => {{
-                let v = *$v as f64 * $r.0;
-                format!("{v}")
-            }};
-        }
+    pub fn unscaled(self) -> UnscaledValue {
         match self {
-            Self::U8((v, r)) => scaled!(v, r),
-            Self::U16((v, r)) => scaled!(v, r),
-            Self::U32((v, r)) => scaled!(v, r),
-            Self::U64((v, r)) => scaled!(v, r),
-            Self::U128((v, r)) => scaled!(v, r),
-            Self::I8((v, r)) => scaled!(v, r),
-            Self::I16((v, r)) => scaled!(v, r),
-            Self::I32((v, r)) => scaled!(v, r),
-            Self::I64((v, r)) => scaled!(v, r),
-            Self::I128((v, r)) => scaled!(v, r),
-            Self::F32((v, r)) => scaled!(v, r),
-            Self::F64((v, r)) => scaled!(v, r),
-            Self::Ascii(v) => v.chars().collect(),
+            Self::U8((v, _r)) => UnscaledValue::U8(v),
+            Self::U16((v, _r)) => UnscaledValue::U16(v),
+            Self::U32((v, _r)) => UnscaledValue::U32(v),
+            Self::U64((v, _r)) => UnscaledValue::U64(v),
+            Self::U128((v, _r)) => UnscaledValue::U128(v),
+            Self::I8((v, _r)) => UnscaledValue::I8(v),
+            Self::I16((v, _r)) => UnscaledValue::I16(v),
+            Self::I32((v, _r)) => UnscaledValue::I32(v),
+            Self::I64((v, _r)) => UnscaledValue::I64(v),
+            Self::I128((v, _r)) => UnscaledValue::I128(v),
+            Self::F32((v, _r)) => UnscaledValue::F32(v),
+            Self::F64((v, _r)) => UnscaledValue::F64(v),
+            Self::Ascii(v) => UnscaledValue::Ascii(v),
         }
+    }
+
+    /// `true` only for an empty ASCII value — the "no value yet" sentinel;
+    /// numeric variants always carry a value.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Ascii(s) if s.is_empty())
     }
 
     /// Formats the unscaled raw value as `0x`-prefixed, zero-padded hex
@@ -106,20 +162,44 @@ mod tests {
 
     #[test]
     fn ut_value_as_str_no_scaling() {
-        assert_eq!(Value::U8((42, res())).as_str(), "42");
-        assert_eq!(Value::U16((1000, res())).as_str(), "1000");
-        assert_eq!(Value::I8((-1, res())).as_str(), "-1");
-        assert_eq!(Value::I16((-100, res())).as_str(), "-100");
-        assert_eq!(Value::Ascii("hello".to_string()).as_str(), "hello");
+        assert_eq!(Value::U8((42, res())).to_string(), "42");
+        assert_eq!(Value::U16((1000, res())).to_string(), "1000");
+        assert_eq!(Value::I8((-1, res())).to_string(), "-1");
+        assert_eq!(Value::I16((-100, res())).to_string(), "-100");
+        assert_eq!(Value::Ascii("hello".to_string()).to_string(), "hello");
     }
 
     #[test]
     fn ut_value_as_str_with_scaling() {
         // Use resolution 2.0 so that integer * 2.0 is exact in f64
         let r = Resolution(2.0);
-        assert_eq!(Value::U16((5, r.clone())).as_str(), "10");
-        assert_eq!(Value::I32((-3, r.clone())).as_str(), "-6");
-        assert_eq!(Value::F32((1.5f32, r.clone())).as_str(), "3");
+        assert_eq!(Value::U16((5, r.clone())).to_string(), "10");
+        assert_eq!(Value::I32((-3, r.clone())).to_string(), "-6");
+        assert_eq!(Value::F32((1.5f32, r.clone())).to_string(), "3");
+    }
+
+    #[test]
+    fn ut_value_unscaled_drops_resolution() {
+        // The unscaled string is the raw value, regardless of resolution.
+        let r = Resolution(2.0);
+        assert_eq!(Value::U16((5, r.clone())).unscaled().to_string(), "5");
+        assert_eq!(Value::I32((-3, r.clone())).unscaled().to_string(), "-3");
+        assert_eq!(
+            Value::F32((1.5f32, r.clone())).unscaled().to_string(),
+            "1.5"
+        );
+        assert_eq!(
+            Value::Ascii("hello".to_string()).unscaled().to_string(),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn ut_value_is_empty() {
+        // Only the empty ASCII sentinel counts as empty.
+        assert!(Value::Ascii(String::new()).is_empty());
+        assert!(!Value::Ascii("x".to_string()).is_empty());
+        assert!(!Value::U16((0, res())).is_empty());
     }
 
     #[test]

@@ -189,6 +189,14 @@ impl Scalar {
             Scalar::Text(s.to_string())
         }
     }
+
+    pub fn to_value(&self, res: f64) -> ferrowl_reg::Value {
+        match self {
+            Scalar::Int(i) => ferrowl_reg::Value::I64((*i, Resolution(res))),
+            Scalar::Float(f) => ferrowl_reg::Value::F64((*f, Resolution(res))),
+            Scalar::Text(s) => ferrowl_reg::Value::Ascii(s.clone()),
+        }
+    }
 }
 
 /// The value encoding of a register.
@@ -467,6 +475,20 @@ mod tests {
         assert!(matches!(def.kind(), Kind::HoldingRegister));
         assert!(matches!(def.mem_type(), Type::Register));
         assert_eq!(def.format().width(), 1);
+    }
+
+    #[test]
+    fn ut_parse_ranges() {
+        // Inclusive bounds; bare address = single-cell range; whitespace tolerated.
+        assert_eq!(
+            parse_ranges("0-100, 140-160 ,5"),
+            vec![Range::new(0, 101), Range::new(140, 21), Range::new(5, 1)]
+        );
+        // Malformed, reversed and empty entries are skipped.
+        assert_eq!(parse_ranges("abc,10-x,,9-3"), vec![]);
+        assert_eq!(parse_ranges(""), vec![]);
+        // Reversed bound dropped, valid neighbor kept.
+        assert_eq!(parse_ranges("9-3,4"), vec![Range::new(4, 1)]);
     }
 
     #[test]

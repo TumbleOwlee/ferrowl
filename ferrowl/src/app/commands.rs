@@ -248,7 +248,7 @@ impl App {
             if role == Role::Server {
                 self.tabs[self.active]
                     .module
-                    .set_virtual_value(register_name, value.to_string())
+                    .set_virtual_value(register_name, crate::module::str_to_value(value, &register))
                     .await;
                 self.log_active(format!("set {register_name} = {value} (virtual)"))
                     .await;

@@ -28,7 +28,7 @@ pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKind>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Shared store of virtual-register values (no Modbus address), keyed by register name. Shared
 /// with the Lua sim thread so `update` scripts can drive virtual registers and the table shows them.
-pub type VirtualStore = Arc<RwLock<HashMap<String, String>>>;
+pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_reg::Value>>>;
 /// Optional per-module log file, shared into the log/status callbacks; swappable at runtime so
 /// `:log` takes effect on already-running modules.
 pub type FileSink = Arc<Mutex<Option<BufWriter<std::fs::File>>>>;
@@ -63,7 +63,7 @@ impl Module {
         let mut memory = Memory::<Key<SlaveKind>>::default();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
         let mut scripts: Vec<(String, String)> = Vec::new();
-        let mut virtual_init: HashMap<String, String> = HashMap::new();
+        let mut virtual_init: HashMap<String, ferrowl_reg::Value> = HashMap::new();
 
         for (name, def) in &device.definitions {
             let register = def.register();
@@ -82,7 +82,7 @@ impl Module {
                 let init = def
                     .default
                     .as_ref()
-                    .map(|s| s.to_string())
+                    .map(|s| s.to_value(def.resolution))
                     .unwrap_or_else(|| default_value(&register));
                 virtual_init.insert(name.clone(), init);
             }
@@ -182,8 +182,8 @@ impl Module {
         &self.registers
     }
 
-    /// Store a string value for a virtual register (replaces any previous value).
-    pub async fn set_virtual_value(&self, name: &str, val: String) {
+    /// Store a value for a virtual register (replaces any previous value).
+    pub async fn set_virtual_value(&self, name: &str, val: ferrowl_reg::Value) {
         self.virtual_values
             .write()
             .await
@@ -369,12 +369,18 @@ impl Module {
 
 /// Initial display value for a register: its format decoded from all-zero words (e.g. "0").
 /// Used to seed virtual registers so the table isn't blank before a script or `:set` runs.
-pub(crate) fn default_value(register: &Register) -> String {
+pub(crate) fn default_value(register: &Register) -> ferrowl_reg::Value {
     let zeros = vec![0u16; register.format().width()];
     register
         .decode(&zeros)
-        .map(|v| format!("{v}"))
-        .unwrap_or_default()
+        .unwrap_or(ferrowl_reg::Value::Ascii(String::new()))
+}
+
+/// Parse user input (`:set`, Lua `write`) into a typed [`Value`](ferrowl_reg::Value),
+/// attaching the register's display resolution (1.0 when the format has none).
+pub(crate) fn str_to_value(s: &str, register: &Register) -> ferrowl_reg::Value {
+    let res = register.format().resolution().map(|r| r.0).unwrap_or(1.0);
+    crate::config::device::Scalar::from_input(s).to_value(res)
 }
 
 fn function_code(register: &Register) -> FunctionCode {
@@ -816,6 +822,42 @@ mod tests {
             Format::U16((Endian::Big, Resolution(1.0), BitField::default())),
             access,
         )
+    }
+
+    #[test]
+    fn ut_str_to_value_uses_register_resolution() {
+        use super::str_to_value;
+        use ferrowl_reg::Value;
+
+        let reg = entry(
+            1,
+            Kind::HoldingRegister,
+            0,
+            Format::U16((Endian::Big, Resolution(0.5), BitField::default())),
+            Access::ReadWrite,
+        )
+        .2;
+
+        // Integer and float inputs carry the register's resolution.
+        match str_to_value("10", &reg) {
+            Value::I64((v, r)) => {
+                assert_eq!(v, 10);
+                assert_eq!(r.0, 0.5);
+            }
+            other => panic!("expected I64, got {other:?}"),
+        }
+        match str_to_value("1.5", &reg) {
+            Value::F64((v, r)) => {
+                assert_eq!(v, 1.5);
+                assert_eq!(r.0, 0.5);
+            }
+            other => panic!("expected F64, got {other:?}"),
+        }
+        // Non-numeric input falls through to ASCII.
+        match str_to_value("idle", &reg) {
+            Value::Ascii(s) => assert_eq!(s, "idle"),
+            other => panic!("expected Ascii, got {other:?}"),
+        }
     }
 
     #[test]
