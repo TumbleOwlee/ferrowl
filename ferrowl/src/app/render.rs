@@ -58,12 +58,15 @@ pub(super) fn render(
         })
         .build()
         .unwrap();
-    let mut status_label = if online {
-        "ONLINE".to_string()
-    } else {
-        "OFFLINE".to_string()
-    };
-    StatefulWidget::render(&status, status_area, buf, &mut status_label);
+
+    if !tabs.is_empty() {
+        let mut status_label = if online {
+            "ONLINE".to_string()
+        } else {
+            "OFFLINE".to_string()
+        };
+        StatefulWidget::render(&status, status_area, buf, &mut status_label);
+    }
 
     if let Some(tab) = tabs.get_mut(active) {
         tab.table.table.state.set_focused(focus == Focus::Table);

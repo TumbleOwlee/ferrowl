@@ -290,7 +290,9 @@ impl App {
                     let mut guard = memory.write().await;
                     // Read-modify-write: merge the masked field into the existing word so a
                     // sibling register aliasing this address keeps its bits.
-                    let old = guard.read_unchecked(key.clone(), &range).unwrap_or_default();
+                    let old = guard
+                        .read_unchecked(key.clone(), &range)
+                        .unwrap_or_default();
                     let merged = register.merge_write(&old, &raw);
                     guard.write_unchecked(key, &range, &merged)
                 };

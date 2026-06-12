@@ -14,7 +14,7 @@ use ferrowl_ui::{
     types::Border,
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Widget,
+        Validate, ValidateResult, Widget,
     },
 };
 use ferrowl_util::convert::FileType;
@@ -134,13 +134,38 @@ pub struct SetupOutcome {
     pub device: Option<(String, DeviceConfig)>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ConfigPath;
+
+impl Validate for ConfigPath {
+    fn validate(input: &str) -> ValidateResult {
+        let input = input.trim();
+        let path = std::path::Path::new(input);
+
+        if input.is_empty() {
+            ValidateResult::None
+        } else if let Some(_) = FileType::from_path(input) {
+            if path.exists() {
+                match crate::config::load_device(input) {
+                    Ok(_) => ValidateResult::Success,
+                    Err(e) => ValidateResult::Error(format!("Config: {e}")),
+                }
+            } else {
+                ValidateResult::None
+            }
+        } else {
+            ValidateResult::Error("Invalid filetype, TOML or JSON expected.".to_string())
+        }
+    }
+}
+
 #[focusable]
 #[derive(Builder, Focus)]
 pub struct SetupDialog {
     #[focus]
     pub name: Widget<InputFieldState, InputField<String>>,
     #[focus]
-    pub config_path: Widget<InputFieldState, InputField<String>>,
+    pub config_path: Widget<InputFieldState, InputField<ConfigPath>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
     #[focus]
@@ -245,7 +270,7 @@ impl SetupDialog {
         let mut name_field = input("Name", None, "module name", &input_style, true);
         set_input(&mut name_field, name);
         let mut config_path_field = input(
-            "Config Path (optional)",
+            "Config Path [TOML/JSON] (optional)",
             None,
             "device.toml",
             &input_style,
@@ -378,8 +403,8 @@ impl SetupDialog {
         let values = self.values()?;
         let device = if self.mode == DialogMode::New {
             let path = self.config_path.state.input().trim().to_string();
-            if path.is_empty() {
-                Some(("".to_string(), DeviceConfig::default()))
+            if path.is_empty() || !std::path::Path::new(&path).exists() {
+                Some((path, DeviceConfig::default()))
             } else {
                 let device =
                     crate::config::load_device(&path).map_err(|e| format!("Config: {e}"))?;
@@ -666,13 +691,13 @@ fn select_u8(state: &mut SelectionState<U8Choice>, current: Option<u8>) {
     }
 }
 
-fn input(
+fn input<T: Validate + Clone>(
     title: &str,
     title_alignment: Option<HorizontalAlignment>,
     placeholder: &str,
     style: &InputFieldStyle,
     focused: bool,
-) -> Widget<InputFieldState, InputField<String>> {
+) -> Widget<InputFieldState, InputField<T>> {
     Widget {
         state: InputFieldStateBuilder::default()
             .focused(focused)
@@ -722,7 +747,10 @@ fn selection<T: ToLabel + Clone>(
     }
 }
 
-fn set_input(widget: &mut Widget<InputFieldState, InputField<String>>, value: &str) {
+fn set_input<T: Validate + Clone>(
+    widget: &mut Widget<InputFieldState, InputField<T>>,
+    value: &str,
+) {
     widget.state.set_input(value.to_string());
     widget.state.set_cursor(value.chars().count());
 }

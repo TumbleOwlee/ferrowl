@@ -153,7 +153,10 @@ impl Module {
                 .timeout_ms
                 .or(device.timeout_ms)
                 .unwrap_or(DEFAULT_TIMEOUT_MS),
-            delay_ms: spec.delay_ms.or(device.delay_ms).unwrap_or(DEFAULT_DELAY_MS),
+            delay_ms: spec
+                .delay_ms
+                .or(device.delay_ms)
+                .unwrap_or(DEFAULT_DELAY_MS),
             interval_ms: spec
                 .interval_ms
                 .or(device.interval_ms)
@@ -951,7 +954,11 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
             .build()
             .unwrap();
 

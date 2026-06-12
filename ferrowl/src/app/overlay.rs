@@ -267,7 +267,8 @@ impl App {
 
     /// Open the new-module dialog (`:n`/`:new`).
     pub(super) fn enter_new(&mut self) {
-        let dialog = SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS));
+        let dialog =
+            SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS));
         self.overlay = Some(Overlay::Setup(dialog));
         self.focus = Focus::Dialog;
     }
@@ -564,8 +565,10 @@ impl App {
         self.tabs[active].device.interval_ms = values.interval_ms;
         self.tabs[active].device.read_ranges = values.read_ranges.clone();
 
-        let timing =
-            crate::module::Module::resolve_timing(&self.tabs[active].spec, &self.tabs[active].device);
+        let timing = crate::module::Module::resolve_timing(
+            &self.tabs[active].spec,
+            &self.tabs[active].device,
+        );
         if let Err(e) = self.tabs[active]
             .module
             .reconfigure(&values.endpoint, values.role, timing, values.read_ranges)

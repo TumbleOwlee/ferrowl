@@ -8,7 +8,7 @@ use ferrowl_ui::{
     state::{InputFieldState, InputFieldStateBuilder},
     style::{InputFieldStyle, TextStyle},
     types::Border,
-    widgets::{InputField, InputFieldBuilder, Text, TextBuilder, Validate, Widget},
+    widgets::{InputField, InputFieldBuilder, Text, TextBuilder, Validate, ValidateResult, Widget},
 };
 use ratatui::{
     buffer::Buffer,
@@ -125,7 +125,7 @@ impl AddNamedValueDialog {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if let Err(e) = String::validate(self.label.state.input()) {
+        if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
         }
         if self.label.state.input().trim().is_empty() {
