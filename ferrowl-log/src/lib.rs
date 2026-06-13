@@ -199,4 +199,56 @@ mod tests {
         let second = log.take().unwrap();
         assert_eq!(&second.1, "abcde");
     }
+
+    #[test]
+    fn ut_log_fills_to_capacity_then_evicts_in_order() {
+        // LOG_SIZE=4 → holds at most 3 entries.
+        let mut log: Log<10, 4> = Log::init();
+        log.write("msg1______");
+        log.write("msg2______");
+        log.write("msg3______");
+        // At capacity: all three present, oldest first.
+        let full = log.peak_n(10).unwrap();
+        assert_eq!(full.len(), 3);
+        assert!(full[0].1.starts_with("msg1"));
+
+        // One more evicts the oldest (msg1) and keeps the window at 3.
+        log.write("msg4______");
+        let rolled = log.peak_n(10).unwrap();
+        assert_eq!(rolled.len(), 3);
+        assert!(rolled[0].1.starts_with("msg2"));
+        assert!(rolled[2].1.starts_with("msg4"));
+    }
+
+    #[test]
+    fn ut_log_peak_n_zero_returns_none() {
+        let mut log: Log<10, 5> = Log::init();
+        log.write("something_");
+        assert!(log.peak_n(0).is_none());
+        assert!(log.take_n(0).is_none());
+        // The entry is untouched by the zero-count calls.
+        assert!(log.peak().is_some());
+    }
+
+    #[test]
+    fn ut_log_clear_empties_the_buffer() {
+        let mut log: Log<10, 5> = Log::init();
+        log.write("a_________");
+        log.write("b_________");
+        log.clear();
+        assert!(log.peak().is_none());
+        assert!(log.take_n(5).is_none());
+        // Usable again after clear.
+        log.write("c_________");
+        assert!(log.peak().unwrap().1.starts_with("c"));
+    }
+
+    #[test]
+    fn ut_log_records_timestamp_on_write() {
+        let mut log: Log<10, 5> = Log::init();
+        log.write("stamped___");
+        let (ts, _) = log.peak().unwrap();
+        // A real Unix-millis timestamp is far from zero.
+        assert!(ts > 0);
+    }
 }

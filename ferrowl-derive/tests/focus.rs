@@ -119,3 +119,52 @@ fn ut_handle_events_routes_to_focused_widget() {
     assert_eq!(app.second.events, 1);
     assert_eq!(app.third.events, 0);
 }
+
+// A view whose middle widget is focusable only when `second_enabled` is set, exercising the
+// `#[focus(when = ...)]` gating path of the derive macro.
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct GatedApp {
+    #[focus]
+    pub first: Widget,
+    #[focus(when = self.second_enabled)]
+    pub second: Widget,
+    #[focus]
+    pub third: Widget,
+    pub second_enabled: bool,
+}
+
+fn make_gated(second_enabled: bool, start: GatedAppFocus) -> GatedApp {
+    GatedAppBuilder::default()
+        .first(Widget::default())
+        .second(Widget::default())
+        .third(Widget::default())
+        .second_enabled(second_enabled)
+        .focus(start)
+        .build()
+        .expect("GatedApp builder failed")
+}
+
+#[test]
+fn ut_focus_next_skips_disabled_gated_widget() {
+    let mut app = make_gated(false, GatedAppFocus::First);
+    app.focus_next(); // First → (Second disabled, skipped) → Third
+    assert!(app.third.is_focused());
+    assert!(!app.second.is_focused());
+}
+
+#[test]
+fn ut_focus_next_lands_on_enabled_gated_widget() {
+    let mut app = make_gated(true, GatedAppFocus::First);
+    app.focus_next(); // First → Second (enabled)
+    assert!(app.second.is_focused());
+    assert!(!app.third.is_focused());
+}
+
+#[test]
+fn ut_focus_previous_skips_disabled_gated_widget() {
+    let mut app = make_gated(false, GatedAppFocus::Third);
+    app.focus_previous(); // Third → (Second disabled, skipped) → First
+    assert!(app.first.is_focused());
+    assert!(!app.second.is_focused());
+}

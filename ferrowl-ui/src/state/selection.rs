@@ -67,6 +67,9 @@ where
     ValueType: ToLabel + Clone,
 {
     pub fn move_down(&mut self) {
+        if self.values.is_empty() {
+            return;
+        }
         self.selection = if self.selection >= self.values.len() - 1 {
             0
         } else {
@@ -75,6 +78,9 @@ where
     }
 
     pub fn move_up(&mut self) {
+        if self.values.is_empty() {
+            return;
+        }
         self.selection = if self.selection == 0 {
             self.values.len() - 1
         } else {
@@ -119,5 +125,70 @@ where
             }
             _ => EventResult::Unhandled(modifiers, code),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sel(n: usize) -> SelectionState<String> {
+        let values = (0..n).map(|i| i.to_string()).collect::<Vec<_>>();
+        SelectionStateBuilder::default()
+            .values(values)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn move_down_advances_then_wraps() {
+        let mut s = sel(3);
+        assert_eq!(s.selection(), 0);
+        s.move_down();
+        assert_eq!(s.selection(), 1);
+        s.move_down();
+        assert_eq!(s.selection(), 2);
+        s.move_down(); // wraps to top
+        assert_eq!(s.selection(), 0);
+    }
+
+    #[test]
+    fn move_up_wraps_to_bottom() {
+        let mut s = sel(3);
+        s.move_up(); // from 0 wraps to last
+        assert_eq!(s.selection(), 2);
+        s.move_up();
+        assert_eq!(s.selection(), 1);
+    }
+
+    #[test]
+    fn empty_values_navigation_is_noop_without_panic() {
+        let mut s = sel(0);
+        s.move_down();
+        assert_eq!(s.selection(), 0);
+        s.move_up();
+        assert_eq!(s.selection(), 0);
+    }
+
+    #[test]
+    fn move_left_does_not_underflow_at_zero() {
+        let mut s = sel(3);
+        s.move_left();
+        assert_eq!(s.horizontal_offset(), 0);
+        s.move_right();
+        assert_eq!(s.horizontal_offset(), 1);
+        s.move_left();
+        assert_eq!(s.horizontal_offset(), 0);
+    }
+
+    #[test]
+    fn handle_events_dispatches_navigation() {
+        let mut s = sel(3);
+        s.handle_events(KeyModifiers::NONE, KeyCode::Char('j'));
+        assert_eq!(s.selection(), 1);
+        s.handle_events(KeyModifiers::NONE, KeyCode::Up);
+        assert_eq!(s.selection(), 0);
+        let r = s.handle_events(KeyModifiers::NONE, KeyCode::Char('z'));
+        assert!(matches!(r, EventResult::Unhandled(..)));
     }
 }

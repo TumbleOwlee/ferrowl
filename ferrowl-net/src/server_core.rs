@@ -290,7 +290,7 @@ where
             };
             let mut guard = memory.write().await;
             let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
-            match guard.write(key, &Type::Coil, &Range::new(addr as usize, 1), &values) {
+            match guard.write(key, &Type::Coil, &Range::new(addr as usize, values.len()), &values) {
                 true => {
                     if verbose {
                         log.invoke(format!(
@@ -575,5 +575,299 @@ mod tests {
         let quiet = buf.lock().unwrap().clone();
         assert_eq!(quiet.len(), 1);
         assert!(quiet[0].contains("received"));
+    }
+
+    /// Build a memory for slave `1` of the given register `kind`/value `ty` over `[0, len)`,
+    /// optionally seeded with `seed` at addr 0. ReadWrite so both read and write paths work.
+    fn seeded(
+        kind: RegKind,
+        ty: Type,
+        len: usize,
+        seed: &[u16],
+    ) -> Arc<RwLock<Memory<Key<SlaveKind>>>> {
+        let key = Key {
+            id: SlaveKind { slave_id: 1, kind },
+        };
+        let mut mem = Memory::<Key<SlaveKind>>::default();
+        mem.add_ranges(key.clone(), &MemKind::ReadWrite(ty), &[Range::new(0, len)]);
+        if !seed.is_empty() {
+            mem.write(key, &ty, &Range::new(0, seed.len()), seed);
+        }
+        Arc::new(RwLock::new(mem))
+    }
+
+    // ---- WriteMultipleCoils: regression for the hard-coded range length bug ----
+
+    #[tokio::test]
+    async fn ut_write_multiple_coils_persists_every_bit() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 8, &[]);
+        let (log, _) = recording_log();
+        let coils = vec![true, false, true, true, false];
+
+        let resp = handle_request::<SlaveKind, _>(
+            1,
+            Request::WriteMultipleCoils(1, coils.clone().into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        // Regression: the write range length must equal values.len(), not 1. Before the fix
+        // `Memory::write` rejected any multi-coil write (range.length() != values.len()).
+        assert!(matches!(resp, Response::WriteMultipleCoils(1, 5)));
+
+        let read =
+            handle_request::<SlaveKind, _>(1, Request::ReadCoils(1, 5), &mem, &log, false)
+                .await
+                .unwrap();
+        assert!(matches!(read, Response::ReadCoils(v) if v == coils));
+    }
+
+    #[tokio::test]
+    async fn ut_write_multiple_coils_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 8, &[]);
+        let (log, _) = recording_log();
+        // addr 6 + 5 coils overruns the registered [0, 8) region.
+        let err = handle_request::<SlaveKind, _>(
+            1,
+            Request::WriteMultipleCoils(6, vec![true; 5].into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    // ---- Coil / discrete-input reads ----
+
+    #[tokio::test]
+    async fn ut_read_coils_returns_seeded_bits() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 4, &[1, 0, 1, 0]);
+        let (log, _) = recording_log();
+        let resp = handle_request::<SlaveKind, _>(1, Request::ReadCoils(0, 4), &mem, &log, false)
+            .await
+            .unwrap();
+        assert!(matches!(resp, Response::ReadCoils(v) if v == vec![true, false, true, false]));
+    }
+
+    #[tokio::test]
+    async fn ut_read_coils_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 4, &[]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(1, Request::ReadCoils(10, 2), &mem, &log, false)
+            .await
+            .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    #[tokio::test]
+    async fn ut_read_discrete_inputs_returns_seeded_bits() {
+        let mem = seeded(RegKind::DiscreteInput, Type::Coil, 3, &[0, 1, 1]);
+        let (log, _) = recording_log();
+        let resp =
+            handle_request::<SlaveKind, _>(1, Request::ReadDiscreteInputs(0, 3), &mem, &log, false)
+                .await
+                .unwrap();
+        assert!(matches!(resp, Response::ReadDiscreteInputs(v) if v == vec![false, true, true]));
+    }
+
+    #[tokio::test]
+    async fn ut_read_discrete_inputs_unknown_slave_is_illegal_function() {
+        let mem = seeded(RegKind::DiscreteInput, Type::Coil, 3, &[]);
+        let (log, _) = recording_log();
+        let err =
+            handle_request::<SlaveKind, _>(2, Request::ReadDiscreteInputs(0, 3), &mem, &log, false)
+                .await
+                .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    // ---- Register reads ----
+
+    #[tokio::test]
+    async fn ut_read_input_registers_returns_seeded_values() {
+        let mem = seeded(RegKind::InputRegister, Type::Register, 3, &[7, 8, 9]);
+        let (log, _) = recording_log();
+        let resp =
+            handle_request::<SlaveKind, _>(1, Request::ReadInputRegisters(0, 3), &mem, &log, false)
+                .await
+                .unwrap();
+        assert!(matches!(resp, Response::ReadInputRegisters(v) if v == vec![7, 8, 9]));
+    }
+
+    #[tokio::test]
+    async fn ut_read_input_registers_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::InputRegister, Type::Register, 3, &[]);
+        let (log, _) = recording_log();
+        let err =
+            handle_request::<SlaveKind, _>(1, Request::ReadInputRegisters(2, 5), &mem, &log, false)
+                .await
+                .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    #[tokio::test]
+    async fn ut_read_holding_registers_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadHoldingRegisters(3, 4),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    // ---- Single writes ----
+
+    #[tokio::test]
+    async fn ut_write_single_coil_persists() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 4, &[]);
+        let (log, _) = recording_log();
+        let resp =
+            handle_request::<SlaveKind, _>(1, Request::WriteSingleCoil(2, true), &mem, &log, false)
+                .await
+                .unwrap();
+        assert!(matches!(resp, Response::WriteSingleCoil(2, true)));
+        let read =
+            handle_request::<SlaveKind, _>(1, Request::ReadCoils(2, 1), &mem, &log, false)
+                .await
+                .unwrap();
+        assert!(matches!(read, Response::ReadCoils(v) if v == vec![true]));
+    }
+
+    #[tokio::test]
+    async fn ut_write_single_coil_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::Coil, Type::Coil, 4, &[]);
+        let (log, _) = recording_log();
+        let err =
+            handle_request::<SlaveKind, _>(1, Request::WriteSingleCoil(9, true), &mem, &log, false)
+                .await
+                .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    #[tokio::test]
+    async fn ut_write_single_register_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(
+            1,
+            Request::WriteSingleRegister(99, 1),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    // ---- WriteMultipleRegisters ----
+
+    #[tokio::test]
+    async fn ut_write_multiple_registers_persists_all() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 8, &[]);
+        let (log, _) = recording_log();
+        let resp = handle_request::<SlaveKind, _>(
+            1,
+            Request::WriteMultipleRegisters(1, vec![11, 22, 33].into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(resp, Response::WriteMultipleRegisters(1, 3)));
+        let read = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadHoldingRegisters(1, 3),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(read, Response::ReadHoldingRegisters(v) if v == vec![11, 22, 33]));
+    }
+
+    #[tokio::test]
+    async fn ut_write_multiple_registers_out_of_range_is_illegal_function() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(
+            1,
+            Request::WriteMultipleRegisters(3, vec![1, 2, 3].into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+    }
+
+    // ---- ReadWriteMultipleRegisters (reads and writes the same holding region) ----
+
+    #[tokio::test]
+    async fn ut_read_write_multiple_registers_writes_then_returns_read() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 8, &[5, 6, 7, 8]);
+        let (log, _) = recording_log();
+        // Read [0,2), write [2,4) = [77, 88].
+        let resp = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadWriteMultipleRegisters(0, 2, 2, vec![77, 88].into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(resp, Response::ReadWriteMultipleRegisters(v) if v == vec![5, 6]));
+        let read = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadHoldingRegisters(2, 2),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(read, Response::ReadHoldingRegisters(v) if v == vec![77, 88]));
+    }
+
+    #[tokio::test]
+    async fn ut_read_write_multiple_registers_out_of_range_is_illegal_data_address() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[1, 2, 3, 4]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(
+            1,
+            Request::ReadWriteMultipleRegisters(0, 2, 10, vec![1, 2].into()),
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
+    }
+
+    // ---- Unsupported function codes ----
+
+    #[tokio::test]
+    async fn ut_report_server_id_is_illegal_function() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKind, _>(1, Request::ReportServerId, &mem, &log, false)
+            .await
+            .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
     }
 }
