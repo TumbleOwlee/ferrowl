@@ -30,7 +30,7 @@ impl Read for Handle {
 }
 
 impl Write for Handle {
-    fn write(&self, _name: String, _value: String) -> Result<()> {
+    fn write(&self, _name: String, _value: ValueType) -> Result<()> {
         Ok(())
     }
 }
@@ -51,33 +51,25 @@ const TIME_SCRIPT: &str = r#"
 "#;
 
 const STATICS_SCRIPT: &str = r#"
-    assert(C_Statics:GetInt("i") == 42)
-    assert(C_Statics:GetFloat("f") == 1.5)
-    assert(C_Statics:GetString("s") == "hi")
-    assert(C_Statics:GetBool("b") == true)
-    -- Missing/typed-wrong keys error out.
-    assert(not pcall(function() return C_Statics:GetInt("missing") end))
-    assert(not pcall(function() return C_Statics:GetFloat("i") end))
-    assert(not pcall(function() return C_Statics:GetString("i") end))
-    assert(not pcall(function() return C_Statics:GetBool("i") end))
+    assert(C_Statics:Get("i") == 42)
+    assert(C_Statics:Get("f") == 1.5)
+    assert(C_Statics:Get("s") == "hi")
+    assert(C_Statics:Get("b") == true)
+    -- Missing keys error out.
+    assert(not pcall(function() return C_Statics:Get("missing") end))
 "#;
 
 const REGISTER_SCRIPT: &str = r#"
-    assert(C_Register:GetInt("i") == 7)
-    assert(C_Register:GetFloat("f") == 1.5)
-    assert(C_Register:GetString("s") == "hi")
-    assert(C_Register:GetBool("b") == true)
-    C_Register:Set("x", "99")
+    assert(C_Register:Get("i") == 7)
+    assert(C_Register:Get("f") == 1.5)
+    assert(C_Register:Get("s") == "hi")
+    assert(C_Register:Get("b") == true)
+    -- Set accepts any Lua value type.
+    C_Register:Set("x", 99)
+    C_Register:Set("s2", "hello")
+    C_Register:Set("b2", true)
     -- Host read error propagates.
-    assert(not pcall(function() return C_Register:GetInt("err") end))
-    assert(not pcall(function() return C_Register:GetFloat("err") end))
-    assert(not pcall(function() return C_Register:GetString("err") end))
-    assert(not pcall(function() return C_Register:GetBool("err") end))
-    -- Wrong-type reads error.
-    assert(not pcall(function() return C_Register:GetInt("f") end))
-    assert(not pcall(function() return C_Register:GetFloat("i") end))
-    assert(not pcall(function() return C_Register:GetString("i") end))
-    assert(not pcall(function() return C_Register:GetBool("i") end))
+    assert(not pcall(function() return C_Register:Get("err") end))
 "#;
 
 fn build_context() -> Context<String> {
@@ -139,7 +131,7 @@ fn ut_statics_from_constructor() {
     data.insert("k".to_string(), ValueType::Int(1));
     let mut ctx = ContextBuilder::<String>::default()
         .with_module(StaticsModule::from(data))
-        .with_script("s".to_string(), r#"assert(C_Statics:GetInt("k") == 1)"#)
+        .with_script("s".to_string(), r#"assert(C_Statics:Get("k") == 1)"#)
         .build()
         .unwrap();
     ctx.call(&"s".to_string()).unwrap();
