@@ -223,7 +223,7 @@ description = "active power (W)"
 default = 0
 # Lua run every cycle: mirror the setpoint into the power register (server simulation).
 update = """
-C_Register:Set("power", C_Register:GetInt("setpoint"))
+C_Register:Set("power", C_Register:Get("setpoint"))
 """
 
 [definitions.state]
@@ -309,44 +309,15 @@ Return: Time in milliseconds since startup.
 ### Module C_Register
 
 ```
-Method:   C_Register:GetString(name)
+Method:   C_Register:Get(name)
 
 Arguments:
                Name: name
                Type: String
         Description: Name of the register as defined in the configuration.
 
-Return: String value of the register
-```
-```
-Method:   C_Register:GetInt(name)
-
-Arguments:
-               Name: name
-               Type: String
-        Description: Name of the register as defined in the configuration.
-
-Return: Integer value of the register
-```
-```
-Method:   C_Register:GetFloat(name)
-
-Arguments:
-               Name: name
-               Type: String
-        Description: Name of the register as defined in the configuration.
-
-Return: Floating point value of the register
-```
-```
-Method:   C_Register:GetBool(name)
-
-Arguments:
-               Name: name
-               Type: String
-        Description: Name of the register as defined in the configuration.
-
-Return: Boolean value of the register
+Return: Value of the register, typed to match it: a number for integer and
+        floating-point registers, a string for strings and a boolean for booleans.
 ```
 ```
 Method:   C_Register:Set(name, value)

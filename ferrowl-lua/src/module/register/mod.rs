@@ -4,12 +4,12 @@ use crate::module::{Module, ValueType};
 use mlua::{Result, UserData};
 use traits::{Read, Write};
 
-/// Lua module `C_Register`: gives scripts typed read/write access to named
-/// registers through a host-provided [`Read`]/[`Write`] handle.
+/// Lua module `C_Register`: gives scripts read/write access to named registers
+/// through a host-provided [`Read`]/[`Write`] handle.
 ///
-/// Exposed Lua methods: `GetInt`, `GetFloat`, `GetString`, `GetBool`
-/// (each takes a register name and errors on type mismatch) and
-/// `Set(name, value)`.
+/// Exposed Lua methods: `Get(name)` — returns a number for integer/float
+/// registers, a string for strings and a boolean for booleans — and
+/// `Set(name, value)`, which accepts any of those Lua types.
 pub struct Register<T>
 where
     T: Write + Read + 'static,
@@ -41,10 +41,7 @@ where
     T: Write + Read + 'static,
 {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("GetInt", Self::get_int);
-        methods.add_method("GetFloat", Self::get_float);
-        methods.add_method("GetString", Self::get_string);
-        methods.add_method("GetBool", Self::get_bool);
+        methods.add_method("Get", Self::get);
         methods.add_method("Set", Self::set);
     }
 }
@@ -53,39 +50,14 @@ impl<T> Register<T>
 where
     T: Write + Read + 'static,
 {
-    fn get_int(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<i128> {
-        match this.handle.read(name) {
-            Ok(ValueType::Int(v)) => Ok(v),
-            Err(e) => Err(e),
-            Ok(_) => Err(mlua::Error::UserDataTypeMismatch),
-        }
+    /// `Get(name)` — reads the register and returns its value as the matching
+    /// Lua type (number / string / boolean).
+    fn get(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<ValueType> {
+        this.handle.read(name)
     }
 
-    fn get_float(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<f64> {
-        match this.handle.read(name) {
-            Ok(ValueType::Float(v)) => Ok(v),
-            Err(e) => Err(e),
-            Ok(_) => Err(mlua::Error::UserDataTypeMismatch),
-        }
-    }
-
-    fn get_string(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<String> {
-        match this.handle.read(name) {
-            Ok(ValueType::String(v)) => Ok(v),
-            Err(e) => Err(e),
-            Ok(_) => Err(mlua::Error::UserDataTypeMismatch),
-        }
-    }
-
-    fn get_bool(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<bool> {
-        match this.handle.read(name) {
-            Ok(ValueType::Bool(v)) => Ok(v),
-            Err(e) => Err(e),
-            Ok(_) => Err(mlua::Error::UserDataTypeMismatch),
-        }
-    }
-
-    fn set(_: &mlua::Lua, this: &Register<T>, (name, value): (String, String)) -> Result<()> {
+    /// `Set(name, value)` — writes a typed Lua value to the register.
+    fn set(_: &mlua::Lua, this: &Register<T>, (name, value): (String, ValueType)) -> Result<()> {
         this.handle.write(name, value)
     }
 }

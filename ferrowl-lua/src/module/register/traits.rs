@@ -3,9 +3,9 @@
 use crate::module::register::ValueType;
 use mlua::Result;
 
-/// Writes a string value to the register named `name`.
+/// Writes a typed value to the register named `name`.
 pub trait Write {
-    fn write(&self, name: String, value: String) -> Result<()>;
+    fn write(&self, name: String, value: ValueType) -> Result<()>;
 }
 
 /// Reads the current value of the register named `name`.
