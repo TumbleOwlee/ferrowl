@@ -197,3 +197,119 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Default, Debug, PartialEq)]
+    struct Row(String);
+
+    impl TableEntry<1> for Row {
+        fn values(&self) -> [String; 1] {
+            [self.0.clone()]
+        }
+        fn height(&self) -> u16 {
+            1
+        }
+    }
+
+    fn table(n: usize) -> TableState<Row, 1> {
+        let values = (0..n).map(|i| Row(i.to_string())).collect::<Vec<_>>();
+        TableStateBuilder::default().values(values).build().unwrap()
+    }
+
+    fn selected(s: &TableState<Row, 1>) -> Option<usize> {
+        s.table_state().selected()
+    }
+
+    #[test]
+    fn starts_with_first_row_selected() {
+        assert_eq!(selected(&table(3)), Some(0));
+    }
+
+    #[test]
+    fn move_down_advances_and_clamps_at_bottom() {
+        let mut s = table(3);
+        s.move_down();
+        assert_eq!(selected(&s), Some(1));
+        s.move_down();
+        assert_eq!(selected(&s), Some(2));
+        s.move_down(); // already at last row, stays
+        assert_eq!(selected(&s), Some(2));
+    }
+
+    #[test]
+    fn move_up_retreats_and_clamps_at_top() {
+        let mut s = table(3);
+        s.move_to_bottom();
+        assert_eq!(selected(&s), Some(2));
+        s.move_up();
+        assert_eq!(selected(&s), Some(1));
+        s.move_up();
+        assert_eq!(selected(&s), Some(0));
+        s.move_up(); // already at top, stays
+        assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn move_to_top_and_bottom_jump() {
+        let mut s = table(5);
+        s.move_to_bottom();
+        assert_eq!(selected(&s), Some(4));
+        s.move_to_top();
+        assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn empty_table_navigation_selects_none_without_panic() {
+        let mut s = table(0);
+        s.move_down();
+        assert_eq!(selected(&s), None);
+        s.move_up();
+        assert_eq!(selected(&s), None);
+        s.move_to_bottom();
+        assert_eq!(selected(&s), None);
+        s.move_to_top();
+        assert_eq!(selected(&s), None);
+    }
+
+    #[test]
+    fn single_row_navigation_stays_put() {
+        let mut s = table(1);
+        s.move_down();
+        assert_eq!(selected(&s), Some(0));
+        s.move_up();
+        assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn horizontal_scroll_does_not_underflow_at_left_edge() {
+        let mut s = table(3);
+        s.move_left();
+        assert_eq!(s.horizontal_scroll(), 0);
+        // With zero measured widths there is nothing to scroll into.
+        s.move_right();
+        assert_eq!(s.horizontal_scroll(), 0);
+    }
+
+    #[test]
+    fn handle_events_dispatches_vim_keys() {
+        let mut s = table(4);
+        s.handle_events(KeyModifiers::NONE, KeyCode::Char('j'));
+        assert_eq!(selected(&s), Some(1));
+        s.handle_events(KeyModifiers::NONE, KeyCode::Char('G'));
+        assert_eq!(selected(&s), Some(3));
+        s.handle_events(KeyModifiers::NONE, KeyCode::Char('k'));
+        assert_eq!(selected(&s), Some(2));
+        s.handle_events(KeyModifiers::NONE, KeyCode::Char('g'));
+        assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn handle_events_returns_unhandled_for_unknown_key() {
+        let mut s = table(2);
+        let r = s.handle_events(KeyModifiers::NONE, KeyCode::Char('z'));
+        assert!(matches!(r, EventResult::Unhandled(..)));
+    }
+}

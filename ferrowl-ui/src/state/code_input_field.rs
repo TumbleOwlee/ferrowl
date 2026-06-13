@@ -290,4 +290,94 @@ mod tests {
         assert_eq!(s.content(), "hello\nworl");
         assert_eq!(s.cursor_col(), 4);
     }
+
+    #[test]
+    fn up_down_navigate_and_clamp_to_shorter_line() {
+        let mut s = state();
+        s.set_content("longline\nx");
+        // Cursor sits at end of "x" (line 1, col 1). Move up onto "longline".
+        press(&mut s, KeyModifiers::NONE, KeyCode::Up);
+        assert_eq!(s.active_line(), 0);
+        assert_eq!(s.cursor_col(), 1);
+        // Move back down; cursor clamps to the shorter line's length.
+        press(&mut s, KeyModifiers::NONE, KeyCode::Down);
+        assert_eq!(s.active_line(), 1);
+        assert_eq!(s.cursor_col(), 1);
+    }
+
+    #[test]
+    fn up_at_first_line_and_down_at_last_are_noops() {
+        let mut s = state();
+        s.set_content("a\nb");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Down); // already last line
+        assert_eq!(s.active_line(), 1);
+        press(&mut s, KeyModifiers::NONE, KeyCode::Up);
+        assert_eq!(s.active_line(), 0);
+        press(&mut s, KeyModifiers::NONE, KeyCode::Up); // already first line
+        assert_eq!(s.active_line(), 0);
+    }
+
+    #[test]
+    fn left_wraps_to_previous_line_end() {
+        let mut s = state();
+        s.set_content("ab\ncd");
+        // At line 1, col 0 (move there from end).
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left); // col 2 -> 1
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left); // col 1 -> 0
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left); // wrap to prev line end
+        assert_eq!(s.active_line(), 0);
+        assert_eq!(s.cursor_col(), 2);
+    }
+
+    #[test]
+    fn right_wraps_to_next_line_start() {
+        let mut s = state();
+        s.set_content("ab\ncd");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Up); // line 0, clamp col to 2
+        // cursor is at col 2 (end of "ab"); Right wraps to next line start.
+        press(&mut s, KeyModifiers::NONE, KeyCode::Right);
+        assert_eq!(s.active_line(), 1);
+        assert_eq!(s.cursor_col(), 0);
+    }
+
+    #[test]
+    fn enter_splits_line_at_cursor() {
+        let mut s = state();
+        s.set_content("abcd");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left);
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left); // cursor at col 2
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "ab\ncd");
+        assert_eq!(s.active_line(), 1);
+        assert_eq!(s.cursor_col(), 0);
+    }
+
+    #[test]
+    fn multibyte_chars_count_by_character() {
+        let mut s = state();
+        type_char(&mut s, 'é');
+        type_char(&mut s, '语');
+        type_char(&mut s, 'x');
+        assert_eq!(s.content(), "é语x");
+        assert_eq!(s.cursor_col(), 3);
+        backspace(&mut s);
+        assert_eq!(s.content(), "é语");
+        assert_eq!(s.cursor_col(), 2);
+        // Insert between the two multi-byte chars.
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left);
+        type_char(&mut s, 'Z');
+        assert_eq!(s.content(), "éZ语");
+        assert_eq!(s.cursor_col(), 2);
+    }
+
+    #[test]
+    fn disabled_state_ignores_keys() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .disabled(true)
+            .build()
+            .unwrap();
+        let r = s.handle_events(KeyModifiers::NONE, KeyCode::Char('a'));
+        assert!(matches!(r, EventResult::Unhandled(..)));
+        assert_eq!(s.content(), "");
+    }
 }
