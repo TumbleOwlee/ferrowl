@@ -135,4 +135,19 @@ mod tests {
         assert_eq!(range.range.start, 100);
         assert_eq!(range.range.end, 120);
     }
+
+    #[test]
+    fn ut_kind_get_type() {
+        assert_eq!(Kind::Read(Type::Coil).get_type(), Type::Coil);
+        assert_eq!(Kind::Write(Type::Register).get_type(), Type::Register);
+        assert_eq!(Kind::ReadWrite(Type::Coil).get_type(), Type::Coil);
+    }
+
+    #[test]
+    fn ut_value_range_accessors() {
+        let values: Vec<u16> = vec![7, 8, 9];
+        let range = ValueRange::new(50, &values);
+        assert_eq!(range.get_values(), &[7, 8, 9]);
+        assert_eq!(range.get_range(), crate::range::Range::new(50, 3));
+    }
 }

@@ -670,6 +670,93 @@ mod tests {
         assert_eq!(reg(u8_be()).write_mask(), vec![0x00FFu16]);
     }
 
+    // --- Wider integer variants, both endians (decode/encode/mask) ---
+
+    #[test]
+    fn ut_roundtrip_wide_ints() {
+        let e = [Endian::Big, Endian::Little];
+        for endian in e {
+            let u64f = Format::U64((endian.clone(), res(), bf()));
+            let u128f = Format::U128((endian.clone(), res(), bf()));
+            let i16f = Format::I16((endian.clone(), res(), bf()));
+            let i64f = Format::I64((endian.clone(), res(), bf()));
+            let i128f = Format::I128((endian.clone(), res(), bf()));
+
+            // Display scales through f64, so values stay within f64's exact
+            // integer range (< 2^53) to survive the round-trip string compare.
+            for (f, s) in [
+                (u64f, "1234567890123"),
+                (u128f, "123456789012345"),
+                (i16f, "-12345"),
+                (i64f, "-1234567890123"),
+                (i128f, "-123456789012345"),
+            ] {
+                let r = reg(f);
+                let words = r.encode(s).unwrap();
+                assert_eq!(r.decode(&words).unwrap().to_string(), s);
+            }
+        }
+    }
+
+    #[test]
+    fn ut_roundtrip_floats_little_endian() {
+        let f32le = reg(Format::F32((Endian::Little, res())));
+        let words = f32le.encode("1.5").unwrap();
+        match f32le.decode(&words).unwrap() {
+            Value::F32((f, _)) => assert!((f - 1.5f32).abs() < 1e-6),
+            _ => panic!("Wrong variant"),
+        }
+
+        let f64le = reg(Format::F64((Endian::Little, res())));
+        let words = f64le.encode("2.25").unwrap();
+        match f64le.decode(&words).unwrap() {
+            Value::F64((f, _)) => assert!((f - 2.25f64).abs() < 1e-10),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_encode_f64_hex() {
+        let bits = 2.5f64.to_bits();
+        let hex_str = format!("0x{:016X}", bits);
+        let r = reg(f64_be());
+        let words = r.encode(&hex_str).unwrap();
+        match r.decode(&words).unwrap() {
+            Value::F64((f, _)) => assert!((f - 2.5f64).abs() < 1e-10),
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ut_encode_i8_little_endian() {
+        // I8 little-endian places the byte in the high byte of the word.
+        let r = reg(Format::I8((Endian::Little, res(), bf())));
+        assert_eq!(r.encode("-1").unwrap(), vec![(-1i8 as u16) << 8]);
+    }
+
+    #[test]
+    fn ut_mask_words_all_widths() {
+        // U8 little-endian mask sits in the high byte.
+        assert_eq!(reg(u8_le()).write_mask(), vec![0xFF00u16]);
+        // U64 / U128 masks span multiple words.
+        assert_eq!(
+            reg(Format::U64((Endian::Big, res(), BitField { mask: u64::MAX as u128 })))
+                .write_mask(),
+            vec![0xFFFFu16; 4]
+        );
+        assert_eq!(
+            reg(Format::U128((Endian::Big, res(), BitField { mask: u128::MAX })))
+                .write_mask(),
+            vec![0xFFFFu16; 8]
+        );
+        // Float / ASCII masks are all-ones across their width.
+        assert_eq!(reg(f32_be()).write_mask(), vec![0xFFFFu16; 2]);
+        assert_eq!(
+            reg(Format::Ascii((Alignment::Left, Width(3)))).write_mask(),
+            vec![0xFFFFu16; 3]
+        );
+    }
+
     #[test]
     fn ut_merge_write_preserves_sibling_bits() {
         // Two U16 regs aliasing one address: low byte and high byte.

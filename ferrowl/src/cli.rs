@@ -238,4 +238,76 @@ mod tests {
     fn ut_missing_port_errors() {
         assert!(parse_module_spec("name=m,device=d.toml,transport=tcp").is_err());
     }
+
+    #[test]
+    fn ut_module_specs_combines_all_sources() {
+        use ferrowl_util::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![create_module_spec_by_device("S".into(), "s.toml".into())],
+        };
+        let path = std::env::temp_dir().join("ferrowl_cli_session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec!["name=m,device=d.toml,port=1".into()],
+            sessions: vec![path],
+            devices: vec!["dev.toml".into()],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs.len(), 3); // session + module + device
+    }
+
+    #[test]
+    fn ut_module_specs_session_load_error() {
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec!["/no/such/ferrowl.toml".into()],
+            devices: vec![],
+            demo: false,
+        };
+        assert!(args.module_specs().is_err());
+    }
+
+    #[test]
+    fn ut_parse_empty_parts_and_error_paths() {
+        // Empty comma segment is skipped.
+        assert_eq!(
+            parse_module_spec("name=m,,device=d.toml,port=1").unwrap().name,
+            "m"
+        );
+        // Invalid role / transport.
+        assert!(parse_module_spec("name=m,device=d,port=1,role=bogus").is_err());
+        assert!(parse_module_spec("name=m,device=d,transport=usb").is_err());
+        // Segment without '='.
+        assert!(parse_module_spec("name=m,oops,device=d,port=1").is_err());
+        // RTU missing path; invalid numeric option; invalid port.
+        assert!(parse_module_spec("name=m,device=d,transport=rtu").is_err());
+        assert!(
+            parse_module_spec("name=m,device=d,transport=rtu,path=/x,data_bits=foo").is_err()
+        );
+        assert!(parse_module_spec("name=m,device=d,port=notanum").is_err());
+    }
+
+    #[test]
+    fn ut_parse_rtu_full_options() {
+        let spec = parse_module_spec(
+            "name=m,device=d,transport=rtu,path=/dev/x,baud_rate=4800,parity=even,data_bits=7,stop_bits=2",
+        )
+        .unwrap();
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::Rtu {
+                path: "/dev/x".into(),
+                baud_rate: 4800,
+                parity: Some("even".into()),
+                data_bits: Some(7),
+                stop_bits: Some(2),
+            }
+        );
+    }
 }

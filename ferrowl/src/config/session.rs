@@ -165,4 +165,52 @@ mod tests {
             assert_eq!(original, back);
         }
     }
+
+    #[test]
+    fn ut_role_display_and_default() {
+        assert_eq!(Role::Client.to_string(), "Client");
+        assert_eq!(Role::Server.to_string(), "Server");
+        assert_eq!(Role::default(), Role::Server);
+    }
+
+    #[test]
+    fn ut_endpoint_display() {
+        assert_eq!(
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 502
+            }
+            .to_string(),
+            "127.0.0.1:502"
+        );
+        // RTU with all optional fields present.
+        assert_eq!(
+            Endpoint::Rtu {
+                path: "/dev/ttyUSB0".into(),
+                baud_rate: 9600,
+                parity: Some("even".into()),
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            }
+            .to_string(),
+            "/dev/ttyUSB0,9600,even,8,1"
+        );
+        // RTU with the optional fields unset renders dashes.
+        assert_eq!(
+            Endpoint::Rtu {
+                path: "/dev/x".into(),
+                baud_rate: 19200,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            }
+            .to_string(),
+            "/dev/x,19200,-,-,-"
+        );
+    }
+
+    #[test]
+    fn ut_default_baud() {
+        assert_eq!(default_baud(), 19200);
+    }
 }

@@ -124,4 +124,28 @@ mod tests {
         let ms: u64 = 19782 * 86400 * 1000;
         assert_eq!(format_timestamp(ms), "2024-02-29 00:00:00.000");
     }
+
+    #[test]
+    fn ut_log_entry_and_header_traits() {
+        let e = LogEntry {
+            timestamp: "ts".into(),
+            message: "hello".into(),
+        };
+        assert_eq!(e.values(), ["ts".to_string(), "hello".to_string()]);
+        assert_eq!(e.height(), 1);
+        assert_eq!(
+            LogHeader::header(),
+            ["Timestamp".to_string(), "Message".to_string()]
+        );
+        let w = LogHeader::widths();
+        assert_eq!(w[0].min, 23);
+        assert_eq!(w[0].max, 23);
+    }
+
+    #[test]
+    fn ut_new_log_view_is_empty_and_unfocused() {
+        let view = new_log_view();
+        assert!(!view.state.focused());
+        assert!(view.state.values().is_empty());
+    }
 }

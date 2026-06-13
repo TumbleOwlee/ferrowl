@@ -67,3 +67,34 @@ impl Display for Access {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Access, Address, Kind};
+
+    #[test]
+    fn ut_kind_display() {
+        assert_eq!(Kind::Coil.to_string(), "Coil");
+        assert_eq!(Kind::DiscreteInput.to_string(), "Discrete Input");
+        assert_eq!(Kind::HoldingRegister.to_string(), "Holding Register");
+        assert_eq!(Kind::InputRegister.to_string(), "Input Register");
+    }
+
+    #[test]
+    fn ut_kind_default() {
+        assert_eq!(Kind::default(), Kind::HoldingRegister);
+    }
+
+    #[test]
+    fn ut_address_display() {
+        assert_eq!(Address::Fixed(42).to_string(), "42");
+        assert_eq!(Address::Virtual.to_string(), "virtual");
+    }
+
+    #[test]
+    fn ut_access_display() {
+        assert_eq!(Access::ReadOnly.to_string(), "ReadOnly");
+        assert_eq!(Access::WriteOnly.to_string(), "WriteOnly");
+        assert_eq!(Access::ReadWrite.to_string(), "ReadWrite");
+    }
+}

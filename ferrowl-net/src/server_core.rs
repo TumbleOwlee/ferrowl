@@ -870,4 +870,123 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalFunction);
     }
+
+    // ---- Verbose logging: every arm's success/failure log branch ----
+
+    #[tokio::test]
+    async fn ut_verbose_logs_success_for_every_request() {
+        macro_rules! ok {
+            ($mem:expr, $req:expr) => {{
+                let mem = $mem;
+                let (log, buf) = recording_log();
+                handle_request::<SlaveKind, _>(1, $req, &mem, &log, true)
+                    .await
+                    .unwrap();
+                assert!(
+                    buf.lock().unwrap().iter().any(|l| l.contains("successful")),
+                    "missing success log line"
+                );
+            }};
+        }
+        ok!(
+            seeded(RegKind::Coil, Type::Coil, 8, &[1, 0, 1, 0, 1, 0, 1, 0]),
+            Request::ReadCoils(0, 4)
+        );
+        ok!(
+            seeded(RegKind::Coil, Type::Coil, 8, &[]),
+            Request::WriteSingleCoil(0, true)
+        );
+        ok!(
+            seeded(RegKind::Coil, Type::Coil, 8, &[]),
+            Request::WriteMultipleCoils(0, vec![true, false, true].into())
+        );
+        ok!(
+            seeded(RegKind::DiscreteInput, Type::Coil, 4, &[1, 1, 1, 1]),
+            Request::ReadDiscreteInputs(0, 4)
+        );
+        ok!(
+            seeded(RegKind::InputRegister, Type::Register, 4, &[1, 2, 3, 4]),
+            Request::ReadInputRegisters(0, 4)
+        );
+        ok!(
+            seeded(RegKind::HoldingRegister, Type::Register, 8, &[]),
+            Request::WriteSingleRegister(0, 9)
+        );
+        ok!(
+            seeded(RegKind::HoldingRegister, Type::Register, 8, &[]),
+            Request::WriteMultipleRegisters(0, vec![1, 2, 3].into())
+        );
+        ok!(
+            seeded(RegKind::HoldingRegister, Type::Register, 8, &[5, 6, 7, 8]),
+            Request::ReadWriteMultipleRegisters(0, 2, 2, vec![7, 8].into())
+        );
+    }
+
+    #[tokio::test]
+    async fn ut_verbose_logs_failure_for_every_request() {
+        macro_rules! fail {
+            ($mem:expr, $req:expr) => {{
+                let mem = $mem;
+                let (log, buf) = recording_log();
+                let _ = handle_request::<SlaveKind, _>(1, $req, &mem, &log, true).await;
+                assert!(
+                    buf.lock().unwrap().iter().any(|l| l.contains("failed")),
+                    "missing failure log line"
+                );
+            }};
+        }
+        fail!(
+            seeded(RegKind::Coil, Type::Coil, 4, &[]),
+            Request::ReadCoils(10, 2)
+        );
+        fail!(
+            seeded(RegKind::Coil, Type::Coil, 4, &[]),
+            Request::WriteSingleCoil(9, true)
+        );
+        fail!(
+            seeded(RegKind::Coil, Type::Coil, 4, &[]),
+            Request::WriteMultipleCoils(6, vec![true; 5].into())
+        );
+        fail!(
+            seeded(RegKind::DiscreteInput, Type::Coil, 4, &[]),
+            Request::ReadDiscreteInputs(10, 2)
+        );
+        fail!(
+            seeded(RegKind::InputRegister, Type::Register, 4, &[]),
+            Request::ReadInputRegisters(10, 2)
+        );
+        fail!(
+            seeded(RegKind::HoldingRegister, Type::Register, 4, &[]),
+            Request::ReadHoldingRegisters(10, 2)
+        );
+        fail!(
+            seeded(RegKind::HoldingRegister, Type::Register, 4, &[]),
+            Request::WriteSingleRegister(99, 1)
+        );
+        fail!(
+            seeded(RegKind::HoldingRegister, Type::Register, 4, &[]),
+            Request::WriteMultipleRegisters(3, vec![1, 2, 3].into())
+        );
+        // Write address out of range -> writable check fails (verbose failure branch).
+        fail!(
+            seeded(RegKind::HoldingRegister, Type::Register, 4, &[1, 2, 3, 4]),
+            Request::ReadWriteMultipleRegisters(0, 2, 10, vec![1, 2].into())
+        );
+    }
+
+    #[tokio::test]
+    async fn ut_unsupported_function_codes_are_illegal() {
+        let mem = seeded(RegKind::HoldingRegister, Type::Register, 4, &[]);
+        let (log, _) = recording_log();
+        for req in [
+            Request::MaskWriteRegister(0, 0, 0),
+            Request::ReadDeviceIdentification(tokio_modbus::prelude::ReadCode::Basic, 0),
+            Request::Custom(0x65, vec![].into()),
+        ] {
+            let err = handle_request::<SlaveKind, _>(1, req, &mem, &log, false)
+                .await
+                .unwrap_err();
+            assert_eq!(err, ExceptionCode::IllegalFunction);
+        }
+    }
 }

@@ -199,6 +199,85 @@ mod tests {
     }
 
     #[test]
+    fn ut_convert_json_to_toml_preserves_data() {
+        // Exercises the JSON-source read path and the TOML-destination write path.
+        let src = tmp_path("json");
+        let dst = tmp_path("toml");
+        let value = Sample {
+            a: 11,
+            b: "y".into(),
+        };
+        Converter::save(&value, &src, FileType::Json).unwrap();
+        Converter::convert::<Sample>(&src, FileType::Json, &dst, FileType::Toml).unwrap();
+        let loaded: Sample = Converter::load(&dst, FileType::Toml).unwrap();
+        assert_eq!(loaded, value);
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+    }
+
+    #[test]
+    fn ut_convert_json_source_open_error() {
+        let dst = tmp_path("toml");
+        let r = Converter::convert::<Sample>(
+            "/no/such/ferrowl/src.json",
+            FileType::Json,
+            &dst,
+            FileType::Toml,
+        );
+        assert!(matches!(r, Err(Error::Serialize(_))));
+    }
+
+    #[test]
+    fn ut_convert_json_source_malformed_error() {
+        let src = tmp_path("json");
+        std::fs::write(&src, "{ not valid json ").unwrap();
+        let dst = tmp_path("toml");
+        let r = Converter::convert::<Sample>(&src, FileType::Json, &dst, FileType::Toml);
+        assert!(matches!(r, Err(Error::Serialize(_))));
+        let _ = std::fs::remove_file(&src);
+    }
+
+    #[test]
+    fn ut_convert_toml_dest_create_error() {
+        // Valid source, but the destination directory does not exist -> create fails.
+        let src = tmp_path("toml");
+        Converter::save(&Sample { a: 1, b: "z".into() }, &src, FileType::Toml).unwrap();
+        let r = Converter::convert::<Sample>(
+            &src,
+            FileType::Toml,
+            "/no/such/ferrowl/dir/out.toml",
+            FileType::Toml,
+        );
+        assert!(matches!(r, Err(Error::Serialize(_))));
+        let _ = std::fs::remove_file(&src);
+    }
+
+    #[test]
+    fn ut_convert_json_dest_create_error() {
+        let src = tmp_path("toml");
+        Converter::save(&Sample { a: 1, b: "z".into() }, &src, FileType::Toml).unwrap();
+        let r = Converter::convert::<Sample>(
+            &src,
+            FileType::Toml,
+            "/no/such/ferrowl/dir/out.json",
+            FileType::Json,
+        );
+        assert!(matches!(r, Err(Error::Serialize(_))));
+        let _ = std::fs::remove_file(&src);
+    }
+
+    #[test]
+    fn ut_save_create_error() {
+        // Destination directory missing -> File::create fails in save().
+        let r = Converter::save(
+            &Sample { a: 1, b: "z".into() },
+            "/no/such/ferrowl/dir/out.toml",
+            FileType::Toml,
+        );
+        assert!(matches!(r, Err(Error::Serialize(_))));
+    }
+
+    #[test]
     fn ut_load_missing_file_errors() {
         let r = Converter::load::<Sample>("/no/such/ferrowl/file.toml", FileType::Toml);
         assert!(matches!(r, Err(Error::Deserialize(_))));
