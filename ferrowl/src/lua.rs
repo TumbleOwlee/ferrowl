@@ -1,5 +1,5 @@
 //! Per-module Lua simulation: a `RegisterBridge` exposes the module's `Memory` to Lua as the
-//! `C_Register` global (`Get*`/`Set(name, value)`), and `run_sim` drives every register's
+//! `C_Register` global (`Get(name)`/`Set(name, value)`), and `run_sim` drives every register's
 //! `update` script on a dedicated thread (because `mlua::Lua` is `!Send`).
 
 use std::collections::HashMap;
@@ -80,7 +80,15 @@ impl Read for RegisterBridge {
 }
 
 impl Write for RegisterBridge {
-    fn write(&self, name: String, value: String) -> Result<()> {
+    fn write(&self, name: String, value: ValueType) -> Result<()> {
+        // The register codec (`encode`/`str_to_value`) is string-based and shared with the
+        // `:set` user-input path, so render the typed value to its canonical string once here.
+        let value = match value {
+            ValueType::Int(v) => v.to_string(),
+            ValueType::Float(v) => v.to_string(),
+            ValueType::String(s) => s,
+            ValueType::Bool(b) => (b as u8).to_string(),
+        };
         let register = self.register(&name)?;
         let addr = match register.address() {
             Address::Fixed(addr) => *addr,
@@ -304,7 +312,7 @@ mod tests {
         // Reading before any write errors; after a write the value round-trips via the store.
         assert!(bridge.read("calc".to_string()).is_err());
         bridge
-            .write("calc".to_string(), "7".to_string())
+            .write("calc".to_string(), ValueType::Int(7))
             .expect("virtual write");
         match bridge.read("calc".to_string()).expect("virtual read") {
             ValueType::Int(v) => assert_eq!(v, 7),
@@ -323,7 +331,7 @@ mod tests {
     fn ut_bridge_write_then_read() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
         bridge
-            .write("setpoint".to_string(), "100".to_string())
+            .write("setpoint".to_string(), ValueType::Int(100))
             .expect("write");
         match bridge.read("setpoint".to_string()).expect("read") {
             ValueType::Int(v) => assert_eq!(v, 100),
@@ -335,7 +343,7 @@ mod tests {
     fn ut_bridge_unknown_register_errors() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
         assert!(bridge.read("nope".to_string()).is_err());
-        assert!(bridge.write("nope".to_string(), "1".to_string()).is_err());
+        assert!(bridge.write("nope".to_string(), ValueType::Int(1)).is_err());
     }
 
     // Mirrors `run_sim`'s body once: a `power` update copying `setpoint` reflects after a cycle.
@@ -344,7 +352,7 @@ mod tests {
         let memory = evse_memory();
         let bridge = RegisterBridge::new(memory.clone(), vstore(), evse_registers());
         bridge
-            .write("setpoint".to_string(), "42".to_string())
+            .write("setpoint".to_string(), ValueType::Int(42))
             .expect("seed setpoint");
 
         let mut context = ContextBuilder::<String>::default()
@@ -353,7 +361,7 @@ mod tests {
             .with_module(TimeModule::default())
             .with_script(
                 "power".to_string(),
-                "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))",
+                "C_Register:Set(\"power\", C_Register:Get(\"setpoint\"))",
             )
             .build()
             .expect("build context");
