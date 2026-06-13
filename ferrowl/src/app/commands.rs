@@ -59,7 +59,7 @@ impl App {
                 } else {
                     return false;
                 };
-                self.log_active(format!("{} {}", self.active, msg)).await;
+                self.log_active(format!("{}", msg)).await;
             }
             Cmd::Set { register, value } => {
                 if register.is_empty() || value.is_empty() {
