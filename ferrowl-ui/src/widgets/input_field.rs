@@ -202,7 +202,11 @@ where
 
         let input = state.input();
         let mut text = if input.is_empty() {
-            state.placeholder().clone().unwrap_or_default()
+            state
+                .autofill()
+                .clone()
+                .or(state.placeholder().clone())
+                .unwrap_or("Enter value..".to_string())
         } else {
             input.clone()
         };

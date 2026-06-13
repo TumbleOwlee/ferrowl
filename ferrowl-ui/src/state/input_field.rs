@@ -30,6 +30,9 @@ pub struct InputFieldState {
     #[getset(get = "pub")]
     #[builder(default = "None")]
     placeholder: Option<String>,
+    #[getset(get = "pub")]
+    #[builder(default = "None")]
+    autofill: Option<String>,
 }
 
 impl GetValue for InputFieldState {
@@ -68,11 +71,17 @@ impl HandleEvents for InputFieldState {
             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                 if !self.disabled
                     && self.input.is_empty()
-                    && let Some(placeholder) = &self.placeholder
+                    && let Some(autofill) = &self.autofill()
                 {
-                    self.input = placeholder.clone();
+                    self.input = autofill.clone();
                     self.cursor = self.input.chars().count();
                 }
+                EventResult::Consumed
+            }
+            // Clear the input line
+            (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+                self.input.clear();
+                self.cursor = 0;
                 EventResult::Consumed
             }
             // Accept SHIFT so capital letters and shifted symbols are inserted; CTRL/ALT
