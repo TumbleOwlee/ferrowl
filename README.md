@@ -117,6 +117,8 @@ If started without any additional parameters, the module setup dialog is shown. 
 | `z` | Toggle compact table mode |
 | `gt \| ]` | Switch to next tab |
 | `gT \| [` | Switch to previous tab |
+| `ctrl + d` | Clear input field |
+| `ctrl + f` | Accept autofill in input field |
 
 ## Impressions
 
