@@ -228,4 +228,88 @@ mod tests {
         let expected = format!("0x{:016X}", bits);
         assert_eq!(Value::F64((1.5f64, res())).as_hex_str(), expected);
     }
+
+    #[test]
+    fn ut_unscaled_value_display_all_variants() {
+        use super::UnscaledValue;
+        assert_eq!(UnscaledValue::U8(8).to_string(), "8");
+        assert_eq!(UnscaledValue::U16(16).to_string(), "16");
+        assert_eq!(UnscaledValue::U32(32).to_string(), "32");
+        assert_eq!(UnscaledValue::U64(64).to_string(), "64");
+        assert_eq!(UnscaledValue::U128(128).to_string(), "128");
+        assert_eq!(UnscaledValue::I8(-8).to_string(), "-8");
+        assert_eq!(UnscaledValue::I16(-16).to_string(), "-16");
+        assert_eq!(UnscaledValue::I32(-32).to_string(), "-32");
+        assert_eq!(UnscaledValue::I64(-64).to_string(), "-64");
+        assert_eq!(UnscaledValue::I128(-128).to_string(), "-128");
+        assert_eq!(UnscaledValue::F32(1.5).to_string(), "1.5");
+        assert_eq!(UnscaledValue::F64(2.5).to_string(), "2.5");
+        assert_eq!(UnscaledValue::Ascii("hi".to_string()).to_string(), "hi");
+    }
+
+    #[test]
+    fn ut_value_display_all_numeric_variants() {
+        // Resolution 1.0 keeps the scaled value equal to the raw value.
+        assert_eq!(Value::U32((32, res())).to_string(), "32");
+        assert_eq!(Value::U64((64, res())).to_string(), "64");
+        assert_eq!(Value::U128((128, res())).to_string(), "128");
+        assert_eq!(Value::I64((-64, res())).to_string(), "-64");
+        assert_eq!(Value::I128((-128, res())).to_string(), "-128");
+        assert_eq!(Value::F64((2.5, res())).to_string(), "2.5");
+    }
+
+    #[test]
+    fn ut_value_unscaled_all_variants() {
+        use super::UnscaledValue;
+        assert!(matches!(Value::U8((8, res())).unscaled(), UnscaledValue::U8(8)));
+        assert!(matches!(
+            Value::U32((32, res())).unscaled(),
+            UnscaledValue::U32(32)
+        ));
+        assert!(matches!(
+            Value::U64((64, res())).unscaled(),
+            UnscaledValue::U64(64)
+        ));
+        assert!(matches!(
+            Value::U128((128, res())).unscaled(),
+            UnscaledValue::U128(128)
+        ));
+        assert!(matches!(
+            Value::I8((-8, res())).unscaled(),
+            UnscaledValue::I8(-8)
+        ));
+        assert!(matches!(
+            Value::I16((-16, res())).unscaled(),
+            UnscaledValue::I16(-16)
+        ));
+        assert!(matches!(
+            Value::I64((-64, res())).unscaled(),
+            UnscaledValue::I64(-64)
+        ));
+        assert!(matches!(
+            Value::I128((-128, res())).unscaled(),
+            UnscaledValue::I128(-128)
+        ));
+        assert!(matches!(
+            Value::F64((2.5, res())).unscaled(),
+            UnscaledValue::F64(_)
+        ));
+    }
+
+    #[test]
+    fn ut_value_as_hex_str_remaining_variants() {
+        assert_eq!(
+            Value::U128((0x1, res())).as_hex_str(),
+            "0x00000000000000000000000000000001"
+        );
+        assert_eq!(Value::I32((-1i32, res())).as_hex_str(), "0xFFFFFFFF");
+        assert_eq!(
+            Value::I64((-1i64, res())).as_hex_str(),
+            "0xFFFFFFFFFFFFFFFF"
+        );
+        assert_eq!(
+            Value::I128((-1i128, res())).as_hex_str(),
+            "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+        );
+    }
 }

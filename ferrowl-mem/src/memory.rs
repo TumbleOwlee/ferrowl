@@ -394,4 +394,115 @@ mod tests {
 
         assert!(!memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
     }
+
+    #[test]
+    fn ut_memory_add_ranges_empty() {
+        let mut memory: Memory<u8> = Memory::default();
+        // Vacant key with no ranges: nothing to insert, still succeeds.
+        assert!(memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[]));
+        assert!(memory.slices.get(&1u8).is_none());
+    }
+
+    #[test]
+    fn ut_memory_widen_read_then_write() {
+        // Read cell + overlapping Write of same type -> ReadWrite.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Read(Type::Register), &[Range::new(0, 5)]);
+        assert!(memory.add_ranges(1u8, &Kind::Write(Type::Register), &[Range::new(0, 5)]));
+        assert!(memory.readable(&1u8, &Type::Register, &Range::new(0, 5)));
+        assert!(memory.writable(&1u8, &Type::Register, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_widen_write_then_read() {
+        // Write cell + overlapping Read of same type -> ReadWrite.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Write(Type::Coil), &[Range::new(0, 5)]);
+        assert!(memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[Range::new(0, 5)]));
+        assert!(memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
+        assert!(memory.writable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_widen_write_then_write_noop() {
+        // Write cell + overlapping Write of same type -> unchanged, still write-only.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Write(Type::Coil), &[Range::new(0, 5)]);
+        assert!(memory.add_ranges(1u8, &Kind::Write(Type::Coil), &[Range::new(0, 5)]));
+        assert!(!memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
+        assert!(memory.writable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_widen_readwrite_then_readwrite_noop() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
+        assert!(memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]));
+        assert!(memory.readable(&1u8, &Type::Coil, &Range::new(0, 5)));
+        assert!(memory.writable(&1u8, &Type::Coil, &Range::new(0, 5)));
+    }
+
+    #[test]
+    fn ut_memory_widen_incompatible_read_cell() {
+        // Read cell + overlapping incompatible access (wrong type) -> false.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[Range::new(0, 5)]);
+        assert!(!memory.add_ranges(1u8, &Kind::Write(Type::Register), &[Range::new(0, 5)]));
+    }
+
+    #[test]
+    fn ut_memory_widen_incompatible_write_cell() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Write(Type::Coil), &[Range::new(0, 5)]);
+        assert!(!memory.add_ranges(1u8, &Kind::Read(Type::Register), &[Range::new(0, 5)]));
+    }
+
+    #[test]
+    fn ut_memory_widen_incompatible_readwrite_cell() {
+        // ReadWrite cell + non-ReadWrite overlapping access -> false.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Coil), &[Range::new(0, 5)]);
+        assert!(!memory.add_ranges(1u8, &Kind::Read(Type::Coil), &[Range::new(0, 5)]));
+    }
+
+    #[test]
+    fn ut_memory_write_read_unchecked() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::Read(Type::Register), &[Range::new(0, 5)]);
+
+        // Checked write fails on read-only cells; unchecked forces it.
+        let values: Vec<u16> = vec![5, 6, 7, 8, 9];
+        assert!(!memory.write(1u8, &Type::Register, &Range::new(0, 5), &values));
+        assert!(memory.write_unchecked(1u8, &Range::new(0, 5), &values));
+        assert_eq!(memory.read_unchecked(1u8, &Range::new(0, 5)), Some(values));
+
+        // Length mismatch and unknown key both fail / return None.
+        assert!(!memory.write_unchecked(1u8, &Range::new(0, 5), &[1, 2]));
+        assert!(!memory.write_unchecked(9u8, &Range::new(0, 5), &[1, 2, 3, 4, 5]));
+        assert!(memory.read_unchecked(9u8, &Range::new(0, 5)).is_none());
+    }
+
+    #[test]
+    fn ut_memory_walk_multiple_slices() {
+        // Two adjacent but non-overlapping slices: a read/write spanning both
+        // walks each slice in turn.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Register), &[Range::new(0, 5)]);
+        memory.add_ranges(1u8, &Kind::ReadWrite(Type::Register), &[Range::new(5, 5)]);
+        assert_eq!(memory.slices.get(&1u8).unwrap().len(), 2);
+
+        let values: Vec<u16> = (1..=10).collect();
+        assert!(memory.write(1u8, &Type::Register, &Range::new(0, 10), &values));
+        assert_eq!(
+            memory.read(1u8, &Type::Register, &Range::new(0, 10)),
+            Some(values)
+        );
+
+        // A range living only in the second slice: the first slice is skipped.
+        assert!(memory.write(1u8, &Type::Register, &Range::new(7, 3), &[70, 80, 90]));
+        assert_eq!(
+            memory.read(1u8, &Type::Register, &Range::new(7, 3)),
+            Some(vec![70, 80, 90])
+        );
+    }
 }

@@ -293,4 +293,94 @@ mod tests {
             0.5
         );
     }
+
+    #[test]
+    fn ut_format_resolution_all_variants() {
+        let r = Resolution(0.25);
+        let e = Endian::Big;
+        for f in [
+            Format::U16((e.clone(), r.clone(), bf())),
+            Format::I8((e.clone(), r.clone(), bf())),
+            Format::U32((e.clone(), r.clone(), bf())),
+            Format::I32((e.clone(), r.clone(), bf())),
+            Format::U64((e.clone(), r.clone(), bf())),
+            Format::I64((e.clone(), r.clone(), bf())),
+            Format::U128((e.clone(), r.clone(), bf())),
+            Format::I128((e.clone(), r.clone(), bf())),
+            Format::F64((e.clone(), r.clone())),
+        ] {
+            assert_eq!(f.resolution().unwrap().0, 0.25);
+        }
+    }
+
+    #[test]
+    fn ut_format_bitfield_all_variants() {
+        let m = BitField { mask: 0x0FF0 };
+        let e = Endian::Big;
+        for f in [
+            Format::U8((e.clone(), res(), m.clone())),
+            Format::U32((e.clone(), res(), m.clone())),
+            Format::U64((e.clone(), res(), m.clone())),
+            Format::U128((e.clone(), res(), m.clone())),
+            Format::I8((e.clone(), res(), m.clone())),
+            Format::I16((e.clone(), res(), m.clone())),
+            Format::I32((e.clone(), res(), m.clone())),
+            Format::I64((e.clone(), res(), m.clone())),
+            Format::I128((e.clone(), res(), m.clone())),
+        ] {
+            assert_eq!(f.bitfield(), m);
+        }
+        // Float variant reports the no-op default.
+        assert!(Format::F64((e, res())).bitfield().is_full());
+    }
+
+    #[test]
+    fn ut_alignment_display() {
+        assert_eq!(Alignment::Left.to_string(), "Left");
+        assert_eq!(Alignment::Right.to_string(), "Right");
+    }
+
+    #[test]
+    fn ut_endian_display() {
+        assert_eq!(Endian::Little.to_string(), "Little Endian");
+        assert_eq!(Endian::Big.to_string(), "Big Endian");
+    }
+
+    #[test]
+    fn ut_resolution_default_and_display() {
+        assert_eq!(Resolution::default().0, 1.0);
+        assert_eq!(Resolution(2.5).to_string(), "2.5");
+    }
+
+    #[test]
+    fn ut_bitfield_default_shift_is_full_display() {
+        assert_eq!(BitField::default().mask, u128::MAX);
+        assert!(BitField::default().is_full());
+        // Zero mask is the degenerate case: shift is 0, not a panic.
+        assert_eq!(BitField { mask: 0 }.shift(), 0);
+        assert_eq!(BitField { mask: 0xFF00 }.shift(), 8);
+        assert!(!BitField { mask: 0xFF00 }.is_full());
+        assert_eq!(BitField { mask: 0xABCD }.to_string(), "0xABCD");
+    }
+
+    #[test]
+    fn ut_format_display_all_variants() {
+        assert_eq!(
+            Format::Ascii((Alignment::Left, Width(2))).to_string(),
+            "ASCII (Left)"
+        );
+        let e = Endian::Big;
+        assert_eq!(Format::U8((e.clone(), res(), bf())).to_string(), "U8 (Big Endian)");
+        assert_eq!(Format::U16((e.clone(), res(), bf())).to_string(), "U16 (Big Endian)");
+        assert_eq!(Format::U32((e.clone(), res(), bf())).to_string(), "U32 (Big Endian)");
+        assert_eq!(Format::U64((e.clone(), res(), bf())).to_string(), "U64 (Big Endian)");
+        assert_eq!(Format::U128((e.clone(), res(), bf())).to_string(), "U128 (Big Endian)");
+        assert_eq!(Format::I8((e.clone(), res(), bf())).to_string(), "I8 (Big Endian)");
+        assert_eq!(Format::I16((e.clone(), res(), bf())).to_string(), "I16 (Big Endian)");
+        assert_eq!(Format::I32((e.clone(), res(), bf())).to_string(), "I32 (Big Endian)");
+        assert_eq!(Format::I64((e.clone(), res(), bf())).to_string(), "I64 (Big Endian)");
+        assert_eq!(Format::I128((e.clone(), res(), bf())).to_string(), "I128 (Big Endian)");
+        assert_eq!(Format::F32((e.clone(), res())).to_string(), "F32 (Big Endian)");
+        assert_eq!(Format::F64((e, res())).to_string(), "F64 (Big Endian)");
+    }
 }

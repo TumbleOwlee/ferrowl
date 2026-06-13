@@ -215,4 +215,10 @@ mod tests {
         let b = Range::new(6, 8);
         assert_eq!(a.intersect(&b), b.intersect(&a));
     }
+
+    #[test]
+    fn ut_range_display() {
+        assert_eq!(format!("{}", Range::new(10, 5)), "[10, 15)");
+        assert_eq!(format!("{}", Range::new(0, 0)), "[0, 0)");
+    }
 }

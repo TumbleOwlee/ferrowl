@@ -38,3 +38,16 @@ pub fn new_command_line() -> CommandLine {
             .unwrap(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ui::traits::IsFocus;
+
+    #[test]
+    fn ut_new_command_line_is_unfocused_and_empty() {
+        let cl = new_command_line();
+        assert!(!cl.is_focused());
+        assert_eq!(cl.state.input(), "");
+    }
+}

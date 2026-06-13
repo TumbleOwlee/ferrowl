@@ -1025,4 +1025,129 @@ mod tests {
         assert_eq!(read, vec![50]);
         assert_eq!(format!("{}", register.decode(&read).unwrap()), "50");
     }
+
+    fn device_with_defs() -> crate::config::DeviceConfig {
+        use crate::config::DeviceConfig;
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
+            ValueType,
+        };
+        use std::collections::BTreeMap;
+
+        let base = |address: Option<u16>, is_virtual: bool, update, default| RegisterDef {
+            slave_id: 1,
+            read_code: 4,
+            address,
+            is_virtual,
+            access: AccessCfg::ReadWrite,
+            value_type: ValueType::U16,
+            endian: EndianCfg::Big,
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: AlignmentCfg::Left,
+            values: vec![NamedValue {
+                name: "a".into(),
+                value: Scalar::Int(1),
+            }],
+            update,
+            description: "desc".into(),
+            default,
+        };
+
+        let mut definitions = BTreeMap::new();
+        // Fixed register with a default value (exercises encode + write_unchecked) and a script.
+        definitions.insert(
+            "hold".into(),
+            base(Some(0), false, Some("x = 1".into()), Some(Scalar::Int(7))),
+        );
+        // Virtual register without a default (exercises default_value).
+        definitions.insert("virt".into(), base(None, true, None, None));
+
+        DeviceConfig {
+            version: None,
+            timeout_ms: Some(1000),
+            delay_ms: None,
+            interval_ms: Some(500),
+            log_file: Some(
+                std::env::temp_dir()
+                    .join("ferrowl_module_test.log")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            read_ranges: ReadRanges {
+                holding: Some("0-10".into()),
+                ..Default::default()
+            },
+            definitions,
+        }
+    }
+
+    #[test]
+    fn ut_module_new_tcp_server_and_sync_accessors() {
+        use super::Module;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+
+        let device = device_with_defs();
+        let spec = ModuleSpec {
+            name: "evse 1".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+        };
+
+        let mut module = Module::new(&spec, &device);
+        assert_eq!(module.registers().len(), 2);
+        let _ = module.memory();
+        let _ = module.log();
+        let _ = module.virtual_store();
+        assert!(!module.lua_running());
+        assert!(!module.is_instance_active());
+
+        // Register-cache mutation helpers.
+        let reg = module.registers()[0].2.clone();
+        module.add_register("new".into(), "d".into(), reg.clone(), vec![]);
+        assert_eq!(module.registers().len(), 3);
+        module.update_register(0, "renamed".into(), "d".into(), reg.clone(), vec![]);
+        module.update_register(99, "oob".into(), "d".into(), reg, vec![]); // out-of-bounds no-op
+        module.remove_register_by_name("new");
+        assert_eq!(module.registers().len(), 2);
+
+        // Log-base reconfiguration: clear, then point at a fresh (unwritable) path.
+        module.set_log_base(None);
+        module.set_log_base(Some("/no/such/ferrowl/dir/base.log"));
+    }
+
+    #[test]
+    fn ut_module_new_rtu_client() {
+        use super::Module;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+
+        let device = device_with_defs();
+        let spec = ModuleSpec {
+            name: "meter".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/ttyUSB0".into(),
+                baud_rate: 9600,
+                parity: Some("none".into()),
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+            timeout_ms: Some(750),
+            delay_ms: Some(10),
+            interval_ms: Some(2000),
+        };
+
+        let module = Module::new(&spec, &device);
+        assert_eq!(module.registers().len(), 2);
+        assert!(!module.is_instance_active());
+    }
 }

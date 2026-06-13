@@ -466,4 +466,49 @@ mod tests {
         assert!(slice.read(&Range::new(190, 20)).is_none());
         assert!(slice.read(&Range::new(500, 20)).is_none());
     }
+
+    #[test]
+    fn ut_slice_extend_non_adjacent() {
+        let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(100, 10));
+        // Range neither ends at start nor starts at end -> no-op, returns false.
+        assert!(!slice.extend(&Kind::Write(Type::Coil), &Range::new(200, 10)));
+        assert_eq!(slice.buffer.len(), 10);
+        assert_eq!(slice.range, Range::new(100, 10));
+    }
+
+    #[test]
+    fn ut_slice_write_unchecked() {
+        let mut slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(0, 5));
+        slice.extend(&Kind::Write(Type::Coil), &Range::new(5, 3));
+        slice.extend(&Kind::ReadWrite(Type::Coil), &Range::new(8, 2));
+
+        // Forces writes into Read, Write and ReadWrite cells alike.
+        let values: Vec<u16> = (1..=10).collect();
+        assert!(slice.write_unchecked(&Range::new(0, 10), &values));
+        let read = slice.read_unchecked(&Range::new(0, 10)).unwrap();
+        assert_eq!(read, values);
+
+        // Out of bounds and length-mismatch both fail.
+        assert!(!slice.write_unchecked(&Range::new(0, 20), &(1..=20).collect::<Vec<u16>>()));
+        assert!(!slice.write_unchecked(&Range::new(0, 5), &[1, 2, 3]));
+    }
+
+    #[test]
+    fn ut_slice_read_unchecked() {
+        let mut slice = Slice::from_range(&Kind::Write(Type::Register), Range::new(0, 4));
+        // Write-only cells are unreadable via read() but read_unchecked returns stored values.
+        assert!(slice.read(&Range::new(0, 4)).is_none());
+        assert!(slice.write(&Range::new(0, 4), &[11, 22, 33, 44]));
+        assert_eq!(slice.read_unchecked(&Range::new(0, 4)).unwrap(), vec![11, 22, 33, 44]);
+
+        // Out of bounds -> None.
+        assert!(slice.read_unchecked(&Range::new(0, 99)).is_none());
+    }
+
+    #[test]
+    fn ut_slice_readable_out_of_range() {
+        let slice = Slice::from_range(&Kind::Read(Type::Coil), Range::new(10, 5));
+        assert!(!slice.readable(&Type::Coil, &Range::new(0, 5)));
+        assert!(!slice.writable(&Type::Coil, &Range::new(0, 5)));
+    }
 }

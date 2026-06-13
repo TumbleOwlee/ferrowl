@@ -107,6 +107,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ut_serial_config_accepts_both_stop_bits() {
+        assert!(serial_config_from("/dev/null", 9600, None, Some(1), None).is_ok());
+        assert!(serial_config_from("/dev/null", 9600, None, Some(2), None).is_ok());
+    }
+
     // Verifies the stable `LogFn` blanket impl (replacing the former nightly `async_fn_traits`
     // bound) is satisfied by an ordinary closure returning a `Send` async block. Compile-time
     // check only — no runtime needed (this crate's tokio has no `rt` feature).

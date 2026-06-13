@@ -39,3 +39,49 @@ pub fn load_device(path: &str) -> Result<DeviceConfig, ConfigError> {
 pub fn load_session(path: &str) -> Result<Session, ConfigError> {
     load(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_util::convert::{Converter, FileType};
+
+    fn tmp(name: &str) -> String {
+        std::env::temp_dir()
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn ut_load_device_and_session_roundtrip() {
+        let dpath = tmp("ferrowl_cfgmod_device.toml");
+        Converter::save(&DeviceConfig::default(), &dpath, FileType::Toml).unwrap();
+        assert_eq!(load_device(&dpath).unwrap(), DeviceConfig::default());
+
+        let spath = tmp("ferrowl_cfgmod_session.json");
+        Converter::save(&Session::default(), &spath, FileType::Json).unwrap();
+        assert_eq!(load_session(&spath).unwrap(), Session::default());
+    }
+
+    #[test]
+    fn ut_load_unknown_format_errors() {
+        let e = load_session("/tmp/ferrowl_cfg.bin");
+        assert!(matches!(e, Err(ConfigError::UnknownFormat(_))));
+    }
+
+    #[test]
+    fn ut_load_io_error() {
+        let e = load_device("/no/such/ferrowl/device.toml");
+        assert!(matches!(e, Err(ConfigError::Io(_))));
+    }
+
+    #[test]
+    fn ut_config_error_display() {
+        assert!(
+            ConfigError::UnknownFormat("p".into())
+                .to_string()
+                .contains("invalid file")
+        );
+        assert_eq!(ConfigError::Io("boom".into()).to_string(), "boom");
+    }
+}

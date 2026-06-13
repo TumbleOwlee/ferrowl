@@ -40,3 +40,27 @@ impl HandleEvents for ButtonState {
         EventResult::Unhandled(modifiers, code)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_button_state_focus_toggles() {
+        let mut s = ButtonStateBuilder::default().label("ok".to_string()).build().unwrap();
+        assert!(s.is_focused()); // focused defaults to true
+        // Call the trait method explicitly: getset also generates an inherent `set_focused`
+        // that would otherwise shadow the `SetFocus` impl.
+        SetFocus::set_focused(&mut s, false);
+        assert!(!IsFocus::is_focused(&s));
+        assert_eq!(s.label(), "ok");
+        assert!(!s.disabled());
+    }
+
+    #[test]
+    fn ut_button_state_never_consumes_keys() {
+        let mut s = ButtonState::default();
+        let r = s.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(matches!(r, EventResult::Unhandled(..)));
+    }
+}

@@ -70,3 +70,25 @@ where
         self.context
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ContextBuilder;
+    use crate::Context;
+
+    #[test]
+    fn ut_builder_from_ok_context() {
+        let builder = ContextBuilder::<String>::from(Ok(Context::default()));
+        assert!(builder.build().is_ok());
+    }
+
+    #[test]
+    fn ut_builder_from_err_context_short_circuits() {
+        // An already-failed context is carried through unchanged, and further
+        // chained calls are no-ops.
+        let builder = ContextBuilder::<String>::from(Err(mlua::Error::BindError))
+            .with_stdlib()
+            .with_script("k".to_string(), "local x = 1");
+        assert!(builder.build().is_err());
+    }
+}

@@ -209,3 +209,38 @@ pub async fn join_all_of_context(ctx: &'static str) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{join_all, join_all_of_context, spawn_detach, spawn_detach_with_context};
+    use std::time::Duration;
+
+    // All spawn/join coverage lives in one test: the background context is a
+    // process-global static, so running these assertions concurrently across
+    // tests would let one drain another's handles.
+    #[tokio::test]
+    async fn ut_spawn_and_join_contexts() {
+        // Global context: first spawn inserts the vec, second pushes onto it.
+        spawn_detach(async {}).await;
+        spawn_detach(async {}).await;
+        // A still-running task exercises the `!is_finished` await branch of join.
+        spawn_detach(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        })
+        .await;
+
+        // Named context: same insert-then-push pattern.
+        spawn_detach_with_context("ctxA", async {}).await;
+        spawn_detach_with_context("ctxA", async {}).await;
+
+        // Join the named context only.
+        join_all_of_context("ctxA").await;
+        // Unknown context: nothing stored -> empty -> immediate break.
+        join_all_of_context("unknown").await;
+
+        // Join everything remaining in the global context.
+        join_all().await;
+        // Nothing left -> immediate break.
+        join_all().await;
+    }
+}

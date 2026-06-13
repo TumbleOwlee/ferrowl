@@ -511,4 +511,136 @@ mod tests {
         def.value_type = ValueType::F32;
         assert!(def.format().bitfield().is_full());
     }
+
+    fn def_with(value_type: ValueType, read_code: u8, address: Option<u16>, is_virtual: bool) -> RegisterDef {
+        RegisterDef {
+            slave_id: 1,
+            read_code,
+            address,
+            is_virtual,
+            access: AccessCfg::ReadWrite,
+            value_type,
+            endian: EndianCfg::Little,
+            resolution: 1.0,
+            bitmask: None,
+            length: 4,
+            alignment: AlignmentCfg::Right,
+            values: vec![],
+            update: None,
+            description: String::new(),
+            default: None,
+        }
+    }
+
+    #[test]
+    fn ut_read_ranges_is_empty_and_ranges_for() {
+        let mut rr = ReadRanges::default();
+        assert!(rr.is_empty());
+        rr.holding = Some("1".into());
+        rr.input = Some("0-3".into());
+        rr.coils = Some("5".into());
+        rr.discrete = Some("7-8".into());
+        assert!(!rr.is_empty());
+        assert_eq!(rr.ranges_for(Kind::HoldingRegister), vec![Range::new(1, 1)]);
+        assert_eq!(rr.ranges_for(Kind::InputRegister), vec![Range::new(0, 4)]);
+        assert_eq!(rr.ranges_for(Kind::Coil), vec![Range::new(5, 1)]);
+        assert_eq!(rr.ranges_for(Kind::DiscreteInput), vec![Range::new(7, 2)]);
+        // Unconfigured kind -> empty.
+        assert!(ReadRanges::default().ranges_for(Kind::Coil).is_empty());
+    }
+
+    #[test]
+    fn ut_scalar_and_named_value() {
+        assert_eq!(Scalar::Int(5).to_string(), "5");
+        assert_eq!(Scalar::Float(1.5).to_string(), "1.5");
+        assert_eq!(Scalar::Text("hi".into()).to_string(), "hi");
+        assert!(matches!(Scalar::from_input(" 7 "), Scalar::Int(7)));
+        assert!(matches!(Scalar::from_input("2.5"), Scalar::Float(_)));
+        assert!(matches!(Scalar::from_input("abc"), Scalar::Text(_)));
+        assert!(matches!(Scalar::Int(1).to_value(1.0), ferrowl_reg::Value::I64(_)));
+        assert!(matches!(Scalar::Float(1.0).to_value(1.0), ferrowl_reg::Value::F64(_)));
+        assert!(matches!(
+            Scalar::Text("x".into()).to_value(1.0),
+            ferrowl_reg::Value::Ascii(_)
+        ));
+        let nv = NamedValue {
+            name: "n".into(),
+            value: Scalar::Int(0),
+        };
+        assert_eq!(nv.to_label(), "n");
+    }
+
+    #[test]
+    fn ut_cfg_conversions() {
+        assert!(matches!(Access::from(AccessCfg::ReadOnly), Access::ReadOnly));
+        assert!(matches!(Access::from(AccessCfg::WriteOnly), Access::WriteOnly));
+        assert!(matches!(Access::from(AccessCfg::ReadWrite), Access::ReadWrite));
+        assert!(matches!(Endian::from(EndianCfg::Big), Endian::Big));
+        assert!(matches!(Endian::from(EndianCfg::Little), Endian::Little));
+        assert!(matches!(Alignment::from(AlignmentCfg::Left), Alignment::Left));
+        assert!(matches!(Alignment::from(AlignmentCfg::Right), Alignment::Right));
+    }
+
+    #[test]
+    fn ut_register_def_kind_mem_type_and_all_formats() {
+        for (code, kind) in [
+            (1u8, Kind::Coil),
+            (2, Kind::DiscreteInput),
+            (3, Kind::InputRegister),
+            (4, Kind::HoldingRegister),
+        ] {
+            assert_eq!(def_with(ValueType::U16, code, Some(0), false).kind(), kind);
+        }
+        assert_eq!(def_with(ValueType::U16, 1, Some(0), false).mem_type(), Type::Coil);
+        assert_eq!(
+            def_with(ValueType::U16, 4, Some(0), false).mem_type(),
+            Type::Register
+        );
+
+        for vt in [
+            ValueType::U8,
+            ValueType::U16,
+            ValueType::U32,
+            ValueType::U64,
+            ValueType::U128,
+            ValueType::I8,
+            ValueType::I16,
+            ValueType::I32,
+            ValueType::I64,
+            ValueType::I128,
+            ValueType::F32,
+            ValueType::F64,
+            ValueType::Ascii,
+        ] {
+            let _ = def_with(vt, 4, Some(0), false).format();
+        }
+    }
+
+    #[test]
+    fn ut_register_def_address_range_and_register() {
+        let fixed = def_with(ValueType::U16, 4, Some(10), false);
+        assert_eq!(fixed.address(), Address::Fixed(10));
+        assert!(fixed.mem_range().is_some());
+        let _ = fixed.register();
+        let _ = fixed.bitfield();
+
+        let virt = def_with(ValueType::U16, 4, None, false);
+        assert_eq!(virt.address(), Address::Virtual);
+        assert!(virt.mem_range().is_none());
+
+        // The `virtual` flag forces Virtual even with a concrete address.
+        assert_eq!(def_with(ValueType::U16, 4, Some(5), true).address(), Address::Virtual);
+    }
+
+    #[test]
+    fn ut_register_def_serde_defaults() {
+        // A minimal definition omitting read_code/resolution/length triggers the default fns.
+        let path = std::env::temp_dir().join("ferrowl_regdef_min.toml");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "type = \"U16\"\n").unwrap();
+        let def: RegisterDef = Converter::load(path, FileType::Toml).unwrap();
+        assert_eq!(def.read_code, 3);
+        assert_eq!(def.resolution, 1.0);
+        assert_eq!(def.length, 1);
+    }
 }
