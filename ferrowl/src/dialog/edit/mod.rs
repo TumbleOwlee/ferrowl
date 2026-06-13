@@ -157,6 +157,7 @@ pub(super) fn set_input<T: Validate>(
     value: &str,
 ) {
     widget.state.set_input(value.to_string());
+    widget.state.set_autofill(Some(value.to_string()));
     widget.state.set_cursor(value.chars().count());
 }
 
