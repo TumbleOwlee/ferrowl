@@ -8,8 +8,42 @@ steps:
       - cargo test
       - cargo build --release
       - cargo build --release --target x86_64-pc-windows-gnu
-      - zip -j ferrowl-windows.zip target/x86_64-pc-windows-gnu/release/ferrowl.exe
-      - tar -C target/release -cvf ferrowl-unix.tar.gz ferrowl
+    when:
+      - event: tag
+        ref: refs/tags/nightly
+
+  delete-nightly:
+    image: alpine
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - apk add --no-cache curl jq
+      - |
+        REPO="$CI_REPO_OWNER/$CI_REPO_NAME"
+        LAST_TAG=$(curl -sf \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          https://api.github.com/repos/$REPO/releases/latest \
+          | jq -r '.tag_name // empty')
+        printf '> [!WARNING]\n> This is an **continuously** updated **Nightly** release - containing upcoming features. It may be unstable and also can contain some bugs.\n\n' > release-notes.md
+        GENERATED=$(curl -sf -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          https://api.github.com/repos/$REPO/releases/generate-notes \
+          -d "$(jq -n --arg tag nightly --arg prev "$LAST_TAG" --arg sha "$CI_COMMIT_SHA" \
+            '{tag_name:$tag, previous_tag_name:$prev, target_commitish:$sha}')" \
+          | jq -r '.body // empty')
+        [ -n "$GENERATED" ] && printf '%s\n\n' "$GENERATED" >> release-notes.md
+        printf 'Built from commit **%s** on **%s**.\n\n' \
+          "$CI_COMMIT_SHA" "$(date -u +%Y-%m-%d)" >> release-notes.md
+        RELEASE_ID=$(curl -sf \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          https://api.github.com/repos/$REPO/releases/tags/nightly \
+          | jq -r '.id // empty')
+        [ -n "$RELEASE_ID" ] && curl -sf -X DELETE \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          https://api.github.com/repos/$REPO/releases/$RELEASE_ID \
+          && echo "Deleted release $RELEASE_ID" || echo "No existing release to delete"
     when:
       - event: tag
         ref: refs/tags/nightly
@@ -19,10 +53,9 @@ steps:
     settings:
       api_key:
         from_secret: github_token
-      files: 
-        - ferrowl-unix.tar.gz
-        - ferrowl-windows.zip
       title: 'Nightly'
+      prerelease: true
+      note: release-notes.md
       checksum:
         - sha256
         - md5
