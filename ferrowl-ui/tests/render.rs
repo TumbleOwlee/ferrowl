@@ -142,6 +142,20 @@ fn input_field_render_variants() {
     let mut b = buffer(24, 3);
     StatefulWidget::render(&f, Rect::new(0, 0, 24, 3), &mut b, &mut st);
 
+    // Unfocused + error input -> unfocused error-style border branch.
+    let f = InputFieldBuilder::<i32>::default()
+        .border(full_border())
+        .title(Some("n".into()))
+        .build()
+        .unwrap();
+    let mut st = InputFieldStateBuilder::default()
+        .focused(false)
+        .input("not-a-number".to_string())
+        .build()
+        .unwrap();
+    let mut b = buffer(24, 3);
+    StatefulWidget::render(&f, Rect::new(0, 0, 24, 3), &mut b, &mut st);
+
     // Disabled (no cursor) and the plain `Widget` impl (builds default state).
     let f = InputFieldBuilder::<String>::default().build().unwrap();
     let mut st = InputFieldStateBuilder::default().disabled(true).build().unwrap();
