@@ -188,9 +188,15 @@ where
 
         // Create block if border is required
         let border_style = if state.focused() && !state.disabled() {
-            self.style.focused
+            match valid {
+                ValidateResult::Success | ValidateResult::None => self.style.focused,
+                ValidateResult::Error(_) => self.style.error,
+            }
         } else {
-            self.style.general
+            match valid {
+                ValidateResult::Success | ValidateResult::None => self.style.general,
+                ValidateResult::Error(_) => self.style.error,
+            }
         };
         let area = crate::widgets::render_border(
             area,

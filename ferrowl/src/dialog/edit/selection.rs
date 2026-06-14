@@ -62,7 +62,7 @@ where
 {
     // Label for the register
     #[focus]
-    pub label: Widget<InputFieldState, InputField<String>>,
+    pub label: Widget<InputFieldState, InputField<crate::dialog::NonEmpty>>,
     // Description for the register
     #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
@@ -71,7 +71,7 @@ where
     pub slave_id: Widget<InputFieldState, InputField<u8>>,
     // Address of the start register
     #[focus]
-    pub address: Widget<InputFieldState, InputField<String>>,
+    pub address: Widget<InputFieldState, InputField<crate::dialog::Address>>,
     // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
@@ -92,7 +92,7 @@ where
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
     // Bit-field mask input (integer formats only)
     #[focus(when = {self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
-    pub number_bitmask: Widget<InputFieldState, InputField<String>>,
+    pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
     // Text alignment selection
     #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
