@@ -1,8 +1,7 @@
 [package]
-name = "ferrowl-log"
+name = "ferrowl-ring"
 version = "0.4.4"
 edition = "2024"
 authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
 
 [dependencies]
-anyhow = "1.0.100"

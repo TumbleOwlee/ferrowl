@@ -662,15 +662,16 @@ dependencies = [
  "crossterm",
  "derive_builder",
  "ferrowl-derive",
- "ferrowl-log",
  "ferrowl-lua",
  "ferrowl-mem",
  "ferrowl-net",
  "ferrowl-reg",
+ "ferrowl-ring",
  "ferrowl-ui",
  "ferrowl-util",
  "ratatui",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -686,13 +687,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "ferrowl-log"
-version = "0.4.4"
-dependencies = [
- "anyhow",
 ]
 
 [[package]]
@@ -740,6 +734,10 @@ dependencies = [
  "serde",
  "tokio-modbus",
 ]
+
+[[package]]
+name = "ferrowl-ring"
+version = "0.4.4"
 
 [[package]]
 name = "ferrowl-ui"

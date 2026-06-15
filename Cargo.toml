@@ -4,7 +4,7 @@ members = [
     "ferrowl-lua",
     "ferrowl-mem",
     "ferrowl-reg",
-    "ferrowl-log",
+    "ferrowl-ring",
     "ferrowl-net",
     "ferrowl-util",
     "ferrowl-ui",
