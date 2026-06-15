@@ -11,7 +11,7 @@ mod registers;
 mod render;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ferrowl_log::Log;
+use ferrowl_ring::Ring;
 use ferrowl_ui::AlternateScreen;
 use ferrowl_ui::traits::HandleEvents;
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -39,7 +39,40 @@ const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 /// Ring-log dimensions for the on-screen log pane.
 pub const LOG_MAX_LINE: usize = 256;
 pub const LOG_SIZE: usize = 80;
-pub type LogRing = Log<LOG_MAX_LINE, LOG_SIZE>;
+
+/// On-screen log: a fixed-capacity ring of timestamped lines. A thin wrapper over the generic
+/// [`Ring`] that stamps the current time and bounds line length on write, preserving the log API
+/// the app relies on (`init`/`write`/`peek_n`/`clear`).
+pub struct LogRing {
+    ring: Ring<(u64, String), LOG_SIZE>,
+}
+
+impl LogRing {
+    /// Creates an empty log.
+    pub fn init() -> Self {
+        Self { ring: Ring::new() }
+    }
+
+    /// Appends `msg` (truncated to `LOG_MAX_LINE` chars) stamped with the current Unix-millis time.
+    pub fn write(&mut self, msg: &str) {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let line: String = msg.chars().take(LOG_MAX_LINE).collect();
+        self.ring.push((ts, line));
+    }
+
+    /// Returns up to `n` `(timestamp, message)` entries, oldest first.
+    pub fn peek_n(&self, n: usize) -> Vec<(u64, String)> {
+        self.ring.peek_n(n).into_iter().cloned().collect()
+    }
+
+    /// Removes all entries.
+    pub fn clear(&mut self) {
+        self.ring.clear();
+    }
+}
 
 /// Which pane currently receives input.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -240,7 +273,7 @@ impl App {
 
         let lines = {
             let guard = log.read().await;
-            guard.peak_n(LOG_SIZE).unwrap_or_default()
+            guard.peek_n(LOG_SIZE)
         };
         let virtual_values = virtual_store.read().await.clone();
         let mut updated = {
