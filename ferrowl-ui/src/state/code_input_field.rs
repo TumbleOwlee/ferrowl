@@ -78,10 +78,6 @@ impl IsFocus for CodeInputFieldState {
 
 impl HandleEvents for CodeInputFieldState {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
-        if self.disabled {
-            return EventResult::Unhandled(modifiers, code);
-        }
-
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Up) => {
                 if self.active_line > 0 {
@@ -116,7 +112,7 @@ impl HandleEvents for CodeInputFieldState {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Enter) => {
+            (KeyModifiers::NONE, KeyCode::Enter) if !self.disabled => {
                 let line = self.lines[self.active_line].clone();
                 let chars: Vec<char> = line.chars().collect();
                 let before: String = chars[..self.cursor_col].iter().collect();
@@ -127,7 +123,7 @@ impl HandleEvents for CodeInputFieldState {
                 self.cursor_col = 0;
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Backspace) => {
+            (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
                 if self.cursor_col > 0 {
                     let chars: Vec<char> = self.lines[self.active_line].chars().collect();
                     let new_line: String = chars
@@ -146,7 +142,7 @@ impl HandleEvents for CodeInputFieldState {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Delete) => {
+            (KeyModifiers::NONE, KeyCode::Delete) if !self.disabled => {
                 let line_len = self.lines[self.active_line].chars().count();
                 if self.cursor_col < line_len {
                     let chars: Vec<char> = self.lines[self.active_line].chars().collect();
@@ -163,7 +159,7 @@ impl HandleEvents for CodeInputFieldState {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) if !self.disabled => {
                 let chars: Vec<char> = self.lines[self.active_line].chars().collect();
                 let mut new_chars = Vec::with_capacity(chars.len() + 1);
                 new_chars.extend_from_slice(&chars[..self.cursor_col]);

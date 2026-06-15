@@ -68,9 +68,8 @@ impl HandleEvents for InputFieldState {
             }
             // Fill an empty field from its placeholder, so the current value doesn't have to be
             // cleared before entering a new one.
-            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
-                if !self.disabled
-                    && self.input.is_empty()
+            (KeyModifiers::CONTROL, KeyCode::Char('f')) if !self.disabled => {
+                if self.input.is_empty()
                     && let Some(autofill) = &self.autofill()
                 {
                     self.input = autofill.clone();
@@ -79,14 +78,14 @@ impl HandleEvents for InputFieldState {
                 EventResult::Consumed
             }
             // Clear the input line
-            (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            (KeyModifiers::CONTROL, KeyCode::Char('d')) if !self.disabled => {
                 self.input.clear();
                 self.cursor = 0;
                 EventResult::Consumed
             }
             // Accept SHIFT so capital letters and shifted symbols are inserted; CTRL/ALT
             // combinations are left unhandled for app-level shortcuts.
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) if !self.disabled => {
                 if !self.disabled {
                     if self.input.is_empty() || self.input.chars().count() == self.cursor {
                         self.input.push(c);
@@ -106,7 +105,7 @@ impl HandleEvents for InputFieldState {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Backspace) => {
+            (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
                 if !self.disabled && self.cursor > 0 {
                     if self.input.chars().count() >= self.cursor {
                         self.input = self.input.chars().enumerate().fold(
@@ -123,7 +122,7 @@ impl HandleEvents for InputFieldState {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Delete) => {
+            (KeyModifiers::NONE, KeyCode::Delete) if !self.disabled => {
                 if !self.disabled && self.input.chars().count() > self.cursor {
                     self.input = self.input.chars().enumerate().fold(
                         String::with_capacity(self.input.capacity() + 1),
