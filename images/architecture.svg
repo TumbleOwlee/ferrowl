@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 880 624" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>Ferrowl workspace architecture — the TUI binary drives per-tab modules that share a register memory between the network tasks, the Lua simulation and the log</title>
-<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs) renders through ferrowl-ui and ferrowl-derive. Each tab is a Module combining ferrowl-reg (register descriptions and codecs), ferrowl-mem (shared register memory), ferrowl-lua (update scripts) and ferrowl-log (ring log). ferrowl-net runs the TCP/RTU client or server task against the shared memory and talks to external Modbus peers. ferrowl-util provides shared helpers.</desc>
+<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs) renders through ferrowl-ui and ferrowl-derive. Each tab is a Module combining ferrowl-reg (register descriptions and codecs), ferrowl-mem (shared register memory), ferrowl-lua (update scripts) and ferrowl-ring (ring log). ferrowl-net runs the TCP/RTU client or server task against the shared memory and talks to external Modbus peers. ferrowl-util provides shared helpers.</desc>
 <defs>
 <linearGradient id="archGrad" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#2D333A"/>
@@ -62,7 +62,7 @@
 <text x="577.5" y="342" font-size="11" fill="#A8B2BB">C_Register · C_Time</text>
 
 <rect x="695" y="262" width="125" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="757.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-log</text>
+<text x="757.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ring</text>
 <text x="757.5" y="310" font-size="11" fill="#A8B2BB">ring buffer</text>
 <text x="757.5" y="326" font-size="11" fill="#A8B2BB">feeds the</text>
 <text x="757.5" y="342" font-size="11" fill="#A8B2BB">log pane</text>
