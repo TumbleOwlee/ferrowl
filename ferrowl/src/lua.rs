@@ -211,6 +211,7 @@ pub fn run_sim(
             }
             sleep_responsive(interval, &thread_stop);
         }
+        emit(&log, &sink, &format!("[sim] stopped completely "));
     });
 
     Some(SimHandle {

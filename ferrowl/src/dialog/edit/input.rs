@@ -210,7 +210,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(44),
+            Constraint::Length(48),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -238,7 +238,7 @@ impl EditInputDialog {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(6),
+            Constraint::Length(10),
             Constraint::Length(3),
             Constraint::Length(4),
             Constraint::Length(1),

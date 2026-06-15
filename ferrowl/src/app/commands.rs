@@ -55,6 +55,14 @@ impl App {
                             tab.module.stop_lua();
                             "Lua simulation stopped".to_string()
                         }
+                        LuaCommand::Status => {
+                            let running = tab.module.lua_running();
+                            if running {
+                                "Lua simulation is running".to_string()
+                            } else {
+                                "Lua simulation is stopped".to_string()
+                            }
+                        }
                     }
                 } else {
                     return false;

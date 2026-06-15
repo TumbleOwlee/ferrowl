@@ -36,6 +36,7 @@ pub enum Cmd {
 pub enum LuaCommand {
     Start,
     Stop,
+    Status,
 }
 
 /// Parse a command line (without the leading `:`).
@@ -59,6 +60,7 @@ pub fn parse(input: &str) -> Cmd {
         "lua" => match args.first().copied() {
             Some("start") => Cmd::Lua(LuaCommand::Start),
             Some("stop") => Cmd::Lua(LuaCommand::Stop),
+            Some("status") => Cmd::Lua(LuaCommand::Status),
             _ => Cmd::Unknown(format!("lua {}", args.join(" ")).trim().to_string()),
         },
         "set" => {
@@ -223,6 +225,7 @@ mod tests {
     fn ut_lua() {
         assert_eq!(parse("lua start"), Cmd::Lua(LuaCommand::Start));
         assert_eq!(parse("lua stop"), Cmd::Lua(LuaCommand::Stop));
+        assert_eq!(parse("lua status"), Cmd::Lua(LuaCommand::Status));
         // Missing/invalid subcommand falls through to Unknown.
         assert_eq!(parse("lua"), Cmd::Unknown("lua".to_string()));
         assert_eq!(parse("lua wat"), Cmd::Unknown("lua wat".to_string()));

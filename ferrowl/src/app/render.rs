@@ -101,7 +101,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
         (":wd | :write-device [path]", "save device config"),
         (":log [file]", "set log file"),
         (":log clear", "clear log view"),
-        (":lua start|stop", "start|stop lua execution"),
+        (":lua start|stop|status", "start|stop|status lua execution"),
         (":reload", "reload device config"),
         (":compact", "toggle compact mode"),
         (":order [col] [asc|desc]", "sort table by column"),

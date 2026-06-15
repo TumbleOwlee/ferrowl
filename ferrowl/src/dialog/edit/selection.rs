@@ -190,7 +190,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3),
+            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3 + 4),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -217,7 +217,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(6),
+            Constraint::Length(10),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(1),
