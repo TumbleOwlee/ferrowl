@@ -13,7 +13,7 @@ use crate::traits::ToLabel;
 use crate::{
     state::{SelectionState, SelectionStateBuilder},
     traits::Margins,
-    types::Border,
+    Border,
 };
 use crate::{style::SelectionStyle, widgets::Title};
 

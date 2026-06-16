@@ -4,7 +4,7 @@ use ferrowl_ui::{
     COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    types::Border,
+    Border,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
 };
 use ratatui::layout::Margin;

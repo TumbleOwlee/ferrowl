@@ -661,12 +661,12 @@ dependencies = [
  "clap",
  "crossterm",
  "derive_builder",
- "ferrowl-derive",
+ "ferrowl-codec",
+ "ferrowl-focus",
  "ferrowl-lua",
- "ferrowl-mem",
- "ferrowl-net",
- "ferrowl-reg",
+ "ferrowl-modbus",
  "ferrowl-ring",
+ "ferrowl-store",
  "ferrowl-ui",
  "ferrowl-util",
  "ratatui",
@@ -677,7 +677,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrowl-derive"
+name = "ferrowl-codec"
+version = "0.4.4"
+dependencies = [
+ "anyhow",
+ "derive-getters",
+ "derive_builder",
+ "derive_setters",
+ "getset",
+ "itertools",
+ "serde",
+ "tokio-modbus",
+]
+
+[[package]]
+name = "ferrowl-focus"
 version = "0.4.4"
 dependencies = [
  "convert_case 0.11.0",
@@ -697,22 +711,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrowl-mem"
-version = "0.4.4"
-dependencies = [
- "anyhow",
- "itertools",
- "serde",
-]
-
-[[package]]
-name = "ferrowl-net"
+name = "ferrowl-modbus"
 version = "0.4.4"
 dependencies = [
  "anyhow",
  "clap",
- "ferrowl-mem",
- "ferrowl-reg",
+ "ferrowl-codec",
+ "ferrowl-store",
  "itertools",
  "serde",
  "thiserror 2.0.18",
@@ -722,22 +727,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrowl-reg"
+name = "ferrowl-ring"
+version = "0.4.4"
+
+[[package]]
+name = "ferrowl-store"
 version = "0.4.4"
 dependencies = [
  "anyhow",
- "derive-getters",
- "derive_builder",
- "derive_setters",
- "getset",
  "itertools",
  "serde",
- "tokio-modbus",
 ]
-
-[[package]]
-name = "ferrowl-ring"
-version = "0.4.4"
 
 [[package]]
 name = "ferrowl-ui"
@@ -745,7 +745,7 @@ version = "0.4.4"
 dependencies = [
  "crossterm",
  "derive_builder",
- "ferrowl-derive",
+ "ferrowl-focus",
  "getset",
  "itertools",
  "ratatui",

@@ -4,7 +4,7 @@ use ferrowl_ui::{
     state::{InputFieldState, InputFieldStateBuilder},
     style::InputFieldStyle,
     traits::HandleEvents,
-    types::Border,
+    Border,
     widgets::{InputField, InputFieldBuilder},
 };
 use ratatui::{

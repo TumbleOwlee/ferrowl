@@ -1,12 +1,12 @@
 //! Yes/no confirmation dialog guarding register deletion.
 
 use derive_builder::Builder;
-use ferrowl_derive::{Focus, focusable};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{ButtonState, ButtonStateBuilder},
     style::{ButtonStyle, TextStyle},
-    types::Border,
+    Border,
     widgets::{Button, ButtonBuilder, Text, TextBuilder, Widget},
 };
 use ratatui::{

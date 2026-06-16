@@ -10,7 +10,7 @@ use config::{ClientConfig, ServerConfig};
 use error::{Error, InstanceError};
 use handle::Handle;
 
-use ferrowl_net::{KeyParams, LogFn};
+use ferrowl_modbus::{KeyParams, LogFn};
 
 /// A startable/stoppable Modbus endpoint (TCP/RTU x client/server).
 ///
@@ -31,9 +31,9 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_tcp_client(config: ClientConfig<T, ferrowl_net::tcp::Config>) -> Self {
+    pub fn with_tcp_client(config: ClientConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
         Self {
-            builder: Builder::TcpClient(ferrowl_net::tcp::ClientBuilder::new(
+            builder: Builder::TcpClient(ferrowl_modbus::tcp::ClientBuilder::new(
                 config.config,
                 config.operations,
                 config.memory,
@@ -42,9 +42,9 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_rtu_client(config: ClientConfig<T, ferrowl_net::rtu::Config>) -> Self {
+    pub fn with_rtu_client(config: ClientConfig<T, ferrowl_modbus::rtu::Config>) -> Self {
         Self {
-            builder: Builder::RtuClient(ferrowl_net::rtu::ClientBuilder::new(
+            builder: Builder::RtuClient(ferrowl_modbus::rtu::ClientBuilder::new(
                 config.config,
                 config.operations,
                 config.memory,
@@ -53,9 +53,9 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_tcp_server(config: ServerConfig<T, ferrowl_net::tcp::Config>) -> Self {
+    pub fn with_tcp_server(config: ServerConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
         Self {
-            builder: Builder::TcpServer(ferrowl_net::tcp::ServerBuilder::new(
+            builder: Builder::TcpServer(ferrowl_modbus::tcp::ServerBuilder::new(
                 config.config,
                 config.memory,
             )),
@@ -63,9 +63,9 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_rtu_server(config: ServerConfig<T, ferrowl_net::rtu::Config>) -> Self {
+    pub fn with_rtu_server(config: ServerConfig<T, ferrowl_modbus::rtu::Config>) -> Self {
         Self {
-            builder: Builder::RtuServer(ferrowl_net::rtu::ServerBuilder::new(
+            builder: Builder::RtuServer(ferrowl_modbus::rtu::ServerBuilder::new(
                 config.config,
                 config.memory,
             )),
@@ -145,7 +145,7 @@ impl<T: KeyParams> Instance<T> {
         }
 
         if self
-            .send_command(ferrowl_net::Command::Terminate)
+            .send_command(ferrowl_modbus::Command::Terminate)
             .await
             .is_ok()
         {
@@ -191,7 +191,7 @@ impl<T: KeyParams> Instance<T> {
 
     /// Forwards a write/terminate command to a running client. Errors if no
     /// task is running or the instance is a server.
-    pub async fn send_command(&self, command: ferrowl_net::Command) -> Result<(), Error> {
+    pub async fn send_command(&self, command: ferrowl_modbus::Command) -> Result<(), Error> {
         if self.handle.is_none() {
             return Err(InstanceError::NotRunning.into());
         }

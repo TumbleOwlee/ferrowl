@@ -104,7 +104,7 @@ jobs:
     # ℹ️ Command-line programs to run using the OS shell.
     # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
     # Compile the workspace so CodeQL traces a real build: dependencies are built and
-    # proc-macros (quote!, syn, ferrowl-derive, anyhow, …) expand. Buildless extraction
+    # proc-macros (quote!, syn, ferrowl-focus, anyhow, …) expand. Buildless extraction
     # cannot expand these and is what produced the macro-expansion errors / low coverage.
     - name: Run manual build steps
       if: matrix.build-mode == 'manual'

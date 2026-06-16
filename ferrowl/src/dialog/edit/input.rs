@@ -6,12 +6,12 @@ use crate::dialog::edit::{
     AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
 };
 use derive_builder::Builder;
-use ferrowl_derive::{Focus, focusable};
-use ferrowl_reg::format::{
+use ferrowl_focus::{Focus, focusable};
+use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, Width,
 };
-use ferrowl_reg::{Access, Address, Kind, Register, RegisterBuilder, encode};
+use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
     state::{
@@ -19,7 +19,7 @@ use ferrowl_ui::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
-    types::Border,
+    Border,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,
@@ -999,7 +999,7 @@ impl EditInputDialog {
         if is_ascii {
             let value: String = if matches!(
                 register.format(),
-                RegisterFormat::Ascii((ferrowl_reg::Alignment::Left, _))
+                RegisterFormat::Ascii((ferrowl_codec::Alignment::Left, _))
             ) {
                 let value: String = value
                     .chars()

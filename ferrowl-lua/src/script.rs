@@ -1,8 +1,8 @@
-use crate::State;
+use crate::ScriptState;
 
 /// Loaded lua script
 pub struct Script {
-    state: State,
+    state: ScriptState,
     func: mlua::Function,
 }
 
@@ -10,7 +10,7 @@ impl Script {
     /// Create lua script state from native function handle
     pub fn init(func: mlua::Function) -> Self {
         Self {
-            state: State::ok(),
+            state: ScriptState::ok(),
             func,
         }
     }
@@ -25,11 +25,11 @@ impl Script {
     pub fn exec(&mut self) -> crate::Result<()> {
         match self.func.call::<()>(()) {
             Ok(_) => {
-                self.state = State::ok();
+                self.state = ScriptState::ok();
                 Ok(())
             }
             Err(e) => {
-                self.state = State::err(e.clone());
+                self.state = ScriptState::err(e.clone());
                 Err(e)
             }
         }

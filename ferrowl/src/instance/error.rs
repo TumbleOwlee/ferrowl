@@ -12,17 +12,17 @@ pub enum InstanceError {
     #[error("Failed to cancel instance")]
     CancelFailed,
     #[error("Failed to send command to instance: {0}")]
-    SendError(SendError<ferrowl_net::Command>),
+    SendError(SendError<ferrowl_modbus::Command>),
     #[error("Invalid operation specified")]
     InvalidOperation,
 }
 
-/// Combined error type: network errors from ferrowl-net or local
+/// Combined error type: network errors from ferrowl-modbus or local
 /// [`InstanceError`]s.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Network error: {0}")]
-    Net(#[from] ferrowl_net::Error),
+    Net(#[from] ferrowl_modbus::Error),
     #[error("Instance error: {0}")]
     Instance(#[from] InstanceError),
 }

@@ -5,7 +5,7 @@ use ferrowl_ui::{
     COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder},
     style::InputFieldStyle,
-    types::Border,
+    Border,
     widgets::{InputField, InputFieldBuilder, Widget},
 };
 use ratatui::layout::Margin;

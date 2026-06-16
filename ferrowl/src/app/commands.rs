@@ -1,9 +1,9 @@
 //! Execution of `:` commands against the active tab: module lifecycle, value writes,
 //! ordering and persistence.
 
-use ferrowl_mem::Range;
-use ferrowl_net::{Key, SlaveKind};
-use ferrowl_reg::{Access, Address};
+use ferrowl_store::Range;
+use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_codec::{Access, Address};
 use ferrowl_ui::widgets::Header;
 use ferrowl_util::convert::{Converter, FileType};
 
@@ -289,7 +289,7 @@ impl App {
                 };
                 let ok = {
                     let key = Key {
-                        id: SlaveKind {
+                        id: SlaveKey {
                             slave_id: slave,
                             kind: register.kind().clone(),
                         },
@@ -316,7 +316,7 @@ impl App {
             }
             Role::Client => {
                 let key = Key {
-                    id: SlaveKind {
+                    id: SlaveKey {
                         slave_id: slave,
                         kind: register.kind().clone(),
                     },

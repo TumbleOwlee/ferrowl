@@ -2,12 +2,12 @@
 resolver = "3"
 members = [
     "ferrowl-lua",
-    "ferrowl-mem",
-    "ferrowl-reg",
+    "ferrowl-store",
+    "ferrowl-codec",
     "ferrowl-ring",
-    "ferrowl-net",
+    "ferrowl-modbus",
     "ferrowl-util",
     "ferrowl-ui",
     "ferrowl",
-    "ferrowl-derive",
+    "ferrowl-focus",
 ]

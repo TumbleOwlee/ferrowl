@@ -11,12 +11,12 @@ use crate::dialog::edit::{
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
-use ferrowl_derive::{Focus, focusable};
-use ferrowl_reg::format::{
+use ferrowl_focus::{Focus, focusable};
+use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, Width,
 };
-use ferrowl_reg::{Address, Register, RegisterBuilder};
+use ferrowl_codec::{Address, Register, RegisterBuilder};
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{
@@ -26,7 +26,7 @@ use ferrowl_ui::{
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::HandleEvents,
     traits::ToLabel,
-    types::Border,
+    Border,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,
@@ -578,10 +578,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 state: SelectionStateBuilder::default()
                     .focused(false)
                     .values(vec![
-                        KindOption(ferrowl_reg::Kind::Coil),
-                        KindOption(ferrowl_reg::Kind::DiscreteInput),
-                        KindOption(ferrowl_reg::Kind::HoldingRegister),
-                        KindOption(ferrowl_reg::Kind::InputRegister),
+                        KindOption(ferrowl_codec::Kind::Coil),
+                        KindOption(ferrowl_codec::Kind::DiscreteInput),
+                        KindOption(ferrowl_codec::Kind::HoldingRegister),
+                        KindOption(ferrowl_codec::Kind::InputRegister),
                     ])
                     .build()
                     .unwrap(),
@@ -601,9 +601,9 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     let mut s = SelectionStateBuilder::default()
                         .focused(false)
                         .values(vec![
-                            AccessOption(ferrowl_reg::Access::ReadOnly),
-                            AccessOption(ferrowl_reg::Access::WriteOnly),
-                            AccessOption(ferrowl_reg::Access::ReadWrite),
+                            AccessOption(ferrowl_codec::Access::ReadOnly),
+                            AccessOption(ferrowl_codec::Access::WriteOnly),
+                            AccessOption(ferrowl_codec::Access::ReadWrite),
                         ])
                         .build()
                         .unwrap();

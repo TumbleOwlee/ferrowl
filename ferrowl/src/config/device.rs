@@ -3,8 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use ferrowl_mem::{Range, Type};
-use ferrowl_reg::{
+use ferrowl_store::{Range, CellType};
+use ferrowl_codec::{
     Access, Address, Format, Kind, Register, RegisterBuilder,
     format::{Alignment, BitField, Endian, Resolution, Width},
 };
@@ -190,11 +190,11 @@ impl Scalar {
         }
     }
 
-    pub fn to_value(&self, res: f64) -> ferrowl_reg::Value {
+    pub fn to_value(&self, res: f64) -> ferrowl_codec::Value {
         match self {
-            Scalar::Int(i) => ferrowl_reg::Value::I64((*i, Resolution(res))),
-            Scalar::Float(f) => ferrowl_reg::Value::F64((*f, Resolution(res))),
-            Scalar::Text(s) => ferrowl_reg::Value::Ascii(s.clone()),
+            Scalar::Int(i) => ferrowl_codec::Value::I64((*i, Resolution(res))),
+            Scalar::Float(f) => ferrowl_codec::Value::F64((*f, Resolution(res))),
+            Scalar::Text(s) => ferrowl_codec::Value::Ascii(s.clone()),
         }
     }
 }
@@ -308,10 +308,10 @@ impl RegisterDef {
         }
     }
 
-    pub fn mem_type(&self) -> Type {
+    pub fn mem_type(&self) -> CellType {
         match self.kind() {
-            Kind::Coil | Kind::DiscreteInput => Type::Coil,
-            Kind::HoldingRegister | Kind::InputRegister => Type::Register,
+            Kind::Coil | Kind::DiscreteInput => CellType::Coil,
+            Kind::HoldingRegister | Kind::InputRegister => CellType::Register,
         }
     }
 
@@ -473,7 +473,7 @@ mod tests {
     fn ut_register_mapping() {
         let def = &sample().definitions["setpoint"];
         assert!(matches!(def.kind(), Kind::HoldingRegister));
-        assert!(matches!(def.mem_type(), Type::Register));
+        assert!(matches!(def.mem_type(), CellType::Register));
         assert_eq!(def.format().width(), 1);
     }
 
@@ -557,11 +557,11 @@ mod tests {
         assert!(matches!(Scalar::from_input(" 7 "), Scalar::Int(7)));
         assert!(matches!(Scalar::from_input("2.5"), Scalar::Float(_)));
         assert!(matches!(Scalar::from_input("abc"), Scalar::Text(_)));
-        assert!(matches!(Scalar::Int(1).to_value(1.0), ferrowl_reg::Value::I64(_)));
-        assert!(matches!(Scalar::Float(1.0).to_value(1.0), ferrowl_reg::Value::F64(_)));
+        assert!(matches!(Scalar::Int(1).to_value(1.0), ferrowl_codec::Value::I64(_)));
+        assert!(matches!(Scalar::Float(1.0).to_value(1.0), ferrowl_codec::Value::F64(_)));
         assert!(matches!(
             Scalar::Text("x".into()).to_value(1.0),
-            ferrowl_reg::Value::Ascii(_)
+            ferrowl_codec::Value::Ascii(_)
         ));
         let nv = NamedValue {
             name: "n".into(),
@@ -591,10 +591,10 @@ mod tests {
         ] {
             assert_eq!(def_with(ValueType::U16, code, Some(0), false).kind(), kind);
         }
-        assert_eq!(def_with(ValueType::U16, 1, Some(0), false).mem_type(), Type::Coil);
+        assert_eq!(def_with(ValueType::U16, 1, Some(0), false).mem_type(), CellType::Coil);
         assert_eq!(
             def_with(ValueType::U16, 4, Some(0), false).mem_type(),
-            Type::Register
+            CellType::Register
         );
 
         for vt in [
@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn ut_register_def_serde_defaults() {
         // A minimal definition omitting read_code/resolution/length triggers the default fns.
-        let path = std::env::temp_dir().join("ferrowl_regdef_min.toml");
+        let path = std::env::temp_dir().join("ferrowl_codecdef_min.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "type = \"U16\"\n").unwrap();
         let def: RegisterDef = Converter::load(path, FileType::Toml).unwrap();
