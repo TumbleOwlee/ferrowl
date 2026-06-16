@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 880 624" role="img" xmlns="http://www.w3.org/2000/svg">
 <title>Ferrowl workspace architecture — the TUI binary drives per-tab modules that share a register memory between the network tasks, the Lua simulation and the log</title>
-<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs) renders through ferrowl-ui and ferrowl-derive. Each tab is a Module combining ferrowl-reg (register descriptions and codecs), ferrowl-mem (shared register memory), ferrowl-lua (update scripts) and ferrowl-ring (ring log). ferrowl-net runs the TCP/RTU client or server task against the shared memory and talks to external Modbus peers. ferrowl-util provides shared helpers.</desc>
+<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs) renders through ferrowl-ui and ferrowl-focus. Each tab is a Module combining ferrowl-codec (register descriptions and codecs), ferrowl-store (shared register memory), ferrowl-lua (update scripts) and ferrowl-ring (ring log). ferrowl-modbus runs the TCP/RTU client or server task against the shared memory and talks to external Modbus peers. ferrowl-util provides shared helpers.</desc>
 <defs>
 <linearGradient id="archGrad" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#2D333A"/>
@@ -29,7 +29,7 @@
 <text x="730" y="116" font-size="11" fill="#A8B2BB">ratatui widgets · state · styles</text>
 
 <rect x="620" y="148" width="220" height="46" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.35"/>
-<text x="730" y="167" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-derive</text>
+<text x="730" y="167" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-focus</text>
 <text x="730" y="184" font-size="11" fill="#A8B2BB">focus-handling proc-macros</text>
 
 <line x1="620" y1="101" x2="594" y2="101" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
@@ -44,13 +44,13 @@
 <text x="60" y="246" font-size="13" font-weight="bold" fill="#C9A87E" text-anchor="start">Module — one per tab (Modbus client or server)</text>
 
 <rect x="60" y="262" width="175" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="147.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-reg</text>
+<text x="147.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-codec</text>
 <text x="147.5" y="310" font-size="11" fill="#A8B2BB">register descriptions</text>
 <text x="147.5" y="326" font-size="11" fill="#A8B2BB">encode / decode raw</text>
 <text x="147.5" y="342" font-size="11" fill="#A8B2BB">words ↔ typed values</text>
 
 <rect x="275" y="262" width="175" height="104" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="362.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-mem</text>
+<text x="362.5" y="288" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-store</text>
 <text x="362.5" y="310" font-size="11" fill="#A8B2BB">shared register space</text>
 <text x="362.5" y="326" font-size="11" fill="#A8B2BB">Arc&lt;RwLock&lt;Memory&gt;&gt;</text>
 <text x="362.5" y="342" font-size="11" fill="#A8B2BB">access-checked cells</text>
@@ -76,7 +76,7 @@
 <text x="375" y="424" font-size="11" font-style="italic" fill="#C49A63" text-anchor="start">reads / writes register words</text>
 
 <rect x="180" y="440" width="400" height="90" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
-<text x="380" y="464" font-size="14" font-weight="bold" fill="#E0CDB4">ferrowl-net</text>
+<text x="380" y="464" font-size="14" font-weight="bold" fill="#E0CDB4">ferrowl-modbus</text>
 <text x="380" y="486" font-size="11" fill="#A8B2BB">TCP &amp; RTU transports (tokio-modbus)</text>
 <text x="380" y="502" font-size="11" fill="#A8B2BB">client: polls operations · sends write commands</text>
 <text x="380" y="518" font-size="11" fill="#A8B2BB">server: answers requests from shared memory</text>
