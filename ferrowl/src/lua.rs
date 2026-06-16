@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use ferrowl_lua::module::{Read, RegisterModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
-use ferrowl_mem::Range;
-use ferrowl_net::{Key, SlaveKind};
-use ferrowl_reg::{Address, Register, Value};
+use ferrowl_store::Range;
+use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_codec::{Address, Register, Value};
 
 use crate::module::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
@@ -62,7 +62,7 @@ impl Read for RegisterBridge {
         };
         let width = register.format().width();
         let key = Key {
-            id: SlaveKind {
+            id: SlaveKey {
                 slave_id: *register.slave_id(),
                 kind: register.kind().clone(),
             },
@@ -102,7 +102,7 @@ impl Write for RegisterBridge {
             .encode(&value)
             .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?;
         let key = Key {
-            id: SlaveKind {
+            id: SlaveKey {
                 slave_id: *register.slave_id(),
                 kind: register.kind().clone(),
             },
@@ -240,10 +240,10 @@ fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_mem::{Kind as MemKind, Memory, Type};
-    use ferrowl_net::SlaveKind;
-    use ferrowl_reg::format::{BitField, Endian, Resolution};
-    use ferrowl_reg::{Access, Format, Kind, RegisterBuilder};
+    use ferrowl_store::{CellKind as MemKind, Memory, CellType};
+    use ferrowl_modbus::SlaveKey;
+    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use tokio::sync::RwLock;
 
     fn holding(addr: u16) -> Register {
@@ -263,16 +263,16 @@ mod tests {
 
     /// Memory holding two U16 registers (setpoint@0, power@1), both read/write.
     fn evse_memory() -> ModuleMemory {
-        let mut memory: Memory<Key<SlaveKind>> = Memory::default();
+        let mut memory: Memory<Key<SlaveKey>> = Memory::default();
         let key = Key {
-            id: SlaveKind {
+            id: SlaveKey {
                 slave_id: 1u8,
                 kind: Kind::HoldingRegister,
             },
         };
         memory.add_ranges(
             key,
-            &MemKind::ReadWrite(Type::Register),
+            &MemKind::ReadWrite(CellType::Register),
             &[Range::new(0, 2)],
         );
         Arc::new(RwLock::new(memory))
@@ -299,7 +299,7 @@ mod tests {
                 .slave_id(1u8)
                 .access(Access::ReadWrite)
                 .kind(Kind::HoldingRegister)
-                .address(ferrowl_reg::Address::Virtual)
+                .address(ferrowl_codec::Address::Virtual)
                 .format(Format::U16((
                     Endian::Big,
                     Resolution(1.0),
@@ -373,12 +373,12 @@ mod tests {
             .blocking_read()
             .read(
                 Key {
-                    id: SlaveKind {
+                    id: SlaveKey {
                         slave_id: 1,
                         kind: Kind::HoldingRegister,
                     },
                 },
-                &Type::Register,
+                &CellType::Register,
                 &Range::new(1, 1),
             )
             .expect("read power");

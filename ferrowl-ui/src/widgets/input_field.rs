@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 use crate::state::InputFieldState;
 use crate::style::InputFieldStyle;
 use crate::traits::Margins;
-use crate::types::Border;
+use crate::Border;
 use crate::widgets::Title;
 
 pub enum ValidateResult {

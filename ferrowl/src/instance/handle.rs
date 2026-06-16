@@ -5,13 +5,13 @@ use tokio::task::JoinHandle;
 
 /// Handle of a running client task plus the channel its commands go through.
 pub struct ClientHandle {
-    pub handle: JoinHandle<Result<(), ferrowl_net::Error>>,
-    pub sender: Sender<ferrowl_net::Command>,
+    pub handle: JoinHandle<Result<(), ferrowl_modbus::Error>>,
+    pub sender: Sender<ferrowl_modbus::Command>,
 }
 
 /// Handle of a running server task.
 pub struct ServerHandle {
-    pub handle: JoinHandle<Result<(), ferrowl_net::Error>>,
+    pub handle: JoinHandle<Result<(), ferrowl_modbus::Error>>,
 }
 
 /// Handle of a running instance, by role.

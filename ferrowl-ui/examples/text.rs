@@ -1,5 +1,5 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ferrowl_ui::{AlternateScreen, style::TextStyle, types::Border, widgets::TextBuilder};
+use ferrowl_ui::{AlternateScreen, style::TextStyle, Border, widgets::TextBuilder};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Rect},

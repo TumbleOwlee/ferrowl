@@ -28,10 +28,10 @@ The project is organized as a Cargo workspace and builds the `ferrowl` binary. S
 | ----- | ----- |
 | `ferrowl` | Binary. Event/redraw loop, tabs, views, dialogs, `:` commands, session & device configuration, `migrate` subcommand. |
 | `ferrowl-ui` | Reusable [ratatui](https://ratatui.rs) building blocks: widgets with their state types, styling and alternate-screen handling. |
-| `ferrowl-derive` | Proc macros that generate keyboard focus cycling and event dispatch for UI views. |
-| `ferrowl-reg` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
-| `ferrowl-mem` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
-| `ferrowl-net` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
+| `ferrowl-focus` | Proc macros that generate keyboard focus cycling and event dispatch for UI views. |
+| `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
+| `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
+| `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
 | `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register` and `C_Time` modules to `update` scripts. |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |

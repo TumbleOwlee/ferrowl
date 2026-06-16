@@ -16,7 +16,7 @@ use ferrowl_ui::style::{
     ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, TableStyle, TextStyle,
 };
 use ferrowl_ui::traits::{Init, ToLabel};
-use ferrowl_ui::types::Border;
+use ferrowl_ui::Border;
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
     SelectionBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,

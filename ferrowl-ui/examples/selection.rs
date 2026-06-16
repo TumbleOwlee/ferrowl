@@ -5,7 +5,7 @@ use ferrowl_ui::{
     state::{SelectionState, SelectionStateBuilder},
     style::SelectionStyle,
     traits::{HandleEvents, ToLabel},
-    types::Border,
+    Border,
     widgets::SelectionBuilder,
 };
 use ratatui::{

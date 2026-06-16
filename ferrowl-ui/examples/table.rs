@@ -5,7 +5,7 @@ use ferrowl_ui::{
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     traits::HandleEvents,
-    types::Border,
+    Border,
     widgets::{Header, Table, TableBuilder, TableEntry, Width},
 };
 use ratatui::{Frame, layout::Margin, style::palette::tailwind};

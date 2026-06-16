@@ -15,7 +15,7 @@ use ratatui::{
 use crate::{
     state::{TableState, TableStateBuilder},
     style::TableStyle,
-    types::Border,
+    Border,
     widgets::Title,
 };
 

@@ -12,11 +12,11 @@ pub use input::*;
 pub use selection::*;
 pub use subdialog::*;
 
-use ferrowl_reg::format::{
+use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution,
 };
-use ferrowl_reg::{Access, Address, Kind};
+use ferrowl_codec::{Access, Address, Kind};
 
 /// Parse an address-field value: the literal `virtual` (case-insensitive) selects a virtual
 /// register (no Modbus address), otherwise a `u16` address.

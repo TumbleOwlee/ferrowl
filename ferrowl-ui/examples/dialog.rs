@@ -12,14 +12,14 @@ use ferrowl_ui::{
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle},
     traits::{HandleEvents, Margins},
-    types::Border,
+    Border,
     widgets::{
         InputField, InputFieldBuilder, Selection, SelectionBuilder, Validate, ValidateResult,
         Widget,
     },
 };
 
-use ferrowl_derive::{Focus, focusable};
+use ferrowl_focus::{Focus, focusable};
 
 #[derive(Debug, Clone)]
 struct Day {}

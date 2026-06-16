@@ -9,10 +9,10 @@ mod builder;
 mod context;
 pub mod module;
 mod script;
-mod state;
+mod script_state;
 
 pub use builder::ContextBuilder;
 pub use context::Context;
 pub use mlua::{Error, Result};
 pub use script::Script;
-pub use state::State;
+pub use script_state::ScriptState;

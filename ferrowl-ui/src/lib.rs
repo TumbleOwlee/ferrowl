@@ -7,15 +7,17 @@
 //! [`EventResult`] so callers know whether a key was consumed.
 //! [`AlternateScreen`] manages raw mode and the terminal's alternate screen.
 
+mod border;
+mod event_result;
 mod screen;
 
 pub mod state;
 pub mod style;
 pub mod traits;
-pub mod types;
 pub mod widgets;
+pub use border::Border;
+pub use event_result::EventResult;
 pub use screen::AlternateScreen;
-pub use types::EventResult;
 
 use ratatui::style::{Color, palette::tailwind};
 

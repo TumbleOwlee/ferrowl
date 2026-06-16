@@ -2,7 +2,7 @@
 //! them, and applying their results to the active tab.
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_reg::Address;
+use ferrowl_codec::Address;
 
 use crate::config::{
     ModuleSpec,

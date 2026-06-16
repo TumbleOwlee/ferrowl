@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
-use ferrowl_net::{Config as NetConfig, FunctionCode, Key, Operation, SlaveKind};
-use ferrowl_reg::{Access, Address, Kind, Register};
+use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
+use ferrowl_modbus::{Transport as NetConfig, FunctionCode, Key, Operation, SlaveKey};
+use ferrowl_codec::{Access, Address, Kind, Register};
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
@@ -24,11 +24,11 @@ use crate::instance::error::Error;
 use crate::lua::{SimHandle, run_sim};
 use crate::view::log::format_timestamp;
 
-pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKind>>>>;
+pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Shared store of virtual-register values (no Modbus address), keyed by register name. Shared
 /// with the Lua sim thread so `update` scripts can drive virtual registers and the table shows them.
-pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_reg::Value>>>;
+pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_codec::Value>>>;
 /// Optional per-module log file, shared into the log/status callbacks; swappable at runtime so
 /// `:log` takes effect on already-running modules.
 pub type FileSink = Arc<Mutex<Option<BufWriter<std::fs::File>>>>;
@@ -37,7 +37,7 @@ pub type FileSink = Arc<Mutex<Option<BufWriter<std::fs::File>>>>;
 /// device), plus its register set, shared memory and ring log.
 pub struct Module {
     name: String,
-    instance: Instance<SlaveKind>,
+    instance: Instance<SlaveKey>,
     registers: Vec<(String, String, Register, Vec<NamedValue>)>,
     /// Shared operations list — owned here so it can be updated in-place without rebuilding the
     /// network instance (the instance holds a clone of the same Arc).
@@ -60,10 +60,10 @@ pub struct Module {
 impl Module {
     /// Build a module from an instance spec and its device-type config.
     pub fn new(spec: &ModuleSpec, device: &DeviceConfig) -> Self {
-        let mut memory = Memory::<Key<SlaveKind>>::default();
+        let mut memory = Memory::<Key<SlaveKey>>::default();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
         let mut scripts: Vec<(String, String)> = Vec::new();
-        let mut virtual_init: HashMap<String, ferrowl_reg::Value> = HashMap::new();
+        let mut virtual_init: HashMap<String, ferrowl_codec::Value> = HashMap::new();
 
         for (name, def) in &device.definitions {
             let register = def.register();
@@ -88,7 +88,7 @@ impl Module {
             }
             if let Some(range) = def.mem_range() {
                 let key = Key {
-                    id: SlaveKind {
+                    id: SlaveKey {
                         slave_id: def.slave_id,
                         kind: def.register().kind().clone(),
                     },
@@ -102,7 +102,7 @@ impl Module {
                     && let Ok(raw) = register.encode(&default.to_string())
                 {
                     let write_key = Key {
-                        id: SlaveKind {
+                        id: SlaveKey {
                             slave_id: def.slave_id,
                             kind: def.register().kind().clone(),
                         },
@@ -183,7 +183,7 @@ impl Module {
     }
 
     /// Store a value for a virtual register (replaces any previous value).
-    pub async fn set_virtual_value(&self, name: &str, val: ferrowl_reg::Value) {
+    pub async fn set_virtual_value(&self, name: &str, val: ferrowl_codec::Value) {
         self.virtual_values
             .write()
             .await
@@ -322,7 +322,7 @@ impl Module {
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).
-    pub async fn send_command(&self, command: ferrowl_net::Command) -> Result<(), Error> {
+    pub async fn send_command(&self, command: ferrowl_modbus::Command) -> Result<(), Error> {
         self.instance.send_command(command).await
     }
 
@@ -369,22 +369,22 @@ impl Module {
 
 /// Initial display value for a register: its format decoded from all-zero words (e.g. "0").
 /// Used to seed virtual registers so the table isn't blank before a script or `:set` runs.
-pub(crate) fn default_value(register: &Register) -> ferrowl_reg::Value {
+pub(crate) fn default_value(register: &Register) -> ferrowl_codec::Value {
     let zeros = vec![0u16; register.format().width()];
     register
         .decode(&zeros)
-        .unwrap_or(ferrowl_reg::Value::Ascii(String::new()))
+        .unwrap_or(ferrowl_codec::Value::Ascii(String::new()))
 }
 
-/// Parse user input (`:set`, Lua `write`) into a typed [`Value`](ferrowl_reg::Value),
+/// Parse user input (`:set`, Lua `write`) into a typed [`Value`](ferrowl_codec::Value),
 /// attaching the register's display resolution (1.0 when the format has none).
-pub(crate) fn str_to_value(s: &str, register: &Register) -> ferrowl_reg::Value {
+pub(crate) fn str_to_value(s: &str, register: &Register) -> ferrowl_codec::Value {
     let res = register.format().resolution().map(|r| r.0).unwrap_or(1.0);
     crate::config::device::Scalar::from_input(s).to_value(res)
 }
 
 fn function_code(register: &Register) -> FunctionCode {
-    use ferrowl_reg::Kind;
+    use ferrowl_codec::Kind;
     match register.kind() {
         Kind::Coil => FunctionCode::ReadCoils,
         Kind::DiscreteInput => FunctionCode::ReadDiscreteInputs,
@@ -530,7 +530,7 @@ fn build_read_operations(
 fn explicit_read_coverage(
     registers: &[(String, String, Register, Vec<NamedValue>)],
     read_ranges: &ReadRanges,
-) -> Vec<(Key<SlaveKind>, MemKind, Range)> {
+) -> Vec<(Key<SlaveKey>, MemKind, Range)> {
     let mut out = Vec::new();
     for ((slave, _), (_, kind, mut spans)) in group_readable_spans(registers, true) {
         let explicit = read_ranges.ranges_for(kind.clone());
@@ -540,11 +540,11 @@ fn explicit_read_coverage(
         spans.sort_unstable();
         let covered = merge_spans(&spans);
         let mem_type = match kind {
-            Kind::Coil | Kind::DiscreteInput => Type::Coil,
-            Kind::HoldingRegister | Kind::InputRegister => Type::Register,
+            Kind::Coil | Kind::DiscreteInput => CellType::Coil,
+            Kind::HoldingRegister | Kind::InputRegister => CellType::Register,
         };
         let key = Key {
-            id: SlaveKind {
+            id: SlaveKey {
                 slave_id: slave,
                 kind: kind.clone(),
             },
@@ -661,7 +661,7 @@ pub struct Timing {
 
 fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetConfig {
     match endpoint {
-        Endpoint::Tcp { ip, port } => NetConfig::Tcp(ferrowl_net::tcp::Config {
+        Endpoint::Tcp { ip, port } => NetConfig::Tcp(ferrowl_modbus::tcp::Config {
             ip: ip.clone(),
             port: *port,
             timeout_ms: timing.timeout_ms,
@@ -674,7 +674,7 @@ fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetConfig {
             parity,
             data_bits,
             stop_bits,
-        } => NetConfig::Rtu(ferrowl_net::rtu::Config {
+        } => NetConfig::Rtu(ferrowl_modbus::rtu::Config {
             path: path.clone(),
             baud_rate: *baud_rate,
             slave: 0,
@@ -693,7 +693,7 @@ fn build_instance(
     config: NetConfig,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
-) -> Instance<SlaveKind> {
+) -> Instance<SlaveKey> {
     match (role, config) {
         (Role::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(ClientConfig {
             config: Arc::new(RwLock::new(cfg)),
@@ -718,10 +718,10 @@ fn build_instance(
 
 #[cfg(test)]
 mod tests {
-    use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
-    use ferrowl_net::{Key, SlaveKind};
-    use ferrowl_reg::format::{BitField, Endian, Resolution};
-    use ferrowl_reg::{Access, Address, Format, Kind, RegisterBuilder};
+    use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
+    use ferrowl_modbus::{Key, SlaveKey};
+    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::{Access, Address, Format, Kind, RegisterBuilder};
 
     #[test]
     fn ut_module_log_path() {
@@ -790,7 +790,7 @@ mod tests {
     ) -> (
         String,
         String,
-        ferrowl_reg::Register,
+        ferrowl_codec::Register,
         Vec<crate::config::device::NamedValue>,
     ) {
         let register = RegisterBuilder::default()
@@ -812,7 +812,7 @@ mod tests {
     ) -> (
         String,
         String,
-        ferrowl_reg::Register,
+        ferrowl_codec::Register,
         Vec<crate::config::device::NamedValue>,
     ) {
         entry(
@@ -827,7 +827,7 @@ mod tests {
     #[test]
     fn ut_str_to_value_uses_register_resolution() {
         use super::str_to_value;
-        use ferrowl_reg::Value;
+        use ferrowl_codec::Value;
 
         let reg = entry(
             1,
@@ -864,7 +864,7 @@ mod tests {
     fn ut_build_read_operations_batches() {
         use super::build_read_operations;
         use crate::config::device::ReadRanges;
-        use ferrowl_net::FunctionCode;
+        use ferrowl_modbus::FunctionCode;
         let mut read_ranges = ReadRanges {
             holding: Some("0-2".to_string()),
             ..Default::default()
@@ -978,16 +978,16 @@ mod tests {
     // Replicates the server `:set`/edit write path + the table decode read path.
     #[test]
     fn ut_server_value_write_roundtrip() {
-        let mut memory: Memory<Key<SlaveKind>> = Memory::default();
+        let mut memory: Memory<Key<SlaveKey>> = Memory::default();
         let key = Key {
-            id: SlaveKind {
+            id: SlaveKey {
                 slave_id: 1u8,
                 kind: Kind::HoldingRegister,
             },
         };
         memory.add_ranges(
             key.clone(),
-            &MemKind::ReadWrite(Type::Register),
+            &MemKind::ReadWrite(CellType::Register),
             &[Range::new(0, 1)],
         );
 
@@ -1008,7 +1008,7 @@ mod tests {
         assert!(
             memory.write(
                 key.clone(),
-                &Type::Register,
+                &CellType::Register,
                 &Range::new(0, raw.len()),
                 &raw
             ),
@@ -1018,7 +1018,7 @@ mod tests {
         let read = memory
             .read(
                 key,
-                &Type::Register,
+                &CellType::Register,
                 &Range::new(0, register.format().width()),
             )
             .expect("read should succeed");

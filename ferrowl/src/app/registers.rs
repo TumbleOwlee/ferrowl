@@ -1,9 +1,9 @@
 //! Free helpers translating between `Register`s, device-config `RegisterDef`s, module memory
 //! bindings and live table values.
 
-use ferrowl_mem::{Kind as MemKind, Memory, Range, Type};
-use ferrowl_net::{Command, Key, SlaveKind};
-use ferrowl_reg::{Access, Address, Kind, Register, Value};
+use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
+use ferrowl_modbus::{Command, Key, SlaveKey};
+use ferrowl_codec::{Access, Address, Kind, Register, Value};
 
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType,
@@ -11,10 +11,10 @@ use crate::config::device::{
 use crate::view::main::Definition;
 
 /// Modbus memory type backing a register.
-fn mem_type(register: &Register) -> Type {
+fn mem_type(register: &Register) -> CellType {
     match register.kind() {
-        Kind::Coil | Kind::DiscreteInput => Type::Coil,
-        Kind::HoldingRegister | Kind::InputRegister => Type::Register,
+        Kind::Coil | Kind::DiscreteInput => CellType::Coil,
+        Kind::HoldingRegister | Kind::InputRegister => CellType::Register,
     }
 }
 
@@ -35,7 +35,7 @@ pub(super) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(Stri
 /// Memory binding `(kind, key, range)` backing a fixed-address register, or `None` if virtual.
 pub(super) fn register_mem_binding(
     register: &Register,
-) -> Option<(MemKind, Key<SlaveKind>, Range)> {
+) -> Option<(MemKind, Key<SlaveKey>, Range)> {
     let Address::Fixed(addr) = register.address() else {
         return None;
     };
@@ -45,7 +45,7 @@ pub(super) fn register_mem_binding(
         Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
     };
     let key = Key {
-        id: SlaveKind {
+        id: SlaveKey {
             slave_id: *register.slave_id(),
             kind: register.kind().clone(),
         },
@@ -80,14 +80,14 @@ pub(super) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u1
 /// Decode one register's live value from the module memory snapshot.
 pub(super) fn decode_definition(
     mut d: Definition,
-    memory: &Memory<Key<SlaveKind>>,
+    memory: &Memory<Key<SlaveKey>>,
     virtual_values: &std::collections::HashMap<String, Value>,
 ) -> Definition {
     match d.register.address() {
         Address::Fixed(addr) => {
             let width = d.register.format().width();
             let key = Key {
-                id: SlaveKind {
+                id: SlaveKey {
                     slave_id: *d.register.slave_id(),
                     kind: d.register.kind().clone(),
                 },
@@ -140,7 +140,7 @@ fn raw_hex(raw: &[u16]) -> String {
 /// Sync the mutable `RegisterDef` fields (address, format, access, kind) from an edited
 /// `Register`. Named values are handled separately in `apply_edit`.
 pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
-    use ferrowl_reg::Format;
+    use ferrowl_codec::Format;
 
     def.slave_id = *register.slave_id();
     def.access = match register.access() {
@@ -203,8 +203,8 @@ pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
         Format::Ascii((align, width)) => {
             def.value_type = DevValueType::Ascii;
             def.alignment = match align {
-                ferrowl_reg::format::Alignment::Left => AlignmentCfg::Left,
-                ferrowl_reg::format::Alignment::Right => AlignmentCfg::Right,
+                ferrowl_codec::format::Alignment::Left => AlignmentCfg::Left,
+                ferrowl_codec::format::Alignment::Right => AlignmentCfg::Right,
             };
             def.length = width.0;
             def.bitmask = None;
@@ -212,9 +212,9 @@ pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
     }
 }
 
-fn endian_cfg(e: &ferrowl_reg::format::Endian) -> EndianCfg {
+fn endian_cfg(e: &ferrowl_codec::format::Endian) -> EndianCfg {
     match e {
-        ferrowl_reg::format::Endian::Big => EndianCfg::Big,
-        ferrowl_reg::format::Endian::Little => EndianCfg::Little,
+        ferrowl_codec::format::Endian::Big => EndianCfg::Big,
+        ferrowl_codec::format::Endian::Little => EndianCfg::Little,
     }
 }

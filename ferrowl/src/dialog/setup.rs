@@ -5,13 +5,13 @@
 //! cannot be confirmed (only cancelled with Esc).
 
 use derive_builder::Builder;
-use ferrowl_derive::{Focus, focusable};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
-    types::Border,
+    Border,
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
         Validate, ValidateResult, Widget,

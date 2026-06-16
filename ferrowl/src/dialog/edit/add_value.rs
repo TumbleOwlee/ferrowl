@@ -2,12 +2,12 @@
 
 use crate::config::device::{NamedValue, Scalar};
 use derive_builder::Builder;
-use ferrowl_derive::{Focus, focusable};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder},
     style::{InputFieldStyle, TextStyle},
-    types::Border,
+    Border,
     widgets::{InputField, InputFieldBuilder, Text, TextBuilder, Validate, ValidateResult, Widget},
 };
 use ratatui::{

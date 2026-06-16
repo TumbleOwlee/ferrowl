@@ -19,7 +19,7 @@ use ratatui::widgets::{Block, StatefulWidget, Widget as RenderWidget};
 use ratatui::{buffer::Buffer, layout::Rect};
 pub use scrolling_tabs::*;
 
-use crate::types::Border;
+use crate::Border;
 
 /// If `border` is `Border::Full`, render a styled (optionally titled) bordered block into `area`
 /// and return the inner content rect (after the border's inner margin). For `Border::None` the
