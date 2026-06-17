@@ -740,13 +740,23 @@ mod tests {
         assert_eq!(reg(u8_le()).write_mask(), vec![0xFF00u16]);
         // U64 / U128 masks span multiple words.
         assert_eq!(
-            reg(Format::U64((Endian::Big, res(), BitField { mask: u64::MAX as u128 })))
-                .write_mask(),
+            reg(Format::U64((
+                Endian::Big,
+                res(),
+                BitField {
+                    mask: u64::MAX as u128
+                }
+            )))
+            .write_mask(),
             vec![0xFFFFu16; 4]
         );
         assert_eq!(
-            reg(Format::U128((Endian::Big, res(), BitField { mask: u128::MAX })))
-                .write_mask(),
+            reg(Format::U128((
+                Endian::Big,
+                res(),
+                BitField { mask: u128::MAX }
+            )))
+            .write_mask(),
             vec![0xFFFFu16; 8]
         );
         // Float / ASCII masks are all-ones across their width.

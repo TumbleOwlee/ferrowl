@@ -1,11 +1,10 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    AlternateScreen, EventResult,
+    AlternateScreen, Border, EventResult,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     traits::HandleEvents,
-    Border,
     widgets::{Header, Table, TableBuilder, TableEntry, Width},
 };
 use ratatui::{Frame, layout::Margin, style::palette::tailwind};

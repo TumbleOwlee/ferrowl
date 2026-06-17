@@ -2,10 +2,9 @@
 //! `InputField` widget; parsing/execution of the typed command lands in a later phase.
 
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder},
     style::InputFieldStyle,
-    Border,
     widgets::{InputField, InputFieldBuilder, Widget},
 };
 use ratatui::layout::Margin;

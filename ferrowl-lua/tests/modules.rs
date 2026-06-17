@@ -4,9 +4,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use ferrowl_lua::module::{
-    Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write,
-};
+use ferrowl_lua::module::{Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{Context, ContextBuilder, Error, Result};
 
 /// A host register handle whose reads are keyed by name so each typed getter

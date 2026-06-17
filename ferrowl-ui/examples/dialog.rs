@@ -8,11 +8,10 @@ use ratatui::{
 use std::{fmt::Debug, io::Stdout, process::ExitCode, time::Duration};
 
 use ferrowl_ui::{
-    AlternateScreen, EventResult,
+    AlternateScreen, Border, EventResult,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle},
     traits::{HandleEvents, Margins},
-    Border,
     widgets::{
         InputField, InputFieldBuilder, Selection, SelectionBuilder, Validate, ValidateResult,
         Widget,

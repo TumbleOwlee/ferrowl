@@ -277,7 +277,9 @@ mod tests {
     fn ut_parse_empty_parts_and_error_paths() {
         // Empty comma segment is skipped.
         assert_eq!(
-            parse_module_spec("name=m,,device=d.toml,port=1").unwrap().name,
+            parse_module_spec("name=m,,device=d.toml,port=1")
+                .unwrap()
+                .name,
             "m"
         );
         // Invalid role / transport.
@@ -287,9 +289,7 @@ mod tests {
         assert!(parse_module_spec("name=m,oops,device=d,port=1").is_err());
         // RTU missing path; invalid numeric option; invalid port.
         assert!(parse_module_spec("name=m,device=d,transport=rtu").is_err());
-        assert!(
-            parse_module_spec("name=m,device=d,transport=rtu,path=/x,data_bits=foo").is_err()
-        );
+        assert!(parse_module_spec("name=m,device=d,transport=rtu,path=/x,data_bits=foo").is_err());
         assert!(parse_module_spec("name=m,device=d,port=notanum").is_err());
     }
 

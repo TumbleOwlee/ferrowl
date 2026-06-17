@@ -1,9 +1,9 @@
 //! Execution of `:` commands against the active tab: module lifecycle, value writes,
 //! ordering and persistence.
 
-use ferrowl_store::Range;
-use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_codec::{Access, Address};
+use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_store::Range;
 use ferrowl_ui::widgets::Header;
 use ferrowl_util::convert::{Converter, FileType};
 

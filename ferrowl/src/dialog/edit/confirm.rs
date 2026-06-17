@@ -3,10 +3,9 @@
 use derive_builder::Builder;
 use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{ButtonState, ButtonStateBuilder},
     style::{ButtonStyle, TextStyle},
-    Border,
     widgets::{Button, ButtonBuilder, Text, TextBuilder, Widget},
 };
 use ratatui::{

@@ -11,9 +11,9 @@ use std::marker::PhantomData;
 
 use crate::traits::ToLabel;
 use crate::{
+    Border,
     state::{SelectionState, SelectionStateBuilder},
     traits::Margins,
-    Border,
 };
 use crate::{style::SelectionStyle, widgets::Title};
 

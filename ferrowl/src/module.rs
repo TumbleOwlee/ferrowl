@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
-use ferrowl_modbus::{Transport as NetConfig, FunctionCode, Key, Operation, SlaveKey};
 use ferrowl_codec::{Access, Address, Kind, Register};
+use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetConfig};
+use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
@@ -718,10 +718,10 @@ fn build_instance(
 
 #[cfg(test)]
 mod tests {
-    use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
-    use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_codec::format::{BitField, Endian, Resolution};
     use ferrowl_codec::{Access, Address, Format, Kind, RegisterBuilder};
+    use ferrowl_modbus::{Key, SlaveKey};
+    use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 
     #[test]
     fn ut_module_log_path() {
@@ -1006,12 +1006,14 @@ mod tests {
 
         let raw = register.encode("50").unwrap();
         assert!(
-            memory.write(
-                key.clone(),
-                &CellType::Register,
-                &Range::new(0, raw.len()),
-                &raw
-            ).is_ok(),
+            memory
+                .write(
+                    key.clone(),
+                    &CellType::Register,
+                    &Range::new(0, raw.len()),
+                    &raw
+                )
+                .is_ok(),
             "write should succeed for a Combined register cell"
         );
 

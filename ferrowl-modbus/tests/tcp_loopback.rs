@@ -5,10 +5,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, SlaveKey};
+use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
 
@@ -45,14 +45,30 @@ fn config(port: u16) -> tcp::Config {
 /// Server memory seeded with distinct values in all four register tables.
 fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
-    mem.add_ranges(key(RegKind::Coil), &MemKind::ReadWrite(CellType::Coil), &[Range::new(0, 8)]);
-    mem.write(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4), &[1, 0, 1, 0]).unwrap();
+    mem.add_ranges(
+        key(RegKind::Coil),
+        &MemKind::ReadWrite(CellType::Coil),
+        &[Range::new(0, 8)],
+    );
+    mem.write(
+        key(RegKind::Coil),
+        &CellType::Coil,
+        &Range::new(0, 4),
+        &[1, 0, 1, 0],
+    )
+    .unwrap();
     mem.add_ranges(
         key(RegKind::DiscreteInput),
         &MemKind::ReadWrite(CellType::Coil),
         &[Range::new(0, 4)],
     );
-    mem.write(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4), &[0, 1, 1, 0]).unwrap();
+    mem.write(
+        key(RegKind::DiscreteInput),
+        &CellType::Coil,
+        &Range::new(0, 4),
+        &[0, 1, 1, 0],
+    )
+    .unwrap();
     mem.add_ranges(
         key(RegKind::InputRegister),
         &MemKind::ReadWrite(CellType::Register),
@@ -63,7 +79,8 @@ fn server_mem() -> Mem {
         &CellType::Register,
         &Range::new(0, 4),
         &[100, 200, 300, 400],
-    ).unwrap();
+    )
+    .unwrap();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
         &MemKind::ReadWrite(CellType::Register),
@@ -74,14 +91,19 @@ fn server_mem() -> Mem {
         &CellType::Register,
         &Range::new(0, 4),
         &[10, 20, 30, 40],
-    ).unwrap();
+    )
+    .unwrap();
     Arc::new(RwLock::new(mem))
 }
 
 /// Client memory with the same regions declared but no values (the client fills them from reads).
 fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
-    mem.add_ranges(key(RegKind::Coil), &MemKind::ReadWrite(CellType::Coil), &[Range::new(0, 8)]);
+    mem.add_ranges(
+        key(RegKind::Coil),
+        &MemKind::ReadWrite(CellType::Coil),
+        &[Range::new(0, 8)],
+    );
     mem.add_ranges(
         key(RegKind::DiscreteInput),
         &MemKind::ReadWrite(CellType::Coil),
@@ -114,7 +136,11 @@ async fn tcp_client_polls_server_and_executes_commands() {
 
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
-        Operation { slave_id: 1, fn_code: FunctionCode::ReadCoils, range: Range::new(0, 4) },
+        Operation {
+            slave_id: 1,
+            fn_code: FunctionCode::ReadCoils,
+            range: Range::new(0, 4),
+        },
         Operation {
             slave_id: 1,
             fn_code: FunctionCode::ReadDiscreteInputs,
@@ -148,38 +174,66 @@ async fn tcp_client_polls_server_and_executes_commands() {
     {
         let g = cli_mem.read().await;
         assert_eq!(
-            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 4)).unwrap(),
+            g.read(
+                key(RegKind::HoldingRegister),
+                &CellType::Register,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
             vec![10, 20, 30, 40]
         );
         assert_eq!(
-            g.read(key(RegKind::InputRegister), &CellType::Register, &Range::new(0, 4)).unwrap(),
+            g.read(
+                key(RegKind::InputRegister),
+                &CellType::Register,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
             vec![100, 200, 300, 400]
         );
         assert_eq!(
-            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4)).unwrap(),
+            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4))
+                .unwrap(),
             vec![1, 0, 1, 0]
         );
         assert_eq!(
-            g.read(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4)).unwrap(),
+            g.read(
+                key(RegKind::DiscreteInput),
+                &CellType::Coil,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
             vec![0, 1, 1, 0]
         );
     }
 
     // Exercise every write command against the server.
-    tx.send(Command::WriteSingleRegister(1, 0, 99)).await.unwrap();
-    tx.send(Command::WriteMultipleRegister(1, 1, vec![5, 6])).await.unwrap();
+    tx.send(Command::WriteSingleRegister(1, 0, 99))
+        .await
+        .unwrap();
+    tx.send(Command::WriteMultipleRegister(1, 1, vec![5, 6]))
+        .await
+        .unwrap();
     tx.send(Command::WriteSingleCoil(1, 5, true)).await.unwrap();
-    tx.send(Command::WriteMultipleCoils(1, 6, vec![true, false])).await.unwrap();
+    tx.send(Command::WriteMultipleCoils(1, 6, vec![true, false]))
+        .await
+        .unwrap();
     sleep(Duration::from_millis(600)).await;
 
     {
         let g = srv_mem.read().await;
         assert_eq!(
-            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 3)).unwrap(),
+            g.read(
+                key(RegKind::HoldingRegister),
+                &CellType::Register,
+                &Range::new(0, 3)
+            )
+            .unwrap(),
             vec![99, 5, 6]
         );
         assert_eq!(
-            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(5, 3)).unwrap(),
+            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(5, 3))
+                .unwrap(),
             vec![1, 1, 0]
         );
     }
@@ -224,10 +278,16 @@ async fn tcp_client_handles_server_rejections() {
     sleep(Duration::from_millis(800)).await;
 
     // Writes the server rejects -> the "invalid" command branches.
-    tx.send(Command::WriteSingleRegister(1, 0, 1)).await.unwrap();
-    tx.send(Command::WriteMultipleRegister(1, 0, vec![1, 2])).await.unwrap();
+    tx.send(Command::WriteSingleRegister(1, 0, 1))
+        .await
+        .unwrap();
+    tx.send(Command::WriteMultipleRegister(1, 0, vec![1, 2]))
+        .await
+        .unwrap();
     tx.send(Command::WriteSingleCoil(1, 0, true)).await.unwrap();
-    tx.send(Command::WriteMultipleCoils(1, 0, vec![true])).await.unwrap();
+    tx.send(Command::WriteMultipleCoils(1, 0, vec![true]))
+        .await
+        .unwrap();
     sleep(Duration::from_millis(600)).await;
 
     tx.send(Command::Terminate).await.unwrap();

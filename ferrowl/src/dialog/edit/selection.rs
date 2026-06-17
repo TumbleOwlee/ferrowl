@@ -11,14 +11,14 @@ use crate::dialog::edit::{
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, Width,
 };
 use ferrowl_codec::{Address, Register, RegisterBuilder};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{
         ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
@@ -26,7 +26,6 @@ use ferrowl_ui::{
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::HandleEvents,
     traits::ToLabel,
-    Border,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,

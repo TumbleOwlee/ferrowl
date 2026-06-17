@@ -1,9 +1,9 @@
 //! Free helpers translating between `Register`s, device-config `RegisterDef`s, module memory
 //! bindings and live table values.
 
-use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
-use ferrowl_modbus::{Command, Key, SlaveKey};
 use ferrowl_codec::{Access, Address, Kind, Register, Value};
+use ferrowl_modbus::{Command, Key, SlaveKey};
+use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType,
@@ -33,9 +33,7 @@ pub(super) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(Stri
 }
 
 /// Memory binding `(kind, key, range)` backing a fixed-address register, or `None` if virtual.
-pub(super) fn register_mem_binding(
-    register: &Register,
-) -> Option<(MemKind, Key<SlaveKey>, Range)> {
+pub(super) fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<SlaveKey>, Range)> {
     let Address::Fixed(addr) = register.address() else {
         return None;
     };

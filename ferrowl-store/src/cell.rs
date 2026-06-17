@@ -93,7 +93,7 @@ impl<'a> ValueRange<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellKind, CellType, Cell, ValueRange};
+    use super::{Cell, CellKind, CellType, ValueRange};
 
     #[test]
     fn ut_value_default() {
@@ -139,8 +139,14 @@ mod tests {
     #[test]
     fn ut_kind_get_type() {
         assert_eq!(CellKind::Read(CellType::Coil).cell_type(), CellType::Coil);
-        assert_eq!(CellKind::Write(CellType::Register).cell_type(), CellType::Register);
-        assert_eq!(CellKind::ReadWrite(CellType::Coil).cell_type(), CellType::Coil);
+        assert_eq!(
+            CellKind::Write(CellType::Register).cell_type(),
+            CellType::Register
+        );
+        assert_eq!(
+            CellKind::ReadWrite(CellType::Coil).cell_type(),
+            CellType::Coil
+        );
     }
 
     #[test]

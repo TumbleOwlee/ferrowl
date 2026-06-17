@@ -1,8 +1,8 @@
 //! Shared-state bundles handed to an [`Instance`](crate::instance::Instance)
 //! constructor.
 
-use ferrowl_store::Memory;
 use ferrowl_modbus::KeyParams;
+use ferrowl_store::Memory;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;

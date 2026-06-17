@@ -261,7 +261,10 @@ mod tests {
     #[test]
     fn ut_value_unscaled_all_variants() {
         use super::UnscaledValue;
-        assert!(matches!(Value::U8((8, res())).unscaled(), UnscaledValue::U8(8)));
+        assert!(matches!(
+            Value::U8((8, res())).unscaled(),
+            UnscaledValue::U8(8)
+        ));
         assert!(matches!(
             Value::U32((32, res())).unscaled(),
             UnscaledValue::U32(32)

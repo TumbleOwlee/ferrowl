@@ -5,8 +5,8 @@ use crate::{
     dialog::parse_raw_value,
 };
 use derive_builder::Builder;
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_codec::{Register, Value};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
