@@ -6,6 +6,7 @@ members = [
     "ferrowl-codec",
     "ferrowl-ring",
     "ferrowl-modbus",
+    "ferrowl-ocpp",
     "ferrowl-util",
     "ferrowl-ui",
     "ferrowl",

@@ -1,0 +1,52 @@
+//! The low-level, full-fidelity action layer.
+//!
+//! Each OCPP version is described by a [`Version`] implementation that ties together its generated
+//! `Action`/`Response` enums (one variant per action, wrapping `rust_ocpp`'s own request/response
+//! structs untouched) with the codec glue the core loop needs. Implementations are produced by the
+//! [`define_ocpp_version!`](crate::action::macros::define_ocpp_version) macro.
+
+pub(crate) mod macros;
+
+#[cfg(feature = "v1_6")]
+pub mod v1_6;
+#[cfg(feature = "v2_0_1")]
+pub mod v2_0_1;
+
+use serde_json::Value;
+
+use crate::error::{OcppError, ValidationError};
+
+/// Everything the version-agnostic core loop needs to move a single OCPP version's actions on and
+/// off the wire. Both inbound directions (decode a peer Call, decode a peer's CallResult) and both
+/// outbound directions (encode our Call, encode our response) are covered.
+///
+/// A `CallResult` frame carries no action name, so [`Version::decode_result`] takes the originating
+/// `Action` to know which response variant to build.
+pub trait Version: Send + Sync + 'static {
+    /// The generated per-version action enum (one variant per action).
+    type Action: Send + 'static;
+    /// The generated per-version response enum (one variant per action).
+    type Response: Send + 'static;
+
+    /// The wire action name for an action variant (e.g. `"BootNotification"`).
+    fn action_name(action: &Self::Action) -> &'static str;
+
+    /// The websocket subprotocol token for this version (`"ocpp1.6"` / `"ocpp2.0.1"`).
+    fn subprotocol() -> &'static str;
+
+    /// Decode an inbound Call payload into a typed action, by wire action name.
+    fn decode_call(action_name: &str, payload: Value) -> Result<Self::Action, OcppError>;
+
+    /// Run `validator::Validate` on an action whose request type supports it (no-op otherwise).
+    fn validate(action: &Self::Action) -> Result<(), ValidationError>;
+
+    /// Encode our response to an inbound Call into a CallResult payload.
+    fn encode_response(response: &Self::Response) -> Result<Value, OcppError>;
+
+    /// Encode our outbound Call's request into a Call payload.
+    fn encode_action(action: &Self::Action) -> Result<Value, OcppError>;
+
+    /// Decode a CallResult payload into a typed response, using the originating action to select
+    /// the response variant.
+    fn decode_result(action: &Self::Action, payload: Value) -> Result<Self::Response, OcppError>;
+}
