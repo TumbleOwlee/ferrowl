@@ -38,7 +38,7 @@ where
             };
             let guard = memory.read().await;
             match guard.read(key, &CellType::Coil, &Range::new(addr as usize, cnt as usize)) {
-                Some(v) => {
+                Ok(v) => {
                     if verbose {
                         log.invoke(format!(
                             "ReadCoils request for slave ID {} and range [{}, {}) successful.",
@@ -50,10 +50,10 @@ where
                     }
                     Ok(Response::ReadCoils(v.into_iter().map(|b| b != 0).collect()))
                 }
-                None => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadCoils request for slave ID {} and range [{}, {}) failed.",
+                            "ReadCoils request for slave ID {} and range [{}, {}) failed: {e}.",
                             slave,
                             addr,
                             addr + cnt
@@ -77,7 +77,7 @@ where
             };
             let guard = memory.read().await;
             match guard.read(key, &CellType::Coil, &Range::new(addr as usize, cnt as usize)) {
-                Some(v) => {
+                Ok(v) => {
                     if verbose {
                         log.invoke(format!(
                             "ReadDiscreteInputs request for slave ID {} and range [{}, {}) successful.",
@@ -91,10 +91,10 @@ where
                         v.into_iter().map(|b| b != 0).collect(),
                     ))
                 }
-                None => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadDiscreteInputs request for slave ID {} and range [{}, {}) failed.",
+                            "ReadDiscreteInputs request for slave ID {} and range [{}, {}) failed: {e}.",
                             slave,
                             addr,
                             addr + cnt
@@ -122,7 +122,7 @@ where
                 &CellType::Register,
                 &Range::new(addr as usize, cnt as usize),
             ) {
-                Some(v) => {
+                Ok(v) => {
                     if verbose {
                         log.invoke(format!(
                             "ReadInputRegisters request for slave ID {} and range [{}, {}) successful.",
@@ -134,10 +134,10 @@ where
                     }
                     Ok(Response::ReadInputRegisters(v))
                 }
-                None => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadInputRegisters request for slave ID {} and range [{}, {}) failed.",
+                            "ReadInputRegisters request for slave ID {} and range [{}, {}) failed: {e}.",
                             slave,
                             addr,
                             addr + cnt
@@ -165,7 +165,7 @@ where
                 &CellType::Register,
                 &Range::new(addr as usize, cnt as usize),
             ) {
-                Some(v) => {
+                Ok(v) => {
                     if verbose {
                         log.invoke(format!(
                             "ReadHoldingRegisters request for slave ID {} and range [{}, {}) successful.",
@@ -177,10 +177,10 @@ where
                     }
                     Ok(Response::ReadHoldingRegisters(v))
                 }
-                None => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadHoldingRegisters request for slave ID {} and range [{}, {}) failed.",
+                            "ReadHoldingRegisters request for slave ID {} and range [{}, {}) failed: {e}.",
                             slave,
                             addr,
                             addr + cnt
@@ -210,7 +210,7 @@ where
                 &Range::new(addr as usize, values.len()),
                 &values,
             ) {
-                true => {
+                Ok(()) => {
                     if verbose {
                         log.invoke(format!(
                             "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} successful.",
@@ -223,10 +223,10 @@ where
                     }
                     Ok(Response::WriteMultipleRegisters(addr, values.len() as u16))
                 }
-                false => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} failed.",
+                            "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} failed: {e}.",
                             slave,
                             addr,
                             addr as usize + values.len(),
@@ -254,7 +254,7 @@ where
                 &Range::new(addr as usize, 1),
                 &[value],
             ) {
-                true => {
+                Ok(()) => {
                     if verbose {
                         log.invoke(format!(
                             "WriteSingleRegister request for slave ID {}, address {}, and value {} successful.",
@@ -264,10 +264,10 @@ where
                     }
                     Ok(Response::WriteSingleRegister(addr, value))
                 }
-                false => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "WriteSingleRegister request for slave ID {}, address {}, and value {} failed.",
+                            "WriteSingleRegister request for slave ID {}, address {}, and value {} failed: {e}.",
                             slave, addr, value
                         ))
                         .await;
@@ -291,7 +291,7 @@ where
             let mut guard = memory.write().await;
             let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
             match guard.write(key, &CellType::Coil, &Range::new(addr as usize, values.len()), &values) {
-                true => {
+                Ok(()) => {
                     if verbose {
                         log.invoke(format!(
                             "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} successful.",
@@ -304,10 +304,10 @@ where
                     }
                     Ok(Response::WriteMultipleCoils(addr, values.len() as u16))
                 }
-                false => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} failed.",
+                            "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} failed: {e}.",
                             slave,
                             addr,
                             addr as usize + values.len(),
@@ -331,7 +331,7 @@ where
             let mut guard = memory.write().await;
             let val = value as u16;
             match guard.write(key, &CellType::Coil, &Range::new(addr as usize, 1), &[val]) {
-                true => {
+                Ok(()) => {
                     if verbose {
                         log.invoke(format!(
                             "WriteSingleCoil request for slave ID {}, address {}, and value {} successful.",
@@ -341,10 +341,10 @@ where
                     }
                     Ok(Response::WriteSingleCoil(addr, value))
                 }
-                false => {
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "WriteSingleCoil request for slave ID {}, address {}, and value {} failed.",
+                            "WriteSingleCoil request for slave ID {}, address {}, and value {} failed: {e}.",
                             slave, addr, value
                         ))
                         .await;
@@ -379,20 +379,28 @@ where
                 id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters),
             };
             let mut guard = memory.write().await;
-            let readable = guard.readable(
+            if let Err(e) = guard.readable(
                 &key,
                 &CellType::Register,
                 &Range::new(read_addr as usize, cnt as usize),
-            );
-            let writable = guard.writable(
+            ) {
+                if verbose {
+                    log.invoke(format!(
+                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
+                        slave, read_addr, cnt, write_addr, values
+                    ))
+                    .await;
+                }
+                return Err(ExceptionCode::IllegalDataAddress);
+            }
+            if let Err(e) = guard.writable(
                 &key,
                 &CellType::Register,
                 &Range::new(write_addr as usize, values.len()),
-            );
-            if !readable || !writable {
+            ) {
                 if verbose {
                     log.invoke(format!(
-                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
+                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
                         slave, read_addr, cnt, write_addr, values
                     ))
                     .await;
@@ -404,11 +412,11 @@ where
                 &CellType::Register,
                 &Range::new(read_addr as usize, cnt as usize),
             ) {
-                Some(v) => v,
-                None => {
+                Ok(v) => v,
+                Err(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
+                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
                             slave, read_addr, cnt, write_addr, values
                         ))
                         .await;
@@ -416,7 +424,7 @@ where
                     return Err(ExceptionCode::IllegalFunction);
                 }
             };
-            if !guard.write(
+            if let Err(e) = guard.write(
                 key,
                 &CellType::Register,
                 &Range::new(write_addr as usize, values.len()),
@@ -424,7 +432,7 @@ where
             ) {
                 if verbose {
                     log.invoke(format!(
-                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed.",
+                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
                         slave, read_addr, cnt, write_addr, values
                     ))
                     .await;
@@ -483,7 +491,7 @@ mod tests {
             &[Range::new(0, 4)],
         );
         if !seed.is_empty() {
-            mem.write(key, &CellType::Register, &Range::new(0, seed.len()), seed);
+            mem.write(key, &CellType::Register, &Range::new(0, seed.len()), seed).unwrap();
         }
         Arc::new(RwLock::new(mem))
     }
@@ -591,7 +599,7 @@ mod tests {
         let mut mem = Memory::<Key<SlaveKey>>::default();
         mem.add_ranges(key.clone(), &MemKind::ReadWrite(ty), &[Range::new(0, len)]);
         if !seed.is_empty() {
-            mem.write(key, &ty, &Range::new(0, seed.len()), seed);
+            mem.write(key, &ty, &Range::new(0, seed.len()), seed).unwrap();
         }
         Arc::new(RwLock::new(mem))
     }

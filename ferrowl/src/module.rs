@@ -1011,7 +1011,7 @@ mod tests {
                 &CellType::Register,
                 &Range::new(0, raw.len()),
                 &raw
-            ),
+            ).is_ok(),
             "write should succeed for a Combined register cell"
         );
 

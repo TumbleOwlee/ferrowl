@@ -46,13 +46,13 @@ fn config(port: u16) -> tcp::Config {
 fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(key(RegKind::Coil), &MemKind::ReadWrite(CellType::Coil), &[Range::new(0, 8)]);
-    mem.write(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4), &[1, 0, 1, 0]);
+    mem.write(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4), &[1, 0, 1, 0]).unwrap();
     mem.add_ranges(
         key(RegKind::DiscreteInput),
         &MemKind::ReadWrite(CellType::Coil),
         &[Range::new(0, 4)],
     );
-    mem.write(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4), &[0, 1, 1, 0]);
+    mem.write(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4), &[0, 1, 1, 0]).unwrap();
     mem.add_ranges(
         key(RegKind::InputRegister),
         &MemKind::ReadWrite(CellType::Register),
@@ -63,7 +63,7 @@ fn server_mem() -> Mem {
         &CellType::Register,
         &Range::new(0, 4),
         &[100, 200, 300, 400],
-    );
+    ).unwrap();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
         &MemKind::ReadWrite(CellType::Register),
@@ -74,7 +74,7 @@ fn server_mem() -> Mem {
         &CellType::Register,
         &Range::new(0, 4),
         &[10, 20, 30, 40],
-    );
+    ).unwrap();
     Arc::new(RwLock::new(mem))
 }
 
@@ -148,20 +148,20 @@ async fn tcp_client_polls_server_and_executes_commands() {
     {
         let g = cli_mem.read().await;
         assert_eq!(
-            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 4)),
-            Some(vec![10, 20, 30, 40])
+            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 4)).unwrap(),
+            vec![10, 20, 30, 40]
         );
         assert_eq!(
-            g.read(key(RegKind::InputRegister), &CellType::Register, &Range::new(0, 4)),
-            Some(vec![100, 200, 300, 400])
+            g.read(key(RegKind::InputRegister), &CellType::Register, &Range::new(0, 4)).unwrap(),
+            vec![100, 200, 300, 400]
         );
         assert_eq!(
-            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4)),
-            Some(vec![1, 0, 1, 0])
+            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(0, 4)).unwrap(),
+            vec![1, 0, 1, 0]
         );
         assert_eq!(
-            g.read(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4)),
-            Some(vec![0, 1, 1, 0])
+            g.read(key(RegKind::DiscreteInput), &CellType::Coil, &Range::new(0, 4)).unwrap(),
+            vec![0, 1, 1, 0]
         );
     }
 
@@ -175,12 +175,12 @@ async fn tcp_client_polls_server_and_executes_commands() {
     {
         let g = srv_mem.read().await;
         assert_eq!(
-            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 3)),
-            Some(vec![99, 5, 6])
+            g.read(key(RegKind::HoldingRegister), &CellType::Register, &Range::new(0, 3)).unwrap(),
+            vec![99, 5, 6]
         );
         assert_eq!(
-            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(5, 3)),
-            Some(vec![1, 1, 0])
+            g.read(key(RegKind::Coil), &CellType::Coil, &Range::new(5, 3)).unwrap(),
+            vec![1, 1, 0]
         );
     }
 
