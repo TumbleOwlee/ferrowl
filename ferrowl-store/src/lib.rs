@@ -12,6 +12,6 @@ mod cell;
 
 pub mod slice;
 
-pub use memory::Memory;
+pub use memory::{Memory, MemoryError};
 pub use range::Range;
 pub use cell::{CellKind, CellType, Cell, ValueRange};
