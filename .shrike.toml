@@ -1,0 +1,32 @@
+[project]
+profile = "rust"
+
+[rust]
+image = "rust:latest"
+
+[rust.build]
+desc = "Compile in debug mode."
+cmd = "rustup default nightly && cargo build"
+
+[rust.demo]
+desc = "Build and run demo."
+cmd = "rustup default nightly && cargo run -- --demo"
+interactive = true
+
+[rust.ex]
+desc = "Run dialog example."
+cmd = "cargo run --example"
+interactive = true
+
+# ======================================================================================= #
+# Claude Environment
+# ======================================================================================= #
+[claude]
+image = "rust:latest"
+setup = "apt-get update && apt-get install -y npm && curl -fsSL https://claude.ai/install.sh | bash && curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash"
+volumes = ["~/.claude.json:/root/.claude.json", "~/.claude:/root/.claude"]
+
+[claude.run]
+desc = "Run claude."
+cmd = "/root/.local/bin/claude"
+interactive = true
