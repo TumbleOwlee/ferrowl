@@ -1,7 +1,7 @@
 //! Modal dialogs: module setup and shared register-edit data types.
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
-pub use crate::module::modbus::setup_dialog::{SetupDialog, SetupValues};
+pub use crate::module::modbus::setup_dialog::SetupDialog;
 use ferrowl_ui::widgets::{Validate, ValidateResult};
 
 #[derive(Clone, Debug)]

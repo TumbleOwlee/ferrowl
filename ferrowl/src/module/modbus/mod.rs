@@ -724,19 +724,6 @@ fn build_instance(
     }
 }
 
-pub(crate) fn collect_scripts(device: &DeviceConfig) -> Vec<(String, String)> {
-    device
-        .definitions
-        .iter()
-        .filter_map(|(name, def)| {
-            def.update
-                .as_ref()
-                .filter(|code| !code.trim().is_empty())
-                .map(|code| (name.clone(), code.clone()))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use ferrowl_codec::format::{BitField, Endian, Resolution};

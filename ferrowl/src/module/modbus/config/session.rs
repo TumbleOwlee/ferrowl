@@ -11,8 +11,11 @@ pub struct Session {
     /// shims when loading configs produced by older releases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Opaque per-module config blobs. Each entry must include a `"type"` field (e.g.
+    /// `"modbus"`) so the loader can dispatch to the right deserializer. Older session
+    /// files without a `"type"` field are assumed to be `"modbus"` for compatibility.
     #[serde(default)]
-    pub modules: Vec<ModuleSpec>,
+    pub modules: Vec<serde_json::Value>,
 }
 
 /// One module instance: which device type, named, with a role and an endpoint.
@@ -119,36 +122,53 @@ mod tests {
     use super::*;
     use ferrowl_util::convert::{Converter, FileType};
 
+    fn sample_spec(name: &str, device: &str, role: Role, endpoint: Endpoint) -> serde_json::Value {
+        let spec = ModuleSpec {
+            name: name.into(),
+            device: device.into(),
+            role,
+            endpoint,
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+        };
+        let mut v = serde_json::to_value(spec).unwrap();
+        v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+        v
+    }
+
     fn sample() -> Session {
         Session {
             version: Some("0.1.0".into()),
             modules: vec![
-                ModuleSpec {
-                    name: "evse-1".into(),
-                    device: "configs/evse.toml".into(),
-                    role: Role::Server,
-                    endpoint: Endpoint::Tcp {
+                sample_spec(
+                    "evse-1",
+                    "configs/evse.toml",
+                    Role::Server,
+                    Endpoint::Tcp {
                         ip: "127.0.0.1".into(),
                         port: 5021,
                     },
-                    timeout_ms: None,
-                    delay_ms: None,
-                    interval_ms: None,
-                },
-                ModuleSpec {
-                    name: "meter".into(),
-                    device: "configs/meter.toml".into(),
-                    role: Role::Client,
-                    endpoint: Endpoint::Rtu {
-                        path: "/dev/ttyUSB0".into(),
-                        baud_rate: 9600,
-                        parity: Some("none".into()),
-                        data_bits: Some(8),
-                        stop_bits: Some(1),
-                    },
-                    timeout_ms: Some(750),
-                    delay_ms: None,
-                    interval_ms: Some(1500),
+                ),
+                {
+                    let spec = ModuleSpec {
+                        name: "meter".into(),
+                        device: "configs/meter.toml".into(),
+                        role: Role::Client,
+                        endpoint: Endpoint::Rtu {
+                            path: "/dev/ttyUSB0".into(),
+                            baud_rate: 9600,
+                            parity: Some("none".into()),
+                            data_bits: Some(8),
+                            stop_bits: Some(1),
+                        },
+                        timeout_ms: Some(750),
+                        delay_ms: None,
+                        interval_ms: Some(1500),
+                    };
+                    let mut v = serde_json::to_value(spec).unwrap();
+                    v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+                    v
                 },
             ],
         }

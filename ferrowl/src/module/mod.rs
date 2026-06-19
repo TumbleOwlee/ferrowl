@@ -14,6 +14,7 @@ use type_descriptor::ModuleTypeDescriptor;
 
 /// All available module types. The UI uses this registry to populate the type-selector
 /// in the new-module dialog.
+#[allow(dead_code)]
 pub static MODULE_TYPES: &[ModuleTypeDescriptor] = &[ModuleTypeDescriptor {
     label: "Modbus",
     new_setup_view: || Box::new(modbus::setup::ModbusSetupView::new_create()),

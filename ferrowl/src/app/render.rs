@@ -1,6 +1,6 @@
-//! Whole-frame rendering: tab bar, register table, log pane, command line and overlay.
+//! Whole-frame rendering: tab bar, module view, log pane, command line and overlay.
 
-use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
+use ferrowl_ui::COLOR_SCHEME;
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -22,62 +22,32 @@ pub(super) fn render(
     active: usize,
     focus: Focus,
     command: &mut CommandLine,
-    online: bool,
     overlay: Option<&mut Overlay>,
 ) {
     let area = frame.area();
-    let [tabs_area, table_area, status_area, log_area, cmd_area] = Layout::vertical([
+    let [tabs_area, view_area, log_area, cmd_area] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
         Constraint::Length(10),
         Constraint::Length(1),
     ])
     .areas(area);
 
-    // Phase 1: background, tab bar, status bar — uses buf directly.
+    // Phase 1: background and tab bar.
     {
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
 
         let names: Vec<String> = tabs.iter().map(|t| format!(" {} ", t.name)).collect();
         render_tabs(&names, active, tabs_area, buf);
-
-        let status = TextBuilder::default()
-            .horizontal_alignment(ratatui::layout::HorizontalAlignment::Center)
-            .style(TextStyle {
-                general: ratatui::prelude::Style::default()
-                    .bg(if online {
-                        COLOR_SCHEME.success
-                    } else {
-                        COLOR_SCHEME.error
-                    })
-                    .fg(if online {
-                        COLOR_SCHEME.text_dark
-                    } else {
-                        COLOR_SCHEME.text
-                    })
-                    .bold(),
-            })
-            .build()
-            .unwrap();
-
-        if !tabs.is_empty() {
-            let mut status_label = if online {
-                "ONLINE".to_string()
-            } else {
-                "OFFLINE".to_string()
-            };
-            StatefulWidget::render(&status, status_area, buf, &mut status_label);
-        }
     }
 
-    // Phase 2: module content view — borrows frame mutably via view.render().
+    // Phase 2: module content view (includes its own status bar).
     if let Some(tab) = tabs.get_mut(active) {
-        tab.view.render(frame, table_area, focus == Focus::Table);
+        tab.view.render(frame, view_area, focus == Focus::Table);
     }
 
-    // Phase 3: log pane, command line, overlay — buf borrow re-acquired.
+    // Phase 3: log pane, command line, overlay.
     {
         let buf = frame.buffer_mut();
         if let Some(tab) = tabs.get_mut(active) {
@@ -98,20 +68,10 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
     const COLS: &[(&str, &str)] = &[
         (":q | :quit", "quit tab"),
         (":qa | :qall", "quit all tabs"),
-        (":e | :edit", "edit module setup"),
         (":n | :new", "new module tab"),
         (":l | :load [path]", "load device config"),
-        (":a | :add", "add register to device"),
-        (":start", "start module"),
-        (":stop", "stop module"),
-        (":restart", "restart module"),
-        (":set <reg> <val>", "write register value"),
         (":s | :save | :w | :write [path]", "save session"),
-        (":wd | :write-device [path]", "save device config"),
-        (":log [file]", "set log file"),
         (":log clear", "clear log view"),
-        (":reload", "reload device config"),
-        (":compact", "toggle compact mode"),
     ];
     let popup_w: u16 = 62;
     let popup_h: u16 = (COLS.len() + module_cmds.len()) as u16 + 2;
@@ -177,7 +137,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    |    Tab  table/log    |    ] [  tabs    |    gt gT  tabs",
+            "  :  command    |    <C-w>j <C-w>k  table/log    |    ] [  tabs    |    <C-t>h <C-t>l  tabs",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }

@@ -1,6 +1,7 @@
 //! Key routing for the non-dialog panes: command line, table/log navigation, tab switching.
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::HandleEvents;
 
 use crate::app::KeyMode;
@@ -27,6 +28,7 @@ impl App {
         false
     }
 
+    // Returns true if has to quit
     pub(super) fn handle_nav_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         match (&self.keymode, modifiers, code) {
             // Window switch
@@ -56,30 +58,29 @@ impl App {
             (None, _, KeyCode::Char('[')) => self.prev_tab(),
             // Command
             (None, _, KeyCode::Char(':')) => self.enter_command(),
-            (None, _, KeyCode::Enter) => self.open_edit(),
-            // Modbus table specifics
-            (None, _, _) => {
-                self.forward_nav(modifiers, code);
-            }
             (_, _, _) => {
                 self.keymode = None;
+                self.forward_nav(modifiers, code);
             }
         }
         false
     }
 
-    fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+    /// Forward a key to the focused pane. Returns `true` if consumed.
+    fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else {
-            return;
+            return false;
         };
         match self.focus {
-            Focus::Table => {
-                let _ = tab.view.handle_events(modifiers, code);
-            }
+            Focus::Table => matches!(
+                tab.view.handle_events(modifiers, code),
+                EventResult::Consumed
+            ),
             Focus::Log => {
                 let _ = tab.log_view.state.handle_events(modifiers, code);
+                false
             }
-            Focus::Command | Focus::Dialog => {}
+            Focus::Command | Focus::Dialog => false,
         }
     }
 
@@ -104,12 +105,6 @@ impl App {
         };
         if let Some(tab) = self.tabs.get_mut(self.active) {
             tab.log_view.state.set_focused(self.focus == Focus::Log);
-        }
-    }
-
-    pub(super) fn toggle_compact(&mut self) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
-            tab.modbus_mut().toggle_compact();
         }
     }
 

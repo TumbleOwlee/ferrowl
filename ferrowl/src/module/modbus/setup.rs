@@ -3,7 +3,7 @@ use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+use crate::config::{DeviceConfig, ModuleSpec};
 use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
 use crate::dialog::SetupDialog;
 use crate::module::modbus::Module;
@@ -19,19 +19,6 @@ impl ModbusSetupView {
     pub fn new_create() -> Self {
         Self {
             dialog: SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS)),
-        }
-    }
-
-    pub fn new_edit(
-        name: &str,
-        config_path: &str,
-        role: Role,
-        endpoint: &Endpoint,
-        timing: (usize, usize, usize),
-        ranges: &crate::config::device::ReadRanges,
-    ) -> Self {
-        Self {
-            dialog: SetupDialog::edit(name, config_path, role, endpoint, timing, ranges),
         }
     }
 
