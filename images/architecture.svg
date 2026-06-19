@@ -1,6 +1,6 @@
 <svg width="100%" viewBox="0 0 880 624" role="img" xmlns="http://www.w3.org/2000/svg">
-<title>Ferrowl workspace architecture — the TUI binary drives a Modbus Module (codec, store, modbus) and independent crates (lua, ring, ocpp) that do not depend on each other</title>
-<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs, command line) uses ferrowl-ui (ratatui widgets) and ferrowl-focus (proc-macros) for rendering. It drives four independent units: a Modbus Module group containing ferrowl-codec, ferrowl-store and ferrowl-modbus (which are tightly coupled); ferrowl-lua; ferrowl-ring; and ferrowl-ocpp. ferrowl-modbus talks to external Modbus peers via TCP/IP or serial. ferrowl-ocpp talks to external OCPP peers via WebSocket. ferrowl-util provides shared helpers used across all crates.</desc>
+<title>Ferrowl workspace architecture — the TUI binary drives a Modbus Module (codec, store, modbus) and independent modules (lua, ring, ocpp) that do not depend on each other</title>
+<desc>Layer diagram: the ferrowl binary (App loop, tabs, dialogs, command line) uses ferrowl-ui (ratatui widgets) and ferrowl-focus (proc-macros) for rendering. It drives four independent units: a Modbus Module group containing ferrowl-codec, ferrowl-store and ferrowl-modbus (tightly coupled); ferrowl-lua; ferrowl-ring; and an OCPP Module group containing ferrowl-ocpp. ferrowl-modbus talks to external Modbus peers via TCP/IP or serial. ferrowl-ocpp talks to external OCPP peers via WebSocket. ferrowl-util provides shared helpers used across all crates.</desc>
 <defs>
 <linearGradient id="archGrad" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#1A1F24"/>
@@ -34,75 +34,79 @@
 <text x="721" y="124" font-size="12" font-weight="bold" fill="#E0CDB4">ferrowl-focus</text>
 <text x="721" y="139" font-size="9" fill="#A8B2BB">focus-handling proc-macros</text>
 
-<!-- Binary drives four independent units -->
-<line x1="168" y1="154" x2="168" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="464" y1="154" x2="464" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="626" y1="154" x2="626" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="787" y1="154" x2="787" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<!-- Binary drives four independent units — centered: Modbus(272) + lua(148) + ring(140) + OCPP(180) = 740px, 3×20px gaps, in 800px span -->
+<line x1="176" y1="154" x2="176" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="406" y1="154" x2="406" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="570" y1="154" x2="570" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="750" y1="154" x2="750" y2="178" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
 
 <!-- Modbus Module group (dashed) — codec + store + modbus are tightly coupled -->
-<rect x="32" y="172" width="272" height="222" rx="12" fill="#C9A87E" fill-opacity="0.03" stroke="#AD8166" stroke-dasharray="6 4"/>
-<text x="52" y="194" font-size="12" font-weight="bold" fill="#C9A87E" text-anchor="start">Modbus Module</text>
+<!-- x=40, w=272, right=312 -->
+<rect x="40" y="172" width="272" height="222" rx="12" fill="#C9A87E" fill-opacity="0.03" stroke="#AD8166" stroke-dasharray="6 4"/>
+<text x="60" y="194" font-size="12" font-weight="bold" fill="#C9A87E" text-anchor="start">Modbus Module</text>
 
-<rect x="44" y="202" width="118" height="82" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="103" y="224" font-size="12" font-weight="bold" fill="#E0CDB4">ferrowl-codec</text>
-<text x="103" y="242" font-size="9" fill="#A8B2BB">register descriptions</text>
-<text x="103" y="256" font-size="9" fill="#A8B2BB">encode / decode raw</text>
-<text x="103" y="270" font-size="9" fill="#A8B2BB">words ↔ typed values</text>
+<rect x="52" y="202" width="118" height="82" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="111" y="224" font-size="12" font-weight="bold" fill="#E0CDB4">ferrowl-codec</text>
+<text x="111" y="242" font-size="9" fill="#A8B2BB">register descriptions</text>
+<text x="111" y="256" font-size="9" fill="#A8B2BB">encode / decode raw</text>
+<text x="111" y="270" font-size="9" fill="#A8B2BB">words ↔ typed values</text>
 
-<rect x="174" y="202" width="118" height="82" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="233" y="224" font-size="12" font-weight="bold" fill="#E0CDB4">ferrowl-store</text>
-<text x="233" y="242" font-size="9" fill="#A8B2BB">shared register space</text>
-<text x="233" y="256" font-size="9" fill="#A8B2BB">Arc&lt;RwLock&lt;Memory&gt;&gt;</text>
-<text x="233" y="270" font-size="9" fill="#A8B2BB">access-checked cells</text>
+<rect x="182" y="202" width="118" height="82" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="241" y="224" font-size="12" font-weight="bold" fill="#E0CDB4">ferrowl-store</text>
+<text x="241" y="242" font-size="9" fill="#A8B2BB">shared register space</text>
+<text x="241" y="256" font-size="9" fill="#A8B2BB">Arc&lt;RwLock&lt;Memory&gt;&gt;</text>
+<text x="241" y="270" font-size="9" fill="#A8B2BB">access-checked cells</text>
 
-<line x1="162" y1="243" x2="174" y2="243" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="170" y1="243" x2="182" y2="243" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
 
-<line x1="103" y1="284" x2="103" y2="300" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="233" y1="284" x2="233" y2="300" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="111" y1="284" x2="111" y2="300" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="241" y1="284" x2="241" y2="300" stroke="#C49A63" stroke-width="1.5" marker-end="url(#arr)"/>
 
-<rect x="44" y="300" width="246" height="86" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
-<text x="167" y="322" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-modbus</text>
-<text x="167" y="341" font-size="10" fill="#A8B2BB">TCP &amp; RTU (tokio-modbus)</text>
-<text x="167" y="357" font-size="10" fill="#A8B2BB">client: polls · write commands</text>
-<text x="167" y="373" font-size="10" fill="#A8B2BB">server: answers from shared mem</text>
+<rect x="52" y="300" width="246" height="86" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
+<text x="175" y="322" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-modbus</text>
+<text x="175" y="341" font-size="10" fill="#A8B2BB">TCP &amp; RTU (tokio-modbus)</text>
+<text x="175" y="357" font-size="10" fill="#A8B2BB">client: polls · write commands</text>
+<text x="175" y="373" font-size="10" fill="#A8B2BB">server: answers from shared mem</text>
 
-<line x1="167" y1="386" x2="167" y2="418" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
-<text x="180" y="408" font-size="10" font-style="italic" fill="#C49A63" text-anchor="start">Modbus protocol</text>
+<line x1="175" y1="386" x2="175" y2="418" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text x="188" y="408" font-size="10" font-style="italic" fill="#C49A63" text-anchor="start">Modbus protocol</text>
 
-<rect x="44" y="418" width="246" height="74" rx="10" fill="none" stroke="#6F7880" stroke-dasharray="6 4"/>
-<text x="167" y="443" font-size="12" font-weight="bold" fill="#A8B2BB">external Modbus peers</text>
-<text x="167" y="461" font-size="10" fill="#8A949D">PLCs · meters · tools</text>
-<text x="167" y="477" font-size="10" fill="#8A949D">TCP/IP · serial (RTU)</text>
+<rect x="52" y="418" width="246" height="74" rx="10" fill="none" stroke="#6F7880" stroke-dasharray="6 4"/>
+<text x="175" y="443" font-size="12" font-weight="bold" fill="#A8B2BB">external Modbus peers</text>
+<text x="175" y="461" font-size="10" fill="#8A949D">PLCs · meters · tools</text>
+<text x="175" y="477" font-size="10" fill="#8A949D">TCP/IP · serial (RTU)</text>
 
-<!-- ferrowl-lua (independent) -->
-<rect x="390" y="178" width="148" height="90" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="464" y="202" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-lua</text>
-<text x="464" y="220" font-size="10" fill="#A8B2BB">Lua VM (mlua)</text>
-<text x="464" y="236" font-size="10" fill="#A8B2BB">runs update scripts</text>
-<text x="464" y="252" font-size="10" fill="#A8B2BB">C_Register · C_Time</text>
+<!-- ferrowl-lua (independent) — x=332, w=148, right=480 -->
+<rect x="332" y="178" width="148" height="90" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="406" y="202" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-lua</text>
+<text x="406" y="220" font-size="10" fill="#A8B2BB">Lua VM (mlua)</text>
+<text x="406" y="236" font-size="10" fill="#A8B2BB">runs update scripts</text>
+<text x="406" y="252" font-size="10" fill="#A8B2BB">C_Register · C_Time</text>
 
-<!-- ferrowl-ring (independent) -->
-<rect x="556" y="178" width="140" height="90" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
-<text x="626" y="202" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ring</text>
-<text x="626" y="220" font-size="10" fill="#A8B2BB">ring buffer</text>
-<text x="626" y="236" font-size="10" fill="#A8B2BB">feeds the</text>
-<text x="626" y="252" font-size="10" fill="#A8B2BB">log pane</text>
+<!-- ferrowl-ring (independent) — x=500, w=140, right=640 -->
+<rect x="500" y="178" width="140" height="90" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.25"/>
+<text x="570" y="202" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ring</text>
+<text x="570" y="220" font-size="10" fill="#A8B2BB">ring buffer</text>
+<text x="570" y="236" font-size="10" fill="#A8B2BB">feeds the</text>
+<text x="570" y="252" font-size="10" fill="#A8B2BB">log pane</text>
 
-<!-- ferrowl-ocpp (independent) -->
-<rect x="710" y="178" width="150" height="90" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
-<text x="785" y="202" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ocpp</text>
-<text x="785" y="220" font-size="10" fill="#A8B2BB">WebSocket (tungstenite)</text>
-<text x="785" y="236" font-size="10" fill="#A8B2BB">CS · CSMS roles</text>
-<text x="785" y="252" font-size="10" fill="#A8B2BB">OCPP v1.6 · v2.0.1</text>
+<!-- OCPP Module group (dashed) — x=660, w=180, right=840 -->
+<rect x="660" y="172" width="180" height="130" rx="12" fill="#C9A87E" fill-opacity="0.03" stroke="#AD8166" stroke-dasharray="6 4"/>
+<text x="680" y="194" font-size="12" font-weight="bold" fill="#C9A87E" text-anchor="start">OCPP Module</text>
 
-<line x1="785" y1="268" x2="785" y2="418" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
-<text x="730" y="356" font-size="10" font-style="italic" fill="#C49A63" text-anchor="middle">OCPP / WebSocket</text>
+<rect x="675" y="202" width="150" height="90" rx="10" fill="#343C44" stroke="#C49A63" stroke-opacity="0.55"/>
+<text x="750" y="224" font-size="13" font-weight="bold" fill="#E0CDB4">ferrowl-ocpp</text>
+<text x="750" y="242" font-size="10" fill="#A8B2BB">WebSocket (tungstenite)</text>
+<text x="750" y="258" font-size="10" fill="#A8B2BB">CS · CSMS roles</text>
+<text x="750" y="274" font-size="10" fill="#A8B2BB">OCPP v1.6 · v2.0.1</text>
 
-<rect x="710" y="418" width="150" height="74" rx="10" fill="none" stroke="#6F7880" stroke-dasharray="6 4"/>
-<text x="785" y="443" font-size="12" font-weight="bold" fill="#A8B2BB">external OCPP peers</text>
-<text x="785" y="461" font-size="10" fill="#8A949D">CS · CSMS systems</text>
-<text x="785" y="477" font-size="10" fill="#8A949D">WebSocket</text>
+<line x1="750" y1="302" x2="750" y2="418" stroke="#C49A63" stroke-width="1.5" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text x="695" y="368" font-size="10" font-style="italic" fill="#C49A63" text-anchor="middle">OCPP / WebSocket</text>
+
+<rect x="675" y="418" width="150" height="74" rx="10" fill="none" stroke="#6F7880" stroke-dasharray="6 4"/>
+<text x="750" y="443" font-size="12" font-weight="bold" fill="#A8B2BB">external OCPP peers</text>
+<text x="750" y="461" font-size="10" fill="#8A949D">CS · CSMS systems</text>
+<text x="750" y="477" font-size="10" fill="#8A949D">WebSocket</text>
 
 <!-- Shared helpers -->
 <rect x="40" y="514" width="800" height="38" rx="10" fill="#2A3138" stroke="#E0CDB4" stroke-opacity="0.18"/>
