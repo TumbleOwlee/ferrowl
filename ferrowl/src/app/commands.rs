@@ -4,15 +4,14 @@
 use ferrowl_codec::{Access, Address};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
-use ferrowl_ui::widgets::Header;
 use ferrowl_util::convert::{Converter, FileType};
 
 use crate::config::{Role, Session};
 use crate::module::Module;
-use crate::view::main::TableHeader;
-use crate::view::main::{Definition, column_index};
+use crate::module::view::CommandResult;
 
-use super::registers::write_command;
+use crate::module::modbus::registers::write_command;
+
 use super::{App, Tab};
 
 impl App {
@@ -25,7 +24,7 @@ impl App {
                 if self.tabs.len() <= 1 {
                     return true;
                 }
-                let _ = self.tabs[self.active].module.stop().await;
+                let _ = self.tabs[self.active].modbus_mut().module_mut().stop().await;
                 self.tabs.remove(self.active);
                 self.active = self.active.min(self.tabs.len() - 1);
             }
@@ -41,33 +40,17 @@ impl App {
                 self.start_module().await;
             }
             Cmd::Lua(action) => {
-                let msg = if let Some(tab) = self.tabs.get_mut(self.active) {
-                    match action {
-                        LuaCommand::Start => {
-                            tab.module.start_lua();
-                            if tab.module.lua_running() {
-                                "Lua simulation started".to_string()
-                            } else {
-                                "No Lua scripts to run".to_string()
-                            }
-                        }
-                        LuaCommand::Stop => {
-                            tab.module.stop_lua();
-                            "Lua simulation stopped".to_string()
-                        }
-                        LuaCommand::Status => {
-                            let running = tab.module.lua_running();
-                            if running {
-                                "Lua simulation is running".to_string()
-                            } else {
-                                "Lua simulation is stopped".to_string()
-                            }
-                        }
-                    }
-                } else {
-                    return false;
+                let raw = match action {
+                    LuaCommand::Start => "lua start",
+                    LuaCommand::Stop => "lua stop",
+                    LuaCommand::Status => "lua status",
                 };
-                self.log_active(format!("{}", msg)).await;
+                let result = self.tabs.get_mut(self.active)
+                    .map(|tab| tab.view.handle_command(raw))
+                    .unwrap_or(CommandResult::Unhandled);
+                if let CommandResult::Handled(Some(msg)) = result {
+                    self.log_active(msg).await;
+                }
             }
             Cmd::Set { register, value } => {
                 if register.is_empty() || value.is_empty() {
@@ -90,8 +73,8 @@ impl App {
                     p
                 } else {
                     match self.tabs.get(self.active) {
-                        Some(t) if !t.spec.device.is_empty() => &t.spec.device,
-                        Some(t) if t.spec.device.is_empty() => {
+                        Some(t) if !t.modbus().spec.device.is_empty() => &t.modbus().spec.device,
+                        Some(t) if t.modbus().spec.device.is_empty() => {
                             self.log_active("No configuration file path configured.".to_string())
                                 .await;
                             return false;
@@ -111,11 +94,11 @@ impl App {
                 Some(file) => {
                     if file == "clear" {
                         if let Some(tab) = self.tabs.get(self.active) {
-                            tab.module.log().write().await.clear();
+                            tab.log.write().await.clear();
                         }
                     } else if let Some(tab) = self.tabs.get_mut(self.active) {
-                        tab.device.log_file = Some(file.clone());
-                        tab.module.set_log_base(Some(&file));
+                        tab.modbus_mut().device.log_file = Some(file.clone());
+                        tab.modbus_mut().module_mut().set_log_base(Some(&file));
                         self.log_active(format!(
                             "Logging this tab to files based on {file} (':wd' to persist)"
                         ))
@@ -127,51 +110,32 @@ impl App {
             Cmd::Compact => self.toggle_compact(),
             Cmd::Reload => self.reload_module().await,
             Cmd::Order { column, descending } => {
-                self.set_order(column.as_deref(), descending).await
+                let raw = match column.as_deref() {
+                    None => "order".to_string(),
+                    Some(col) => format!("order {} {}", col, if descending { "desc" } else { "asc" }),
+                };
+                let result = self.tabs.get_mut(self.active)
+                    .map(|tab| tab.view.handle_command(&raw))
+                    .unwrap_or(CommandResult::Unhandled);
+                if let CommandResult::Handled(Some(msg)) = result {
+                    self.log_active(msg).await;
+                }
             }
-            Cmd::Unknown(name) => self.log_active(format!("Unknown command ':{name}'")).await,
+            Cmd::Unknown(name) => {
+                let result = self.tabs.get_mut(self.active)
+                    .map(|tab| tab.view.handle_command(input))
+                    .unwrap_or(CommandResult::Unhandled);
+                match result {
+                    CommandResult::Handled(msg) => {
+                        if let Some(m) = msg { self.log_active(m).await; }
+                    }
+                    CommandResult::Unhandled => {
+                        self.log_active(format!("Unknown command ':{name}'")).await;
+                    }
+                }
+            }
         }
         false
-    }
-
-    /// Apply (or clear) the active tab's table ordering for `:order`.
-    async fn set_order(&mut self, column: Option<&str>, descending: bool) {
-        let active = self.active;
-        if active >= self.tabs.len() {
-            return;
-        }
-        match column {
-            None => {
-                let original = self.tabs[active]
-                    .module
-                    .registers()
-                    .iter()
-                    .map(|(name, description, register, values)| {
-                        Definition::new(
-                            name.clone(),
-                            description.clone(),
-                            register.clone(),
-                            values.clone(),
-                        )
-                    })
-                    .collect();
-                let tab = &mut self.tabs[active];
-                tab.sort = None;
-                tab.table.set_definitions(original);
-                self.log_active("Order cleared".to_string()).await;
-            }
-            Some(name) => match column_index(name) {
-                None => self.log_active(format!("Unknown column '{name}'")).await,
-                Some(idx) => {
-                    let tab = &mut self.tabs[active];
-                    tab.sort = Some((idx, descending));
-                    tab.table.sort_definitions(idx, descending);
-                    let header = TableHeader::header()[idx].clone();
-                    let dir = if descending { "DESC" } else { "ASC" };
-                    self.log_active(format!("Ordered by {header} {dir}")).await;
-                }
-            },
-        }
     }
 
     async fn reload_module(&mut self) {
@@ -179,12 +143,12 @@ impl App {
         let Some(tab) = self.tabs.get(active) else {
             return;
         };
-        if tab.spec.device.is_empty() {
+        if tab.modbus().spec.device.is_empty() {
             self.log_active("No configuration file path configured. Reload aborted.".to_string())
                 .await;
             return;
         }
-        let path = tab.spec.device.clone();
+        let path = tab.modbus().spec.device.clone();
         let device = match crate::config::load_device(&path) {
             Ok(d) => d,
             Err(e) => {
@@ -193,12 +157,12 @@ impl App {
                 return;
             }
         };
-        let _ = self.tabs[active].module.stop().await;
-        let mut module = Module::new(&self.tabs[active].spec, &device);
+        let _ = self.tabs[active].modbus_mut().module_mut().stop().await;
+        let spec = self.tabs[active].modbus().spec.clone();
+        let mut module = Module::new(&spec, &device);
         if let Err(e) = module.start().await {
             self.log_active(format!(":reload start error: {e}")).await;
         }
-        let spec = self.tabs[active].spec.clone();
         let new_tab = Tab::from_module(spec, device, module);
         let log_view = std::mem::replace(&mut self.tabs[active].log_view, new_tab.log_view);
         self.tabs[active] = Tab {
@@ -213,13 +177,13 @@ impl App {
         if active >= self.tabs.len() {
             return;
         }
-        let role = self.tabs[active].spec.role.to_string();
-        let result = self.tabs[active].module.start().await;
+        let role = self.tabs[active].modbus().spec.role.to_string();
+        let result = self.tabs[active].modbus_mut().module_mut().start().await;
         let msg = match result {
-            Ok(()) => format!("Started {role} on {}", self.tabs[active].spec.endpoint),
+            Ok(()) => format!("Started {role} on {}", self.tabs[active].modbus().spec.endpoint),
             Err(e) => format!("Start {role} failed: {e}"),
         };
-        self.tabs[active].module.log().write().await.write(&msg);
+        self.tabs[active].log.write().await.write(&msg);
     }
 
     async fn stop_module(&mut self) {
@@ -227,24 +191,25 @@ impl App {
         if active >= self.tabs.len() {
             return;
         }
-        let role = self.tabs[active].spec.role.to_string();
-        let result = self.tabs[active].module.stop().await;
+        let role = self.tabs[active].modbus().spec.role.to_string();
+        let result = self.tabs[active].modbus_mut().module_mut().stop().await;
         let msg = match result {
             Ok(()) => format!("Stopped {role}"),
             Err(e) => format!("Stop {role} failed: {e}"),
         };
-        self.tabs[active].module.log().write().await.write(&msg);
+        self.tabs[active].log.write().await.write(&msg);
     }
 
     /// Write a value to a register on the active module: local memory for servers, a modbus
     /// write command for clients.
     pub(super) async fn set_value(&mut self, register_name: &str, value: &str) {
         let resolved = self.tabs.get(self.active).and_then(|tab| {
-            tab.table
+            tab.modbus()
+                .table()
                 .definitions()
                 .iter()
                 .find(|d| d.name == register_name)
-                .map(|d| (d.register.clone(), tab.spec.role))
+                .map(|d| (d.register.clone(), tab.modbus().spec.role))
         });
         let Some((register, role)) = resolved else {
             self.log_active(format!(":set unknown register '{register_name}'"))
@@ -255,7 +220,8 @@ impl App {
         if let Address::Virtual = register.address() {
             if role == Role::Server {
                 self.tabs[self.active]
-                    .module
+                    .modbus_mut()
+                    .module_mut()
                     .set_virtual_value(register_name, crate::module::str_to_value(value, &register))
                     .await;
                 self.log_active(format!("set {register_name} = {value} (virtual)"))
@@ -285,7 +251,7 @@ impl App {
             Role::Server => {
                 let memory = {
                     let tab = &self.tabs[self.active];
-                    tab.module.memory()
+                    tab.modbus().module().memory()
                 };
                 let ok = {
                     let key = Key {
@@ -326,7 +292,7 @@ impl App {
                 // write preserves the bits of any sibling register sharing this address. An
                 // unpolled address mirrors zeros, leaving the out-of-mask bits 0.
                 let merged = {
-                    let memory = self.tabs[self.active].module.memory();
+                    let memory = self.tabs[self.active].modbus().module().memory();
                     let old = memory
                         .read()
                         .await
@@ -335,13 +301,13 @@ impl App {
                     register.merge_write(&old, &raw)
                 };
                 let command = write_command(&register, slave, addr, &merged);
-                let result = self.tabs[self.active].module.send_command(command).await;
+                let result = self.tabs[self.active].modbus_mut().module_mut().send_command(command).await;
                 match result {
                     Ok(()) => {
                         // Write-only registers are never polled back, so mirror the value into
                         // local memory immediately so the table reflects what was sent.
                         if *register.access() == Access::WriteOnly {
-                            let memory = self.tabs[self.active].module.memory();
+                            let memory = self.tabs[self.active].modbus().module().memory();
                             memory.write().await.write_unchecked(key, &range, &merged);
                         }
                         self.log_active(format!("set {register_name} = {value} (sent)"))
@@ -358,7 +324,7 @@ impl App {
         let ty = FileType::from_path(path)
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
         let tab = self.tabs.get(self.active).ok_or("no active tab")?;
-        let mut device = tab.device.clone();
+        let mut device = tab.modbus().device.clone();
         device.version = Some(crate::config::VERSION.to_string());
         Converter::save(&device, path, ty).map_err(|e| format!("{e:?}"))
     }
@@ -369,7 +335,7 @@ impl App {
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
         let session = Session {
             version: Some(crate::config::VERSION.to_string()),
-            modules: self.tabs.iter().map(|t| t.spec.clone()).collect(),
+            modules: self.tabs.iter().map(|t| t.modbus().spec.clone()).collect(),
         };
         Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))
     }

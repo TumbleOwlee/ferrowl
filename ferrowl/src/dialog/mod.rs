@@ -1,11 +1,8 @@
-//! Modal dialogs: register editing and module setup.
+//! Modal dialogs: module setup and shared register-edit data types.
 
-mod edit;
-mod setup;
-
-pub use edit::{EditInputDialog, EditSelectionDialog, EditedRegister, SubDialogs, parse_raw_value};
+pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
+pub use crate::module::modbus::setup_dialog::{SetupDialog, SetupValues};
 use ferrowl_ui::widgets::{Validate, ValidateResult};
-pub use setup::{SetupDialog, SetupValues};
 
 #[derive(Clone, Debug)]
 pub struct NonEmpty();

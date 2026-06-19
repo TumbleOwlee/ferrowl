@@ -1,31 +1,25 @@
-//! Selection-based register edit dialog: enum-like properties picked from
-//! lists instead of typed.
+//! Free-text register edit dialog: every register property as an input field.
 
 use crate::config::device::{NamedValue, Scalar};
-use crate::dialog::EditedRegister;
-use crate::dialog::edit::{
-    AccessOption, AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption,
-    SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index,
-    is_integer_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
-    with_numeric_parts,
+use crate::dialog::NonEmpty;
+use super::{
+    AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
 };
-use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, Width,
 };
-use ferrowl_codec::{Address, Register, RegisterBuilder};
+use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_focus::{Focus, focusable};
+use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border,
     state::{
         ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
-    traits::HandleEvents,
-    traits::ToLabel,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,
@@ -39,29 +33,12 @@ use ratatui::{
 };
 use std::fmt::Debug;
 
-/// Parse a raw memory string like `[00a0 0001]` into an i64 (big-endian word combination).
-pub fn parse_raw_value(raw: &str) -> Option<i64> {
-    let inner = raw.trim().strip_prefix('[')?.strip_suffix(']')?;
-    let mut result: u64 = 0;
-    for word in inner.split_whitespace() {
-        result = (result << 16) | u64::from_str_radix(word, 16).ok()?;
-    }
-    Some(result as i64)
-}
-
-// ---------------------------------------------------------------------------
-// EditSelectionDialog
-// ---------------------------------------------------------------------------
-
 #[focusable]
 #[derive(Builder, Debug, Focus)]
-pub struct EditSelectionDialog<V>
-where
-    V: ToLabel + Clone,
-{
+pub struct EditInputDialog {
     // Label for the register
     #[focus]
-    pub label: Widget<InputFieldState, InputField<crate::dialog::NonEmpty>>,
+    pub label: Widget<InputFieldState, InputField<NonEmpty>>,
     // Description for the register
     #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
@@ -77,39 +54,38 @@ where
     // Access selection (ReadOnly / WriteOnly / ReadWrite)
     #[focus]
     pub access: Widget<SelectionState<AccessOption>, Selection<AccessOption>>,
-    // Type selection
-    #[focus]
+    // Type selection (hidden for boolean kinds)
+    #[focus(when = { !self.is_boolean_kind() })]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
+    // Static "Boolean" label shown instead of Type selector for Coil/DiscreteInput
+    pub boolean_type: Widget<String, Text>,
     // Number format selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
     // Number endianess selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
     // Number resolution input
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
     // Bit-field mask input (integer formats only)
-    #[focus(when = {self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0) })]
     pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
     // Text alignment selection
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     // Text length input
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
-    // Value selection
-    #[focus(when = {!self.value.state.values().is_empty()})]
-    pub value: Widget<SelectionState<V>, Selection<V>>,
-    // Add button
+    // Value input
+    #[focus]
+    pub value: Widget<InputFieldState, InputField<String>>,
+    // Default value stored in the device config and applied on startup
+    #[focus]
+    pub default_value: Widget<InputFieldState, InputField<String>>,
+    // Button to add a predefined named value
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
-    // Delete button
-    #[focus(when = {!self.value.state.values().is_empty()})]
-    pub delete_button: Widget<ButtonState, Button>,
-    // Default value selection (same options as value, plus a leading "no default" sentinel)
-    #[focus(when = {!self.value.state.values().is_empty()})]
-    pub default_value: Widget<SelectionState<V>, Selection<V>>,
     // Lua simulation script (optional multiline)
     #[focus]
     pub update_script: Widget<CodeInputFieldState, CodeInputField>,
@@ -125,9 +101,12 @@ where
     pub success: Widget<String, Text>,
     // Keybinds display field
     pub keybinds: [Widget<String, Text>; 2],
-    // Optional add-value sub-dialog
+    // Optional sub-dialog for adding a new named value entry.
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
+    // Named values accumulated via the ADD button in this session.
+    #[builder(default)]
+    pub pending_named_values: Vec<NamedValue>,
     // Whether this dialog edits an existing register (enables the delete button).
     #[builder(default)]
     pub deletable: bool,
@@ -140,7 +119,30 @@ where
     pub name_error: Option<String>,
 }
 
-impl<V: ToLabel + Clone> EditSelectionDialog<V> {
+/// The result of confirming the edit dialog: updated register metadata + an optional value to
+/// write.
+#[derive(Debug, Clone)]
+pub struct EditedRegister {
+    pub name: String,
+    pub description: String,
+    pub register: Register,
+    pub value: Option<String>,
+    /// Updated named-value list from EditSelectionDialog; None means unchanged.
+    pub named_values: Option<Vec<crate::config::device::NamedValue>>,
+    /// Lua update script content; None means unchanged (field not shown).
+    pub update: Option<String>,
+    /// Default value to store in the device config (applied on startup). None = no default.
+    pub default: Option<Scalar>,
+}
+
+impl EditInputDialog {
+    fn is_boolean_kind(&self) -> bool {
+        matches!(
+            self.kind.state.get_value().0,
+            Kind::Coil | Kind::DiscreteInput
+        )
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
@@ -150,24 +152,39 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             return Err(format!("Address: {e}"));
         }
 
-        match self.value_type.state.values()[self.value_type.state.selection()] {
-            ValueType::Number => {
-                if let ValidateResult::Error(e) =
-                    f64::validate(self.number_resolution.state.input())
-                {
-                    return Err(format!("Resolution: {e}"));
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    if let ValidateResult::Error(e) =
+                        f64::validate(self.number_resolution.state.input())
+                    {
+                        return Err(format!("Resolution: {e}"));
+                    }
+                    let format =
+                        &self.number_format.state.values()[self.number_format.state.selection()].0;
+                    if is_integer_format(format)
+                        && let Err(e) = parse_bitmask(self.number_bitmask.state.input())
+                    {
+                        return Err(format!("Bitmask: {e}"));
+                    }
+                    let v = self.value.state.input();
+                    let s = v.trim();
+                    if let Err(e) = encode(format, s) {
+                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
+                    }
+                    let v = self.default_value.state.input();
+                    let s = v.trim();
+                    if !s.is_empty()
+                        && let Err(e) = encode(format, s)
+                    {
+                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
+                    }
                 }
-                let format =
-                    &self.number_format.state.values()[self.number_format.state.selection()].0;
-                if is_integer_format(format)
-                    && let Err(e) = parse_bitmask(self.number_bitmask.state.input())
-                {
-                    return Err(format!("Bitmask: {e}"));
-                }
-            }
-            ValueType::Text => {
-                if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input()) {
-                    return Err(format!("Width: {e}"));
+                ValueType::Text => {
+                    if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
+                    {
+                        return Err(format!("Width: {e}"));
+                    }
                 }
             }
         }
@@ -175,12 +192,16 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        // Show error: field-level validation takes precedence; otherwise surface a pending
+        // name-conflict error set by the app at confirm time.
         match self.validate() {
             Ok(_) => match &self.name_error {
                 Some(e) => self.error.state = e.clone(),
                 None => self.error.state.clear(),
             },
-            Err(e) => self.error.state = e,
+            Err(e) => {
+                self.error.state = e;
+            }
         }
 
         let horizontal_layout: [Rect; 3] =
@@ -189,7 +210,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3 + 4),
+            Constraint::Length(48),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -197,18 +218,18 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         let block = Block::bordered()
             .style(
                 ratatui::prelude::Style::default()
-                    .fg(COLOR_SCHEME.hi)
-                    .bg(COLOR_SCHEME.bg),
+                    .bg(COLOR_SCHEME.bg)
+                    .fg(COLOR_SCHEME.hi),
             )
             .title_alignment(HorizontalAlignment::Center)
             .title(if self.deletable { "Edit" } else { "Add" });
-        let dialog_box = vertical_layout[1]; // preserved for sub-dialog rendering
+        let dialog_box = vertical_layout[1];
         let area = block.inner(dialog_box).inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 13] = Layout::vertical([
+        let vertical_layout: [Rect; 14] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
@@ -216,9 +237,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(10),
             Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -279,131 +301,106 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             &mut self.access.state,
         );
 
-        StatefulWidget::render(
-            &self.value_type.widget,
-            horizontal_layout[2],
-            buf,
-            &mut self.value_type.state,
-        );
+        if self.is_boolean_kind() {
+            StatefulWidget::render(
+                &self.boolean_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.boolean_type.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.value_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.value_type.state,
+            );
+        }
 
-        match self.value_type.state.values()[self.value_type.state.selection()] {
-            ValueType::Number => {
-                // Integer formats get a 4th column for the bitmask; floats keep 3.
-                let integer = is_integer_format(&self.number_format.get_value().0);
-                let columns = if integer { 4 } else { 3 };
-                let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
-                    .split(vertical_layout[vertical_index]);
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    // Integer formats get a 4th column for the bitmask; floats keep 3.
+                    let integer = is_integer_format(&self.number_format.get_value().0);
+                    let columns = if integer { 4 } else { 3 };
+                    let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
+                        .split(vertical_layout[vertical_index]);
 
-                StatefulWidget::render(
-                    &self.number_format.widget,
-                    cells[0],
-                    buf,
-                    &mut self.number_format.state,
-                );
-
-                StatefulWidget::render(
-                    &self.number_endian.widget,
-                    cells[1],
-                    buf,
-                    &mut self.number_endian.state,
-                );
-
-                StatefulWidget::render(
-                    &self.number_resolution.widget,
-                    cells[2],
-                    buf,
-                    &mut self.number_resolution.state,
-                );
-
-                if integer {
                     StatefulWidget::render(
-                        &self.number_bitmask.widget,
-                        cells[3],
+                        &self.number_format.widget,
+                        cells[0],
                         buf,
-                        &mut self.number_bitmask.state,
+                        &mut self.number_format.state,
+                    );
+
+                    StatefulWidget::render(
+                        &self.number_endian.widget,
+                        cells[1],
+                        buf,
+                        &mut self.number_endian.state,
+                    );
+
+                    StatefulWidget::render(
+                        &self.number_resolution.widget,
+                        cells[2],
+                        buf,
+                        &mut self.number_resolution.state,
+                    );
+
+                    if integer {
+                        StatefulWidget::render(
+                            &self.number_bitmask.widget,
+                            cells[3],
+                            buf,
+                            &mut self.number_bitmask.state,
+                        );
+                    }
+                }
+                ValueType::Text => {
+                    let horizontal_layout: [Rect; 2] =
+                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+                            .areas(vertical_layout[vertical_index]);
+
+                    StatefulWidget::render(
+                        &self.text_alignment.widget,
+                        horizontal_layout[0],
+                        buf,
+                        &mut self.text_alignment.state,
+                    );
+
+                    StatefulWidget::render(
+                        &self.text_width.widget,
+                        horizontal_layout[1],
+                        buf,
+                        &mut self.text_width.state,
                     );
                 }
             }
-            ValueType::Text => {
-                let horizontal_layout: [Rect; 2] =
-                    Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
-                        .areas(vertical_layout[vertical_index]);
-
-                StatefulWidget::render(
-                    &self.text_alignment.widget,
-                    horizontal_layout[0],
-                    buf,
-                    &mut self.text_alignment.state,
-                );
-
-                StatefulWidget::render(
-                    &self.text_width.widget,
-                    horizontal_layout[1],
-                    buf,
-                    &mut self.text_width.state,
-                );
-            }
         }
         vertical_index += 1;
 
-        // Value selection + ADD + DEL buttons side by side
-        let horizontal_layout: [Rect; 4] = Layout::horizontal([
-            Constraint::Min(1),
-            Constraint::Length(7),
-            Constraint::Length(7),
-            Constraint::Length(1),
-        ])
-        .areas(vertical_layout[vertical_index]);
+        StatefulWidget::render(
+            &self.value.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.value.state,
+        );
+        vertical_index += 1;
 
-        if self.value.state.values().is_empty() {
-            let text = TextBuilder::default()
-                .margin(Margin {
-                    horizontal: 1,
-                    vertical: 0,
-                })
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .style(TextStyle {
-                    general: ratatui::style::Style::default()
-                        .fg(COLOR_SCHEME.hi)
-                        .bg(COLOR_SCHEME.bg),
-                })
-                .multiline(true)
-                .build()
-                .unwrap();
-            let mut message: String = "No predefined values — reopen to use free-text input".into();
-            StatefulWidget::render(&text, horizontal_layout[0], buf, &mut message);
-        } else {
-            StatefulWidget::render(
-                &self.value.widget,
-                horizontal_layout[0],
-                buf,
-                &mut self.value.state,
-            );
-            StatefulWidget::render(
-                &self.delete_button.widget,
-                horizontal_layout[2],
-                buf,
-                &mut self.delete_button.state,
-            );
-        }
+        StatefulWidget::render(
+            &self.default_value.widget,
+            vertical_layout[vertical_index],
+            buf,
+            &mut self.default_value.state,
+        );
+        vertical_index += 1;
 
         StatefulWidget::render(
             &self.add_button.widget,
-            horizontal_layout[1],
+            vertical_layout[vertical_index],
             buf,
             &mut self.add_button.state,
         );
-
-        vertical_index += 1;
-
-        if !self.default_value.state.values().is_empty() {
-            StatefulWidget::render(
-                &self.default_value.widget,
-                vertical_layout[vertical_index],
-                buf,
-                &mut self.default_value.state,
-            );
-        }
         vertical_index += 1;
 
         StatefulWidget::render(
@@ -471,19 +468,16 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             &mut self.keybinds[1].state,
         );
 
-        // Render add sub-dialog on top if open — centred within the main dialog box.
         if let Some(d) = self.add_dialog.as_mut() {
             d.render(dialog_box, buf);
         }
 
-        // Render the delete-confirmation box on top if open.
         if let Some(d) = self.confirm_delete.as_mut() {
             d.render(dialog_box, buf);
         }
     }
 
-    pub fn new(values: Vec<V>) -> Self {
-        let default_values = values.clone();
+    pub fn new() -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
         let error_style = TextStyle {
@@ -497,12 +491,11 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 .bg(COLOR_SCHEME.bg),
         };
         let text_style = TextStyle::default();
-        let button_style = ButtonStyle::default();
 
-        EditSelectionDialogBuilder::<V>::default()
+        EditInputDialogBuilder::default()
             .label(Widget {
                 state: InputFieldStateBuilder::default()
-                    .focused(false)
+                    .focused(true)
                     .disabled(false)
                     .placeholder(Some("Custom label...".to_string()))
                     .build()
@@ -559,7 +552,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 state: InputFieldStateBuilder::default()
                     .focused(false)
                     .disabled(false)
-                    .placeholder(Some("e.g. 100".to_string()))
+                    .placeholder(Some("100 or 'virtual'".to_string()))
                     .build()
                     .unwrap(),
                 widget: InputFieldBuilder::default()
@@ -577,10 +570,10 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 state: SelectionStateBuilder::default()
                     .focused(false)
                     .values(vec![
-                        KindOption(ferrowl_codec::Kind::Coil),
-                        KindOption(ferrowl_codec::Kind::DiscreteInput),
-                        KindOption(ferrowl_codec::Kind::HoldingRegister),
-                        KindOption(ferrowl_codec::Kind::InputRegister),
+                        KindOption(Kind::Coil),
+                        KindOption(Kind::DiscreteInput),
+                        KindOption(Kind::HoldingRegister),
+                        KindOption(Kind::InputRegister),
                     ])
                     .build()
                     .unwrap(),
@@ -600,9 +593,9 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     let mut s = SelectionStateBuilder::default()
                         .focused(false)
                         .values(vec![
-                            AccessOption(ferrowl_codec::Access::ReadOnly),
-                            AccessOption(ferrowl_codec::Access::WriteOnly),
-                            AccessOption(ferrowl_codec::Access::ReadWrite),
+                            AccessOption(Access::ReadOnly),
+                            AccessOption(Access::WriteOnly),
+                            AccessOption(Access::ReadWrite),
                         ])
                         .build()
                         .unwrap();
@@ -634,6 +627,19 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         horizontal: 1,
                     })
                     .style(selection_style.clone())
+                    .build()
+                    .unwrap(),
+            })
+            .boolean_type(Widget {
+                state: "Boolean".to_string(),
+                widget: TextBuilder::default()
+                    .title(Some(("Type", HorizontalAlignment::Right).into()))
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(text_style.clone())
                     .build()
                     .unwrap(),
             })
@@ -737,7 +743,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some(("Resolution", HorizontalAlignment::Right).into()))
+                    .title(Some(("Resolution", HorizontalAlignment::Center).into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
@@ -803,43 +809,45 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .unwrap(),
             })
             .value(Widget {
-                state: SelectionStateBuilder::<V>::default()
-                    .focused(true)
-                    .values(values)
+                state: InputFieldStateBuilder::default()
+                    .focused(false)
+                    .disabled(false)
+                    .placeholder(Some("Enter value...".to_string()))
                     .build()
                     .unwrap(),
-                widget: SelectionBuilder::default()
+                widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Value".into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
                     })
-                    .style(selection_style.clone())
+                    .style(input_style.clone())
                     .build()
                     .unwrap(),
             })
             .default_value(Widget {
-                state: SelectionStateBuilder::<V>::default()
+                state: InputFieldStateBuilder::default()
                     .focused(false)
-                    .values(default_values)
+                    .disabled(false)
+                    .placeholder(Some("Default value (applied on startup)...".to_string()))
                     .build()
                     .unwrap(),
-                widget: SelectionBuilder::default()
+                widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Default".into()))
                     .margin(Margin {
                         vertical: 0,
                         horizontal: 1,
                     })
-                    .style(selection_style.clone())
+                    .style(input_style.clone())
                     .build()
                     .unwrap(),
             })
             .add_button(Widget {
                 state: ButtonStateBuilder::default()
                     .focused(false)
-                    .label("ADD".to_string())
+                    .label("ADD PREDEFINED".to_string())
                     .disabled(false)
                     .build()
                     .unwrap(),
@@ -847,27 +855,9 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                     .border_margin(Margin::new(1, 0))
                     .margin(Margin {
                         vertical: 0,
-                        horizontal: 0,
+                        horizontal: 1,
                     })
-                    .style(button_style.clone())
-                    .horizontal_alignment(HorizontalAlignment::Center)
-                    .build()
-                    .unwrap(),
-            })
-            .delete_button(Widget {
-                state: ButtonStateBuilder::default()
-                    .focused(false)
-                    .label("DEL".to_string())
-                    .disabled(false)
-                    .build()
-                    .unwrap(),
-                widget: ButtonBuilder::default()
-                    .border_margin(Margin::new(1, 0))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 0,
-                    })
-                    .style(button_style.clone())
+                    .style(ButtonStyle::default())
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
@@ -903,7 +893,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         vertical: 0,
                         horizontal: 1,
                     })
-                    .style(button_style.clone())
+                    .style(ButtonStyle::default())
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
@@ -911,7 +901,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             .confirm_button(Widget {
                 state: ButtonStateBuilder::default()
                     .focused(false)
-                    .label("Confirm".to_string())
+                    .label("CONFIRM".to_string())
                     .disabled(false)
                     .build()
                     .unwrap(),
@@ -921,7 +911,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         vertical: 0,
                         horizontal: 1,
                     })
-                    .style(button_style.clone())
+                    .style(ButtonStyle::default())
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
                     .unwrap(),
@@ -935,6 +925,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         vertical: 0,
                         horizontal: 1,
                     })
+                    .multiline(true)
                     .style(error_style.clone())
                     .build()
                     .unwrap(),
@@ -954,7 +945,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             })
             .keybinds([
                 Widget {
-                    state: "<Tab>: next | <Space>: press button".to_string(),
+                    state: "<Space>: press button | <C-f>: fill value | <Tab>: next".to_string(),
                     widget: TextBuilder::default()
                         .margin(Margin {
                             vertical: 0,
@@ -978,52 +969,59 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                         .unwrap(),
                 },
             ])
-            .focus(EditSelectionDialogFocus::Value)
+            .focus(EditInputDialogFocus::Label)
             .build()
             .unwrap()
     }
-}
 
-impl EditSelectionDialog<NamedValue> {
-    /// Build the dialog pre-filled from an existing register, its named values, and current value.
-    /// `raw_value` is the hex memory string (e.g. `[000a]`) used for accurate integer matching.
-    #[allow(clippy::too_many_arguments)]
+    /// Build the dialog pre-filled from an existing register and its current value. Focus
+    /// starts on the value field so editing the value (the common case) works immediately.
     pub fn from_register(
         name: &str,
         description: &str,
         register: &Register,
-        named_values: Vec<NamedValue>,
-        current_value: &str,
-        raw_value: &str,
+        value: &str,
         update: Option<&str>,
         default: Option<&Scalar>,
     ) -> Self {
-        let mut dialog = Self::new(named_values.clone());
+        let mut dialog = Self::new();
         dialog.deletable = true;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         if let Some(script) = update {
             dialog.update_script.state.set_content(script);
         }
-        // Populate default selection: sentinel at index 0, then all named values.
-        let mut default_vals = vec![NamedValue {
-            name: "(no default)".to_string(),
-            value: Scalar::Text("".into()),
-        }];
-        default_vals.extend_from_slice(&named_values);
-        *dialog.default_value.state.values_mut() = default_vals;
         if let Some(def) = default {
-            let def_str = def.to_string();
-            if let Some(idx) = named_values
-                .iter()
-                .position(|nv| nv.value.to_string() == def_str)
-            {
-                dialog.default_value.state.set_selection(idx + 1);
-            }
+            set_input(&mut dialog.default_value, &def.to_string());
+        }
+        // Pre-populate the value field so the user can edit or clear it directly.
+        let is_ascii = matches!(register.format(), RegisterFormat::Ascii(_));
+        if is_ascii {
+            let value: String = if matches!(
+                register.format(),
+                RegisterFormat::Ascii((ferrowl_codec::Alignment::Left, _))
+            ) {
+                let value: String = value
+                    .chars()
+                    .rev()
+                    .skip_while(|c| !c.is_ascii_graphic())
+                    .map(|c| if !c.is_ascii_graphic() { ' ' } else { c })
+                    .collect();
+                value.chars().rev().collect()
+            } else {
+                value
+                    .chars()
+                    .skip_while(|c| !c.is_ascii_graphic())
+                    .map(|c| if !c.is_ascii_graphic() { ' ' } else { c })
+                    .collect()
+            };
+            set_input(&mut dialog.value, &value);
+        } else {
+            set_input(&mut dialog.value, value);
         }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
-        dialog.focus = EditSelectionDialogFocus::Value;
+        dialog.focus = EditInputDialogFocus::Value;
         match register.address() {
             Address::Fixed(addr) => set_input(&mut dialog.address, &addr.to_string()),
             Address::Virtual => set_input(&mut dialog.address, "virtual"),
@@ -1065,61 +1063,54 @@ impl EditSelectionDialog<NamedValue> {
                 }
             }
         }
-
-        // Pre-select the matching named value. Integer values match the raw memory words (reliable
-        // across formats/resolutions); any value type also matches the decoded display string.
-        let raw_int = parse_raw_value(raw_value);
-        let current = current_value.trim();
-        if let Some(idx) = named_values.iter().position(|nv| match &nv.value {
-            Scalar::Int(v) => raw_int == Some(*v) || current == v.to_string(),
-            other => current == other.to_string(),
-        }) {
-            dialog.value.state.set_selection(idx);
-        }
-
         dialog
     }
 
-    /// Validate and produce the edited register metadata + the selected named value to write.
+    /// Validate and produce the edited register metadata + optional value to write.
     pub fn apply(&self) -> Result<EditedRegister, String> {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
         let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
-        let format = match self.value_type.state.get_value() {
-            ValueType::Number => {
-                let selected = self.number_format.state.get_value();
-                let endian = self.number_endian.state.get_value().0;
-                let resolution = Resolution(
-                    self.number_resolution
+        let format = if self.is_boolean_kind() {
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default()))
+        } else {
+            match self.value_type.state.get_value() {
+                ValueType::Number => {
+                    let selected = self.number_format.state.get_value();
+                    let endian = self.number_endian.state.get_value().0;
+                    let resolution = Resolution(
+                        self.number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?,
+                    );
+                    // Bitmask applies to integer formats only; floats ignore it.
+                    let bitfield = if is_integer_format(&selected.0) {
+                        parse_bitmask(self.number_bitmask.state.input())
+                            .map_err(|e| format!("Bitmask {e}."))?
+                    } else {
+                        BitField::default()
+                    };
+                    with_numeric_parts(&selected.0, endian, resolution, bitfield)
+                }
+                ValueType::Text => {
+                    let alignment = self.text_alignment.state.get_value().0;
+                    let width = self
+                        .text_width
                         .state
                         .input()
                         .trim()
-                        .parse::<f64>()
-                        .map_err(|_| "Resolution must be a number.".to_string())?,
-                );
-                // Bitmask applies to integer formats only; floats ignore it.
-                let bitfield = if is_integer_format(&selected.0) {
-                    parse_bitmask(self.number_bitmask.state.input())
-                        .map_err(|e| format!("Bitmask {e}."))?
-                } else {
-                    BitField::default()
-                };
-                with_numeric_parts(&selected.0, endian, resolution, bitfield)
-            }
-            ValueType::Text => {
-                let alignment = self.text_alignment.state.get_value().0;
-                let width = self
-                    .text_width
-                    .state
-                    .input()
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| "Width must be a number.".to_string())?;
-                RegisterFormat::Ascii((alignment, Width(width)))
+                        .parse::<usize>()
+                        .map_err(|_| "Width must be a number.".to_string())?;
+                    RegisterFormat::Ascii((alignment, Width(width)))
+                }
             }
         };
+        let is_ascii = matches!(format, RegisterFormat::Ascii(_));
 
         let slave_id = self
             .slave_id
@@ -1138,11 +1129,11 @@ impl EditSelectionDialog<NamedValue> {
             .build()
             .expect("all register fields are set");
 
-        let named_values = self.value.state.values().clone();
-        let value = if named_values.is_empty() {
-            None
+        let input = self.value.state.input().to_string();
+        let value = if is_ascii || !input.trim().is_empty() {
+            Some(input)
         } else {
-            Some(self.value.state.get_value().value.to_string())
+            None
         };
         let update_script = self.update_script.state.content().trim().to_string();
         let update = Some(if update_script.is_empty() {
@@ -1151,13 +1142,18 @@ impl EditSelectionDialog<NamedValue> {
             update_script
         });
 
+        let named_values = if self.pending_named_values.is_empty() {
+            None
+        } else {
+            Some(self.pending_named_values.clone())
+        };
+
         let default = {
-            let sel = self.default_value.state.selection();
-            let vals = self.default_value.state.values();
-            if sel == 0 || vals.len() <= 1 {
+            let s = self.default_value.state.input().trim();
+            if s.is_empty() {
                 None
             } else {
-                Some(vals[sel].value.clone())
+                Some(Scalar::from_input(s))
             }
         };
 
@@ -1166,7 +1162,7 @@ impl EditSelectionDialog<NamedValue> {
             description,
             register,
             value,
-            named_values: Some(named_values),
+            named_values,
             update,
             default,
         })
@@ -1174,9 +1170,8 @@ impl EditSelectionDialog<NamedValue> {
 
     pub fn handle_space(&mut self) {
         match self.focus {
-            EditSelectionDialogFocus::AddButton => self.open_add_dialog(),
-            EditSelectionDialogFocus::DeleteButton => self.delete_selected(),
-            EditSelectionDialogFocus::DeleteRegisterButton => self.open_confirm_delete(),
+            EditInputDialogFocus::AddButton => self.open_add_dialog(),
+            EditInputDialogFocus::DeleteRegisterButton => self.open_confirm_delete(),
             _ => {
                 self.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
             }
@@ -1184,21 +1179,25 @@ impl EditSelectionDialog<NamedValue> {
     }
 
     pub fn is_delete_register_button_focused(&self) -> bool {
-        matches!(self.focus, EditSelectionDialogFocus::DeleteRegisterButton)
+        matches!(self.focus, EditInputDialogFocus::DeleteRegisterButton)
     }
 
     pub fn is_update_script_focused(&self) -> bool {
-        matches!(self.focus, EditSelectionDialogFocus::UpdateScript)
+        matches!(self.focus, EditInputDialogFocus::UpdateScript)
     }
 
     pub fn is_confirm_button_focused(&self) -> bool {
-        matches!(self.focus, EditSelectionDialogFocus::ConfirmButton)
+        matches!(self.focus, EditInputDialogFocus::ConfirmButton)
     }
 
-    /// Convert this dialog into an EditInputDialog, preserving all shared field state.
-    /// Called when all named values are removed and the dialog should switch to free-text mode.
-    pub fn to_edit_input_dialog(&self) -> super::input::EditInputDialog {
-        let mut d = super::input::EditInputDialog::new();
+    /// Convert this dialog into an EditSelectionDialog, preserving shared field state.
+    /// Called when the first named value is added and the dialog should switch to selection mode.
+    pub fn to_edit_selection_dialog(
+        &self,
+    ) -> super::selection::EditSelectionDialog<crate::config::device::NamedValue> {
+        use crate::config::device::{NamedValue, Scalar};
+        let values = self.pending_named_values.clone();
+        let mut d = super::selection::EditSelectionDialog::new(values.clone());
         d.deletable = self.deletable;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
@@ -1214,60 +1213,27 @@ impl EditSelectionDialog<NamedValue> {
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
         d.update_script.state = self.update_script.state.clone();
-        // Convert selected default → text (skip sentinel at index 0).
-        let sel = self.default_value.state.selection();
-        if sel > 0
-            && let Some(nv) = self.default_value.state.values().get(sel)
+
+        // Set up default selection with sentinel and try to match prior text default.
+        let mut default_vals = vec![NamedValue {
+            name: "(no default)".to_string(),
+            value: Scalar::Text("".into()),
+        }];
+        default_vals.extend_from_slice(&values);
+        *d.default_value.state.values_mut() = default_vals;
+        let default_text = self.default_value.state.input().trim().to_string();
+        if !default_text.is_empty()
+            && let Some(idx) = values
+                .iter()
+                .position(|nv| nv.value.to_string() == default_text)
         {
-            set_input(&mut d.default_value, &nv.value.to_string());
+            d.default_value.state.set_selection(idx + 1);
         }
         d
     }
-
-    pub fn delete_selected(&mut self) {
-        let idx = self.value.state.selection();
-        let vals = self.value.state.values_mut();
-        let mut is_empty = vals.is_empty();
-        if !vals.is_empty() {
-            vals.remove(idx);
-            is_empty = vals.is_empty();
-            if !vals.is_empty() {
-                let new_idx = if idx >= vals.len() {
-                    vals.len() - 1
-                } else {
-                    idx
-                };
-                self.value.state.set_selection(new_idx);
-            } else {
-                self.value.state.set_selection(0);
-            }
-
-            // Sync default selection: idx+1 because sentinel sits at position 0.
-            let default_idx = idx + 1;
-            let default_vals = self.default_value.state.values_mut();
-            if default_idx < default_vals.len() {
-                default_vals.remove(default_idx);
-                let default_sel = self.default_value.state.selection();
-                if default_sel >= default_idx {
-                    // If exactly the deleted entry was selected, reset to "no default";
-                    // otherwise shift the selection down to stay on the same item.
-                    let new_sel = if default_sel == default_idx {
-                        0
-                    } else {
-                        default_sel - 1
-                    };
-                    self.default_value.state.set_selection(new_sel);
-                }
-            }
-        }
-
-        if is_empty {
-            self.focus_previous();
-        }
-    }
 }
 
-impl SubDialogs for EditSelectionDialog<NamedValue> {
+impl SubDialogs for EditInputDialog {
     fn add_dialog_opt(&self) -> Option<&AddNamedValueDialog> {
         self.add_dialog.as_ref()
     }
@@ -1293,10 +1259,14 @@ impl SubDialogs for EditSelectionDialog<NamedValue> {
     }
 
     fn accept_named_value(&mut self, nv: NamedValue) {
-        self.value.state.values_mut().push(nv.clone());
-        let idx = self.value.state.values().len() - 1;
-        self.value.state.set_selection(idx);
-        // Keep default selection in sync: append after the sentinel.
-        self.default_value.state.values_mut().push(nv);
+        self.pending_named_values.push(nv);
     }
 }
+
+use super::{
+    AddNamedValueDialog, ConfirmDeleteDialog, SubDialogs, access_index, alignment_index,
+    endian_index, format_index, is_integer_format, kind_index, numeric_parts, parse_bitmask,
+    set_input, with_numeric_parts,
+};
+use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::traits::HandleEvents;

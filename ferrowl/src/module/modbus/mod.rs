@@ -1,5 +1,13 @@
-//! The [`Module`]: one running Modbus endpoint with its registers, shared
+//! Modbus-specific module implementation: one running endpoint with its registers, shared
 //! memory, log, and optional Lua simulation.
+
+pub mod config;
+pub mod dialog;
+pub mod registers;
+pub mod setup;
+pub mod setup_dialog;
+pub mod table;
+pub mod view;
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -714,6 +722,19 @@ fn build_instance(
             memory,
         }),
     }
+}
+
+pub(crate) fn collect_scripts(device: &DeviceConfig) -> Vec<(String, String)> {
+    device
+        .definitions
+        .iter()
+        .filter_map(|(name, def)| {
+            def.update
+                .as_ref()
+                .filter(|code| !code.trim().is_empty())
+                .map(|code| (name.clone(), code.clone()))
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -1,7 +1,11 @@
 //! Device and session configuration loading (TOML/JSON).
 
-pub mod device;
-pub mod session;
+pub mod device {
+    pub use crate::module::modbus::config::device::*;
+}
+pub mod session {
+    pub use crate::module::modbus::config::session::*;
+}
 
 pub use device::DeviceConfig;
 pub use session::{Endpoint, ModuleSpec, Role, Session};
