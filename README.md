@@ -9,6 +9,9 @@ Ferrowl is a TUI application, written in Rust, to provide Modbus Client and Serv
 If you prefer a GUI application, this tool is not the right choice. In these cases refer to GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
 
 > [!WARNING]
+> Support of OCPP modules is planned and currently under development. As of now, the draft of the OCPP abstraction layer is added. The implementation of the CS and CSMS modules are ongoing.
+
+> [!WARNING]
 > Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configuration files and their management. You can migrate configuration files created by versions prior to **v0.4.0** using the `migrate` subcommand - e.g. `ferrowl migrate -i old-config.json -o new-config.json` (supports JSON and TOML as input and output).
 
 ## Goal
