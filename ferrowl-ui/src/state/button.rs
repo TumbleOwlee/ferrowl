@@ -47,7 +47,10 @@ mod tests {
 
     #[test]
     fn ut_button_state_focus_toggles() {
-        let mut s = ButtonStateBuilder::default().label("ok".to_string()).build().unwrap();
+        let mut s = ButtonStateBuilder::default()
+            .label("ok".to_string())
+            .build()
+            .unwrap();
         assert!(s.is_focused()); // focused defaults to true
         // Call the trait method explicitly: getset also generates an inherent `set_focused`
         // that would otherwise shadow the `SetFocus` impl.

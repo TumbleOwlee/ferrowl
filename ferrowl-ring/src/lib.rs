@@ -186,7 +186,10 @@ mod tests {
         r.push(2);
         r.push(3);
         assert!(r.is_full());
-        assert_eq!(r.peek_n(10).into_iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(
+            r.peek_n(10).into_iter().copied().collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
     }
 
     #[test]
@@ -196,7 +199,10 @@ mod tests {
             r.push(i);
         }
         // 1 and 2 evicted; window stays at 3, oldest first.
-        assert_eq!(r.peek_n(10).into_iter().copied().collect::<Vec<_>>(), [3, 4, 5]);
+        assert_eq!(
+            r.peek_n(10).into_iter().copied().collect::<Vec<_>>(),
+            [3, 4, 5]
+        );
         assert_eq!(r.len(), 3);
     }
 
@@ -235,7 +241,10 @@ mod tests {
         assert_eq!(r.pop(), Some(1));
         r.push(3);
         r.push(4); // head has advanced; this wraps
-        assert_eq!(r.peek_n(10).into_iter().copied().collect::<Vec<_>>(), [2, 3, 4]);
+        assert_eq!(
+            r.peek_n(10).into_iter().copied().collect::<Vec<_>>(),
+            [2, 3, 4]
+        );
     }
 
     #[test]
@@ -250,7 +259,10 @@ mod tests {
         for (i, v) in r.iter_mut().enumerate() {
             *v += i as i32 * 10;
         }
-        assert_eq!(r.peek_n(10).into_iter().copied().collect::<Vec<_>>(), [2, 13, 24]);
+        assert_eq!(
+            r.peek_n(10).into_iter().copied().collect::<Vec<_>>(),
+            [2, 13, 24]
+        );
         // Reverse scan finds the newest matching item.
         let last = r.iter_mut().rev().find(|v| **v > 0);
         assert_eq!(last.copied(), Some(24));
@@ -259,7 +271,10 @@ mod tests {
     #[test]
     fn ut_from_iter_keeps_last_cap() {
         let r: Ring<i32, 3> = (1..=6).collect();
-        assert_eq!(r.peek_n(10).into_iter().copied().collect::<Vec<_>>(), [4, 5, 6]);
+        assert_eq!(
+            r.peek_n(10).into_iter().copied().collect::<Vec<_>>(),
+            [4, 5, 6]
+        );
     }
 
     #[test]

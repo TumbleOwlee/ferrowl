@@ -2,24 +2,24 @@
 
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::NonEmpty;
-use crate::dialog::edit::{
+use super::{
     AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
 };
 use derive_builder::Builder;
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, Width,
 };
 use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder, encode};
+use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
+    Border,
     state::{
         ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
-    Border,
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder, Validate,

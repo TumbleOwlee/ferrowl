@@ -13,9 +13,9 @@ use ratatui::{
 };
 
 use crate::{
+    Border,
     state::{TableState, TableStateBuilder},
     style::TableStyle,
-    Border,
     widgets::Title,
 };
 

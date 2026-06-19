@@ -241,7 +241,15 @@ mod tests {
     fn ut_convert_toml_dest_create_error() {
         // Valid source, but the destination directory does not exist -> create fails.
         let src = tmp_path("toml");
-        Converter::save(&Sample { a: 1, b: "z".into() }, &src, FileType::Toml).unwrap();
+        Converter::save(
+            &Sample {
+                a: 1,
+                b: "z".into(),
+            },
+            &src,
+            FileType::Toml,
+        )
+        .unwrap();
         let r = Converter::convert::<Sample>(
             &src,
             FileType::Toml,
@@ -255,7 +263,15 @@ mod tests {
     #[test]
     fn ut_convert_json_dest_create_error() {
         let src = tmp_path("toml");
-        Converter::save(&Sample { a: 1, b: "z".into() }, &src, FileType::Toml).unwrap();
+        Converter::save(
+            &Sample {
+                a: 1,
+                b: "z".into(),
+            },
+            &src,
+            FileType::Toml,
+        )
+        .unwrap();
         let r = Converter::convert::<Sample>(
             &src,
             FileType::Toml,
@@ -270,7 +286,10 @@ mod tests {
     fn ut_save_create_error() {
         // Destination directory missing -> File::create fails in save().
         let r = Converter::save(
-            &Sample { a: 1, b: "z".into() },
+            &Sample {
+                a: 1,
+                b: "z".into(),
+            },
             "/no/such/ferrowl/dir/out.toml",
             FileType::Toml,
         );

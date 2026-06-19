@@ -1,36 +1,27 @@
 //! Top-level application state and the async event/redraw loop.
 //!
 //! Submodules split the `App` impl by concern: key routing ([`keys`]), overlay/dialog
-//! lifecycle ([`overlay`]), `:` command execution ([`commands`]), frame rendering
-//! ([`mod@render`]) and register/config helpers ([`registers`]).
+//! lifecycle ([`overlay`]), `:` command execution ([`commands`]) and frame rendering
+//! ([`mod@render`]).
 
 mod commands;
 mod keys;
 mod overlay;
-mod registers;
 mod render;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_ring::Ring;
 use ferrowl_ui::AlternateScreen;
-use ferrowl_ui::traits::HandleEvents;
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::Duration;
 
-use crate::config::{
-    DeviceConfig, ModuleSpec,
-    device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS, NamedValue},
-};
-use crate::dialog::{
-    EditInputDialog, EditSelectionDialog, EditedRegister, SetupDialog, SetupValues,
-};
-use crate::module::Module;
+use crate::module::modbus::setup::ModbusSetupView;
+use crate::module::type_descriptor::SetupView;
+use crate::module::view::{ModuleView, SharedLog};
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
-use crate::view::main::{Definition, TableView, cmp_definitions};
 
-use registers::decode_definition;
 use render::render;
 
 /// How often the UI redraws when no input arrives (drives live value updates).
@@ -40,20 +31,16 @@ const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 pub const LOG_MAX_LINE: usize = 256;
 pub const LOG_SIZE: usize = 80;
 
-/// On-screen log: a fixed-capacity ring of timestamped lines. A thin wrapper over the generic
-/// [`Ring`] that stamps the current time and bounds line length on write, preserving the log API
-/// the app relies on (`init`/`write`/`peek_n`/`clear`).
+/// On-screen log: a fixed-capacity ring of timestamped lines.
 pub struct LogRing {
     ring: Ring<(u64, String), LOG_SIZE>,
 }
 
 impl LogRing {
-    /// Creates an empty log.
     pub fn init() -> Self {
         Self { ring: Ring::new() }
     }
 
-    /// Appends `msg` (truncated to `LOG_MAX_LINE` chars) stamped with the current Unix-millis time.
     pub fn write(&mut self, msg: &str) {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -63,12 +50,10 @@ impl LogRing {
         self.ring.push((ts, line));
     }
 
-    /// Returns up to `n` `(timestamp, message)` entries, oldest first.
     pub fn peek_n(&self, n: usize) -> Vec<(u64, String)> {
         self.ring.peek_n(n).into_iter().cloned().collect()
     }
 
-    /// Removes all entries.
     pub fn clear(&mut self) {
         self.ring.clear();
     }
@@ -83,104 +68,60 @@ enum Focus {
     Dialog,
 }
 
-/// The active modal dialog, if any.
+/// The active modal creation dialog (`:new`/`:load`), if any.
 enum Overlay {
-    Setup(SetupDialog),
-    Edit(EditInputDialog),
-    EditSelection(EditSelectionDialog<NamedValue>),
-    Add(EditInputDialog),
+    Creation(Box<dyn SetupView>),
 }
 
 impl Overlay {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self {
-            Overlay::Setup(d) => d.render(area, buf),
-            Overlay::Edit(d) | Overlay::Add(d) => d.render(area, buf),
-            Overlay::EditSelection(d) => d.render(area, buf),
+            Overlay::Creation(sv) => sv.render(area, buf),
         }
     }
 
     fn focus_next(&mut self) {
         match self {
-            Overlay::Setup(d) => d.focus_next(),
-            Overlay::Edit(d) | Overlay::Add(d) => d.focus_next(),
-            Overlay::EditSelection(d) => d.focus_next(),
+            Overlay::Creation(sv) => sv.focus_next(),
         }
     }
 
     fn focus_previous(&mut self) {
         match self {
-            Overlay::Setup(d) => d.focus_previous(),
-            Overlay::Edit(d) | Overlay::Add(d) => d.focus_previous(),
-            Overlay::EditSelection(d) => d.focus_previous(),
+            Overlay::Creation(sv) => sv.focus_previous(),
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
         match self {
-            Overlay::Setup(d) => {
-                let _ = d.handle_events(modifiers, code);
-            }
-            Overlay::Edit(d) | Overlay::Add(d) => {
-                let _ = d.handle_events(modifiers, code);
-            }
-            Overlay::EditSelection(d) => {
-                let _ = d.handle_events(modifiers, code);
-            }
+            Overlay::Creation(sv) => sv.handle_events(modifiers, code),
         }
     }
 }
 
-/// What confirming the active overlay should do (computed before mutating `self`).
-enum OverlayAction {
-    CreateModule(SetupValues, String, Box<DeviceConfig>),
-    ApplySetup(SetupValues),
-    ApplyEdit(EditedRegister),
-    AddRegister(EditedRegister),
-}
-
-/// Per-module UI state shown under one tab: the owning `Module` plus its register table and
-/// log view.
+/// Per-module UI state shown under one tab.
 pub struct Tab {
     pub name: String,
-    pub spec: ModuleSpec,
-    pub device: DeviceConfig,
-    pub table: TableView,
-    pub module: Module,
-    /// Active table ordering for `:order` — `(column index, descending)`, or `None` for
-    /// device-definition order. Re-applied each `refresh_snapshot` so live columns stay sorted.
-    pub sort: Option<(usize, bool)>,
-    log_view: LogView,
+    pub log: SharedLog,
+    pub log_view: LogView,
+    pub view: Box<dyn ModuleView>,
 }
 
 impl Tab {
-    /// Build a tab from a module + the spec it was built from. The register table is populated
-    /// from the module's register definitions; live values are filled in by
-    /// `App::refresh_snapshot`.
-    pub fn from_module(spec: ModuleSpec, device: DeviceConfig, module: Module) -> Self {
-        let name = spec.name.clone();
-        let definitions = module
-            .registers()
-            .iter()
-            .map(|(name, description, register, values)| {
-                Definition::new(
-                    name.clone(),
-                    description.clone(),
-                    register.clone(),
-                    values.clone(),
-                )
-            })
-            .collect();
+    pub fn new_from_view(name: String, view: Box<dyn ModuleView>) -> Self {
+        let log = view.log();
         Self {
             name,
-            spec,
-            device,
-            table: TableView::new(definitions),
-            module,
-            sort: None,
+            log,
             log_view: new_log_view(),
+            view,
         }
     }
+}
+
+pub enum KeyMode {
+    CtrlWin,
+    CtrlTab,
 }
 
 /// Top-level application: owns the terminal and all module tabs, and runs the async
@@ -192,15 +133,14 @@ pub struct App {
     focus: Focus,
     command: CommandLine,
     overlay: Option<Overlay>,
-    pending_g: bool,
+    keymode: Option<KeyMode>,
 }
 
 impl App {
     pub fn new(tabs: Vec<Tab>) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {
-            let timing = (DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS);
             (
-                Some(Overlay::Setup(SetupDialog::create(timing))),
+                Some(Overlay::Creation(Box::new(ModbusSetupView::new_create()))),
                 Focus::Dialog,
             )
         } else {
@@ -213,15 +153,11 @@ impl App {
             focus,
             command: new_command_line(),
             overlay,
-            pending_g: false,
+            keymode: None,
         })
     }
 
     /// Run the async UI loop until the user quits.
-    ///
-    /// crossterm's `read()` is blocking, so a dedicated reader thread forwards terminal
-    /// events over an mpsc channel; the loop races event delivery against a redraw tick
-    /// via `timeout`, keeping rendering synchronous while waiting asynchronously.
     pub async fn run(&mut self) -> std::io::Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Event>(64);
         std::thread::spawn(move || {
@@ -242,16 +178,14 @@ impl App {
                         break;
                     }
                 }
-                Ok(Some(_)) => {}  // resize/mouse/etc. — redraw on next iteration
-                Ok(None) => break, // reader thread gone
-                Err(_) => {}       // tick elapsed — redraw
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(_) => {}
             }
         }
         Ok(())
     }
 
-    /// Snapshot the active module's log and memory into the views (non-destructive),
-    /// auto-following the log tail unless the user is scrolling it.
     async fn refresh_snapshot(&mut self) {
         if self.active >= self.tabs.len() {
             return;
@@ -259,33 +193,11 @@ impl App {
         let active = self.active;
         let follow = self.focus != Focus::Log;
 
-        // Clone shared handles + current rows so no `self.tabs` borrow is held across awaits.
-        let (log, memory, defs, virtual_store, sort) = {
-            let tab = &self.tabs[active];
-            (
-                tab.module.log(),
-                tab.module.memory(),
-                tab.table.definitions().to_vec(),
-                tab.module.virtual_store(),
-                tab.sort,
-            )
-        };
-
+        let log = self.tabs[active].log.clone();
         let lines = {
             let guard = log.read().await;
             guard.peek_n(LOG_SIZE)
         };
-        let virtual_values = virtual_store.read().await.clone();
-        let mut updated = {
-            let guard = memory.read().await;
-            defs.into_iter()
-                .map(|d| decode_definition(d, &guard, &virtual_values))
-                .collect::<Vec<_>>()
-        };
-        // Re-apply the active ordering so live columns (Value/Raw Value) stay sorted.
-        if let Some((column, descending)) = sort {
-            updated.sort_by(|a, b| cmp_definitions(a, b, column, descending));
-        }
 
         let entries: Vec<LogEntry> = lines
             .into_iter()
@@ -300,23 +212,18 @@ impl App {
         if follow {
             tab.log_view.state.move_to_bottom();
         }
-        tab.table.set_definitions(updated);
+        tab.view.refresh().await;
+        tab.name = tab.view.name();
     }
 
     fn draw(&mut self) -> std::io::Result<()> {
-        // Disjoint field borrows so the render closure can hold the view state while
-        // `screen.draw` holds `&mut screen`.
         let screen = &mut self.screen;
-        let online = self
-            .tabs
-            .get(self.active)
-            .is_some_and(|tab| tab.module.is_instance_active());
         let tabs = &mut self.tabs;
         let command = &mut self.command;
         let overlay = self.overlay.as_mut();
         let active = self.active;
         let focus = self.focus;
-        screen.draw(|f| render(f, tabs, active, focus, command, online, overlay))?;
+        screen.draw(|f| render(f, tabs, active, focus, command, overlay))?;
         Ok(())
     }
 
@@ -334,10 +241,9 @@ impl App {
         self.focus = Focus::Table;
     }
 
-    /// Append a message to the active module's log.
     async fn log_active(&self, message: String) {
         if let Some(tab) = self.tabs.get(self.active) {
-            tab.module.log().write().await.write(&message);
+            tab.log.write().await.write(&message);
         }
     }
 }

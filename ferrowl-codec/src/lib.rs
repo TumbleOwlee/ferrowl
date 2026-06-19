@@ -6,11 +6,11 @@
 //! [`decode`]/[`encode`] convert between raw `u16` register words and typed
 //! [`Value`]s or user-entered strings.
 
-pub mod codec;
-mod kind;
-mod address;
 mod access;
+mod address;
+pub mod codec;
 pub mod format;
+mod kind;
 pub mod traits;
 pub mod value;
 
@@ -19,11 +19,11 @@ use getset::{CopyGetters, Getters, Setters, WithSetters};
 use serde::{Deserialize, Serialize};
 use tokio_modbus::SlaveId;
 
-pub use crate::codec::{decode, encode};
 pub use crate::access::Access;
 pub use crate::address::Address;
-pub use crate::kind::Kind;
+pub use crate::codec::{decode, encode};
 pub use crate::format::{Alignment, BitField, Endian, Format};
+pub use crate::kind::Kind;
 pub use crate::traits::{IntoVec, ParseFromU8};
 pub use crate::value::Value;
 

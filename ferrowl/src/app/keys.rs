@@ -1,7 +1,10 @@
 //! Key routing for the non-dialog panes: command line, table/log navigation, tab switching.
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::HandleEvents;
+
+use crate::app::KeyMode;
 
 use super::{App, Focus};
 
@@ -25,56 +28,59 @@ impl App {
         false
     }
 
+    // Returns true if has to quit
     pub(super) fn handle_nav_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        // `gt`/`gT` tab switching: a leading `g` was seen last keystroke.
-        if self.pending_g {
-            self.pending_g = false;
-            match code {
-                KeyCode::Char('t') => {
-                    self.next_tab();
-                    return false;
-                }
-                KeyCode::Char('T') => {
-                    self.prev_tab();
-                    return false;
-                }
-                _ => {}
+        match (&self.keymode, modifiers, code) {
+            // Window switch
+            (None, KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                self.keymode = Some(KeyMode::CtrlWin)
             }
-        }
-
-        match (modifiers, code) {
-            (_, KeyCode::Char(':')) => self.enter_command(),
-            (_, KeyCode::Enter) => self.open_edit(),
-            (_, KeyCode::Tab) => self.toggle_pane(),
-            (_, KeyCode::Char(']')) => self.next_tab(),
-            (_, KeyCode::Char('[')) => self.prev_tab(),
-            (KeyModifiers::NONE, KeyCode::Char('z')) => self.toggle_compact(),
-            (KeyModifiers::NONE, KeyCode::Char('g')) => {
-                self.pending_g = true;
-                self.forward_nav(modifiers, code); // `g` still scrolls to top in the table
+            (Some(KeyMode::CtrlWin), _, KeyCode::Char('j'))
+            | (Some(KeyMode::CtrlWin), _, KeyCode::Down)
+            | (Some(KeyMode::CtrlWin), _, KeyCode::Char('k'))
+            | (Some(KeyMode::CtrlWin), _, KeyCode::Up) => {
+                self.keymode = None;
+                self.toggle_pane();
             }
-            (KeyModifiers::SHIFT, KeyCode::Char('g'))
-            | (KeyModifiers::NONE, KeyCode::Char('G'))
-            | (KeyModifiers::SHIFT, KeyCode::Char('G')) => {
-                self.forward_nav(modifiers, code); // `g` still scrolls to top in the table
+            // Tab switch
+            (None, KeyModifiers::CONTROL, KeyCode::Char('t')) => {
+                self.keymode = Some(KeyMode::CtrlTab)
             }
-            _ => self.forward_nav(modifiers, code),
+            (Some(KeyMode::CtrlTab), _, KeyCode::Char('l')) => {
+                self.keymode = None;
+                self.next_tab();
+            }
+            (Some(KeyMode::CtrlTab), _, KeyCode::Char('h')) => {
+                self.keymode = None;
+                self.prev_tab();
+            }
+            (None, _, KeyCode::Char(']')) => self.next_tab(),
+            (None, _, KeyCode::Char('[')) => self.prev_tab(),
+            // Command
+            (None, _, KeyCode::Char(':')) => self.enter_command(),
+            (_, _, _) => {
+                self.keymode = None;
+                self.forward_nav(modifiers, code);
+            }
         }
         false
     }
 
-    fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+    /// Forward a key to the focused pane. Returns `true` if consumed.
+    fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else {
-            return;
+            return false;
         };
         match self.focus {
-            Focus::Table => {
-                let _ = tab.table.handle_events(modifiers, code);
-            }
+            Focus::Table => matches!(
+                tab.view.handle_events(modifiers, code),
+                EventResult::Consumed
+            ),
             Focus::Log => {
                 let _ = tab.log_view.state.handle_events(modifiers, code);
+                false
             }
-            Focus::Command | Focus::Dialog => {}
+            Focus::Command | Focus::Dialog => false,
         }
     }
 
@@ -99,12 +105,6 @@ impl App {
         };
         if let Some(tab) = self.tabs.get_mut(self.active) {
             tab.log_view.state.set_focused(self.focus == Focus::Log);
-        }
-    }
-
-    pub(super) fn toggle_compact(&mut self) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
-            tab.table.set_compact(!tab.table.compact);
         }
     }
 

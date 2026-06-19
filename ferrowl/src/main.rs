@@ -31,10 +31,12 @@ use crate::config::device::{
 };
 use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::module::Module;
+use crate::module::modbus::view::ModbusModuleView;
+use crate::module::view::{CommandResult, ModuleView};
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
 /// binds nothing).
-fn demo() -> (DeviceConfig, ModuleSpec) {
+fn demo_config() -> (DeviceConfig, ModuleSpec) {
     let reg = |address: u16, value_type: ValueType, description: &str, values: Vec<NamedValue>| {
         RegisterDef {
             slave_id: 1,
@@ -123,32 +125,22 @@ fn demo() -> (DeviceConfig, ModuleSpec) {
     (device, spec)
 }
 
-/// Builds one UI tab per configured module, starting each module's
-/// background task. Start failures are written to the module's log; modules
-/// whose device config fails to load are skipped with a warning on stderr.
+/// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
+/// Start failures are written to the module's log. Modules whose device config fails to load
+/// are skipped with a warning on stderr.
 async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 
     if args.demo {
-        let (device, spec) = demo();
-        let mut module = Module::new(&spec, &device);
-        let role = spec.role;
-
-        if let Err(e) = module.start().await {
-            module
-                .log()
-                .write()
-                .await
-                .write(&format!("Failed to start {role}: {e}"));
-        } else {
-            module
-                .log()
-                .write()
-                .await
-                .write(&format!("Started {role} on {}", spec.endpoint));
+        let (device, spec) = demo_config();
+        let module = Module::new(&spec, &device);
+        let view: Box<dyn ModuleView> =
+            Box::new(ModbusModuleView::new(module, spec.clone(), device));
+        let mut tab = Tab::new_from_view(spec.name.clone(), view);
+        if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
+            tab.log.write().await.write(&msg);
         }
-
-        return Ok(vec![Tab::from_module(spec, device, module)]);
+        return Ok(vec![tab]);
     }
 
     let mut tabs = Vec::new();
@@ -163,23 +155,14 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
                 continue;
             }
         };
-        let role = spec.role;
-        let mut module = Module::new(spec, &device);
-        // CLI/session modules auto-start; start failures are surfaced into the module log.
-        if let Err(e) = module.start().await {
-            module
-                .log()
-                .write()
-                .await
-                .write(&format!("Failed to start {role}: {e}"));
-        } else {
-            module
-                .log()
-                .write()
-                .await
-                .write(&format!("Started {role} on {}", spec.endpoint));
+        let module = Module::new(spec, &device);
+        let view: Box<dyn ModuleView> =
+            Box::new(ModbusModuleView::new(module, spec.clone(), device));
+        let mut tab = Tab::new_from_view(spec.name.clone(), view);
+        if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
+            tab.log.write().await.write(&msg);
         }
-        tabs.push(Tab::from_module(spec.clone(), device, module));
+        tabs.push(tab);
     }
     Ok(tabs)
 }

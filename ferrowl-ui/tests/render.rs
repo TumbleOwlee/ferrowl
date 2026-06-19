@@ -8,6 +8,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{HorizontalAlignment, Margin, Rect};
 use ratatui::widgets::{StatefulWidget, Widget as RWidget};
 
+use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
     SelectionStateBuilder, TableStateBuilder,
@@ -16,7 +17,6 @@ use ferrowl_ui::style::{
     ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, TableStyle, TextStyle,
 };
 use ferrowl_ui::traits::{Init, ToLabel};
-use ferrowl_ui::Border;
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
     SelectionBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
@@ -61,7 +61,10 @@ fn button_render_variants() {
     let widget = ButtonBuilder::default().build().unwrap();
 
     // Focused (default), short label.
-    let mut st = ButtonStateBuilder::default().label("OK".to_string()).build().unwrap();
+    let mut st = ButtonStateBuilder::default()
+        .label("OK".to_string())
+        .build()
+        .unwrap();
     let mut b = buffer(20, 3);
     StatefulWidget::render(&widget, Rect::new(0, 0, 20, 3), &mut b, &mut st);
 
@@ -158,7 +161,10 @@ fn input_field_render_variants() {
 
     // Disabled (no cursor) and the plain `Widget` impl (builds default state).
     let f = InputFieldBuilder::<String>::default().build().unwrap();
-    let mut st = InputFieldStateBuilder::default().disabled(true).build().unwrap();
+    let mut st = InputFieldStateBuilder::default()
+        .disabled(true)
+        .build()
+        .unwrap();
     let mut b = buffer(20, 1);
     StatefulWidget::render(&f, Rect::new(0, 0, 20, 1), &mut b, &mut st);
 
@@ -205,7 +211,10 @@ fn scrolling_tabs_render_variants() {
     let w = ScrollingTabsBuilder::<String>::default().build().unwrap();
 
     // Empty -> early return.
-    let mut st = ScrollingTabsState::<String> { titles: vec![], selected: 0 };
+    let mut st = ScrollingTabsState::<String> {
+        titles: vec![],
+        selected: 0,
+    };
     let mut b = buffer(20, 1);
     StatefulWidget::render(&w, Rect::new(0, 0, 20, 1), &mut b, &mut st);
 
@@ -217,7 +226,10 @@ fn scrolling_tabs_render_variants() {
         "delta".to_string(),
         "epsilon".to_string(),
     ];
-    let mut st = ScrollingTabsState { titles, selected: 2 };
+    let mut st = ScrollingTabsState {
+        titles,
+        selected: 2,
+    };
     let mut b = buffer(12, 1);
     StatefulWidget::render(w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
 }
@@ -233,7 +245,10 @@ fn selection_render_variants() {
         "a selected entry that is wider than the area".to_string(),
         "tail".to_string(),
     ];
-    let mut st = SelectionStateBuilder::default().values(values.clone()).build().unwrap();
+    let mut st = SelectionStateBuilder::default()
+        .values(values.clone())
+        .build()
+        .unwrap();
     st.move_down(); // select the wide row
     st.move_right(); // give it a horizontal offset
     let mut b = buffer(10, 5);
@@ -245,10 +260,13 @@ fn selection_render_variants() {
         .title(Some("pick".into()))
         .build()
         .unwrap();
-    let mut st = SelectionStateBuilder::default().values(values).focused(false).build().unwrap();
+    let mut st = SelectionStateBuilder::default()
+        .values(values)
+        .focused(false)
+        .build()
+        .unwrap();
     let mut b = buffer(20, 6);
     StatefulWidget::render(&w, Rect::new(0, 0, 20, 6), &mut b, &mut st);
-
 }
 
 // ---- Title conversions + Widget<S, W> pair forwarding ----
@@ -266,7 +284,10 @@ fn title_conversions_and_widget_pair() {
     let _: Title = (String::from("t"), HorizontalAlignment::Right).into();
 
     // The pair forwards each trait to the appropriate half.
-    let state = InputFieldStateBuilder::default().input("hi".to_string()).build().unwrap();
+    let state = InputFieldStateBuilder::default()
+        .input("hi".to_string())
+        .build()
+        .unwrap();
     let widget = InputFieldBuilder::<String>::default().build().unwrap();
     let mut pair = WidgetPair { state, widget };
 
@@ -318,14 +339,23 @@ impl Header<2> for Cols {
 #[test]
 fn table_render_variants() {
     let rows = vec![
-        Row("alpha".to_string(), "a value with several words to wrap".to_string()),
+        Row(
+            "alpha".to_string(),
+            "a value with several words to wrap".to_string(),
+        ),
         Row("beta".to_string(), "short".to_string()),
-        Row("gamma".to_string(), "supercalifragilisticexpialidocious".to_string()),
+        Row(
+            "gamma".to_string(),
+            "supercalifragilisticexpialidocious".to_string(),
+        ),
     ];
 
     // Focused, area wide enough that total_width <= area.width (no h-scroll).
     let w = TableBuilder::<Row, Cols, 2>::default().build().unwrap();
-    let mut st = TableStateBuilder::default().values(rows.clone()).build().unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(rows.clone())
+        .build()
+        .unwrap();
     let mut b = buffer(40, 8);
     StatefulWidget::render(&w, Rect::new(0, 0, 40, 8), &mut b, &mut st);
 
@@ -337,8 +367,11 @@ fn table_render_variants() {
         .split_by_whitespace([true, false])
         .build()
         .unwrap();
-    let mut st = TableStateBuilder::default().values(rows.clone()).focused(false).build().unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(rows.clone())
+        .focused(false)
+        .build()
+        .unwrap();
     let mut b = buffer(14, 8);
     StatefulWidget::render(&w, Rect::new(0, 0, 14, 8), &mut b, &mut st);
-
 }

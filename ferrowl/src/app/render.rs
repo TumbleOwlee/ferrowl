@@ -1,6 +1,6 @@
-//! Whole-frame rendering: tab bar, register table, log pane, command line and overlay.
+//! Whole-frame rendering: tab bar, module view, log pane, command line and overlay.
 
-use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
+use ferrowl_ui::COLOR_SCHEME;
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
 
+use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
 use crate::view::tabs::render_tabs;
 
@@ -21,93 +22,59 @@ pub(super) fn render(
     active: usize,
     focus: Focus,
     command: &mut CommandLine,
-    online: bool,
     overlay: Option<&mut Overlay>,
 ) {
     let area = frame.area();
-    let [tabs_area, table_area, status_area, log_area, cmd_area] = Layout::vertical([
+    let [tabs_area, view_area, log_area, cmd_area] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
         Constraint::Length(10),
         Constraint::Length(1),
     ])
     .areas(area);
 
-    let buf = frame.buffer_mut();
-    buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
+    // Phase 1: background and tab bar.
+    {
+        let buf = frame.buffer_mut();
+        buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
 
-    let names: Vec<String> = tabs.iter().map(|t| format!(" {} ", t.name)).collect();
-    render_tabs(&names, active, tabs_area, buf);
-
-    let status = TextBuilder::default()
-        .horizontal_alignment(ratatui::layout::HorizontalAlignment::Center)
-        .style(TextStyle {
-            general: ratatui::prelude::Style::default()
-                .bg(if online {
-                    COLOR_SCHEME.success
-                } else {
-                    COLOR_SCHEME.error
-                })
-                .fg(if online {
-                    COLOR_SCHEME.text_dark
-                } else {
-                    COLOR_SCHEME.text
-                })
-                .bold(),
-        })
-        .build()
-        .unwrap();
-
-    if !tabs.is_empty() {
-        let mut status_label = if online {
-            "ONLINE".to_string()
-        } else {
-            "OFFLINE".to_string()
-        };
-        StatefulWidget::render(&status, status_area, buf, &mut status_label);
+        let names: Vec<String> = tabs.iter().map(|t| format!(" {} ", t.name)).collect();
+        render_tabs(&names, active, tabs_area, buf);
     }
 
+    // Phase 2: module content view (includes its own status bar).
     if let Some(tab) = tabs.get_mut(active) {
-        tab.table.table.state.set_focused(focus == Focus::Table);
-        tab.table.render(table_area, buf);
-        StatefulWidget::render(&tab.log_view.widget, log_area, buf, &mut tab.log_view.state);
+        tab.view.render(frame, view_area, focus == Focus::Table);
     }
 
-    render_command(command, focus, cmd_area, buf);
-    if focus == Focus::Command {
-        render_command_help(cmd_area, buf);
-    }
-
-    // Overlay dialog (drawn last; it clears its own area).
-    if let Some(dialog) = overlay {
-        dialog.render(area, buf);
+    // Phase 3: log pane, command line, overlay.
+    {
+        let buf = frame.buffer_mut();
+        if let Some(tab) = tabs.get_mut(active) {
+            StatefulWidget::render(&tab.log_view.widget, log_area, buf, &mut tab.log_view.state);
+        }
+        render_command(command, focus, cmd_area, buf);
+        if focus == Focus::Command {
+            let module_cmds = tabs.get(active).map(|t| t.view.commands()).unwrap_or(&[]);
+            render_command_help(cmd_area, buf, module_cmds);
+        }
+        if let Some(dialog) = overlay {
+            dialog.render(area, buf);
+        }
     }
 }
 
-fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
+fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandDescriptor]) {
     const COLS: &[(&str, &str)] = &[
         (":q | :quit", "quit tab"),
         (":qa | :qall", "quit all tabs"),
-        (":e | :edit", "edit module setup"),
         (":n | :new", "new module tab"),
         (":l | :load [path]", "load device config"),
-        (":a | :add", "add register to device"),
-        (":start", "start module"),
-        (":stop", "stop module"),
-        (":restart", "restart module"),
-        (":set <reg> <val>", "write register value"),
         (":s | :save | :w | :write [path]", "save session"),
-        (":wd | :write-device [path]", "save device config"),
-        (":log [file]", "set log file"),
         (":log clear", "clear log view"),
-        (":lua start|stop|status", "start|stop|status lua execution"),
-        (":reload", "reload device config"),
-        (":compact", "toggle compact mode"),
-        (":order [col] [asc|desc]", "sort table by column"),
     ];
     let popup_w: u16 = 62;
-    let popup_h: u16 = COLS.len() as u16 + 2;
+    let popup_h: u16 = (COLS.len() + module_cmds.len()) as u16 + 2;
     let x = cmd_area.x;
     let y = cmd_area.y.saturating_sub(popup_h);
     let popup = Rect {
@@ -122,20 +89,26 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer) {
     let inner = block.inner(popup);
     ratatui::prelude::Widget::render(block, popup, buf);
 
+    let make_line = |(cmd, desc): (&str, &str)| {
+        Line::from(vec![
+            Span::styled(
+                format!("{cmd:<34}"),
+                Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+            ),
+            Span::styled(
+                desc.to_string(),
+                Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
+            ),
+        ])
+    };
     let lines: Vec<Line> = COLS
         .iter()
-        .map(|(cmd, desc)| {
-            Line::from(vec![
-                Span::styled(
-                    format!("{cmd:<34}"),
-                    Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
-                ),
-                Span::styled(
-                    desc.to_string(),
-                    Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
-                ),
-            ])
-        })
+        .map(|(cmd, desc)| make_line((cmd, desc)))
+        .chain(
+            module_cmds
+                .iter()
+                .map(|c| make_line((c.name, c.description))),
+        )
         .collect();
     ratatui::prelude::Widget::render(
         Paragraph::new(lines).style(Style::default().bg(COLOR_SCHEME.bg)),
@@ -164,7 +137,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    |    Tab  table/log    |    ] [  tabs    |    gt gT  tabs",
+            "  :  command    |    <C-w>j <C-w>k  table/log    |    ] [  tabs    |    <C-t>h <C-t>l  tabs",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }

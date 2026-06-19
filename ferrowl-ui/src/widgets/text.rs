@@ -1,9 +1,9 @@
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
 
+use crate::Border;
 use crate::style::TextStyle;
 use crate::traits::Margins;
-use crate::Border;
 use crate::widgets::Title;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect};

@@ -1,11 +1,10 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    AlternateScreen, EventResult,
+    AlternateScreen, Border, EventResult,
     state::{SelectionState, SelectionStateBuilder},
     style::SelectionStyle,
     traits::{HandleEvents, ToLabel},
-    Border,
     widgets::SelectionBuilder,
 };
 use ratatui::{

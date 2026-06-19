@@ -1,10 +1,9 @@
 //! Log pane: scrollable table of timestamped module log lines.
 
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    Border,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
 };
 use ratatui::layout::Margin;

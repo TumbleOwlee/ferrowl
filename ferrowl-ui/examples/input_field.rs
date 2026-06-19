@@ -1,10 +1,9 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_ui::{
-    AlternateScreen, EventResult,
+    AlternateScreen, Border, EventResult,
     state::{InputFieldState, InputFieldStateBuilder},
     style::InputFieldStyle,
     traits::HandleEvents,
-    Border,
     widgets::{InputField, InputFieldBuilder},
 };
 use ratatui::{

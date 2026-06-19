@@ -7,11 +7,10 @@
 use derive_builder::Builder;
 use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
-    Border,
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
         Validate, ValidateResult, Widget,

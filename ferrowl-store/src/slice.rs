@@ -1,10 +1,10 @@
 //! Contiguous runs of memory cells backing a [`Memory`](crate::Memory).
 
-use crate::{range::Range, cell::CellType};
+use crate::{cell::CellType, range::Range};
 use itertools::Itertools;
 use std::fmt::Debug;
 
-use crate::cell::{CellKind, Cell, ValueRange};
+use crate::cell::{Cell, CellKind, ValueRange};
 
 /// A contiguous run of [`Cell`] cells covering an address [`Range`].
 ///
@@ -214,7 +214,7 @@ impl Slice {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellKind, Range, Slice, CellType, Cell, ValueRange};
+    use super::{Cell, CellKind, CellType, Range, Slice, ValueRange};
 
     #[test]
     fn ut_slice_from_range() {
@@ -246,7 +246,10 @@ mod tests {
     #[test]
     fn ut_slice_from_value_range() {
         let values: Vec<u16> = (1..46).collect();
-        let slice = Slice::from_value_range(&CellKind::Read(CellType::Coil), ValueRange::new(123, &values));
+        let slice = Slice::from_value_range(
+            &CellKind::Read(CellType::Coil),
+            ValueRange::new(123, &values),
+        );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
@@ -255,8 +258,10 @@ mod tests {
         }
 
         let values: Vec<u16> = (1..46).collect();
-        let slice =
-            Slice::from_value_range(&CellKind::Write(CellType::Coil), ValueRange::new(123, &values));
+        let slice = Slice::from_value_range(
+            &CellKind::Write(CellType::Coil),
+            ValueRange::new(123, &values),
+        );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
@@ -265,8 +270,10 @@ mod tests {
         }
 
         let values: Vec<u16> = (1..46).collect();
-        let slice =
-            Slice::from_value_range(&CellKind::ReadWrite(CellType::Coil), ValueRange::new(123, &values));
+        let slice = Slice::from_value_range(
+            &CellKind::ReadWrite(CellType::Coil),
+            ValueRange::new(123, &values),
+        );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
@@ -499,7 +506,10 @@ mod tests {
         // Write-only cells are unreadable via read() but read_unchecked returns stored values.
         assert!(slice.read(&Range::new(0, 4)).is_none());
         assert!(slice.write(&Range::new(0, 4), &[11, 22, 33, 44]));
-        assert_eq!(slice.read_unchecked(&Range::new(0, 4)).unwrap(), vec![11, 22, 33, 44]);
+        assert_eq!(
+            slice.read_unchecked(&Range::new(0, 4)).unwrap(),
+            vec![11, 22, 33, 44]
+        );
 
         // Out of bounds -> None.
         assert!(slice.read_unchecked(&Range::new(0, 99)).is_none());

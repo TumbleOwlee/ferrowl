@@ -3,11 +3,11 @@
 
 use std::collections::BTreeMap;
 
-use ferrowl_store::{Range, CellType};
 use ferrowl_codec::{
     Access, Address, Format, Kind, Register, RegisterBuilder,
     format::{Alignment, BitField, Endian, Resolution, Width},
 };
+use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
 
@@ -159,12 +159,78 @@ impl ToLabel for NamedValue {
 /// A named-value payload. Untagged so the config file can write `value = 10`, `value = 1.5`
 /// or `value = "text"` without quoting numbers. Written to a register via its `Display` string,
 /// which `Register::encode` then interprets per the register's own format.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Serialization is derived untagged. Deserialization is hand-written via a `Visitor` rather than
+/// `#[serde(untagged)]` because that buffers content into an intermediate that `serde_json`'s
+/// `arbitrary_precision` mode represents numbers as — making untagged number variants fail to
+/// match. A direct visitor avoids the buffering and also accepts the `arbitrary_precision` number
+/// wrapper, so it works under any serde_json feature set as well as for TOML.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Scalar {
     Int(i64),
     Float(f64),
     Text(String),
+}
+
+impl<'de> Deserialize<'de> for Scalar {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ScalarVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ScalarVisitor {
+            type Value = Scalar;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an integer, float, or string")
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Scalar, E> {
+                Ok(Scalar::Int(v))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Scalar, E> {
+                Ok(i64::try_from(v).map_or(Scalar::Float(v as f64), Scalar::Int))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Scalar, E> {
+                Ok(Scalar::Float(v))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Scalar, E> {
+                Ok(Scalar::Text(v.to_owned()))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Scalar, E> {
+                Ok(Scalar::Text(v))
+            }
+
+            // `serde_json`'s `arbitrary_precision` mode (enabled transitively by `rust-ocpp`'s
+            // `jsonschema`/`rust_decimal` deps when this crate shares a workspace build) encodes a
+            // number as a single-entry map `{ "$serde_json::private::Number": "<digits>" }`. Parse
+            // that back into the appropriate variant.
+            fn visit_map<A>(self, mut map: A) -> Result<Scalar, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let _key: String = map
+                    .next_key()?
+                    .ok_or_else(|| serde::de::Error::custom("empty number map"))?;
+                let raw: String = map.next_value()?;
+                if let Ok(i) = raw.parse::<i64>() {
+                    Ok(Scalar::Int(i))
+                } else if let Ok(f) = raw.parse::<f64>() {
+                    Ok(Scalar::Float(f))
+                } else {
+                    Err(serde::de::Error::custom(format!("invalid number: {raw}")))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ScalarVisitor)
+    }
 }
 
 impl std::fmt::Display for Scalar {
@@ -512,7 +578,12 @@ mod tests {
         assert!(def.format().bitfield().is_full());
     }
 
-    fn def_with(value_type: ValueType, read_code: u8, address: Option<u16>, is_virtual: bool) -> RegisterDef {
+    fn def_with(
+        value_type: ValueType,
+        read_code: u8,
+        address: Option<u16>,
+        is_virtual: bool,
+    ) -> RegisterDef {
         RegisterDef {
             slave_id: 1,
             read_code,
@@ -557,8 +628,14 @@ mod tests {
         assert!(matches!(Scalar::from_input(" 7 "), Scalar::Int(7)));
         assert!(matches!(Scalar::from_input("2.5"), Scalar::Float(_)));
         assert!(matches!(Scalar::from_input("abc"), Scalar::Text(_)));
-        assert!(matches!(Scalar::Int(1).to_value(1.0), ferrowl_codec::Value::I64(_)));
-        assert!(matches!(Scalar::Float(1.0).to_value(1.0), ferrowl_codec::Value::F64(_)));
+        assert!(matches!(
+            Scalar::Int(1).to_value(1.0),
+            ferrowl_codec::Value::I64(_)
+        ));
+        assert!(matches!(
+            Scalar::Float(1.0).to_value(1.0),
+            ferrowl_codec::Value::F64(_)
+        ));
         assert!(matches!(
             Scalar::Text("x".into()).to_value(1.0),
             ferrowl_codec::Value::Ascii(_)
@@ -572,13 +649,28 @@ mod tests {
 
     #[test]
     fn ut_cfg_conversions() {
-        assert!(matches!(Access::from(AccessCfg::ReadOnly), Access::ReadOnly));
-        assert!(matches!(Access::from(AccessCfg::WriteOnly), Access::WriteOnly));
-        assert!(matches!(Access::from(AccessCfg::ReadWrite), Access::ReadWrite));
+        assert!(matches!(
+            Access::from(AccessCfg::ReadOnly),
+            Access::ReadOnly
+        ));
+        assert!(matches!(
+            Access::from(AccessCfg::WriteOnly),
+            Access::WriteOnly
+        ));
+        assert!(matches!(
+            Access::from(AccessCfg::ReadWrite),
+            Access::ReadWrite
+        ));
         assert!(matches!(Endian::from(EndianCfg::Big), Endian::Big));
         assert!(matches!(Endian::from(EndianCfg::Little), Endian::Little));
-        assert!(matches!(Alignment::from(AlignmentCfg::Left), Alignment::Left));
-        assert!(matches!(Alignment::from(AlignmentCfg::Right), Alignment::Right));
+        assert!(matches!(
+            Alignment::from(AlignmentCfg::Left),
+            Alignment::Left
+        ));
+        assert!(matches!(
+            Alignment::from(AlignmentCfg::Right),
+            Alignment::Right
+        ));
     }
 
     #[test]
@@ -591,7 +683,10 @@ mod tests {
         ] {
             assert_eq!(def_with(ValueType::U16, code, Some(0), false).kind(), kind);
         }
-        assert_eq!(def_with(ValueType::U16, 1, Some(0), false).mem_type(), CellType::Coil);
+        assert_eq!(
+            def_with(ValueType::U16, 1, Some(0), false).mem_type(),
+            CellType::Coil
+        );
         assert_eq!(
             def_with(ValueType::U16, 4, Some(0), false).mem_type(),
             CellType::Register
@@ -629,7 +724,10 @@ mod tests {
         assert!(virt.mem_range().is_none());
 
         // The `virtual` flag forces Virtual even with a concrete address.
-        assert_eq!(def_with(ValueType::U16, 4, Some(5), true).address(), Address::Virtual);
+        assert_eq!(
+            def_with(ValueType::U16, 4, Some(5), true).address(),
+            Address::Virtual
+        );
     }
 
     #[test]

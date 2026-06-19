@@ -8,10 +8,10 @@ use ratatui::{
     widgets::{Block, Paragraph, StatefulWidget, Widget},
 };
 
+use crate::Border;
 use crate::state::CodeInputFieldState;
 use crate::style::InputFieldStyle;
 use crate::traits::Margins;
-use crate::Border;
 use crate::widgets::Title;
 
 /// A multi-line text editor (e.g. for Lua snippets) rendered from a

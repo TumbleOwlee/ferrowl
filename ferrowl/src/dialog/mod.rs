@@ -1,11 +1,8 @@
-//! Modal dialogs: register editing and module setup.
+//! Modal dialogs: module setup and shared register-edit data types.
 
-mod edit;
-mod setup;
-
-pub use edit::{EditInputDialog, EditSelectionDialog, EditedRegister, SubDialogs, parse_raw_value};
+pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
+pub use crate::module::modbus::setup_dialog::SetupDialog;
 use ferrowl_ui::widgets::{Validate, ValidateResult};
-pub use setup::{SetupDialog, SetupValues};
 
 #[derive(Clone, Debug)]
 pub struct NonEmpty();
@@ -88,7 +85,10 @@ mod tests {
 
     #[test]
     fn address_virtual_keyword() {
-        assert!(matches!(Address::validate("virtual"), ValidateResult::Success));
+        assert!(matches!(
+            Address::validate("virtual"),
+            ValidateResult::Success
+        ));
     }
 
     #[test]
@@ -101,9 +101,18 @@ mod tests {
 
     #[test]
     fn address_overflow_i16() {
-        assert!(matches!(Address::validate("32768"), ValidateResult::Error(_)));
-        assert!(matches!(Address::validate("-32769"), ValidateResult::Error(_)));
-        assert!(matches!(Address::validate("99999"), ValidateResult::Error(_)));
+        assert!(matches!(
+            Address::validate("32768"),
+            ValidateResult::Error(_)
+        ));
+        assert!(matches!(
+            Address::validate("-32769"),
+            ValidateResult::Error(_)
+        ));
+        assert!(matches!(
+            Address::validate("99999"),
+            ValidateResult::Error(_)
+        ));
     }
 
     #[test]
@@ -123,7 +132,10 @@ mod tests {
     fn bitmask_valid_hex_lowercase_prefix() {
         assert!(matches!(Bitmask::validate("0xFF"), ValidateResult::None));
         assert!(matches!(Bitmask::validate("0x0"), ValidateResult::None));
-        assert!(matches!(Bitmask::validate("0xDEADBEEF"), ValidateResult::None));
+        assert!(matches!(
+            Bitmask::validate("0xDEADBEEF"),
+            ValidateResult::None
+        ));
     }
 
     #[test]
@@ -134,7 +146,10 @@ mod tests {
 
     #[test]
     fn bitmask_invalid_hex() {
-        assert!(matches!(Bitmask::validate("0xGG"), ValidateResult::Error(_)));
+        assert!(matches!(
+            Bitmask::validate("0xGG"),
+            ValidateResult::Error(_)
+        ));
         assert!(matches!(Bitmask::validate("0x"), ValidateResult::Error(_)));
     }
 
@@ -142,7 +157,10 @@ mod tests {
     fn bitmask_valid_decimal() {
         assert!(matches!(Bitmask::validate("0"), ValidateResult::None));
         assert!(matches!(Bitmask::validate("255"), ValidateResult::None));
-        assert!(matches!(Bitmask::validate("340282366920938463463374607431768211455"), ValidateResult::None)); // u128::MAX
+        assert!(matches!(
+            Bitmask::validate("340282366920938463463374607431768211455"),
+            ValidateResult::None
+        )); // u128::MAX
     }
 
     #[test]

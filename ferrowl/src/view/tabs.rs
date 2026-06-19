@@ -21,7 +21,12 @@ mod tests {
     fn ut_render_tabs() {
         let area = Rect::new(0, 0, 30, 1);
         let mut buf = Buffer::empty(area);
-        render_tabs(&["alpha".to_string(), "beta".to_string()], 1, area, &mut buf);
+        render_tabs(
+            &["alpha".to_string(), "beta".to_string()],
+            1,
+            area,
+            &mut buf,
+        );
         // Empty tab list must not panic.
         render_tabs(&[], 0, area, &mut buf);
     }

@@ -8,10 +8,10 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::{Paragraph, StatefulWidget};
 use std::marker::PhantomData;
 
+use crate::Border;
 use crate::state::InputFieldState;
 use crate::style::InputFieldStyle;
 use crate::traits::Margins;
-use crate::Border;
 use crate::widgets::Title;
 
 pub enum ValidateResult {

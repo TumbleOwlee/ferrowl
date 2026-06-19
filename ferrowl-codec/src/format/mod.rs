@@ -249,17 +249,50 @@ mod tests {
             "ASCII (Left)"
         );
         let e = Endian::Big;
-        assert_eq!(Format::U8((e.clone(), res(), bf())).to_string(), "U8 (Big Endian)");
-        assert_eq!(Format::U16((e.clone(), res(), bf())).to_string(), "U16 (Big Endian)");
-        assert_eq!(Format::U32((e.clone(), res(), bf())).to_string(), "U32 (Big Endian)");
-        assert_eq!(Format::U64((e.clone(), res(), bf())).to_string(), "U64 (Big Endian)");
-        assert_eq!(Format::U128((e.clone(), res(), bf())).to_string(), "U128 (Big Endian)");
-        assert_eq!(Format::I8((e.clone(), res(), bf())).to_string(), "I8 (Big Endian)");
-        assert_eq!(Format::I16((e.clone(), res(), bf())).to_string(), "I16 (Big Endian)");
-        assert_eq!(Format::I32((e.clone(), res(), bf())).to_string(), "I32 (Big Endian)");
-        assert_eq!(Format::I64((e.clone(), res(), bf())).to_string(), "I64 (Big Endian)");
-        assert_eq!(Format::I128((e.clone(), res(), bf())).to_string(), "I128 (Big Endian)");
-        assert_eq!(Format::F32((e.clone(), res())).to_string(), "F32 (Big Endian)");
+        assert_eq!(
+            Format::U8((e.clone(), res(), bf())).to_string(),
+            "U8 (Big Endian)"
+        );
+        assert_eq!(
+            Format::U16((e.clone(), res(), bf())).to_string(),
+            "U16 (Big Endian)"
+        );
+        assert_eq!(
+            Format::U32((e.clone(), res(), bf())).to_string(),
+            "U32 (Big Endian)"
+        );
+        assert_eq!(
+            Format::U64((e.clone(), res(), bf())).to_string(),
+            "U64 (Big Endian)"
+        );
+        assert_eq!(
+            Format::U128((e.clone(), res(), bf())).to_string(),
+            "U128 (Big Endian)"
+        );
+        assert_eq!(
+            Format::I8((e.clone(), res(), bf())).to_string(),
+            "I8 (Big Endian)"
+        );
+        assert_eq!(
+            Format::I16((e.clone(), res(), bf())).to_string(),
+            "I16 (Big Endian)"
+        );
+        assert_eq!(
+            Format::I32((e.clone(), res(), bf())).to_string(),
+            "I32 (Big Endian)"
+        );
+        assert_eq!(
+            Format::I64((e.clone(), res(), bf())).to_string(),
+            "I64 (Big Endian)"
+        );
+        assert_eq!(
+            Format::I128((e.clone(), res(), bf())).to_string(),
+            "I128 (Big Endian)"
+        );
+        assert_eq!(
+            Format::F32((e.clone(), res())).to_string(),
+            "F32 (Big Endian)"
+        );
         assert_eq!(Format::F64((e, res())).to_string(), "F64 (Big Endian)");
     }
 }

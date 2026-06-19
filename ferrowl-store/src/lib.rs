@@ -6,12 +6,12 @@
 //! (read, write, or read/write), so reads and writes are validated against
 //! the declared access rights of the addressed cells.
 
+mod cell;
 mod memory;
 mod range;
-mod cell;
 
 pub mod slice;
 
+pub use cell::{Cell, CellKind, CellType, ValueRange};
 pub use memory::{Memory, MemoryError};
 pub use range::Range;
-pub use cell::{CellKind, CellType, Cell, ValueRange};

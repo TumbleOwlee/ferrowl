@@ -4,10 +4,9 @@ use crate::config::device::{NamedValue, Scalar};
 use derive_builder::Builder;
 use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder},
     style::{InputFieldStyle, TextStyle},
-    Border,
     widgets::{InputField, InputFieldBuilder, Text, TextBuilder, Validate, ValidateResult, Widget},
 };
 use ratatui::{

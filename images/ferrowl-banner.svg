@@ -3,8 +3,8 @@
 <desc style="fill:rgb(0, 0, 0);stroke:none;color:rgb(251, 251, 254);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto">A wide README banner: the complete owl with gauge eyes and a register-grid chest stands on the left gripping a steel rail; to the right are the wordmark ferrowl, a tagline, and tags for tcp/ip, serial/rtu, lua and live registers.</desc>
 <defs>
 <linearGradient id="bnr2Grad" x1="0" y1="0" x2="0" y2="1">
-<stop offset="0" stop-color="#2D333A" style="--darkreader-inline-stopcolor: var(--darkreader-background-2d333a, #2f3132);" data-darkreader-inline-stopcolor=""/>
-<stop offset="1" stop-color="#1B2025" style="--darkreader-inline-stopcolor: var(--darkreader-background-1b2025, #181a1c);" data-darkreader-inline-stopcolor=""/>
+<stop offset="0" stop-color="#1A1F24" style="--darkreader-inline-stopcolor: var(--darkreader-background-1a1f24, #1a1f24);" data-darkreader-inline-stopcolor=""/>
+<stop offset="1" stop-color="#0C0F12" style="--darkreader-inline-stopcolor: var(--darkreader-background-0c0f12, #0c0f12);" data-darkreader-inline-stopcolor=""/>
 </linearGradient>
 <linearGradient id="bnrBody" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#AD8166" style="--darkreader-inline-stopcolor: var(--darkreader-background-ad8166, #9a816e);" data-darkreader-inline-stopcolor=""/>

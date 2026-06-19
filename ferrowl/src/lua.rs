@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use ferrowl_codec::{Address, Register, Value};
 use ferrowl_lua::module::{Read, RegisterModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
-use ferrowl_store::Range;
 use ferrowl_modbus::{Key, SlaveKey};
-use ferrowl_codec::{Address, Register, Value};
+use ferrowl_store::Range;
 
 use crate::module::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
@@ -240,10 +240,10 @@ fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_store::{CellKind as MemKind, Memory, CellType};
-    use ferrowl_modbus::SlaveKey;
     use ferrowl_codec::format::{BitField, Endian, Resolution};
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
+    use ferrowl_modbus::SlaveKey;
+    use ferrowl_store::{CellKind as MemKind, CellType, Memory};
     use tokio::sync::RwLock;
 
     fn holding(addr: u16) -> Register {

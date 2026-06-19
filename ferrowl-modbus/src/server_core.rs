@@ -2,7 +2,7 @@
 
 use crate::{Key, KeyParams, LogFn, SlaveId};
 
-use ferrowl_store::{Memory, Range, CellType};
+use ferrowl_store::{CellType, Memory, Range};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_modbus::FunctionCode;
@@ -37,7 +37,11 @@ where
                 id: T::from_slave_fn(slave, FunctionCode::ReadCoils),
             };
             let guard = memory.read().await;
-            match guard.read(key, &CellType::Coil, &Range::new(addr as usize, cnt as usize)) {
+            match guard.read(
+                key,
+                &CellType::Coil,
+                &Range::new(addr as usize, cnt as usize),
+            ) {
                 Ok(v) => {
                     if verbose {
                         log.invoke(format!(
@@ -76,7 +80,11 @@ where
                 id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs),
             };
             let guard = memory.read().await;
-            match guard.read(key, &CellType::Coil, &Range::new(addr as usize, cnt as usize)) {
+            match guard.read(
+                key,
+                &CellType::Coil,
+                &Range::new(addr as usize, cnt as usize),
+            ) {
                 Ok(v) => {
                     if verbose {
                         log.invoke(format!(
@@ -290,7 +298,12 @@ where
             };
             let mut guard = memory.write().await;
             let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
-            match guard.write(key, &CellType::Coil, &Range::new(addr as usize, values.len()), &values) {
+            match guard.write(
+                key,
+                &CellType::Coil,
+                &Range::new(addr as usize, values.len()),
+                &values,
+            ) {
                 Ok(()) => {
                     if verbose {
                         log.invoke(format!(
@@ -471,8 +484,8 @@ where
 mod tests {
     use super::*;
     use crate::SlaveKey;
-    use ferrowl_store::CellKind as MemKind;
     use ferrowl_codec::Kind as RegKind;
+    use ferrowl_store::CellKind as MemKind;
     use std::sync::Mutex;
 
     /// Build a memory map for slave `1`, holding registers `[0,4)`, seeded with `seed` at addr 0,
@@ -491,7 +504,8 @@ mod tests {
             &[Range::new(0, 4)],
         );
         if !seed.is_empty() {
-            mem.write(key, &CellType::Register, &Range::new(0, seed.len()), seed).unwrap();
+            mem.write(key, &CellType::Register, &Range::new(0, seed.len()), seed)
+                .unwrap();
         }
         Arc::new(RwLock::new(mem))
     }
@@ -513,15 +527,10 @@ mod tests {
     async fn ut_handle_read_holding_returns_seeded_values() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
-        let resp = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadHoldingRegisters(0, 2),
-            &mem,
-            &log,
-            true,
-        )
-        .await
-        .unwrap();
+        let resp =
+            handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, true)
+                .await
+                .unwrap();
         assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![10, 20]));
     }
 
@@ -599,7 +608,8 @@ mod tests {
         let mut mem = Memory::<Key<SlaveKey>>::default();
         mem.add_ranges(key.clone(), &MemKind::ReadWrite(ty), &[Range::new(0, len)]);
         if !seed.is_empty() {
-            mem.write(key, &ty, &Range::new(0, seed.len()), seed).unwrap();
+            mem.write(key, &ty, &Range::new(0, seed.len()), seed)
+                .unwrap();
         }
         Arc::new(RwLock::new(mem))
     }
@@ -625,10 +635,9 @@ mod tests {
         // `Memory::write` rejected any multi-coil write (range.length() != values.len()).
         assert!(matches!(resp, Response::WriteMultipleCoils(1, 5)));
 
-        let read =
-            handle_request::<SlaveKey, _>(1, Request::ReadCoils(1, 5), &mem, &log, false)
-                .await
-                .unwrap();
+        let read = handle_request::<SlaveKey, _>(1, Request::ReadCoils(1, 5), &mem, &log, false)
+            .await
+            .unwrap();
         assert!(matches!(read, Response::ReadCoils(v) if v == coils));
     }
 
@@ -744,10 +753,9 @@ mod tests {
                 .await
                 .unwrap();
         assert!(matches!(resp, Response::WriteSingleCoil(2, true)));
-        let read =
-            handle_request::<SlaveKey, _>(1, Request::ReadCoils(2, 1), &mem, &log, false)
-                .await
-                .unwrap();
+        let read = handle_request::<SlaveKey, _>(1, Request::ReadCoils(2, 1), &mem, &log, false)
+            .await
+            .unwrap();
         assert!(matches!(read, Response::ReadCoils(v) if v == vec![true]));
     }
 
@@ -826,7 +834,12 @@ mod tests {
 
     #[tokio::test]
     async fn ut_read_write_multiple_registers_writes_then_returns_read() {
-        let mem = seeded(RegKind::HoldingRegister, CellType::Register, 8, &[5, 6, 7, 8]);
+        let mem = seeded(
+            RegKind::HoldingRegister,
+            CellType::Register,
+            8,
+            &[5, 6, 7, 8],
+        );
         let (log, _) = recording_log();
         // Read [0,2), write [2,4) = [77, 88].
         let resp = handle_request::<SlaveKey, _>(
@@ -853,7 +866,12 @@ mod tests {
 
     #[tokio::test]
     async fn ut_read_write_multiple_registers_out_of_range_is_illegal_data_address() {
-        let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[1, 2, 3, 4]);
+        let mem = seeded(
+            RegKind::HoldingRegister,
+            CellType::Register,
+            4,
+            &[1, 2, 3, 4],
+        );
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
             1,
@@ -925,7 +943,12 @@ mod tests {
             Request::WriteMultipleRegisters(0, vec![1, 2, 3].into())
         );
         ok!(
-            seeded(RegKind::HoldingRegister, CellType::Register, 8, &[5, 6, 7, 8]),
+            seeded(
+                RegKind::HoldingRegister,
+                CellType::Register,
+                8,
+                &[5, 6, 7, 8]
+            ),
             Request::ReadWriteMultipleRegisters(0, 2, 2, vec![7, 8].into())
         );
     }
@@ -977,7 +1000,12 @@ mod tests {
         );
         // Write address out of range -> writable check fails (verbose failure branch).
         fail!(
-            seeded(RegKind::HoldingRegister, CellType::Register, 4, &[1, 2, 3, 4]),
+            seeded(
+                RegKind::HoldingRegister,
+                CellType::Register,
+                4,
+                &[1, 2, 3, 4]
+            ),
             Request::ReadWriteMultipleRegisters(0, 2, 10, vec![1, 2].into())
         );
     }

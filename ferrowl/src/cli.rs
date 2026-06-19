@@ -55,11 +55,28 @@ pub struct MigrateArgs {
 
 impl CliArgs {
     /// Resolve every module instance from `--session` files (first) and `--module` flags.
+    /// Session modules are stored as `serde_json::Value`; we dispatch on the `"type"` field
+    /// (defaulting to `"modbus"`) to deserialize the right spec type.
     pub fn module_specs(&self) -> Result<Vec<ModuleSpec>, String> {
         let mut specs = Vec::new();
         for path in &self.sessions {
             let session = config::load_session(path).map_err(|e| e.to_string())?;
-            specs.extend(session.modules);
+            for module_val in session.modules {
+                let ty = module_val
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("modbus");
+                match ty {
+                    "modbus" => {
+                        let spec: ModuleSpec = serde_json::from_value(module_val)
+                            .map_err(|e| format!("invalid modbus module spec: {e}"))?;
+                        specs.push(spec);
+                    }
+                    other => {
+                        return Err(format!("unsupported module type '{other}'"));
+                    }
+                }
+            }
         }
         for spec in &self.modules {
             specs.push(parse_module_spec(spec)?);
@@ -244,7 +261,10 @@ mod tests {
         use ferrowl_util::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
-            modules: vec![create_module_spec_by_device("S".into(), "s.toml".into())],
+            modules: vec![
+                serde_json::to_value(create_module_spec_by_device("S".into(), "s.toml".into()))
+                    .unwrap(),
+            ],
         };
         let path = std::env::temp_dir().join("ferrowl_cli_session.toml");
         let path = path.to_str().unwrap().to_string();
@@ -277,7 +297,9 @@ mod tests {
     fn ut_parse_empty_parts_and_error_paths() {
         // Empty comma segment is skipped.
         assert_eq!(
-            parse_module_spec("name=m,,device=d.toml,port=1").unwrap().name,
+            parse_module_spec("name=m,,device=d.toml,port=1")
+                .unwrap()
+                .name,
             "m"
         );
         // Invalid role / transport.
@@ -287,9 +309,7 @@ mod tests {
         assert!(parse_module_spec("name=m,oops,device=d,port=1").is_err());
         // RTU missing path; invalid numeric option; invalid port.
         assert!(parse_module_spec("name=m,device=d,transport=rtu").is_err());
-        assert!(
-            parse_module_spec("name=m,device=d,transport=rtu,path=/x,data_bits=foo").is_err()
-        );
+        assert!(parse_module_spec("name=m,device=d,transport=rtu,path=/x,data_bits=foo").is_err());
         assert!(parse_module_spec("name=m,device=d,port=notanum").is_err());
     }
 

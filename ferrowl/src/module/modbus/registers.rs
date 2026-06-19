@@ -1,14 +1,13 @@
 //! Free helpers translating between `Register`s, device-config `RegisterDef`s, module memory
 //! bindings and live table values.
 
-use ferrowl_store::{CellKind as MemKind, Memory, Range, CellType};
+use ferrowl_codec::{Access, Address, Kind, Register};
 use ferrowl_modbus::{Command, Key, SlaveKey};
-use ferrowl_codec::{Access, Address, Kind, Register, Value};
+use ferrowl_store::{CellKind as MemKind, CellType, Range};
 
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType,
 };
-use crate::view::main::Definition;
 
 /// Modbus memory type backing a register.
 fn mem_type(register: &Register) -> CellType {
@@ -19,7 +18,7 @@ fn mem_type(register: &Register) -> CellType {
 }
 
 /// (name, script) pairs for every register carrying a non-empty `update` Lua snippet.
-pub(super) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(String, String)> {
+pub(crate) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(String, String)> {
     device
         .definitions
         .iter()
@@ -33,9 +32,7 @@ pub(super) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(Stri
 }
 
 /// Memory binding `(kind, key, range)` backing a fixed-address register, or `None` if virtual.
-pub(super) fn register_mem_binding(
-    register: &Register,
-) -> Option<(MemKind, Key<SlaveKey>, Range)> {
+pub(crate) fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<SlaveKey>, Range)> {
     let Address::Fixed(addr) = register.address() else {
         return None;
     };
@@ -58,7 +55,7 @@ pub(super) fn register_mem_binding(
 }
 
 /// Build the appropriate write command for a client, based on the register kind/width.
-pub(super) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Command {
+pub(crate) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Command {
     match register.kind() {
         Kind::Coil | Kind::DiscreteInput => {
             if raw.len() == 1 {
@@ -77,69 +74,9 @@ pub(super) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u1
     }
 }
 
-/// Decode one register's live value from the module memory snapshot.
-pub(super) fn decode_definition(
-    mut d: Definition,
-    memory: &Memory<Key<SlaveKey>>,
-    virtual_values: &std::collections::HashMap<String, Value>,
-) -> Definition {
-    match d.register.address() {
-        Address::Fixed(addr) => {
-            let width = d.register.format().width();
-            let key = Key {
-                id: SlaveKey {
-                    slave_id: *d.register.slave_id(),
-                    kind: d.register.kind().clone(),
-                },
-            };
-            let raw = memory
-                .read_unchecked(key, &Range::new(*addr as usize, width))
-                .unwrap_or_else(|| vec![0; width]);
-            d.value = match d.register.decode(&raw) {
-                Ok(v) => v,
-                Err(_) => Value::Ascii("Error".to_string()),
-            };
-            d.raw_value = raw_hex(&raw);
-        }
-        Address::Virtual => {
-            // No Modbus address: value comes from the virtual store (Lua sim / server `:set`);
-            // derive the raw view by re-encoding it through the register's format.
-            match virtual_values.get(&d.name) {
-                Some(v) => {
-                    d.value = v.clone();
-                    d.raw_value = d
-                        .register
-                        .encode(&v.clone().unscaled().to_string())
-                        .map(|raw| raw_hex(&raw))
-                        .unwrap_or_default();
-                }
-                None => {
-                    d.value = Value::Ascii(String::new());
-                    d.raw_value.clear();
-                }
-            }
-        }
-    }
-    d
-}
-
-/// Format register words as `[aaaa bbbb …]` lowercase hex for the table's raw column.
-fn raw_hex(raw: &[u16]) -> String {
-    let mut out = String::with_capacity(raw.len() * 5 + 2);
-    out.push('[');
-    for (i, v) in raw.iter().enumerate() {
-        if i > 0 {
-            out.push(' ');
-        }
-        out += &format!("{v:04x}");
-    }
-    out.push(']');
-    out
-}
-
 /// Sync the mutable `RegisterDef` fields (address, format, access, kind) from an edited
 /// `Register`. Named values are handled separately in `apply_edit`.
-pub(super) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
+pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
     use ferrowl_codec::Format;
 
     def.slave_id = *register.slave_id();
