@@ -140,13 +140,21 @@ impl<V: Version> OcppClient<V> {
             }
             Err(e) => {
                 let msg = e.to_string();
-                self.record(Dir::In, &name, Value::Null, Some(false), msg).await;
+                self.record(Dir::In, &name, Value::Null, Some(false), msg)
+                    .await;
                 Err(e)
             }
         }
     }
 
-    async fn record(&self, dir: Dir, name: &str, payload: Value, ok: Option<bool>, context: String) {
+    async fn record(
+        &self,
+        dir: Dir,
+        name: &str,
+        payload: Value,
+        ok: Option<bool>,
+        context: String,
+    ) {
         self.messages.write().await.push(OcppMessage {
             ts: now_ms(),
             direction: dir,

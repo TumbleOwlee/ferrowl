@@ -1159,18 +1159,54 @@ impl ModuleView for ModbusModuleView {
 }
 
 static MODBUS_COMMANDS: [CommandDescriptor; 12] = [
-    CommandDescriptor { name: ":e | :edit",                 description: "edit module setup" },
-    CommandDescriptor { name: ":a | :add",                  description: "add register to device" },
-    CommandDescriptor { name: ":start",                     description: "start module" },
-    CommandDescriptor { name: ":stop",                      description: "stop module" },
-    CommandDescriptor { name: ":restart",                   description: "restart module" },
-    CommandDescriptor { name: ":reload",                    description: "reload device config" },
-    CommandDescriptor { name: ":compact",                   description: "toggle compact mode" },
-    CommandDescriptor { name: ":set <reg> <val>",           description: "write register value" },
-    CommandDescriptor { name: ":wd | :write-device [path]", description: "save device config" },
-    CommandDescriptor { name: ":log <file>",                description: "set log file" },
-    CommandDescriptor { name: ":lua start|stop|status",     description: "lua simulation" },
-    CommandDescriptor { name: ":order [col] [asc|desc]",    description: "sort table by column" },
+    CommandDescriptor {
+        name: ":e | :edit",
+        description: "edit module setup",
+    },
+    CommandDescriptor {
+        name: ":a | :add",
+        description: "add register to device",
+    },
+    CommandDescriptor {
+        name: ":start",
+        description: "start module",
+    },
+    CommandDescriptor {
+        name: ":stop",
+        description: "stop module",
+    },
+    CommandDescriptor {
+        name: ":restart",
+        description: "restart module",
+    },
+    CommandDescriptor {
+        name: ":reload",
+        description: "reload device config",
+    },
+    CommandDescriptor {
+        name: ":compact",
+        description: "toggle compact mode",
+    },
+    CommandDescriptor {
+        name: ":set <reg> <val>",
+        description: "write register value",
+    },
+    CommandDescriptor {
+        name: ":wd | :write-device [path]",
+        description: "save device config",
+    },
+    CommandDescriptor {
+        name: ":log <file>",
+        description: "set log file",
+    },
+    CommandDescriptor {
+        name: ":lua start|stop|status",
+        description: "lua simulation",
+    },
+    CommandDescriptor {
+        name: ":order [col] [asc|desc]",
+        description: "sort table by column",
+    },
 ];
 
 fn decode_definition(

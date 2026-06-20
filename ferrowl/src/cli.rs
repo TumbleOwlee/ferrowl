@@ -304,11 +304,9 @@ mod tests {
     #[test]
     fn ut_session_splits_modbus_and_ocpp() {
         use ferrowl_util::convert::{Converter, FileType};
-        let mut modbus = serde_json::to_value(create_module_spec_by_device(
-            "mb".into(),
-            "s.toml".into(),
-        ))
-        .unwrap();
+        let mut modbus =
+            serde_json::to_value(create_module_spec_by_device("mb".into(), "s.toml".into()))
+                .unwrap();
         modbus
             .as_object_mut()
             .unwrap()

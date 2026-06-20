@@ -113,7 +113,11 @@ impl CsState {
             nv("Current L3", "A", format!("{:.1}", self.current[2])),
             nv("Power", "W", format!("{:.1}", self.power)),
             nv("Total Energy", "kWh", format!("{:.2}", self.total_energy)),
-            nv("Session Energy", "kWh", format!("{:.2}", self.session_energy)),
+            nv(
+                "Session Energy",
+                "kWh",
+                format!("{:.2}", self.session_energy),
+            ),
             nv("Status", "", self.status.clone()),
             nv("RFID", "", self.rfid.clone()),
             nv("Model", "", self.model.clone()),

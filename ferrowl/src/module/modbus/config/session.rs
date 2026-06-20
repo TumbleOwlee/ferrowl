@@ -133,7 +133,9 @@ mod tests {
             interval_ms: None,
         };
         let mut v = serde_json::to_value(spec).unwrap();
-        v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+        v.as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
         v
     }
 
@@ -167,7 +169,9 @@ mod tests {
                         interval_ms: Some(1500),
                     };
                     let mut v = serde_json::to_value(spec).unwrap();
-                    v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+                    v.as_object_mut()
+                        .unwrap()
+                        .insert("type".into(), "modbus".into());
                     v
                 },
             ],

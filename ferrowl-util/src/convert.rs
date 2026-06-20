@@ -67,9 +67,8 @@ impl Converter {
                 // transitively by `rust-ocpp`/`rust_decimal` — `serde_json::Number` serializes as a
                 // `{"$serde_json::private::Number": "…"}` wrapper struct, which TOML would otherwise
                 // emit as a bogus sub-table. Normalizing turns those back into plain integers/floats.
-                let json = serde_json::to_value(value).map_err(|e| {
-                    Error::Serialize(format!("Failed to serialize TOML [{}].", e))
-                })?;
+                let json = serde_json::to_value(value)
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?;
                 toml::to_string_pretty(&json_to_toml(&json))
                     .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?
             }

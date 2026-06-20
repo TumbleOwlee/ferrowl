@@ -176,9 +176,8 @@ impl OcppSetupDialog {
 
         StatefulWidget::render(&self.name.widget, rows[0], buf, &mut self.name.state);
 
-        let [vl, vr] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(rows[1]);
+        let [vl, vr] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(rows[1]);
         StatefulWidget::render(&self.version.widget, vl, buf, &mut self.version.state);
         StatefulWidget::render(&self.role.widget, vr, buf, &mut self.role.state);
 
@@ -195,7 +194,12 @@ impl OcppSetupDialog {
         if has_error {
             StatefulWidget::render(&self.error.widget, rows[3], buf, &mut self.error.state);
         }
-        StatefulWidget::render(&self.keybinds.widget, rows[4], buf, &mut self.keybinds.state);
+        StatefulWidget::render(
+            &self.keybinds.widget,
+            rows[4],
+            buf,
+            &mut self.keybinds.state,
+        );
     }
 }
 

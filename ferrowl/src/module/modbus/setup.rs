@@ -3,8 +3,8 @@ use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::config::{DeviceConfig, ModuleSpec};
 use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
+use crate::config::{DeviceConfig, ModuleSpec};
 use crate::dialog::SetupDialog;
 use crate::module::modbus::Module;
 use crate::module::modbus::view::ModbusModuleView;
@@ -18,7 +18,11 @@ pub struct ModbusSetupView {
 impl ModbusSetupView {
     pub fn new_create() -> Self {
         Self {
-            dialog: SetupDialog::create((DEFAULT_TIMEOUT_MS, DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS)),
+            dialog: SetupDialog::create((
+                DEFAULT_TIMEOUT_MS,
+                DEFAULT_DELAY_MS,
+                DEFAULT_INTERVAL_MS,
+            )),
         }
     }
 
@@ -67,8 +71,13 @@ impl SetupView for ModbusSetupView {
             interval_ms: values.interval_ms,
         };
 
-        let factory: ModuleViewFactory =
-            Box::new(move || Box::new(ModbusModuleView::new(Module::new(&spec, &device), spec, device)));
+        let factory: ModuleViewFactory = Box::new(move || {
+            Box::new(ModbusModuleView::new(
+                Module::new(&spec, &device),
+                spec,
+                device,
+            ))
+        });
 
         Some((name, factory))
     }

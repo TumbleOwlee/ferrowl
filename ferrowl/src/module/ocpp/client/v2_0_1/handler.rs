@@ -73,22 +73,22 @@ impl CsStateHandler {
                     .set_variable_data
                     .iter()
                     .map(|d| {
-                        let status = match state.config.iter_mut().find(|c| c.key == d.variable.name)
-                        {
-                            Some(c) if c.readonly => SetVariableStatusEnumType::Rejected,
-                            Some(c) => {
-                                c.value = d.attribute_value.clone();
-                                SetVariableStatusEnumType::Accepted
-                            }
-                            None => {
-                                state.config.push(ConfigKey {
-                                    key: d.variable.name.clone(),
-                                    value: d.attribute_value.clone(),
-                                    readonly: false,
-                                });
-                                SetVariableStatusEnumType::Accepted
-                            }
-                        };
+                        let status =
+                            match state.config.iter_mut().find(|c| c.key == d.variable.name) {
+                                Some(c) if c.readonly => SetVariableStatusEnumType::Rejected,
+                                Some(c) => {
+                                    c.value = d.attribute_value.clone();
+                                    SetVariableStatusEnumType::Accepted
+                                }
+                                None => {
+                                    state.config.push(ConfigKey {
+                                        key: d.variable.name.clone(),
+                                        value: d.attribute_value.clone(),
+                                        readonly: false,
+                                    });
+                                    SetVariableStatusEnumType::Accepted
+                                }
+                            };
                         SetVariableResultType {
                             attribute_type: d.attribute_type.clone(),
                             attribute_status: status,
@@ -123,7 +123,10 @@ impl CsStateHandler {
                 let schedule = &json["chargingProfile"]["chargingSchedule"][0];
                 let period = &schedule["chargingSchedulePeriod"][0];
                 let context = if let Some(limit) = period["limit"].as_f64() {
-                    let unit = schedule["chargingRateUnit"].as_str().unwrap_or("A").to_string();
+                    let unit = schedule["chargingRateUnit"]
+                        .as_str()
+                        .unwrap_or("A")
+                        .to_string();
                     let mut state = self.state.write().unwrap();
                     state.limit = Some(limit);
                     state.limit_unit = unit.clone();

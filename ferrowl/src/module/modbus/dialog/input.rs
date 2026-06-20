@@ -1,10 +1,8 @@
 //! Free-text register edit dialog: every register property as an input field.
 
+use super::{AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address};
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::NonEmpty;
-use super::{
-    AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address,
-};
 use derive_builder::Builder;
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,

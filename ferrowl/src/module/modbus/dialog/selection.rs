@@ -1,14 +1,14 @@
 //! Selection-based register edit dialog: enum-like properties picked from
 //! lists instead of typed.
 
-use crate::config::device::{NamedValue, Scalar};
-use crate::dialog::EditedRegister;
 use super::{
     AccessOption, AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption,
     SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index,
     is_integer_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
     with_numeric_parts,
 };
+use crate::config::device::{NamedValue, Scalar};
+use crate::dialog::EditedRegister;
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_codec::format::{

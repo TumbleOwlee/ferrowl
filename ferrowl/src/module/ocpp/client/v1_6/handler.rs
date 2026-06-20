@@ -4,8 +4,8 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::v1_6::messages::change_configuration::ChangeConfigurationResponse;
@@ -79,9 +79,9 @@ impl CsStateHandler {
                     }
                 };
                 (
-                    Ok(Response16::ChangeConfiguration(ChangeConfigurationResponse {
-                        status,
-                    })),
+                    Ok(Response16::ChangeConfiguration(
+                        ChangeConfigurationResponse { status },
+                    )),
                     format!("{} = {}", req.key, req.value),
                 )
             }
@@ -102,7 +102,10 @@ impl CsStateHandler {
                 let schedule = &json["csChargingProfiles"]["chargingSchedule"];
                 let period = &schedule["chargingSchedulePeriod"][0];
                 let context = if let Some(limit) = period["limit"].as_f64() {
-                    let unit = schedule["chargingRateUnit"].as_str().unwrap_or("A").to_string();
+                    let unit = schedule["chargingRateUnit"]
+                        .as_str()
+                        .unwrap_or("A")
+                        .to_string();
                     let mut state = self.state.write().unwrap();
                     state.limit = Some(limit);
                     state.limit_unit = unit.clone();

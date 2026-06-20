@@ -69,7 +69,10 @@ impl App {
     pub(super) fn enter_load(&mut self, path: Option<&str>) {
         let mut sv = ModbusSetupView::new_create();
         if let Some(path) = path {
-            sv.dialog_mut().config_path.state.set_input(path.to_string());
+            sv.dialog_mut()
+                .config_path
+                .state
+                .set_input(path.to_string());
             sv.dialog_mut()
                 .config_path
                 .state

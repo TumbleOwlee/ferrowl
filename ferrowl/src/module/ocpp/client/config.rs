@@ -144,7 +144,12 @@ impl ConfigEditDialog {
 
         StatefulWidget::render(&self.key.widget, key_area, buf, &mut self.key.state);
         StatefulWidget::render(&self.value.widget, value_area, buf, &mut self.value.state);
-        StatefulWidget::render(&self.readonly.widget, ro_area, buf, &mut self.readonly.state);
+        StatefulWidget::render(
+            &self.readonly.widget,
+            ro_area,
+            buf,
+            &mut self.readonly.state,
+        );
     }
 }
 
