@@ -102,6 +102,47 @@ impl OcppSpec {
     pub fn url(&self) -> String {
         format!("{}{}:{}", self.protocol, self.ip, self.port)
     }
+
+    /// Build the runtime spec from its persistence halves: the endpoint comes from the session
+    /// [`OcppModuleSpec`], the version/role/timeout from the device config.
+    pub fn from_parts(module: &OcppModuleSpec, device: &super::device::OcppDeviceConfig) -> Self {
+        Self {
+            name: module.name.clone(),
+            version: device.ocpp_version,
+            role: device.role,
+            protocol: module.protocol,
+            ip: module.ip.clone(),
+            port: module.port,
+            timeout_ms: device.timeout_ms,
+        }
+    }
+}
+
+/// Session-level OCPP module entry: the tab name, the device-config file path, and the
+/// per-instance websocket endpoint. Mirrors the Modbus `ModuleSpec` split — version/role/timeout
+/// and the Lua scripts live in the referenced device file, not here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OcppModuleSpec {
+    pub name: String,
+    /// Path to the OCPP device-config file.
+    pub device: String,
+    #[serde(default)]
+    pub protocol: OcppProtocol,
+    pub ip: String,
+    pub port: u16,
+}
+
+impl OcppModuleSpec {
+    /// Build the session entry from a runtime spec plus the device-config path.
+    pub fn from_spec(spec: &OcppSpec, device: &str) -> Self {
+        Self {
+            name: spec.name.clone(),
+            device: device.to_string(),
+            protocol: spec.protocol,
+            ip: spec.ip.clone(),
+            port: spec.port,
+        }
+    }
 }
 
 #[cfg(test)]

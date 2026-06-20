@@ -66,9 +66,6 @@ impl SetupView for ModbusSetupView {
             device: device_path,
             role: values.role,
             endpoint: values.endpoint,
-            timeout_ms: values.timeout_ms,
-            delay_ms: values.delay_ms,
-            interval_ms: values.interval_ms,
         };
 
         let factory: ModuleViewFactory = Box::new(move || {

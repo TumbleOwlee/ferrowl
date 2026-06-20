@@ -8,7 +8,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use crate::module::ocpp::client::build_client_view;
-use crate::module::ocpp::config::session::OcppRole;
+use crate::module::ocpp::config::device::OcppDeviceConfig;
+use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::ocpp::view::OcppServerView;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
@@ -45,10 +46,25 @@ impl SetupView for OcppSetupView {
 
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
         let spec = self.dialog.resolve().ok()?;
+        let path = self.dialog.config_path();
         let name = spec.name.clone();
-        let factory: ModuleViewFactory = match spec.role {
-            OcppRole::Client => Box::new(move || build_client_view(spec)),
-            OcppRole::Server => Box::new(move || Box::new(OcppServerView::new(spec))),
+
+        // Assemble the device config: an existing file at `path` is authoritative (its scripts,
+        // and — to avoid clobbering — its version/role/timeout); otherwise build it from the
+        // dialog's selections with no scripts yet.
+        let device = if path.is_empty() {
+            OcppDeviceConfig::from_spec(&spec, Vec::new())
+        } else {
+            crate::config::load_ocpp_device(&path)
+                .unwrap_or_else(|_| OcppDeviceConfig::from_spec(&spec, Vec::new()))
+        };
+        // Reconcile the runtime spec with the (possibly file-sourced) device fields + endpoint.
+        let module = OcppModuleSpec::from_spec(&spec, &path);
+        let spec = OcppSpec::from_parts(&module, &device);
+
+        let factory: ModuleViewFactory = match device.role {
+            OcppRole::Client => Box::new(move || build_client_view(spec, path, device)),
+            OcppRole::Server => Box::new(move || Box::new(OcppServerView::new(spec, path, device))),
         };
         Some((name, factory))
     }

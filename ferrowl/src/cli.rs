@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::config::{self, Endpoint, ModuleSpec, OcppSpec, Role};
+use crate::config::{self, Endpoint, ModuleSpec, OcppModuleSpec, Role};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Ferrowl — a modbus client/server TUI", long_about = None)]
@@ -93,15 +93,16 @@ impl CliArgs {
     }
 
     /// Resolve every OCPP module instance from `--session` files (modules tagged
-    /// `"type":"ocpp"`).
-    pub fn ocpp_specs(&self) -> Result<Vec<OcppSpec>, String> {
+    /// `"type":"ocpp"`). Each entry carries the device-config path + endpoint; the device file
+    /// (version/role/timeout/scripts) is loaded separately when the tab is built.
+    pub fn ocpp_specs(&self) -> Result<Vec<OcppModuleSpec>, String> {
         let mut specs = Vec::new();
         for path in &self.sessions {
             let session = config::load_session(path).map_err(|e| e.to_string())?;
             for module_val in session.modules {
                 let ty = module_val.get("type").and_then(|v| v.as_str());
                 if ty == Some("ocpp") {
-                    let spec: OcppSpec = serde_json::from_value(module_val)
+                    let spec: OcppModuleSpec = serde_json::from_value(module_val)
                         .map_err(|e| format!("invalid ocpp module spec: {e}"))?;
                     specs.push(spec);
                 }
@@ -123,9 +124,6 @@ pub fn create_module_spec_by_device(name: String, device: String) -> ModuleSpec 
             ip: "127.0.0.1".to_string(),
             port: 5020,
         },
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     }
 }
 
@@ -181,9 +179,6 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
         device,
         role,
         endpoint,
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     })
 }
 
@@ -311,14 +306,12 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .insert("type".into(), "modbus".into());
-        let mut ocpp = serde_json::to_value(OcppSpec {
+        let mut ocpp = serde_json::to_value(OcppModuleSpec {
             name: "cs".into(),
-            version: config::ocpp::OcppVersion::V1_6,
-            role: config::ocpp::OcppRole::Client,
+            device: "cs.toml".into(),
             protocol: config::ocpp::OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
             port: 9000,
-            timeout_ms: None,
         })
         .unwrap();
         ocpp.as_object_mut()
@@ -345,7 +338,8 @@ mod tests {
         let ocpp = args.ocpp_specs().unwrap();
         assert_eq!(ocpp.len(), 1);
         assert_eq!(ocpp[0].name, "cs");
-        assert_eq!(ocpp[0].url(), "ws://127.0.0.1:9000");
+        assert_eq!(ocpp[0].device, "cs.toml");
+        assert_eq!(ocpp[0].port, 9000);
     }
 
     #[test]

@@ -35,7 +35,7 @@ The project is organized as a Cargo workspace and builds the `ferrowl` binary. S
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
-| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register` and `C_Time` modules to `update` scripts. |
+| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time` and `C_OCPP` modules to simulation scripts. |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
 
@@ -175,14 +175,13 @@ If started without any additional parameters, the module setup dialog is shown. 
 
 ### Session Configuration
 
-The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Each module may also override the device timings per instance via `timeout_ms`, `delay_ms` and `interval_ms`.
+The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Timings (`timeout_ms`, `delay_ms`, `interval_ms`) are part of the device configuration, not the session.
 
 ```toml
 [[modules]]
 name = "evse-1"
 device = "configs/evse.toml"
 role = "server"
-interval_ms = 500      # optional per-instance timing override
 
 [modules.endpoint]
 transport = "tcp"
@@ -200,6 +199,20 @@ baud_rate = 19200
 parity = "none"
 data_bits = 8
 stop_bits = 1
+```
+
+An **OCPP** module session entry is tagged `type = "ocpp"` and carries only the name, the
+device-config path and the websocket endpoint (`protocol` is `ws` or `wss`); the OCPP version,
+role, timeout and Lua scripts live in the referenced device file.
+
+```toml
+[[modules]]
+type = "ocpp"
+name = "cs-1"
+device = "configs/cs.toml"
+protocol = "ws"
+ip = "127.0.0.1"
+port = 9000
 ```
 
 ### Device Configuration
@@ -286,11 +299,27 @@ input = "0-10"
 # coils / discrete are also available
 ```
 
-Timing precedence is per-instance (session) → device → built-in defaults (3000/1000/1000 ms).
+Timing precedence is device → built-in defaults (3000/1000/1000 ms).
+
+An **OCPP** device file (saved with `:write-device`) describes the charge point: its OCPP version,
+role, reply timeout and the Lua simulation scripts. Endpoint (ip/port/protocol) is per-instance and
+lives in the session, not here.
+
+```toml
+version = "0.4.4"        # ferrowl version, stamped on save
+ocpp_version = "1.6"     # or "2.0.1"
+role = "client"          # client = charging station, server = management system
+timeout_ms = 30000       # awaited-reply timeout
+
+[[scripts]]
+name = "ramp"
+enabled = true
+code = "C_OCPP:Set(\"Power\", C_OCPP:Get(\"Power\") + 100)"
+```
 
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts configured in the `update` property. These scripts are executed each cycle and allow the full automatic simulation of full system. Besides the standard Lua libraries, the modules `C_Time` and `C_Register` are exposed to interact with the registers and elapsed time.
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules these are the per-register `update` snippets (run each cycle), interacting with the registers through `C_Register`. For **OCPP** modules, scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run every ~100 ms and interact with the charging-station state and actions through `C_OCPP`. Besides the standard Lua libraries, the exposed modules are `C_Time` (both), `C_Register` (Modbus only) and `C_OCPP` (OCPP only).
 
 ### Module C_Time
 
@@ -335,4 +364,80 @@ Arguments:
         Description: Value to set for the specified register
 
 Return: nil
+```
+
+### Module C_OCPP
+
+Exposed to the Lua scripts of an **OCPP** module (charging-station / client role). All loaded,
+enabled scripts run every ~100 ms. `C_Time` is also available; `C_Register` is **not** (it is
+Modbus-only).
+
+`Get`/`Set` read and write the charging-station state by name. Supported names (compact forms of
+the state-table labels):
+
+```
+ConnectorId, Phases, Voltage, Current (= CurrentL1), CurrentL1, CurrentL2, CurrentL3,
+Power, TotalEnergy, SessionEnergy, Status, Rfid, Model, Vendor
+```
+
+OCPP 2.0.1 additionally exposes `EvseId`.
+
+```
+Method:   C_OCPP:Get(name)
+
+Arguments:
+               Name: name
+               Type: String
+        Description: State field name (see the list above).
+
+Return: Value of the field — a number for numeric fields, a string for textual ones — or an
+        error for an unknown name.
+```
+```
+Method:   C_OCPP:Set(name, value)
+
+Arguments:
+               Name: name
+               Type: String
+        Description: State field name. Numeric fields accept an integer or float; textual
+                     fields accept a string.
+
+               Name: value
+               Type: integer | float | string
+
+Return: nil (errors on an unknown name or a type mismatch).
+```
+
+In addition, every supported OCPP action is callable as `C_OCPP:<Action>(overrides?)`. The set of
+actions is version-specific (OCPP 1.6 and 2.0.1 differ), so a script must match the device's OCPP
+version. The action's payload is built from the current state exactly like the on-screen action
+buttons; an optional table of overrides is shallow-merged over it. The call returns `true` once the
+action is queued, or `false` on an argument error. The result of the exchange with the CSMS appears
+in the module's Messages table, not in the return value.
+
+```
+Method:   C_OCPP:<Action>(overrides?)
+          e.g. C_OCPP:Authorize(), C_OCPP:StartTransaction(), C_OCPP:MeterValues()
+               C_OCPP:BootNotification({ chargePointModel = "Custom" })
+
+Arguments:
+               Name: overrides
+               Type: table (optional)
+        Description: Key/value fields shallow-merged over the state-derived payload.
+
+Return: true when the action was queued, false on an argument error.
+```
+
+#### Example
+
+```lua
+-- Ramp the charging current while a transaction is running, then report it.
+local target = 16.0
+local current = C_OCPP:Get("CurrentL1")
+if current < target then
+    C_OCPP:Set("CurrentL1", current + 0.5)
+    C_OCPP:Set("CurrentL2", current + 0.5)
+    C_OCPP:Set("CurrentL3", current + 0.5)
+    C_OCPP:MeterValues()
+end
 ```

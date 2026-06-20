@@ -133,7 +133,7 @@ impl Module {
         let file_sink: FileSink = Arc::new(Mutex::new(None));
         open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
-        let timing = Self::resolve_timing(spec, device);
+        let timing = Self::resolve_timing(device);
         let net_config = endpoint_to_config(&spec.endpoint, &timing);
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
@@ -153,22 +153,13 @@ impl Module {
         }
     }
 
-    /// Resolve effective timing for an instance: a `ModuleSpec` override wins, else the device
-    /// config value, else the built-in default.
-    pub fn resolve_timing(spec: &ModuleSpec, device: &DeviceConfig) -> Timing {
+    /// Resolve effective timing for an instance from the device config, falling back to the
+    /// built-in defaults. Timing is no longer a per-instance (session) override.
+    pub fn resolve_timing(device: &DeviceConfig) -> Timing {
         Timing {
-            timeout_ms: spec
-                .timeout_ms
-                .or(device.timeout_ms)
-                .unwrap_or(DEFAULT_TIMEOUT_MS),
-            delay_ms: spec
-                .delay_ms
-                .or(device.delay_ms)
-                .unwrap_or(DEFAULT_DELAY_MS),
-            interval_ms: spec
-                .interval_ms
-                .or(device.interval_ms)
-                .unwrap_or(DEFAULT_INTERVAL_MS),
+            timeout_ms: device.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+            delay_ms: device.delay_ms.unwrap_or(DEFAULT_DELAY_MS),
+            interval_ms: device.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS),
         }
     }
 
@@ -751,25 +742,13 @@ mod tests {
     #[test]
     fn ut_resolve_timing_fallback() {
         use super::Module;
+        use crate::config::DeviceConfig;
         use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
-        use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 
-        let mut spec = ModuleSpec {
-            name: "m".into(),
-            device: String::new(),
-            role: Role::Server,
-            endpoint: Endpoint::Tcp {
-                ip: "127.0.0.1".into(),
-                port: 502,
-            },
-            timeout_ms: None,
-            delay_ms: None,
-            interval_ms: None,
-        };
         let mut device = DeviceConfig::default();
 
-        // No spec/device values: built-in defaults.
-        let timing = Module::resolve_timing(&spec, &device);
+        // No device values: built-in defaults.
+        let timing = Module::resolve_timing(&device);
         assert_eq!(timing.timeout_ms, DEFAULT_TIMEOUT_MS);
         assert_eq!(timing.delay_ms, DEFAULT_DELAY_MS);
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
@@ -777,16 +756,10 @@ mod tests {
         // Device values beat the defaults.
         device.timeout_ms = Some(2000);
         device.delay_ms = Some(500);
-        let timing = Module::resolve_timing(&spec, &device);
+        let timing = Module::resolve_timing(&device);
         assert_eq!(timing.timeout_ms, 2000);
         assert_eq!(timing.delay_ms, 500);
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
-
-        // Spec overrides beat the device values.
-        spec.timeout_ms = Some(100);
-        let timing = Module::resolve_timing(&spec, &device);
-        assert_eq!(timing.timeout_ms, 100);
-        assert_eq!(timing.delay_ms, 500);
     }
 
     fn entry(
@@ -1107,9 +1080,6 @@ mod tests {
                 ip: "127.0.0.1".into(),
                 port: 5020,
             },
-            timeout_ms: None,
-            delay_ms: None,
-            interval_ms: None,
         };
 
         let mut module = Module::new(&spec, &device);
@@ -1151,9 +1121,6 @@ mod tests {
                 data_bits: Some(8),
                 stop_bits: Some(1),
             },
-            timeout_ms: Some(750),
-            delay_ms: Some(10),
-            interval_ms: Some(2000),
         };
 
         let module = Module::new(&spec, &device);

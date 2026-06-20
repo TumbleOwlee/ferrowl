@@ -10,9 +10,10 @@ use ferrowl_ui::{
     traits::ToLabel,
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Validate, Widget,
+        Validate, ValidateResult, Widget,
     },
 };
+use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -21,11 +22,42 @@ use ratatui::{
 
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
+/// Live validator for the device-config path field: empty is allowed (a fresh empty config),
+/// otherwise the path must be a TOML/JSON file, and — if it exists — a loadable OCPP device
+/// config. Mirrors the Modbus dialog's `ConfigPath`.
+#[derive(Debug, Clone)]
+pub struct ConfigPath;
+
+impl Validate for ConfigPath {
+    fn validate(input: &str) -> ValidateResult {
+        let input = input.trim();
+        let path = std::path::Path::new(input);
+
+        if input.is_empty() {
+            ValidateResult::None
+        } else if FileType::from_path(input).is_some() {
+            if path.exists() {
+                match crate::config::load_ocpp_device(input) {
+                    Ok(_) => ValidateResult::Success,
+                    Err(e) => ValidateResult::Error(format!("Config: {e}")),
+                }
+            } else {
+                ValidateResult::None
+            }
+        } else {
+            ValidateResult::Error("Invalid filetype, TOML or JSON expected.".to_string())
+        }
+    }
+}
+
 #[focusable]
 #[derive(Builder, Focus)]
 pub struct OcppSetupDialog {
     #[focus]
     pub name: Widget<InputFieldState, InputField<String>>,
+    /// Path to the OCPP device-config file (empty = a fresh, empty device config).
+    #[focus]
+    pub config_path: Widget<InputFieldState, InputField<ConfigPath>>,
     #[focus]
     pub version: Widget<SelectionState<OcppVersion>, Selection<OcppVersion>>,
     #[focus]
@@ -47,6 +79,7 @@ impl OcppSetupDialog {
 
         OcppSetupDialogBuilder::default()
             .name(input("Name", "cs-1", &input_style, true))
+            .config_path(input("Config", "device.toml", &input_style, false))
             .version(selection(
                 "Version",
                 vec![OcppVersion::V1_6, OcppVersion::V2_0_1],
@@ -75,10 +108,11 @@ impl OcppSetupDialog {
             .unwrap()
     }
 
-    /// Build a dialog pre-filled with an existing spec, for `:edit`.
-    pub fn edit(spec: &OcppSpec) -> Self {
+    /// Build a dialog pre-filled with an existing spec + device-config path, for `:edit`.
+    pub fn edit(spec: &OcppSpec, device_path: &str) -> Self {
         let mut d = Self::new();
         set_text(&mut d.name, &spec.name);
+        set_text(&mut d.config_path, device_path);
         d.version.state.set_selection(match spec.version {
             OcppVersion::V1_6 => 0,
             OcppVersion::V2_0_1 => 1,
@@ -101,6 +135,9 @@ impl OcppSetupDialog {
         let name = self.name.state.input().trim().to_string();
         if name.is_empty() {
             return Err("Name is required.".into());
+        }
+        if let ValidateResult::Error(e) = ConfigPath::validate(self.config_path.state.input()) {
+            return Err(e);
         }
         let mut ip = self.ip.state.input().trim().to_string();
         if ip.is_empty() {
@@ -127,6 +164,11 @@ impl OcppSetupDialog {
         })
     }
 
+    /// The entered device-config path (trimmed; empty when none).
+    pub fn config_path(&self) -> String {
+        self.config_path.state.input().trim().to_string()
+    }
+
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self.resolve() {
             Ok(_) => self.error.state.clear(),
@@ -134,9 +176,9 @@ impl OcppSetupDialog {
         }
 
         let has_error = !self.error.state.is_empty();
-        // border(2) + inner margin(2) + name(3) + version|role(3) + protocol|ip|port(3)
-        // + keybinds(1), plus the error box (3) only when there is a message.
-        let box_height = if has_error { 17 } else { 14 };
+        // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
+        // + protocol|ip|port(3) + keybinds(1), plus the error box (3) only when there is a message.
+        let box_height = if has_error { 20 } else { 17 };
         let box_width = 60;
 
         let [_, hcenter, _] = Layout::horizontal([
@@ -167,6 +209,7 @@ impl OcppSetupDialog {
         let error_height = if has_error { 3 } else { 0 };
         let rows = Layout::vertical([
             Constraint::Length(3),            // name
+            Constraint::Length(3),            // config path
             Constraint::Length(3),            // version | role
             Constraint::Length(3),            // protocol | ip | port
             Constraint::Length(error_height), // error (hidden when empty)
@@ -175,9 +218,15 @@ impl OcppSetupDialog {
         .split(inner);
 
         StatefulWidget::render(&self.name.widget, rows[0], buf, &mut self.name.state);
+        StatefulWidget::render(
+            &self.config_path.widget,
+            rows[1],
+            buf,
+            &mut self.config_path.state,
+        );
 
         let [vl, vr] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .areas(rows[1]);
+            .areas(rows[2]);
         StatefulWidget::render(&self.version.widget, vl, buf, &mut self.version.state);
         StatefulWidget::render(&self.role.widget, vr, buf, &mut self.role.state);
 
@@ -186,17 +235,17 @@ impl OcppSetupDialog {
             Constraint::Min(1),
             Constraint::Length(14),
         ])
-        .areas(rows[2]);
+        .areas(rows[3]);
         StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
         StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
         StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
 
         if has_error {
-            StatefulWidget::render(&self.error.widget, rows[3], buf, &mut self.error.state);
+            StatefulWidget::render(&self.error.widget, rows[4], buf, &mut self.error.state);
         }
         StatefulWidget::render(
             &self.keybinds.widget,
-            rows[4],
+            rows[5],
             buf,
             &mut self.keybinds.state,
         );

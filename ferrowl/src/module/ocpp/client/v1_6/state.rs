@@ -124,6 +124,118 @@ impl CsState {
             .collect()
     }
 
+    /// Read a state field by name, for the `C_OCPP:Get(name)` Lua binding. Names match the state
+    /// table labels in compact form (e.g. `Power`, `CurrentL2`); `Current` aliases `CurrentL1`.
+    pub fn get_field(&self, name: &str) -> Option<ferrowl_lua::module::ValueType> {
+        use ferrowl_lua::module::ValueType as Vt;
+        Some(match name {
+            "ConnectorId" => Vt::Int(self.connector_id as i128),
+            "Phases" => Vt::String(self.phases.clone()),
+            "Voltage" => Vt::Float(self.voltage),
+            "Current" | "CurrentL1" => Vt::Float(self.current[0]),
+            "CurrentL2" => Vt::Float(self.current[1]),
+            "CurrentL3" => Vt::Float(self.current[2]),
+            "Power" => Vt::Float(self.power),
+            "TotalEnergy" => Vt::Float(self.total_energy),
+            "SessionEnergy" => Vt::Float(self.session_energy),
+            "Status" => Vt::String(self.status.clone()),
+            "Rfid" => Vt::String(self.rfid.clone()),
+            "Model" => Vt::String(self.model.clone()),
+            "Vendor" => Vt::String(self.vendor.clone()),
+            _ => return None,
+        })
+    }
+
+    /// Write a state field by name, for `C_OCPP:Set(name, value)`. Numeric fields accept an int or
+    /// float; string fields accept a string. Returns false for an unknown name or a type mismatch.
+    pub fn set_field(&mut self, name: &str, value: ferrowl_lua::module::ValueType) -> bool {
+        use ferrowl_lua::module::ValueType as Vt;
+        let num = |v: &Vt| match v {
+            Vt::Int(i) => Some(*i as f64),
+            Vt::Float(f) => Some(*f),
+            _ => None,
+        };
+        match (name, &value) {
+            ("ConnectorId", _) => match num(&value) {
+                Some(n) => {
+                    self.connector_id = n as i64;
+                    true
+                }
+                None => false,
+            },
+            ("Voltage", _) => match num(&value) {
+                Some(n) => {
+                    self.voltage = n;
+                    true
+                }
+                None => false,
+            },
+            ("Current" | "CurrentL1", _) => match num(&value) {
+                Some(n) => {
+                    self.current[0] = n;
+                    true
+                }
+                None => false,
+            },
+            ("CurrentL2", _) => match num(&value) {
+                Some(n) => {
+                    self.current[1] = n;
+                    true
+                }
+                None => false,
+            },
+            ("CurrentL3", _) => match num(&value) {
+                Some(n) => {
+                    self.current[2] = n;
+                    true
+                }
+                None => false,
+            },
+            ("Power", _) => match num(&value) {
+                Some(n) => {
+                    self.power = n;
+                    true
+                }
+                None => false,
+            },
+            ("TotalEnergy", _) => match num(&value) {
+                Some(n) => {
+                    self.total_energy = n;
+                    true
+                }
+                None => false,
+            },
+            ("SessionEnergy", _) => match num(&value) {
+                Some(n) => {
+                    self.session_energy = n;
+                    true
+                }
+                None => false,
+            },
+            ("Phases", Vt::String(s)) => {
+                self.phases = s.clone();
+                true
+            }
+            ("Status", Vt::String(s)) => {
+                self.status = s.clone();
+                true
+            }
+            ("Rfid", Vt::String(s)) => {
+                self.rfid = s.clone();
+                true
+            }
+            ("Model", Vt::String(s)) => {
+                self.model = s.clone();
+                true
+            }
+            ("Vendor", Vt::String(s)) => {
+                self.vendor = s.clone();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Energy meter reading in Wh (StartTransaction/StopTransaction units).
     pub fn meter_wh(&self) -> i64 {
         (self.total_energy * 1000.0) as i64
@@ -158,5 +270,28 @@ impl CsState {
             "unit": "Wh",
         }));
         serde_json::json!([{ "timestamp": rfc3339_now(), "sampledValue": sampled }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CsState;
+    use ferrowl_lua::module::ValueType as Vt;
+
+    #[test]
+    fn ut_get_set_field_roundtrip() {
+        let mut s = CsState::default();
+        // Numeric set accepts int or float; string fields accept strings.
+        assert!(s.set_field("Power", Vt::Float(11000.0)));
+        assert!(s.set_field("CurrentL2", Vt::Int(16)));
+        assert!(s.set_field("Status", Vt::String("Charging".into())));
+        assert!(matches!(s.get_field("Power"), Some(Vt::Float(v)) if v == 11000.0));
+        assert!(matches!(s.get_field("Current"), Some(Vt::Float(_)))); // alias -> L1
+        assert!(matches!(s.get_field("CurrentL2"), Some(Vt::Float(v)) if v == 16.0));
+        assert!(matches!(s.get_field("Status"), Some(Vt::String(ref v)) if v == "Charging"));
+        // Unknown name and type mismatch both fail; EvseId is 2.0.1-only.
+        assert!(s.get_field("EvseId").is_none());
+        assert!(!s.set_field("Nope", Vt::Int(1)));
+        assert!(!s.set_field("Power", Vt::String("x".into())));
     }
 }

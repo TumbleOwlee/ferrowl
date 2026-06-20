@@ -31,7 +31,9 @@ use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
 use crate::config::ocpp::{OcppProtocol, OcppRole, OcppVersion};
-use crate::config::{DeviceConfig, Endpoint, ModuleSpec, OcppSpec, Role};
+use crate::config::{
+    DeviceConfig, Endpoint, ModuleSpec, OcppDeviceConfig, OcppModuleSpec, OcppSpec, Role,
+};
 use crate::module::Module;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::ocpp::client::build_client_view;
@@ -122,9 +124,6 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
             ip: "127.0.0.1".to_string(),
             port: 5020,
         },
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     };
 
     let module = Module::new(&spec, &device);
@@ -142,7 +141,8 @@ fn demo_ocpp_tab(name: String, role: OcppRole) -> Tab {
         port: 9000,
         timeout_ms: None,
     };
-    let view = build_client_view(spec.clone());
+    let device = OcppDeviceConfig::from_spec(&spec, Vec::new());
+    let view = build_client_view(spec.clone(), String::new(), device);
     Tab::new_from_view(spec.name.clone(), view)
 }
 
@@ -194,12 +194,16 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     Ok(tabs)
 }
 
-/// Build a UI tab for one OCPP module spec, starting it via `handle_command("start")`.
-async fn build_ocpp_tab(spec: OcppSpec) -> Tab {
-    let name = spec.name.clone();
-    let view: Box<dyn ModuleView> = match spec.role {
-        OcppRole::Client => build_client_view(spec),
-        OcppRole::Server => Box::new(OcppServerView::new(spec)),
+/// Build a UI tab for one OCPP module spec, starting it via `handle_command("start")`. The
+/// device-config file (role/version/timeout/scripts) is loaded from the spec's path; a missing or
+/// unreadable file falls back to defaults.
+async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
+    let name = module.name.clone();
+    let device = config::load_ocpp_device(&module.device).unwrap_or_default();
+    let spec = OcppSpec::from_parts(&module, &device);
+    let view: Box<dyn ModuleView> = match device.role {
+        OcppRole::Client => build_client_view(spec, module.device.clone(), device),
+        OcppRole::Server => Box::new(OcppServerView::new(spec, module.device.clone(), device)),
     };
     let mut tab = Tab::new_from_view(name, view);
     if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {

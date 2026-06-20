@@ -1,7 +1,7 @@
 //! A dynamically typed value passed across the Lua/host boundary.
 
 /// A dynamically typed value passed between Lua and the host.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ValueType {
     Int(i128),
     Float(f64),

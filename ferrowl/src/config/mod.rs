@@ -7,11 +7,12 @@ pub mod session {
     pub use crate::module::modbus::config::session::*;
 }
 pub mod ocpp {
+    pub use crate::module::ocpp::config::device::*;
     pub use crate::module::ocpp::config::session::*;
 }
 
 pub use device::DeviceConfig;
-pub use ocpp::OcppSpec;
+pub use ocpp::{OcppDeviceConfig, OcppModuleSpec, OcppSpec};
 pub use session::{Endpoint, ModuleSpec, Role, Session};
 
 use ferrowl_util::convert::{Converter, FileType};
@@ -40,6 +41,11 @@ fn load<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ConfigError> {
 
 /// Load a device-type config file.
 pub fn load_device(path: &str) -> Result<DeviceConfig, ConfigError> {
+    load(path)
+}
+
+/// Load an OCPP device-type config file.
+pub fn load_ocpp_device(path: &str) -> Result<OcppDeviceConfig, ConfigError> {
     load(path)
 }
 

@@ -681,15 +681,12 @@ impl ModbusModuleView {
         self.spec.name = values.name.clone();
         self.spec.role = values.role;
         self.spec.endpoint = values.endpoint.clone();
-        self.spec.timeout_ms = values.timeout_ms;
-        self.spec.delay_ms = values.delay_ms;
-        self.spec.interval_ms = values.interval_ms;
         self.device.timeout_ms = values.timeout_ms;
         self.device.delay_ms = values.delay_ms;
         self.device.interval_ms = values.interval_ms;
         self.device.read_ranges = values.read_ranges.clone();
 
-        let timing = Module::resolve_timing(&self.spec, &self.device);
+        let timing = Module::resolve_timing(&self.device);
         let role = self.spec.role.to_string();
         let endpoint = self.spec.endpoint.to_string();
 
@@ -1035,7 +1032,7 @@ impl ModuleView for ModbusModuleView {
         }
 
         if trimmed == "edit" || trimmed == "e" {
-            let timing = Module::resolve_timing(&self.spec, &self.device);
+            let timing = Module::resolve_timing(&self.device);
             let dialog = SetupDialog::edit(
                 &self.spec.name,
                 &self.spec.device,

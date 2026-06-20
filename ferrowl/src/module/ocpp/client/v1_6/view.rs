@@ -5,24 +5,27 @@
 //! Heartbeat, MeterValues, Start/StopTransaction, StatusNotification) is built straight from state
 //! and sent. Any other action opens a JSON dialog prefilled with its `default_action` template.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult,
     state::{
-        CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
-        SelectionState, SelectionStateBuilder, TableState, TableStateBuilder,
+        ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder, TableState,
+        TableStateBuilder,
     },
     style::{
-        InputFieldStyle, InputFieldStyleBuilder, SelectionStyle, SelectionStyleBuilder,
+        ButtonStyle, InputFieldStyle, InputFieldStyleBuilder, SelectionStyle, SelectionStyleBuilder,
         TableStyleBuilder, TextStyle,
     },
     traits::HandleEvents,
     widgets::{
-        CodeInputField, CodeInputFieldBuilder, GetValue, Header, InputField, InputFieldBuilder,
-        Selection, SelectionBuilder, Table, TableBuilder, TableEntry, TextBuilder, Widget, Width,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, Header, InputField,
+        InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, TableEntry,
+        TextBuilder, Widget, Width,
     },
 };
 use ratatui::style::Style;
@@ -37,10 +40,16 @@ use ferrowl_ocpp::{V1_6, Version};
 
 use crate::app::LogRing;
 use crate::module::ocpp::client::backend::{OcppClient, OcppMessage, rfc3339_now};
+use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::config::ConfigEditDialog;
+use crate::module::ocpp::client::lua_sim::{
+    ActionQueue, OcppSimHandle, merge_overrides, run_ocpp_sim,
+};
+use crate::module::ocpp::client::scripts::ScriptDialog;
 use crate::module::ocpp::client::v1_6::handler::CsStateHandler;
 use crate::module::ocpp::client::v1_6::state::{ConfigKey, ConfigRow, CsState, NvRow};
-use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
+use crate::module::ocpp::config::device::OcppDeviceConfig;
+use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::ocpp::view::OcppServerView;
 use crate::module::view::{
@@ -282,6 +291,7 @@ fn msg_row(m: &OcppMessage) -> MsgRow {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Pane {
     State,
+    Scripts,
     ConfigTable,
     ConfigKey,
     ConfigValue,
@@ -295,6 +305,11 @@ type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
 pub struct OcppClientV16View {
     spec: OcppSpec,
+    /// Path to the OCPP device-config file backing this module (empty = none yet).
+    device_path: String,
+    /// Device config (role/version/timeout/scripts); the persistence form, source of truth for
+    /// scripts. `:wd` writes it back to `device_path`.
+    device: OcppDeviceConfig,
     backend: OcppClient<V1_6>,
     state: Arc<RwLock<CsState>>,
     log: SharedLog,
@@ -306,27 +321,36 @@ pub struct OcppClientV16View {
     msg_table: MsgTable,
     messages: Vec<OcppMessage>,
     code: Widget<CodeInputFieldState, CodeInputField>,
+    scripts_button: Widget<ButtonState, Button>,
+    script_dialog: Option<ScriptDialog>,
     focus: Pane,
     edit: Option<EditOverlay>,
     config_edit: Option<ConfigEditDialog>,
     action_dialog: Option<(String, Widget<CodeInputFieldState, CodeInputField>)>,
     pending_send: Option<(String, serde_json::Value)>,
     setup_overlay: Option<OcppSetupDialog>,
-    pending_setup: Option<OcppSpec>,
+    /// A resolved `:edit` (spec + device-config path) awaiting application in `refresh`.
+    pending_setup: Option<(OcppSpec, String)>,
     replacement: Option<Box<dyn ModuleView>>,
+    /// Actions enqueued by Lua scripts, drained and sent each `refresh`.
+    action_queue: ActionQueue,
+    /// The running Lua simulation thread, if any.
+    sim: Option<OcppSimHandle>,
     meter_tick: u32,
     compact: bool,
 }
 
 impl OcppClientV16View {
-    pub fn new(spec: OcppSpec) -> Self {
+    pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let state = Arc::new(RwLock::new(CsState::default()));
         let (rows, config_rows) = {
             let s = state.read().unwrap();
             (s.rows(), s.config_rows())
         };
         let action_values: Vec<String> = V1_6::cs_actions().iter().map(|s| s.to_string()).collect();
-        Self {
+        let mut view = Self {
+            device_path,
+            device,
             backend: OcppClient::new(spec.clone()),
             state,
             log: Arc::new(AsyncRwLock::new(LogRing::init())),
@@ -338,6 +362,8 @@ impl OcppClientV16View {
             msg_table: msg_table(),
             messages: Vec::new(),
             code: code_view(),
+            scripts_button: scripts_button(),
+            script_dialog: None,
             focus: Pane::State,
             edit: None,
             config_edit: None,
@@ -346,10 +372,61 @@ impl OcppClientV16View {
             setup_overlay: None,
             pending_setup: None,
             replacement: None,
+            action_queue: Arc::new(Mutex::new(VecDeque::new())),
+            sim: None,
             meter_tick: 0,
             compact: false,
             spec,
+        };
+        view.start_sim();
+        view
+    }
+
+    /// Enabled scripts as `(name, code)` pairs for the simulation thread.
+    fn enabled_scripts(&self) -> Vec<(String, String)> {
+        self.device
+            .scripts
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| (s.name.clone(), s.code.clone()))
+            .collect()
+    }
+
+    /// (Re)start the Lua simulation thread from the currently-enabled scripts (no-op if none).
+    fn start_sim(&mut self) {
+        self.stop_sim();
+        self.sim = run_ocpp_sim(
+            self.state.clone(),
+            self.action_queue.clone(),
+            self.enabled_scripts(),
+            self.log.clone(),
+        );
+    }
+
+    /// Stop and join the simulation thread if one is running.
+    fn stop_sim(&mut self) {
+        if let Some(mut sim) = self.sim.take() {
+            sim.stop();
         }
+    }
+
+    /// Open the Lua script manager over the current device scripts.
+    fn open_scripts(&mut self) {
+        self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
+    }
+
+    /// Drain and send one Lua-enqueued action, building the payload like the action buttons do and
+    /// merging any override args over it.
+    async fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
+        let mut payload = if STATE_DRIVEN.contains(&name) {
+            self.state_payload(name)
+        } else {
+            V1_6::default_action(name)
+                .and_then(|a| V1_6::encode_action(&a).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        };
+        merge_overrides(&mut payload, overrides);
+        self.send_payload(name, payload).await;
     }
 
     /// Build a fresh inbound handler sharing this view's online flag, message log, and state.
@@ -359,6 +436,23 @@ impl OcppClientV16View {
             self.backend.messages_handle(),
             self.state.clone(),
         )
+    }
+
+    /// Write the device config (reconciled with the live spec, scripts preserved) to `path`,
+    /// stamping the ferrowl version. Mirrors the Modbus `:wd`.
+    fn save_device_to(&self, path: &str) -> CommandResult {
+        use ferrowl_util::convert::{Converter, FileType};
+        let Some(ty) = FileType::from_path(path) else {
+            return CommandResult::Handled(Some(format!(
+                "unknown format for '{path}' (use .toml or .json)"
+            )));
+        };
+        let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
+        device.version = Some(crate::config::VERSION.to_string());
+        match Converter::save(&device, path, ty) {
+            Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
+            Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
+        }
     }
 
     fn set_compact(&mut self, compact: bool) {
@@ -448,7 +542,8 @@ impl OcppClientV16View {
 
     fn focus_next(&mut self) {
         self.focus = match self.focus {
-            Pane::State => Pane::Actions,
+            Pane::State => Pane::Scripts,
+            Pane::Scripts => Pane::Actions,
             Pane::Actions => Pane::ConfigTable,
             Pane::ConfigTable => Pane::ConfigKey,
             Pane::ConfigKey => Pane::ConfigValue,
@@ -460,7 +555,8 @@ impl OcppClientV16View {
     fn focus_previous(&mut self) {
         self.focus = match self.focus {
             Pane::State => Pane::Messages,
-            Pane::Actions => Pane::State,
+            Pane::Scripts => Pane::State,
+            Pane::Actions => Pane::Scripts,
             Pane::ConfigTable => Pane::Actions,
             Pane::ConfigKey => Pane::ConfigTable,
             Pane::ConfigValue => Pane::ConfigKey,
@@ -646,6 +742,7 @@ impl ModuleView for OcppClientV16View {
             || self.config_edit.is_some()
             || self.action_dialog.is_some()
             || self.setup_overlay.is_some()
+            || self.script_dialog.is_some()
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
@@ -654,8 +751,12 @@ impl ModuleView for OcppClientV16View {
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         let [left, right] =
             Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
-        let [left_top, left_bottom] =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(left);
+        let [left_top, scripts_btn_area, left_bottom] = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .areas(left);
         // Lower-left: config block (upper half) over the action list (lower half).
         let [actions_area, config_area] = Layout::vertical([
             Constraint::Max(2 + self.actions.state.values().len() as u16),
@@ -685,6 +786,9 @@ impl ModuleView for OcppClientV16View {
         self.actions
             .state
             .set_focused(focused && self.focus == Pane::Actions);
+        self.scripts_button
+            .state
+            .set_focused(focused && self.focus == Pane::Scripts);
         self.msg_table
             .state
             .set_focused(focused && self.focus == Pane::Messages);
@@ -694,6 +798,12 @@ impl ModuleView for OcppClientV16View {
             left_top,
             buf,
             &mut self.state_table.state,
+        );
+        StatefulWidget::render(
+            &self.scripts_button.widget,
+            scripts_btn_area,
+            buf,
+            &mut self.scripts_button.state,
         );
         StatefulWidget::render(
             &self.config_table.widget,
@@ -817,16 +927,32 @@ impl ModuleView for OcppClientV16View {
         if let Some(setup) = self.setup_overlay.as_mut() {
             setup.render(area, buf);
         }
+
+        // Script manager dialog on top of everything.
+        if let Some(dialog) = self.script_dialog.as_mut() {
+            dialog.render(area, buf);
+        }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let Some(dialog) = self.script_dialog.as_mut() {
+            if dialog.handle_events(modifiers, code) {
+                // Closed: apply the edited scripts and reload the simulation.
+                let scripts = self.script_dialog.take().unwrap().resolve();
+                self.device.scripts = scripts;
+                self.start_sim();
+            }
+            return EventResult::Consumed;
+        }
+
         if let Some(setup) = self.setup_overlay.as_mut() {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => self.setup_overlay = None,
                 (KeyModifiers::NONE, KeyCode::Enter) => {
                     if let Ok(spec) = setup.resolve() {
+                        let path = setup.config_path();
                         self.setup_overlay = None;
-                        self.pending_setup = Some(spec);
+                        self.pending_setup = Some((spec, path));
                     }
                 }
                 (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_next(),
@@ -904,6 +1030,7 @@ impl ModuleView for OcppClientV16View {
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 match self.focus {
                     Pane::State => self.open_edit(),
+                    Pane::Scripts => self.open_scripts(),
                     Pane::ConfigTable => self.open_config_edit(),
                     Pane::ConfigKey | Pane::ConfigValue => self.add_config_key(),
                     Pane::Actions => self.trigger_action(),
@@ -917,6 +1044,7 @@ impl ModuleView for OcppClientV16View {
             {
                 match self.focus {
                     Pane::State => self.open_edit(),
+                    Pane::Scripts => self.open_scripts(),
                     Pane::ConfigTable => self.open_config_edit(),
                     Pane::Actions => self.trigger_action(),
                     _ => {}
@@ -925,6 +1053,7 @@ impl ModuleView for OcppClientV16View {
             }
             _ => match self.focus {
                 Pane::State => self.state_table.state.handle_events(modifiers, code),
+                Pane::Scripts => EventResult::Consumed,
                 Pane::ConfigTable => self.config_table.state.handle_events(modifiers, code),
                 Pane::ConfigKey => self.key_input.state.handle_events(modifiers, code),
                 Pane::ConfigValue => self.value_input.state.handle_events(modifiers, code),
@@ -940,23 +1069,33 @@ impl ModuleView for OcppClientV16View {
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // Apply an `:edit` that changed the spec.
-            if let Some(spec) = self.pending_setup.take() {
+            // Apply an `:edit` that changed the spec. Scripts are preserved across the edit; the
+            // device config mirrors the new version/role/timeout.
+            if let Some((spec, path)) = self.pending_setup.take() {
+                let device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(Box::new(OcppServerView::new(spec)));
+                    self.replacement = Some(Box::new(OcppServerView::new(spec, path, device)));
                     return;
                 }
                 if spec.version != self.spec.version {
-                    // Switching version means switching view type; the v2.0.1 view is a later task.
-                    self.log
-                        .write()
-                        .await
-                        .write("Version switch not yet supported in the 1.6 view");
+                    // Switching version switches the view type (1.6 ↔ 2.0.1): rebuild via
+                    // build_client_view, carrying the path + scripts. Scripts are kept but are
+                    // version-specific — calls to actions the new version lacks return false.
+                    let _ = self.backend.stop().await;
+                    if !device.scripts.is_empty() {
+                        self.log.write().await.write(
+                            "Version switched: scripts kept but may call actions the new version lacks",
+                        );
+                    }
+                    self.replacement = Some(build_client_view(spec, path, device));
+                    return;
                 } else {
                     let was_online = self.backend.is_online();
                     let _ = self.backend.stop().await;
                     self.spec = spec.clone();
+                    self.device = device;
+                    self.device_path = path;
                     self.backend = OcppClient::new(spec);
                     self.log.write().await.write("Settings updated");
                     if was_online {
@@ -969,6 +1108,13 @@ impl ModuleView for OcppClientV16View {
             // Send a queued action.
             if let Some((name, payload)) = self.pending_send.take() {
                 self.send_payload(&name, payload).await;
+            }
+
+            // Drain actions enqueued by Lua scripts and send them.
+            let queued: Vec<(String, serde_json::Value)> =
+                self.action_queue.lock().unwrap().drain(..).collect();
+            for (name, overrides) in queued {
+                self.dispatch_lua_action(&name, overrides).await;
             }
 
             // While a transaction is active, report MeterValues periodically (~every 5s).
@@ -1021,12 +1167,25 @@ impl ModuleView for OcppClientV16View {
                 }
             }),
             "edit" | "e" => {
-                self.setup_overlay = Some(OcppSetupDialog::edit(&self.spec));
+                self.setup_overlay = Some(OcppSetupDialog::edit(&self.spec, &self.device_path));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
             "compact" => {
                 self.set_compact(!self.compact);
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
+            "wd" => {
+                let result = if self.device_path.is_empty() {
+                    CommandResult::Handled(Some("No configuration file path configured.".into()))
+                } else {
+                    self.save_device_to(&self.device_path.clone())
+                };
+                Box::pin(std::future::ready(result))
+            }
+            cmd if cmd.starts_with("wd ") => {
+                let path = cmd["wd ".len()..].trim().to_string();
+                let result = self.save_device_to(&path);
+                Box::pin(std::future::ready(result))
             }
             _ => Box::pin(std::future::ready(CommandResult::Unhandled)),
         }
@@ -1041,7 +1200,8 @@ impl ModuleView for OcppClientV16View {
     }
 
     fn session_spec(&self) -> Option<serde_json::Value> {
-        let mut v = serde_json::to_value(&self.spec).ok()?;
+        let module = OcppModuleSpec::from_spec(&self.spec, &self.device_path);
+        let mut v = serde_json::to_value(&module).ok()?;
         v.as_object_mut()?.insert("type".into(), "ocpp".into());
         Some(v)
     }
@@ -1051,7 +1211,7 @@ impl ModuleView for OcppClientV16View {
     }
 }
 
-static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 5] = [
+static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 6] = [
     CommandDescriptor {
         name: ":e | :edit",
         description: "edit module setup",
@@ -1071,6 +1231,10 @@ static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 5] = [
     CommandDescriptor {
         name: ":compact",
         description: "toggle compact rows",
+    },
+    CommandDescriptor {
+        name: ":wd | :write-device [path]",
+        description: "save device config",
     },
 ];
 
@@ -1280,6 +1444,30 @@ fn editable_code() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 1,
             })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn scripts_button() -> Widget<ButtonState, Button> {
+    Widget {
+        state: ButtonStateBuilder::default()
+            .focused(false)
+            .label("Lua Scripts".to_string())
+            .disabled(false)
+            .build()
+            .unwrap(),
+        widget: ButtonBuilder::default()
+            .border_margin(Margin::new(1, 0))
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
+            .style(ButtonStyle {
+                general: border_style(),
+                ..ButtonStyle::default()
+            })
+            .horizontal_alignment(HorizontalAlignment::Center)
             .build()
             .unwrap(),
     }
