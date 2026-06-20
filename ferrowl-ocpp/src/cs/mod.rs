@@ -91,6 +91,25 @@ impl<V: Version> Client<V> {
         self.cmd_tx.clone()
     }
 
+    /// Send a Call and await its reply over a cloned command sender, without borrowing the
+    /// [`Client`]. Lets a caller spawn the round-trip off-thread so a non-responding peer never
+    /// blocks the caller. Same semantics as [`Client::call`].
+    pub async fn call_via(
+        cmd_tx: &mpsc::Sender<Command<V>>,
+        action: V::Action,
+    ) -> Result<V::Response, Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        cmd_tx
+            .send(Command::SendActionAwait(action, reply_tx))
+            .await
+            .map_err(|_| Error::ChannelClosed)?;
+        match reply_rx.await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(call_err)) => Err(Error::Call(call_err)),
+            Err(_) => Err(Error::ChannelClosed),
+        }
+    }
+
     /// Send a raw command to the client task.
     pub async fn send(&self, command: Command<V>) -> Result<(), Error> {
         self.cmd_tx

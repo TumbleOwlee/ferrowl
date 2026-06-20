@@ -10,8 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 
-use ferrowl_ocpp::cs::{Client, ClientBuilder, Config, CsActionHandler};
+use ferrowl_ocpp::cs::{Client, ClientBuilder, Command, Config, CsActionHandler};
 use ferrowl_ocpp::{Error, Version};
 
 use crate::module::ocpp::config::session::OcppSpec;
@@ -92,10 +93,26 @@ impl<V: Version> OcppClient<V> {
         self.messages.read().await.clone()
     }
 
+    /// A detachable sender for off-thread Calls (or `None` cmd channel when not connected). The
+    /// returned value owns clones of the command channel and message log, so the caller can
+    /// `tokio::spawn` the round-trip and keep the UI responsive while the peer is slow/silent.
+    pub fn sender(&self) -> OcppSender<V> {
+        OcppSender {
+            cmd_tx: self.client.as_ref().map(|c| c.sender()),
+            messages: self.messages.clone(),
+        }
+    }
+
     /// Dial the CSMS and spawn the client task, using the caller-supplied inbound handler.
     pub async fn start<H: CsActionHandler<V>>(&mut self, handler: H) -> Result<(), Error> {
         if self.client.is_some() {
-            return Ok(());
+            // Already connected: nothing to do. But if the websocket dropped without an explicit
+            // `stop` the handle is stale (task dead, `online` already false) — tear it down so we
+            // can redial instead of silently no-op'ing.
+            if self.is_online() {
+                return Ok(());
+            }
+            let _ = self.stop().await;
         }
         let config = Config {
             url: self.spec.url(),
@@ -119,51 +136,67 @@ impl<V: Version> OcppClient<V> {
         }
     }
 
-    /// Send a typed Call, recording the request payload and the response (or error). Returns the
-    /// response payload JSON on success so callers can read fields (e.g. a transaction id).
-    pub async fn send(&self, action: V::Action) -> Result<Value, Error> {
+}
+
+/// A self-contained Call sender, decoupled from the [`OcppClient`] borrow so the round-trip can be
+/// `tokio::spawn`ed. Records the request and reply into the same shared message log the view reads.
+pub struct OcppSender<V: Version> {
+    cmd_tx: Option<mpsc::Sender<Command<V>>>,
+    messages: Messages,
+}
+
+impl<V: Version> OcppSender<V> {
+    /// Send a typed Call, recording the request and the response (or error). Returns the response
+    /// JSON on success. Awaiting this never blocks the UI loop because the caller spawns it.
+    pub async fn send(self, action: V::Action) -> Result<Value, Error> {
         let name = V::action_name(&action).to_string();
         let request = V::encode_action(&action).unwrap_or(Value::Null);
-        self.record(Dir::Out, &name, request, None, String::new())
-            .await;
+        record(&self.messages, Dir::Out, &name, request, None, String::new()).await;
 
-        let result = match &self.client {
-            Some(c) => c.call(action).await,
+        let result = match &self.cmd_tx {
+            Some(cmd_tx) => Client::<V>::call_via(cmd_tx, action).await,
             None => Err(Error::NotRunning),
         };
         match result {
             Ok(response) => {
                 let payload = V::encode_response(&response).unwrap_or(Value::Null);
-                self.record(Dir::In, &name, payload.clone(), Some(true), String::new())
-                    .await;
+                record(
+                    &self.messages,
+                    Dir::In,
+                    &name,
+                    payload.clone(),
+                    Some(true),
+                    String::new(),
+                )
+                .await;
                 Ok(payload)
             }
             Err(e) => {
                 let msg = e.to_string();
-                self.record(Dir::In, &name, Value::Null, Some(false), msg)
-                    .await;
+                record(&self.messages, Dir::In, &name, Value::Null, Some(false), msg).await;
                 Err(e)
             }
         }
     }
+}
 
-    async fn record(
-        &self,
-        dir: Dir,
-        name: &str,
-        payload: Value,
-        ok: Option<bool>,
-        context: String,
-    ) {
-        self.messages.write().await.push(OcppMessage {
-            ts: now_ms(),
-            direction: dir,
-            name: name.to_string(),
-            payload,
-            ok,
-            context,
-        });
-    }
+/// Push one message into a shared message log.
+async fn record(
+    messages: &Messages,
+    dir: Dir,
+    name: &str,
+    payload: Value,
+    ok: Option<bool>,
+    context: String,
+) {
+    messages.write().await.push(OcppMessage {
+        ts: now_ms(),
+        direction: dir,
+        name: name.to_string(),
+        payload,
+        ok,
+        context,
+    });
 }
 
 /// A `LogFn` that records error/diagnostic strings into the message log.

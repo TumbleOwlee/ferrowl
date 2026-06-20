@@ -337,6 +337,9 @@ pub struct OcppClientV16View {
     /// The running Lua simulation thread, if any.
     sim: Option<OcppSimHandle>,
     meter_tick: u32,
+    /// Whether a transaction was open on the previous `refresh`, to reset `meter_tick` on the
+    /// no→yes edge (the start side-effect lands asynchronously from a spawned send task).
+    tx_was_active: bool,
     compact: bool,
 }
 
@@ -375,6 +378,7 @@ impl OcppClientV16View {
             action_queue: Arc::new(Mutex::new(VecDeque::new())),
             sim: None,
             meter_tick: 0,
+            tx_was_active: false,
             compact: false,
             spec,
         };
@@ -417,7 +421,7 @@ impl OcppClientV16View {
 
     /// Drain and send one Lua-enqueued action, building the payload like the action buttons do and
     /// merging any override args over it.
-    async fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
+    fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
         let mut payload = if STATE_DRIVEN.contains(&name) {
             self.state_payload(name)
         } else {
@@ -426,7 +430,7 @@ impl OcppClientV16View {
                 .unwrap_or_else(|| serde_json::json!({}))
         };
         merge_overrides(&mut payload, overrides);
-        self.send_payload(name, payload).await;
+        self.send_payload(name, payload);
     }
 
     /// Build a fresh inbound handler sharing this view's online flag, message log, and state.
@@ -519,24 +523,6 @@ impl OcppClientV16View {
                 "status": s.status,
             }),
             _ => serde_json::json!({}),
-        }
-    }
-
-    /// After a successful send, apply action-specific side effects to state.
-    fn post_send(&mut self, name: &str, response: &serde_json::Value) {
-        let mut s = self.state.write().unwrap();
-        match name {
-            "StartTransaction" => {
-                s.transaction_id = response["transactionId"].as_i64();
-                s.status = "Charging".to_string();
-                s.session_energy = 0.0;
-                self.meter_tick = 0;
-            }
-            "StopTransaction" => {
-                s.transaction_id = None;
-                s.status = "Available".to_string();
-            }
-            _ => {}
         }
     }
 
@@ -716,19 +702,42 @@ impl OcppClientV16View {
         self.code.state.set_content(&content);
     }
 
-    /// Decode + send a (name, payload), recording it; returns the response JSON on success.
-    async fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
-        match V1_6::decode_call(name, payload) {
-            Ok(action) => match self.backend.send(action).await {
-                Ok(response) => self.post_send(name, &response),
-                Err(e) => self.log.write().await.write(&format!("{name} failed: {e}")),
-            },
-            Err(e) => self
-                .log
-                .write()
-                .await
-                .write(&format!("{name} invalid payload: {e}")),
+    /// Decode + send a (name, payload) without blocking: the round-trip runs in a spawned task so a
+    /// slow or unresponsive CSMS never freezes the UI loop. The request/response land in the shared
+    /// message log (picked up next `refresh`); success side-effects apply to the shared state.
+    fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
+        let sender = self.backend.sender();
+        let state = self.state.clone();
+        let log = self.log.clone();
+        let name = name.to_string();
+        tokio::spawn(async move {
+            match V1_6::decode_call(&name, payload) {
+                Ok(action) => match sender.send(action).await {
+                    Ok(response) => apply_post_send(&state, &name, &response),
+                    Err(e) => log.write().await.write(&format!("{name} failed: {e}")),
+                },
+                Err(e) => log.write().await.write(&format!("{name} invalid payload: {e}")),
+            }
+        });
+    }
+}
+
+/// Apply a successful response's side-effects to the shared state (transaction id, status). Runs in
+/// the spawned send task, so it touches only the shared `CsState`; meter-tick cadence is reset in
+/// `refresh` when it observes a transaction starting.
+fn apply_post_send(state: &Arc<RwLock<CsState>>, name: &str, response: &serde_json::Value) {
+    let mut s = state.write().unwrap();
+    match name {
+        "StartTransaction" => {
+            s.transaction_id = response["transactionId"].as_i64();
+            s.status = "Charging".to_string();
+            s.session_energy = 0.0;
         }
+        "StopTransaction" => {
+            s.transaction_id = None;
+            s.status = "Available".to_string();
+        }
+        _ => {}
     }
 }
 
@@ -1105,25 +1114,30 @@ impl ModuleView for OcppClientV16View {
                 }
             }
 
-            // Send a queued action.
+            // Send a queued action (spawned; never blocks this loop).
             if let Some((name, payload)) = self.pending_send.take() {
-                self.send_payload(&name, payload).await;
+                self.send_payload(&name, payload);
             }
 
             // Drain actions enqueued by Lua scripts and send them.
             let queued: Vec<(String, serde_json::Value)> =
                 self.action_queue.lock().unwrap().drain(..).collect();
             for (name, overrides) in queued {
-                self.dispatch_lua_action(&name, overrides).await;
+                self.dispatch_lua_action(&name, overrides);
             }
 
-            // While a transaction is active, report MeterValues periodically (~every 5s).
+            // While a transaction is active, report MeterValues periodically (~every 5s). Reset the
+            // cadence when a transaction opens, since the start side-effect arrives asynchronously.
             let tx_active = self.state.read().unwrap().transaction_id.is_some();
+            if tx_active && !self.tx_was_active {
+                self.meter_tick = 0;
+            }
+            self.tx_was_active = tx_active;
             if tx_active {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {
                     let payload = self.state_payload("MeterValues");
-                    self.send_payload("MeterValues", payload).await;
+                    self.send_payload("MeterValues", payload);
                 }
             }
 

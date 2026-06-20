@@ -416,7 +416,7 @@ impl OcppClientV201View {
 
     /// Drain and send one Lua-enqueued action. The transaction shortcuts map to a TransactionEvent
     /// (like the buttons); state-driven and other actions build their payload then merge overrides.
-    async fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
+    fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
         let (send_name, mut payload) = match name {
             "StartTransaction" => ("TransactionEvent".to_string(), self.start_event()),
             "StopTransaction" => match self.stop_event() {
@@ -432,7 +432,7 @@ impl OcppClientV201View {
             }
         };
         merge_overrides(&mut payload, overrides);
-        self.send_payload(&send_name, payload).await;
+        self.send_payload(&send_name, payload);
     }
 
     fn make_handler(&self) -> CsStateHandler {
@@ -750,19 +750,24 @@ impl OcppClientV201View {
         self.code.state.set_content(&content);
     }
 
-    async fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
-        match V2_0_1::decode_call(name, payload) {
-            Ok(action) => {
-                if let Err(e) = self.backend.send(action).await {
-                    self.log.write().await.write(&format!("{name} failed: {e}"));
+    /// Decode + send a (name, payload) without blocking: the round-trip runs in a spawned task so a
+    /// slow or unresponsive CSMS never freezes the UI loop. The request/response land in the shared
+    /// message log, picked up on the next `refresh`. State side-effects for transactions already
+    /// applied at payload-build time (`start_event`/`stop_event`).
+    fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
+        let sender = self.backend.sender();
+        let log = self.log.clone();
+        let name = name.to_string();
+        tokio::spawn(async move {
+            match V2_0_1::decode_call(&name, payload) {
+                Ok(action) => {
+                    if let Err(e) = sender.send(action).await {
+                        log.write().await.write(&format!("{name} failed: {e}"));
+                    }
                 }
+                Err(e) => log.write().await.write(&format!("{name} invalid payload: {e}")),
             }
-            Err(e) => self
-                .log
-                .write()
-                .await
-                .write(&format!("{name} invalid payload: {e}")),
-        }
+        });
     }
 }
 
@@ -1135,14 +1140,14 @@ impl ModuleView for OcppClientV201View {
             }
 
             if let Some((name, payload)) = self.pending_send.take() {
-                self.send_payload(&name, payload).await;
+                self.send_payload(&name, payload);
             }
 
             // Drain actions enqueued by Lua scripts and send them.
             let queued: Vec<(String, serde_json::Value)> =
                 self.action_queue.lock().unwrap().drain(..).collect();
             for (name, overrides) in queued {
-                self.dispatch_lua_action(&name, overrides).await;
+                self.dispatch_lua_action(&name, overrides);
             }
 
             // While a transaction is active, report MeterValues periodically (~every 5s).
@@ -1151,7 +1156,7 @@ impl ModuleView for OcppClientV201View {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {
                     let payload = self.state_payload("MeterValues");
-                    self.send_payload("MeterValues", payload).await;
+                    self.send_payload("MeterValues", payload);
                 }
             }
 
