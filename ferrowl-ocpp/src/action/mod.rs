@@ -31,6 +31,22 @@ pub trait Version: Send + Sync + 'static {
     /// The wire action name for an action variant (e.g. `"BootNotification"`).
     fn action_name(action: &Self::Action) -> &'static str;
 
+    /// Every action's wire name for this version (one entry per variant, table order).
+    fn action_names() -> &'static [&'static str];
+
+    /// Wire names of the actions a Charging Station may *originate* (Call), i.e. CS→CSMS. The
+    /// client UI lists exactly these as action buttons. Includes both-direction actions (e.g.
+    /// `DataTransfer`).
+    fn cs_actions() -> &'static [&'static str];
+
+    /// Build a `Default`-derived action for a wire name, as a payload template for the UI to fill.
+    /// `None` for an unknown name.
+    fn default_action(name: &str) -> Option<Self::Action>;
+
+    /// Build a `Default`-derived response for a wire name, for the inbound state handler's
+    /// default-accept path. `None` for an unknown name.
+    fn default_response(name: &str) -> Option<Self::Response>;
+
     /// The websocket subprotocol token for this version (`"ocpp1.6"` / `"ocpp2.0.1"`).
     fn subprotocol() -> &'static str;
 

@@ -60,8 +60,19 @@ impl Converter {
     /// Serialize a value to a file of the given type.
     pub fn save<T: Serialize>(value: &T, path: &str, ty: FileType) -> Result<(), Error> {
         let content = match ty {
-            FileType::Toml => toml::to_string_pretty(value)
-                .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?,
+            FileType::Toml => {
+                // Route TOML through a `serde_json::Value` and normalize it before handing it to
+                // the TOML serializer. This matters for values that embed `serde_json::Value`s
+                // (e.g. session module blobs): under the `arbitrary_precision` feature — pulled in
+                // transitively by `rust-ocpp`/`rust_decimal` — `serde_json::Number` serializes as a
+                // `{"$serde_json::private::Number": "…"}` wrapper struct, which TOML would otherwise
+                // emit as a bogus sub-table. Normalizing turns those back into plain integers/floats.
+                let json = serde_json::to_value(value).map_err(|e| {
+                    Error::Serialize(format!("Failed to serialize TOML [{}].", e))
+                })?;
+                toml::to_string_pretty(&json_to_toml(&json))
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?
+            }
             FileType::Json => serde_json::to_string_pretty(value)
                 .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))?,
         };
@@ -117,6 +128,40 @@ impl Converter {
     }
 }
 
+/// Convert a `serde_json::Value` into a `toml::Value`, normalizing numbers so they serialize as
+/// plain TOML integers/floats instead of the `arbitrary_precision` wrapper struct. JSON `null`s
+/// (which TOML cannot represent) are dropped from objects.
+fn json_to_toml(value: &serde_json::Value) -> toml::Value {
+    use serde_json::Value as J;
+    match value {
+        J::Null => toml::Value::String(String::new()),
+        J::Bool(b) => toml::Value::Boolean(*b),
+        J::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml::Value::Integer(i)
+            } else if let Some(u) = n.as_u64() {
+                toml::Value::Integer(u as i64)
+            } else if let Some(f) = n.as_f64() {
+                toml::Value::Float(f)
+            } else {
+                toml::Value::String(n.to_string())
+            }
+        }
+        J::String(s) => toml::Value::String(s.clone()),
+        J::Array(a) => toml::Value::Array(a.iter().map(json_to_toml).collect()),
+        J::Object(o) => {
+            let mut table = toml::value::Table::new();
+            for (k, v) in o {
+                if v.is_null() {
+                    continue;
+                }
+                table.insert(k.clone(), json_to_toml(v));
+            }
+            toml::Value::Table(table)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +210,28 @@ mod tests {
         };
         Converter::save(&value, &path, FileType::Toml).unwrap();
         let loaded: Sample = Converter::load(&path, FileType::Toml).unwrap();
+        assert_eq!(loaded, value);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ut_toml_embedded_json_value_number_is_plain() {
+        // A struct embedding a `serde_json::Value` with numbers must serialize to plain TOML
+        // integers — not the `$serde_json::private::Number` wrapper that `arbitrary_precision`
+        // would otherwise produce.
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Wrap {
+            blob: serde_json::Value,
+        }
+        let value = Wrap {
+            blob: serde_json::json!({ "ip": "127.0.0.1", "port": 9000 }),
+        };
+        let path = tmp_path("toml");
+        Converter::save(&value, &path, FileType::Toml).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("port = 9000"), "got:\n{text}");
+        assert!(!text.contains("private::Number"), "got:\n{text}");
+        let loaded: Wrap = Converter::load(&path, FileType::Toml).unwrap();
         assert_eq!(loaded, value);
         let _ = std::fs::remove_file(&path);
     }

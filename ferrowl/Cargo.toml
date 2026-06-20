@@ -11,6 +11,7 @@ ferrowl-ui = { path = "../ferrowl-ui" }
 ferrowl-ring = { path = "../ferrowl-ring" }
 ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-modbus = { path = "../ferrowl-modbus" }
+ferrowl-ocpp = { path = "../ferrowl-ocpp" }
 ferrowl-lua = { path = "../ferrowl-lua" }
 ferrowl-focus = { path = "../ferrowl-focus" }
 anyhow = "1.0.100"

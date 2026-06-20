@@ -8,6 +8,11 @@ use crate::action::macros::define_ocpp_version;
 
 define_ocpp_version! {
     V1_6, "ocpp1.6",
+    cs = [
+        Authorize, BootNotification, DataTransfer, DiagnosticsStatusNotification,
+        FirmwareStatusNotification, Heartbeat, MeterValues, StartTransaction,
+        StatusNotification, StopTransaction,
+    ];
     Authorize => ::rust_ocpp::v1_6::messages::authorize::AuthorizeRequest, ::rust_ocpp::v1_6::messages::authorize::AuthorizeResponse, yes ;
     BootNotification => ::rust_ocpp::v1_6::messages::boot_notification::BootNotificationRequest, ::rust_ocpp::v1_6::messages::boot_notification::BootNotificationResponse, yes ;
     CancelReservation => ::rust_ocpp::v1_6::messages::cancel_reservation::CancelReservationRequest, ::rust_ocpp::v1_6::messages::cancel_reservation::CancelReservationResponse, no ;
@@ -77,6 +82,24 @@ mod tests {
         });
         let resp = V1_6::decode_result(&action, resp_json).unwrap();
         assert!(matches!(resp, Response::BootNotification(_)));
+    }
+
+    #[test]
+    fn ut_introspection() {
+        // Full set is 28 actions; CS-originated subset is the 10 a charging station sends.
+        assert_eq!(V1_6::action_names().len(), 28);
+        let cs = V1_6::cs_actions();
+        assert_eq!(cs.len(), 10);
+        assert!(cs.contains(&"BootNotification"));
+        assert!(cs.contains(&"StartTransaction"));
+        // Reset is CSMS-originated, not a CS button.
+        assert!(!cs.contains(&"Reset"));
+        // default_action yields a typed template for a known name, None otherwise.
+        assert!(matches!(
+            V1_6::default_action("Authorize"),
+            Some(Action::Authorize(_))
+        ));
+        assert!(V1_6::default_action("NoSuchAction").is_none());
     }
 
     #[test]

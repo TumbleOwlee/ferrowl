@@ -66,4 +66,11 @@ pub trait ModuleView {
     fn session_spec(&self) -> Option<serde_json::Value> {
         None
     }
+
+    /// Take a view that should replace this one in its tab, if the view requested one (e.g. the
+    /// OCPP role was switched in the edit dialog, turning a client view into a server view).
+    /// Polled by `App` once per tick after [`refresh`]. Default: never replaced.
+    fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
+        None
+    }
 }

@@ -1,8 +1,11 @@
-//! OCPP module type — a placeholder implementation wired into the module registry.
+//! OCPP module type.
 //!
-//! The setup dialog ([`setup`]) and content view ([`view`]) are intentionally minimal
-//! stubs: enough to create and display a named OCPP tab. Real protocol handling (the
-//! `ferrowl-ocpp` crate's `Cs`/`Csms`) is a follow-up.
+//! [`setup`] is the creation dialog; [`config`] holds the per-instance spec. The charging
+//! station (client) implementation lives in [`client`]; the server (CSMS) role uses the
+//! placeholder in [`view`].
 
+pub mod client;
+pub mod config;
 pub mod setup;
+pub mod setup_dialog;
 pub mod view;

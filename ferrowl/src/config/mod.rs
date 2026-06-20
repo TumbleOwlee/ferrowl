@@ -6,8 +6,12 @@ pub mod device {
 pub mod session {
     pub use crate::module::modbus::config::session::*;
 }
+pub mod ocpp {
+    pub use crate::module::ocpp::config::session::*;
+}
 
 pub use device::DeviceConfig;
+pub use ocpp::OcppSpec;
 pub use session::{Endpoint, ModuleSpec, Role, Session};
 
 use ferrowl_util::convert::{Converter, FileType};

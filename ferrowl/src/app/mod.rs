@@ -221,6 +221,11 @@ impl App {
             tab.log_view.state.move_to_bottom();
         }
         tab.view.refresh().await;
+        // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
+        if let Some(new_view) = tab.view.take_replacement() {
+            tab.view = new_view;
+            tab.log = tab.view.log();
+        }
         tab.name = tab.view.name();
     }
 

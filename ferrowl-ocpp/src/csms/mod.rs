@@ -1,12 +1,9 @@
 //! CSMS = Charging Station Management System (server role; accepts CS connections).
 
 mod action_handler;
-mod adapter;
 mod command;
 mod config;
 mod core;
-mod handler;
-mod ops;
 mod registry;
 
 use std::marker::PhantomData;
@@ -27,11 +24,8 @@ use crate::log::LogFn;
 use crate::ocppj::CallErrorCode;
 
 pub use action_handler::CsmsActionHandler;
-pub use adapter::SemanticAdapter;
 pub use command::Command;
 pub use config::Config;
-pub use handler::CsmsHandler;
-pub use ops::CsmsOps;
 pub use registry::{ConnectionId, ConnectionRegistry};
 
 /// Capacity of the server command channel and each per-connection channel.

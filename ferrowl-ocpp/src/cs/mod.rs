@@ -1,17 +1,12 @@
 //! CS = Charging Station (client role; dials out to a CSMS).
 
 mod action_handler;
-mod adapter;
 mod command;
 mod config;
 mod core;
-mod handler;
-mod ops;
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -24,45 +19,11 @@ use crate::error::{Error, WsError};
 use crate::log::LogFn;
 
 pub use action_handler::CsActionHandler;
-pub use adapter::SemanticAdapter;
 pub use command::Command;
 pub use config::Config;
-pub use handler::CsHandler;
-pub use ops::CsOps;
 
 /// Capacity of the command channel between a [`Client`] handle and its task.
 const COMMAND_CHANNEL_CAP: usize = 32;
-
-/// Adapter-internal transaction state (Decision 6): the v2.0.1 semantic `TransactionEvent` merge
-/// needs a per-transaction `seq_no` counter that v1.6's flat messages don't carry. Held on the
-/// client; harmless and unused for v1.6.
-#[derive(Default)]
-#[cfg_attr(not(feature = "v2_0_1"), allow(dead_code))]
-pub(crate) struct TxState {
-    next_tx: AtomicU64,
-    seqs: Mutex<HashMap<String, i32>>,
-}
-
-#[cfg_attr(not(feature = "v2_0_1"), allow(dead_code))]
-impl TxState {
-    /// Mint a fresh transaction id and seed its sequence number at 0.
-    fn start_transaction(&self) -> (String, i32) {
-        let id = format!(
-            "ferrowl-tx-{}",
-            self.next_tx.fetch_add(1, Ordering::Relaxed)
-        );
-        self.seqs.lock().unwrap().insert(id.clone(), 0);
-        (id, 0)
-    }
-
-    /// Next sequence number for an existing transaction (0 if previously unseen).
-    fn next_seq(&self, id: &str) -> i32 {
-        let mut guard = self.seqs.lock().unwrap();
-        let entry = guard.entry(id.to_owned()).or_insert(-1);
-        *entry += 1;
-        *entry
-    }
-}
 
 /// Builds and connects a CS client for a specific OCPP [`Version`].
 pub struct ClientBuilder<V: Version> {
@@ -111,18 +72,16 @@ impl<V: Version> ClientBuilder<V> {
         Ok(Client {
             cmd_tx,
             handle: Some(handle),
-            tx_state: Arc::new(TxState::default()),
             _v: PhantomData,
         })
     }
 }
 
-/// A handle to a running CS client task. Send [`Command`]s, or use the semantic [`CsOps`] methods.
+/// A handle to a running CS client task. Send typed [`Command`]s, or use [`Client::call`] /
+/// [`Client::notify`] to drive actions directly.
 pub struct Client<V: Version> {
     cmd_tx: mpsc::Sender<Command<V>>,
     handle: Option<JoinHandle<Result<(), Error>>>,
-    #[cfg_attr(not(feature = "v2_0_1"), allow(dead_code))]
-    pub(crate) tx_state: Arc<TxState>,
     _v: PhantomData<fn() -> V>,
 }
 

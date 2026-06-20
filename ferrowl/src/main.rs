@@ -29,9 +29,12 @@ use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
-use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+use crate::config::ocpp::{OcppProtocol, OcppRole, OcppVersion};
+use crate::config::{DeviceConfig, Endpoint, ModuleSpec, OcppSpec, Role};
 use crate::module::Module;
 use crate::module::modbus::view::ModbusModuleView;
+use crate::module::ocpp::client::build_client_view;
+use crate::module::ocpp::view::OcppServerView;
 use crate::module::view::{CommandResult, ModuleView};
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
@@ -128,6 +131,20 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
     Tab::new_from_view(spec.name.clone(), view)
 }
 
+fn demo_ocpp_tab(name: String, role: OcppRole) -> Tab {
+    let spec = OcppSpec {
+        name,
+        version: OcppVersion::V1_6,
+        role,
+        protocol: OcppProtocol::Ws,
+        ip: "127.0.0.1".into(),
+        port: 9000,
+        timeout_ms: None,
+    };
+    let view = build_client_view(spec.clone());
+    Tab::new_from_view(spec.name.clone(), view)
+}
+
 /// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
 /// Start failures are written to the module's log. Modules whose device config fails to load
 /// are skipped with a warning on stderr.
@@ -138,6 +155,7 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         let mut tabs = vec![
             demo_modbus_tab("Demo Server".to_string(), Role::Server),
             demo_modbus_tab("Demo Client".to_string(), Role::Client),
+            demo_ocpp_tab("CS-1".to_string(), OcppRole::Client),
         ];
         for tab in tabs.iter_mut() {
             if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
@@ -168,7 +186,25 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         }
         tabs.push(tab);
     }
+
+    for spec in args.ocpp_specs()? {
+        tabs.push(build_ocpp_tab(spec).await);
+    }
     Ok(tabs)
+}
+
+/// Build a UI tab for one OCPP module spec, starting it via `handle_command("start")`.
+async fn build_ocpp_tab(spec: OcppSpec) -> Tab {
+    let name = spec.name.clone();
+    let view: Box<dyn ModuleView> = match spec.role {
+        OcppRole::Client => build_client_view(spec),
+        OcppRole::Server => Box::new(OcppServerView::new(spec)),
+    };
+    let mut tab = Tab::new_from_view(name, view);
+    if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
+        tab.log.write().await.write(&msg);
+    }
+    tab
 }
 
 fn main() {

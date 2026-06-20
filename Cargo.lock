@@ -834,6 +834,7 @@ dependencies = [
  "ferrowl-focus",
  "ferrowl-lua",
  "ferrowl-modbus",
+ "ferrowl-ocpp",
  "ferrowl-ring",
  "ferrowl-store",
  "ferrowl-ui",

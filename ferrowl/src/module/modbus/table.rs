@@ -8,6 +8,7 @@ use derive_builder::Builder;
 use ferrowl_codec::{Register, Value};
 use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
+    Border,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
@@ -189,6 +190,8 @@ impl TableView {
             .table(Widget {
                 state: TableStateBuilder::default().values(values).build().unwrap(),
                 widget: TableBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some("Register".into()))
                     .style(TableStyleBuilder::default().build().unwrap())
                     .split_by_whitespace([
                         true, true, true, true, true, true, true, true, true, false, true,

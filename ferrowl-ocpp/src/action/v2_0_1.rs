@@ -8,6 +8,15 @@ use crate::action::macros::define_ocpp_version;
 
 define_ocpp_version! {
     V2_0_1, "ocpp2.0.1",
+    cs = [
+        Authorize, BootNotification, ClearedChargingLimit, DataTransfer,
+        FirmwareStatusNotification, Get15118EVCertificate, GetCertificateStatus, Heartbeat,
+        LogStatusNotification, MeterValues, NotifyChargingLimit, NotifyCustomerInformation,
+        NotifyDisplayMessages, NotifyEVChargingNeeds, NotifyEVChargingSchedule, NotifyEvent,
+        NotifyMonitoringReport, NotifyReport, PublishFirmwareStatusNotification,
+        ReportChargingProfiles, ReservationStatusUpdate, SecurityEventNotification, SignCertificate,
+        StatusNotification, TransactionEvent,
+    ];
     Authorize => ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeRequest, ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeResponse, yes ;
     BootNotification => ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationRequest, ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationResponse, no ;
     CancelReservation => ::rust_ocpp::v2_0_1::messages::cancel_reservation::CancelReservationRequest, ::rust_ocpp::v2_0_1::messages::cancel_reservation::CancelReservationResponse, no ;
