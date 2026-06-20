@@ -1,5 +1,6 @@
-//! Modal dialog to edit one OCPP 1.6 configuration key (key / value / readonly), opened by
-//! selecting a row in the config table. Three fields cycled with Tab; Enter confirms, Esc cancels.
+//! Shared (version-agnostic) configuration-key model and its edit dialog, used by both the OCPP
+//! 1.6 config store (GetConfiguration) and the 2.0.1 variable store (GetVariables). A "key" is a
+//! name/value pair with a readonly flag.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
@@ -15,7 +16,13 @@ use ratatui::{
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
 
-use crate::module::ocpp::client::v1_6::state::ConfigKey;
+/// One configuration key / variable: a name, a value, and whether it is read-only.
+#[derive(Clone, Debug)]
+pub struct ConfigKey {
+    pub key: String,
+    pub value: String,
+    pub readonly: bool,
+}
 
 /// Which dialog field has focus.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -27,7 +34,7 @@ enum Field {
 
 const READONLY_CHOICES: [&str; 2] = ["false", "true"];
 
-/// Editor for the config key at `index` in `CsState.config`.
+/// Editor for the config key at `index` in a view's config/variable store.
 pub struct ConfigEditDialog {
     index: usize,
     key: Widget<InputFieldState, InputField<String>>,
@@ -137,12 +144,7 @@ impl ConfigEditDialog {
 
         StatefulWidget::render(&self.key.widget, key_area, buf, &mut self.key.state);
         StatefulWidget::render(&self.value.widget, value_area, buf, &mut self.value.state);
-        StatefulWidget::render(
-            &self.readonly.widget,
-            ro_area,
-            buf,
-            &mut self.readonly.state,
-        );
+        StatefulWidget::render(&self.readonly.widget, ro_area, buf, &mut self.readonly.state);
     }
 }
 

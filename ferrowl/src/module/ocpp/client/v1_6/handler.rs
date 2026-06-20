@@ -97,6 +97,23 @@ impl CsStateHandler {
                     "state reset".to_string(),
                 )
             }
+            Action16::SetChargingProfile(_) => {
+                let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let schedule = &json["csChargingProfiles"]["chargingSchedule"];
+                let period = &schedule["chargingSchedulePeriod"][0];
+                let context = if let Some(limit) = period["limit"].as_f64() {
+                    let unit = schedule["chargingRateUnit"].as_str().unwrap_or("A").to_string();
+                    let mut state = self.state.write().unwrap();
+                    state.limit = Some(limit);
+                    state.limit_unit = unit.clone();
+                    format!("limit {limit} {unit}")
+                } else {
+                    "no limit in profile".to_string()
+                };
+                let resp = V1_6::default_response("SetChargingProfile")
+                    .expect("SetChargingProfile is a known action");
+                (Ok(resp), context)
+            }
             other => {
                 let name = V1_6::action_name(other);
                 match V1_6::default_response(name) {

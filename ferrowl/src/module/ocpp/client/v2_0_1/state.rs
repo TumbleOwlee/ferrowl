@@ -1,14 +1,14 @@
-//! OCPP 1.6 charging-station state. Holds the system parameters the CS exposes/uses: metering
-//! (fed into MeterValues), connector/transaction status, boot identity, and the configuration-key
-//! store that answers GetConfiguration / is mutated by ChangeConfiguration. Shared (behind a
-//! `std::sync::RwLock`) between the view (sync render/edit) and the inbound handler (brief locks,
-//! never held across an await).
+//! OCPP 2.0.1 charging-station state. Like the 1.6 state but with 2.0.1 shapes: EVSE id, connector
+//! status enum (Available/Occupied/…), a string transaction id minted locally with a seq counter,
+//! and a *variable* store (name/value/readonly) that answers GetVariables / is mutated by
+//! SetVariables. Shared (behind `std::sync::RwLock`) between view and inbound handler.
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 pub use crate::module::ocpp::client::config::ConfigKey;
 
-/// OCPP 1.6 charging-station state.
+/// OCPP 2.0.1 charging-station state.
 pub struct CsState {
+    pub evse_id: i64,
     pub connector_id: i64,
     pub phases: String,
     pub voltage: f64,
@@ -20,21 +20,25 @@ pub struct CsState {
     pub rfid: String,
     pub model: String,
     pub vendor: String,
-    pub transaction_id: Option<i64>,
+    pub transaction_id: Option<String>,
+    pub seq_no: i32,
+    tx_counter: u64,
     /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
     pub limit: Option<f64>,
     pub limit_unit: String,
+    /// Variable store (component-agnostic name/value), answers GetVariables.
     pub config: Vec<ConfigKey>,
 }
 
 impl Default for CsState {
     fn default() -> Self {
-        let cfg = |key: &str, value: &str, readonly: bool| ConfigKey {
+        let var = |key: &str, value: &str, readonly: bool| ConfigKey {
             key: key.to_string(),
             value: value.to_string(),
             readonly,
         };
         Self {
+            evse_id: 1,
             connector_id: 1,
             phases: "L1,L2,L3".to_string(),
             voltage: 230.0,
@@ -47,13 +51,14 @@ impl Default for CsState {
             model: "Ferrowl-EVSE".to_string(),
             vendor: "Ferrowl".to_string(),
             transaction_id: None,
+            seq_no: 0,
+            tx_counter: 0,
             limit: None,
             limit_unit: "A".to_string(),
             config: vec![
-                cfg("HeartbeatInterval", "300", false),
-                cfg("MeterValueSampleInterval", "60", false),
-                cfg("NumberOfConnectors", "1", true),
-                cfg("ConnectorPhaseRotation", "NotApplicable", false),
+                var("HeartbeatInterval", "300", false),
+                var("AuthCtrlr.Enabled", "true", false),
+                var("EVSE.AvailabilityState", "Available", true),
             ],
         }
     }
@@ -67,7 +72,7 @@ pub struct NvRow {
     pub value: String,
 }
 
-/// A row in the configuration-key table.
+/// A row in the variable table.
 #[derive(Clone, Debug)]
 pub struct ConfigRow {
     pub key: String,
@@ -76,8 +81,22 @@ pub struct ConfigRow {
 }
 
 impl CsState {
-    /// Rows for the state table (metering + connector + identity). Config keys are managed by the
-    /// inbound handler, not shown here.
+    /// Mint a fresh transaction id and reset the sequence counter.
+    pub fn start_tx(&mut self) -> String {
+        let id = format!("ferrowl-tx-{}", self.tx_counter);
+        self.tx_counter += 1;
+        self.seq_no = 0;
+        self.transaction_id = Some(id.clone());
+        id
+    }
+
+    /// Next sequence number for the running transaction.
+    pub fn next_seq(&mut self) -> i32 {
+        let n = self.seq_no;
+        self.seq_no += 1;
+        n
+    }
+
     pub fn rows(&self) -> Vec<NvRow> {
         let nv = |name: &str, unit: &str, value: String| NvRow {
             name: name.to_string(),
@@ -85,6 +104,7 @@ impl CsState {
             value,
         };
         vec![
+            nv("EVSE ID", "", self.evse_id.to_string()),
             nv("Connector ID", "", self.connector_id.to_string()),
             nv("Used Phases", "", self.phases.clone()),
             nv("Voltage", "V", format!("{:.1}", self.voltage)),
@@ -108,7 +128,6 @@ impl CsState {
         ]
     }
 
-    /// Rows for the configuration-key table.
     pub fn config_rows(&self) -> Vec<ConfigRow> {
         self.config
             .iter()
@@ -120,38 +139,39 @@ impl CsState {
             .collect()
     }
 
-    /// Energy meter reading in Wh (StartTransaction/StopTransaction units).
+    /// Energy meter reading in Wh.
     pub fn meter_wh(&self) -> i64 {
         (self.total_energy * 1000.0) as i64
     }
 
-    /// An OCPP `meterValue` array reflecting the current state, for MeterValues.
+    /// An OCPP 2.0.1 `meterValue` array reflecting the current state, for MeterValues. The 2.0.1
+    /// `sampledValue.value` is numeric and the unit is nested under `unitOfMeasure`.
     pub fn meter_value_json(&self) -> serde_json::Value {
         let mut sampled = Vec::new();
         for (i, phase) in ["L1", "L2", "L3"].iter().enumerate() {
             if self.phases.split(',').any(|p| p.trim() == *phase) {
                 sampled.push(serde_json::json!({
-                    "value": format!("{:.1}", self.current[i]),
+                    "value": self.current[i],
                     "measurand": "Current.Import",
                     "phase": phase,
-                    "unit": "A",
+                    "unitOfMeasure": { "unit": "A" },
                 }));
             }
         }
         sampled.push(serde_json::json!({
-            "value": format!("{:.1}", self.voltage),
+            "value": self.voltage,
             "measurand": "Voltage",
-            "unit": "V",
+            "unitOfMeasure": { "unit": "V" },
         }));
         sampled.push(serde_json::json!({
-            "value": format!("{:.1}", self.power),
+            "value": self.power,
             "measurand": "Power.Active.Import",
-            "unit": "W",
+            "unitOfMeasure": { "unit": "W" },
         }));
         sampled.push(serde_json::json!({
-            "value": self.meter_wh().to_string(),
+            "value": self.meter_wh(),
             "measurand": "Energy.Active.Import.Register",
-            "unit": "Wh",
+            "unitOfMeasure": { "unit": "Wh" },
         }));
         serde_json::json!([{ "timestamp": rfc3339_now(), "sampledValue": sampled }])
     }

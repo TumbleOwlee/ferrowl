@@ -14,6 +14,11 @@ pub struct InputFieldStyle {
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg)")]
     pub focused: Style,
+    /// Border color when the field is not focused. Defaults to the general text color (preserving
+    /// the previous look); set it to the theme border color to match table/selection borders.
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg)")]
+    pub border: Style,
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.placeholder).bg(COLOR_SCHEME.bg)")]
     pub placeholder: Style,

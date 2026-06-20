@@ -1,9 +1,7 @@
-//! OCPP 1.6 charging-station (client) view. Left: a system-state panel (editable) over an action
-//! list; right: the OCPP message log over a JSON payload viewer; an ONLINE/OFFLINE status line.
-//!
-//! Action buttons are `V1_6::cs_actions()`. A state-driven action (Authorize, BootNotification,
-//! Heartbeat, MeterValues, Start/StopTransaction, StatusNotification) is built straight from state
-//! and sent. Any other action opens a JSON dialog prefilled with its `default_action` template.
+//! OCPP 2.0.1 charging-station (client) view. Same layout as the 1.6 view (state panel over the
+//! action list and a variable table+inputs on the left; message log over a JSON payload viewer on
+//! the right) adapted to 2.0.1: EVSE id, connector-status enum, GetVariables-backed variable store,
+//! and `StartTransaction`/`StopTransaction` *shortcut* buttons that emit a `TransactionEvent`.
 
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -33,13 +31,13 @@ use ratatui::{
 };
 use tokio::sync::RwLock as AsyncRwLock;
 
-use ferrowl_ocpp::{V1_6, Version};
+use ferrowl_ocpp::{V2_0_1, Version};
 
 use crate::app::LogRing;
 use crate::module::ocpp::client::backend::{OcppClient, OcppMessage, rfc3339_now};
-use crate::module::ocpp::client::config::ConfigEditDialog;
-use crate::module::ocpp::client::v1_6::handler::CsStateHandler;
-use crate::module::ocpp::client::v1_6::state::{ConfigKey, ConfigRow, CsState, NvRow};
+use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
+use crate::module::ocpp::client::v2_0_1::handler::CsStateHandler;
+use crate::module::ocpp::client::v2_0_1::state::{ConfigRow, CsState, NvRow};
 use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::ocpp::view::OcppServerView;
@@ -75,7 +73,7 @@ impl Header<3> for NvHeader {
     }
 }
 
-// --- Config table ----------------------------------------------------------
+// --- Variable table --------------------------------------------------------
 
 impl TableEntry<3> for ConfigRow {
     fn values(&self) -> [String; 3] {
@@ -91,7 +89,7 @@ struct ConfigHeader;
 
 impl Header<3> for ConfigHeader {
     fn header() -> [String; 3] {
-        ["Key".into(), "Value".into(), "ReadOnly".into()]
+        ["Variable".into(), "Value".into(), "ReadOnly".into()]
     }
     fn widths() -> [Width; 3] {
         [
@@ -105,6 +103,7 @@ impl Header<3> for ConfigHeader {
 /// Which state row an edit overlay is changing.
 #[derive(Clone, Copy)]
 enum EditField {
+    EvseId,
     ConnectorId,
     Phases,
     Voltage,
@@ -121,25 +120,27 @@ enum EditField {
 impl EditField {
     fn from_row(row: usize) -> Option<EditField> {
         Some(match row {
-            0 => EditField::ConnectorId,
-            1 => EditField::Phases,
-            2 => EditField::Voltage,
-            3 => EditField::Current(0),
-            4 => EditField::Current(1),
-            5 => EditField::Current(2),
-            6 => EditField::Power,
-            7 => EditField::TotalEnergy,
-            8 => EditField::SessionEnergy,
-            9 => EditField::Status,
-            10 => EditField::Rfid,
-            11 => EditField::Model,
-            12 => EditField::Vendor,
+            0 => EditField::EvseId,
+            1 => EditField::ConnectorId,
+            2 => EditField::Phases,
+            3 => EditField::Voltage,
+            4 => EditField::Current(0),
+            5 => EditField::Current(1),
+            6 => EditField::Current(2),
+            7 => EditField::Power,
+            8 => EditField::TotalEnergy,
+            9 => EditField::SessionEnergy,
+            10 => EditField::Status,
+            11 => EditField::Rfid,
+            12 => EditField::Model,
+            13 => EditField::Vendor,
             _ => return None,
         })
     }
 
     fn label(self) -> &'static str {
         match self {
+            EditField::EvseId => "EVSE ID",
             EditField::ConnectorId => "Connector ID",
             EditField::Phases => "Used Phases",
             EditField::Voltage => "Voltage",
@@ -158,25 +159,24 @@ impl EditField {
 }
 
 const PHASE_CHOICES: [&str; 7] = ["L1", "L2", "L3", "L1,L2", "L1,L3", "L2,L3", "L1,L2,L3"];
-const STATUS_CHOICES: [&str; 7] = [
+const STATUS_CHOICES: [&str; 5] = [
     "Available",
-    "Preparing",
-    "Charging",
-    "SuspendedEV",
-    "SuspendedEVSE",
-    "Finishing",
+    "Occupied",
+    "Reserved",
+    "Unavailable",
     "Faulted",
 ];
 
-/// State-driven actions: their request is fully built from state, no dialog.
-const STATE_DRIVEN: [&str; 7] = [
+/// Friendly shortcut buttons that map to a `TransactionEvent`.
+const SHORTCUTS: [&str; 2] = ["StartTransaction", "StopTransaction"];
+
+/// State-driven real actions: built straight from state, no dialog.
+const STATE_DRIVEN: [&str; 5] = [
     "Authorize",
     "BootNotification",
     "Heartbeat",
     "MeterValues",
-    "StartTransaction",
     "StatusNotification",
-    "StopTransaction",
 ];
 
 enum EditOverlay {
@@ -293,9 +293,9 @@ type StateTable = Widget<TableState<NvRow, 3>, Table<NvRow, NvHeader, 3>>;
 type ConfigTable = Widget<TableState<ConfigRow, 3>, Table<ConfigRow, ConfigHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
-pub struct OcppClientV16View {
+pub struct OcppClientV201View {
     spec: OcppSpec,
-    backend: OcppClient<V1_6>,
+    backend: OcppClient<V2_0_1>,
     state: Arc<RwLock<CsState>>,
     log: SharedLog,
     state_table: StateTable,
@@ -318,14 +318,19 @@ pub struct OcppClientV16View {
     compact: bool,
 }
 
-impl OcppClientV16View {
+impl OcppClientV201View {
     pub fn new(spec: OcppSpec) -> Self {
         let state = Arc::new(RwLock::new(CsState::default()));
         let (rows, config_rows) = {
             let s = state.read().unwrap();
             (s.rows(), s.config_rows())
         };
-        let action_values: Vec<String> = V1_6::cs_actions().iter().map(|s| s.to_string()).collect();
+        // Shortcut buttons first, then the real CS-originated actions.
+        let action_values: Vec<String> = SHORTCUTS
+            .iter()
+            .map(|s| s.to_string())
+            .chain(V2_0_1::cs_actions().iter().map(|s| s.to_string()))
+            .collect();
         Self {
             backend: OcppClient::new(spec.clone()),
             state,
@@ -352,7 +357,6 @@ impl OcppClientV16View {
         }
     }
 
-    /// Build a fresh inbound handler sharing this view's online flag, message log, and state.
     fn make_handler(&self) -> CsStateHandler {
         CsStateHandler::new(
             self.backend.online_handle(),
@@ -372,77 +376,98 @@ impl OcppClientV16View {
         self.msg_table.widget.set_row_margin(margin);
     }
 
-    /// Enqueue the focused action for sending, or open a JSON dialog when it needs more than state.
+    /// Enqueue the focused action for sending. Shortcuts and state-driven actions build their
+    /// payload from state; anything else opens a JSON dialog with the Default-derived template.
     fn trigger_action(&mut self) {
         let name = self.actions.state.get_value();
         if name.is_empty() {
             return;
         }
-        if STATE_DRIVEN.contains(&name.as_str()) {
-            let payload = self.state_payload(&name);
-            self.pending_send = Some((name, payload));
-        } else {
-            // Prefill a JSON editor with the Default-derived template.
-            let template = V1_6::default_action(&name)
-                .and_then(|a| V1_6::encode_action(&a).ok())
-                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                .unwrap_or_else(|| "{}".to_string());
-            let mut field = editable_code();
-            field.state.set_content(&template);
-            self.action_dialog = Some((name, field));
+        match name.as_str() {
+            "StartTransaction" => {
+                let payload = self.start_event();
+                self.pending_send = Some(("TransactionEvent".to_string(), payload));
+            }
+            "StopTransaction" => {
+                if let Some(payload) = self.stop_event() {
+                    self.pending_send = Some(("TransactionEvent".to_string(), payload));
+                }
+            }
+            n if STATE_DRIVEN.contains(&n) => {
+                let payload = self.state_payload(n);
+                self.pending_send = Some((name, payload));
+            }
+            _ => {
+                let template = V2_0_1::default_action(&name)
+                    .and_then(|a| V2_0_1::encode_action(&a).ok())
+                    .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                    .unwrap_or_else(|| "{}".to_string());
+                let mut field = editable_code();
+                field.state.set_content(&template);
+                self.action_dialog = Some((name, field));
+            }
         }
+    }
+
+    /// Build a `TransactionEvent(Started)`, minting a transaction id and starting charging.
+    fn start_event(&mut self) -> serde_json::Value {
+        let mut s = self.state.write().unwrap();
+        let tx = s.start_tx();
+        let seq = s.next_seq();
+        s.status = "Occupied".to_string();
+        s.session_energy = 0.0;
+        self.meter_tick = 0;
+        serde_json::json!({
+            "eventType": "Started",
+            "timestamp": rfc3339_now(),
+            "triggerReason": "Authorized",
+            "seqNo": seq,
+            "transactionInfo": { "transactionId": tx },
+            "idToken": { "idToken": s.rfid, "type": "Central" },
+            "evse": { "id": s.evse_id, "connectorId": s.connector_id },
+        })
+    }
+
+    /// Build a `TransactionEvent(Ended)` for the running transaction, or `None` if idle.
+    fn stop_event(&mut self) -> Option<serde_json::Value> {
+        let mut s = self.state.write().unwrap();
+        let tx = s.transaction_id.clone()?;
+        let seq = s.next_seq();
+        s.status = "Available".to_string();
+        s.transaction_id = None;
+        Some(serde_json::json!({
+            "eventType": "Ended",
+            "timestamp": rfc3339_now(),
+            "triggerReason": "StopAuthorized",
+            "seqNo": seq,
+            "transactionInfo": { "transactionId": tx },
+            "idToken": { "idToken": s.rfid, "type": "Central" },
+        }))
     }
 
     /// Build the request payload for a state-driven action from current state.
     fn state_payload(&self, name: &str) -> serde_json::Value {
         let s = self.state.read().unwrap();
         match name {
-            "Authorize" => serde_json::json!({ "idTag": s.rfid }),
+            "Authorize" => serde_json::json!({
+                "idToken": { "idToken": s.rfid, "type": "Central" },
+            }),
             "BootNotification" => serde_json::json!({
-                "chargePointModel": s.model,
-                "chargePointVendor": s.vendor,
+                "reason": "PowerUp",
+                "chargingStation": { "model": s.model, "vendorName": s.vendor },
             }),
             "Heartbeat" => serde_json::json!({}),
             "MeterValues" => serde_json::json!({
-                "connectorId": s.connector_id,
+                "evseId": s.evse_id,
                 "meterValue": s.meter_value_json(),
             }),
-            "StartTransaction" => serde_json::json!({
-                "connectorId": s.connector_id,
-                "idTag": s.rfid,
-                "meterStart": s.meter_wh(),
-                "timestamp": rfc3339_now(),
-            }),
-            "StopTransaction" => serde_json::json!({
-                "transactionId": s.transaction_id.unwrap_or_default(),
-                "meterStop": s.meter_wh(),
-                "timestamp": rfc3339_now(),
-                "idTag": s.rfid,
-            }),
             "StatusNotification" => serde_json::json!({
+                "timestamp": rfc3339_now(),
+                "connectorStatus": s.status,
+                "evseId": s.evse_id,
                 "connectorId": s.connector_id,
-                "errorCode": "NoError",
-                "status": s.status,
             }),
             _ => serde_json::json!({}),
-        }
-    }
-
-    /// After a successful send, apply action-specific side effects to state.
-    fn post_send(&mut self, name: &str, response: &serde_json::Value) {
-        let mut s = self.state.write().unwrap();
-        match name {
-            "StartTransaction" => {
-                s.transaction_id = response["transactionId"].as_i64();
-                s.status = "Charging".to_string();
-                s.session_energy = 0.0;
-                self.meter_tick = 0;
-            }
-            "StopTransaction" => {
-                s.transaction_id = None;
-                s.status = "Available".to_string();
-            }
-            _ => {}
         }
     }
 
@@ -468,7 +493,7 @@ impl OcppClientV16View {
         };
     }
 
-    /// Append a config key from the key/value inputs (readonly=false), then clear them.
+    /// Append a variable from the key/value inputs (readonly=false), then clear them.
     fn add_config_key(&mut self) {
         let key = self.key_input.state.input().trim().to_string();
         if key.is_empty() {
@@ -492,7 +517,6 @@ impl OcppClientV16View {
         self.value_input.state.set_cursor(0);
     }
 
-    /// Open the config-key editor for the selected config-table row.
     fn open_config_edit(&mut self) {
         let Some(row) = self.config_table.state.table_state().selected() else {
             return;
@@ -503,7 +527,6 @@ impl OcppClientV16View {
         }
     }
 
-    /// Write the open config editor back into state.
     fn apply_config_edit(&mut self) {
         let Some(dialog) = self.config_edit.take() else {
             return;
@@ -533,6 +556,10 @@ impl OcppClientV16View {
             EditField::Status => EditOverlay::Choice {
                 field,
                 sel: choice(&STATUS_CHOICES, &s.status),
+            },
+            EditField::EvseId => EditOverlay::Number {
+                field,
+                input: number(s.evse_id as f64),
             },
             EditField::ConnectorId => EditOverlay::Number {
                 field,
@@ -590,6 +617,7 @@ impl OcppClientV16View {
                     return;
                 };
                 match field {
+                    EditField::EvseId => s.evse_id = value as i64,
                     EditField::ConnectorId => s.connector_id = value as i64,
                     EditField::Voltage => s.voltage = value,
                     EditField::Current(i) => s.current[i] = value,
@@ -620,13 +648,13 @@ impl OcppClientV16View {
         self.code.state.set_content(&content);
     }
 
-    /// Decode + send a (name, payload), recording it; returns the response JSON on success.
     async fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
-        match V1_6::decode_call(name, payload) {
-            Ok(action) => match self.backend.send(action).await {
-                Ok(response) => self.post_send(name, &response),
-                Err(e) => self.log.write().await.write(&format!("{name} failed: {e}")),
-            },
+        match V2_0_1::decode_call(name, payload) {
+            Ok(action) => {
+                if let Err(e) = self.backend.send(action).await {
+                    self.log.write().await.write(&format!("{name} failed: {e}"));
+                }
+            }
             Err(e) => self
                 .log
                 .write()
@@ -636,7 +664,7 @@ impl OcppClientV16View {
     }
 }
 
-impl ModuleView for OcppClientV16View {
+impl ModuleView for OcppClientV201View {
     fn name(&self) -> String {
         self.spec.name.clone()
     }
@@ -649,7 +677,6 @@ impl ModuleView for OcppClientV16View {
             Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
         let [left_top, left_bottom] =
             Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(left);
-        // Lower-left: config block (upper half) over the action list (lower half).
         let [actions_area, config_area] = Layout::vertical([
             Constraint::Max(2 + self.actions.state.values().len() as u16),
             Constraint::Min(1),
@@ -780,7 +807,7 @@ impl ModuleView for OcppClientV16View {
             }
         }
 
-        // Config-key edit dialog, centered.
+        // Variable edit dialog, centered.
         if let Some(dialog) = self.config_edit.as_mut() {
             dialog.render(area, buf);
         }
@@ -837,7 +864,6 @@ impl ModuleView for OcppClientV16View {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => self.action_dialog = None,
                 (KeyModifiers::NONE, KeyCode::Enter) => {
-                    // Keep the dialog open on invalid JSON.
                     if let Ok(payload) =
                         serde_json::from_str::<serde_json::Value>(&field.state.content())
                     {
@@ -904,7 +930,6 @@ impl ModuleView for OcppClientV16View {
                 }
                 EventResult::Consumed
             }
-            // Space activates list/table panes, but must type into the text inputs.
             (KeyModifiers::NONE, KeyCode::Char(' '))
                 if !matches!(self.focus, Pane::ConfigKey | Pane::ConfigValue) =>
             {
@@ -933,7 +958,6 @@ impl ModuleView for OcppClientV16View {
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // Apply an `:edit` that changed the spec.
             if let Some(spec) = self.pending_setup.take() {
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
@@ -941,11 +965,10 @@ impl ModuleView for OcppClientV16View {
                     return;
                 }
                 if spec.version != self.spec.version {
-                    // Switching version means switching view type; the v2.0.1 view is a later task.
                     self.log
                         .write()
                         .await
-                        .write("Version switch not yet supported in the 1.6 view");
+                        .write("Version switch not yet supported in the 2.0.1 view");
                 } else {
                     let was_online = self.backend.is_online();
                     let _ = self.backend.stop().await;
@@ -959,7 +982,6 @@ impl ModuleView for OcppClientV16View {
                 }
             }
 
-            // Send a queued action.
             if let Some((name, payload)) = self.pending_send.take() {
                 self.send_payload(&name, payload).await;
             }
@@ -974,7 +996,6 @@ impl ModuleView for OcppClientV16View {
                 }
             }
 
-            // Refresh tables from backend + state.
             self.messages = self.backend.messages_snapshot().await;
             let rows: Vec<MsgRow> = self.messages.iter().map(msg_row).collect();
             self.msg_table.state.set_values(rows);
@@ -1108,7 +1129,7 @@ fn config_table(rows: Vec<ConfigRow>) -> ConfigTable {
         state: TableStateBuilder::default().values(rows).build().unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Config".into()))
+            .title(Some("Variables".into()))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,

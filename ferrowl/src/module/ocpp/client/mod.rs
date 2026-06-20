@@ -2,6 +2,7 @@
 //! OCPP version (1.6 implemented; 2.0.1 a placeholder for now).
 
 pub mod backend;
+pub mod config;
 pub mod v1_6;
 pub mod v2_0_1;
 
