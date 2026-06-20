@@ -105,8 +105,8 @@ pub struct RegisterDef {
     #[serde(default)]
     pub slave_id: u8,
     /// Modbus read function code: 1=Coil, 2=DiscreteInput, 3=InputRegister, 4=HoldingRegister.
-    #[serde(default = "default_read_code")]
-    pub read_code: u8,
+    #[serde(default = "default_kind")]
+    pub kind: Kind,
     /// Start address; omitted (or `virtual = true`) marks a virtual register.
     #[serde(default)]
     pub address: Option<u16>,
@@ -326,12 +326,14 @@ pub fn parse_bitmask(s: Option<&str>) -> BitField {
     BitField { mask }
 }
 
-fn default_read_code() -> u8 {
-    3
+fn default_kind() -> Kind {
+    Kind::InputRegister
 }
+
 fn default_resolution() -> f64 {
     1.0
 }
+
 fn default_length() -> usize {
     1
 }
@@ -366,12 +368,7 @@ impl From<AlignmentCfg> for Alignment {
 
 impl RegisterDef {
     pub fn kind(&self) -> Kind {
-        match self.read_code {
-            1 => Kind::Coil,
-            2 => Kind::DiscreteInput,
-            4 => Kind::HoldingRegister,
-            _ => Kind::InputRegister,
-        }
+        self.kind.clone()
     }
 
     pub fn mem_type(&self) -> CellType {
@@ -447,7 +444,7 @@ mod tests {
             "setpoint".to_string(),
             RegisterDef {
                 slave_id: 1,
-                read_code: 4,
+                kind: Kind::HoldingRegister,
                 address: Some(0),
                 is_virtual: false,
                 access: AccessCfg::ReadWrite,
@@ -467,7 +464,7 @@ mod tests {
             "state".to_string(),
             RegisterDef {
                 slave_id: 1,
-                read_code: 4,
+                kind: Kind::HoldingRegister,
                 address: Some(5),
                 is_virtual: false,
                 access: AccessCfg::ReadWrite,
@@ -580,13 +577,13 @@ mod tests {
 
     fn def_with(
         value_type: ValueType,
-        read_code: u8,
+        kind: Kind,
         address: Option<u16>,
         is_virtual: bool,
     ) -> RegisterDef {
         RegisterDef {
             slave_id: 1,
-            read_code,
+            kind,
             address,
             is_virtual,
             access: AccessCfg::ReadWrite,
@@ -675,20 +672,23 @@ mod tests {
 
     #[test]
     fn ut_register_def_kind_mem_type_and_all_formats() {
-        for (code, kind) in [
-            (1u8, Kind::Coil),
-            (2, Kind::DiscreteInput),
-            (3, Kind::InputRegister),
-            (4, Kind::HoldingRegister),
+        for kind in [
+            Kind::Coil,
+            Kind::DiscreteInput,
+            Kind::InputRegister,
+            Kind::HoldingRegister,
         ] {
-            assert_eq!(def_with(ValueType::U16, code, Some(0), false).kind(), kind);
+            assert_eq!(
+                def_with(ValueType::U16, kind.clone(), Some(0), false).kind(),
+                kind
+            );
         }
         assert_eq!(
-            def_with(ValueType::U16, 1, Some(0), false).mem_type(),
+            def_with(ValueType::U16, Kind::Coil, Some(0), false).mem_type(),
             CellType::Coil
         );
         assert_eq!(
-            def_with(ValueType::U16, 4, Some(0), false).mem_type(),
+            def_with(ValueType::U16, Kind::HoldingRegister, Some(0), false).mem_type(),
             CellType::Register
         );
 
@@ -707,37 +707,37 @@ mod tests {
             ValueType::F64,
             ValueType::Ascii,
         ] {
-            let _ = def_with(vt, 4, Some(0), false).format();
+            let _ = def_with(vt, Kind::HoldingRegister, Some(0), false).format();
         }
     }
 
     #[test]
     fn ut_register_def_address_range_and_register() {
-        let fixed = def_with(ValueType::U16, 4, Some(10), false);
+        let fixed = def_with(ValueType::U16, Kind::HoldingRegister, Some(10), false);
         assert_eq!(fixed.address(), Address::Fixed(10));
         assert!(fixed.mem_range().is_some());
         let _ = fixed.register();
         let _ = fixed.bitfield();
 
-        let virt = def_with(ValueType::U16, 4, None, false);
+        let virt = def_with(ValueType::U16, Kind::HoldingRegister, None, false);
         assert_eq!(virt.address(), Address::Virtual);
         assert!(virt.mem_range().is_none());
 
         // The `virtual` flag forces Virtual even with a concrete address.
         assert_eq!(
-            def_with(ValueType::U16, 4, Some(5), true).address(),
+            def_with(ValueType::U16, Kind::HoldingRegister, Some(5), true).address(),
             Address::Virtual
         );
     }
 
     #[test]
     fn ut_register_def_serde_defaults() {
-        // A minimal definition omitting read_code/resolution/length triggers the default fns.
+        // A minimal definition omitting kind/resolution/length triggers the default fns.
         let path = std::env::temp_dir().join("ferrowl_codecdef_min.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "type = \"U16\"\n").unwrap();
         let def: RegisterDef = Converter::load(path, FileType::Toml).unwrap();
-        assert_eq!(def.read_code, 3);
+        assert_eq!(def.kind, Kind::InputRegister);
         assert_eq!(def.resolution, 1.0);
         assert_eq!(def.length, 1);
     }

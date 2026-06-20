@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_codec::{Access, Address, Value};
+use ferrowl_codec::{Access, Address, Kind, Value};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Memory, Range};
 use ferrowl_ui::EventResult;
@@ -490,7 +490,7 @@ impl ModbusModuleView {
 
         let mut def = crate::config::device::RegisterDef {
             slave_id: 0,
-            read_code: 4,
+            kind: Kind::HoldingRegister,
             address: None,
             is_virtual: false,
             access: crate::config::device::AccessCfg::ReadWrite,

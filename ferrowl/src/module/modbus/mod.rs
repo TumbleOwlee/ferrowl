@@ -1046,7 +1046,7 @@ mod tests {
 
         let base = |address: Option<u16>, is_virtual: bool, update, default| RegisterDef {
             slave_id: 1,
-            read_code: 4,
+            kind: Kind::HoldingRegister,
             address,
             is_virtual,
             access: AccessCfg::ReadWrite,

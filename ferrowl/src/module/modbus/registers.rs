@@ -85,12 +85,7 @@ pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
         Access::WriteOnly => AccessCfg::WriteOnly,
         Access::ReadWrite => AccessCfg::ReadWrite,
     };
-    def.read_code = match register.kind() {
-        Kind::Coil => 1,
-        Kind::DiscreteInput => 2,
-        Kind::HoldingRegister => 4,
-        Kind::InputRegister => 3,
-    };
+    def.kind = register.kind().clone();
     match register.address() {
         Address::Fixed(addr) => {
             def.address = Some(*addr);

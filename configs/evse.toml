@@ -4,7 +4,7 @@ description = "EVSE charge point"
 
 [definitions.setpoint]
 slave_id = 1
-read_code = 4                       # 4 = holding register
+kind = "HoldingRegister"
 address = 0
 type = "U16"
 access = "ReadWrite"
@@ -13,7 +13,7 @@ default = 0                         # start at zero watts on every load
 
 [definitions.power]
 slave_id = 1
-read_code = 4
+kind = "HoldingRegister"
 address = 1
 type = "U16"
 access = "ReadWrite"
@@ -24,7 +24,7 @@ update = "C_Register:Set(\"power\", C_Register:Get(\"setpoint\"))"
 
 [definitions.state]
 slave_id = 1
-read_code = 4
+kind = "HoldingRegister"
 address = 2
 type = "I16"
 access = "ReadWrite"

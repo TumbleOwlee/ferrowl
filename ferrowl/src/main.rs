@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::io::Stdout;
 
 use clap::Parser;
+use ferrowl_codec::Kind;
 use ferrowl_ui::AlternateScreen;
 use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
@@ -43,7 +44,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
     let reg = |address: u16, value_type: ValueType, description: &str, values: Vec<NamedValue>| {
         RegisterDef {
             slave_id: 1,
-            read_code: 4,
+            kind: Kind::HoldingRegister,
             address: Some(address),
             is_virtual: false,
             access: AccessCfg::ReadWrite,
