@@ -831,6 +831,10 @@ impl ModuleView for ModbusModuleView {
         self.spec.name.clone()
     }
 
+    fn is_overlay_active(&self) -> bool {
+        self.overlay.is_some() || self.setup_overlay.is_some()
+    }
+
     fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
         use ratatui::{

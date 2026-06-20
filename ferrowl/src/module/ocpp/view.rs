@@ -45,6 +45,10 @@ impl ModuleView for OcppServerView {
         self.spec.name.clone()
     }
 
+    fn is_overlay_active(&self) -> bool {
+        self.pending_setup.is_some()
+    }
+
     fn render(&mut self, frame: &mut Frame, area: Rect, _focused: bool) {
         use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
         use ratatui::{

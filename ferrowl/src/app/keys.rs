@@ -57,7 +57,15 @@ impl App {
             (None, _, KeyCode::Char(']')) => self.next_tab(),
             (None, _, KeyCode::Char('[')) => self.prev_tab(),
             // Command
-            (None, _, KeyCode::Char(':')) => self.enter_command(),
+            (None, _, KeyCode::Char(':'))
+                if !self
+                    .tabs
+                    .get_mut(self.active)
+                    .map(|t| t.view.is_overlay_active())
+                    .unwrap_or(false) =>
+            {
+                self.enter_command()
+            }
             (_, _, _) => {
                 self.keymode = None;
                 self.forward_nav(modifiers, code);

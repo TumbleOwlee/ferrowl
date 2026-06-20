@@ -641,6 +641,13 @@ impl ModuleView for OcppClientV16View {
         self.spec.name.clone()
     }
 
+    fn is_overlay_active(&self) -> bool {
+        self.edit.is_some()
+            || self.config_edit.is_some()
+            || self.action_dialog.is_some()
+            || self.setup_overlay.is_some()
+    }
+
     fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let buf = frame.buffer_mut();
         let [body, status_area] =
