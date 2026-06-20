@@ -108,6 +108,9 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
             0
         };
         let max_lines = area.height as i32 - border_lines;
+        if max_lines < 1 {
+            return;
+        }
         let lines = state.values().len();
         let lines = std::cmp::min(lines as i32, max_lines);
         let height = if let Border::Full(margin) = &self.border {

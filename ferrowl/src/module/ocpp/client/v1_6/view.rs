@@ -652,7 +652,7 @@ impl ModuleView for OcppClientV16View {
         // Lower-left: config block (upper half) over the action list (lower half).
         let [actions_area, config_area] = Layout::vertical([
             Constraint::Max(2 + self.actions.state.values().len() as u16),
-            Constraint::Min(1),
+            Constraint::Min(9),
         ])
         .areas(left_bottom);
         let [config_table_area, config_input_area] =

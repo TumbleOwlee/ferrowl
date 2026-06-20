@@ -679,7 +679,7 @@ impl ModuleView for OcppClientV201View {
             Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(left);
         let [actions_area, config_area] = Layout::vertical([
             Constraint::Max(2 + self.actions.state.values().len() as u16),
-            Constraint::Min(1),
+            Constraint::Min(9),
         ])
         .areas(left_bottom);
         let [config_table_area, config_input_area] =
