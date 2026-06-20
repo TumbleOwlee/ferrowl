@@ -16,8 +16,8 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::Duration;
 
-use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::type_descriptor::SetupView;
+use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::{ModuleView, SharedLog};
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
@@ -69,31 +69,39 @@ enum Focus {
 }
 
 /// The active modal creation dialog (`:new`/`:load`), if any.
+///
+/// `:new` opens [`Overlay::TypeSelect`] first; confirming it swaps in
+/// [`Overlay::Creation`] for the chosen module type's setup dialog.
 enum Overlay {
+    TypeSelect(Box<TypeSelectDialog>),
     Creation(Box<dyn SetupView>),
 }
 
 impl Overlay {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self {
+            Overlay::TypeSelect(d) => d.render(area, buf),
             Overlay::Creation(sv) => sv.render(area, buf),
         }
     }
 
     fn focus_next(&mut self) {
         match self {
+            Overlay::TypeSelect(_) => {}
             Overlay::Creation(sv) => sv.focus_next(),
         }
     }
 
     fn focus_previous(&mut self) {
         match self {
+            Overlay::TypeSelect(_) => {}
             Overlay::Creation(sv) => sv.focus_previous(),
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
         match self {
+            Overlay::TypeSelect(d) => d.handle_events(modifiers, code),
             Overlay::Creation(sv) => sv.handle_events(modifiers, code),
         }
     }
@@ -140,7 +148,7 @@ impl App {
     pub fn new(tabs: Vec<Tab>) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {
             (
-                Some(Overlay::Creation(Box::new(ModbusSetupView::new_create()))),
+                Some(Overlay::TypeSelect(Box::new(TypeSelectDialog::new()))),
                 Focus::Dialog,
             )
         } else {

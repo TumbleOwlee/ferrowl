@@ -23,7 +23,6 @@ pub trait SetupView {
 }
 
 /// Describes one module type available in the static registry.
-#[allow(dead_code)]
 pub struct ModuleTypeDescriptor {
     pub label: &'static str,
     /// Construct a fresh (empty) setup dialog for this module type.

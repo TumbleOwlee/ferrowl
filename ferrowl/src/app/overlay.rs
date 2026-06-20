@@ -2,7 +2,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
+use crate::module::MODULE_TYPES;
 use crate::module::modbus::setup::ModbusSetupView;
+use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::ModuleView;
 
 use super::{App, Focus, Overlay, Tab};
@@ -35,22 +37,31 @@ impl App {
         false
     }
 
-    /// Confirm the active creation overlay. Creates a new tab when the dialog validates.
+    /// Confirm the active creation overlay.
+    ///
+    /// From the type selector this swaps in the chosen module type's setup dialog; from a
+    /// setup dialog it creates a new tab when the dialog validates.
     async fn confirm_overlay(&mut self) {
+        // Stage 1: type chosen -> open that module type's setup dialog.
+        if let Some(Overlay::TypeSelect(d)) = &self.overlay {
+            let setup = (MODULE_TYPES[d.selected_index()].new_setup_view)();
+            self.overlay = Some(Overlay::Creation(setup));
+            return;
+        }
+
+        // Stage 2: setup dialog confirmed -> create the tab.
         let action = match &self.overlay {
-            Some(Overlay::Creation(sv)) => {
-                sv.confirm().map(|(name, factory)| (name, factory()))
-            }
-            None => None,
+            Some(Overlay::Creation(sv)) => sv.confirm().map(|(name, factory)| (name, factory())),
+            _ => None,
         };
         if let Some((name, view)) = action {
             self.create_tab(name, view).await;
         }
     }
 
-    /// Open the creation dialog for a new module tab (`:n`/`:new`).
+    /// Open the module-type selector for a new module tab (`:n`/`:new`).
     pub(super) fn enter_new(&mut self) {
-        self.overlay = Some(Overlay::Creation(Box::new(ModbusSetupView::new_create())));
+        self.overlay = Some(Overlay::TypeSelect(Box::new(TypeSelectDialog::new())));
         self.focus = Focus::Dialog;
     }
 
