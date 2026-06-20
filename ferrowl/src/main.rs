@@ -36,7 +36,7 @@ use crate::module::view::{CommandResult, ModuleView};
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
 /// binds nothing).
-fn demo_config() -> (DeviceConfig, ModuleSpec) {
+fn demo_modbus_tab(name: String, role: Role) -> Tab {
     let reg = |address: u16, value_type: ValueType, description: &str, values: Vec<NamedValue>| {
         RegisterDef {
             slave_id: 1,
@@ -111,9 +111,9 @@ fn demo_config() -> (DeviceConfig, ModuleSpec) {
         definitions,
     };
     let spec = ModuleSpec {
-        name: "demo".to_string(),
+        name,
         device: String::new(),
-        role: Role::Server,
+        role,
         endpoint: Endpoint::Tcp {
             ip: "127.0.0.1".to_string(),
             port: 5020,
@@ -122,7 +122,10 @@ fn demo_config() -> (DeviceConfig, ModuleSpec) {
         delay_ms: None,
         interval_ms: None,
     };
-    (device, spec)
+
+    let module = Module::new(&spec, &device);
+    let view: Box<dyn ModuleView> = Box::new(ModbusModuleView::new(module, spec.clone(), device));
+    Tab::new_from_view(spec.name.clone(), view)
 }
 
 /// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
@@ -132,15 +135,16 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 
     if args.demo {
-        let (device, spec) = demo_config();
-        let module = Module::new(&spec, &device);
-        let view: Box<dyn ModuleView> =
-            Box::new(ModbusModuleView::new(module, spec.clone(), device));
-        let mut tab = Tab::new_from_view(spec.name.clone(), view);
-        if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-            tab.log.write().await.write(&msg);
+        let mut tabs = vec![
+            demo_modbus_tab("Demo Server".to_string(), Role::Server),
+            demo_modbus_tab("Demo Client".to_string(), Role::Client),
+        ];
+        for tab in tabs.iter_mut() {
+            if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
+                tab.log.write().await.write(&msg);
+            }
         }
-        return Ok(vec![tab]);
+        return Ok(tabs);
     }
 
     let mut tabs = Vec::new();
