@@ -312,6 +312,7 @@ mod tests {
             protocol: config::ocpp::OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
             port: 9000,
+            path: String::new(),
         })
         .unwrap();
         ocpp.as_object_mut()

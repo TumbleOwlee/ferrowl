@@ -91,16 +91,19 @@ pub struct OcppSpec {
     pub protocol: OcppProtocol,
     pub ip: String,
     pub port: u16,
+    /// URL path appended after the endpoint, e.g. `/ocpp/cp001` (empty = none). The OCPP
+    /// charge-point identity is conventionally a trailing path segment.
+    #[serde(default)]
+    pub path: String,
     /// Awaited-reply timeout (ms); `None` uses the crate default (30_000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }
 
 impl OcppSpec {
-    /// Full websocket URL, e.g. `ws://127.0.0.1:9000`. The OCPP charge-point identity is
-    /// conventionally a trailing path segment; not modelled yet.
+    /// Full websocket URL, e.g. `ws://127.0.0.1:9000/ocpp/cp001` (path omitted when empty).
     pub fn url(&self) -> String {
-        format!("{}{}:{}", self.protocol, self.ip, self.port)
+        format!("{}{}:{}{}", self.protocol, self.ip, self.port, self.path)
     }
 
     /// Build the runtime spec from its persistence halves: the endpoint comes from the session
@@ -113,6 +116,7 @@ impl OcppSpec {
             protocol: module.protocol,
             ip: module.ip.clone(),
             port: module.port,
+            path: module.path.clone(),
             timeout_ms: device.timeout_ms,
         }
     }
@@ -130,6 +134,9 @@ pub struct OcppModuleSpec {
     pub protocol: OcppProtocol,
     pub ip: String,
     pub port: u16,
+    /// URL path appended after the endpoint, e.g. `/ocpp/cp001` (empty = none).
+    #[serde(default)]
+    pub path: String,
 }
 
 impl OcppModuleSpec {
@@ -141,6 +148,7 @@ impl OcppModuleSpec {
             protocol: spec.protocol,
             ip: spec.ip.clone(),
             port: spec.port,
+            path: spec.path.clone(),
         }
     }
 }
@@ -158,6 +166,7 @@ mod tests {
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
             port: 9000,
+            path: String::new(),
             timeout_ms: None,
         };
         assert_eq!(spec.url(), "ws://127.0.0.1:9000");
@@ -167,6 +176,12 @@ mod tests {
             ..spec.clone()
         };
         assert_eq!(secure.url(), "wss://127.0.0.1:9000");
+
+        let with_path = OcppSpec {
+            path: "/ocpp/cp001".into(),
+            ..spec.clone()
+        };
+        assert_eq!(with_path.url(), "ws://127.0.0.1:9000/ocpp/cp001");
     }
 
     #[test]
@@ -185,6 +200,7 @@ mod tests {
             protocol: OcppProtocol::Ws,
             ip: "10.0.0.5".into(),
             port: 8080,
+            path: "/ocpp/cp001".into(),
             timeout_ms: Some(5000),
         };
         let mut v = serde_json::to_value(&spec).unwrap();

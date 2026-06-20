@@ -104,6 +104,7 @@ mod tests {
             protocol: super::super::session::OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
             port: 9000,
+            path: String::new(),
             timeout_ms: Some(1000),
         };
         let scripts = vec![ScriptDef {

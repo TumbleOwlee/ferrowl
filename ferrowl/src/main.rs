@@ -139,6 +139,7 @@ fn demo_ocpp_tab(name: String, role: OcppRole) -> Tab {
         protocol: OcppProtocol::Ws,
         ip: "127.0.0.1".into(),
         port: 9000,
+        path: String::new(),
         timeout_ms: None,
     };
     let device = OcppDeviceConfig::from_spec(&spec, Vec::new());

@@ -68,6 +68,9 @@ pub struct OcppSetupDialog {
     pub ip: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub port: Widget<InputFieldState, InputField<u16>>,
+    /// Optional URL path appended after the endpoint, e.g. `/ocpp/cp001`.
+    #[focus]
+    pub path: Widget<InputFieldState, InputField<String>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
 }
@@ -97,6 +100,7 @@ impl OcppSetupDialog {
             ))
             .ip(input("IP", "127.0.0.1", &input_style, false))
             .port(input("Port", "9000", &input_style, false))
+            .path(input("Path", "/ocpp/cp001", &input_style, false))
             .error(text(TextStyle {
                 general: ratatui::prelude::Style::default()
                     .fg(COLOR_SCHEME.error)
@@ -127,6 +131,7 @@ impl OcppSetupDialog {
         });
         set_text(&mut d.ip, &spec.ip);
         set_text(&mut d.port, &spec.port.to_string());
+        set_text(&mut d.path, &spec.path);
         d
     }
 
@@ -153,6 +158,12 @@ impl OcppSetupDialog {
                 .map_err(|_| "Port must be a number (0-65535).".to_string())?
         };
 
+        // Normalize the optional URL path: trim, and ensure a leading '/' when non-empty.
+        let mut path = self.path.state.input().trim().to_string();
+        if !path.is_empty() && !path.starts_with('/') {
+            path.insert(0, '/');
+        }
+
         Ok(OcppSpec {
             name,
             version: self.version.state.get_value(),
@@ -160,6 +171,7 @@ impl OcppSetupDialog {
             protocol: self.protocol.state.get_value(),
             ip,
             port,
+            path,
             timeout_ms: None,
         })
     }
@@ -177,9 +189,9 @@ impl OcppSetupDialog {
 
         let has_error = !self.error.state.is_empty();
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
-        // + protocol|ip|port(3) + keybinds(1), plus the error box (3) only when there is a message.
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3) only when there is a message.
         let box_height = if has_error { 20 } else { 17 };
-        let box_width = 60;
+        let box_width = 80;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -230,15 +242,17 @@ impl OcppSetupDialog {
         StatefulWidget::render(&self.version.widget, vl, buf, &mut self.version.state);
         StatefulWidget::render(&self.role.widget, vr, buf, &mut self.role.state);
 
-        let [proto, ip, port] = Layout::horizontal([
+        let [proto, ip, port, path] = Layout::horizontal([
             Constraint::Length(12),
             Constraint::Min(1),
-            Constraint::Length(14),
+            Constraint::Length(13),
+            Constraint::Length(24),
         ])
         .areas(rows[3]);
         StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
         StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
         StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
+        StatefulWidget::render(&self.path.widget, path, buf, &mut self.path.state);
 
         if has_error {
             StatefulWidget::render(&self.error.widget, rows[4], buf, &mut self.error.state);
