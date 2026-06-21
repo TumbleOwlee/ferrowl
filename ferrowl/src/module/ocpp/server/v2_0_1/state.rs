@@ -79,6 +79,16 @@ impl EntryStateT for CsLevelState {
             _ => return None,
         })
     }
+
+    fn fields(&self) -> Vec<(String, String)> {
+        vec![
+            ("Model".into(), self.model.clone()),
+            ("Vendor".into(), self.vendor.clone()),
+            ("FirmwareVersion".into(), self.firmware_version.clone()),
+            ("SerialNumber".into(), self.serial_number.clone()),
+            ("LastHeartbeat".into(), self.last_heartbeat.clone()),
+        ]
+    }
 }
 
 /// Per-EVSE observed state.
@@ -221,6 +231,36 @@ impl EntryStateT for ConnectorState {
             "UnlockConnector" => serde_json::json!({ "evseId": evse, "connectorId": 1 }),
             _ => return None,
         })
+    }
+
+    fn fields(&self) -> Vec<(String, String)> {
+        vec![
+            ("EvseId".into(), self.evse_id.to_string()),
+            ("Status".into(), self.status.clone()),
+            ("Rfid".into(), self.rfid.clone()),
+            (
+                "TransactionId".into(),
+                self.transaction_id.clone().unwrap_or_default(),
+            ),
+        ]
+    }
+
+    fn metering(&self) -> Vec<(String, String)> {
+        vec![
+            ("Voltage".into(), format!("{:.1}", self.voltage)),
+            ("CurrentL1".into(), format!("{:.1}", self.current[0])),
+            ("CurrentL2".into(), format!("{:.1}", self.current[1])),
+            ("CurrentL3".into(), format!("{:.1}", self.current[2])),
+            ("Power".into(), format!("{:.1}", self.power)),
+            ("Frequency".into(), format!("{:.2}", self.frequency)),
+            ("TotalEnergy".into(), format!("{:.3}", self.total_energy)),
+            (
+                "SessionEnergy".into(),
+                format!("{:.3}", self.session_energy),
+            ),
+            ("Soc".into(), format!("{:.1}", self.soc)),
+            ("Temperature".into(), format!("{:.1}", self.temperature)),
+        ]
     }
 }
 

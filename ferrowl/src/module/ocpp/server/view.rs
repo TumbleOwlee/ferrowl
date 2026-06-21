@@ -53,6 +53,7 @@ use crate::module::ocpp::server::backend::{
     EventRx, EventTx, OcppServer, RfidList, ServerEvent, inbound_messages,
 };
 use crate::module::ocpp::server::build_server_view;
+use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
@@ -66,6 +67,14 @@ pub trait EntryStateT: OcppFields + Default + Send + Sync + 'static {
     /// Derive a complete outbound payload for `name` from observed state (e.g. `idTag` from the
     /// last RFID, the connector id), or `None` to fall back to the JSON editor.
     fn derive_payload(&self, name: &str, connector_id: Option<i64>) -> Option<serde_json::Value>;
+    /// Ordered (field, value) rows describing the observed non-metering state, for the detail
+    /// overlay's "State" table.
+    fn fields(&self) -> Vec<(String, String)>;
+    /// Ordered (field, value) metering rows for the detail overlay's "Metering" table (default
+    /// empty; connector states override).
+    fn metering(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
 
 /// Everything version-specific the generic server view needs.
@@ -82,6 +91,23 @@ pub trait ServerVersion: Version + Sized + 'static {
 
     /// The connector id an inbound request targets (`None` = CS-level), used to bucket it.
     fn inbound_connector(name: &str, request: &serde_json::Value) -> Option<i64>;
+
+    /// The CSMS action that retrieves configuration (`GetConfiguration` for 1.6, `GetVariables` for
+    /// 2.0.1).
+    fn config_action() -> &'static str;
+
+    /// Build a config-fetch request payload for a free-form key (empty = "all" where supported).
+    fn config_request(key: &str) -> serde_json::Value;
+
+    /// Parse a config-fetch response into ordered (key, value) rows.
+    fn parse_config(response: &serde_json::Value) -> Vec<(String, String)>;
+
+    /// The CSMS action that writes one configuration value (`ChangeConfiguration` for 1.6,
+    /// `SetVariables` for 2.0.1).
+    fn set_action() -> &'static str;
+
+    /// Build a config-write request payload setting `key` to `value`.
+    fn set_request(key: &str, value: &str) -> serde_json::Value;
 }
 
 // --- Connection table ------------------------------------------------------
@@ -323,6 +349,11 @@ pub struct ServerView<V: ServerVersion> {
     rfids: RfidList,
     /// Compact table rows (no vertical margin); toggled by `:compact`.
     compact: bool,
+    /// The per-entry detail overlay (Enter on a Charging Stations row), if open.
+    detail: Option<DetailOverlay>,
+    /// In-memory per-CS configuration rows (identity → key/value), kept across overlay open/close
+    /// only while the CS is in the list; dropped when its entry is removed (delete/`:stop`/`:restart`).
+    cs_configs: HashMap<String, Vec<(String, String)>>,
 }
 
 impl<V: ServerVersion> ServerView<V>
@@ -361,6 +392,8 @@ where
             code_content: String::new(),
             rfids,
             compact: false,
+            detail: None,
+            cs_configs: HashMap::new(),
         }
     }
 
@@ -381,8 +414,65 @@ where
         if entry.connector_id.is_none() {
             let identity = entry.identity.clone();
             self.entries.retain(|e| e.identity != identity);
+            self.cs_configs.remove(&identity);
         } else {
             self.entries.remove(idx);
+        }
+    }
+
+    /// Open the detail overlay for the selected entry, seeding any persisted config rows.
+    fn open_detail(&mut self) {
+        let Some(idx) = self.selected() else { return };
+        let entry = &self.entries[idx];
+        let identity = entry.identity.clone();
+        let connector_id = entry.connector_id;
+        let mut overlay = DetailOverlay::new(identity.clone(), connector_id);
+        if connector_id.is_none()
+            && let Some(rows) = self.cs_configs.get(&identity)
+        {
+            overlay.set_config(rows.clone());
+        }
+        self.detail = Some(overlay);
+    }
+
+    /// The live connection for a charge-point identity, if any entry of it is online.
+    fn conn_for(&self, identity: &str) -> Option<ConnectionId> {
+        self.entries
+            .iter()
+            .find(|e| e.identity == identity && e.conn.is_some())
+            .and_then(|e| e.conn)
+    }
+
+    /// Feed the open detail overlay live state/metering rows from its target entry.
+    fn refresh_detail(&mut self) {
+        let Some((identity, connector_id, is_cs)) = self
+            .detail
+            .as_ref()
+            .map(|d| (d.identity.clone(), d.connector_id, d.is_cs))
+        else {
+            return;
+        };
+        let Some(entry) = self
+            .entries
+            .iter()
+            .find(|e| e.identity == identity && e.connector_id == connector_id)
+        else {
+            return;
+        };
+        let (fields, metering) = match &entry.state {
+            EntryState::Cs(s) => {
+                let g = s.read().unwrap();
+                (g.fields(), g.metering())
+            }
+            EntryState::Conn(s) => {
+                let g = s.read().unwrap();
+                (g.fields(), g.metering())
+            }
+        };
+        let detail = self.detail.as_mut().unwrap();
+        detail.set_state_rows(fields);
+        if !is_cs {
+            detail.set_metering_rows(metering);
         }
     }
 
@@ -495,6 +585,17 @@ where
                     context,
                 } => {
                     let identity = self.identity_of(conn);
+                    // Feed a config-fetch response into the open detail overlay (CS-level only).
+                    if ok
+                        && name == V::config_action()
+                        && let Some(d) = self.detail.as_mut()
+                        && d.is_cs
+                        && d.identity == identity
+                    {
+                        for (k, v) in V::parse_config(&response) {
+                            d.merge_config(k, v);
+                        }
+                    }
                     let idx = self.entry_index(&identity, connector_id, Some(conn));
                     let entry = &mut self.entries[idx];
                     push_capped(
@@ -720,6 +821,7 @@ where
             || self.setup_overlay.is_some()
             || self.delete_confirm.is_some()
             || self.pending_setup.is_some()
+            || self.detail.is_some()
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
@@ -849,6 +951,10 @@ where
             ratatui::widgets::Widget::render(ratatui::widgets::Clear, mid, buf);
             StatefulWidget::render(&field.widget, mid, buf, &mut field.state);
         }
+        if self.detail.is_some() {
+            self.refresh_detail();
+            self.detail.as_mut().unwrap().render(area, buf);
+        }
         if let Some(setup) = self.setup_overlay.as_mut() {
             setup.render(area, buf);
         }
@@ -858,6 +964,34 @@ where
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if self.detail.is_some() {
+            let req = self.detail.as_mut().unwrap().input(modifiers, code);
+            let identity = self.detail.as_ref().unwrap().identity.clone();
+            match req {
+                Some(DetailRequest::Close) => {
+                    // Keep the (possibly edited) config rows in memory so reopening keeps them
+                    // while the CS stays in the list.
+                    if let Some(d) = self.detail.take()
+                        && d.is_cs
+                    {
+                        self.cs_configs.insert(d.identity.clone(), d.config_rows());
+                    }
+                    self.detail = None;
+                }
+                Some(DetailRequest::Fetch(key)) => {
+                    if let Some(conn) = self.conn_for(&identity) {
+                        self.send_to(conn, None, V::config_action(), V::config_request(&key));
+                    }
+                }
+                Some(DetailRequest::Set(key, value)) => {
+                    if let Some(conn) = self.conn_for(&identity) {
+                        self.send_to(conn, None, V::set_action(), V::set_request(&key, &value));
+                    }
+                }
+                None => {}
+            }
+            return EventResult::Consumed;
+        }
         if let Some(confirm) = self.delete_confirm.as_mut() {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => self.delete_confirm = None,
@@ -934,6 +1068,10 @@ where
                 self.focus_previous();
                 EventResult::Consumed
             }
+            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Pane::CsTable => {
+                self.open_detail();
+                EventResult::Consumed
+            }
             (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Pane::Scripts => {
                 self.open_scripts();
                 EventResult::Consumed
@@ -992,6 +1130,7 @@ where
                 let _ = self.backend.stop().await;
                 self.entries.clear();
                 self.conn_identity.clear();
+                self.cs_configs.clear();
                 self.log.write().await.write("Settings updated");
             }
 
@@ -1054,12 +1193,14 @@ where
                     let _ = self.backend.stop().await;
                     self.entries.clear();
                     self.conn_identity.clear();
+                    self.cs_configs.clear();
                     CommandResult::Handled(Some("CSMS server stopped".into()))
                 }
                 "restart" => {
                     let _ = self.backend.stop().await;
                     self.entries.clear();
                     self.conn_identity.clear();
+                    self.cs_configs.clear();
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
@@ -1164,7 +1305,7 @@ where
     }
 }
 
-static OCPP_SERVER_COMMANDS: [CommandDescriptor; 8] = [
+static OCPP_SERVER_COMMANDS: [CommandDescriptor; 9] = [
     CommandDescriptor {
         name: ":start | :stop",
         description: "bind / unbind the CSMS listener",
@@ -1196,6 +1337,10 @@ static OCPP_SERVER_COMMANDS: [CommandDescriptor; 8] = [
     CommandDescriptor {
         name: "d",
         description: "delete the selected charging station / connector",
+    },
+    CommandDescriptor {
+        name: "Enter",
+        description: "open the selected entry's detail overlay",
     },
 ];
 
@@ -1380,6 +1525,59 @@ mod tests {
         // BackTab from CsTable lands on Payload (reverse order).
         v.focus_previous();
         assert!(v.focus == Pane::Payload);
+    }
+
+    #[test]
+    fn open_detail_builds_overlay_for_selected_entry() {
+        let mut v = server_view();
+        // Add a CS-level entry and select its row.
+        v.entry_index("CP1", None, None);
+        v.cs_table.state.set_values(vec![CsRow {
+            name: "CP1".into(),
+            connector: String::new(),
+            state: "Disconnected".into(),
+        }]);
+        v.cs_table.state.move_down();
+        assert!(!v.is_overlay_active());
+        v.open_detail();
+        assert!(v.is_overlay_active(), "detail overlay should be active");
+        let d = v.detail.as_ref().expect("detail overlay open");
+        assert_eq!(d.identity, "CP1");
+        assert!(d.is_cs, "CS-level entry should yield a CS detail overlay");
+    }
+
+    #[test]
+    fn config_keys_persist_across_overlay_close() {
+        let mut v = server_view();
+        v.entry_index("CP1", None, None);
+        v.cs_table.state.set_values(vec![CsRow {
+            name: "CP1".into(),
+            connector: String::new(),
+            state: "Disconnected".into(),
+        }]);
+        v.open_detail();
+        // Simulate a fetched config row merged into the overlay.
+        v.detail
+            .as_mut()
+            .unwrap()
+            .merge_config("HeartbeatInterval".into(), "30".into());
+        // Close the overlay (Esc) — keep rows in memory, not discard.
+        v.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(v.detail.is_none());
+        assert_eq!(
+            v.cs_configs.get("CP1").unwrap(),
+            &vec![("HeartbeatInterval".into(), "30".into())]
+        );
+        // Reopening seeds the overlay from the in-memory rows.
+        v.open_detail();
+        assert_eq!(
+            v.detail.as_ref().unwrap().config_rows(),
+            vec![("HeartbeatInterval".into(), "30".into())]
+        );
+        v.detail = None;
+        // Deleting the CS drops its stored config.
+        v.delete_selected();
+        assert!(v.cs_configs.get("CP1").is_none());
     }
 
     #[test]

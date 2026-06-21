@@ -2,6 +2,7 @@
 //! modules supplying observed-state types, inbound handlers, and the [`view::ServerVersion`] glue.
 
 pub mod backend;
+mod detail;
 mod v1_6;
 mod v2_0_1;
 pub mod view;
