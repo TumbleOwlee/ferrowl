@@ -6,7 +6,7 @@ mod state;
 
 use ferrowl_ocpp::V1_6;
 
-use crate::module::ocpp::server::backend::EventTx;
+use crate::module::ocpp::server::backend::{EventTx, RfidList};
 use crate::module::ocpp::server::view::ServerVersion;
 
 use handler::CsmsHandler16;
@@ -17,8 +17,8 @@ impl ServerVersion for V1_6 {
     type Conn = ConnectorState;
     type Handler = CsmsHandler16;
 
-    fn handler(tx: EventTx) -> Self::Handler {
-        CsmsHandler16::new(tx)
+    fn handler(tx: EventTx, rfids: RfidList) -> Self::Handler {
+        CsmsHandler16::new(tx, rfids)
     }
 
     fn inbound_connector(_name: &str, request: &serde_json::Value) -> Option<i64> {

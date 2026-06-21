@@ -36,6 +36,9 @@ pub struct CsState {
     pub limit_unit: String,
     /// Variable store (component-agnostic name/value), answers GetVariables.
     pub config: Vec<ConfigKey>,
+    /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response. `None`
+    /// until a BootNotification round-trips; the view falls back to a built-in default.
+    pub heartbeat_interval_secs: Option<u64>,
 }
 
 impl Default for CsState {
@@ -74,6 +77,7 @@ impl Default for CsState {
                 var("AuthCtrlr.Enabled", "true", false),
                 var("EVSE.AvailabilityState", "Available", true),
             ],
+            heartbeat_interval_secs: None,
         }
     }
 }

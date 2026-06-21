@@ -30,6 +30,9 @@ pub struct CsState {
     pub limit: Option<f64>,
     pub limit_unit: String,
     pub config: Vec<ConfigKey>,
+    /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response. `None`
+    /// until a BootNotification round-trips; the view falls back to a built-in default.
+    pub heartbeat_interval_secs: Option<u64>,
 }
 
 impl Default for CsState {
@@ -59,6 +62,7 @@ impl Default for CsState {
             transaction_id: None,
             limit: None,
             limit_unit: "A".to_string(),
+            heartbeat_interval_secs: None,
             config: vec![
                 cfg("HeartbeatInterval", "300", false),
                 cfg("MeterValueSampleInterval", "60", false),

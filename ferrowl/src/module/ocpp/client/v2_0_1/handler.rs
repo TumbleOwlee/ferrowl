@@ -18,7 +18,7 @@ use ferrowl_ocpp::v2_0_1::messages::reset::ResetResponse;
 use ferrowl_ocpp::v2_0_1::messages::set_variables::SetVariablesResponse;
 use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1, Version};
 
-use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, now_ms};
+use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 
@@ -170,22 +170,16 @@ impl CsActionHandler<V2_0_1> for CsStateHandler {
         let ok = result.is_ok();
         let messages = self.messages.clone();
         async move {
-            messages.write().await.push(OcppMessage {
-                ts: now_ms(),
-                direction: Dir::In,
-                name: name.clone(),
-                payload: request,
-                ok: None,
-                context: "inbound call".to_string(),
-            });
-            messages.write().await.push(OcppMessage {
-                ts: now_ms(),
-                direction: Dir::Out,
-                name,
-                payload: reply_payload,
-                ok: Some(ok),
-                context,
-            });
+            let mut guard = messages.write().await;
+            push_capped(
+                &mut guard,
+                OcppMessage::new(Dir::In, name.clone(), request, None, "inbound call"),
+            );
+            push_capped(
+                &mut guard,
+                OcppMessage::new(Dir::Out, name, reply_payload, Some(ok), context),
+            );
+            drop(guard);
             result
         }
     }

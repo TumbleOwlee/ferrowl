@@ -41,7 +41,7 @@ use ferrowl_ocpp::{ConnectorScope, Version};
 
 use crate::app::LogRing;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
-use crate::module::ocpp::client::backend::{Dir, OcppMessage};
+use crate::module::ocpp::client::backend::{Dir, OcppMessage, push_capped};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{
     ActionQueue, OcppFields, OcppSimHandle, merge_overrides, run_ocpp_sim,
@@ -50,8 +50,9 @@ use crate::module::ocpp::client::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::server::backend::{
-    EventRx, EventTx, OcppServer, ServerEvent, inbound_messages,
+    EventRx, EventTx, OcppServer, RfidList, ServerEvent, inbound_messages,
 };
+use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
@@ -76,8 +77,8 @@ pub trait ServerVersion: Version + Sized + 'static {
     /// The inbound handler answering CS→CSMS Calls and emitting [`ServerEvent`]s.
     type Handler: CsmsActionHandler<Self>;
 
-    /// Build the inbound handler, wiring it to the view's event channel.
-    fn handler(tx: EventTx) -> Self::Handler;
+    /// Build the inbound handler, wiring it to the view's event channel and RFID accept-list.
+    fn handler(tx: EventTx, rfids: RfidList) -> Self::Handler;
 
     /// The connector id an inbound request targets (`None` = CS-level), used to bucket it.
     fn inbound_connector(name: &str, request: &serde_json::Value) -> Option<i64>;
@@ -269,6 +270,7 @@ enum Pane {
     Scripts,
     Actions,
     Messages,
+    Payload,
 }
 
 type CsTable = Widget<TableState<CsRow, 3>, Table<CsRow, CsHeader, 3>>;
@@ -311,6 +313,14 @@ pub struct ServerView<V: ServerVersion> {
     focus: Pane,
     /// Whether the listener should be running (auto-bind on open; toggled by `:start`/`:stop`).
     want_running: bool,
+    /// Highest message `seq` already teed into the persistent log, so each is logged once.
+    logged_seq: u64,
+    /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
+    applied_log_file: Option<String>,
+    /// Last content pushed into the payload viewer, so periodic refreshes don't reset its scroll.
+    code_content: String,
+    /// Shared RFID accept-list handed to each (re)built inbound handler; edited via `:rfid`.
+    rfids: RfidList,
     /// Compact table rows (no vertical margin); toggled by `:compact`.
     compact: bool,
 }
@@ -321,6 +331,7 @@ where
 {
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let rfids: RfidList = Arc::new(std::sync::RwLock::new(device.rfids.clone()));
         Self {
             backend: OcppServer::new(spec.clone()),
             spec,
@@ -345,6 +356,10 @@ where
             delete_confirm: None,
             focus: Pane::CsTable,
             want_running: true,
+            logged_seq: 0,
+            applied_log_file: None,
+            code_content: String::new(),
+            rfids,
             compact: false,
         }
     }
@@ -467,7 +482,7 @@ where
                     entry.conn = Some(conn);
                     entry.apply_inbound(&name, &request);
                     for m in inbound_messages(&name, request, response) {
-                        entry.messages.push(m);
+                        push_capped(&mut entry.messages, m);
                     }
                 }
                 ServerEvent::Outbound {
@@ -482,22 +497,14 @@ where
                     let identity = self.identity_of(conn);
                     let idx = self.entry_index(&identity, connector_id, Some(conn));
                     let entry = &mut self.entries[idx];
-                    entry.messages.push(OcppMessage {
-                        ts: crate::module::ocpp::client::backend::now_ms(),
-                        direction: Dir::Out,
-                        name: name.clone(),
-                        payload: request,
-                        ok: None,
-                        context: "outbound call".to_string(),
-                    });
-                    entry.messages.push(OcppMessage {
-                        ts: crate::module::ocpp::client::backend::now_ms(),
-                        direction: Dir::In,
-                        name,
-                        payload: response,
-                        ok: Some(ok),
-                        context,
-                    });
+                    push_capped(
+                        &mut entry.messages,
+                        OcppMessage::new(Dir::Out, name.clone(), request, None, "outbound call"),
+                    );
+                    push_capped(
+                        &mut entry.messages,
+                        OcppMessage::new(Dir::In, name, response, Some(ok), context),
+                    );
                 }
             }
         }
@@ -609,7 +616,10 @@ where
             .selected()
             .map(|i| self.entries[i].connector_id.is_some());
         let want = is_connector.unwrap_or(false);
-        if self.actions_for_connector == Some(want) && self.selected().is_some() {
+        // Rebuild only when the level (CS vs connector) actually changes. Gating on a live
+        // selection rebuilt the list every frame while the table was empty, resetting the
+        // selection so it could never move.
+        if self.actions_for_connector == Some(want) {
             return;
         }
         self.actions_for_connector = Some(want);
@@ -637,7 +647,12 @@ where
             })
             .map(|m| serde_json::to_string_pretty(&m.payload).unwrap_or_default())
             .unwrap_or_default();
-        self.code.state.set_content(&content);
+        // Only reset the viewer when the selected payload actually changes; otherwise the periodic
+        // refresh would snap its scroll position back to the top every tick.
+        if content != self.code_content {
+            self.code.state.set_content(&content);
+            self.code_content = content;
+        }
     }
 
     fn open_scripts(&mut self) {
@@ -658,13 +673,15 @@ where
             Pane::CsTable => Pane::Scripts,
             Pane::Scripts => Pane::Actions,
             Pane::Actions => Pane::Messages,
-            Pane::Messages => Pane::CsTable,
+            Pane::Messages => Pane::Payload,
+            Pane::Payload => Pane::CsTable,
         };
     }
 
     fn focus_previous(&mut self) {
         self.focus = match self.focus {
-            Pane::CsTable => Pane::Messages,
+            Pane::CsTable => Pane::Payload,
+            Pane::Payload => Pane::Messages,
             Pane::Messages => Pane::Actions,
             Pane::Actions => Pane::Scripts,
             Pane::Scripts => Pane::CsTable,
@@ -680,6 +697,8 @@ where
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
+        device.log_file = self.device.log_file.clone();
+        device.rfids = self.rfids.read().unwrap().clone();
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
             Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
@@ -760,6 +779,9 @@ where
         self.msg_table
             .state
             .set_focused(focused && self.focus == Pane::Messages);
+        self.code
+            .state
+            .set_focused(focused && self.focus == Pane::Payload);
 
         StatefulWidget::render(
             &self.cs_table.widget,
@@ -936,6 +958,7 @@ where
                     consumed
                 }
                 Pane::Scripts => EventResult::Unhandled(modifiers, code),
+                Pane::Payload => self.code.state.handle_events(modifiers, code),
             },
         }
     }
@@ -944,9 +967,22 @@ where
         Box::pin(async move {
             // Apply a resolved `:edit`.
             if let Some((spec, path)) = self.pending_setup.take() {
-                let device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
+                let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
+                device.log_file = self.device.log_file.clone();
+                device.rfids = self.rfids.read().unwrap().clone();
                 if spec.role == OcppRole::Client {
+                    // Stop the listener first: dropping `Server<V>` only detaches its accept task,
+                    // leaving the port bound, so the swapped-in view could never rebind.
+                    let _ = self.backend.stop().await;
                     self.replacement = Some(build_client_view(spec, path, device));
+                    return;
+                }
+                if spec.version != self.spec.version {
+                    // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
+                    // generic over the *old* version and would rebind with the old subprotocol,
+                    // rejecting the (now-different-version) client handshake with a 400.
+                    let _ = self.backend.stop().await;
+                    self.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 self.spec = spec;
@@ -961,7 +997,7 @@ where
 
             // Auto-bind / honour `:start`.
             if self.want_running && !self.backend.is_online() {
-                let handler = V::handler(self.events_tx.clone());
+                let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                 if let Err(e) = self.backend.start(handler).await {
                     self.log.write().await.write(&format!("listen failed: {e}"));
                     self.want_running = false;
@@ -970,6 +1006,35 @@ where
 
             self.drain_events();
             self.drain_lua_actions();
+
+            // Apply a pending `:log` change (or device-config log file) to the persistent sink.
+            if self.applied_log_file != self.device.log_file {
+                let name = self.spec.name.clone();
+                self.log
+                    .write()
+                    .await
+                    .set_log_file(self.device.log_file.as_deref(), &name);
+                self.applied_log_file = self.device.log_file.clone();
+            }
+
+            // Tee new protocol messages (across all entries) into the persistent log. Each entry's
+            // log is filtered separately on screen, but the persistent log is the whole CSMS.
+            let mut max_seq = self.logged_seq;
+            let mut new: Vec<(u64, String)> = Vec::new();
+            for entry in &self.entries {
+                for m in entry.messages.iter().filter(|m| m.seq > self.logged_seq) {
+                    max_seq = max_seq.max(m.seq);
+                    new.push((m.seq, m.log_line()));
+                }
+            }
+            if !new.is_empty() {
+                new.sort_by_key(|(seq, _)| *seq);
+                let mut log = self.log.write().await;
+                for (_, line) in new {
+                    log.write(&line);
+                }
+                self.logged_seq = max_seq;
+            }
         })
     }
 
@@ -978,7 +1043,7 @@ where
             match cmd.trim() {
                 "start" => {
                     self.want_running = true;
-                    let handler = V::handler(self.events_tx.clone());
+                    let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
                         Ok(()) => CommandResult::Handled(Some("CSMS server started".into())),
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
@@ -996,7 +1061,7 @@ where
                     self.entries.clear();
                     self.conn_identity.clear();
                     self.want_running = true;
-                    let handler = V::handler(self.events_tx.clone());
+                    let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
                         Ok(()) => CommandResult::Handled(Some("CSMS server restarted".into())),
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
@@ -1023,6 +1088,57 @@ where
                     self.set_compact(!self.compact);
                     CommandResult::Handled(None)
                 }
+                "log" => {
+                    self.device.log_file = None;
+                    CommandResult::Handled(Some("File logging disabled".into()))
+                }
+                cmd if cmd.starts_with("log ") => {
+                    let path = cmd["log ".len()..].trim().to_string();
+                    if path.is_empty() {
+                        self.device.log_file = None;
+                        CommandResult::Handled(Some("File logging disabled".into()))
+                    } else {
+                        self.device.log_file = Some(path.clone());
+                        CommandResult::Handled(Some(format!("Logging to {path}")))
+                    }
+                }
+                "rfid" => {
+                    let list = self.rfids.read().unwrap();
+                    let msg = if list.is_empty() {
+                        "RFID accept-list empty (all tags accepted)".to_string()
+                    } else {
+                        format!("Accepted RFIDs: {}", list.join(", "))
+                    };
+                    CommandResult::Handled(Some(msg))
+                }
+                "rfid clear" => {
+                    self.rfids.write().unwrap().clear();
+                    CommandResult::Handled(Some("RFID accept-list cleared (all accepted)".into()))
+                }
+                cmd if cmd.starts_with("rfid add ") => {
+                    let tag = cmd["rfid add ".len()..].trim().to_string();
+                    if tag.is_empty() {
+                        return CommandResult::Handled(Some("Usage: :rfid add <tag>".into()));
+                    }
+                    let mut list = self.rfids.write().unwrap();
+                    if list.contains(&tag) {
+                        CommandResult::Handled(Some(format!("{tag} already in accept-list")))
+                    } else {
+                        list.push(tag.clone());
+                        CommandResult::Handled(Some(format!("Added RFID {tag}")))
+                    }
+                }
+                cmd if cmd.starts_with("rfid del ") => {
+                    let tag = cmd["rfid del ".len()..].trim().to_string();
+                    let mut list = self.rfids.write().unwrap();
+                    let before = list.len();
+                    list.retain(|t| t != &tag);
+                    if list.len() < before {
+                        CommandResult::Handled(Some(format!("Removed RFID {tag}")))
+                    } else {
+                        CommandResult::Handled(Some(format!("{tag} not in accept-list")))
+                    }
+                }
                 _ => CommandResult::Unhandled,
             }
         })
@@ -1048,7 +1164,7 @@ where
     }
 }
 
-static OCPP_SERVER_COMMANDS: [CommandDescriptor; 6] = [
+static OCPP_SERVER_COMMANDS: [CommandDescriptor; 8] = [
     CommandDescriptor {
         name: ":start | :stop",
         description: "bind / unbind the CSMS listener",
@@ -1068,6 +1184,14 @@ static OCPP_SERVER_COMMANDS: [CommandDescriptor; 6] = [
     CommandDescriptor {
         name: ":compact",
         description: "toggle compact rows",
+    },
+    CommandDescriptor {
+        name: ":log [file]",
+        description: "set/clear log file",
+    },
+    CommandDescriptor {
+        name: ":rfid [add|del <tag> | clear]",
+        description: "CSMS RFID accept-list",
     },
     CommandDescriptor {
         name: "d",
@@ -1216,5 +1340,68 @@ fn editable_code() -> Widget<CodeInputFieldState, CodeInputField> {
             })
             .build()
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::ocpp::config::session::{OcppProtocol, OcppVersion};
+    use ferrowl_ocpp::V1_6;
+
+    fn server_view() -> ServerView<V1_6> {
+        let spec = OcppSpec {
+            name: "csms".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Server,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 0,
+            path: String::new(),
+            timeout_ms: None,
+        };
+        ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
+    }
+
+    #[test]
+    fn focus_cycle_includes_payload_pane() {
+        let mut v = server_view();
+        // CsTable -> Scripts -> Actions -> Messages -> Payload -> CsTable.
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            v.focus_next();
+            seen.push(v.focus);
+        }
+        assert!(
+            seen.contains(&Pane::Payload),
+            "Payload pane not in Tab order"
+        );
+        assert!(v.focus == Pane::CsTable, "focus_next did not wrap to start");
+        // BackTab from CsTable lands on Payload (reverse order).
+        v.focus_previous();
+        assert!(v.focus == Pane::Payload);
+    }
+
+    #[test]
+    fn sync_actions_preserves_selection_when_no_entry_selected() {
+        let mut v = server_view();
+        // First sync builds the CS-level action list.
+        v.sync_actions();
+        assert!(
+            v.actions.state.values().len() > 1,
+            "need >1 action to exercise selection movement"
+        );
+        // Move the selection off the top.
+        v.actions.state.move_down();
+        let chosen = v.actions.state.selection();
+        assert_ne!(chosen, 0);
+        // A later sync with no CS entry selected must not rebuild/reset the list (the bug:
+        // it rebuilt every frame, snapping the selection back to the top).
+        v.sync_actions();
+        assert_eq!(
+            v.actions.state.selection(),
+            chosen,
+            "selection reset — sync_actions rebuilt the list with no selection present"
+        );
     }
 }

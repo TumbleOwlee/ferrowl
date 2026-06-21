@@ -14,7 +14,7 @@ use ferrowl_ocpp::v1_6::messages::reset::ResetResponse;
 use ferrowl_ocpp::v1_6::types::{ConfigurationStatus, KeyValue, ResetResponseStatus};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version};
 
-use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, now_ms};
+use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
 
 /// Inbound handler for an OCPP 1.6 charging station, backed by shared [`CsState`].
@@ -150,22 +150,16 @@ impl CsActionHandler<V1_6> for CsStateHandler {
         let messages = self.messages.clone();
         async move {
             // Record the inbound Call, then our reply.
-            messages.write().await.push(OcppMessage {
-                ts: now_ms(),
-                direction: Dir::In,
-                name: name.clone(),
-                payload: request,
-                ok: None,
-                context: "inbound call".to_string(),
-            });
-            messages.write().await.push(OcppMessage {
-                ts: now_ms(),
-                direction: Dir::Out,
-                name,
-                payload: reply_payload,
-                ok: Some(ok),
-                context,
-            });
+            let mut guard = messages.write().await;
+            push_capped(
+                &mut guard,
+                OcppMessage::new(Dir::In, name.clone(), request, None, "inbound call"),
+            );
+            push_capped(
+                &mut guard,
+                OcppMessage::new(Dir::Out, name, reply_payload, Some(ok), context),
+            );
+            drop(guard);
             result
         }
     }

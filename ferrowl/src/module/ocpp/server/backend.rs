@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 use ferrowl_ocpp::csms::{Command, Config, ConnectionId, CsmsActionHandler, Server, ServerBuilder};
 use ferrowl_ocpp::{Error, Version};
 
-use crate::module::ocpp::client::backend::{Dir, OcppMessage, now_ms};
+use crate::module::ocpp::client::backend::{Dir, OcppMessage};
 use crate::module::ocpp::config::session::OcppSpec;
 
 /// A lifecycle/message event delivered from the CSMS server tasks to the view. Version-agnostic:
@@ -49,6 +49,16 @@ pub enum ServerEvent {
 
 pub type EventTx = mpsc::UnboundedSender<ServerEvent>;
 pub type EventRx = mpsc::UnboundedReceiver<ServerEvent>;
+
+/// Shared CSMS RFID accept-list. Edited live by the view (`:rfid`), read by the inbound handler to
+/// gate Authorize / StartTransaction. Empty = accept every tag.
+pub type RfidList = std::sync::Arc<std::sync::RwLock<Vec<String>>>;
+
+/// Whether `id_tag` is accepted given an accept-list: an empty list accepts everything.
+pub fn rfid_accepted(list: &RfidList, id_tag: &str) -> bool {
+    let guard = list.read().unwrap();
+    guard.is_empty() || guard.iter().any(|t| t == id_tag)
+}
 
 /// The version-generic CSMS backend owned by a server view.
 pub struct OcppServer<V: Version> {
@@ -148,21 +158,7 @@ impl<V: Version> OcppServerSender<V> {
 /// Build a message-log entry for a request (inbound) / its reply (outbound).
 pub fn inbound_messages(name: &str, request: Value, response: Value) -> [OcppMessage; 2] {
     [
-        OcppMessage {
-            ts: now_ms(),
-            direction: Dir::In,
-            name: name.to_string(),
-            payload: request,
-            ok: None,
-            context: String::new(),
-        },
-        OcppMessage {
-            ts: now_ms(),
-            direction: Dir::Out,
-            name: name.to_string(),
-            payload: response,
-            ok: Some(true),
-            context: String::new(),
-        },
+        OcppMessage::new(Dir::In, name, request, None, String::new()),
+        OcppMessage::new(Dir::Out, name, response, Some(true), String::new()),
     ]
 }

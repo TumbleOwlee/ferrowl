@@ -78,7 +78,9 @@ impl StatefulWidget for &CodeInputField {
         .split(area)[1];
 
         if let Border::Full(m) = &self.border {
-            let border_style = if state.focused() && !state.disabled() {
+            // A focused field shows the focused border even when disabled (read-only): a disabled
+            // viewer can still hold focus for scrolling, and the border must reflect that.
+            let border_style = if state.focused() {
                 self.style.focused
             } else {
                 self.style.border

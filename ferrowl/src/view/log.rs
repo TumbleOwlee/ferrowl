@@ -74,6 +74,36 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (y as i32, m as u32, d as u32)
 }
 
+/// Derive a per-module log file path from a user-supplied `base` and a module/tab `name`:
+/// `<stem>.<sanitized-name>.<ext>` (or `<base>.<name>` without an extension), next to `base`.
+/// Mirrors the Modbus module's own path scheme so OCPP `:log` files sit alongside Modbus ones.
+pub fn module_log_path(base: &str, name: &str) -> std::path::PathBuf {
+    use std::path::{Path, PathBuf};
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let path = Path::new(base);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("ferrowl");
+    let filename = match path.extension().and_then(|s| s.to_str()) {
+        Some(ext) => format!("{stem}.{sanitized}.{ext}"),
+        None => format!("{stem}.{sanitized}"),
+    };
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(filename),
+        _ => PathBuf::from(filename),
+    }
+}
+
 /// Build an empty log view with a border and "Log" title.
 pub fn new_log_view() -> LogView {
     Widget {
@@ -122,6 +152,15 @@ mod tests {
         // 2024-02-29 is day 19782 since epoch
         let ms: u64 = 19782 * 86400 * 1000;
         assert_eq!(format_timestamp(ms), "2024-02-29 00:00:00.000");
+    }
+
+    #[test]
+    fn module_log_path_inserts_sanitized_name_before_ext() {
+        let p = module_log_path("/tmp/run.log", "cs 1/2");
+        assert_eq!(p, std::path::Path::new("/tmp/run.cs_1_2.log"));
+        // No extension: append the name.
+        let p = module_log_path("/tmp/run", "csms");
+        assert_eq!(p, std::path::Path::new("/tmp/run.csms"));
     }
 
     #[test]

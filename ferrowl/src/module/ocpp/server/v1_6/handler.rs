@@ -13,24 +13,44 @@ use ferrowl_ocpp::csms::{ConnectionId, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version};
 
 use crate::module::ocpp::client::backend::rfc3339_now;
-use crate::module::ocpp::server::backend::{EventTx, ServerEvent};
+use crate::module::ocpp::server::backend::{EventTx, RfidList, ServerEvent, rfid_accepted};
 
 /// CSMS inbound handler for OCPP 1.6.
 pub struct CsmsHandler16 {
     tx: EventTx,
     next_txid: AtomicI64,
+    rfids: RfidList,
 }
 
 impl CsmsHandler16 {
-    pub fn new(tx: EventTx) -> Self {
+    pub fn new(tx: EventTx, rfids: RfidList) -> Self {
         Self {
             tx,
             next_txid: AtomicI64::new(1),
+            rfids,
         }
     }
 
-    /// Build the typed response for an inbound action.
-    fn respond(&self, name: &str, action: &Action16) -> Result<Response16, CallError> {
+    /// `"Accepted"` / `"Invalid"` for an id tag, per the configured accept-list.
+    fn id_tag_status(&self, id_tag: &str) -> &'static str {
+        if rfid_accepted(&self.rfids, id_tag) {
+            "Accepted"
+        } else {
+            "Invalid"
+        }
+    }
+
+    /// Build the typed response for an inbound action. `request` is the encoded Call payload.
+    fn respond(
+        &self,
+        name: &str,
+        action: &Action16,
+        request: &Value,
+    ) -> Result<Response16, CallError> {
+        let id_tag_status = || {
+            let tag = request["idTag"].as_str().unwrap_or_default();
+            self.id_tag_status(tag)
+        };
         let crafted: Option<Value> = match name {
             "BootNotification" => Some(json!({
                 "status": "Accepted",
@@ -38,9 +58,10 @@ impl CsmsHandler16 {
                 "interval": 300,
             })),
             "Heartbeat" => Some(json!({ "currentTime": rfc3339_now() })),
+            "Authorize" => Some(json!({ "idTagInfo": { "status": id_tag_status() } })),
             "StartTransaction" => {
                 let id = self.next_txid.fetch_add(1, Ordering::Relaxed);
-                Some(json!({ "transactionId": id, "idTagInfo": { "status": "Accepted" } }))
+                Some(json!({ "transactionId": id, "idTagInfo": { "status": id_tag_status() } }))
             }
             _ => None,
         };
@@ -65,7 +86,7 @@ impl CsmsActionHandler<V1_6> for CsmsHandler16 {
     ) -> impl Future<Output = Result<Response16, CallError>> + Send {
         let name = V1_6::action_name(&action).to_string();
         let request = V1_6::encode_action(&action).unwrap_or(Value::Null);
-        let result = self.respond(&name, &action);
+        let result = self.respond(&name, &action, &request);
         let response = match &result {
             Ok(resp) => V1_6::encode_response(resp).unwrap_or(Value::Null),
             Err(_) => Value::Null,
@@ -95,10 +116,14 @@ mod tests {
     use super::*;
     use ferrowl_ocpp::csms::ConnectionId;
 
+    fn empty_rfids() -> crate::module::ocpp::server::backend::RfidList {
+        std::sync::Arc::new(std::sync::RwLock::new(Vec::new()))
+    }
+
     #[tokio::test]
     async fn ut_boot_response_and_inbound_event() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let handler = CsmsHandler16::new(tx);
+        let handler = CsmsHandler16::new(tx, empty_rfids());
         let action = V1_6::default_action("BootNotification").unwrap();
         let resp = handler.handle_call(ConnectionId(1), action).await.unwrap();
         let json = V1_6::encode_response(&resp).unwrap();
@@ -114,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn ut_start_transaction_mints_unique_txids() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let handler = CsmsHandler16::new(tx);
+        let handler = CsmsHandler16::new(tx, empty_rfids());
         let txid = |resp: &Response16| {
             V1_6::encode_response(resp).unwrap()["transactionId"]
                 .as_i64()
@@ -135,5 +160,36 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(txid(&r1), txid(&r2));
+    }
+
+    #[tokio::test]
+    async fn ut_authorize_gated_by_rfid_list() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let rfids = std::sync::Arc::new(std::sync::RwLock::new(vec!["GOOD".to_string()]));
+        let handler = CsmsHandler16::new(tx, rfids);
+        let status = |resp: &Response16| {
+            V1_6::encode_response(resp).unwrap()["idTagInfo"]["status"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let good = V1_6::decode_call("Authorize", json!({ "idTag": "GOOD" })).unwrap();
+        let bad = V1_6::decode_call("Authorize", json!({ "idTag": "NOPE" })).unwrap();
+        let r_good = handler.handle_call(ConnectionId(1), good).await.unwrap();
+        let r_bad = handler.handle_call(ConnectionId(1), bad).await.unwrap();
+        assert_eq!(status(&r_good), "Accepted");
+        assert_eq!(status(&r_bad), "Invalid");
+    }
+
+    #[tokio::test]
+    async fn ut_empty_rfid_list_accepts_all() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let handler = CsmsHandler16::new(tx, empty_rfids());
+        let action = V1_6::decode_call("Authorize", json!({ "idTag": "ANYTHING" })).unwrap();
+        let resp = handler.handle_call(ConnectionId(1), action).await.unwrap();
+        assert_eq!(
+            V1_6::encode_response(&resp).unwrap()["idTagInfo"]["status"],
+            "Accepted"
+        );
     }
 }

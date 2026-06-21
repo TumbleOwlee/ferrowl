@@ -39,7 +39,9 @@ use tokio::sync::RwLock as AsyncRwLock;
 use ferrowl_ocpp::{V1_6, Version};
 
 use crate::app::LogRing;
-use crate::module::ocpp::client::backend::{OcppClient, OcppMessage, rfc3339_now};
+use crate::module::ocpp::client::backend::{
+    DEFAULT_HEARTBEAT_SECS, OcppClient, OcppMessage, TICKS_PER_SEC, boot_interval, rfc3339_now,
+};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::config::ConfigEditDialog;
 use crate::module::ocpp::client::lua_sim::{
@@ -312,6 +314,7 @@ enum Pane {
     ConfigValue,
     Actions,
     Messages,
+    Payload,
 }
 
 type StateTable = Widget<TableState<NvRow, 3>, Table<NvRow, NvHeader, 3>>;
@@ -355,6 +358,16 @@ pub struct OcppClientV16View {
     /// Whether a transaction was open on the previous `refresh`, to reset `meter_tick` on the
     /// no→yes edge (the start side-effect lands asynchronously from a spawned send task).
     tx_was_active: bool,
+    /// Ticks since the last auto-Heartbeat, for the BootNotification-driven cadence.
+    heartbeat_tick: u32,
+    /// Online state observed on the previous `refresh`, to log the online→offline edge once.
+    was_online: bool,
+    /// Highest message `seq` already teed into the persistent log, so each is logged once.
+    logged_seq: u64,
+    /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
+    applied_log_file: Option<String>,
+    /// Last content pushed into the payload viewer, so periodic refreshes don't reset its scroll.
+    code_content: String,
     compact: bool,
 }
 
@@ -394,6 +407,11 @@ impl OcppClientV16View {
             sim: None,
             meter_tick: 0,
             tx_was_active: false,
+            heartbeat_tick: 0,
+            was_online: false,
+            logged_seq: 0,
+            applied_log_file: None,
+            code_content: String::new(),
             compact: false,
             spec,
         };
@@ -468,6 +486,7 @@ impl OcppClientV16View {
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
+        device.log_file = self.device.log_file.clone();
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
             Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
@@ -551,19 +570,21 @@ impl OcppClientV16View {
             Pane::ConfigTable => Pane::ConfigKey,
             Pane::ConfigKey => Pane::ConfigValue,
             Pane::ConfigValue => Pane::Messages,
-            Pane::Messages => Pane::State,
+            Pane::Messages => Pane::Payload,
+            Pane::Payload => Pane::State,
         };
     }
 
     fn focus_previous(&mut self) {
         self.focus = match self.focus {
-            Pane::State => Pane::Messages,
+            Pane::State => Pane::Payload,
             Pane::Scripts => Pane::State,
             Pane::Actions => Pane::Scripts,
             Pane::ConfigTable => Pane::Actions,
             Pane::ConfigKey => Pane::ConfigTable,
             Pane::ConfigValue => Pane::ConfigKey,
             Pane::Messages => Pane::ConfigValue,
+            Pane::Payload => Pane::Messages,
         };
     }
 
@@ -741,7 +762,12 @@ impl OcppClientV16View {
             .and_then(|i| self.messages.get(i))
             .map(|m| serde_json::to_string_pretty(&m.payload).unwrap_or_default())
             .unwrap_or_default();
-        self.code.state.set_content(&content);
+        // Only reset the viewer when the selected payload actually changes; otherwise the periodic
+        // refresh would snap its scroll position back to the top every tick.
+        if content != self.code_content {
+            self.code.state.set_content(&content);
+            self.code_content = content;
+        }
     }
 
     /// Decode + send a (name, payload) without blocking: the round-trip runs in a spawned task so a
@@ -781,6 +807,10 @@ fn apply_post_send(state: &Arc<RwLock<CsState>>, name: &str, response: &serde_js
         "StopTransaction" => {
             s.transaction_id = None;
             s.status = "Available".to_string();
+        }
+        "BootNotification" => {
+            // The CSMS dictates the heartbeat cadence; a zero/absent interval falls back later.
+            s.heartbeat_interval_secs = boot_interval(response);
         }
         _ => {}
     }
@@ -846,6 +876,9 @@ impl ModuleView for OcppClientV16View {
         self.msg_table
             .state
             .set_focused(focused && self.focus == Pane::Messages);
+        self.code
+            .state
+            .set_focused(focused && self.focus == Pane::Payload);
 
         StatefulWidget::render(
             &self.state_table.widget,
@@ -1088,7 +1121,7 @@ impl ModuleView for OcppClientV16View {
                     Pane::ConfigTable => self.open_config_edit(),
                     Pane::ConfigKey | Pane::ConfigValue => self.add_config_key(),
                     Pane::Actions => self.trigger_action(),
-                    Pane::Messages => {}
+                    Pane::Messages | Pane::Payload => {}
                 }
                 EventResult::Consumed
             }
@@ -1127,6 +1160,7 @@ impl ModuleView for OcppClientV16View {
                     self.sync_code();
                     r
                 }
+                Pane::Payload => self.code.state.handle_events(modifiers, code),
             },
         }
     }
@@ -1136,7 +1170,8 @@ impl ModuleView for OcppClientV16View {
             // Apply an `:edit` that changed the spec. Scripts are preserved across the edit; the
             // device config mirrors the new version/role/timeout.
             if let Some((spec, path)) = self.pending_setup.take() {
-                let device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
+                let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
+                device.log_file = self.device.log_file.clone();
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
                     self.replacement = Some(build_server_view(spec, path, device));
@@ -1181,14 +1216,44 @@ impl ModuleView for OcppClientV16View {
                 self.dispatch_lua_action(&name, overrides);
             }
 
+            // Track the online→offline edge: log once and halt auto-transmit (no auto-reconnect),
+            // which stops the MeterValues-after-disconnect spam.
+            let online = self.backend.is_online();
+            if self.was_online && !online {
+                self.log
+                    .write()
+                    .await
+                    .write("Connection lost — auto-transmit halted");
+                self.heartbeat_tick = 0;
+            }
+            self.was_online = online;
+
+            // Auto-Heartbeat at the BootNotification-supplied cadence (fallback default) while
+            // connected, to keep the websocket alive independent of any transaction.
+            if online {
+                let interval_secs = self
+                    .state
+                    .read()
+                    .unwrap()
+                    .heartbeat_interval_secs
+                    .unwrap_or(DEFAULT_HEARTBEAT_SECS)
+                    .max(1);
+                self.heartbeat_tick = self.heartbeat_tick.wrapping_add(1);
+                if self.heartbeat_tick >= interval_secs as u32 * TICKS_PER_SEC {
+                    self.heartbeat_tick = 0;
+                    self.send_payload("Heartbeat", serde_json::json!({}));
+                }
+            }
+
             // While a transaction is active, report MeterValues periodically (~every 5s). Reset the
             // cadence when a transaction opens, since the start side-effect arrives asynchronously.
+            // Gated on `online` so a dropped connection halts the readings instead of spamming.
             let tx_active = self.state.read().unwrap().transaction_id.is_some();
             if tx_active && !self.tx_was_active {
                 self.meter_tick = 0;
             }
             self.tx_was_active = tx_active;
-            if tx_active {
+            if tx_active && online {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {
                     let payload = self.state_payload("MeterValues");
@@ -1196,8 +1261,36 @@ impl ModuleView for OcppClientV16View {
                 }
             }
 
+            // Apply a pending `:log` change (or device-config log file) to the persistent sink.
+            if self.applied_log_file != self.device.log_file {
+                let name = self.spec.name.clone();
+                self.log
+                    .write()
+                    .await
+                    .set_log_file(self.device.log_file.as_deref(), &name);
+                self.applied_log_file = self.device.log_file.clone();
+            }
+
             // Refresh tables from backend + state.
             self.messages = self.backend.messages_snapshot().await;
+            // Tee new protocol messages into the persistent log (bounded ring + optional file).
+            let mut max_seq = self.logged_seq;
+            let new_lines: Vec<String> = self
+                .messages
+                .iter()
+                .filter(|m| m.seq > self.logged_seq)
+                .map(|m| {
+                    max_seq = max_seq.max(m.seq);
+                    m.log_line()
+                })
+                .collect();
+            if !new_lines.is_empty() {
+                let mut log = self.log.write().await;
+                for line in new_lines {
+                    log.write(&line);
+                }
+                self.logged_seq = max_seq;
+            }
             let rows: Vec<MsgRow> = self.messages.iter().map(msg_row).collect();
             self.msg_table.state.set_values(rows);
             let (state_rows, config_rows) = {
@@ -1256,6 +1349,23 @@ impl ModuleView for OcppClientV16View {
                 let result = self.save_device_to(&path);
                 Box::pin(std::future::ready(result))
             }
+            "log" => {
+                self.device.log_file = None;
+                Box::pin(std::future::ready(CommandResult::Handled(Some(
+                    "File logging disabled".into(),
+                ))))
+            }
+            cmd if cmd.starts_with("log ") => {
+                let path = cmd["log ".len()..].trim().to_string();
+                let msg = if path.is_empty() {
+                    self.device.log_file = None;
+                    "File logging disabled".to_string()
+                } else {
+                    self.device.log_file = Some(path.clone());
+                    format!("Logging to {path}")
+                };
+                Box::pin(std::future::ready(CommandResult::Handled(Some(msg))))
+            }
             _ => Box::pin(std::future::ready(CommandResult::Unhandled)),
         }
     }
@@ -1280,7 +1390,7 @@ impl ModuleView for OcppClientV16View {
     }
 }
 
-static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 6] = [
+static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 7] = [
     CommandDescriptor {
         name: ":e | :edit",
         description: "edit module setup",
@@ -1304,6 +1414,10 @@ static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 6] = [
     CommandDescriptor {
         name: ":wd | :write-device [path]",
         description: "save device config",
+    },
+    CommandDescriptor {
+        name: ":log [file]",
+        description: "set/clear log file",
     },
 ];
 

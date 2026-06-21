@@ -5,7 +5,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -16,6 +16,20 @@ use ferrowl_ocpp::cs::{Client, ClientBuilder, Command, Config, CsActionHandler};
 use ferrowl_ocpp::{Error, Version};
 
 use crate::module::ocpp::config::session::OcppSpec;
+
+/// Number of `refresh` ticks per second (the UI ticks at ~100ms), used to convert second-based
+/// cadences (heartbeat interval, MeterValues period) into tick counts.
+pub const TICKS_PER_SEC: u32 = 10;
+
+/// Fallback heartbeat cadence (seconds) used until the CSMS supplies one in its BootNotification
+/// response (or when it sends `0`).
+pub const DEFAULT_HEARTBEAT_SECS: u64 = 30;
+
+/// Extract the heartbeat cadence from a BootNotification response. The CSMS dictates the interval;
+/// an absent or zero value yields `None`, so the caller falls back to [`DEFAULT_HEARTBEAT_SECS`].
+pub fn boot_interval(response: &Value) -> Option<u64> {
+    response["interval"].as_u64().filter(|&i| i > 0)
+}
 
 /// Direction of a recorded OCPP message relative to this charging station.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +49,23 @@ impl Dir {
     }
 }
 
+/// Largest number of messages kept in an in-memory message-log buffer. Older messages are evicted;
+/// the full history survives only in the `:log <file>` sink (via the per-module `SharedLog`).
+pub const MAX_MESSAGES: usize = 200;
+
+/// Monotonic message sequence, so a view can tee only the messages it hasn't logged yet even as the
+/// bounded buffer evicts older ones. Starts at 1 so a cursor initialised to 0 logs the first message.
+static MSG_SEQ: AtomicU64 = AtomicU64::new(1);
+
+fn next_seq() -> u64 {
+    MSG_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
 /// One observed OCPP message, for the message-log table and the JSON view.
 #[derive(Debug, Clone)]
 pub struct OcppMessage {
+    /// Monotonic id assigned at creation (see [`MSG_SEQ`]); used by the log tee cursor.
+    pub seq: u64,
     pub ts: u64,
     pub direction: Dir,
     pub name: String,
@@ -48,7 +76,57 @@ pub struct OcppMessage {
     pub context: String,
 }
 
+impl OcppMessage {
+    /// Build a message, stamping it with the current time and the next sequence id.
+    pub fn new(
+        direction: Dir,
+        name: impl Into<String>,
+        payload: Value,
+        ok: Option<bool>,
+        context: impl Into<String>,
+    ) -> Self {
+        Self {
+            seq: next_seq(),
+            ts: now_ms(),
+            direction,
+            name: name.into(),
+            payload,
+            ok,
+            context: context.into(),
+        }
+    }
+
+    /// A one-line rendering for the persistent log: direction, name, outcome, context, payload.
+    pub fn log_line(&self) -> String {
+        let dir = match self.direction {
+            Dir::In => "<-",
+            Dir::Out => "->",
+        };
+        let status = match self.ok {
+            Some(true) => " ok",
+            Some(false) => " ERR",
+            None => "",
+        };
+        let ctx = if self.context.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", self.context)
+        };
+        let payload = serde_json::to_string(&self.payload).unwrap_or_default();
+        format!("{dir} {}{status}{ctx} {payload}", self.name)
+    }
+}
+
 pub type Messages = Arc<RwLock<Vec<OcppMessage>>>;
+
+/// Push a message into a buffer, evicting the oldest once it exceeds [`MAX_MESSAGES`].
+pub fn push_capped(buf: &mut Vec<OcppMessage>, msg: OcppMessage) {
+    buf.push(msg);
+    if buf.len() > MAX_MESSAGES {
+        let overflow = buf.len() - MAX_MESSAGES;
+        buf.drain(0..overflow);
+    }
+}
 
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
@@ -195,7 +273,7 @@ impl<V: Version> OcppSender<V> {
     }
 }
 
-/// Push one message into a shared message log.
+/// Push one message into a shared message log (bounded to [`MAX_MESSAGES`]).
 async fn record(
     messages: &Messages,
     dir: Dir,
@@ -204,14 +282,11 @@ async fn record(
     ok: Option<bool>,
     context: String,
 ) {
-    messages.write().await.push(OcppMessage {
-        ts: now_ms(),
-        direction: dir,
-        name: name.to_string(),
-        payload,
-        ok,
-        context,
-    });
+    let mut guard = messages.write().await;
+    push_capped(
+        &mut guard,
+        OcppMessage::new(dir, name, payload, ok, context),
+    );
 }
 
 /// A `LogFn` that records error/diagnostic strings into the message log.
@@ -221,14 +296,11 @@ fn log_fn(
     move |s: String| {
         let messages = messages.clone();
         Box::pin(async move {
-            messages.write().await.push(OcppMessage {
-                ts: now_ms(),
-                direction: Dir::In,
-                name: "log".to_string(),
-                payload: Value::String(s),
-                ok: None,
-                context: String::new(),
-            });
+            let mut guard = messages.write().await;
+            push_capped(
+                &mut guard,
+                OcppMessage::new(Dir::In, "log", Value::String(s), None, String::new()),
+            );
         })
     }
 }
@@ -261,4 +333,55 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m as u32, d as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn boot_interval_prefers_csms_value() {
+        let resp =
+            json!({ "currentTime": "2026-01-01T00:00:00Z", "interval": 120, "status": "Accepted" });
+        assert_eq!(boot_interval(&resp), Some(120));
+    }
+
+    #[test]
+    fn boot_interval_falls_back_on_zero_or_absent() {
+        // Zero is treated as "unset" so the caller uses DEFAULT_HEARTBEAT_SECS.
+        assert_eq!(boot_interval(&json!({ "interval": 0 })), None);
+        // Missing field.
+        assert_eq!(boot_interval(&json!({ "status": "Accepted" })), None);
+    }
+
+    #[test]
+    fn push_capped_evicts_oldest_beyond_limit() {
+        let mut buf = Vec::new();
+        for _ in 0..(MAX_MESSAGES + 50) {
+            push_capped(
+                &mut buf,
+                OcppMessage::new(Dir::Out, "Heartbeat", json!({}), None, String::new()),
+            );
+        }
+        assert_eq!(buf.len(), MAX_MESSAGES);
+        // The retained window is the newest MAX_MESSAGES, so seqs are strictly increasing and the
+        // front is no longer seq 1.
+        assert!(buf[0].seq < buf[buf.len() - 1].seq);
+        assert!(buf.windows(2).all(|w| w[0].seq < w[1].seq));
+    }
+
+    #[test]
+    fn log_line_renders_direction_status_and_payload() {
+        let m = OcppMessage::new(
+            Dir::In,
+            "BootNotification",
+            json!({"status":"Accepted"}),
+            Some(true),
+            "boot",
+        );
+        let line = m.log_line();
+        assert!(line.starts_with("<- BootNotification ok (boot) "));
+        assert!(line.contains("\"status\":\"Accepted\""));
+    }
 }

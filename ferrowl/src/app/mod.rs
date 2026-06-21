@@ -31,14 +31,20 @@ const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 pub const LOG_MAX_LINE: usize = 256;
 pub const LOG_SIZE: usize = 80;
 
-/// On-screen log: a fixed-capacity ring of timestamped lines.
+/// On-screen log: a fixed-capacity ring of timestamped lines, optionally mirrored to a file so the
+/// full history survives the ring's eviction (the `:log <file>` feature).
 pub struct LogRing {
     ring: Ring<(u64, String), LOG_SIZE>,
+    /// Append-mode file sink set by `:log <file>`; when present, every line is also persisted.
+    sink: Option<std::io::BufWriter<std::fs::File>>,
 }
 
 impl LogRing {
     pub fn init() -> Self {
-        Self { ring: Ring::new() }
+        Self {
+            ring: Ring::new(),
+            sink: None,
+        }
     }
 
     pub fn write(&mut self, msg: &str) {
@@ -47,7 +53,28 @@ impl LogRing {
             .unwrap_or_default()
             .as_millis() as u64;
         let line: String = msg.chars().take(LOG_MAX_LINE).collect();
+        // Persist to the file sink first (unbounded history), then push into the bounded ring.
+        if let Some(writer) = self.sink.as_mut() {
+            use std::io::Write;
+            let _ = writeln!(writer, "[{}] {line}", format_timestamp(ts));
+            let _ = writer.flush();
+        }
         self.ring.push((ts, line));
+    }
+
+    /// Point the log at a file (append): `base` resolves to `<stem>.<name>.<ext>` next to it via
+    /// [`module_log_path`](crate::view::log::module_log_path). `None`, or a file that can't be
+    /// opened, disables file logging.
+    pub fn set_log_file(&mut self, base: Option<&str>, name: &str) {
+        self.sink = base.and_then(|base| {
+            let path = crate::view::log::module_log_path(base, name);
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
+                .map(std::io::BufWriter::new)
+        });
     }
 
     pub fn peek_n(&self, n: usize) -> Vec<(u64, String)> {
@@ -258,5 +285,39 @@ impl App {
         if let Some(tab) = self.tabs.get(self.active) {
             tab.log.write().await.write(&message);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn log_ring_persists_lines_to_file_sink() {
+        let dir = std::env::temp_dir();
+        let base = dir.join(format!("ferrowl_logring_test_{}.log", std::process::id()));
+        let base = base.to_str().unwrap();
+        let name = "csms";
+        let path = crate::view::log::module_log_path(base, name);
+        let _ = std::fs::remove_file(&path);
+
+        let mut ring = LogRing::init();
+        ring.set_log_file(Some(base), name);
+        ring.write("first line");
+        ring.write("second line");
+        // Disabling the sink flushes/drops the writer.
+        ring.set_log_file(None, name);
+
+        let mut contents = String::new();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert!(contents.contains("first line"));
+        assert!(contents.contains("second line"));
+        // Lines are timestamped.
+        assert!(contents.trim_start().starts_with('['));
+        let _ = std::fs::remove_file(&path);
     }
 }

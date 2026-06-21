@@ -45,6 +45,14 @@ pub struct OcppDeviceConfig {
     /// Lua simulation scripts (run every ~100ms while enabled; client role only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptDef>,
+    /// Persistent log-file base set via `:log <file>`; `None` disables file logging. The actual
+    /// file is `<stem>.<tab-name>.<ext>` next to this path (see `module_log_path`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_file: Option<String>,
+    /// CSMS RFID accept-list (server role): id tags accepted for Authorize / StartTransaction.
+    /// Empty = accept every tag (the default-accept behaviour). Ignored for the client role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rfids: Vec<String>,
 }
 
 impl OcppDeviceConfig {
@@ -57,6 +65,8 @@ impl OcppDeviceConfig {
             role: spec.role,
             timeout_ms: spec.timeout_ms,
             scripts,
+            log_file: None,
+            rfids: Vec::new(),
         }
     }
 }
@@ -85,6 +95,8 @@ mod tests {
                 code: "C_OCPP:Set(\"Power\", 11000)".into(),
                 enabled: false,
             }],
+            log_file: Some("/tmp/ferrowl.log".into()),
+            rfids: vec!["DEADBEEF".into(), "CAFE1234".into()],
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = std::env::temp_dir().join(format!("ferrowl_ocpp_device_test.{ext}"));
