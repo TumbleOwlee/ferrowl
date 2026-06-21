@@ -1,0 +1,10 @@
+pre-commit:
+  commands:
+    fmt:
+      run: cargo fmt --all
+      env:
+        LEFTHOOK: "true"
+    clippy:
+      run: cargo clippy --fix --allow-dirty -- -D warnings
+      env:
+        LEFTHOOK: "true"
