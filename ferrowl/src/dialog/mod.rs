@@ -25,7 +25,7 @@ impl Validate for Address {
         if input == "virtual" {
             ValidateResult::Success
         } else if let ValidateResult::Error(e) = i16::validate(input) {
-            ValidateResult::Error(format!("{e}"))
+            ValidateResult::Error(e.to_string())
         } else {
             ValidateResult::None
         }
@@ -46,19 +46,17 @@ impl Validate for Bitmask {
             if let Err(e) =
                 u128::from_str_radix(hex, 16).map_err(|_| "must be a hex (0x…) or decimal number")
             {
-                ValidateResult::Error(format!("{e}"))
+                ValidateResult::Error(e.to_string())
             } else {
                 ValidateResult::None
             }
+        } else if let Err(e) = input
+            .parse::<u128>()
+            .map_err(|_| "must be a hex (0x…) or decimal number")
+        {
+            ValidateResult::Error(e.to_string())
         } else {
-            if let Err(e) = input
-                .parse::<u128>()
-                .map_err(|_| "must be a hex (0x…) or decimal number")
-            {
-                ValidateResult::Error(format!("{e}"))
-            } else {
-                ValidateResult::None
-            }
+            ValidateResult::None
         }
     }
 }

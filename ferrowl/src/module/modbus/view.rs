@@ -420,40 +420,36 @@ impl ModbusModuleView {
     fn confirm_overlay(&mut self) {
         let Some(overlay) = &self.overlay else { return };
         let is_add = overlay.is_add();
-        match overlay.apply() {
-            Some(edited) => {
-                let current_name = self.table.selected().map(|d| d.name.clone());
-                if !is_add {
-                    if let Some(original) = &current_name {
-                        if &edited.name != original
-                            && self.device.definitions.contains_key(&edited.name)
-                        {
-                            let msg = format!("Name '{}' already in use", edited.name);
-                            self.overlay.as_mut().unwrap().set_name_error(msg);
-                            return;
-                        }
-                    }
-                } else if self.device.definitions.contains_key(&edited.name) {
-                    let msg = format!("Name '{}' already in use", edited.name);
-                    self.overlay.as_mut().unwrap().set_name_error(msg);
-                    return;
-                }
-                self.overlay = None;
-                if is_add {
-                    self.pending = Some(PendingAction::Add(edited));
-                } else {
-                    let Some(idx) = self.table.selected_index() else {
+        if let Some(edited) = overlay.apply() {
+            let current_name = self.table.selected().map(|d| d.name.clone());
+            if !is_add {
+                if let Some(original) = &current_name
+                    && &edited.name != original
+                        && self.device.definitions.contains_key(&edited.name)
+                    {
+                        let msg = format!("Name '{}' already in use", edited.name);
+                        self.overlay.as_mut().unwrap().set_name_error(msg);
                         return;
-                    };
-                    let original_name = current_name.unwrap_or_default();
-                    self.pending = Some(PendingAction::Edit {
-                        edited,
-                        idx,
-                        original_name,
-                    });
-                }
+                    }
+            } else if self.device.definitions.contains_key(&edited.name) {
+                let msg = format!("Name '{}' already in use", edited.name);
+                self.overlay.as_mut().unwrap().set_name_error(msg);
+                return;
             }
-            None => {}
+            self.overlay = None;
+            if is_add {
+                self.pending = Some(PendingAction::Add(edited));
+            } else {
+                let Some(idx) = self.table.selected_index() else {
+                    return;
+                };
+                let original_name = current_name.unwrap_or_default();
+                self.pending = Some(PendingAction::Edit {
+                    edited,
+                    idx,
+                    original_name,
+                });
+            }
         }
     }
 
@@ -621,11 +617,10 @@ impl ModbusModuleView {
                 }
                 def.default = edited.default.clone();
             }
-            if edited.name != original_name {
-                if let Some(def) = self.device.definitions.remove(&original_name) {
+            if edited.name != original_name
+                && let Some(def) = self.device.definitions.remove(&original_name) {
                     self.device.definitions.insert(edited.name.clone(), def);
                 }
-            }
 
             mem_result
         } else {
@@ -645,14 +640,13 @@ impl ModbusModuleView {
             self.module.reload_scripts(scripts);
         }
 
-        if let Some(v) = preserved_value {
-            if edited.value.is_none() {
+        if let Some(v) = preserved_value
+            && edited.value.is_none() {
                 let result = self.set_register_value(&edited.name, &v).await;
                 if let CommandResult::Handled(Some(msg)) = result {
                     self.module.log().write().await.write(&msg);
                 }
             }
-        }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;
@@ -923,7 +917,7 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
-        return Box::pin(async move {
+        Box::pin(async move {
             if let Some(pending) = self.pending.take() {
                 match pending {
                     PendingAction::Add(edited) => self.apply_add(edited).await,
@@ -955,7 +949,7 @@ impl ModuleView for ModbusModuleView {
             }
 
             self.table.set_definitions(updated);
-        });
+        })
     }
 
     fn handle_command<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
