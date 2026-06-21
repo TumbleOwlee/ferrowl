@@ -40,16 +40,18 @@ use ferrowl_ocpp::csms::{ConnectionId, CsmsActionHandler};
 use ferrowl_ocpp::{ConnectorScope, Version};
 
 use crate::app::LogRing;
+use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::client::backend::{Dir, OcppMessage};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{
     ActionQueue, OcppFields, OcppSimHandle, merge_overrides, run_ocpp_sim,
 };
 use crate::module::ocpp::client::scripts::ScriptDialog;
-use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
-use crate::module::ocpp::server::backend::{EventRx, EventTx, OcppServer, ServerEvent, inbound_messages};
+use crate::module::ocpp::server::backend::{
+    EventRx, EventTx, OcppServer, ServerEvent, inbound_messages,
+};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
@@ -92,7 +94,11 @@ struct CsRow {
 
 impl TableEntry<3> for CsRow {
     fn values(&self) -> [String; 3] {
-        [self.name.clone(), self.connector.clone(), self.state.clone()]
+        [
+            self.name.clone(),
+            self.connector.clone(),
+            self.state.clone(),
+        ]
     }
     fn height(&self) -> u16 {
         1
@@ -112,7 +118,11 @@ struct CsHeader;
 
 impl Header<3> for CsHeader {
     fn header() -> [String; 3] {
-        ["Charging Station".into(), "Connector".into(), "State".into()]
+        [
+            "Charging Station".into(),
+            "Connector".into(),
+            "State".into(),
+        ]
     }
     fn widths() -> [Width; 3] {
         [
@@ -384,7 +394,12 @@ where
     }
 
     /// Find an entry by (identity, connector), creating it if missing. Returns its index.
-    fn entry_index(&mut self, identity: &str, connector_id: Option<i64>, conn: Option<ConnectionId>) -> usize {
+    fn entry_index(
+        &mut self,
+        identity: &str,
+        connector_id: Option<i64>,
+        conn: Option<ConnectionId>,
+    ) -> usize {
         if let Some(i) = self
             .entries
             .iter()
@@ -489,7 +504,13 @@ where
     }
 
     /// Spawn an outbound Call to `conn` and post its result back as an [`ServerEvent::Outbound`].
-    fn send_to(&self, conn: ConnectionId, connector_id: Option<i64>, name: &str, payload: serde_json::Value) {
+    fn send_to(
+        &self,
+        conn: ConnectionId,
+        connector_id: Option<i64>,
+        name: &str,
+        payload: serde_json::Value,
+    ) {
         let Some(sender) = self.backend.sender() else {
             return;
         };
@@ -584,7 +605,9 @@ where
 
     /// Rebuild the action list for the selected entry's level, if it changed.
     fn sync_actions(&mut self) {
-        let is_connector = self.selected().map(|i| self.entries[i].connector_id.is_some());
+        let is_connector = self
+            .selected()
+            .map(|i| self.entries[i].connector_id.is_some());
         let want = is_connector.unwrap_or(false);
         if self.actions_for_connector == Some(want) && self.selected().is_some() {
             return;
@@ -699,7 +722,13 @@ where
         self.sync_actions();
         let rows: Vec<MsgRow> = self
             .selected()
-            .map(|i| self.entries[i].rows_for_state().iter().map(msg_row).collect())
+            .map(|i| {
+                self.entries[i]
+                    .rows_for_state()
+                    .iter()
+                    .map(msg_row)
+                    .collect()
+            })
             .unwrap_or_default();
         self.msg_table.state.set_values(rows);
         let cs_rows: Vec<CsRow> = self
@@ -708,7 +737,12 @@ where
             .map(|e| CsRow {
                 name: e.identity.clone(),
                 connector: e.connector_id.map(|c| c.to_string()).unwrap_or_default(),
-                state: if e.online { "Connected" } else { "Disconnected" }.to_string(),
+                state: if e.online {
+                    "Connected"
+                } else {
+                    "Disconnected"
+                }
+                .to_string(),
             })
             .collect();
         self.cs_table.state.set_values(cs_rows);
@@ -727,15 +761,30 @@ where
             .state
             .set_focused(focused && self.focus == Pane::Messages);
 
-        StatefulWidget::render(&self.cs_table.widget, cs_area, buf, &mut self.cs_table.state);
+        StatefulWidget::render(
+            &self.cs_table.widget,
+            cs_area,
+            buf,
+            &mut self.cs_table.state,
+        );
         StatefulWidget::render(
             &self.scripts_button.widget,
             scripts_btn_area,
             buf,
             &mut self.scripts_button.state,
         );
-        StatefulWidget::render(&self.actions.widget, actions_area, buf, &mut self.actions.state);
-        StatefulWidget::render(&self.msg_table.widget, right_top, buf, &mut self.msg_table.state);
+        StatefulWidget::render(
+            &self.actions.widget,
+            actions_area,
+            buf,
+            &mut self.actions.state,
+        );
+        StatefulWidget::render(
+            &self.msg_table.widget,
+            right_top,
+            buf,
+            &mut self.msg_table.state,
+        );
         StatefulWidget::render(&self.code.widget, right_bottom, buf, &mut self.code.state);
 
         // ONLINE/OFFLINE status line (with the bound address when running).
@@ -759,10 +808,7 @@ where
             .build()
             .unwrap();
         let mut status = if online {
-            format!(
-                "ONLINE  {}",
-                self.backend.bound_addr().unwrap_or_default()
-            )
+            format!("ONLINE  {}", self.backend.bound_addr().unwrap_or_default())
         } else {
             "OFFLINE".to_string()
         };
@@ -876,7 +922,8 @@ where
             }
             (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == Pane::CsTable => {
                 if let Some(idx) = self.selected() {
-                    self.delete_confirm = Some(ConfirmDeleteDialog::new(&self.entries[idx].identity));
+                    self.delete_confirm =
+                        Some(ConfirmDeleteDialog::new(&self.entries[idx].identity));
                 }
                 EventResult::Consumed
             }
@@ -961,7 +1008,9 @@ where
                 }
                 "wd" => {
                     if self.device_path.is_empty() {
-                        CommandResult::Handled(Some("No configuration file path configured.".into()))
+                        CommandResult::Handled(Some(
+                            "No configuration file path configured.".into(),
+                        ))
                     } else {
                         self.save_device_to(&self.device_path.clone())
                     }
@@ -1034,12 +1083,18 @@ fn border_style() -> Style {
 
 fn cs_table() -> CsTable {
     Widget {
-        state: TableStateBuilder::default().values(Vec::new()).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Charging Stations".into()))
             .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin { vertical: 1, horizontal: 0 })
+            .row_margin(Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
             .build()
             .unwrap(),
     }
@@ -1047,12 +1102,18 @@ fn cs_table() -> CsTable {
 
 fn msg_table() -> MsgTable {
     Widget {
-        state: TableStateBuilder::default().values(Vec::new()).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Messages".into()))
             .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin { vertical: 1, horizontal: 0 })
+            .row_margin(Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
             .build()
             .unwrap(),
     }
@@ -1071,11 +1132,19 @@ fn action_list(values: Vec<String>) -> Widget<SelectionState<String>, Selection<
             .style(
                 SelectionStyleBuilder::default()
                     .general(border_style())
-                    .focused(Style::default().fg(COLOR_SCHEME.bg).bg(COLOR_SCHEME.hi).bold())
+                    .focused(
+                        Style::default()
+                            .fg(COLOR_SCHEME.bg)
+                            .bg(COLOR_SCHEME.hi)
+                            .bold(),
+                    )
                     .build()
                     .unwrap(),
             )
-            .margin(Margin { vertical: 0, horizontal: 0 })
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
             .build()
             .unwrap(),
     }
@@ -1091,7 +1160,10 @@ fn scripts_button() -> Widget<ButtonState, Button> {
             .unwrap(),
         widget: ButtonBuilder::default()
             .border_margin(Margin::new(1, 0))
-            .margin(Margin { vertical: 0, horizontal: 0 })
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
             .style(ButtonStyle {
                 general: border_style(),
                 ..ButtonStyle::default()
@@ -1119,7 +1191,10 @@ fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
                     .build()
                     .unwrap(),
             )
-            .margin(Margin { vertical: 0, horizontal: 0 })
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
             .build()
             .unwrap(),
     }
@@ -1135,7 +1210,10 @@ fn editable_code() -> Widget<CodeInputFieldState, CodeInputField> {
         widget: CodeInputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Action payload (Enter to send)".into()))
-            .margin(Margin { vertical: 0, horizontal: 0 })
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
             .build()
             .unwrap(),
     }

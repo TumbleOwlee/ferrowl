@@ -256,7 +256,10 @@ fn apply_meter_values(state: &mut ConnectorState, request: &serde_json::Value) {
                 .as_f64()
                 .or_else(|| s["value"].as_str().and_then(|v| v.parse().ok()))
                 .unwrap_or(0.0);
-            match s["measurand"].as_str().unwrap_or("Energy.Active.Import.Register") {
+            match s["measurand"]
+                .as_str()
+                .unwrap_or("Energy.Active.Import.Register")
+            {
                 "Voltage" => state.voltage = value,
                 "Power.Active.Import" => state.power = value,
                 "Frequency" => state.frequency = value,

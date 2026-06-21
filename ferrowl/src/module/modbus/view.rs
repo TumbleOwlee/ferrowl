@@ -425,12 +425,12 @@ impl ModbusModuleView {
             if !is_add {
                 if let Some(original) = &current_name
                     && &edited.name != original
-                        && self.device.definitions.contains_key(&edited.name)
-                    {
-                        let msg = format!("Name '{}' already in use", edited.name);
-                        self.overlay.as_mut().unwrap().set_name_error(msg);
-                        return;
-                    }
+                    && self.device.definitions.contains_key(&edited.name)
+                {
+                    let msg = format!("Name '{}' already in use", edited.name);
+                    self.overlay.as_mut().unwrap().set_name_error(msg);
+                    return;
+                }
             } else if self.device.definitions.contains_key(&edited.name) {
                 let msg = format!("Name '{}' already in use", edited.name);
                 self.overlay.as_mut().unwrap().set_name_error(msg);
@@ -618,9 +618,10 @@ impl ModbusModuleView {
                 def.default = edited.default.clone();
             }
             if edited.name != original_name
-                && let Some(def) = self.device.definitions.remove(&original_name) {
-                    self.device.definitions.insert(edited.name.clone(), def);
-                }
+                && let Some(def) = self.device.definitions.remove(&original_name)
+            {
+                self.device.definitions.insert(edited.name.clone(), def);
+            }
 
             mem_result
         } else {
@@ -641,12 +642,13 @@ impl ModbusModuleView {
         }
 
         if let Some(v) = preserved_value
-            && edited.value.is_none() {
-                let result = self.set_register_value(&edited.name, &v).await;
-                if let CommandResult::Handled(Some(msg)) = result {
-                    self.module.log().write().await.write(&msg);
-                }
+            && edited.value.is_none()
+        {
+            let result = self.set_register_value(&edited.name, &v).await;
+            if let CommandResult::Handled(Some(msg)) = result {
+                self.module.log().write().await.write(&msg);
             }
+        }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;

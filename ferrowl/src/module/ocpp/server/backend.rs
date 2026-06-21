@@ -109,15 +109,17 @@ where
 
     /// The charge-point identity for a connection (URL-path segment), if known.
     pub fn identity(&self, conn: ConnectionId) -> Option<String> {
-        self.server.as_ref().and_then(|s| s.registry().identity(conn))
+        self.server
+            .as_ref()
+            .and_then(|s| s.registry().identity(conn))
     }
 
     /// A detachable sender for off-thread Calls to a specific connection, decoupled from the
     /// `OcppServer` borrow so the round-trip can be `tokio::spawn`ed. `None` when not bound.
     pub fn sender(&self) -> Option<OcppServerSender<V>> {
-        self.server.as_ref().map(|s| OcppServerSender {
-            cmd_tx: s.sender(),
-        })
+        self.server
+            .as_ref()
+            .map(|s| OcppServerSender { cmd_tx: s.sender() })
     }
 }
 

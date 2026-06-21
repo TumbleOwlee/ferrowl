@@ -303,7 +303,10 @@ fn apply_meter_values(state: &mut ConnectorState, request: &serde_json::Value) {
             continue;
         };
         for s in samples {
-            let value: f64 = s["value"].as_str().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let value: f64 = s["value"]
+                .as_str()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0);
             let measurand = s["measurand"]
                 .as_str()
                 .unwrap_or("Energy.Active.Import.Register");

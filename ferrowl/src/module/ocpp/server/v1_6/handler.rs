@@ -48,7 +48,10 @@ impl CsmsHandler16 {
             Some(payload) => V1_6::decode_result(action, payload)
                 .map_err(|e| CallError::new(CallErrorCode::InternalError, e.to_string())),
             None => V1_6::default_response(name).ok_or_else(|| {
-                CallError::new(CallErrorCode::NotImplemented, "action not handled by the CSMS")
+                CallError::new(
+                    CallErrorCode::NotImplemented,
+                    "action not handled by the CSMS",
+                )
             }),
         }
     }
@@ -112,13 +115,23 @@ mod tests {
     async fn ut_start_transaction_mints_unique_txids() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = CsmsHandler16::new(tx);
-        let txid = |resp: &Response16| V1_6::encode_response(resp).unwrap()["transactionId"].as_i64().unwrap();
+        let txid = |resp: &Response16| {
+            V1_6::encode_response(resp).unwrap()["transactionId"]
+                .as_i64()
+                .unwrap()
+        };
         let r1 = handler
-            .handle_call(ConnectionId(1), V1_6::default_action("StartTransaction").unwrap())
+            .handle_call(
+                ConnectionId(1),
+                V1_6::default_action("StartTransaction").unwrap(),
+            )
             .await
             .unwrap();
         let r2 = handler
-            .handle_call(ConnectionId(1), V1_6::default_action("StartTransaction").unwrap())
+            .handle_call(
+                ConnectionId(1),
+                V1_6::default_action("StartTransaction").unwrap(),
+            )
             .await
             .unwrap();
         assert_ne!(txid(&r1), txid(&r2));

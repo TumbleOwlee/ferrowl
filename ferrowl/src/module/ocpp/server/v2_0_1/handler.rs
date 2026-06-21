@@ -36,7 +36,10 @@ impl CsmsHandler201 {
             Some(payload) => V2_0_1::decode_result(action, payload)
                 .map_err(|e| CallError::new(CallErrorCode::InternalError, e.to_string())),
             None => V2_0_1::default_response(name).ok_or_else(|| {
-                CallError::new(CallErrorCode::NotImplemented, "action not handled by the CSMS")
+                CallError::new(
+                    CallErrorCode::NotImplemented,
+                    "action not handled by the CSMS",
+                )
             }),
         }
     }

@@ -135,7 +135,13 @@ mod tests {
         for n in V1_6::action_names() {
             assert!(cs.contains(n) || csms.contains(n), "{n} uncategorized");
         }
-        let scope = |name: &str| V1_6::csms_actions().iter().find(|(n, _)| *n == name).unwrap().1;
+        let scope = |name: &str| {
+            V1_6::csms_actions()
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap()
+                .1
+        };
         assert_eq!(scope("Reset"), None);
         assert_eq!(scope("UnlockConnector"), Required);
         assert_eq!(scope("RemoteStartTransaction"), Optional);

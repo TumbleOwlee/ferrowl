@@ -2,9 +2,9 @@
 //! modules supplying observed-state types, inbound handlers, and the [`view::ServerVersion`] glue.
 
 pub mod backend;
-pub mod view;
 mod v1_6;
 mod v2_0_1;
+pub mod view;
 
 use ferrowl_ocpp::{V1_6, V2_0_1};
 

@@ -50,8 +50,8 @@ use crate::module::ocpp::client::v1_6::handler::CsStateHandler;
 use crate::module::ocpp::client::v1_6::state::{ConfigKey, ConfigRow, CsState, NvRow};
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
-use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::ocpp::server::build_server_view;
+use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
