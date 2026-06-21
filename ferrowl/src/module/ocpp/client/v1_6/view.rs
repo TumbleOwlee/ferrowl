@@ -18,8 +18,8 @@ use ferrowl_ui::{
         TableStateBuilder,
     },
     style::{
-        ButtonStyle, InputFieldStyle, InputFieldStyleBuilder, SelectionStyle, SelectionStyleBuilder,
-        TableStyleBuilder, TextStyle,
+        ButtonStyle, InputFieldStyle, InputFieldStyleBuilder, SelectionStyle,
+        SelectionStyleBuilder, TableStyleBuilder, TextStyle,
     },
     traits::HandleEvents,
     widgets::{
@@ -716,7 +716,10 @@ impl OcppClientV16View {
                     Ok(response) => apply_post_send(&state, &name, &response),
                     Err(e) => log.write().await.write(&format!("{name} failed: {e}")),
                 },
-                Err(e) => log.write().await.write(&format!("{name} invalid payload: {e}")),
+                Err(e) => log
+                    .write()
+                    .await
+                    .write(&format!("{name} invalid payload: {e}")),
             }
         });
     }
@@ -1044,6 +1047,16 @@ impl ModuleView for OcppClientV16View {
                     Pane::ConfigKey | Pane::ConfigValue => self.add_config_key(),
                     Pane::Actions => self.trigger_action(),
                     Pane::Messages => {}
+                }
+                EventResult::Consumed
+            }
+            (KeyModifiers::NONE, KeyCode::Char('d')) if matches!(self.focus, Pane::ConfigTable) => {
+                let mut s = self.state.write().unwrap();
+                if let Some(i) = self.config_table.state.table_state().selected()
+                    && i < s.config.len()
+                {
+                    s.config.remove(i);
+                    self.config_table.state.move_up();
                 }
                 EventResult::Consumed
             }

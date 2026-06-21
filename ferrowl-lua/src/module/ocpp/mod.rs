@@ -112,7 +112,9 @@ mod tests {
             vec!["StartTransaction"]
         }
         fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
-            self.dispatched.borrow_mut().push((action.to_string(), args));
+            self.dispatched
+                .borrow_mut()
+                .push((action.to_string(), args));
             true
         }
     }

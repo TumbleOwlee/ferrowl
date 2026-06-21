@@ -135,7 +135,6 @@ impl<V: Version> OcppClient<V> {
             None => Ok(()),
         }
     }
-
 }
 
 /// A self-contained Call sender, decoupled from the [`OcppClient`] borrow so the round-trip can be
@@ -151,7 +150,15 @@ impl<V: Version> OcppSender<V> {
     pub async fn send(self, action: V::Action) -> Result<Value, Error> {
         let name = V::action_name(&action).to_string();
         let request = V::encode_action(&action).unwrap_or(Value::Null);
-        record(&self.messages, Dir::Out, &name, request, None, String::new()).await;
+        record(
+            &self.messages,
+            Dir::Out,
+            &name,
+            request,
+            None,
+            String::new(),
+        )
+        .await;
 
         let result = match &self.cmd_tx {
             Some(cmd_tx) => Client::<V>::call_via(cmd_tx, action).await,
@@ -173,7 +180,15 @@ impl<V: Version> OcppSender<V> {
             }
             Err(e) => {
                 let msg = e.to_string();
-                record(&self.messages, Dir::In, &name, Value::Null, Some(false), msg).await;
+                record(
+                    &self.messages,
+                    Dir::In,
+                    &name,
+                    Value::Null,
+                    Some(false),
+                    msg,
+                )
+                .await;
                 Err(e)
             }
         }
