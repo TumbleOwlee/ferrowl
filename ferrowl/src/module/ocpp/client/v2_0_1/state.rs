@@ -21,6 +21,8 @@ pub struct CsState {
     pub temperature: f64,
     pub status: String,
     pub rfid: String,
+    /// idToken of the latest accepted ReserveNow from the CSMS, cleared on CancelReservation.
+    pub reserved_rfid: Option<String>,
     pub model: String,
     pub vendor: String,
     pub firmware_version: String,
@@ -62,6 +64,7 @@ impl Default for CsState {
             temperature: 25.0,
             status: "Available".to_string(),
             rfid: "DEADBEEF".to_string(),
+            reserved_rfid: None,
             model: "Ferrowl-EVSE".to_string(),
             vendor: "Ferrowl".to_string(),
             firmware_version: "1.0.0".to_string(),
@@ -142,6 +145,13 @@ impl CsState {
             nv("Temperature", "°C", format!("{:.1}", self.temperature)),
             nv("Status", "", self.status.clone()),
             nv("RFID", "", self.rfid.clone()),
+            nv(
+                "Reserved RFID",
+                "",
+                self.reserved_rfid
+                    .clone()
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
             nv("Model", "", self.model.clone()),
             nv("Vendor", "", self.vendor.clone()),
             nv("Firmware Version", "", self.firmware_version.clone()),
@@ -186,6 +196,7 @@ impl CsState {
             "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
+            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
             "Model" => Vt::String(self.model.clone()),
             "Vendor" => Vt::String(self.vendor.clone()),
             "FirmwareVersion" => Vt::String(self.firmware_version.clone()),

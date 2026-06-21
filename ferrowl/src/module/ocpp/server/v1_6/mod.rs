@@ -6,7 +6,7 @@ mod state;
 
 use ferrowl_ocpp::V1_6;
 
-use crate::module::ocpp::server::backend::{EventTx, RfidList};
+use crate::module::ocpp::server::backend::{EventTx, RfidList, Scope};
 use crate::module::ocpp::server::view::ServerVersion;
 
 use handler::CsmsHandler16;
@@ -21,11 +21,11 @@ impl ServerVersion for V1_6 {
         CsmsHandler16::new(tx, rfids)
     }
 
-    fn inbound_connector(_name: &str, request: &serde_json::Value) -> Option<i64> {
-        request
-            .get("connectorId")
-            .and_then(|v| v.as_i64())
-            .filter(|&c| c >= 1)
+    fn inbound_connector(_name: &str, request: &serde_json::Value) -> Scope {
+        match request.get("connectorId").and_then(|v| v.as_i64()) {
+            Some(c) if c >= 1 => Scope::connector(c),
+            _ => Scope::CS,
+        }
     }
 
     fn config_action() -> &'static str {
@@ -41,7 +41,7 @@ impl ServerVersion for V1_6 {
         }
     }
 
-    fn parse_config(response: &serde_json::Value) -> Vec<(String, String)> {
+    fn parse_config(response: &serde_json::Value) -> Vec<(String, String, bool)> {
         let mut rows = Vec::new();
         if let Some(keys) = response["configurationKey"].as_array() {
             for k in keys {
@@ -49,18 +49,14 @@ impl ServerVersion for V1_6 {
                     continue;
                 };
                 let value = k["value"].as_str().unwrap_or_default();
-                let ro = if k["readonly"].as_bool().unwrap_or(false) {
-                    " (ro)"
-                } else {
-                    ""
-                };
-                rows.push((name.to_string(), format!("{value}{ro}")));
+                let readonly = k["readonly"].as_bool().unwrap_or(false);
+                rows.push((name.to_string(), value.to_string(), readonly));
             }
         }
-        // Keys the CS rejected as unknown are surfaced too.
+        // Keys the CS rejected as unknown are surfaced too (writable by default).
         if let Some(unknown) = response["unknownKey"].as_array() {
             for k in unknown.iter().filter_map(|k| k.as_str()) {
-                rows.push((k.to_string(), "<unknown>".to_string()));
+                rows.push((k.to_string(), "<unknown>".to_string(), false));
             }
         }
         rows
@@ -73,12 +69,37 @@ impl ServerVersion for V1_6 {
     fn set_request(key: &str, value: &str) -> serde_json::Value {
         serde_json::json!({ "key": key, "value": value })
     }
+
+    fn action_spec(name: &str) -> Option<crate::module::ocpp::action_dialog::ActionSpec> {
+        crate::module::ocpp::spec::v1_6::action_spec(name)
+    }
+
+    fn json_actions() -> &'static [&'static str] {
+        crate::module::ocpp::spec::v1_6::json_actions()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ut_inbound_connector_scope() {
+        assert_eq!(
+            V1_6::inbound_connector("StatusNotification", &json!({ "connectorId": 2 })),
+            Scope::connector(2)
+        );
+        // connectorId 0 (or absent) is the CS as a whole.
+        assert_eq!(
+            V1_6::inbound_connector("StatusNotification", &json!({ "connectorId": 0 })),
+            Scope::CS
+        );
+        assert_eq!(
+            V1_6::inbound_connector("BootNotification", &json!({})),
+            Scope::CS
+        );
+    }
 
     #[test]
     fn ut_config_request_all_vs_single() {
@@ -99,11 +120,11 @@ mod tests {
             "unknownKey": ["Foo"],
         });
         let rows = V1_6::parse_config(&resp);
-        assert_eq!(rows[0], ("HeartbeatInterval".into(), "30".into()));
+        assert_eq!(rows[0], ("HeartbeatInterval".into(), "30".into(), false));
         assert_eq!(
             rows[1],
-            ("MeterValueSampleInterval".into(), "60 (ro)".into())
+            ("MeterValueSampleInterval".into(), "60".into(), true)
         );
-        assert_eq!(rows[2], ("Foo".into(), "<unknown>".into()));
+        assert_eq!(rows[2], ("Foo".into(), "<unknown>".into(), false));
     }
 }

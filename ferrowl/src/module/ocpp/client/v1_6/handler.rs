@@ -117,6 +117,18 @@ impl CsStateHandler {
                     .expect("SetChargingProfile is a known action");
                 (Ok(resp), context)
             }
+            Action16::ReserveNow(req) => {
+                self.state.write().unwrap().reserved_rfid = Some(req.id_tag.clone());
+                let resp =
+                    V1_6::default_response("ReserveNow").expect("ReserveNow is a known action");
+                (Ok(resp), format!("reserved for {}", req.id_tag))
+            }
+            Action16::CancelReservation(_) => {
+                self.state.write().unwrap().reserved_rfid = None;
+                let resp = V1_6::default_response("CancelReservation")
+                    .expect("CancelReservation is a known action");
+                (Ok(resp), "reservation cancelled".to_string())
+            }
             other => {
                 let name = V1_6::action_name(other);
                 match V1_6::default_response(name) {

@@ -8,6 +8,7 @@ use ferrowl_ocpp::{V1_6, Version};
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 use crate::module::ocpp::client::lua_sim::OcppFields;
+use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::server::view::EntryStateT;
 
 /// The CSMS action names exposed to Lua as `C_OCPP:<Action>` for OCPP 1.6.
@@ -54,7 +55,12 @@ impl OcppFields for CsLevelState {
 }
 
 impl EntryStateT for CsLevelState {
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value) {
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        _response: &serde_json::Value,
+    ) {
         match name {
             "BootNotification" => {
                 if let Some(m) = request["chargePointModel"].as_str() {
@@ -83,7 +89,7 @@ impl EntryStateT for CsLevelState {
         }
     }
 
-    fn derive_payload(&self, name: &str, _connector_id: Option<i64>) -> Option<serde_json::Value> {
+    fn derive_payload(&self, name: &str, _scope: Scope) -> Option<serde_json::Value> {
         Some(match name {
             "Reset" => serde_json::json!({ "type": "Soft" }),
             "ClearCache" | "GetLocalListVersion" | "GetConfiguration" => serde_json::json!({}),
@@ -199,7 +205,12 @@ impl OcppFields for ConnectorState {
 }
 
 impl EntryStateT for ConnectorState {
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value) {
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        response: &serde_json::Value,
+    ) {
         if let Some(c) = request["connectorId"].as_i64() {
             self.connector_id = c;
         }
@@ -213,6 +224,10 @@ impl EntryStateT for ConnectorState {
                 if let Some(tag) = request["idTag"].as_str() {
                     self.rfid = tag.to_string();
                 }
+                // The CSMS mints the transactionId in the response.
+                if let Some(id) = response["transactionId"].as_i64() {
+                    self.transaction_id = Some(id);
+                }
                 self.status = "Charging".to_string();
             }
             "StopTransaction" => {
@@ -224,8 +239,8 @@ impl EntryStateT for ConnectorState {
         }
     }
 
-    fn derive_payload(&self, name: &str, connector_id: Option<i64>) -> Option<serde_json::Value> {
-        let cid = connector_id.unwrap_or(self.connector_id);
+    fn derive_payload(&self, name: &str, scope: Scope) -> Option<serde_json::Value> {
+        let cid = scope.connector.unwrap_or(self.connector_id);
         Some(match name {
             "RemoteStartTransaction" => {
                 serde_json::json!({ "connectorId": cid, "idTag": self.idtag() })
@@ -283,60 +298,6 @@ impl ConnectorState {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ut_connector_meter_values_update_state() {
-        let mut s = ConnectorState::default();
-        let req = serde_json::json!({
-            "connectorId": 2,
-            "meterValue": [{ "timestamp": "t", "sampledValue": [
-                { "value": "230.0", "measurand": "Voltage", "unit": "V" },
-                { "value": "16.0", "measurand": "Current.Import", "phase": "L1", "unit": "A" },
-                { "value": "11000", "measurand": "Power.Active.Import", "unit": "W" },
-                { "value": "5000", "measurand": "Energy.Active.Import.Register", "unit": "Wh" },
-            ]}]
-        });
-        s.apply_inbound("MeterValues", &req);
-        assert_eq!(s.connector_id, 2);
-        assert_eq!(s.voltage, 230.0);
-        assert_eq!(s.current[0], 16.0);
-        assert_eq!(s.power, 11000.0);
-        assert_eq!(s.total_energy, 5.0); // Wh → kWh
-    }
-
-    #[test]
-    fn ut_connector_derive_payload() {
-        let mut s = ConnectorState::default();
-        s.apply_inbound(
-            "StartTransaction",
-            &serde_json::json!({ "connectorId": 1, "idTag": "ABC" }),
-        );
-        let p = s.derive_payload("RemoteStartTransaction", Some(1)).unwrap();
-        assert_eq!(p["connectorId"], 1);
-        assert_eq!(p["idTag"], "ABC");
-        // Without an observed transaction, RemoteStop can't be derived → JSON editor.
-        assert!(s.derive_payload("RemoteStopTransaction", Some(1)).is_none());
-        // Complex action → JSON editor fallback.
-        assert!(s.derive_payload("ReserveNow", Some(1)).is_none());
-    }
-
-    #[test]
-    fn ut_cs_level_boot_and_derive() {
-        let mut s = CsLevelState::default();
-        s.apply_inbound(
-            "BootNotification",
-            &serde_json::json!({ "chargePointModel": "M", "chargePointVendor": "V" }),
-        );
-        assert_eq!(s.model, "M");
-        assert_eq!(s.vendor, "V");
-        assert_eq!(s.derive_payload("Reset", None).unwrap()["type"], "Soft");
-        assert!(s.derive_payload("UnlockConnector", None).is_none());
-    }
-}
-
 /// Fold an OCPP 1.6 MeterValues request's `sampledValue`s into the connector's metering fields.
 fn apply_meter_values(state: &mut ConnectorState, request: &serde_json::Value) {
     let Some(meter_values) = request["meterValue"].as_array() else {
@@ -373,5 +334,74 @@ fn apply_meter_values(state: &mut ConnectorState, request: &serde_json::Value) {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_connector_meter_values_update_state() {
+        let mut s = ConnectorState::default();
+        let req = serde_json::json!({
+            "connectorId": 2,
+            "meterValue": [{ "timestamp": "t", "sampledValue": [
+                { "value": "230.0", "measurand": "Voltage", "unit": "V" },
+                { "value": "16.0", "measurand": "Current.Import", "phase": "L1", "unit": "A" },
+                { "value": "11000", "measurand": "Power.Active.Import", "unit": "W" },
+                { "value": "5000", "measurand": "Energy.Active.Import.Register", "unit": "Wh" },
+            ]}]
+        });
+        s.apply_inbound("MeterValues", &req, &serde_json::Value::Null);
+        assert_eq!(s.connector_id, 2);
+        assert_eq!(s.voltage, 230.0);
+        assert_eq!(s.current[0], 16.0);
+        assert_eq!(s.power, 11000.0);
+        assert_eq!(s.total_energy, 5.0); // Wh → kWh
+    }
+
+    #[test]
+    fn ut_connector_derive_payload() {
+        let mut s = ConnectorState::default();
+        s.apply_inbound(
+            "StartTransaction",
+            &serde_json::json!({ "connectorId": 1, "idTag": "ABC" }),
+            &serde_json::json!({ "transactionId": 42 }),
+        );
+        let p = s
+            .derive_payload("RemoteStartTransaction", Scope::connector(1))
+            .unwrap();
+        assert_eq!(p["connectorId"], 1);
+        assert_eq!(p["idTag"], "ABC");
+        // The minted transactionId from the response is recorded, so RemoteStop can derive.
+        assert_eq!(s.transaction_id, Some(42));
+        assert_eq!(
+            s.derive_payload("RemoteStopTransaction", Scope::connector(1))
+                .unwrap()["transactionId"],
+            42
+        );
+        // Complex action → JSON editor fallback.
+        assert!(
+            s.derive_payload("ReserveNow", Scope::connector(1))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ut_cs_level_boot_and_derive() {
+        let mut s = CsLevelState::default();
+        s.apply_inbound(
+            "BootNotification",
+            &serde_json::json!({ "chargePointModel": "M", "chargePointVendor": "V" }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.model, "M");
+        assert_eq!(s.vendor, "V");
+        assert_eq!(
+            s.derive_payload("Reset", Scope::CS).unwrap()["type"],
+            "Soft"
+        );
+        assert!(s.derive_payload("UnlockConnector", Scope::CS).is_none());
     }
 }

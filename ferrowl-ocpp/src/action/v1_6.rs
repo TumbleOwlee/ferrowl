@@ -24,7 +24,7 @@ define_ocpp_version! {
         GetConfiguration => None,
         GetDiagnostics => None,
         GetLocalListVersion => None,
-        RemoteStartTransaction => Optional,
+        RemoteStartTransaction => Required,
         RemoteStopTransaction => None,
         ReserveNow => Required,
         Reset => None,
@@ -144,7 +144,8 @@ mod tests {
         };
         assert_eq!(scope("Reset"), None);
         assert_eq!(scope("UnlockConnector"), Required);
-        assert_eq!(scope("RemoteStartTransaction"), Optional);
+        // RemoteStartTransaction is connector-scoped: it targets a connector and prefills its id.
+        assert_eq!(scope("RemoteStartTransaction"), Required);
     }
 
     #[test]

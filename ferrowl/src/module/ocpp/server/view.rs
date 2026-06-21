@@ -41,6 +41,7 @@ use ferrowl_ocpp::{ConnectorScope, Version};
 
 use crate::app::LogRing;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
+use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
 use crate::module::ocpp::client::backend::{Dir, OcppMessage, push_capped};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{
@@ -50,7 +51,7 @@ use crate::module::ocpp::client::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::server::backend::{
-    EventRx, EventTx, OcppServer, RfidList, ServerEvent, inbound_messages,
+    EventRx, EventTx, OcppServer, RfidList, Scope, ServerEvent, inbound_messages,
 };
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
@@ -62,11 +63,17 @@ use crate::view::log::format_timestamp;
 
 /// Per-entry observed state behaviour the generic view needs from each version's state types.
 pub trait EntryStateT: OcppFields + Default + Send + Sync + 'static {
-    /// Update the observed state from an inbound CS→CSMS request.
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value);
+    /// Update the observed state from an inbound CS→CSMS request and the CSMS response (e.g.
+    /// StartTransaction's transactionId is minted in the response).
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        response: &serde_json::Value,
+    );
     /// Derive a complete outbound payload for `name` from observed state (e.g. `idTag` from the
-    /// last RFID, the connector id), or `None` to fall back to the JSON editor.
-    fn derive_payload(&self, name: &str, connector_id: Option<i64>) -> Option<serde_json::Value>;
+    /// last RFID, the connector/EVSE id from `scope`), or `None` to fall back to the JSON editor.
+    fn derive_payload(&self, name: &str, scope: Scope) -> Option<serde_json::Value>;
     /// Ordered (field, value) rows describing the observed non-metering state, for the detail
     /// overlay's "State" table.
     fn fields(&self) -> Vec<(String, String)>;
@@ -89,8 +96,8 @@ pub trait ServerVersion: Version + Sized + 'static {
     /// Build the inbound handler, wiring it to the view's event channel and RFID accept-list.
     fn handler(tx: EventTx, rfids: RfidList) -> Self::Handler;
 
-    /// The connector id an inbound request targets (`None` = CS-level), used to bucket it.
-    fn inbound_connector(name: &str, request: &serde_json::Value) -> Option<i64>;
+    /// The scope an inbound request targets (CS-level/connector/EVSE), used to bucket it.
+    fn inbound_connector(name: &str, request: &serde_json::Value) -> Scope;
 
     /// The CSMS action that retrieves configuration (`GetConfiguration` for 1.6, `GetVariables` for
     /// 2.0.1).
@@ -99,8 +106,8 @@ pub trait ServerVersion: Version + Sized + 'static {
     /// Build a config-fetch request payload for a free-form key (empty = "all" where supported).
     fn config_request(key: &str) -> serde_json::Value;
 
-    /// Parse a config-fetch response into ordered (key, value) rows.
-    fn parse_config(response: &serde_json::Value) -> Vec<(String, String)>;
+    /// Parse a config-fetch response into ordered (key, value, readonly) rows.
+    fn parse_config(response: &serde_json::Value) -> Vec<(String, String, bool)>;
 
     /// The CSMS action that writes one configuration value (`ChangeConfiguration` for 1.6,
     /// `SetVariables` for 2.0.1).
@@ -108,6 +115,12 @@ pub trait ServerVersion: Version + Sized + 'static {
 
     /// Build a config-write request payload setting `key` to `value`.
     fn set_request(key: &str, value: &str) -> serde_json::Value;
+
+    /// The per-action send-dialog spec for `name`, or `None` (raw JSON editor).
+    fn action_spec(name: &str) -> Option<crate::module::ocpp::action_dialog::ActionSpec>;
+
+    /// Dialog-reachable actions that intentionally use the raw JSON editor (no typed form yet).
+    fn json_actions() -> &'static [&'static str];
 }
 
 // --- Connection table ------------------------------------------------------
@@ -245,8 +258,8 @@ enum EntryState<V: ServerVersion> {
 struct Entry<V: ServerVersion> {
     /// Charge-point identity (URL-path segment, or a peer fallback).
     identity: String,
-    /// `None` = CS-level entry; `Some(id)` = connector entry.
-    connector_id: Option<i64>,
+    /// The entry scope: CS-level, a 1.6 connector, or a 2.0.1 EVSE/connector.
+    scope: Scope,
     /// The live connection while online.
     conn: Option<ConnectionId>,
     online: bool,
@@ -261,18 +274,33 @@ impl<V: ServerVersion> Entry<V> {
         self.messages.clone()
     }
 
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value) {
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        response: &serde_json::Value,
+    ) {
         match &self.state {
-            EntryState::Cs(s) => s.write().unwrap().apply_inbound(name, request),
-            EntryState::Conn(s) => s.write().unwrap().apply_inbound(name, request),
+            EntryState::Cs(s) => s.write().unwrap().apply_inbound(name, request, response),
+            EntryState::Conn(s) => s.write().unwrap().apply_inbound(name, request, response),
         }
     }
 
     fn derive_payload(&self, name: &str) -> Option<serde_json::Value> {
         match &self.state {
-            EntryState::Cs(s) => s.read().unwrap().derive_payload(name, self.connector_id),
-            EntryState::Conn(s) => s.read().unwrap().derive_payload(name, self.connector_id),
+            EntryState::Cs(s) => s.read().unwrap().derive_payload(name, self.scope),
+            EntryState::Conn(s) => s.read().unwrap().derive_payload(name, self.scope),
         }
+    }
+
+    /// Read an observed-state field as a display string, for action-dialog prefill.
+    fn get_field_str(&self, name: &str) -> Option<String> {
+        use crate::module::ocpp::action_dialog::value_to_string;
+        let v = match &self.state {
+            EntryState::Cs(s) => s.read().unwrap().get_field(name),
+            EntryState::Conn(s) => s.read().unwrap().get_field(name),
+        };
+        v.map(value_to_string)
     }
 
     /// (Re)start this entry's Lua sim over the given scripts (no-op if no enabled scripts).
@@ -301,13 +329,6 @@ enum Pane {
 
 type CsTable = Widget<TableState<CsRow, 3>, Table<CsRow, CsHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
-/// An open JSON action editor: action name, target connection + connector, and the editor widget.
-type ActionDialog = (
-    String,
-    ConnectionId,
-    Option<i64>,
-    Widget<CodeInputFieldState, CodeInputField>,
-);
 
 pub struct ServerView<V: ServerVersion> {
     spec: OcppSpec,
@@ -330,7 +351,8 @@ pub struct ServerView<V: ServerVersion> {
     code: Widget<CodeInputFieldState, CodeInputField>,
     script_dialog: Option<ScriptDialog>,
     /// A JSON action editor: (action name, target conn, connector id, editor widget).
-    action_dialog: Option<ActionDialog>,
+    /// An open per-action send dialog with its target (connection, connector).
+    action_dialog: Option<(ConnectionId, Scope, ActionDialog)>,
     setup_overlay: Option<OcppSetupDialog>,
     pending_setup: Option<(OcppSpec, String)>,
     replacement: Option<Box<dyn ModuleView>>,
@@ -353,7 +375,7 @@ pub struct ServerView<V: ServerVersion> {
     detail: Option<DetailOverlay>,
     /// In-memory per-CS configuration rows (identity → key/value), kept across overlay open/close
     /// only while the CS is in the list; dropped when its entry is removed (delete/`:stop`/`:restart`).
-    cs_configs: HashMap<String, Vec<(String, String)>>,
+    cs_configs: HashMap<String, Vec<(String, String, bool)>>,
 }
 
 impl<V: ServerVersion> ServerView<V>
@@ -411,7 +433,7 @@ where
     fn delete_selected(&mut self) {
         let Some(idx) = self.selected() else { return };
         let entry = &self.entries[idx];
-        if entry.connector_id.is_none() {
+        if !entry.scope.is_connector() {
             let identity = entry.identity.clone();
             self.entries.retain(|e| e.identity != identity);
             self.cs_configs.remove(&identity);
@@ -425,9 +447,9 @@ where
         let Some(idx) = self.selected() else { return };
         let entry = &self.entries[idx];
         let identity = entry.identity.clone();
-        let connector_id = entry.connector_id;
-        let mut overlay = DetailOverlay::new(identity.clone(), connector_id);
-        if connector_id.is_none()
+        let scope = entry.scope;
+        let mut overlay = DetailOverlay::new(identity.clone(), scope);
+        if !scope.is_connector()
             && let Some(rows) = self.cs_configs.get(&identity)
         {
             overlay.set_config(rows.clone());
@@ -445,17 +467,17 @@ where
 
     /// Feed the open detail overlay live state/metering rows from its target entry.
     fn refresh_detail(&mut self) {
-        let Some((identity, connector_id, is_cs)) = self
+        let Some((identity, scope, is_cs)) = self
             .detail
             .as_ref()
-            .map(|d| (d.identity.clone(), d.connector_id, d.is_cs))
+            .map(|d| (d.identity.clone(), d.scope, d.is_cs))
         else {
             return;
         };
         let Some(entry) = self
             .entries
             .iter()
-            .find(|e| e.identity == identity && e.connector_id == connector_id)
+            .find(|e| e.identity == identity && e.scope == scope)
         else {
             return;
         };
@@ -499,26 +521,22 @@ where
     }
 
     /// Find an entry by (identity, connector), creating it if missing. Returns its index.
-    fn entry_index(
-        &mut self,
-        identity: &str,
-        connector_id: Option<i64>,
-        conn: Option<ConnectionId>,
-    ) -> usize {
+    fn entry_index(&mut self, identity: &str, scope: Scope, conn: Option<ConnectionId>) -> usize {
         if let Some(i) = self
             .entries
             .iter()
-            .position(|e| e.identity == identity && e.connector_id == connector_id)
+            .position(|e| e.identity == identity && e.scope == scope)
         {
             return i;
         }
-        let state = match connector_id {
-            None => EntryState::Cs(Arc::new(RwLock::new(V::Cs::default()))),
-            Some(_) => EntryState::Conn(Arc::new(RwLock::new(V::Conn::default()))),
+        let state = if scope.is_connector() {
+            EntryState::Conn(Arc::new(RwLock::new(V::Conn::default())))
+        } else {
+            EntryState::Cs(Arc::new(RwLock::new(V::Cs::default())))
         };
         let mut entry = Entry {
             identity: identity.to_string(),
-            connector_id,
+            scope,
             conn,
             online: conn.is_some(),
             state,
@@ -544,7 +562,7 @@ where
                 ServerEvent::Connected { conn } => {
                     let identity = self.identity_of(conn);
                     // Ensure the CS-level entry exists and bring every entry of this CS online.
-                    self.entry_index(&identity, None, Some(conn));
+                    self.entry_index(&identity, Scope::CS, Some(conn));
                     for e in self.entries.iter_mut().filter(|e| e.identity == identity) {
                         e.online = true;
                         e.conn = Some(conn);
@@ -563,21 +581,21 @@ where
                     response,
                 } => {
                     let identity = self.identity_of(conn);
-                    let connector = V::inbound_connector(&name, &request);
+                    let scope = V::inbound_connector(&name, &request);
                     // Always make sure the CS-level entry exists for this connection.
-                    self.entry_index(&identity, None, Some(conn));
-                    let idx = self.entry_index(&identity, connector, Some(conn));
+                    self.entry_index(&identity, Scope::CS, Some(conn));
+                    let idx = self.entry_index(&identity, scope, Some(conn));
                     let entry = &mut self.entries[idx];
                     entry.online = true;
                     entry.conn = Some(conn);
-                    entry.apply_inbound(&name, &request);
+                    entry.apply_inbound(&name, &request, &response);
                     for m in inbound_messages(&name, request, response) {
                         push_capped(&mut entry.messages, m);
                     }
                 }
                 ServerEvent::Outbound {
                     conn,
-                    connector_id,
+                    scope,
                     name,
                     request,
                     response,
@@ -585,18 +603,30 @@ where
                     context,
                 } => {
                     let identity = self.identity_of(conn);
-                    // Feed a config-fetch response into the open detail overlay (CS-level only).
-                    if ok
-                        && name == V::config_action()
-                        && let Some(d) = self.detail.as_mut()
-                        && d.is_cs
-                        && d.identity == identity
-                    {
-                        for (k, v) in V::parse_config(&response) {
-                            d.merge_config(k, v);
+                    // Persist a config-fetch response for this CS so it is available whether or not
+                    // the detail overlay is open, and live-merge it into an open matching overlay.
+                    if ok && name == V::config_action() {
+                        let rows = V::parse_config(&response);
+                        if !rows.is_empty() {
+                            let store = self.cs_configs.entry(identity.clone()).or_default();
+                            for (k, v, ro) in rows {
+                                match store.iter_mut().find(|(ek, _, _)| *ek == k) {
+                                    Some(r) => {
+                                        r.1 = v;
+                                        r.2 = ro;
+                                    }
+                                    None => store.push((k, v, ro)),
+                                }
+                            }
+                            if let Some(d) = self.detail.as_mut()
+                                && d.is_cs
+                                && d.identity == identity
+                            {
+                                d.set_config(self.cs_configs[&identity].clone());
+                            }
                         }
                     }
-                    let idx = self.entry_index(&identity, connector_id, Some(conn));
+                    let idx = self.entry_index(&identity, scope, Some(conn));
                     let entry = &mut self.entries[idx];
                     push_capped(
                         &mut entry.messages,
@@ -612,13 +642,7 @@ where
     }
 
     /// Spawn an outbound Call to `conn` and post its result back as an [`ServerEvent::Outbound`].
-    fn send_to(
-        &self,
-        conn: ConnectionId,
-        connector_id: Option<i64>,
-        name: &str,
-        payload: serde_json::Value,
-    ) {
+    fn send_to(&self, conn: ConnectionId, scope: Scope, name: &str, payload: serde_json::Value) {
         let Some(sender) = self.backend.sender() else {
             return;
         };
@@ -629,7 +653,7 @@ where
             Err(e) => {
                 let _ = tx.send(ServerEvent::Outbound {
                     conn,
-                    connector_id,
+                    scope,
                     name,
                     request: payload,
                     response: serde_json::Value::Null,
@@ -647,7 +671,7 @@ where
             };
             let _ = tx.send(ServerEvent::Outbound {
                 conn,
-                connector_id,
+                scope,
                 name,
                 request,
                 response,
@@ -673,25 +697,41 @@ where
         let Some(conn) = self.entries[idx].conn else {
             return;
         };
-        let connector_id = self.entries[idx].connector_id;
+        let scope = self.entries[idx].scope;
         match self.entries[idx].derive_payload(&name) {
-            Some(payload) => self.send_to(conn, connector_id, &name, payload),
+            Some(payload) => self.send_to(conn, scope, &name, payload),
             None => {
-                // Open a JSON editor prefilled with the Default-derived template.
-                let template = V::default_action(&name)
-                    .and_then(|a| V::encode_action(&a).ok())
-                    .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                    .unwrap_or_else(|| "{}".to_string());
-                let mut field = editable_code();
-                field.state.set_content(&template);
-                self.action_dialog = Some((name, conn, connector_id, field));
+                // Open a per-action dialog from the spec, or a raw JSON editor if none yet.
+                let dialog = match V::action_spec(&name) {
+                    Some(spec) => {
+                        let entry = &self.entries[idx];
+                        ActionDialog::new(
+                            name.clone(),
+                            &spec,
+                            |f| entry.get_field_str(f),
+                            gen_tx_id,
+                        )
+                    }
+                    None => {
+                        debug_assert!(
+                            V::json_actions().contains(&name.as_str()),
+                            "{name} has no spec and is not a registered JSON action"
+                        );
+                        let template = V::default_action(&name)
+                            .and_then(|a| V::encode_action(&a).ok())
+                            .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                            .unwrap_or_else(|| "{}".to_string());
+                        ActionDialog::json_only(name.clone(), &template)
+                    }
+                };
+                self.action_dialog = Some((conn, scope, dialog));
             }
         }
     }
 
     /// Drain each entry's Lua action queue and send the actions to its connection.
     fn drain_lua_actions(&mut self) {
-        let mut sends: Vec<(ConnectionId, Option<i64>, String, serde_json::Value)> = Vec::new();
+        let mut sends: Vec<(ConnectionId, Scope, String, serde_json::Value)> = Vec::new();
         for entry in &self.entries {
             let Some(conn) = entry.conn else { continue };
             let queued: Vec<(String, serde_json::Value)> =
@@ -703,11 +743,11 @@ where
                         .unwrap_or_else(|| serde_json::json!({}))
                 });
                 merge_overrides(&mut payload, overrides);
-                sends.push((conn, entry.connector_id, name, payload));
+                sends.push((conn, entry.scope, name, payload));
             }
         }
-        for (conn, connector_id, name, payload) in sends {
-            self.send_to(conn, connector_id, &name, payload);
+        for (conn, scope, name, payload) in sends {
+            self.send_to(conn, scope, &name, payload);
         }
     }
 
@@ -715,7 +755,7 @@ where
     fn sync_actions(&mut self) {
         let is_connector = self
             .selected()
-            .map(|i| self.entries[i].connector_id.is_some());
+            .map(|i| self.entries[i].scope.is_connector());
         let want = is_connector.unwrap_or(false);
         // Rebuild only when the level (CS vs connector) actually changes. Gating on a live
         // selection rebuilt the list every frame while the table was empty, resetting the
@@ -852,12 +892,16 @@ where
             })
             .unwrap_or_default();
         self.msg_table.state.set_values(rows);
+        // Autoscroll the message log to the newest row unless the user is scrolling it.
+        if !(focused && self.focus == Pane::Messages) {
+            self.msg_table.state.move_to_bottom();
+        }
         let cs_rows: Vec<CsRow> = self
             .entries
             .iter()
             .map(|e| CsRow {
                 name: e.identity.clone(),
-                connector: e.connector_id.map(|c| c.to_string()).unwrap_or_default(),
+                connector: e.scope.label(),
                 state: if e.online {
                     "Connected"
                 } else {
@@ -941,15 +985,8 @@ where
         if let Some(dialog) = self.script_dialog.as_mut() {
             dialog.render(area, buf);
         }
-        if let Some((_, _, _, field)) = self.action_dialog.as_mut() {
-            let [_, mid, _] = Layout::vertical([
-                Constraint::Percentage(15),
-                Constraint::Percentage(70),
-                Constraint::Percentage(15),
-            ])
-            .areas(area);
-            ratatui::widgets::Widget::render(ratatui::widgets::Clear, mid, buf);
-            StatefulWidget::render(&field.widget, mid, buf, &mut field.state);
+        if let Some((_, _, dlg)) = self.action_dialog.as_mut() {
+            dlg.render(area, buf);
         }
         if self.detail.is_some() {
             self.refresh_detail();
@@ -980,12 +1017,17 @@ where
                 }
                 Some(DetailRequest::Fetch(key)) => {
                     if let Some(conn) = self.conn_for(&identity) {
-                        self.send_to(conn, None, V::config_action(), V::config_request(&key));
+                        self.send_to(conn, Scope::CS, V::config_action(), V::config_request(&key));
                     }
                 }
                 Some(DetailRequest::Set(key, value)) => {
                     if let Some(conn) = self.conn_for(&identity) {
-                        self.send_to(conn, None, V::set_action(), V::set_request(&key, &value));
+                        self.send_to(
+                            conn,
+                            Scope::CS,
+                            V::set_action(),
+                            V::set_request(&key, &value),
+                        );
                     }
                 }
                 None => {}
@@ -1040,22 +1082,25 @@ where
             }
             return EventResult::Consumed;
         }
-        if let Some((name, conn, connector_id, field)) = self.action_dialog.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.action_dialog = None,
-                (KeyModifiers::NONE, KeyCode::Enter) => {
-                    // Keep the dialog open on invalid JSON.
-                    if let Ok(payload) =
-                        serde_json::from_str::<serde_json::Value>(&field.state.content())
-                    {
-                        let (name, conn, connector_id) = (name.clone(), *conn, *connector_id);
+        if self.action_dialog.is_some() {
+            let res = self
+                .action_dialog
+                .as_mut()
+                .unwrap()
+                .2
+                .input(modifiers, code);
+            match res {
+                Some(ActionResult::Close) => self.action_dialog = None,
+                Some(ActionResult::Send(payload)) => {
+                    let (conn, scope, dlg) = self.action_dialog.as_ref().unwrap();
+                    let (conn, scope, name) = (*conn, *scope, dlg.name.clone());
+                    // Validate before sending; keep the dialog open on an invalid payload.
+                    if V::decode_call(&name, payload.clone()).is_ok() {
                         self.action_dialog = None;
-                        self.send_to(conn, connector_id, &name, payload);
+                        self.send_to(conn, scope, &name, payload);
                     }
                 }
-                _ => {
-                    let _ = field.state.handle_events(modifiers, code);
-                }
+                None => {}
             }
             return EventResult::Consumed;
         }
@@ -1469,25 +1514,6 @@ fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
     }
 }
 
-fn editable_code() -> Widget<CodeInputFieldState, CodeInputField> {
-    Widget {
-        state: CodeInputFieldStateBuilder::default()
-            .focused(true)
-            .disabled(false)
-            .build()
-            .unwrap(),
-        widget: CodeInputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Action payload (Enter to send)".into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1528,10 +1554,28 @@ mod tests {
     }
 
     #[test]
+    fn entries_keyed_by_scope() {
+        let mut v = server_view();
+        // Two 2.0.1 connectors sharing EVSE 1 are distinct entries; re-querying is stable.
+        let c1 = v.entry_index("CP1", Scope::evse(1, Some(1)), None);
+        let c2 = v.entry_index("CP1", Scope::evse(1, Some(2)), None);
+        assert_ne!(
+            c1, c2,
+            "connectors sharing an EVSE must be distinct entries"
+        );
+        assert_eq!(c1, v.entry_index("CP1", Scope::evse(1, Some(1)), None));
+        // 1.6-style keying (CS-level vs connector) is unchanged.
+        let cs = v.entry_index("CP1", Scope::CS, None);
+        let conn = v.entry_index("CP1", Scope::connector(1), None);
+        assert_ne!(cs, conn);
+        assert_eq!(conn, v.entry_index("CP1", Scope::connector(1), None));
+    }
+
+    #[test]
     fn open_detail_builds_overlay_for_selected_entry() {
         let mut v = server_view();
         // Add a CS-level entry and select its row.
-        v.entry_index("CP1", None, None);
+        v.entry_index("CP1", Scope::CS, None);
         v.cs_table.state.set_values(vec![CsRow {
             name: "CP1".into(),
             connector: String::new(),
@@ -1546,10 +1590,72 @@ mod tests {
         assert!(d.is_cs, "CS-level entry should yield a CS detail overlay");
     }
 
+    fn get_config_event(conn: ConnectionId) -> ServerEvent {
+        ServerEvent::Outbound {
+            conn,
+            scope: Scope::CS,
+            name: "GetConfiguration".into(),
+            request: serde_json::json!({}),
+            response: serde_json::json!({ "configurationKey": [
+                { "key": "HeartbeatInterval", "value": "30", "readonly": true }
+            ]}),
+            ok: true,
+            context: String::new(),
+        }
+    }
+
+    #[test]
+    fn get_configuration_response_populates_config_table() {
+        let mut v = server_view();
+        let conn = ConnectionId(1);
+        v.conn_identity.insert(conn, "CP1".into());
+        v.entry_index("CP1", Scope::CS, Some(conn));
+        v.cs_table.state.set_values(vec![CsRow {
+            name: "CP1".into(),
+            connector: String::new(),
+            state: "Connected".into(),
+        }]);
+        v.cs_table.state.move_down();
+        v.open_detail();
+        v.events_tx.send(get_config_event(conn)).unwrap();
+        v.drain_events();
+        assert_eq!(
+            v.detail.as_ref().unwrap().config_rows(),
+            vec![("HeartbeatInterval".into(), "30".into(), true)]
+        );
+    }
+
+    #[test]
+    fn get_configuration_response_persists_with_overlay_closed() {
+        let mut v = server_view();
+        let conn = ConnectionId(1);
+        v.conn_identity.insert(conn, "CP1".into());
+        v.entry_index("CP1", Scope::CS, Some(conn));
+        // No overlay open when the response arrives (e.g. triggered via the action button).
+        v.events_tx.send(get_config_event(conn)).unwrap();
+        v.drain_events();
+        assert_eq!(
+            v.cs_configs.get("CP1").unwrap(),
+            &vec![("HeartbeatInterval".into(), "30".into(), true)]
+        );
+        // Opening the detail later seeds the table from the persisted rows.
+        v.cs_table.state.set_values(vec![CsRow {
+            name: "CP1".into(),
+            connector: String::new(),
+            state: "Connected".into(),
+        }]);
+        v.cs_table.state.move_down();
+        v.open_detail();
+        assert_eq!(
+            v.detail.as_ref().unwrap().config_rows(),
+            vec![("HeartbeatInterval".into(), "30".into(), true)]
+        );
+    }
+
     #[test]
     fn config_keys_persist_across_overlay_close() {
         let mut v = server_view();
-        v.entry_index("CP1", None, None);
+        v.entry_index("CP1", Scope::CS, None);
         v.cs_table.state.set_values(vec![CsRow {
             name: "CP1".into(),
             connector: String::new(),
@@ -1560,24 +1666,24 @@ mod tests {
         v.detail
             .as_mut()
             .unwrap()
-            .merge_config("HeartbeatInterval".into(), "30".into());
+            .merge_config("HeartbeatInterval".into(), "30".into(), false);
         // Close the overlay (Esc) — keep rows in memory, not discard.
         v.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(v.detail.is_none());
         assert_eq!(
             v.cs_configs.get("CP1").unwrap(),
-            &vec![("HeartbeatInterval".into(), "30".into())]
+            &vec![("HeartbeatInterval".into(), "30".into(), false)]
         );
         // Reopening seeds the overlay from the in-memory rows.
         v.open_detail();
         assert_eq!(
             v.detail.as_ref().unwrap().config_rows(),
-            vec![("HeartbeatInterval".into(), "30".into())]
+            vec![("HeartbeatInterval".into(), "30".into(), false)]
         );
         v.detail = None;
         // Deleting the CS drops its stored config.
         v.delete_selected();
-        assert!(v.cs_configs.get("CP1").is_none());
+        assert!(!v.cs_configs.contains_key("CP1"));
     }
 
     #[test]

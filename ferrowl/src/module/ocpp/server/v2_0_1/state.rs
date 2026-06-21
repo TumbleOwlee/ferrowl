@@ -7,6 +7,7 @@ use ferrowl_ocpp::{V2_0_1, Version};
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 use crate::module::ocpp::client::lua_sim::OcppFields;
+use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::server::view::EntryStateT;
 
 fn csms_action_names() -> Vec<&'static str> {
@@ -50,7 +51,12 @@ impl OcppFields for CsLevelState {
 }
 
 impl EntryStateT for CsLevelState {
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value) {
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        _response: &serde_json::Value,
+    ) {
         match name {
             "BootNotification" => {
                 let cs = &request["chargingStation"];
@@ -72,7 +78,7 @@ impl EntryStateT for CsLevelState {
         }
     }
 
-    fn derive_payload(&self, name: &str, _connector_id: Option<i64>) -> Option<serde_json::Value> {
+    fn derive_payload(&self, name: &str, _scope: Scope) -> Option<serde_json::Value> {
         Some(match name {
             "Reset" => serde_json::json!({ "type": "Immediate" }),
             "ClearCache" | "GetLocalListVersion" => serde_json::json!({}),
@@ -184,7 +190,12 @@ impl OcppFields for ConnectorState {
 }
 
 impl EntryStateT for ConnectorState {
-    fn apply_inbound(&mut self, name: &str, request: &serde_json::Value) {
+    fn apply_inbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        _response: &serde_json::Value,
+    ) {
         if let Some(e) = evse_of(request) {
             self.evse_id = e;
         }
@@ -217,8 +228,8 @@ impl EntryStateT for ConnectorState {
         }
     }
 
-    fn derive_payload(&self, name: &str, connector_id: Option<i64>) -> Option<serde_json::Value> {
-        let evse = connector_id.unwrap_or(self.evse_id);
+    fn derive_payload(&self, name: &str, scope: Scope) -> Option<serde_json::Value> {
+        let evse = scope.evse.unwrap_or(self.evse_id);
         Some(match name {
             "RequestStartTransaction" => serde_json::json!({
                 "evseId": evse,

@@ -6,7 +6,7 @@ mod state;
 
 use ferrowl_ocpp::V2_0_1;
 
-use crate::module::ocpp::server::backend::{EventTx, RfidList};
+use crate::module::ocpp::server::backend::{EventTx, RfidList, Scope};
 use crate::module::ocpp::server::view::ServerVersion;
 
 use handler::CsmsHandler201;
@@ -21,12 +21,18 @@ impl ServerVersion for V2_0_1 {
         CsmsHandler201::new(tx, rfids)
     }
 
-    fn inbound_connector(_name: &str, request: &serde_json::Value) -> Option<i64> {
-        request["evse"]["id"]
+    fn inbound_connector(_name: &str, request: &serde_json::Value) -> Scope {
+        let evse = request["evse"]["id"]
             .as_i64()
-            .or_else(|| request["evseId"].as_i64())
+            .or_else(|| request["evseId"].as_i64());
+        let connector = request["evse"]["connectorId"]
+            .as_i64()
             .or_else(|| request["connectorId"].as_i64())
-            .filter(|&c| c >= 1)
+            .filter(|&c| c >= 1);
+        match evse {
+            Some(e) if e >= 1 => Scope::evse(e, connector),
+            _ => Scope::CS,
+        }
     }
 
     fn config_action() -> &'static str {
@@ -45,7 +51,7 @@ impl ServerVersion for V2_0_1 {
         })
     }
 
-    fn parse_config(response: &serde_json::Value) -> Vec<(String, String)> {
+    fn parse_config(response: &serde_json::Value) -> Vec<(String, String, bool)> {
         let mut rows = Vec::new();
         let Some(results) = response["getVariableResult"].as_array() else {
             return rows;
@@ -59,7 +65,8 @@ impl ServerVersion for V2_0_1 {
             } else {
                 format!("<{status}>")
             };
-            rows.push((format!("{component}/{variable}"), value));
+            // 2.0.1 mutability is per-attribute (not a simple bool); treat as writable.
+            rows.push((format!("{component}/{variable}"), value, false));
         }
         rows
     }
@@ -78,12 +85,46 @@ impl ServerVersion for V2_0_1 {
             }]
         })
     }
+
+    fn action_spec(name: &str) -> Option<crate::module::ocpp::action_dialog::ActionSpec> {
+        crate::module::ocpp::spec::v2_0_1::action_spec(name)
+    }
+
+    fn json_actions() -> &'static [&'static str] {
+        crate::module::ocpp::spec::v2_0_1::json_actions()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn ut_inbound_connector_scope() {
+        // Nested evse object carries both EVSE id and connector → distinct scopes per connector.
+        let a = V2_0_1::inbound_connector(
+            "TransactionEvent",
+            &json!({ "evse": { "id": 1, "connectorId": 1 } }),
+        );
+        let b = V2_0_1::inbound_connector(
+            "TransactionEvent",
+            &json!({ "evse": { "id": 1, "connectorId": 2 } }),
+        );
+        assert_eq!(a, Scope::evse(1, Some(1)));
+        assert_eq!(b, Scope::evse(1, Some(2)));
+        assert_ne!(a, b);
+        // Top-level evseId (no nested object), no connector.
+        assert_eq!(
+            V2_0_1::inbound_connector("MeterValues", &json!({ "evseId": 2 })),
+            Scope::evse(2, None)
+        );
+        // No EVSE → CS-level.
+        assert_eq!(
+            V2_0_1::inbound_connector("BootNotification", &json!({})),
+            Scope::CS
+        );
+    }
 
     #[test]
     fn ut_config_request_splits_component_variable() {
@@ -122,8 +163,8 @@ mod tests {
         let rows = V2_0_1::parse_config(&resp);
         assert_eq!(
             rows[0],
-            ("OCPPCommCtrlr/HeartbeatInterval".into(), "30".into())
+            ("OCPPCommCtrlr/HeartbeatInterval".into(), "30".into(), false)
         );
-        assert_eq!(rows[1], ("X/Y".into(), "<Rejected>".into()));
+        assert_eq!(rows[1], ("X/Y".into(), "<Rejected>".into(), false));
     }
 }

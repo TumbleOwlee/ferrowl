@@ -13,6 +13,8 @@
 //! the view as a [`DetailRequest`].
 
 use crossterm::event::{KeyCode, KeyModifiers};
+
+use crate::module::ocpp::server::backend::Scope;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder, TableState, TableStateBuilder},
@@ -71,6 +73,42 @@ impl Header<2> for KvHeader {
 
 type KvTable = Widget<TableState<KvRow, 2>, Table<KvRow, KvHeader, 2>>;
 
+// --- Configuration table (key/value/readonly) ------------------------------
+
+#[derive(Clone, Debug, Default)]
+struct CfgRow {
+    key: String,
+    value: String,
+    readonly: String,
+}
+
+impl TableEntry<3> for CfgRow {
+    fn values(&self) -> [String; 3] {
+        [self.key.clone(), self.value.clone(), self.readonly.clone()]
+    }
+    fn height(&self) -> u16 {
+        1
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CfgHeader;
+
+impl Header<3> for CfgHeader {
+    fn header() -> [String; 3] {
+        ["Key".into(), "Value".into(), "ReadOnly".into()]
+    }
+    fn widths() -> [Width; 3] {
+        [
+            Width { min: 16, max: 30 },
+            Width { min: 10, max: 40 },
+            Width { min: 8, max: 9 },
+        ]
+    }
+}
+
+type CfgTable = Widget<TableState<CfgRow, 3>, Table<CfgRow, CfgHeader, 3>>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
     State,
@@ -82,15 +120,18 @@ enum Focus {
 pub struct DetailOverlay {
     /// Charge-point identity of the target entry.
     pub identity: String,
-    /// `None` = CS-level entry; `Some(id)` = connector entry.
-    pub connector_id: Option<i64>,
+    /// The target entry's scope (CS-level/connector/EVSE), used to re-find it each frame.
+    pub scope: Scope,
     /// Whether this is a CS-level entry (config table + key input) or a connector (metering table).
     pub is_cs: bool,
     state: KvTable,
+    /// Connector "Metering" table (connector entries only).
     side: KvTable,
+    /// CS-level "Configuration" table (key/value/readonly).
+    cfg: CfgTable,
     key_input: Widget<InputFieldState, InputField<String>>,
-    /// Config rows accumulated from `GetConfiguration`/`GetVariables` responses (CS-level only).
-    config: Vec<(String, String)>,
+    /// Config rows (key, value, readonly) from `GetConfiguration`/`GetVariables` (CS-level only).
+    config: Vec<(String, String, bool)>,
     focus: Focus,
     /// Compact (no vertical row margin) tables; toggled with `c`. Default off (margin 1).
     compact: bool,
@@ -99,15 +140,15 @@ pub struct DetailOverlay {
 }
 
 impl DetailOverlay {
-    pub fn new(identity: String, connector_id: Option<i64>) -> Self {
-        let is_cs = connector_id.is_none();
-        let side_title = if is_cs { "Configuration" } else { "Metering" };
+    pub fn new(identity: String, scope: Scope) -> Self {
+        let is_cs = !scope.is_connector();
         Self {
             identity,
-            connector_id,
+            scope,
             is_cs,
             state: kv_table("State"),
-            side: kv_table(side_title),
+            side: kv_table("Metering"),
+            cfg: cfg_table(),
             key_input: key_input(),
             config: Vec::new(),
             focus: Focus::State,
@@ -126,29 +167,38 @@ impl DetailOverlay {
         self.side.state.set_values(to_kv(rows));
     }
 
-    /// Merge a fetched (key, value) config row, updating an existing key or appending a new one.
-    pub fn merge_config(&mut self, key: String, value: String) {
-        if let Some(row) = self.config.iter_mut().find(|(k, _)| *k == key) {
+    /// Merge a fetched (key, value, readonly) config row, updating an existing key or appending it.
+    pub fn merge_config(&mut self, key: String, value: String, readonly: bool) {
+        if let Some(row) = self.config.iter_mut().find(|(k, _, _)| *k == key) {
             row.1 = value;
+            row.2 = readonly;
         } else {
-            self.config.push((key, value));
+            self.config.push((key, value, readonly));
         }
         self.refresh_config_table();
     }
 
     fn refresh_config_table(&mut self) {
-        let rows = self.config.clone();
-        self.side.state.set_values(to_kv(rows));
+        let rows: Vec<CfgRow> = self
+            .config
+            .iter()
+            .map(|(k, v, ro)| CfgRow {
+                key: k.clone(),
+                value: v.clone(),
+                readonly: if *ro { "yes" } else { "no" }.to_string(),
+            })
+            .collect();
+        self.cfg.state.set_values(rows);
     }
 
     /// Seed the config table from persisted rows (on overlay open).
-    pub fn set_config(&mut self, rows: Vec<(String, String)>) {
+    pub fn set_config(&mut self, rows: Vec<(String, String, bool)>) {
         self.config = rows;
         self.refresh_config_table();
     }
 
     /// The current config rows (to persist on overlay close).
-    pub fn config_rows(&self) -> Vec<(String, String)> {
+    pub fn config_rows(&self) -> Vec<(String, String, bool)> {
         self.config.clone()
     }
 
@@ -188,16 +238,17 @@ impl DetailOverlay {
         };
         self.state.widget.set_row_margin(margin);
         self.side.widget.set_row_margin(margin);
+        self.cfg.widget.set_row_margin(margin);
     }
 
     /// The selected configuration key, if the config table has a selection.
     fn selected_config_key(&self) -> Option<String> {
-        let i = self.side.state.table_state().selected()?;
-        self.config.get(i).map(|(k, _)| k.clone())
+        let i = self.cfg.state.table_state().selected()?;
+        self.config.get(i).map(|(k, _, _)| k.clone())
     }
 
     fn delete_selected_config(&mut self) {
-        if let Some(i) = self.side.state.table_state().selected()
+        if let Some(i) = self.cfg.state.table_state().selected()
             && i < self.config.len()
         {
             self.config.remove(i);
@@ -209,8 +260,8 @@ impl DetailOverlay {
         let current = self
             .config
             .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v.clone())
+            .find(|(k, _, _)| *k == key)
+            .map(|(_, v, _)| v.clone())
             .unwrap_or_default();
         let mut field = value_input(&key);
         field.state.set_input(current.clone());
@@ -227,8 +278,8 @@ impl DetailOverlay {
                 (KeyModifiers::NONE, KeyCode::Enter) => {
                     let (k, v) = (key.clone(), field.state.get_value());
                     self.set_dialog = None;
-                    // Optimistically reflect the new value; the response confirms or overwrites it.
-                    self.merge_config(k.clone(), v.clone());
+                    // Optimistically reflect the new value; a freshly written key is writable.
+                    self.merge_config(k.clone(), v.clone(), false);
                     return Some(DetailRequest::Set(k, v));
                 }
                 _ => {
@@ -277,6 +328,9 @@ impl DetailOverlay {
             Focus::State => {
                 let _ = self.state.state.handle_events(modifiers, code);
             }
+            Focus::Side if self.is_cs => {
+                let _ = self.cfg.state.handle_events(modifiers, code);
+            }
             Focus::Side => {
                 let _ = self.side.state.handle_events(modifiers, code);
             }
@@ -301,9 +355,10 @@ impl DetailOverlay {
         .areas(hc);
 
         UiWidget::render(&Clear, vc, buf);
-        let title = match self.connector_id {
-            Some(c) => format!("{} — connector {c}", self.identity),
-            None => self.identity.clone(),
+        let title = if self.scope.is_connector() {
+            format!("{} — connector {}", self.identity, self.scope.label())
+        } else {
+            self.identity.clone()
         };
         let block = Block::bordered()
             .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
@@ -318,6 +373,7 @@ impl DetailOverlay {
 
         self.state.state.set_focused(self.focus == Focus::State);
         self.side.state.set_focused(self.focus == Focus::Side);
+        self.cfg.state.set_focused(self.focus == Focus::Side);
 
         if self.is_cs {
             // Vertically stacked: State, Configuration, then the free-form fetch input.
@@ -329,7 +385,7 @@ impl DetailOverlay {
             .areas(inner);
             self.key_input.state.set_focused(self.focus == Focus::Key);
             StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
-            StatefulWidget::render(&self.side.widget, config_area, buf, &mut self.side.state);
+            StatefulWidget::render(&self.cfg.widget, config_area, buf, &mut self.cfg.state);
             StatefulWidget::render(
                 &self.key_input.widget,
                 input_area,
@@ -380,6 +436,25 @@ fn kv_table(title: &str) -> KvTable {
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(title.into()))
+            .style(TableStyleBuilder::default().build().unwrap())
+            .row_margin(Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn cfg_table() -> CfgTable {
+    Widget {
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .unwrap(),
+        widget: TableBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some("Configuration".into()))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,
@@ -444,19 +519,22 @@ mod tests {
 
     #[test]
     fn merge_config_updates_existing_and_appends_new() {
-        let mut d = DetailOverlay::new("CP".into(), None);
-        d.merge_config("A".into(), "1".into());
-        d.merge_config("B".into(), "2".into());
-        d.merge_config("A".into(), "9".into()); // updates A in place
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
+        d.merge_config("A".into(), "1".into(), false);
+        d.merge_config("B".into(), "2".into(), false);
+        d.merge_config("A".into(), "9".into(), false); // updates A in place
         assert_eq!(
             d.config,
-            vec![("A".into(), "9".into()), ("B".into(), "2".into())]
+            vec![
+                ("A".into(), "9".into(), false),
+                ("B".into(), "2".into(), false)
+            ]
         );
     }
 
     #[test]
     fn connector_overlay_has_no_key_pane() {
-        let mut d = DetailOverlay::new("CP".into(), Some(1));
+        let mut d = DetailOverlay::new("CP".into(), Scope::connector(1));
         assert!(!d.is_cs);
         // Focus cycles State -> Side -> State; the key input pane is CS-only.
         d.focus_next();
@@ -467,7 +545,7 @@ mod tests {
 
     #[test]
     fn cs_overlay_reaches_key_pane() {
-        let mut d = DetailOverlay::new("CP".into(), None);
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
         assert!(d.is_cs);
         // State -> Side -> Key.
         d.focus_next();
@@ -477,7 +555,7 @@ mod tests {
 
     #[test]
     fn toggle_compact_flips_flag() {
-        let mut d = DetailOverlay::new("CP".into(), None);
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
         assert!(!d.compact);
         // `c` on a focused table toggles; on the key input it is text.
         assert!(d.input(KeyModifiers::NONE, KeyCode::Char('c')).is_none());
@@ -491,20 +569,35 @@ mod tests {
     }
 
     #[test]
+    fn config_table_shows_readonly_column() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
+        d.merge_config("A".into(), "1".into(), true);
+        d.merge_config("B".into(), "2".into(), false);
+        let rows = d.cfg.state.values();
+        assert_eq!(rows[0].readonly, "yes");
+        assert_eq!(rows[1].readonly, "no");
+        // A value written via the set dialog is marked writable (not read-only).
+        d.focus = Focus::Side;
+        d.input(KeyModifiers::NONE, KeyCode::Enter); // open set dialog for row 0 (A)
+        d.input(KeyModifiers::NONE, KeyCode::Enter); // confirm (keeps prefilled value)
+        assert_eq!(d.config[0], ("A".into(), "1".into(), false));
+    }
+
+    #[test]
     fn delete_removes_selected_config_key() {
-        let mut d = DetailOverlay::new("CP".into(), None);
-        d.merge_config("A".into(), "1".into());
-        d.merge_config("B".into(), "2".into());
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
+        d.merge_config("A".into(), "1".into(), false);
+        d.merge_config("B".into(), "2".into(), false);
         d.focus = Focus::Side;
         // Selection defaults to row 0 (A).
         d.input(KeyModifiers::NONE, KeyCode::Char('d'));
-        assert_eq!(d.config, vec![("B".into(), "2".into())]);
+        assert_eq!(d.config, vec![("B".into(), "2".into(), false)]);
     }
 
     #[test]
     fn refetch_selected_config_key_requests_fetch() {
-        let mut d = DetailOverlay::new("CP".into(), None);
-        d.merge_config("HeartbeatInterval".into(), "30".into());
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
+        d.merge_config("HeartbeatInterval".into(), "30".into(), false);
         d.focus = Focus::Side;
         let req = d.input(KeyModifiers::NONE, KeyCode::Char('u'));
         assert!(matches!(req, Some(DetailRequest::Fetch(k)) if k == "HeartbeatInterval"));
@@ -512,8 +605,8 @@ mod tests {
 
     #[test]
     fn enter_on_config_opens_value_dialog_then_set_request() {
-        let mut d = DetailOverlay::new("CP".into(), None);
-        d.merge_config("HeartbeatInterval".into(), "30".into());
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
+        d.merge_config("HeartbeatInterval".into(), "30".into(), false);
         d.focus = Focus::Side;
         // Enter opens the value dialog (no request yet).
         assert!(d.input(KeyModifiers::NONE, KeyCode::Enter).is_none());
@@ -532,7 +625,7 @@ mod tests {
 
     #[test]
     fn fetch_clears_key_input() {
-        let mut d = DetailOverlay::new("CP".into(), None);
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
         d.focus = Focus::Key;
         for c in "Foo".chars() {
             d.input(KeyModifiers::NONE, KeyCode::Char(c));
@@ -544,7 +637,7 @@ mod tests {
 
     #[test]
     fn esc_requests_close() {
-        let mut d = DetailOverlay::new("CP".into(), None);
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS);
         assert!(matches!(
             d.input(KeyModifiers::NONE, KeyCode::Esc),
             Some(DetailRequest::Close)

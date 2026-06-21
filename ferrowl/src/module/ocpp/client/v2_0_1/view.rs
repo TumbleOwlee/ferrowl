@@ -37,6 +37,7 @@ use tokio::sync::RwLock as AsyncRwLock;
 use ferrowl_ocpp::{V2_0_1, Version};
 
 use crate::app::LogRing;
+use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::backend::{
     DEFAULT_HEARTBEAT_SECS, OcppClient, OcppMessage, TICKS_PER_SEC, boot_interval, rfc3339_now,
 };
@@ -151,10 +152,11 @@ impl EditField {
             12 => EditField::Temperature,
             13 => EditField::Status,
             14 => EditField::Rfid,
-            15 => EditField::Model,
-            16 => EditField::Vendor,
-            17 => EditField::FirmwareVersion,
-            18 => EditField::SerialNumber,
+            // 15 = "Reserved RFID" (read-only, set by the CSMS via ReserveNow).
+            16 => EditField::Model,
+            17 => EditField::Vendor,
+            18 => EditField::FirmwareVersion,
+            19 => EditField::SerialNumber,
             _ => return None,
         })
     }
@@ -343,7 +345,7 @@ pub struct OcppClientV201View {
     focus: Pane,
     edit: Option<EditOverlay>,
     config_edit: Option<ConfigEditDialog>,
-    action_dialog: Option<(String, Widget<CodeInputFieldState, CodeInputField>)>,
+    action_dialog: Option<ActionDialog>,
     pending_send: Option<(String, serde_json::Value)>,
     setup_overlay: Option<OcppSetupDialog>,
     /// A resolved `:edit` (spec + device-config path) awaiting application in `refresh`.
@@ -527,13 +529,28 @@ impl OcppClientV201View {
                 self.pending_send = Some((name, payload));
             }
             _ => {
-                let template = V2_0_1::default_action(&name)
-                    .and_then(|a| V2_0_1::encode_action(&a).ok())
-                    .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                    .unwrap_or_else(|| "{}".to_string());
-                let mut field = editable_code();
-                field.state.set_content(&template);
-                self.action_dialog = Some((name, field));
+                self.action_dialog = Some(
+                    match crate::module::ocpp::spec::v2_0_1::action_spec(&name) {
+                        Some(spec) => {
+                            let state = self.state.clone();
+                            let lookup =
+                                |f: &str| state.read().unwrap().get_field(f).map(value_to_string);
+                            ActionDialog::new(name, &spec, lookup, gen_tx_id)
+                        }
+                        None => {
+                            debug_assert!(
+                                crate::module::ocpp::spec::v2_0_1::json_actions()
+                                    .contains(&name.as_str()),
+                                "{name} has no spec and is not a registered JSON action"
+                            );
+                            let template = V2_0_1::default_action(&name)
+                                .and_then(|a| V2_0_1::encode_action(&a).ok())
+                                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                                .unwrap_or_else(|| "{}".to_string());
+                            ActionDialog::json_only(name, &template)
+                        }
+                    },
+                );
             }
         }
     }
@@ -1051,25 +1068,9 @@ impl ModuleView for OcppClientV201View {
             dialog.render(area, buf);
         }
 
-        // Action JSON dialog, centered.
-        if let Some((name, field)) = self.action_dialog.as_mut() {
-            let [_, hc, _] = Layout::horizontal([
-                Constraint::Percentage(20),
-                Constraint::Percentage(60),
-                Constraint::Percentage(20),
-            ])
-            .areas(area);
-            let [_, vc, _] = Layout::vertical([
-                Constraint::Percentage(20),
-                Constraint::Percentage(60),
-                Constraint::Percentage(20),
-            ])
-            .areas(hc);
-            UiWidget::render(&Clear, vc, buf);
-            let block = boxed(name);
-            let inner = block.inner(vc);
-            block.render(vc, buf);
-            StatefulWidget::render(&field.widget, inner, buf, &mut field.state);
+        // Per-action send dialog, centered.
+        if let Some(dlg) = self.action_dialog.as_mut() {
+            dlg.render(area, buf);
         }
 
         // Setup dialog (`:edit`) on top.
@@ -1115,21 +1116,19 @@ impl ModuleView for OcppClientV201View {
             return EventResult::Consumed;
         }
 
-        if let Some((name, field)) = self.action_dialog.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.action_dialog = None,
-                (KeyModifiers::NONE, KeyCode::Enter) => {
-                    if let Ok(payload) =
-                        serde_json::from_str::<serde_json::Value>(&field.state.content())
-                    {
-                        let name = name.clone();
+        if self.action_dialog.is_some() {
+            let res = self.action_dialog.as_mut().unwrap().input(modifiers, code);
+            match res {
+                Some(ActionResult::Close) => self.action_dialog = None,
+                Some(ActionResult::Send(payload)) => {
+                    let name = self.action_dialog.as_ref().unwrap().name.clone();
+                    // Validate before sending; keep the dialog open on an invalid payload.
+                    if V2_0_1::decode_call(&name, payload.clone()).is_ok() {
                         self.action_dialog = None;
                         self.pending_send = Some((name, payload));
                     }
                 }
-                _ => {
-                    let _ = field.state.handle_events(modifiers, code);
-                }
+                None => {}
             }
             return EventResult::Consumed;
         }
@@ -1348,6 +1347,10 @@ impl ModuleView for OcppClientV201View {
             }
             let rows: Vec<MsgRow> = self.messages.iter().map(msg_row).collect();
             self.msg_table.state.set_values(rows);
+            // Autoscroll the message log to the newest row unless the user is on that pane.
+            if self.focus != Pane::Messages {
+                self.msg_table.state.move_to_bottom();
+            }
             let (state_rows, config_rows) = {
                 let s = self.state.read().unwrap();
                 (s.rows(), s.config_rows())
@@ -1670,23 +1673,6 @@ fn text_input(current: &str) -> Widget<InputFieldState, InputField<String>> {
     }
 }
 
-fn editable_code() -> Widget<CodeInputFieldState, CodeInputField> {
-    Widget {
-        state: CodeInputFieldStateBuilder::default()
-            .focused(true)
-            .disabled(false)
-            .build()
-            .unwrap(),
-        widget: CodeInputFieldBuilder::default()
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .build()
-            .unwrap(),
-    }
-}
-
 fn scripts_button() -> Widget<ButtonState, Button> {
     Widget {
         state: ButtonStateBuilder::default()
@@ -1734,5 +1720,30 @@ fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
             })
             .build()
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditField;
+    use crate::module::ocpp::client::v2_0_1::state::CsState;
+
+    /// The state-table row order and `EditField::from_row` must stay in lockstep: each editable row
+    /// maps to the field with the same label; read-only rows (Reserved RFID, Charge Limit) map to
+    /// `None`.
+    #[test]
+    fn ut_edit_field_rows_align_with_state_table() {
+        let rows = CsState::default().rows();
+        for (i, row) in rows.iter().enumerate() {
+            match EditField::from_row(i) {
+                Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
+                None => assert!(
+                    row.name == "Reserved RFID" || row.name == "Charge Limit",
+                    "row {i} ({}) maps to no field but is not read-only",
+                    row.name
+                ),
+            }
+        }
+        assert!(EditField::from_row(rows.len()).is_none());
     }
 }
