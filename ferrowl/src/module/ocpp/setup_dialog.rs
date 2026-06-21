@@ -158,8 +158,13 @@ impl OcppSetupDialog {
                 .map_err(|_| "Port must be a number (0-65535).".to_string())?
         };
 
-        // Normalize the optional URL path: trim, and ensure a leading '/' when non-empty.
-        let mut path = self.path.state.input().trim().to_string();
+        // Normalize the optional URL path: trim, and ensure a leading '/' when non-empty. The
+        // server role has no URL path, so it is always empty there.
+        let mut path = if self.path_hidden() {
+            String::new()
+        } else {
+            self.path.state.input().trim().to_string()
+        };
         if !path.is_empty() && !path.starts_with('/') {
             path.insert(0, '/');
         }
@@ -179,6 +184,28 @@ impl OcppSetupDialog {
     /// The entered device-config path (trimmed; empty when none).
     pub fn config_path(&self) -> String {
         self.config_path.state.input().trim().to_string()
+    }
+
+    /// The URL `path` field is only meaningful for the client (CS) role — the CSMS server binds a
+    /// host:port and ignores it — so it is hidden (and skipped by focus) when the role is Server.
+    fn path_hidden(&self) -> bool {
+        self.role.state.get_value() == OcppRole::Server
+    }
+
+    /// Advance focus, skipping the hidden URL-path field when in server role.
+    pub fn focus_step(&mut self, forward: bool) {
+        if forward {
+            self.focus_next();
+        } else {
+            self.focus_previous();
+        }
+        if self.path_hidden() && matches!(self.focus, OcppSetupDialogFocus::Path) {
+            if forward {
+                self.focus_next();
+            } else {
+                self.focus_previous();
+            }
+        }
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -242,17 +269,30 @@ impl OcppSetupDialog {
         StatefulWidget::render(&self.version.widget, vl, buf, &mut self.version.state);
         StatefulWidget::render(&self.role.widget, vr, buf, &mut self.role.state);
 
-        let [proto, ip, port, path] = Layout::horizontal([
-            Constraint::Length(12),
-            Constraint::Min(1),
-            Constraint::Length(13),
-            Constraint::Length(24),
-        ])
-        .areas(rows[3]);
-        StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
-        StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
-        StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
-        StatefulWidget::render(&self.path.widget, path, buf, &mut self.path.state);
+        if self.path_hidden() {
+            // No URL path for the server role — let ip take the freed space.
+            let [proto, ip, port] = Layout::horizontal([
+                Constraint::Length(12),
+                Constraint::Min(1),
+                Constraint::Length(13),
+            ])
+            .areas(rows[3]);
+            StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
+            StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
+            StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
+        } else {
+            let [proto, ip, port, path] = Layout::horizontal([
+                Constraint::Length(12),
+                Constraint::Min(1),
+                Constraint::Length(13),
+                Constraint::Length(24),
+            ])
+            .areas(rows[3]);
+            StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
+            StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
+            StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
+            StatefulWidget::render(&self.path.widget, path, buf, &mut self.path.state);
+        }
 
         if has_error {
             StatefulWidget::render(&self.error.widget, rows[4], buf, &mut self.error.state);

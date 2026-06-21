@@ -15,7 +15,7 @@ mod ocppj;
 pub mod cs;
 pub mod csms;
 
-pub use action::Version;
+pub use action::{ConnectorScope, Version};
 pub use error::{CallError, Error, FramingError, OcppError, ValidationError, WsError};
 pub use log::LogFn;
 pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};

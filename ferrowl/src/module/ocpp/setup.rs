@@ -10,8 +10,8 @@ use ratatui::layout::Rect;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
+use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
-use crate::module::ocpp::view::OcppServerView;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 
 /// Setup dialog for the OCPP module type.
@@ -37,11 +37,11 @@ impl SetupView for OcppSetupView {
     }
 
     fn focus_next(&mut self) {
-        self.dialog.focus_next();
+        self.dialog.focus_step(true);
     }
 
     fn focus_previous(&mut self) {
-        self.dialog.focus_previous();
+        self.dialog.focus_step(false);
     }
 
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
@@ -64,7 +64,7 @@ impl SetupView for OcppSetupView {
 
         let factory: ModuleViewFactory = match device.role {
             OcppRole::Client => Box::new(move || build_client_view(spec, path, device)),
-            OcppRole::Server => Box::new(move || Box::new(OcppServerView::new(spec, path, device))),
+            OcppRole::Server => Box::new(move || build_server_view(spec, path, device)),
         };
         Some((name, factory))
     }

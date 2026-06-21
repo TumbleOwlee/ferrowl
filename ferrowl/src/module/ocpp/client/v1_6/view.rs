@@ -51,7 +51,7 @@ use crate::module::ocpp::client::v1_6::state::{ConfigKey, ConfigRow, CsState, Nv
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
-use crate::module::ocpp::view::OcppServerView;
+use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
@@ -119,12 +119,17 @@ enum EditField {
     Voltage,
     Current(usize),
     Power,
+    Frequency,
     TotalEnergy,
     SessionEnergy,
+    Soc,
+    Temperature,
     Status,
     Rfid,
     Model,
     Vendor,
+    FirmwareVersion,
+    SerialNumber,
 }
 
 impl EditField {
@@ -137,12 +142,17 @@ impl EditField {
             4 => EditField::Current(1),
             5 => EditField::Current(2),
             6 => EditField::Power,
-            7 => EditField::TotalEnergy,
-            8 => EditField::SessionEnergy,
-            9 => EditField::Status,
-            10 => EditField::Rfid,
-            11 => EditField::Model,
-            12 => EditField::Vendor,
+            7 => EditField::Frequency,
+            8 => EditField::TotalEnergy,
+            9 => EditField::SessionEnergy,
+            10 => EditField::Soc,
+            11 => EditField::Temperature,
+            12 => EditField::Status,
+            13 => EditField::Rfid,
+            14 => EditField::Model,
+            15 => EditField::Vendor,
+            16 => EditField::FirmwareVersion,
+            17 => EditField::SerialNumber,
             _ => return None,
         })
     }
@@ -156,12 +166,17 @@ impl EditField {
             EditField::Current(1) => "Current L2",
             EditField::Current(_) => "Current L3",
             EditField::Power => "Power",
+            EditField::Frequency => "Frequency",
             EditField::TotalEnergy => "Total Energy",
             EditField::SessionEnergy => "Session Energy",
+            EditField::Soc => "State of Charge",
+            EditField::Temperature => "Temperature",
             EditField::Status => "Status",
             EditField::Rfid => "RFID",
             EditField::Model => "Model",
             EditField::Vendor => "Vendor",
+            EditField::FirmwareVersion => "Firmware Version",
+            EditField::SerialNumber => "Serial Number",
         }
     }
 }
@@ -499,6 +514,8 @@ impl OcppClientV16View {
             "BootNotification" => serde_json::json!({
                 "chargePointModel": s.model,
                 "chargePointVendor": s.vendor,
+                "chargePointSerialNumber": s.serial_number,
+                "firmwareVersion": s.firmware_version,
             }),
             "Heartbeat" => serde_json::json!({}),
             "MeterValues" => serde_json::json!({
@@ -632,6 +649,10 @@ impl OcppClientV16View {
                 field,
                 input: number(s.power),
             },
+            EditField::Frequency => EditOverlay::Number {
+                field,
+                input: number(s.frequency),
+            },
             EditField::TotalEnergy => EditOverlay::Number {
                 field,
                 input: number(s.total_energy),
@@ -639,6 +660,14 @@ impl OcppClientV16View {
             EditField::SessionEnergy => EditOverlay::Number {
                 field,
                 input: number(s.session_energy),
+            },
+            EditField::Soc => EditOverlay::Number {
+                field,
+                input: number(s.soc),
+            },
+            EditField::Temperature => EditOverlay::Number {
+                field,
+                input: number(s.temperature),
             },
             EditField::Rfid => EditOverlay::Text {
                 field,
@@ -651,6 +680,14 @@ impl OcppClientV16View {
             EditField::Vendor => EditOverlay::Text {
                 field,
                 input: text_input(&s.vendor),
+            },
+            EditField::FirmwareVersion => EditOverlay::Text {
+                field,
+                input: text_input(&s.firmware_version),
+            },
+            EditField::SerialNumber => EditOverlay::Text {
+                field,
+                input: text_input(&s.serial_number),
             },
         });
     }
@@ -676,8 +713,11 @@ impl OcppClientV16View {
                     EditField::Voltage => s.voltage = value,
                     EditField::Current(i) => s.current[i] = value,
                     EditField::Power => s.power = value,
+                    EditField::Frequency => s.frequency = value,
                     EditField::TotalEnergy => s.total_energy = value,
                     EditField::SessionEnergy => s.session_energy = value,
+                    EditField::Soc => s.soc = value,
+                    EditField::Temperature => s.temperature = value,
                     _ => {}
                 }
             }
@@ -687,6 +727,8 @@ impl OcppClientV16View {
                     EditField::Rfid => s.rfid = value,
                     EditField::Model => s.model = value,
                     EditField::Vendor => s.vendor = value,
+                    EditField::FirmwareVersion => s.firmware_version = value,
+                    EditField::SerialNumber => s.serial_number = value,
                     _ => {}
                 }
             }
@@ -967,9 +1009,9 @@ impl ModuleView for OcppClientV16View {
                         self.pending_setup = Some((spec, path));
                     }
                 }
-                (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_next(),
+                (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_step(true),
                 (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    setup.focus_previous()
+                    setup.focus_step(false)
                 }
                 _ => {
                     let _ = setup.handle_events(modifiers, code);
@@ -1097,7 +1139,7 @@ impl ModuleView for OcppClientV16View {
                 let device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(Box::new(OcppServerView::new(spec, path, device)));
+                    self.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {

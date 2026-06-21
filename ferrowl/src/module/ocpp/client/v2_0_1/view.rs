@@ -49,7 +49,7 @@ use crate::module::ocpp::client::v2_0_1::state::{ConfigRow, CsState, NvRow};
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
-use crate::module::ocpp::view::OcppServerView;
+use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
@@ -118,12 +118,17 @@ enum EditField {
     Voltage,
     Current(usize),
     Power,
+    Frequency,
     TotalEnergy,
     SessionEnergy,
+    Soc,
+    Temperature,
     Status,
     Rfid,
     Model,
     Vendor,
+    FirmwareVersion,
+    SerialNumber,
 }
 
 impl EditField {
@@ -137,12 +142,17 @@ impl EditField {
             5 => EditField::Current(1),
             6 => EditField::Current(2),
             7 => EditField::Power,
-            8 => EditField::TotalEnergy,
-            9 => EditField::SessionEnergy,
-            10 => EditField::Status,
-            11 => EditField::Rfid,
-            12 => EditField::Model,
-            13 => EditField::Vendor,
+            8 => EditField::Frequency,
+            9 => EditField::TotalEnergy,
+            10 => EditField::SessionEnergy,
+            11 => EditField::Soc,
+            12 => EditField::Temperature,
+            13 => EditField::Status,
+            14 => EditField::Rfid,
+            15 => EditField::Model,
+            16 => EditField::Vendor,
+            17 => EditField::FirmwareVersion,
+            18 => EditField::SerialNumber,
             _ => return None,
         })
     }
@@ -157,12 +167,17 @@ impl EditField {
             EditField::Current(1) => "Current L2",
             EditField::Current(_) => "Current L3",
             EditField::Power => "Power",
+            EditField::Frequency => "Frequency",
             EditField::TotalEnergy => "Total Energy",
             EditField::SessionEnergy => "Session Energy",
+            EditField::Soc => "State of Charge",
+            EditField::Temperature => "Temperature",
             EditField::Status => "Status",
             EditField::Rfid => "RFID",
             EditField::Model => "Model",
             EditField::Vendor => "Vendor",
+            EditField::FirmwareVersion => "Firmware Version",
+            EditField::SerialNumber => "Serial Number",
         }
     }
 }
@@ -530,6 +545,7 @@ impl OcppClientV201View {
         let seq = s.next_seq();
         s.status = "Available".to_string();
         s.transaction_id = None;
+        s.tx_confirmed = false;
         Some(serde_json::json!({
             "eventType": "Ended",
             "timestamp": rfc3339_now(),
@@ -549,7 +565,12 @@ impl OcppClientV201View {
             }),
             "BootNotification" => serde_json::json!({
                 "reason": "PowerUp",
-                "chargingStation": { "model": s.model, "vendorName": s.vendor },
+                "chargingStation": {
+                    "model": s.model,
+                    "vendorName": s.vendor,
+                    "serialNumber": s.serial_number,
+                    "firmwareVersion": s.firmware_version,
+                },
             }),
             "Heartbeat" => serde_json::json!({}),
             "MeterValues" => serde_json::json!({
@@ -679,6 +700,10 @@ impl OcppClientV201View {
                 field,
                 input: number(s.power),
             },
+            EditField::Frequency => EditOverlay::Number {
+                field,
+                input: number(s.frequency),
+            },
             EditField::TotalEnergy => EditOverlay::Number {
                 field,
                 input: number(s.total_energy),
@@ -686,6 +711,14 @@ impl OcppClientV201View {
             EditField::SessionEnergy => EditOverlay::Number {
                 field,
                 input: number(s.session_energy),
+            },
+            EditField::Soc => EditOverlay::Number {
+                field,
+                input: number(s.soc),
+            },
+            EditField::Temperature => EditOverlay::Number {
+                field,
+                input: number(s.temperature),
             },
             EditField::Rfid => EditOverlay::Text {
                 field,
@@ -698,6 +731,14 @@ impl OcppClientV201View {
             EditField::Vendor => EditOverlay::Text {
                 field,
                 input: text_input(&s.vendor),
+            },
+            EditField::FirmwareVersion => EditOverlay::Text {
+                field,
+                input: text_input(&s.firmware_version),
+            },
+            EditField::SerialNumber => EditOverlay::Text {
+                field,
+                input: text_input(&s.serial_number),
             },
         });
     }
@@ -724,8 +765,11 @@ impl OcppClientV201View {
                     EditField::Voltage => s.voltage = value,
                     EditField::Current(i) => s.current[i] = value,
                     EditField::Power => s.power = value,
+                    EditField::Frequency => s.frequency = value,
                     EditField::TotalEnergy => s.total_energy = value,
                     EditField::SessionEnergy => s.session_energy = value,
+                    EditField::Soc => s.soc = value,
+                    EditField::Temperature => s.temperature = value,
                     _ => {}
                 }
             }
@@ -735,6 +779,8 @@ impl OcppClientV201View {
                     EditField::Rfid => s.rfid = value,
                     EditField::Model => s.model = value,
                     EditField::Vendor => s.vendor = value,
+                    EditField::FirmwareVersion => s.firmware_version = value,
+                    EditField::SerialNumber => s.serial_number = value,
                     _ => {}
                 }
             }
@@ -756,15 +802,42 @@ impl OcppClientV201View {
     /// applied at payload-build time (`start_event`/`stop_event`).
     fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
         let sender = self.backend.sender();
+        let state = self.state.clone();
         let log = self.log.clone();
         let name = name.to_string();
+        // A transaction start mints its id eagerly (the payload carries it), so confirm or roll back
+        // that id on the response — auto-MeterValues only fire once the start is acknowledged.
+        let started_tx = (name == "TransactionEvent"
+            && payload.get("eventType").and_then(|v| v.as_str()) == Some("Started"))
+        .then(|| {
+            payload
+                .pointer("/transactionInfo/transactionId")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        });
         tokio::spawn(async move {
             match V2_0_1::decode_call(&name, payload) {
-                Ok(action) => {
-                    if let Err(e) = sender.send(action).await {
+                Ok(action) => match sender.send(action).await {
+                    Ok(_) => {
+                        if let Some(tx_id) = started_tx {
+                            let mut s = state.write().unwrap();
+                            if s.transaction_id == tx_id {
+                                s.tx_confirmed = true;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(tx_id) = started_tx {
+                            let mut s = state.write().unwrap();
+                            if s.transaction_id == tx_id {
+                                s.transaction_id = None;
+                                s.tx_confirmed = false;
+                                s.status = "Available".to_string();
+                            }
+                        }
                         log.write().await.write(&format!("{name} failed: {e}"));
                     }
-                }
+                },
                 Err(e) => log
                     .write()
                     .await
@@ -996,9 +1069,9 @@ impl ModuleView for OcppClientV201View {
                         self.pending_setup = Some((spec, path));
                     }
                 }
-                (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_next(),
+                (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_step(true),
                 (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    setup.focus_previous()
+                    setup.focus_step(false)
                 }
                 _ => {
                     let _ = setup.handle_events(modifiers, code);
@@ -1122,7 +1195,7 @@ impl ModuleView for OcppClientV201View {
                 let device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(Box::new(OcppServerView::new(spec, path, device)));
+                    self.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {
@@ -1163,8 +1236,12 @@ impl ModuleView for OcppClientV201View {
                 self.dispatch_lua_action(&name, overrides);
             }
 
-            // While a transaction is active, report MeterValues periodically (~every 5s).
-            let tx_active = self.state.read().unwrap().transaction_id.is_some();
+            // While a confirmed transaction is active, report MeterValues periodically (~every 5s).
+            // Gate on `tx_confirmed` so a start that the CSMS never acknowledged emits no readings.
+            let tx_active = {
+                let s = self.state.read().unwrap();
+                s.transaction_id.is_some() && s.tx_confirmed
+            };
             if tx_active {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {

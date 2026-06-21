@@ -37,7 +37,7 @@ use crate::config::{
 use crate::module::Module;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::ocpp::client::build_client_view;
-use crate::module::ocpp::view::OcppServerView;
+use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView};
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
@@ -139,11 +139,14 @@ fn demo_ocpp_tab(name: String, role: OcppRole) -> Tab {
         protocol: OcppProtocol::Ws,
         ip: "127.0.0.1".into(),
         port: 9000,
-        path: String::new(),
+        path: "/ocpp/cp001".into(),
         timeout_ms: None,
     };
     let device = OcppDeviceConfig::from_spec(&spec, Vec::new());
-    let view = build_client_view(spec.clone(), String::new(), device);
+    let view = match role {
+        OcppRole::Client => build_client_view(spec.clone(), String::new(), device),
+        OcppRole::Server => build_server_view(spec.clone(), String::new(), device),
+    };
     Tab::new_from_view(spec.name.clone(), view)
 }
 
@@ -155,9 +158,10 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
 
     if args.demo {
         let mut tabs = vec![
-            demo_modbus_tab("Demo Server".to_string(), Role::Server),
-            demo_modbus_tab("Demo Client".to_string(), Role::Client),
-            demo_ocpp_tab("CS-1".to_string(), OcppRole::Client),
+            demo_modbus_tab("Modbus Server".to_string(), Role::Server),
+            demo_modbus_tab("Modbus Client".to_string(), Role::Client),
+            demo_ocpp_tab("OCPP CSMS".to_string(), OcppRole::Server),
+            demo_ocpp_tab("OCPP CS".to_string(), OcppRole::Client),
         ];
         for tab in tabs.iter_mut() {
             if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
@@ -204,7 +208,7 @@ async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
     let spec = OcppSpec::from_parts(&module, &device);
     let view: Box<dyn ModuleView> = match device.role {
         OcppRole::Client => build_client_view(spec, module.device.clone(), device),
-        OcppRole::Server => Box::new(OcppServerView::new(spec, module.device.clone(), device)),
+        OcppRole::Server => build_server_view(spec, module.device.clone(), device),
     };
     let mut tab = Tab::new_from_view(name, view);
     if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {

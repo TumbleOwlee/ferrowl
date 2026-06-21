@@ -29,6 +29,7 @@ macro_rules! define_ocpp_version {
     (
         $version_ty:ident, $subprotocol:literal,
         cs = [ $( $cs_variant:ident ),* $(,)? ];
+        csms = [ $( $csms_variant:ident => $scope:ident ),* $(,)? ];
         $( $variant:ident => $req:path, $resp:path, $validate:tt ; )+
     ) => {
         /// Full action set for this OCPP version; each variant wraps `rust_ocpp`'s request struct.
@@ -57,6 +58,10 @@ macro_rules! define_ocpp_version {
 
             fn cs_actions() -> &'static [&'static str] {
                 &[ $( stringify!($cs_variant), )* ]
+            }
+
+            fn csms_actions() -> &'static [(&'static str, $crate::action::ConnectorScope)] {
+                &[ $( (stringify!($csms_variant), $crate::action::ConnectorScope::$scope), )* ]
             }
 
             fn default_action(name: &str) -> ::core::option::Option<Action> {

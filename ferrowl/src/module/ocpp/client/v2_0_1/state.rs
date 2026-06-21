@@ -14,13 +14,21 @@ pub struct CsState {
     pub voltage: f64,
     pub current: [f64; 3],
     pub power: f64,
+    pub frequency: f64,
     pub total_energy: f64,
     pub session_energy: f64,
+    pub soc: f64,
+    pub temperature: f64,
     pub status: String,
     pub rfid: String,
     pub model: String,
     pub vendor: String,
+    pub firmware_version: String,
+    pub serial_number: String,
     pub transaction_id: Option<String>,
+    /// Set once the CSMS has acknowledged the `TransactionEvent(Started)`. Auto-MeterValues only
+    /// transmit while this is true, so a failed start never leaks meter readings.
+    pub tx_confirmed: bool,
     pub seq_no: i32,
     tx_counter: u64,
     /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
@@ -44,13 +52,19 @@ impl Default for CsState {
             voltage: 230.0,
             current: [0.0; 3],
             power: 0.0,
+            frequency: 50.0,
             total_energy: 0.0,
             session_energy: 0.0,
+            soc: 0.0,
+            temperature: 25.0,
             status: "Available".to_string(),
             rfid: "DEADBEEF".to_string(),
             model: "Ferrowl-EVSE".to_string(),
             vendor: "Ferrowl".to_string(),
+            firmware_version: "1.0.0".to_string(),
+            serial_number: "FERROWL-0001".to_string(),
             transaction_id: None,
+            tx_confirmed: false,
             seq_no: 0,
             tx_counter: 0,
             limit: None,
@@ -87,6 +101,7 @@ impl CsState {
         self.tx_counter += 1;
         self.seq_no = 0;
         self.transaction_id = Some(id.clone());
+        self.tx_confirmed = false;
         id
     }
 
@@ -112,16 +127,21 @@ impl CsState {
             nv("Current L2", "A", format!("{:.1}", self.current[1])),
             nv("Current L3", "A", format!("{:.1}", self.current[2])),
             nv("Power", "W", format!("{:.1}", self.power)),
+            nv("Frequency", "Hz", format!("{:.1}", self.frequency)),
             nv("Total Energy", "kWh", format!("{:.2}", self.total_energy)),
             nv(
                 "Session Energy",
                 "kWh",
                 format!("{:.2}", self.session_energy),
             ),
+            nv("State of Charge", "%", format!("{:.1}", self.soc)),
+            nv("Temperature", "°C", format!("{:.1}", self.temperature)),
             nv("Status", "", self.status.clone()),
             nv("RFID", "", self.rfid.clone()),
             nv("Model", "", self.model.clone()),
             nv("Vendor", "", self.vendor.clone()),
+            nv("Firmware Version", "", self.firmware_version.clone()),
+            nv("Serial Number", "", self.serial_number.clone()),
             nv(
                 "Charge Limit",
                 &self.limit_unit,
@@ -155,12 +175,17 @@ impl CsState {
             "CurrentL2" => Vt::Float(self.current[1]),
             "CurrentL3" => Vt::Float(self.current[2]),
             "Power" => Vt::Float(self.power),
+            "Frequency" => Vt::Float(self.frequency),
             "TotalEnergy" => Vt::Float(self.total_energy),
             "SessionEnergy" => Vt::Float(self.session_energy),
+            "Soc" => Vt::Float(self.soc),
+            "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
             "Model" => Vt::String(self.model.clone()),
             "Vendor" => Vt::String(self.vendor.clone()),
+            "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
+            "SerialNumber" => Vt::String(self.serial_number.clone()),
             _ => return None,
         })
     }
@@ -224,6 +249,27 @@ impl CsState {
                 }
                 None => false,
             },
+            ("Frequency", _) => match num(&value) {
+                Some(n) => {
+                    self.frequency = n;
+                    true
+                }
+                None => false,
+            },
+            ("Soc", _) => match num(&value) {
+                Some(n) => {
+                    self.soc = n;
+                    true
+                }
+                None => false,
+            },
+            ("Temperature", _) => match num(&value) {
+                Some(n) => {
+                    self.temperature = n;
+                    true
+                }
+                None => false,
+            },
             ("TotalEnergy", _) => match num(&value) {
                 Some(n) => {
                     self.total_energy = n;
@@ -256,6 +302,14 @@ impl CsState {
             }
             ("Vendor", Vt::String(s)) => {
                 self.vendor = s.clone();
+                true
+            }
+            ("FirmwareVersion", Vt::String(s)) => {
+                self.firmware_version = s.clone();
+                true
+            }
+            ("SerialNumber", Vt::String(s)) => {
+                self.serial_number = s.clone();
                 true
             }
             _ => false,
@@ -296,6 +350,17 @@ impl CsState {
             "measurand": "Energy.Active.Import.Register",
             "unitOfMeasure": { "unit": "Wh" },
         }));
+        sampled.push(serde_json::json!({
+            "value": self.frequency,
+            "measurand": "Frequency",
+            "unitOfMeasure": { "unit": "Hz" },
+        }));
+        // OCPP 2.0.1 has no Temperature measurand, so it is not reported here (only Frequency/SoC).
+        sampled.push(serde_json::json!({
+            "value": self.soc,
+            "measurand": "SoC",
+            "unitOfMeasure": { "unit": "Percent" },
+        }));
         serde_json::json!([{ "timestamp": rfc3339_now(), "sampledValue": sampled }])
     }
 }
@@ -304,6 +369,17 @@ impl CsState {
 mod tests {
     use super::CsState;
     use ferrowl_lua::module::ValueType as Vt;
+
+    #[test]
+    fn ut_meter_values_payload_decodes() {
+        use ferrowl_ocpp::{V2_0_1, Version};
+        let s = CsState::default();
+        let payload = serde_json::json!({
+            "evseId": s.evse_id,
+            "meterValue": s.meter_value_json(),
+        });
+        assert!(V2_0_1::decode_call("MeterValues", payload).is_ok());
+    }
 
     #[test]
     fn ut_get_set_field_evse_id() {

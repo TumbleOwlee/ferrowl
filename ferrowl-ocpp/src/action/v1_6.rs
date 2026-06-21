@@ -13,6 +13,27 @@ define_ocpp_version! {
         FirmwareStatusNotification, Heartbeat, MeterValues, StartTransaction,
         StatusNotification, StopTransaction,
     ];
+    // CSMS-originated actions, tagged by connectorId presence in the rust_ocpp request.
+    csms = [
+        CancelReservation => None,
+        ChangeAvailability => Required,
+        ChangeConfiguration => None,
+        ClearCache => None,
+        ClearChargingProfile => Optional,
+        GetCompositeSchedule => Required,
+        GetConfiguration => None,
+        GetDiagnostics => None,
+        GetLocalListVersion => None,
+        RemoteStartTransaction => Optional,
+        RemoteStopTransaction => None,
+        ReserveNow => Required,
+        Reset => None,
+        SendLocalList => None,
+        SetChargingProfile => Required,
+        TriggerMessage => Optional,
+        UnlockConnector => Required,
+        UpdateFirmware => None,
+    ];
     Authorize => ::rust_ocpp::v1_6::messages::authorize::AuthorizeRequest, ::rust_ocpp::v1_6::messages::authorize::AuthorizeResponse, yes ;
     BootNotification => ::rust_ocpp::v1_6::messages::boot_notification::BootNotificationRequest, ::rust_ocpp::v1_6::messages::boot_notification::BootNotificationResponse, yes ;
     CancelReservation => ::rust_ocpp::v1_6::messages::cancel_reservation::CancelReservationRequest, ::rust_ocpp::v1_6::messages::cancel_reservation::CancelReservationResponse, no ;
@@ -100,6 +121,24 @@ mod tests {
             Some(Action::Authorize(_))
         ));
         assert!(V1_6::default_action("NoSuchAction").is_none());
+    }
+
+    #[test]
+    fn ut_csms_actions_partition_and_scopes() {
+        use crate::action::ConnectorScope::*;
+        let cs: std::collections::HashSet<_> = V1_6::cs_actions().iter().copied().collect();
+        let csms: std::collections::HashSet<_> =
+            V1_6::csms_actions().iter().map(|(n, _)| *n).collect();
+        // cs and csms partition the full action set: disjoint and together complete.
+        assert!(cs.is_disjoint(&csms));
+        assert_eq!(cs.len() + csms.len(), V1_6::action_names().len());
+        for n in V1_6::action_names() {
+            assert!(cs.contains(n) || csms.contains(n), "{n} uncategorized");
+        }
+        let scope = |name: &str| V1_6::csms_actions().iter().find(|(n, _)| *n == name).unwrap().1;
+        assert_eq!(scope("Reset"), None);
+        assert_eq!(scope("UnlockConnector"), Required);
+        assert_eq!(scope("RemoteStartTransaction"), Optional);
     }
 
     #[test]
