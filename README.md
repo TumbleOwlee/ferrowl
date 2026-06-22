@@ -35,7 +35,7 @@ The project is organized as a Cargo workspace and builds the `ferrowl` binary. S
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
-| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time` and `C_OCPP` modules to simulation scripts. |
+| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time`, `C_OCPP` and `C_Log` modules to simulation scripts. |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
 
@@ -319,7 +319,7 @@ code = "C_OCPP:Set(\"Power\", C_OCPP:Get(\"Power\") + 100)"
 
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules these are the per-register `update` snippets (run each cycle), interacting with the registers through `C_Register`. For **OCPP** modules, scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run every ~100 ms and interact with the charging-station state and actions through `C_OCPP`. Besides the standard Lua libraries, the exposed modules are `C_Time` (both), `C_Register` (Modbus only) and `C_OCPP` (OCPP only).
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules these are the per-register `update` snippets (run each cycle), interacting with the registers through `C_Register`. For **OCPP** modules, scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the charging-station state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time` (both), `C_Register` (Modbus only), and `C_OCPP` + `C_Log` (OCPP only).
 
 ### Module C_Time
 
@@ -336,6 +336,20 @@ Method:   C_Time:GetMs()
 Arguments: None
 
 Return: Time in milliseconds since startup.
+```
+
+### Module C_Log
+
+```
+Method:   C_Log:Print(message)
+
+Arguments:
+               Name: message
+               Type: String
+        Description: A line to append to the module's log (the on-screen log
+                     pane, and the file sink when `:log <file>` is active).
+
+Return: nil
 ```
 
 ### Module C_Register

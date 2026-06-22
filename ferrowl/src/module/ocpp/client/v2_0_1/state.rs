@@ -1,13 +1,14 @@
-//! OCPP 2.0.1 charging-station state. Like the 1.6 state but with 2.0.1 shapes: EVSE id, connector
-//! status enum (Available/Occupied/…), a string transaction id minted locally with a seq counter,
-//! and a *variable* store (name/value/readonly) that answers GetVariables / is mutated by
-//! SetVariables. Shared (behind `std::sync::RwLock`) between view and inbound handler.
+//! OCPP 2.0.1 charging-station state, split by level. [`CsState`] holds the CS-wide data (boot
+//! identity, the variable store answering GetVariables / mutated by SetVariables, the latest CSMS
+//! reservation, the heartbeat cadence) plus a list of [`ConnectorState`]s. Each connector carries
+//! its EVSE id, 2.0.1 status enum, metering, and a locally-minted string transaction (with a seq
+//! counter). Shared (behind `std::sync::RwLock`) between view, inbound handler, and Lua sim.
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 pub use crate::module::ocpp::client::config::ConfigKey;
 
-/// OCPP 2.0.1 charging-station state.
-pub struct CsState {
+/// One connector's live state (EVSE id, metering, status, transaction) for OCPP 2.0.1.
+pub struct ConnectorState {
     pub evse_id: i64,
     pub connector_id: i64,
     pub phases: String,
@@ -21,12 +22,6 @@ pub struct CsState {
     pub temperature: f64,
     pub status: String,
     pub rfid: String,
-    /// idToken of the latest accepted ReserveNow from the CSMS, cleared on CancelReservation.
-    pub reserved_rfid: Option<String>,
-    pub model: String,
-    pub vendor: String,
-    pub firmware_version: String,
-    pub serial_number: String,
     pub transaction_id: Option<String>,
     /// Set once the CSMS has acknowledged the `TransactionEvent(Started)`. Auto-MeterValues only
     /// transmit while this is true, so a failed start never leaks meter readings.
@@ -36,23 +31,14 @@ pub struct CsState {
     /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
     pub limit: Option<f64>,
     pub limit_unit: String,
-    /// Variable store (component-agnostic name/value), answers GetVariables.
-    pub config: Vec<ConfigKey>,
-    /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response. `None`
-    /// until a BootNotification round-trips; the view falls back to a built-in default.
-    pub heartbeat_interval_secs: Option<u64>,
 }
 
-impl Default for CsState {
-    fn default() -> Self {
-        let var = |key: &str, value: &str, readonly: bool| ConfigKey {
-            key: key.to_string(),
-            value: value.to_string(),
-            readonly,
-        };
+impl ConnectorState {
+    /// A fresh connector on `evse_id`/`connector_id` with sensible simulation defaults.
+    pub fn new(evse_id: i64, connector_id: i64) -> Self {
         Self {
-            evse_id: 1,
-            connector_id: 1,
+            evse_id,
+            connector_id,
             phases: "L1,L2,L3".to_string(),
             voltage: 230.0,
             current: [0.0; 3],
@@ -64,47 +50,18 @@ impl Default for CsState {
             temperature: 25.0,
             status: "Available".to_string(),
             rfid: "DEADBEEF".to_string(),
-            reserved_rfid: None,
-            model: "Ferrowl-EVSE".to_string(),
-            vendor: "Ferrowl".to_string(),
-            firmware_version: "1.0.0".to_string(),
-            serial_number: "FERROWL-0001".to_string(),
             transaction_id: None,
             tx_confirmed: false,
             seq_no: 0,
             tx_counter: 0,
             limit: None,
             limit_unit: "A".to_string(),
-            config: vec![
-                var("HeartbeatInterval", "300", false),
-                var("AuthCtrlr.Enabled", "true", false),
-                var("EVSE.AvailabilityState", "Available", true),
-            ],
-            heartbeat_interval_secs: None,
         }
     }
-}
 
-/// A row in the left "system state" table.
-#[derive(Clone, Debug)]
-pub struct NvRow {
-    pub name: String,
-    pub unit: String,
-    pub value: String,
-}
-
-/// A row in the variable table.
-#[derive(Clone, Debug)]
-pub struct ConfigRow {
-    pub key: String,
-    pub value: String,
-    pub ro: String,
-}
-
-impl CsState {
     /// Mint a fresh transaction id and reset the sequence counter.
     pub fn start_tx(&mut self) -> String {
-        let id = format!("ferrowl-tx-{}", self.tx_counter);
+        let id = format!("ferrowl-tx-{}-{}", self.connector_id, self.tx_counter);
         self.tx_counter += 1;
         self.seq_no = 0;
         self.transaction_id = Some(id.clone());
@@ -146,17 +103,6 @@ impl CsState {
             nv("Status", "", self.status.clone()),
             nv("RFID", "", self.rfid.clone()),
             nv(
-                "Reserved RFID",
-                "",
-                self.reserved_rfid
-                    .clone()
-                    .unwrap_or_else(|| "—".to_string()),
-            ),
-            nv("Model", "", self.model.clone()),
-            nv("Vendor", "", self.vendor.clone()),
-            nv("Firmware Version", "", self.firmware_version.clone()),
-            nv("Serial Number", "", self.serial_number.clone()),
-            nv(
                 "Charge Limit",
                 &self.limit_unit,
                 self.limit
@@ -166,18 +112,7 @@ impl CsState {
         ]
     }
 
-    pub fn config_rows(&self) -> Vec<ConfigRow> {
-        self.config
-            .iter()
-            .map(|c| ConfigRow {
-                key: c.key.clone(),
-                value: c.value.clone(),
-                ro: if c.readonly { "yes" } else { "no" }.to_string(),
-            })
-            .collect()
-    }
-
-    /// Read a state field by name, for `C_OCPP:Get(name)`. Like the 1.6 mapping plus `EvseId`.
+    /// Read a connector field by name, for `C_OCPP:Connector(id):Get(name)`.
     pub fn get_field(&self, name: &str) -> Option<ferrowl_lua::module::ValueType> {
         use ferrowl_lua::module::ValueType as Vt;
         Some(match name {
@@ -196,11 +131,6 @@ impl CsState {
             "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
-            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
-            "Model" => Vt::String(self.model.clone()),
-            "Vendor" => Vt::String(self.vendor.clone()),
-            "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
-            "SerialNumber" => Vt::String(self.serial_number.clone()),
             "ChargeLimit" => match self.limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
@@ -209,8 +139,7 @@ impl CsState {
         })
     }
 
-    /// Write a state field by name, for `C_OCPP:Set(name, value)`. Numeric fields accept an int or
-    /// float; string fields accept a string. Returns false for an unknown name or a type mismatch.
+    /// Write a connector field by name, for `C_OCPP:Connector(id):Set(name, value)`.
     pub fn set_field(&mut self, name: &str, value: ferrowl_lua::module::ValueType) -> bool {
         use ferrowl_lua::module::ValueType as Vt;
         let num = |v: &Vt| match v {
@@ -220,126 +149,63 @@ impl CsState {
         };
         match (name, &value) {
             ("EvseId", _) => match num(&value) {
-                Some(n) => {
-                    self.evse_id = n as i64;
-                    true
-                }
-                None => false,
+                Some(n) => self.evse_id = n as i64,
+                None => return false,
             },
             ("ConnectorId", _) => match num(&value) {
-                Some(n) => {
-                    self.connector_id = n as i64;
-                    true
-                }
-                None => false,
+                Some(n) => self.connector_id = n as i64,
+                None => return false,
             },
             ("Voltage", _) => match num(&value) {
-                Some(n) => {
-                    self.voltage = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.voltage = n,
+                None => return false,
             },
             ("Current" | "CurrentL1", _) => match num(&value) {
-                Some(n) => {
-                    self.current[0] = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.current[0] = n,
+                None => return false,
             },
             ("CurrentL2", _) => match num(&value) {
-                Some(n) => {
-                    self.current[1] = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.current[1] = n,
+                None => return false,
             },
             ("CurrentL3", _) => match num(&value) {
-                Some(n) => {
-                    self.current[2] = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.current[2] = n,
+                None => return false,
             },
             ("Power", _) => match num(&value) {
-                Some(n) => {
-                    self.power = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.power = n,
+                None => return false,
             },
             ("Frequency", _) => match num(&value) {
-                Some(n) => {
-                    self.frequency = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.frequency = n,
+                None => return false,
             },
             ("Soc" | "StateOfCharge", _) => match num(&value) {
-                Some(n) => {
-                    self.soc = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.soc = n,
+                None => return false,
             },
             ("Temperature", _) => match num(&value) {
-                Some(n) => {
-                    self.temperature = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.temperature = n,
+                None => return false,
             },
             ("TotalEnergy", _) => match num(&value) {
-                Some(n) => {
-                    self.total_energy = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.total_energy = n,
+                None => return false,
             },
             ("SessionEnergy", _) => match num(&value) {
-                Some(n) => {
-                    self.session_energy = n;
-                    true
-                }
-                None => false,
+                Some(n) => self.session_energy = n,
+                None => return false,
             },
-            ("Phases", Vt::String(s)) => {
-                self.phases = s.clone();
-                true
-            }
-            ("Status", Vt::String(s)) => {
-                self.status = s.clone();
-                true
-            }
-            ("Rfid", Vt::String(s)) => {
-                self.rfid = s.clone();
-                true
-            }
-            ("Model", Vt::String(s)) => {
-                self.model = s.clone();
-                true
-            }
-            ("Vendor", Vt::String(s)) => {
-                self.vendor = s.clone();
-                true
-            }
-            ("FirmwareVersion", Vt::String(s)) => {
-                self.firmware_version = s.clone();
-                true
-            }
-            ("SerialNumber", Vt::String(s)) => {
-                self.serial_number = s.clone();
-                true
-            }
+            ("Phases", Vt::String(s)) => self.phases = s.clone(),
+            ("Status", Vt::String(s)) => self.status = s.clone(),
+            ("Rfid", Vt::String(s)) => self.rfid = s.clone(),
             ("ChargeLimit", _) => match num(&value) {
-                Some(n) => {
-                    self.limit = Some(n);
-                    true
-                }
-                None => false,
+                Some(n) => self.limit = Some(n),
+                None => return false,
             },
-            _ => false,
+            _ => return false,
         }
+        true
     }
 
     /// Energy meter reading in Wh.
@@ -347,8 +213,7 @@ impl CsState {
         (self.total_energy * 1000.0) as i64
     }
 
-    /// An OCPP 2.0.1 `meterValue` array reflecting the current state, for MeterValues. The 2.0.1
-    /// `sampledValue.value` is numeric and the unit is nested under `unitOfMeasure`.
+    /// An OCPP 2.0.1 `meterValue` array reflecting this connector's state, for MeterValues.
     pub fn meter_value_json(&self) -> serde_json::Value {
         let mut sampled = Vec::new();
         for (i, phase) in ["L1", "L2", "L3"].iter().enumerate() {
@@ -391,30 +256,186 @@ impl CsState {
     }
 }
 
+/// OCPP 2.0.1 charging-station (CS-level) state plus its connectors.
+pub struct CsState {
+    pub model: String,
+    pub vendor: String,
+    pub firmware_version: String,
+    pub serial_number: String,
+    /// idToken of the latest accepted ReserveNow from the CSMS, cleared on CancelReservation.
+    pub reserved_rfid: Option<String>,
+    /// Variable store (component-agnostic name/value), answers GetVariables.
+    pub config: Vec<ConfigKey>,
+    /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response.
+    pub heartbeat_interval_secs: Option<u64>,
+    pub connectors: Vec<ConnectorState>,
+}
+
+impl Default for CsState {
+    fn default() -> Self {
+        let var = |key: &str, value: &str, readonly: bool| ConfigKey {
+            key: key.to_string(),
+            value: value.to_string(),
+            readonly,
+        };
+        Self {
+            model: "Ferrowl-EVSE".to_string(),
+            vendor: "Ferrowl".to_string(),
+            firmware_version: "1.0.0".to_string(),
+            serial_number: "FERROWL-0001".to_string(),
+            reserved_rfid: None,
+            config: vec![
+                var("HeartbeatInterval", "300", false),
+                var("AuthCtrlr.Enabled", "true", false),
+                var("EVSE.AvailabilityState", "Available", true),
+            ],
+            heartbeat_interval_secs: None,
+            connectors: vec![ConnectorState::new(1, 1)],
+        }
+    }
+}
+
+/// A row in a state table.
+#[derive(Clone, Debug)]
+pub struct NvRow {
+    pub name: String,
+    pub unit: String,
+    pub value: String,
+}
+
+/// A row in the variable table.
+#[derive(Clone, Debug)]
+pub struct ConfigRow {
+    pub key: String,
+    pub value: String,
+    pub ro: String,
+}
+
+impl CsState {
+    /// Find a connector by its connector id.
+    pub fn connector(&self, id: i64) -> Option<&ConnectorState> {
+        self.connectors.iter().find(|c| c.connector_id == id)
+    }
+
+    /// Find a connector by its connector id (mutable).
+    pub fn connector_mut(&mut self, id: i64) -> Option<&mut ConnectorState> {
+        self.connectors.iter_mut().find(|c| c.connector_id == id)
+    }
+
+    /// Find the connector on an EVSE. In 2.0.1 entries are addressed by EVSE id (one connector per
+    /// EVSE in the simulator), so this is the primary lookup for scope resolution.
+    pub fn connector_by_evse(&self, evse: i64) -> Option<&ConnectorState> {
+        self.connectors.iter().find(|c| c.evse_id == evse)
+    }
+
+    /// Find the connector on an EVSE (mutable).
+    pub fn connector_mut_by_evse(&mut self, evse: i64) -> Option<&mut ConnectorState> {
+        self.connectors.iter_mut().find(|c| c.evse_id == evse)
+    }
+
+    /// Add a connector `(evse, connector)` if its connector id is absent; returns whether added.
+    pub fn add_connector(&mut self, evse: i64, connector: i64) -> bool {
+        if self.connectors.iter().any(|c| c.connector_id == connector) {
+            return false;
+        }
+        self.connectors.push(ConnectorState::new(evse, connector));
+        self.connectors.sort_by_key(|c| (c.evse_id, c.connector_id));
+        true
+    }
+
+    /// Rows for the CS-level state table (boot identity + the latest reservation).
+    pub fn cs_rows(&self) -> Vec<NvRow> {
+        let nv = |name: &str, value: String| NvRow {
+            name: name.to_string(),
+            unit: String::new(),
+            value,
+        };
+        vec![
+            nv("Model", self.model.clone()),
+            nv("Vendor", self.vendor.clone()),
+            nv("Firmware Version", self.firmware_version.clone()),
+            nv("Serial Number", self.serial_number.clone()),
+            nv(
+                "Reserved RFID",
+                self.reserved_rfid
+                    .clone()
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+        ]
+    }
+
+    pub fn config_rows(&self) -> Vec<ConfigRow> {
+        self.config
+            .iter()
+            .map(|c| ConfigRow {
+                key: c.key.clone(),
+                value: c.value.clone(),
+                ro: if c.readonly { "yes" } else { "no" }.to_string(),
+            })
+            .collect()
+    }
+
+    /// Read a CS-level field by name, for the bare `C_OCPP:Get(name)` Lua binding.
+    pub fn cs_get_field(&self, name: &str) -> Option<ferrowl_lua::module::ValueType> {
+        use ferrowl_lua::module::ValueType as Vt;
+        Some(match name {
+            "Model" => Vt::String(self.model.clone()),
+            "Vendor" => Vt::String(self.vendor.clone()),
+            "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
+            "SerialNumber" => Vt::String(self.serial_number.clone()),
+            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            _ => return None,
+        })
+    }
+
+    /// Write a CS-level field by name, for the bare `C_OCPP:Set(name, value)` Lua binding.
+    pub fn cs_set_field(&mut self, name: &str, value: ferrowl_lua::module::ValueType) -> bool {
+        use ferrowl_lua::module::ValueType as Vt;
+        match (name, value) {
+            ("Model", Vt::String(s)) => self.model = s,
+            ("Vendor", Vt::String(s)) => self.vendor = s,
+            ("FirmwareVersion", Vt::String(s)) => self.firmware_version = s,
+            ("SerialNumber", Vt::String(s)) => self.serial_number = s,
+            _ => return false,
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::CsState;
+    use super::{ConnectorState, CsState};
     use ferrowl_lua::module::ValueType as Vt;
 
     #[test]
     fn ut_meter_values_payload_decodes() {
         use ferrowl_ocpp::{V2_0_1, Version};
-        let s = CsState::default();
+        let c = ConnectorState::new(1, 1);
         let payload = serde_json::json!({
-            "evseId": s.evse_id,
-            "meterValue": s.meter_value_json(),
+            "evseId": c.evse_id,
+            "meterValue": c.meter_value_json(),
         });
         assert!(V2_0_1::decode_call("MeterValues", payload).is_ok());
     }
 
     #[test]
-    fn ut_get_set_field_evse_id() {
+    fn ut_connector_get_set_field_evse_id() {
+        let mut c = ConnectorState::new(1, 1);
+        assert!(c.set_field("EvseId", Vt::Int(2)));
+        assert!(matches!(c.get_field("EvseId"), Some(Vt::Int(2))));
+        assert!(c.set_field("Voltage", Vt::Float(400.0)));
+        assert!(matches!(c.get_field("Voltage"), Some(Vt::Float(v)) if v == 400.0));
+        assert!(!c.set_field("Unknown", Vt::Bool(true)));
+    }
+
+    #[test]
+    fn ut_cs_level_and_connectors() {
         let mut s = CsState::default();
-        // EvseId is the 2.0.1-only field.
-        assert!(s.set_field("EvseId", Vt::Int(2)));
-        assert!(matches!(s.get_field("EvseId"), Some(Vt::Int(2))));
-        assert!(s.set_field("Voltage", Vt::Float(400.0)));
-        assert!(matches!(s.get_field("Voltage"), Some(Vt::Float(v)) if v == 400.0));
-        assert!(!s.set_field("Unknown", Vt::Bool(true)));
+        assert!(s.cs_set_field("Model", Vt::String("M".into())));
+        assert!(matches!(s.cs_get_field("Model"), Some(Vt::String(ref v)) if v == "M"));
+        assert!(s.cs_get_field("Power").is_none());
+        assert!(s.add_connector(1, 2));
+        assert!(!s.add_connector(1, 2));
+        assert!(s.connector(2).is_some());
     }
 }

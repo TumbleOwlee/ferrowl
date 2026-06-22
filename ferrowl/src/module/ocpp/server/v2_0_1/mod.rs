@@ -22,17 +22,36 @@ impl ServerVersion for V2_0_1 {
     }
 
     fn inbound_connector(_name: &str, request: &serde_json::Value) -> Scope {
+        // 2.0.1 connectors are listed and addressed by EVSE id only; a nested/top-level
+        // `connectorId` is ignored for bucketing (connector kept `None`).
         let evse = request["evse"]["id"]
             .as_i64()
             .or_else(|| request["evseId"].as_i64());
-        let connector = request["evse"]["connectorId"]
-            .as_i64()
-            .or_else(|| request["connectorId"].as_i64())
-            .filter(|&c| c >= 1);
         match evse {
-            Some(e) if e >= 1 => Scope::evse(e, connector),
+            Some(e) if e >= 1 => Scope::evse(e, None),
             _ => Scope::CS,
         }
+    }
+
+    fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
+        if let (Some(e), Some(obj)) = (scope.evse, payload.as_object_mut()) {
+            // Set the EVSE id when absent or still the `0` default the encoded request struct
+            // carries; a genuine non-zero value (and later user overrides) win.
+            let cur = obj.get("evseId").and_then(|v| v.as_i64());
+            if cur.is_none() || cur == Some(0) {
+                obj.insert("evseId".into(), serde_json::json!(e));
+            }
+        }
+    }
+
+    fn lua_connector_id(scope: Scope) -> Option<i64> {
+        // 2.0.1 connectors are addressed by EVSE id (the connector dimension is always `None`).
+        scope.evse
+    }
+
+    fn config_has_component() -> bool {
+        // GetVariables/SetVariables keys are `Component/Variable`; show a Component column.
+        true
     }
 
     fn config_action() -> &'static str {
@@ -102,7 +121,8 @@ mod tests {
 
     #[test]
     fn ut_inbound_connector_scope() {
-        // Nested evse object carries both EVSE id and connector → distinct scopes per connector.
+        // Connectors are bucketed by EVSE id only — a nested `connectorId` is ignored, so two
+        // connectors on the same EVSE map to the same (connector-less) scope.
         let a = V2_0_1::inbound_connector(
             "TransactionEvent",
             &json!({ "evse": { "id": 1, "connectorId": 1 } }),
@@ -111,10 +131,10 @@ mod tests {
             "TransactionEvent",
             &json!({ "evse": { "id": 1, "connectorId": 2 } }),
         );
-        assert_eq!(a, Scope::evse(1, Some(1)));
-        assert_eq!(b, Scope::evse(1, Some(2)));
-        assert_ne!(a, b);
-        // Top-level evseId (no nested object), no connector.
+        assert_eq!(a, Scope::evse(1, None));
+        assert_eq!(b, Scope::evse(1, None));
+        assert_eq!(a, b);
+        // Top-level evseId (no nested object).
         assert_eq!(
             V2_0_1::inbound_connector("MeterValues", &json!({ "evseId": 2 })),
             Scope::evse(2, None)
@@ -124,6 +144,35 @@ mod tests {
             V2_0_1::inbound_connector("BootNotification", &json!({})),
             Scope::CS
         );
+    }
+
+    #[test]
+    fn ut_inject_scope_defaults_evse_id() {
+        // A connector-scoped Lua payload gets the EVSE id when it lacks one.
+        let mut p = json!({});
+        V2_0_1::inject_scope(&mut p, Scope::evse(3, None));
+        assert_eq!(p["evseId"], 3);
+        // The `0` default an encoded request struct carries is treated as unset and overwritten.
+        let mut p0 = json!({ "evseId": 0 });
+        V2_0_1::inject_scope(&mut p0, Scope::evse(3, None));
+        assert_eq!(p0["evseId"], 3);
+        // A genuine non-zero evseId is preserved.
+        let mut p2 = json!({ "evseId": 8 });
+        V2_0_1::inject_scope(&mut p2, Scope::evse(3, None));
+        assert_eq!(p2["evseId"], 8);
+        // CS-level scope is a no-op.
+        let mut p3 = json!({});
+        V2_0_1::inject_scope(&mut p3, Scope::CS);
+        assert!(p3.get("evseId").is_none());
+    }
+
+    #[test]
+    fn ut_lua_connector_id_uses_evse() {
+        // Lua addresses 2.0.1 connectors by EVSE id (connector dimension is always None).
+        assert_eq!(V2_0_1::lua_connector_id(Scope::evse(2, None)), Some(2));
+        assert_eq!(V2_0_1::lua_connector_id(Scope::evse(3, Some(1))), Some(3));
+        // CS-level is not a connector.
+        assert_eq!(V2_0_1::lua_connector_id(Scope::CS), None);
     }
 
     #[test]

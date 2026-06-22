@@ -3,6 +3,7 @@
 
 pub mod backend;
 mod detail;
+pub mod lua;
 mod v1_6;
 mod v2_0_1;
 pub mod view;

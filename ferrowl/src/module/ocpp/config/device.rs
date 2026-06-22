@@ -15,6 +15,30 @@ fn default_true() -> bool {
     true
 }
 
+/// A persisted connector entry for a charging-station (client) device type. `evse` is `None` for
+/// OCPP 1.6 (connector-only) and `Some` for 2.0.1; `connector` is the connector id. The CS-level
+/// entry is implicit (always present in the view) and is not stored here. Maps to a runtime
+/// `Scope` when the view is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evse: Option<i64>,
+    pub connector: i64,
+}
+
+/// A persisted configuration key for a charging-station (client) device type: a name/value pair and
+/// its read-only flag, seeded into the client's config store (GetConfiguration / GetVariables) on
+/// load and written by `:wd`. Server (CSMS) config is per-connected-station and transient, so it is
+/// never persisted here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigKeyDef {
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub readonly: bool,
+}
+
 /// One Lua simulation script attached to an OCPP device type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptDef {
@@ -53,6 +77,16 @@ pub struct OcppDeviceConfig {
     /// Empty = accept every tag (the default-accept behaviour). Ignored for the client role.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rfids: Vec<String>,
+    /// Connector entries for the charging-station (client) view, seeded into its connector table on
+    /// load and written by `:wd`. Empty = CS-level only. Ignored for the server role (connectors
+    /// there are discovered from connected stations).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<ConnectorRef>,
+    /// Persisted configuration keys for the charging-station (client) view, seeded into its config
+    /// store on load and written by `:wd`. Empty = use the built-in defaults. Ignored for the server
+    /// role (CSMS config is per-connected-station and transient).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config: Vec<ConfigKeyDef>,
 }
 
 impl OcppDeviceConfig {
@@ -67,6 +101,8 @@ impl OcppDeviceConfig {
             scripts,
             log_file: None,
             rfids: Vec::new(),
+            connectors: Vec::new(),
+            config: Vec::new(),
         }
     }
 }
@@ -97,6 +133,28 @@ mod tests {
             }],
             log_file: Some("/tmp/ferrowl.log".into()),
             rfids: vec!["DEADBEEF".into(), "CAFE1234".into()],
+            connectors: vec![
+                ConnectorRef {
+                    evse: None,
+                    connector: 1,
+                },
+                ConnectorRef {
+                    evse: Some(1),
+                    connector: 2,
+                },
+            ],
+            config: vec![
+                ConfigKeyDef {
+                    key: "HeartbeatInterval".into(),
+                    value: "30".into(),
+                    readonly: false,
+                },
+                ConfigKeyDef {
+                    key: "NumberOfConnectors".into(),
+                    value: "2".into(),
+                    readonly: true,
+                },
+            ],
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = std::env::temp_dir().join(format!("ferrowl_ocpp_device_test.{ext}"));

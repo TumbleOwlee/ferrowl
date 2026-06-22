@@ -16,6 +16,27 @@ use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
+use crate::module::ocpp::scope::Scope;
+
+/// Scope an inbound CSMS→CS Call belongs to, for the message log: a top-level `connectorId` targets
+/// that connector, otherwise it is CS-level.
+fn inbound_scope(request: &serde_json::Value) -> Scope {
+    match request["connectorId"].as_i64() {
+        Some(c) => Scope::connector(c),
+        None => Scope::CS,
+    }
+}
+
+/// A top-level `connectorId` that this charging station does not have, if any. Connector `0` is the
+/// charge point itself in OCPP 1.6 and is always valid; an absent `connectorId` is CS-level.
+fn unknown_connector(request: &serde_json::Value, state: &CsState) -> Option<i64> {
+    let id = request["connectorId"].as_i64()?;
+    if id == 0 || state.connector(id).is_some() {
+        None
+    } else {
+        Some(id)
+    }
+}
 
 /// Inbound handler for an OCPP 1.6 charging station, backed by shared [`CsState`].
 pub struct CsStateHandler {
@@ -87,9 +108,11 @@ impl CsStateHandler {
             }
             Action16::Reset(_) => {
                 let mut state = self.state.write().unwrap();
-                state.status = "Available".to_string();
-                state.transaction_id = None;
-                state.session_energy = 0.0;
+                for c in &mut state.connectors {
+                    c.status = "Available".to_string();
+                    c.transaction_id = None;
+                    c.session_energy = 0.0;
+                }
                 (
                     Ok(Response16::Reset(ResetResponse {
                         status: ResetResponseStatus::Accepted,
@@ -97,7 +120,7 @@ impl CsStateHandler {
                     "state reset".to_string(),
                 )
             }
-            Action16::SetChargingProfile(_) => {
+            Action16::SetChargingProfile(req) => {
                 let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
                 let schedule = &json["csChargingProfiles"]["chargingSchedule"];
                 let period = &schedule["chargingSchedulePeriod"][0];
@@ -107,8 +130,17 @@ impl CsStateHandler {
                         .unwrap_or("A")
                         .to_string();
                     let mut state = self.state.write().unwrap();
-                    state.limit = Some(limit);
-                    state.limit_unit = unit.clone();
+                    // Apply the limit to the targeted connector (fall back to the first).
+                    let target = req.connector_id as i64;
+                    let idx = state
+                        .connectors
+                        .iter()
+                        .position(|c| c.connector_id == target)
+                        .or((!state.connectors.is_empty()).then_some(0));
+                    if let Some(i) = idx {
+                        state.connectors[i].limit = Some(limit);
+                        state.connectors[i].limit_unit = unit.clone();
+                    }
                     format!("limit {limit} {unit}")
                 } else {
                     "no limit in profile".to_string()
@@ -153,23 +185,43 @@ impl CsActionHandler<V1_6> for CsStateHandler {
     ) -> impl Future<Output = Result<Response16, CallError>> + Send {
         let name = V1_6::action_name(&action).to_string();
         let request = V1_6::encode_action(&action).unwrap_or(serde_json::Value::Null);
-        let (result, context) = self.respond(&action);
+        // Reject Calls targeting a connector this station does not have. Scope the read guard so it
+        // is dropped before `respond()` (which takes a write lock) — holding both deadlocks.
+        let unknown = unknown_connector(&request, &self.state.read().unwrap());
+        let (result, context) = match unknown {
+            Some(id) => (
+                Err(CallError::new(
+                    CallErrorCode::PropertyConstraintViolation,
+                    "unknown connectorId",
+                )),
+                format!("unknown connector {id}"),
+            ),
+            None => self.respond(&action),
+        };
         let reply_payload = match &result {
             Ok(resp) => V1_6::encode_response(resp).unwrap_or(serde_json::Value::Null),
             Err(_) => serde_json::Value::Null,
         };
         let ok = result.is_ok();
+        let scope = inbound_scope(&request);
         let messages = self.messages.clone();
         async move {
-            // Record the inbound Call, then our reply.
+            // Record the inbound Call, then our reply, both tagged with the connector scope.
             let mut guard = messages.write().await;
             push_capped(
                 &mut guard,
-                OcppMessage::new(Dir::In, name.clone(), request, None, "inbound call"),
+                OcppMessage::new_scoped(
+                    scope,
+                    Dir::In,
+                    name.clone(),
+                    request,
+                    None,
+                    "inbound call",
+                ),
             );
             push_capped(
                 &mut guard,
-                OcppMessage::new(Dir::Out, name, reply_payload, Some(ok), context),
+                OcppMessage::new_scoped(scope, Dir::Out, name, reply_payload, Some(ok), context),
             );
             drop(guard);
             result
@@ -197,5 +249,51 @@ fn key_value(c: &super::state::ConfigKey) -> KeyValue {
         key: c.key.clone(),
         readonly: c.readonly,
         value: Some(c.value.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ut_unknown_connector_rejected() {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        s.add_connector(1);
+        // A present connector, the charge point itself (0) and CS-level Calls are accepted.
+        assert_eq!(unknown_connector(&json!({ "connectorId": 1 }), &s), None);
+        assert_eq!(unknown_connector(&json!({ "connectorId": 0 }), &s), None);
+        assert_eq!(unknown_connector(&json!({}), &s), None);
+        // An unknown connector id is reported for rejection.
+        assert_eq!(unknown_connector(&json!({ "connectorId": 7 }), &s), Some(7));
+    }
+
+    #[test]
+    fn ut_write_arm_action_does_not_deadlock() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // Reset hits the `None` (accept) arm and takes a write lock in `respond()`. If the inbound
+        // read guard is still held there, the std RwLock self-deadlocks. Run on a thread and bound
+        // the wait so a regression fails the test instead of hanging CI.
+        let handler = CsStateHandler::new(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            Arc::new(RwLock::new(CsState::default())),
+        );
+        let action = V1_6::default_action("Reset").expect("Reset is a known action");
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            // Building the response is the synchronous part that deadlocked; dropping the future is fine.
+            let _ = handler.handle_call(action);
+            let _ = tx.send(());
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "handle_call deadlocked on a write-arm inbound action"
+        );
     }
 }

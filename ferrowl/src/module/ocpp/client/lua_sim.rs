@@ -1,26 +1,27 @@
-//! Per-OCPP-module Lua simulation. A version-generic bridge exposes a charging-station `CsState`
-//! to Lua as the `C_OCPP` global: `Get`/`Set` read and write state fields by name, and
-//! `C_OCPP:<Action>(overrides?)` enqueues an action onto a shared queue that the view drains and
-//! sends. Enabled scripts run every ~100ms on a dedicated thread (the `mlua` VM is `!Send`),
-//! mirroring the Modbus simulation.
+//! Per-OCPP-module Lua simulation for the **client** (charging-station) views. The `C_OCPP` global
+//! is the multi-connector [`OcppClient`] shape: bare `Get`/`Set`/`<Action>` address the CS level,
+//! `Connector(id)` addresses one connector. Actions enqueue onto a [`ScopedActionQueue`] (carrying
+//! the target scope) that the view drains and sends. Enabled scripts run once per second on a
+//! dedicated thread (the `mlua` VM is `!Send`). The [`OcppFields`] trait + the server's bridge live
+//! alongside in `server/lua.rs`.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use ferrowl_lua::module::{OcppActions, OcppModule, Read, TimeModule, ValueType, Write};
+use ferrowl_lua::module::{
+    LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TimeModule, ValueType, Write,
+};
 use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
 
+use crate::module::ocpp::scope::Scope;
 use crate::module::view::SharedLog;
 
-/// Actions enqueued by Lua (`action` name + flat JSON override args), drained by the view each
-/// refresh and turned into outbound sends.
-pub type ActionQueue = Arc<Mutex<VecDeque<(String, serde_json::Value)>>>;
-
-/// A version's charging-station state, addressable by field name and exposing its action set, so
-/// the generic bridge can serve `C_OCPP` for either OCPP version. Implemented by both `CsState`s.
+/// A version's observed-state type, addressable by field name and exposing its action set. The
+/// server states implement this (CS-level / connector) and the server Lua bridge in `server/lua.rs`
+/// reads/writes through it.
 pub trait OcppFields {
     /// The `C_OCPP:<Action>` method names exposed for this version.
     fn actions() -> Vec<&'static str>
@@ -30,82 +31,267 @@ pub trait OcppFields {
     fn set_field(&mut self, name: &str, value: ValueType) -> bool;
 }
 
-impl OcppFields for crate::module::ocpp::client::v1_6::state::CsState {
-    fn actions() -> Vec<&'static str> {
-        V1_6::cs_actions().to_vec()
-    }
-    fn get_field(&self, name: &str) -> Option<ValueType> {
-        self.get_field(name)
-    }
-    fn set_field(&mut self, name: &str, value: ValueType) -> bool {
-        self.set_field(name, value)
-    }
+// --- Multi-connector client bridge (split CS / connector state) ------------
+
+/// Actions enqueued by Lua, drained by the multi-connector client view: target `scope` + action
+/// name + flat JSON override args.
+pub type ScopedActionQueue = Arc<Mutex<VecDeque<(Scope, String, serde_json::Value)>>>;
+
+/// Split-level state access for the multi-connector client `C_OCPP` bridge: bare `Get`/`Set`/
+/// `<Action>` hit the CS level, `Connector(id)` hits one connector. Implemented by the client
+/// `CsState`s.
+pub trait ClientFields {
+    /// CS-level action method names (bare `C_OCPP:<Action>`).
+    fn cs_actions() -> Vec<&'static str>
+    where
+        Self: Sized;
+    /// Connector-level action method names (`C_OCPP:Connector(id):<Action>`).
+    fn conn_actions() -> Vec<&'static str>
+    where
+        Self: Sized;
+    fn cs_get(&self, name: &str) -> Option<ValueType>;
+    fn cs_set(&mut self, name: &str, value: ValueType) -> bool;
+    fn conn_get(&self, id: i64, name: &str) -> Option<ValueType>;
+    fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool;
+    /// The dispatch scope for `Connector(id)` actions (version-specific: 1.6 connector / 2.0.1 evse).
+    fn conn_scope(&self, id: i64) -> Scope;
 }
 
-impl OcppFields for crate::module::ocpp::client::v2_0_1::state::CsState {
-    fn actions() -> Vec<&'static str> {
-        // The two transaction shortcuts (mapped to TransactionEvent by the view) precede the real
-        // CS-originated actions, matching the action-button list.
-        let mut actions = vec!["StartTransaction", "StopTransaction"];
-        actions.extend_from_slice(V2_0_1::cs_actions());
-        actions
-    }
-    fn get_field(&self, name: &str) -> Option<ValueType> {
-        self.get_field(name)
-    }
-    fn set_field(&mut self, name: &str, value: ValueType) -> bool {
-        self.set_field(name, value)
-    }
-}
-
-/// Host handle backing `C_OCPP` for one module: shared state (for `Get`/`Set`) + the action queue.
-struct OcppBridge<S: OcppFields> {
+/// Host handle for the CS level of one client module: shared state + the scoped queue. Bare
+/// `Get`/`Set`/`<Action>` route here; `Connector(id)` produces a [`ClientConnHandle`].
+struct ClientCsHandle<S: ClientFields> {
     state: Arc<RwLock<S>>,
-    queue: ActionQueue,
+    queue: ScopedActionQueue,
 }
 
-impl<S: OcppFields + 'static> Read for OcppBridge<S> {
+impl<S: ClientFields + 'static> Read for ClientCsHandle<S> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
         self.state
             .read()
             .unwrap()
-            .get_field(&name)
-            .ok_or_else(|| Error::RuntimeError(format!("unknown OCPP field '{name}'")))
+            .cs_get(&name)
+            .ok_or_else(|| Error::RuntimeError(format!("unknown CS field '{name}'")))
+    }
+}
+impl<S: ClientFields + 'static> Write for ClientCsHandle<S> {
+    fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
+        if self.state.write().unwrap().cs_set(&name, value) {
+            Ok(())
+        } else {
+            Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+        }
+    }
+}
+impl<S: ClientFields + 'static> OcppActions for ClientCsHandle<S> {
+    fn actions() -> Vec<&'static str> {
+        S::cs_actions()
+    }
+    fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
+        enqueue(&self.queue, Scope::CS, action, args);
+        true
+    }
+}
+impl<S: ClientFields + 'static> OcppClientHost for ClientCsHandle<S> {
+    type Conn = ClientConnHandle<S>;
+    fn connector(&self, id: i64) -> ClientConnHandle<S> {
+        ClientConnHandle {
+            state: self.state.clone(),
+            queue: self.queue.clone(),
+            id,
+        }
     }
 }
 
-impl<S: OcppFields + 'static> Write for OcppBridge<S> {
+/// Host handle for one connector of a client module, addressing it by id.
+struct ClientConnHandle<S: ClientFields> {
+    state: Arc<RwLock<S>>,
+    queue: ScopedActionQueue,
+    id: i64,
+}
+
+impl<S: ClientFields + 'static> Read for ClientConnHandle<S> {
+    fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
+        self.state
+            .read()
+            .unwrap()
+            .conn_get(self.id, &name)
+            .ok_or_else(|| Error::RuntimeError(format!("unknown connector field '{name}'")))
+    }
+}
+impl<S: ClientFields + 'static> Write for ClientConnHandle<S> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if self.state.write().unwrap().set_field(&name, value) {
+        if self.state.write().unwrap().conn_set(self.id, &name, value) {
             Ok(())
         } else {
             Err(Error::RuntimeError(format!(
-                "cannot set OCPP field '{name}'"
+                "cannot set connector field '{name}'"
             )))
         }
     }
 }
-
-impl<S: OcppFields + 'static> OcppActions for OcppBridge<S> {
+impl<S: ClientFields + 'static> OcppActions for ClientConnHandle<S> {
     fn actions() -> Vec<&'static str> {
-        S::actions()
+        S::conn_actions()
     }
     fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
-        let mut overrides = serde_json::Map::new();
-        for (key, value) in args {
-            overrides.insert(key, vt_to_json(value));
-        }
-        self.queue
-            .lock()
-            .unwrap()
-            .push_back((action.to_string(), serde_json::Value::Object(overrides)));
+        let scope = self.state.read().unwrap().conn_scope(self.id);
+        enqueue(&self.queue, scope, action, args);
         true
+    }
+}
+
+/// Push a `(scope, action, overrides-json)` item onto a scoped queue.
+fn enqueue(queue: &ScopedActionQueue, scope: Scope, action: &str, args: Vec<(String, ValueType)>) {
+    let mut overrides = serde_json::Map::new();
+    for (key, value) in args {
+        overrides.insert(key, vt_to_json(value));
+    }
+    queue.lock().unwrap().push_back((
+        scope,
+        action.to_string(),
+        serde_json::Value::Object(overrides),
+    ));
+}
+
+/// Connector-scoped action names for OCPP 1.6 (everything else is CS-level).
+const CONNECTOR_ACTIONS_V16: &[&str] = &[
+    "StatusNotification",
+    "MeterValues",
+    "StartTransaction",
+    "StopTransaction",
+];
+
+impl ClientFields for crate::module::ocpp::client::v1_6::state::CsState {
+    fn cs_actions() -> Vec<&'static str> {
+        V1_6::cs_actions()
+            .iter()
+            .copied()
+            .filter(|a| !CONNECTOR_ACTIONS_V16.contains(a))
+            .collect()
+    }
+    fn conn_actions() -> Vec<&'static str> {
+        V1_6::cs_actions()
+            .iter()
+            .copied()
+            .filter(|a| CONNECTOR_ACTIONS_V16.contains(a))
+            .collect()
+    }
+    fn cs_get(&self, name: &str) -> Option<ValueType> {
+        self.cs_get_field(name)
+    }
+    fn cs_set(&mut self, name: &str, value: ValueType) -> bool {
+        self.cs_set_field(name, value)
+    }
+    fn conn_get(&self, id: i64, name: &str) -> Option<ValueType> {
+        self.connector(id).and_then(|c| c.get_field(name))
+    }
+    fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool {
+        self.connector_mut(id)
+            .map(|c| c.set_field(name, value))
+            .unwrap_or(false)
+    }
+    fn conn_scope(&self, id: i64) -> Scope {
+        Scope::connector(id)
+    }
+}
+
+/// Spawn the simulation thread for one multi-connector client module. Like [`run_ocpp_sim`] but
+/// over split CS/connector state via the [`OcppClient`] module (bare `Get/Set/<Action>` = CS,
+/// `Connector(id)` = one connector).
+pub fn run_client_sim<S>(
+    state: Arc<RwLock<S>>,
+    queue: ScopedActionQueue,
+    scripts: Vec<(String, String)>,
+    log: SharedLog,
+) -> Option<OcppSimHandle>
+where
+    S: ClientFields + Send + Sync + 'static,
+{
+    if scripts.is_empty() {
+        return None;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop.clone();
+    let handle = std::thread::spawn(move || {
+        let bridge = ClientCsHandle { state, queue };
+        let mut builder = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppClient::init(bridge))
+            .with_module(TimeModule::default())
+            .with_module(LogModule::init(LuaLogSink(log.clone())));
+        for (name, code) in &scripts {
+            builder = builder.with_script(name.clone(), code);
+        }
+        let mut context = match builder.build() {
+            Ok(context) => context,
+            Err(e) => {
+                emit(&log, &format!("[lua] failed to build context: {e}"));
+                return;
+            }
+        };
+        while !thread_stop.load(Ordering::Relaxed) {
+            if let Err(errors) = context.refresh_all(Duration::from_secs(1)) {
+                for e in errors {
+                    emit(&log, &format!("[lua] {e}"));
+                }
+            }
+            sleep_responsive(Duration::from_millis(50), &thread_stop);
+        }
+    });
+    Some(OcppSimHandle {
+        stop,
+        handle: Some(handle),
+    })
+}
+
+/// Connector-scoped action names for OCPP 2.0.1 (everything else is CS-level). The
+/// `StartTransaction`/`StopTransaction` shortcuts (mapped to TransactionEvent by the view) are also
+/// connector-scoped and are prepended by `conn_actions`.
+const CONNECTOR_ACTIONS_V201: &[&str] = &["MeterValues", "StatusNotification", "TransactionEvent"];
+
+impl ClientFields for crate::module::ocpp::client::v2_0_1::state::CsState {
+    fn cs_actions() -> Vec<&'static str> {
+        V2_0_1::cs_actions()
+            .iter()
+            .copied()
+            .filter(|a| !CONNECTOR_ACTIONS_V201.contains(a))
+            .collect()
+    }
+    fn conn_actions() -> Vec<&'static str> {
+        let mut actions = vec!["StartTransaction", "StopTransaction"];
+        actions.extend(
+            V2_0_1::cs_actions()
+                .iter()
+                .copied()
+                .filter(|a| CONNECTOR_ACTIONS_V201.contains(a)),
+        );
+        actions
+    }
+    fn cs_get(&self, name: &str) -> Option<ValueType> {
+        self.cs_get_field(name)
+    }
+    fn cs_set(&mut self, name: &str, value: ValueType) -> bool {
+        self.cs_set_field(name, value)
+    }
+    fn conn_get(&self, id: i64, name: &str) -> Option<ValueType> {
+        self.connector(id).and_then(|c| c.get_field(name))
+    }
+    fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool {
+        self.connector_mut(id)
+            .map(|c| c.set_field(name, value))
+            .unwrap_or(false)
+    }
+    fn conn_scope(&self, id: i64) -> Scope {
+        match self.connector(id) {
+            Some(c) => Scope::evse(c.evse_id, Some(c.connector_id)),
+            None => Scope::evse(1, Some(id)),
+        }
     }
 }
 
 /// Map a Lua `ValueType` to JSON for the override args (integers narrow to i64 — override values
 /// are small scalars like ports and currents).
-fn vt_to_json(value: ValueType) -> serde_json::Value {
+pub(crate) fn vt_to_json(value: ValueType) -> serde_json::Value {
     match value {
         ValueType::Int(v) => serde_json::Value::from(v as i64),
         ValueType::Float(v) => serde_json::json!(v),
@@ -138,6 +324,15 @@ impl OcppSimHandle {
             let _ = handle.join();
         }
     }
+
+    /// Construct a handle from its stop flag and join handle (for sibling sim runners, e.g. the
+    /// server's single-sim runner in `server/lua.rs`).
+    pub(crate) fn from_parts(stop: Arc<AtomicBool>, handle: std::thread::JoinHandle<()>) -> Self {
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
 }
 
 impl Drop for OcppSimHandle {
@@ -146,64 +341,71 @@ impl Drop for OcppSimHandle {
     }
 }
 
-/// Spawn the simulation thread for one OCPP module. Returns `None` when there are no scripts. The
-/// Lua `Context` is built inside the thread because it is `!Send`. Each cycle runs every enabled
-/// script at most every ~100ms (`refresh_all`); script errors go to the module log.
-pub fn run_ocpp_sim<S>(
-    state: Arc<RwLock<S>>,
-    queue: ActionQueue,
-    scripts: Vec<(String, String)>,
-    log: SharedLog,
-) -> Option<OcppSimHandle>
-where
-    S: OcppFields + Send + Sync + 'static,
-{
-    if scripts.is_empty() {
-        return None;
-    }
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let thread_stop = stop.clone();
-    let handle = std::thread::spawn(move || {
-        let bridge = OcppBridge { state, queue };
-        let mut builder = ContextBuilder::<String>::default()
-            .with_stdlib()
-            .with_module(OcppModule::init(bridge))
-            .with_module(TimeModule::default());
-        for (name, code) in &scripts {
-            builder = builder.with_script(name.clone(), code);
-        }
-        let mut context = match builder.build() {
-            Ok(context) => context,
-            Err(e) => {
-                emit(&log, &format!("[lua] failed to build context: {e}"));
-                return;
-            }
-        };
-
-        while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.refresh_all(Duration::from_millis(100)) {
-                for e in errors {
-                    emit(&log, &format!("[lua] {e}"));
-                }
-            }
-            sleep_responsive(Duration::from_millis(50), &thread_stop);
-        }
-    });
-
-    Some(OcppSimHandle {
-        stop,
-        handle: Some(handle),
-    })
-}
-
 /// Append a line to the module's ring log from the (non-runtime) sim thread.
-fn emit(log: &SharedLog, line: &str) {
+pub(crate) fn emit(log: &SharedLog, line: &str) {
     log.blocking_write().write(line);
 }
 
+/// Routes `C_Log:Print(..)` lines from a Lua sim into the module's ring log. Used to build the
+/// `C_Log` module for both the client and server sims.
+pub(crate) struct LuaLogSink(pub SharedLog);
+
+impl LogSink for LuaLogSink {
+    fn print(&self, line: &str) {
+        emit(&self.0, line);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
+    use crate::module::ocpp::client::v2_0_1::state::CsState as Cs201;
+
+    #[test]
+    fn ut_v16_actions_partition_disjoint_and_covers() {
+        let cs = <Cs16 as ClientFields>::cs_actions();
+        let conn = <Cs16 as ClientFields>::conn_actions();
+        // The two levels are disjoint and together cover every 1.6 CS action.
+        for a in &conn {
+            assert!(!cs.contains(a), "{a} in both levels");
+        }
+        assert_eq!(cs.len() + conn.len(), V1_6::cs_actions().len());
+        assert!(conn.contains(&"StartTransaction"));
+        assert!(cs.contains(&"BootNotification"));
+    }
+
+    #[test]
+    fn ut_conn_scope_is_version_specific() {
+        // 1.6: connector-only scope.
+        let s16 = Cs16::default();
+        assert_eq!(
+            <Cs16 as ClientFields>::conn_scope(&s16, 1),
+            Scope::connector(1)
+        );
+        // 2.0.1: scope carries the connector's EVSE.
+        let mut s201 = Cs201::default();
+        s201.add_connector(2, 5);
+        assert_eq!(
+            <Cs201 as ClientFields>::conn_scope(&s201, 5),
+            Scope::evse(2, Some(5))
+        );
+    }
+
+    #[test]
+    fn ut_v201_conn_actions_include_shortcuts() {
+        let conn = <Cs201 as ClientFields>::conn_actions();
+        assert!(conn.contains(&"StartTransaction"));
+        assert!(conn.contains(&"StopTransaction"));
+        // CS-level excludes connector-scoped reals like MeterValues.
+        let cs = <Cs201 as ClientFields>::cs_actions();
+        assert!(!cs.contains(&"MeterValues"));
+        assert!(cs.contains(&"BootNotification"));
+    }
+}
+
 /// Sleep up to `interval` in small chunks so the stop flag is observed promptly.
-fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
+pub(crate) fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
     let chunk = Duration::from_millis(25);
     let mut slept = Duration::ZERO;
     while slept < interval && !stop.load(Ordering::Relaxed) {

@@ -1,8 +1,8 @@
 //! Lua script manager dialog, shared by both OCPP client views. Left: a table of scripts with an
 //! On/Off status over a "New Script" name input; right: a code editor for the selected script.
 //! Edits are live on a working copy; the view reads it back via [`ScriptDialog::resolve`] on close
-//! and reloads the simulation. `t` toggles a script, `d` deletes (with confirmation), Enter in the
-//! name input creates a new (enabled) script, Esc closes.
+//! and reloads the simulation. `t` toggles a script, `d` deletes (with confirmation), `c` toggles
+//! compact rows, Enter in the name input creates a new (enabled) script, Esc closes.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
@@ -75,6 +75,8 @@ pub struct ScriptDialog {
     code: Widget<CodeInputFieldState, CodeInputField>,
     focus: Focus,
     confirm: Option<ConfirmDeleteDialog>,
+    /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
+    compact: bool,
 }
 
 impl ScriptDialog {
@@ -86,6 +88,7 @@ impl ScriptDialog {
             code: code_editor(),
             focus: Focus::List,
             confirm: None,
+            compact: false,
             scripts,
         };
         dialog.sync_code_from_selection();
@@ -140,6 +143,14 @@ impl ScriptDialog {
         self.name_input.state.set_input(String::new());
         self.name_input.state.set_cursor(0);
         self.sync_code_from_selection();
+    }
+
+    fn toggle_compact(&mut self) {
+        self.compact = !self.compact;
+        self.table.widget.set_row_margin(Margin {
+            vertical: if self.compact { 0 } else { 1 },
+            horizontal: 0,
+        });
     }
 
     fn toggle_selected(&mut self) {
@@ -205,6 +216,7 @@ impl ScriptDialog {
             _ => match self.focus {
                 Focus::List => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
+                    (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
                     (KeyModifiers::NONE, KeyCode::Char('d')) => {
                         if let Some(i) = self.selected() {
                             self.confirm = Some(ConfirmDeleteDialog::new(&self.scripts[i].name));
@@ -307,10 +319,10 @@ fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
         state: TableStateBuilder::default().values(rows).build().unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Scripts (t: toggle, d: delete)".into()))
+            .title(Some("Scripts (t: toggle, d: delete, c: compact)".into()))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
-                vertical: 0,
+                vertical: 1,
                 horizontal: 0,
             })
             .build()
@@ -367,5 +379,34 @@ fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
             })
             .build()
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dialog() -> ScriptDialog {
+        ScriptDialog::new(&[ScriptDef {
+            name: "boot".into(),
+            code: String::new(),
+            enabled: true,
+        }])
+    }
+
+    #[test]
+    fn c_toggles_compact_in_list_not_in_name_input() {
+        let mut d = dialog();
+        assert!(!d.compact);
+        // `c` on the focused script list toggles compact.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
+        assert!(d.compact);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
+        assert!(!d.compact);
+        // `c` in the name input is text, not a compact toggle.
+        d.focus = Focus::NewInput;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
+        assert!(!d.compact);
+        assert_eq!(d.name_input.state.input(), "c");
     }
 }

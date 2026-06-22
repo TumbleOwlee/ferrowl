@@ -222,6 +222,19 @@ impl App {
     }
 
     async fn refresh_snapshot(&mut self) {
+        // Refresh *every* tab's module, not just the active one: background modules must keep
+        // sending/receiving while another tab is shown (e.g. an OCPP CSMS keeps driving its Lua
+        // sim so a CS tab sees inbound traffic live, instead of only when the tab is switched).
+        for tab in self.tabs.iter_mut() {
+            tab.view.refresh().await;
+            // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
+            if let Some(new_view) = tab.view.take_replacement() {
+                tab.view = new_view;
+                tab.log = tab.view.log();
+            }
+            tab.name = tab.view.name();
+        }
+
         if self.active >= self.tabs.len() {
             return;
         }
@@ -247,13 +260,6 @@ impl App {
         if follow {
             tab.log_view.state.move_to_bottom();
         }
-        tab.view.refresh().await;
-        // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
-        if let Some(new_view) = tab.view.take_replacement() {
-            tab.view = new_view;
-            tab.log = tab.view.log();
-        }
-        tab.name = tab.view.name();
     }
 
     fn draw(&mut self) -> std::io::Result<()> {

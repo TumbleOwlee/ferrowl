@@ -1,7 +1,9 @@
-//! OCPP 2.0.1 charging-station (client) view. Same layout as the 1.6 view (state panel over the
-//! action list and a variable table+inputs on the left; message log over a JSON payload viewer on
-//! the right) adapted to 2.0.1: EVSE id, connector-status enum, GetVariables-backed variable store,
-//! and `StartTransaction`/`StopTransaction` *shortcut* buttons that emit a `TransactionEvent`.
+//! OCPP 2.0.1 charging-station (client) view. Same multi-connector layout as the 1.6 view (a
+//! connector table + add-connector input over the selected entry's state table, scripts button,
+//! action list and CS-level variable block on the left; message log filtered to the selection over
+//! a JSON payload viewer on the right), adapted to 2.0.1: EVSE+connector scope, a connector-status
+//! enum, a GetVariables-backed variable store, and `StartTransaction`/`StopTransaction` *shortcut*
+//! buttons that emit a `TransactionEvent` for the selected connector.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -44,13 +46,14 @@ use crate::module::ocpp::client::backend::{
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::{
-    ActionQueue, OcppSimHandle, merge_overrides, run_ocpp_sim,
+    ClientFields, OcppSimHandle, ScopedActionQueue, merge_overrides, run_client_sim,
 };
 use crate::module::ocpp::client::scripts::ScriptDialog;
 use crate::module::ocpp::client::v2_0_1::handler::CsStateHandler;
 use crate::module::ocpp::client::v2_0_1::state::{ConfigRow, CsState, NvRow};
-use crate::module::ocpp::config::device::OcppDeviceConfig;
+use crate::module::ocpp::config::device::{ConfigKeyDef, ConnectorRef, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
+use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
@@ -85,6 +88,35 @@ impl Header<3> for NvHeader {
     }
 }
 
+// --- Connector table -------------------------------------------------------
+
+#[derive(Clone, Debug)]
+struct ConnRow {
+    cp: String,
+    connector: String,
+}
+
+impl TableEntry<2> for ConnRow {
+    fn values(&self) -> [String; 2] {
+        [self.cp.clone(), self.connector.clone()]
+    }
+    fn height(&self) -> u16 {
+        1
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ConnHeader;
+
+impl Header<2> for ConnHeader {
+    fn header() -> [String; 2] {
+        ["Charge Point".into(), "Connector".into()]
+    }
+    fn widths() -> [Width; 2] {
+        [Width { min: 12, max: 40 }, Width { min: 9, max: 16 }]
+    }
+}
+
 // --- Variable table --------------------------------------------------------
 
 impl TableEntry<3> for ConfigRow {
@@ -112,9 +144,10 @@ impl Header<3> for ConfigHeader {
     }
 }
 
-/// Which state row an edit overlay is changing.
+/// Which state row an edit overlay is changing (CS-level identity or connector metering/status).
 #[derive(Clone, Copy)]
 enum EditField {
+    // Connector-level
     EvseId,
     ConnectorId,
     Phases,
@@ -128,6 +161,7 @@ enum EditField {
     Temperature,
     Status,
     Rfid,
+    // CS-level
     Model,
     Vendor,
     FirmwareVersion,
@@ -135,7 +169,20 @@ enum EditField {
 }
 
 impl EditField {
-    fn from_row(row: usize) -> Option<EditField> {
+    /// Map a CS-level state-table row (see [`CsState::cs_rows`]). Reserved RFID (row 4) is read-only.
+    fn from_cs_row(row: usize) -> Option<EditField> {
+        Some(match row {
+            0 => EditField::Model,
+            1 => EditField::Vendor,
+            2 => EditField::FirmwareVersion,
+            3 => EditField::SerialNumber,
+            _ => return None,
+        })
+    }
+
+    /// Map a connector state-table row (see [`ConnectorState::rows`]). Charge Limit (row 15) is
+    /// read-only.
+    fn from_conn_row(row: usize) -> Option<EditField> {
         Some(match row {
             0 => EditField::EvseId,
             1 => EditField::ConnectorId,
@@ -152,11 +199,6 @@ impl EditField {
             12 => EditField::Temperature,
             13 => EditField::Status,
             14 => EditField::Rfid,
-            // 15 = "Reserved RFID" (read-only, set by the CSMS via ReserveNow).
-            16 => EditField::Model,
-            17 => EditField::Vendor,
-            18 => EditField::FirmwareVersion,
-            19 => EditField::SerialNumber,
             _ => return None,
         })
     }
@@ -195,9 +237,6 @@ const STATUS_CHOICES: [&str; 5] = [
     "Faulted",
 ];
 
-/// Friendly shortcut buttons that map to a `TransactionEvent`.
-const SHORTCUTS: [&str; 2] = ["StartTransaction", "StopTransaction"];
-
 /// State-driven real actions: built straight from state, no dialog.
 const STATE_DRIVEN: [&str; 5] = [
     "Authorize",
@@ -207,29 +246,17 @@ const STATE_DRIVEN: [&str; 5] = [
     "StatusNotification",
 ];
 
-enum EditOverlay {
-    Choice {
-        field: EditField,
-        sel: Widget<SelectionState<String>, Selection<String>>,
-    },
-    Number {
-        field: EditField,
-        input: Widget<InputFieldState, InputField<f64>>,
-    },
-    Text {
-        field: EditField,
-        input: Widget<InputFieldState, InputField<String>>,
-    },
+enum EditKind {
+    Choice(Widget<SelectionState<String>, Selection<String>>),
+    Number(Widget<InputFieldState, InputField<f64>>),
+    Text(Widget<InputFieldState, InputField<String>>),
 }
 
-impl EditOverlay {
-    fn field(&self) -> EditField {
-        match self {
-            EditOverlay::Choice { field, .. }
-            | EditOverlay::Number { field, .. }
-            | EditOverlay::Text { field, .. } => *field,
-        }
-    }
+struct EditOverlay {
+    field: EditField,
+    /// The EVSE id of the connector being edited (`None` = CS-level field).
+    evse: Option<i64>,
+    kind: EditKind,
 }
 
 // --- Message table ---------------------------------------------------------
@@ -309,6 +336,8 @@ fn msg_row(m: &OcppMessage) -> MsgRow {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Pane {
+    Connectors,
+    ConnectorInput,
     State,
     Scripts,
     ConfigTable,
@@ -320,18 +349,19 @@ enum Pane {
 }
 
 type StateTable = Widget<TableState<NvRow, 3>, Table<NvRow, NvHeader, 3>>;
+type ConnTable = Widget<TableState<ConnRow, 2>, Table<ConnRow, ConnHeader, 2>>;
 type ConfigTable = Widget<TableState<ConfigRow, 3>, Table<ConfigRow, ConfigHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
 pub struct OcppClientV201View {
     spec: OcppSpec,
-    /// Path to the OCPP device-config file backing this module (empty = none yet).
     device_path: String,
-    /// Device config (role/version/timeout/scripts); source of truth for scripts. `:wd` persists.
     device: OcppDeviceConfig,
     backend: OcppClient<V2_0_1>,
     state: Arc<RwLock<CsState>>,
     log: SharedLog,
+    conn_table: ConnTable,
+    conn_input: Widget<InputFieldState, InputField<String>>,
     state_table: StateTable,
     config_table: ConfigTable,
     key_input: Widget<InputFieldState, InputField<String>>,
@@ -339,6 +369,7 @@ pub struct OcppClientV201View {
     actions: Widget<SelectionState<String>, Selection<String>>,
     msg_table: MsgTable,
     messages: Vec<OcppMessage>,
+    visible_messages: Vec<OcppMessage>,
     code: Widget<CodeInputFieldState, CodeInputField>,
     scripts_button: Widget<ButtonState, Button>,
     script_dialog: Option<ScriptDialog>,
@@ -346,59 +377,73 @@ pub struct OcppClientV201View {
     edit: Option<EditOverlay>,
     config_edit: Option<ConfigEditDialog>,
     action_dialog: Option<ActionDialog>,
-    pending_send: Option<(String, serde_json::Value)>,
+    pending_send: Option<(String, serde_json::Value, Scope)>,
     setup_overlay: Option<OcppSetupDialog>,
-    /// A resolved `:edit` (spec + device-config path) awaiting application in `refresh`.
     pending_setup: Option<(OcppSpec, String)>,
     replacement: Option<Box<dyn ModuleView>>,
-    /// Actions enqueued by Lua scripts, drained and sent each `refresh`.
-    action_queue: ActionQueue,
-    /// The running Lua simulation thread, if any.
+    action_queue: ScopedActionQueue,
     sim: Option<OcppSimHandle>,
     meter_tick: u32,
-    /// Ticks since the last auto-Heartbeat, for the BootNotification-driven cadence.
     heartbeat_tick: u32,
-    /// Online state observed on the previous `refresh`, to log the online→offline edge once.
     was_online: bool,
-    /// Highest message `seq` already teed into the persistent log, so each is logged once.
     logged_seq: u64,
-    /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
     applied_log_file: Option<String>,
-    /// Last content pushed into the payload viewer, so periodic refreshes don't reset its scroll.
     code_content: String,
     compact: bool,
+    actions_for_connector: Option<bool>,
 }
 
 impl OcppClientV201View {
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let state = Arc::new(RwLock::new(CsState::default()));
-        let (rows, config_rows) = {
+        if !device.connectors.is_empty() {
+            let mut s = state.write().unwrap();
+            s.connectors.clear();
+            for c in &device.connectors {
+                s.add_connector(c.evse.unwrap_or(1), c.connector);
+            }
+            if s.connectors.is_empty() {
+                s.add_connector(1, 1);
+            }
+        }
+        // Seed persisted config keys from the device config (else keep the built-in defaults).
+        if !device.config.is_empty() {
+            let mut s = state.write().unwrap();
+            s.config = device
+                .config
+                .iter()
+                .map(|c| ConfigKey {
+                    key: c.key.clone(),
+                    value: c.value.clone(),
+                    readonly: c.readonly,
+                })
+                .collect();
+        }
+        let cp = spec.name.clone();
+        let (conn_rows, state_rows, config_rows) = {
             let s = state.read().unwrap();
-            (s.rows(), s.config_rows())
+            (conn_rows(&cp, &s), s.cs_rows(), s.config_rows())
         };
-        // Shortcut buttons first, then the real CS-originated actions.
-        let action_values: Vec<String> = SHORTCUTS
-            .iter()
-            .map(|s| s.to_string())
-            .chain(V2_0_1::cs_actions().iter().map(|s| s.to_string()))
-            .collect();
         let mut view = Self {
             device_path,
             device,
             backend: OcppClient::new(spec.clone()),
             state,
             log: Arc::new(AsyncRwLock::new(LogRing::init())),
-            state_table: nv_table(rows),
+            conn_table: conn_table(conn_rows),
+            conn_input: panel_input("Add evse/connector"),
+            state_table: nv_table(state_rows),
             config_table: config_table(config_rows),
             key_input: panel_input("Key"),
             value_input: panel_input("Value"),
-            actions: action_list(action_values),
+            actions: action_list(Vec::new()),
             msg_table: msg_table(),
             messages: Vec::new(),
+            visible_messages: Vec::new(),
             code: code_view(),
             scripts_button: scripts_button(),
             script_dialog: None,
-            focus: Pane::State,
+            focus: Pane::Connectors,
             edit: None,
             config_edit: None,
             action_dialog: None,
@@ -415,13 +460,32 @@ impl OcppClientV201View {
             applied_log_file: None,
             code_content: String::new(),
             compact: false,
+            actions_for_connector: None,
             spec,
         };
+        view.sync_actions();
         view.start_sim();
         view
     }
 
-    /// Enabled scripts as `(name, code)` pairs for the simulation thread.
+    fn cs_selected(&self) -> bool {
+        !matches!(self.conn_table.state.table_state().selected(), Some(i) if i >= 1)
+    }
+
+    /// The scope of the selected connector-table row (CS row → `Scope::CS`).
+    fn selected_scope(&self) -> Scope {
+        match self.conn_table.state.table_state().selected() {
+            Some(i) if i >= 1 => {
+                let s = self.state.read().unwrap();
+                s.connectors
+                    .get(i - 1)
+                    .map(|c| Scope::evse(c.evse_id, None))
+                    .unwrap_or(Scope::CS)
+            }
+            _ => Scope::CS,
+        }
+    }
+
     fn enabled_scripts(&self) -> Vec<(String, String)> {
         self.device
             .scripts
@@ -431,10 +495,9 @@ impl OcppClientV201View {
             .collect()
     }
 
-    /// (Re)start the Lua simulation thread from the currently-enabled scripts (no-op if none).
     fn start_sim(&mut self) {
         self.stop_sim();
-        self.sim = run_ocpp_sim(
+        self.sim = run_client_sim(
             self.state.clone(),
             self.action_queue.clone(),
             self.enabled_scripts(),
@@ -442,23 +505,41 @@ impl OcppClientV201View {
         );
     }
 
-    /// Stop and join the simulation thread if one is running.
     fn stop_sim(&mut self) {
         if let Some(mut sim) = self.sim.take() {
             sim.stop();
         }
     }
 
+    fn open_scripts(&mut self) {
+        self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
+    }
+
+    fn sync_actions(&mut self) {
+        let want = !self.cs_selected();
+        if self.actions_for_connector == Some(want) {
+            return;
+        }
+        let names = if want {
+            <CsState as ClientFields>::conn_actions()
+        } else {
+            <CsState as ClientFields>::cs_actions()
+        };
+        let values: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
+        self.actions.state.set_values(values);
+        self.actions_for_connector = Some(want);
+    }
+
     /// Drain and send one Lua-enqueued action. The transaction shortcuts map to a TransactionEvent
-    /// (like the buttons); state-driven and other actions build their payload then merge overrides.
-    fn dispatch_lua_action(&mut self, name: &str, overrides: serde_json::Value) {
+    /// for the action's connector; state-driven and other actions build their payload then merge.
+    fn dispatch_lua_action(&mut self, scope: Scope, name: &str, overrides: serde_json::Value) {
         let (send_name, mut payload) = match name {
-            "StartTransaction" => ("TransactionEvent".to_string(), self.start_event()),
-            "StopTransaction" => match self.stop_event() {
+            "StartTransaction" => ("TransactionEvent".to_string(), self.start_event(scope)),
+            "StopTransaction" => match self.stop_event(scope) {
                 Some(payload) => ("TransactionEvent".to_string(), payload),
                 None => return,
             },
-            n if STATE_DRIVEN.contains(&n) => (name.to_string(), self.state_payload(n)),
+            n if STATE_DRIVEN.contains(&n) => (name.to_string(), self.state_payload(n, scope)),
             _ => {
                 let template = V2_0_1::default_action(name)
                     .and_then(|a| V2_0_1::encode_action(&a).ok())
@@ -467,7 +548,7 @@ impl OcppClientV201View {
             }
         };
         merge_overrides(&mut payload, overrides);
-        self.send_payload(&send_name, payload);
+        self.send_payload(&send_name, payload, scope);
     }
 
     fn make_handler(&self) -> CsStateHandler {
@@ -478,8 +559,6 @@ impl OcppClientV201View {
         )
     }
 
-    /// Write the device config (reconciled with the live spec, scripts preserved) to `path`,
-    /// stamping the ferrowl version. Mirrors the Modbus `:wd`.
     fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
@@ -490,6 +569,30 @@ impl OcppClientV201View {
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
         device.log_file = self.device.log_file.clone();
+        device.connectors = self
+            .state
+            .read()
+            .unwrap()
+            .connectors
+            .iter()
+            .map(|c| ConnectorRef {
+                evse: Some(c.evse_id),
+                connector: c.connector_id,
+            })
+            .collect();
+        // Persist the client's config keys (server config is transient, never written).
+        device.config = self
+            .state
+            .read()
+            .unwrap()
+            .config
+            .iter()
+            .map(|c| ConfigKeyDef {
+                key: c.key.clone(),
+                value: c.value.clone(),
+                readonly: c.readonly,
+            })
+            .collect();
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
             Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
@@ -502,39 +605,95 @@ impl OcppClientV201View {
             vertical: if compact { 0 } else { 1 },
             horizontal: 0,
         };
+        // The connector table stays compact (no vertical margin) to save space.
         self.state_table.widget.set_row_margin(margin);
         self.config_table.widget.set_row_margin(margin);
         self.msg_table.widget.set_row_margin(margin);
     }
 
-    /// Enqueue the focused action for sending. Shortcuts and state-driven actions build their
-    /// payload from state; anything else opens a JSON dialog with the Default-derived template.
+    /// Add a connector from the input field (`evse/connector` or bare `connector`, evse default 1).
+    fn add_connector(&mut self) {
+        let raw = self.conn_input.state.input().trim().to_string();
+        let (evse, connector) = match raw.split_once('/') {
+            Some((e, c)) => (parse_id(e).unwrap_or(1), parse_id(c)),
+            None => (1, parse_id(&raw)),
+        };
+        let Some(connector) = connector else {
+            return;
+        };
+        let added = self.state.write().unwrap().add_connector(evse, connector);
+        self.conn_input.state.set_input(String::new());
+        self.conn_input.state.set_cursor(0);
+        if added {
+            // Rebuild the (now-sorted) table and select the new connector's row (CS row = 0).
+            let cp = self.spec.name.clone();
+            let (rows, row) = {
+                let s = self.state.read().unwrap();
+                let row = s
+                    .connectors
+                    .iter()
+                    .position(|c| c.connector_id == connector)
+                    .map(|p| p + 1)
+                    .unwrap_or(0);
+                (conn_rows(&cp, &s), row)
+            };
+            self.conn_table.state.set_values(rows);
+            select_index(&mut self.conn_table.state, row);
+            self.sync_actions();
+        }
+    }
+
+    fn remove_connector(&mut self) {
+        let Some(i) = self.conn_table.state.table_state().selected() else {
+            return;
+        };
+        if i == 0 {
+            return;
+        }
+        let mut s = self.state.write().unwrap();
+        if s.connectors.len() <= 1 || i > s.connectors.len() {
+            return;
+        }
+        s.connectors.remove(i - 1);
+        drop(s);
+        self.conn_table.state.move_up();
+        self.sync_actions();
+    }
+
     fn trigger_action(&mut self) {
         let name = self.actions.state.get_value();
         if name.is_empty() {
             return;
         }
+        let scope = self.selected_scope();
         match name.as_str() {
             "StartTransaction" => {
-                let payload = self.start_event();
-                self.pending_send = Some(("TransactionEvent".to_string(), payload));
+                let payload = self.start_event(scope);
+                self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
             }
             "StopTransaction" => {
-                if let Some(payload) = self.stop_event() {
-                    self.pending_send = Some(("TransactionEvent".to_string(), payload));
+                if let Some(payload) = self.stop_event(scope) {
+                    self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
                 }
             }
             n if STATE_DRIVEN.contains(&n) => {
-                let payload = self.state_payload(n);
-                self.pending_send = Some((name, payload));
+                let payload = self.state_payload(n, scope);
+                self.pending_send = Some((name, payload, scope));
             }
             _ => {
                 self.action_dialog = Some(
                     match crate::module::ocpp::spec::v2_0_1::action_spec(&name) {
                         Some(spec) => {
                             let state = self.state.clone();
-                            let lookup =
-                                |f: &str| state.read().unwrap().get_field(f).map(value_to_string);
+                            let eid = scope.evse;
+                            let lookup = move |f: &str| {
+                                let s = state.read().unwrap();
+                                eid.and_then(|e| s.connector_by_evse(e))
+                                    .or_else(|| s.connectors.first())
+                                    .and_then(|c| c.get_field(f))
+                                    .or_else(|| s.cs_get_field(f))
+                                    .map(value_to_string)
+                            };
                             ActionDialog::new(name, &spec, lookup, gen_tx_id)
                         }
                         None => {
@@ -555,49 +714,65 @@ impl OcppClientV201View {
         }
     }
 
-    /// Build a `TransactionEvent(Started)`, minting a transaction id and starting charging.
-    fn start_event(&mut self) -> serde_json::Value {
+    /// Build a `TransactionEvent(Started)` for the connector resolved from `scope`, minting a tx id.
+    fn start_event(&mut self, scope: Scope) -> serde_json::Value {
         let mut s = self.state.write().unwrap();
-        let tx = s.start_tx();
-        let seq = s.next_seq();
-        s.status = "Occupied".to_string();
-        s.session_energy = 0.0;
-        self.meter_tick = 0;
-        serde_json::json!({
+        let idx = connector_index(&s, scope);
+        let Some(i) = idx else {
+            return serde_json::json!({});
+        };
+        let tx = s.connectors[i].start_tx();
+        let seq = s.connectors[i].next_seq();
+        s.connectors[i].status = "Occupied".to_string();
+        s.connectors[i].session_energy = 0.0;
+        let c = &s.connectors[i];
+        let payload = serde_json::json!({
             "eventType": "Started",
             "timestamp": rfc3339_now(),
             "triggerReason": "Authorized",
             "seqNo": seq,
             "transactionInfo": { "transactionId": tx },
-            "idToken": { "idToken": s.rfid, "type": "Central" },
-            "evse": { "id": s.evse_id, "connectorId": s.connector_id },
-        })
+            "idToken": { "idToken": c.rfid, "type": "Central" },
+            "evse": { "id": c.evse_id, "connectorId": c.connector_id },
+        });
+        drop(s);
+        self.meter_tick = 0;
+        payload
     }
 
-    /// Build a `TransactionEvent(Ended)` for the running transaction, or `None` if idle.
-    fn stop_event(&mut self) -> Option<serde_json::Value> {
+    /// Build a `TransactionEvent(Ended)` for the connector resolved from `scope`, or `None` if idle.
+    fn stop_event(&mut self, scope: Scope) -> Option<serde_json::Value> {
         let mut s = self.state.write().unwrap();
-        let tx = s.transaction_id.clone()?;
-        let seq = s.next_seq();
-        s.status = "Available".to_string();
-        s.transaction_id = None;
-        s.tx_confirmed = false;
+        let i = connector_index(&s, scope)?;
+        let tx = s.connectors[i].transaction_id.clone()?;
+        let seq = s.connectors[i].next_seq();
+        s.connectors[i].status = "Available".to_string();
+        s.connectors[i].transaction_id = None;
+        s.connectors[i].tx_confirmed = false;
+        let c = &s.connectors[i];
         Some(serde_json::json!({
             "eventType": "Ended",
             "timestamp": rfc3339_now(),
             "triggerReason": "StopAuthorized",
             "seqNo": seq,
             "transactionInfo": { "transactionId": tx },
-            "idToken": { "idToken": s.rfid, "type": "Central" },
+            "idToken": { "idToken": c.rfid, "type": "Central" },
         }))
     }
 
-    /// Build the request payload for a state-driven action from current state.
-    fn state_payload(&self, name: &str) -> serde_json::Value {
+    /// Build the request payload for a state-driven action, using the connector from `scope`.
+    fn state_payload(&self, name: &str, scope: Scope) -> serde_json::Value {
         let s = self.state.read().unwrap();
+        let conn = scope
+            .evse
+            .and_then(|e| s.connector_by_evse(e))
+            .or_else(|| s.connectors.first());
+        let evse = conn.map(|c| c.evse_id).unwrap_or(1);
+        let cid = conn.map(|c| c.connector_id).unwrap_or(1);
+        let rfid = conn.map(|c| c.rfid.clone()).unwrap_or_default();
         match name {
             "Authorize" => serde_json::json!({
-                "idToken": { "idToken": s.rfid, "type": "Central" },
+                "idToken": { "idToken": rfid, "type": "Central" },
             }),
             "BootNotification" => serde_json::json!({
                 "reason": "PowerUp",
@@ -610,14 +785,14 @@ impl OcppClientV201View {
             }),
             "Heartbeat" => serde_json::json!({}),
             "MeterValues" => serde_json::json!({
-                "evseId": s.evse_id,
-                "meterValue": s.meter_value_json(),
+                "evseId": evse,
+                "meterValue": conn.map(|c| c.meter_value_json()).unwrap_or(serde_json::json!([])),
             }),
             "StatusNotification" => serde_json::json!({
                 "timestamp": rfc3339_now(),
-                "connectorStatus": s.status,
-                "evseId": s.evse_id,
-                "connectorId": s.connector_id,
+                "connectorStatus": conn.map(|c| c.status.clone()).unwrap_or_default(),
+                "evseId": evse,
+                "connectorId": cid,
             }),
             _ => serde_json::json!({}),
         }
@@ -625,36 +800,36 @@ impl OcppClientV201View {
 
     fn focus_next(&mut self) {
         self.focus = match self.focus {
+            Pane::ConnectorInput => Pane::Connectors,
+            Pane::Connectors => Pane::State,
             Pane::State => Pane::Scripts,
             Pane::Scripts => Pane::Actions,
-            Pane::Actions => Pane::ConfigTable,
+            Pane::Actions if self.cs_selected() => Pane::ConfigTable,
+            Pane::Actions => Pane::Messages,
             Pane::ConfigTable => Pane::ConfigKey,
             Pane::ConfigKey => Pane::ConfigValue,
             Pane::ConfigValue => Pane::Messages,
             Pane::Messages => Pane::Payload,
-            Pane::Payload => Pane::State,
+            Pane::Payload => Pane::ConnectorInput,
         };
     }
 
     fn focus_previous(&mut self) {
         self.focus = match self.focus {
-            Pane::State => Pane::Payload,
+            Pane::ConnectorInput => Pane::Payload,
+            Pane::Connectors => Pane::ConnectorInput,
+            Pane::State => Pane::Connectors,
             Pane::Scripts => Pane::State,
             Pane::Actions => Pane::Scripts,
             Pane::ConfigTable => Pane::Actions,
             Pane::ConfigKey => Pane::ConfigTable,
             Pane::ConfigValue => Pane::ConfigKey,
-            Pane::Messages => Pane::ConfigValue,
+            Pane::Messages if self.cs_selected() => Pane::ConfigValue,
+            Pane::Messages => Pane::Actions,
             Pane::Payload => Pane::Messages,
         };
     }
 
-    /// Open the Lua script manager over the current device scripts.
-    fn open_scripts(&mut self) {
-        self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
-    }
-
-    /// Append a variable from the key/value inputs (readonly=false), then clear them.
     fn add_config_key(&mut self) {
         let key = self.key_input.state.input().trim().to_string();
         if key.is_empty() {
@@ -705,116 +880,111 @@ impl OcppClientV201View {
         let Some(row) = self.state_table.state.table_state().selected() else {
             return;
         };
-        let Some(field) = EditField::from_row(row) else {
-            return;
+        let cs = self.cs_selected();
+        let field = if cs {
+            EditField::from_cs_row(row)
+        } else {
+            EditField::from_conn_row(row)
         };
+        let Some(field) = field else { return };
+        let evse = if cs { None } else { self.selected_scope().evse };
         let s = self.state.read().unwrap();
-        self.edit = Some(match field {
-            EditField::Phases => EditOverlay::Choice {
-                field,
-                sel: choice(&PHASE_CHOICES, &s.phases),
-            },
-            EditField::Status => EditOverlay::Choice {
-                field,
-                sel: choice(&STATUS_CHOICES, &s.status),
-            },
-            EditField::EvseId => EditOverlay::Number {
-                field,
-                input: number(s.evse_id as f64),
-            },
-            EditField::ConnectorId => EditOverlay::Number {
-                field,
-                input: number(s.connector_id as f64),
-            },
-            EditField::Voltage => EditOverlay::Number {
-                field,
-                input: number(s.voltage),
-            },
-            EditField::Current(i) => EditOverlay::Number {
-                field,
-                input: number(s.current[i]),
-            },
-            EditField::Power => EditOverlay::Number {
-                field,
-                input: number(s.power),
-            },
-            EditField::Frequency => EditOverlay::Number {
-                field,
-                input: number(s.frequency),
-            },
-            EditField::TotalEnergy => EditOverlay::Number {
-                field,
-                input: number(s.total_energy),
-            },
-            EditField::SessionEnergy => EditOverlay::Number {
-                field,
-                input: number(s.session_energy),
-            },
-            EditField::Soc => EditOverlay::Number {
-                field,
-                input: number(s.soc),
-            },
-            EditField::Temperature => EditOverlay::Number {
-                field,
-                input: number(s.temperature),
-            },
-            EditField::Rfid => EditOverlay::Text {
-                field,
-                input: text_input(&s.rfid),
-            },
-            EditField::Model => EditOverlay::Text {
-                field,
-                input: text_input(&s.model),
-            },
-            EditField::Vendor => EditOverlay::Text {
-                field,
-                input: text_input(&s.vendor),
-            },
-            EditField::FirmwareVersion => EditOverlay::Text {
-                field,
-                input: text_input(&s.firmware_version),
-            },
-            EditField::SerialNumber => EditOverlay::Text {
-                field,
-                input: text_input(&s.serial_number),
-            },
-        });
+        let conn = evse
+            .and_then(|e| s.connector_by_evse(e))
+            .or_else(|| s.connectors.first());
+        let kind = match field {
+            EditField::Phases => EditKind::Choice(choice(
+                &PHASE_CHOICES,
+                conn.map(|c| c.phases.as_str()).unwrap_or(""),
+            )),
+            EditField::Status => EditKind::Choice(choice(
+                &STATUS_CHOICES,
+                conn.map(|c| c.status.as_str()).unwrap_or(""),
+            )),
+            EditField::EvseId => {
+                EditKind::Number(number(conn.map(|c| c.evse_id as f64).unwrap_or(1.0)))
+            }
+            EditField::ConnectorId => {
+                EditKind::Number(number(conn.map(|c| c.connector_id as f64).unwrap_or(0.0)))
+            }
+            EditField::Voltage => EditKind::Number(number(conn.map(|c| c.voltage).unwrap_or(0.0))),
+            EditField::Current(i) => {
+                EditKind::Number(number(conn.map(|c| c.current[i]).unwrap_or(0.0)))
+            }
+            EditField::Power => EditKind::Number(number(conn.map(|c| c.power).unwrap_or(0.0))),
+            EditField::Frequency => {
+                EditKind::Number(number(conn.map(|c| c.frequency).unwrap_or(0.0)))
+            }
+            EditField::TotalEnergy => {
+                EditKind::Number(number(conn.map(|c| c.total_energy).unwrap_or(0.0)))
+            }
+            EditField::SessionEnergy => {
+                EditKind::Number(number(conn.map(|c| c.session_energy).unwrap_or(0.0)))
+            }
+            EditField::Soc => EditKind::Number(number(conn.map(|c| c.soc).unwrap_or(0.0))),
+            EditField::Temperature => {
+                EditKind::Number(number(conn.map(|c| c.temperature).unwrap_or(0.0)))
+            }
+            EditField::Rfid => {
+                EditKind::Text(text_input(conn.map(|c| c.rfid.as_str()).unwrap_or("")))
+            }
+            EditField::Model => EditKind::Text(text_input(&s.model)),
+            EditField::Vendor => EditKind::Text(text_input(&s.vendor)),
+            EditField::FirmwareVersion => EditKind::Text(text_input(&s.firmware_version)),
+            EditField::SerialNumber => EditKind::Text(text_input(&s.serial_number)),
+        };
+        drop(s);
+        self.edit = Some(EditOverlay { field, evse, kind });
     }
 
     fn apply_edit(&mut self) {
         let Some(edit) = self.edit.take() else { return };
         let mut s = self.state.write().unwrap();
-        match edit {
-            EditOverlay::Choice { field, sel } => {
+        let conn_idx = edit
+            .evse
+            .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e))
+            .or((!s.connectors.is_empty()).then_some(0));
+        match edit.kind {
+            EditKind::Choice(sel) => {
                 let value = sel.state.get_value();
-                match field {
-                    EditField::Phases => s.phases = value,
-                    EditField::Status => s.status = value,
-                    _ => {}
+                if let Some(i) = conn_idx {
+                    let c = &mut s.connectors[i];
+                    match edit.field {
+                        EditField::Phases => c.phases = value,
+                        EditField::Status => c.status = value,
+                        _ => {}
+                    }
                 }
             }
-            EditOverlay::Number { field, input } => {
+            EditKind::Number(input) => {
                 let Ok(value) = input.state.input().trim().parse::<f64>() else {
                     return;
                 };
-                match field {
-                    EditField::EvseId => s.evse_id = value as i64,
-                    EditField::ConnectorId => s.connector_id = value as i64,
-                    EditField::Voltage => s.voltage = value,
-                    EditField::Current(i) => s.current[i] = value,
-                    EditField::Power => s.power = value,
-                    EditField::Frequency => s.frequency = value,
-                    EditField::TotalEnergy => s.total_energy = value,
-                    EditField::SessionEnergy => s.session_energy = value,
-                    EditField::Soc => s.soc = value,
-                    EditField::Temperature => s.temperature = value,
-                    _ => {}
+                if let Some(i) = conn_idx {
+                    let c = &mut s.connectors[i];
+                    match edit.field {
+                        EditField::EvseId => c.evse_id = value as i64,
+                        EditField::ConnectorId => c.connector_id = value as i64,
+                        EditField::Voltage => c.voltage = value,
+                        EditField::Current(j) => c.current[j] = value,
+                        EditField::Power => c.power = value,
+                        EditField::Frequency => c.frequency = value,
+                        EditField::TotalEnergy => c.total_energy = value,
+                        EditField::SessionEnergy => c.session_energy = value,
+                        EditField::Soc => c.soc = value,
+                        EditField::Temperature => c.temperature = value,
+                        _ => {}
+                    }
                 }
             }
-            EditOverlay::Text { field, input } => {
+            EditKind::Text(input) => {
                 let value = input.state.input().trim().to_string();
-                match field {
-                    EditField::Rfid => s.rfid = value,
+                match edit.field {
+                    EditField::Rfid => {
+                        if let Some(i) = conn_idx {
+                            s.connectors[i].rfid = value;
+                        }
+                    }
                     EditField::Model => s.model = value,
                     EditField::Vendor => s.vendor = value,
                     EditField::FirmwareVersion => s.firmware_version = value,
@@ -828,11 +998,9 @@ impl OcppClientV201View {
     fn sync_code(&mut self) {
         let selected = self.msg_table.state.table_state().selected();
         let content = selected
-            .and_then(|i| self.messages.get(i))
+            .and_then(|i| self.visible_messages.get(i))
             .map(|m| serde_json::to_string_pretty(&m.payload).unwrap_or_default())
             .unwrap_or_default();
-        // Only reset the viewer when the selected payload actually changes; otherwise the periodic
-        // refresh would snap its scroll position back to the top every tick.
         if content == self.code_content {
             return;
         }
@@ -840,17 +1008,14 @@ impl OcppClientV201View {
         self.code.state.set_content(&content);
     }
 
-    /// Decode + send a (name, payload) without blocking: the round-trip runs in a spawned task so a
-    /// slow or unresponsive CSMS never freezes the UI loop. The request/response land in the shared
-    /// message log, picked up on the next `refresh`. State side-effects for transactions already
-    /// applied at payload-build time (`start_event`/`stop_event`).
-    fn send_payload(&mut self, name: &str, payload: serde_json::Value) {
+    /// Decode + send a (name, payload) at `scope` without blocking the UI loop. A transaction start
+    /// mints its id eagerly (carried in the payload); confirm or roll it back on the response so
+    /// auto-MeterValues only fire once the start is acknowledged.
+    fn send_payload(&mut self, name: &str, payload: serde_json::Value, scope: Scope) {
         let sender = self.backend.sender();
         let state = self.state.clone();
         let log = self.log.clone();
         let name = name.to_string();
-        // A transaction start mints its id eagerly (the payload carries it), so confirm or roll back
-        // that id on the response — auto-MeterValues only fire once the start is acknowledged.
         let started_tx = (name == "TransactionEvent"
             && payload.get("eventType").and_then(|v| v.as_str()) == Some("Started"))
         .then(|| {
@@ -858,30 +1023,35 @@ impl OcppClientV201View {
                 .pointer("/transactionInfo/transactionId")
                 .and_then(|v| v.as_str())
                 .map(String::from)
-        });
+        })
+        .flatten();
+        let evse_id = scope.evse;
         tokio::spawn(async move {
             match V2_0_1::decode_call(&name, payload) {
-                Ok(action) => match sender.send(action).await {
+                Ok(action) => match sender.send_scoped(action, scope).await {
                     Ok(response) => {
                         if name == "BootNotification" {
-                            // The CSMS dictates the heartbeat cadence; zero/absent falls back later.
                             state.write().unwrap().heartbeat_interval_secs =
                                 boot_interval(&response);
                         }
                         if let Some(tx_id) = started_tx {
                             let mut s = state.write().unwrap();
-                            if s.transaction_id == tx_id {
-                                s.tx_confirmed = true;
+                            if let Some(c) = evse_id.and_then(|e| s.connector_mut_by_evse(e))
+                                && c.transaction_id.as_deref() == Some(tx_id.as_str())
+                            {
+                                c.tx_confirmed = true;
                             }
                         }
                     }
                     Err(e) => {
                         if let Some(tx_id) = started_tx {
                             let mut s = state.write().unwrap();
-                            if s.transaction_id == tx_id {
-                                s.transaction_id = None;
-                                s.tx_confirmed = false;
-                                s.status = "Available".to_string();
+                            if let Some(c) = evse_id.and_then(|e| s.connector_mut_by_evse(e))
+                                && c.transaction_id.as_deref() == Some(tx_id.as_str())
+                            {
+                                c.transaction_id = None;
+                                c.tx_confirmed = false;
+                                c.status = "Available".to_string();
                             }
                         }
                         log.write().await.write(&format!("{name} failed: {e}"));
@@ -894,6 +1064,23 @@ impl OcppClientV201View {
             }
         });
     }
+}
+
+/// Resolve the connector index targeted by `scope` (the connector on its EVSE, else the first).
+fn connector_index(s: &CsState, scope: Scope) -> Option<usize> {
+    scope
+        .evse
+        .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e))
+        .or((!s.connectors.is_empty()).then_some(0))
+}
+
+/// Parse a connector/evse id, tolerating a leading `e`/`c` label (e.g. `e1`, `c2`).
+fn parse_id(raw: &str) -> Option<i64> {
+    raw.trim()
+        .trim_start_matches(['e', 'c', 'E', 'C'])
+        .trim()
+        .parse()
+        .ok()
 }
 
 impl ModuleView for OcppClientV201View {
@@ -911,21 +1098,32 @@ impl ModuleView for OcppClientV201View {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
         let buf = frame.buffer_mut();
+        let cs = self.cs_selected();
         let [body, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         let [left, right] =
             Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
-        let [left_top, scripts_btn_area, left_bottom] = Layout::vertical([
-            Constraint::Percentage(50),
-            Constraint::Length(3),
-            Constraint::Min(1),
+
+        let n_conn = self.conn_table.state.values().len() as u16;
+        let n_actions = self.actions.state.values().len() as u16;
+        // Config block only when the CS row is selected (13 table + 3 input).
+        let config_len = if cs { 16 } else { 0 };
+        let [
+            conn_input_area,
+            conn_area,
+            state_area,
+            scripts_btn_area,
+            actions_area,
+            config_area,
+        ] = Layout::vertical([
+            Constraint::Length(3),                         // Add-connector input (top)
+            Constraint::Length((n_conn + 3).clamp(6, 12)), // Connectors (compact, ≥3 entries)
+            Constraint::Min(16),                           // State (≥5 entries + header)
+            Constraint::Length(3),                         // Scripts button
+            Constraint::Max(2 + n_actions),                // Actions
+            Constraint::Length(config_len),                // Config block (CS only)
         ])
         .areas(left);
-        let [actions_area, config_area] = Layout::vertical([
-            Constraint::Max(2 + self.actions.state.values().len() as u16),
-            Constraint::Min(9),
-        ])
-        .areas(left_bottom);
         let [config_table_area, config_input_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(config_area);
         let [key_area, value_area] =
@@ -934,6 +1132,12 @@ impl ModuleView for OcppClientV201View {
         let [right_top, right_bottom] =
             Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(right);
 
+        self.conn_table
+            .state
+            .set_focused(focused && self.focus == Pane::Connectors);
+        self.conn_input
+            .state
+            .set_focused(focused && self.focus == Pane::ConnectorInput);
         self.state_table
             .state
             .set_focused(focused && self.focus == Pane::State);
@@ -960,8 +1164,20 @@ impl ModuleView for OcppClientV201View {
             .set_focused(focused && self.focus == Pane::Payload);
 
         StatefulWidget::render(
+            &self.conn_table.widget,
+            conn_area,
+            buf,
+            &mut self.conn_table.state,
+        );
+        StatefulWidget::render(
+            &self.conn_input.widget,
+            conn_input_area,
+            buf,
+            &mut self.conn_input.state,
+        );
+        StatefulWidget::render(
             &self.state_table.widget,
-            left_top,
+            state_area,
             buf,
             &mut self.state_table.state,
         );
@@ -972,29 +1188,31 @@ impl ModuleView for OcppClientV201View {
             &mut self.scripts_button.state,
         );
         StatefulWidget::render(
-            &self.config_table.widget,
-            config_table_area,
-            buf,
-            &mut self.config_table.state,
-        );
-        StatefulWidget::render(
-            &self.key_input.widget,
-            key_area,
-            buf,
-            &mut self.key_input.state,
-        );
-        StatefulWidget::render(
-            &self.value_input.widget,
-            value_area,
-            buf,
-            &mut self.value_input.state,
-        );
-        StatefulWidget::render(
             &self.actions.widget,
             actions_area,
             buf,
             &mut self.actions.state,
         );
+        if cs {
+            StatefulWidget::render(
+                &self.config_table.widget,
+                config_table_area,
+                buf,
+                &mut self.config_table.state,
+            );
+            StatefulWidget::render(
+                &self.key_input.widget,
+                key_area,
+                buf,
+                &mut self.key_input.state,
+            );
+            StatefulWidget::render(
+                &self.value_input.widget,
+                value_area,
+                buf,
+                &mut self.value_input.state,
+            );
+        }
         StatefulWidget::render(
             &self.msg_table.widget,
             right_top,
@@ -1003,7 +1221,6 @@ impl ModuleView for OcppClientV201View {
         );
         StatefulWidget::render(&self.code.widget, right_bottom, buf, &mut self.code.state);
 
-        // ONLINE/OFFLINE status line.
         let online = self.backend.is_online();
         let status_widget = TextBuilder::default()
             .horizontal_alignment(HorizontalAlignment::Center)
@@ -1026,20 +1243,19 @@ impl ModuleView for OcppClientV201View {
         let mut status = if online { "ONLINE" } else { "OFFLINE" }.to_string();
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
 
-        // State-row edit overlay over the state table.
         if let Some(edit) = self.edit.as_mut() {
-            let title = edit.field().label();
-            let height = match edit {
-                EditOverlay::Choice { sel, .. } => sel.state.values().len() as u16 + 2,
-                EditOverlay::Number { .. } | EditOverlay::Text { .. } => 3,
+            let title = edit.field.label();
+            let height = match &edit.kind {
+                EditKind::Choice(sel) => sel.state.values().len() as u16 + 2,
+                EditKind::Number(_) | EditKind::Text(_) => 3,
             };
-            let width = left_top.width.min(30);
+            let width = state_area.width.min(30);
             let [_, hc, _] = Layout::horizontal([
                 Constraint::Min(0),
                 Constraint::Length(width),
                 Constraint::Min(0),
             ])
-            .areas(left_top);
+            .areas(state_area);
             let [_, vc, _] = Layout::vertical([
                 Constraint::Min(0),
                 Constraint::Length(height),
@@ -1050,35 +1266,28 @@ impl ModuleView for OcppClientV201View {
             let block = boxed(title);
             let inner = block.inner(vc);
             block.render(vc, buf);
-            match edit {
-                EditOverlay::Choice { sel, .. } => {
+            match &mut edit.kind {
+                EditKind::Choice(sel) => {
                     StatefulWidget::render(&sel.widget, inner, buf, &mut sel.state)
                 }
-                EditOverlay::Number { input, .. } => {
+                EditKind::Number(input) => {
                     StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
                 }
-                EditOverlay::Text { input, .. } => {
+                EditKind::Text(input) => {
                     StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
                 }
             }
         }
 
-        // Variable edit dialog, centered.
         if let Some(dialog) = self.config_edit.as_mut() {
             dialog.render(area, buf);
         }
-
-        // Per-action send dialog, centered.
         if let Some(dlg) = self.action_dialog.as_mut() {
             dlg.render(area, buf);
         }
-
-        // Setup dialog (`:edit`) on top.
         if let Some(setup) = self.setup_overlay.as_mut() {
             setup.render(area, buf);
         }
-
-        // Script manager dialog on top of everything.
         if let Some(dialog) = self.script_dialog.as_mut() {
             dialog.render(area, buf);
         }
@@ -1087,7 +1296,6 @@ impl ModuleView for OcppClientV201View {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         if let Some(dialog) = self.script_dialog.as_mut() {
             if dialog.handle_events(modifiers, code) {
-                // Closed: apply the edited scripts and reload the simulation.
                 let scripts = self.script_dialog.take().unwrap().resolve();
                 self.device.scripts = scripts;
                 self.start_sim();
@@ -1122,10 +1330,10 @@ impl ModuleView for OcppClientV201View {
                 Some(ActionResult::Close) => self.action_dialog = None,
                 Some(ActionResult::Send(payload)) => {
                     let name = self.action_dialog.as_ref().unwrap().name.clone();
-                    // Validate before sending; keep the dialog open on an invalid payload.
                     if V2_0_1::decode_call(&name, payload.clone()).is_ok() {
+                        let scope = self.selected_scope();
                         self.action_dialog = None;
-                        self.pending_send = Some((name, payload));
+                        self.pending_send = Some((name, payload, scope));
                     }
                 }
                 None => {}
@@ -1137,14 +1345,14 @@ impl ModuleView for OcppClientV201View {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => self.edit = None,
                 (KeyModifiers::NONE, KeyCode::Enter) => self.apply_edit(),
-                _ => match edit {
-                    EditOverlay::Choice { sel, .. } => {
+                _ => match &mut edit.kind {
+                    EditKind::Choice(sel) => {
                         let _ = sel.state.handle_events(modifiers, code);
                     }
-                    EditOverlay::Number { input, .. } => {
+                    EditKind::Number(input) => {
                         let _ = input.state.handle_events(modifiers, code);
                     }
-                    EditOverlay::Text { input, .. } => {
+                    EditKind::Text(input) => {
                         let _ = input.state.handle_events(modifiers, code);
                     }
                 },
@@ -1176,6 +1384,8 @@ impl ModuleView for OcppClientV201View {
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 match self.focus {
+                    Pane::Connectors => self.sync_actions(),
+                    Pane::ConnectorInput => self.add_connector(),
                     Pane::State => self.open_edit(),
                     Pane::Scripts => self.open_scripts(),
                     Pane::ConfigTable => self.open_config_edit(),
@@ -1195,8 +1405,15 @@ impl ModuleView for OcppClientV201View {
                 }
                 EventResult::Consumed
             }
+            (KeyModifiers::NONE, KeyCode::Char('d')) if matches!(self.focus, Pane::Connectors) => {
+                self.remove_connector();
+                EventResult::Consumed
+            }
             (KeyModifiers::NONE, KeyCode::Char(' '))
-                if !matches!(self.focus, Pane::ConfigKey | Pane::ConfigValue) =>
+                if !matches!(
+                    self.focus,
+                    Pane::ConfigKey | Pane::ConfigValue | Pane::ConnectorInput
+                ) =>
             {
                 match self.focus {
                     Pane::State => self.open_edit(),
@@ -1208,6 +1425,12 @@ impl ModuleView for OcppClientV201View {
                 EventResult::Consumed
             }
             _ => match self.focus {
+                Pane::Connectors => {
+                    let r = self.conn_table.state.handle_events(modifiers, code);
+                    self.sync_actions();
+                    r
+                }
+                Pane::ConnectorInput => self.conn_input.state.handle_events(modifiers, code),
                 Pane::State => self.state_table.state.handle_events(modifiers, code),
                 Pane::Scripts => EventResult::Consumed,
                 Pane::ConfigTable => self.config_table.state.handle_events(modifiers, code),
@@ -1229,15 +1452,14 @@ impl ModuleView for OcppClientV201View {
             if let Some((spec, path)) = self.pending_setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
+                device.connectors = self.device.connectors.clone();
+                device.config = self.device.config.clone();
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
                     self.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {
-                    // Switching version switches the view type (1.6 ↔ 2.0.1): rebuild via
-                    // build_client_view, carrying the path + scripts. Scripts are kept but are
-                    // version-specific — calls to actions the new version lacks return false.
                     let _ = self.backend.stop().await;
                     if !device.scripts.is_empty() {
                         self.log.write().await.write(
@@ -1261,19 +1483,16 @@ impl ModuleView for OcppClientV201View {
                 }
             }
 
-            if let Some((name, payload)) = self.pending_send.take() {
-                self.send_payload(&name, payload);
+            if let Some((name, payload, scope)) = self.pending_send.take() {
+                self.send_payload(&name, payload, scope);
             }
 
-            // Drain actions enqueued by Lua scripts and send them.
-            let queued: Vec<(String, serde_json::Value)> =
+            let queued: Vec<(Scope, String, serde_json::Value)> =
                 self.action_queue.lock().unwrap().drain(..).collect();
-            for (name, overrides) in queued {
-                self.dispatch_lua_action(&name, overrides);
+            for (scope, name, overrides) in queued {
+                self.dispatch_lua_action(scope, &name, overrides);
             }
 
-            // Track the online→offline edge: log once and halt auto-transmit (no auto-reconnect),
-            // which stops the MeterValues-after-disconnect spam.
             let online = self.backend.is_online();
             if self.was_online && !online {
                 self.log
@@ -1284,8 +1503,6 @@ impl ModuleView for OcppClientV201View {
             }
             self.was_online = online;
 
-            // Auto-Heartbeat at the BootNotification-supplied cadence (fallback default) while
-            // connected, to keep the websocket alive independent of any transaction.
             if online {
                 let interval_secs = self
                     .state
@@ -1297,26 +1514,29 @@ impl ModuleView for OcppClientV201View {
                 self.heartbeat_tick = self.heartbeat_tick.wrapping_add(1);
                 if self.heartbeat_tick >= interval_secs as u32 * TICKS_PER_SEC {
                     self.heartbeat_tick = 0;
-                    self.send_payload("Heartbeat", serde_json::json!({}));
+                    self.send_payload("Heartbeat", serde_json::json!({}), Scope::CS);
                 }
             }
 
-            // While a confirmed transaction is active, report MeterValues periodically (~every 5s).
-            // Gate on `tx_confirmed` so a start that the CSMS never acknowledged emits no readings,
-            // and on `online` so a dropped connection halts the readings instead of spamming.
-            let tx_active = {
+            // Auto-MeterValues per connector with a confirmed transaction (~every 5s), gated online.
+            let active: Vec<Scope> = {
                 let s = self.state.read().unwrap();
-                s.transaction_id.is_some() && s.tx_confirmed
+                s.connectors
+                    .iter()
+                    .filter(|c| c.transaction_id.is_some() && c.tx_confirmed)
+                    .map(|c| Scope::evse(c.evse_id, None))
+                    .collect()
             };
-            if tx_active && online {
+            if !active.is_empty() && online {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {
-                    let payload = self.state_payload("MeterValues");
-                    self.send_payload("MeterValues", payload);
+                    for scope in active {
+                        let payload = self.state_payload("MeterValues", scope);
+                        self.send_payload("MeterValues", payload, scope);
+                    }
                 }
             }
 
-            // Apply a pending `:log` change (or device-config log file) to the persistent sink.
             if self.applied_log_file != self.device.log_file {
                 let name = self.spec.name.clone();
                 self.log
@@ -1327,7 +1547,6 @@ impl ModuleView for OcppClientV201View {
             }
 
             self.messages = self.backend.messages_snapshot().await;
-            // Tee new protocol messages into the persistent log (bounded ring + optional file).
             let mut max_seq = self.logged_seq;
             let new_lines: Vec<String> = self
                 .messages
@@ -1345,16 +1564,42 @@ impl ModuleView for OcppClientV201View {
                 }
                 self.logged_seq = max_seq;
             }
-            let rows: Vec<MsgRow> = self.messages.iter().map(msg_row).collect();
+
+            let scope = self.selected_scope();
+            self.visible_messages = self
+                .messages
+                .iter()
+                .filter(|m| m.scope == scope)
+                .cloned()
+                .collect();
+            let rows: Vec<MsgRow> = self.visible_messages.iter().map(msg_row).collect();
+            let at_bottom = msg_log_at_bottom(&self.msg_table.state);
             self.msg_table.state.set_values(rows);
-            // Autoscroll the message log to the newest row unless the user is on that pane.
-            if self.focus != Pane::Messages {
+            // Tail the log to the newest message so incoming traffic shows instantly, but never
+            // while the user is reading it (Messages scrolled up) or scrolling the payload pane
+            // (whose content is driven by the selected message row).
+            let follow = match self.focus {
+                Pane::Payload => false,
+                Pane::Messages => at_bottom,
+                _ => true,
+            };
+            if follow {
                 self.msg_table.state.move_to_bottom();
             }
-            let (state_rows, config_rows) = {
+
+            let cp = self.spec.name.clone();
+            let (conn_rows, state_rows, config_rows) = {
                 let s = self.state.read().unwrap();
-                (s.rows(), s.config_rows())
+                let state_rows = match scope.evse {
+                    Some(e) => s
+                        .connector_by_evse(e)
+                        .map(|c| c.rows())
+                        .unwrap_or_else(|| s.cs_rows()),
+                    None => s.cs_rows(),
+                };
+                (conn_rows(&cp, &s), state_rows, s.config_rows())
             };
+            self.conn_table.state.set_values(conn_rows);
             self.state_table.state.set_values(state_rows);
             self.config_table.state.set_values(config_rows);
             self.sync_code();
@@ -1481,7 +1726,40 @@ static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 7] = [
 
 // --- Widget builders -------------------------------------------------------
 
-/// Theme border color, matching a table/selection border when unfocused.
+/// Whether a message table's selection is on (or past) the last row — i.e. the user is tailing it.
+/// An empty table or no selection counts as tailing.
+fn msg_log_at_bottom<V: TableEntry<N>, const N: usize>(state: &TableState<V, N>) -> bool {
+    let len = state.values().len();
+    len == 0
+        || state
+            .table_state()
+            .selected()
+            .map(|s| s + 1 >= len)
+            .unwrap_or(true)
+}
+
+/// Select row `idx` in a table (no direct setter on `TableState`): jump to the top, then step down.
+fn select_index<V: TableEntry<N>, const N: usize>(state: &mut TableState<V, N>, idx: usize) {
+    state.move_to_top();
+    for _ in 0..idx {
+        state.move_down();
+    }
+}
+
+fn conn_rows(cp: &str, s: &CsState) -> Vec<ConnRow> {
+    let mut rows = vec![ConnRow {
+        cp: cp.to_string(),
+        connector: String::new(),
+    }];
+    for c in &s.connectors {
+        rows.push(ConnRow {
+            cp: cp.to_string(),
+            connector: Scope::evse(c.evse_id, None).label(),
+        });
+    }
+    rows
+}
+
 fn border_style() -> ratatui::prelude::Style {
     ratatui::prelude::Style::default()
         .fg(COLOR_SCHEME.border)
@@ -1508,6 +1786,23 @@ fn nv_table(rows: Vec<NvRow>) -> StateTable {
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn conn_table(rows: Vec<ConnRow>) -> ConnTable {
+    Widget {
+        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        widget: TableBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some("Connectors".into()))
+            .style(TableStyleBuilder::default().build().unwrap())
+            // Always compact (no vertical margin), independent of `:compact`, to save space.
+            .row_margin(Margin {
+                vertical: 0,
                 horizontal: 0,
             })
             .build()
@@ -1726,24 +2021,36 @@ fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
 #[cfg(test)]
 mod tests {
     use super::EditField;
-    use crate::module::ocpp::client::v2_0_1::state::CsState;
+    use crate::module::ocpp::client::v2_0_1::state::{ConnectorState, CsState};
 
-    /// The state-table row order and `EditField::from_row` must stay in lockstep: each editable row
-    /// maps to the field with the same label; read-only rows (Reserved RFID, Charge Limit) map to
-    /// `None`.
     #[test]
-    fn ut_edit_field_rows_align_with_state_table() {
-        let rows = CsState::default().rows();
+    fn ut_edit_field_conn_rows_align() {
+        let rows = ConnectorState::new(1, 1).rows();
         for (i, row) in rows.iter().enumerate() {
-            match EditField::from_row(i) {
+            match EditField::from_conn_row(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
-                    row.name == "Reserved RFID" || row.name == "Charge Limit",
-                    "row {i} ({}) maps to no field but is not read-only",
+                    row.name == "Charge Limit",
+                    "row {i} ({}) maps to no field",
                     row.name
                 ),
             }
         }
-        assert!(EditField::from_row(rows.len()).is_none());
+        assert!(EditField::from_conn_row(rows.len()).is_none());
+    }
+
+    #[test]
+    fn ut_edit_field_cs_rows_align() {
+        let rows = CsState::default().cs_rows();
+        for (i, row) in rows.iter().enumerate() {
+            match EditField::from_cs_row(i) {
+                Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
+                None => assert!(
+                    row.name == "Reserved RFID",
+                    "row {i} ({}) maps to no field",
+                    row.name
+                ),
+            }
+        }
     }
 }

@@ -5,8 +5,10 @@
 //! ONLINE/OFFLINE status line for the listening socket.
 //!
 //! Each WebSocket connection yields a CS-level entry (no connector id) plus a connector entry for
-//! every `connectorId` seen in inbound traffic. The selected entry scopes the message log, the
-//! action list, and — via one Lua sim per entry over its own observed state — `C_OCPP:Get`.
+//! every `connectorId` seen in inbound traffic. The selected entry scopes the message log and the
+//! action list. A single Lua sim backs the whole module (see `server/lua.rs`): its `C_OCPP` global
+//! addresses every station/connector via `ChargingStation(cs)` / `Connector(cs, id)` over a shared
+//! state registry the view keeps in step with its entries.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -44,9 +46,7 @@ use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
 use crate::module::ocpp::client::backend::{Dir, OcppMessage, push_capped};
 use crate::module::ocpp::client::build_client_view;
-use crate::module::ocpp::client::lua_sim::{
-    ActionQueue, OcppFields, OcppSimHandle, merge_overrides, run_ocpp_sim,
-};
+use crate::module::ocpp::client::lua_sim::{OcppFields, OcppSimHandle, merge_overrides};
 use crate::module::ocpp::client::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
@@ -55,6 +55,9 @@ use crate::module::ocpp::server::backend::{
 };
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
+use crate::module::ocpp::server::lua::{
+    ServerActionQueue, ServerStates, SharedServerStates, run_server_sim,
+};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
@@ -121,6 +124,24 @@ pub trait ServerVersion: Version + Sized + 'static {
 
     /// Dialog-reachable actions that intentionally use the raw JSON editor (no typed form yet).
     fn json_actions() -> &'static [&'static str];
+
+    /// Inject the target scope's connector/EVSE id into a (Lua-built) payload that does not already
+    /// carry it, so e.g. `con:SetChargingProfile()` defaults to the selected connector. No-op for
+    /// the CS-level scope or a non-object payload.
+    fn inject_scope(_payload: &mut serde_json::Value, _scope: Scope) {}
+
+    /// The id Lua addresses a connector entry by in `C_OCPP:Connector(cs, id)` / `GetConnectors`.
+    /// 1.6 uses the connector id; 2.0.1 uses the EVSE id (connectors are always `None` there).
+    /// `None` for the CS-level scope, which Lua does not address as a connector.
+    fn lua_connector_id(scope: Scope) -> Option<i64> {
+        scope.connector
+    }
+
+    /// Whether config keys carry a component dimension (2.0.1 `Component/Variable`), so the detail
+    /// overlay's config table shows a separate "Component" column. 1.6 keys are flat.
+    fn config_has_component() -> bool {
+        false
+    }
 }
 
 // --- Connection table ------------------------------------------------------
@@ -265,8 +286,6 @@ struct Entry<V: ServerVersion> {
     online: bool,
     state: EntryState<V>,
     messages: Vec<OcppMessage>,
-    queue: ActionQueue,
-    sim: Option<OcppSimHandle>,
 }
 
 impl<V: ServerVersion> Entry<V> {
@@ -301,18 +320,6 @@ impl<V: ServerVersion> Entry<V> {
             EntryState::Conn(s) => s.read().unwrap().get_field(name),
         };
         v.map(value_to_string)
-    }
-
-    /// (Re)start this entry's Lua sim over the given scripts (no-op if no enabled scripts).
-    fn restart_sim(&mut self, scripts: Vec<(String, String)>, log: SharedLog) {
-        if let Some(mut sim) = self.sim.take() {
-            sim.stop();
-        }
-        let queue = self.queue.clone();
-        self.sim = match &self.state {
-            EntryState::Cs(s) => run_ocpp_sim(s.clone(), queue, scripts, log),
-            EntryState::Conn(s) => run_ocpp_sim(s.clone(), queue, scripts, log),
-        };
     }
 }
 
@@ -376,6 +383,12 @@ pub struct ServerView<V: ServerVersion> {
     /// In-memory per-CS configuration rows (identity → key/value), kept across overlay open/close
     /// only while the CS is in the list; dropped when its entry is removed (delete/`:stop`/`:restart`).
     cs_configs: HashMap<String, Vec<(String, String, bool)>>,
+    /// Shared registry of every entry's observed state, read by the single Lua sim.
+    lua_states: SharedServerStates<V>,
+    /// Actions enqueued by the Lua sim (identity + scope), drained and routed each refresh.
+    lua_queue: ServerActionQueue,
+    /// The single Lua sim thread for the whole module, if scripts are enabled.
+    sim: Option<OcppSimHandle>,
 }
 
 impl<V: ServerVersion> ServerView<V>
@@ -385,7 +398,7 @@ where
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
         let rfids: RfidList = Arc::new(std::sync::RwLock::new(device.rfids.clone()));
-        Self {
+        let mut view = Self {
             backend: OcppServer::new(spec.clone()),
             spec,
             device_path,
@@ -416,7 +429,40 @@ where
             compact: false,
             detail: None,
             cs_configs: HashMap::new(),
+            lua_states: Arc::new(RwLock::new(ServerStates::default())),
+            lua_queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            sim: None,
+        };
+        view.start_sim();
+        view
+    }
+
+    /// Enabled scripts as `(name, code)` pairs for the simulation thread.
+    fn enabled_scripts(&self) -> Vec<(String, String)> {
+        self.device
+            .scripts
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| (s.name.clone(), s.code.clone()))
+            .collect()
+    }
+
+    /// (Re)start the single Lua sim over the shared state registry (no-op if no enabled scripts).
+    fn start_sim(&mut self) {
+        if let Some(mut sim) = self.sim.take() {
+            sim.stop();
         }
+        self.sim = run_server_sim(
+            self.lua_states.clone(),
+            self.lua_queue.clone(),
+            self.enabled_scripts(),
+            self.log.clone(),
+        );
+    }
+
+    /// Forget every station's registered state (after the entry set is cleared).
+    fn clear_lua_states(&mut self) {
+        self.lua_states.write().unwrap().stations.clear();
     }
 
     fn set_compact(&mut self, compact: bool) {
@@ -433,12 +479,17 @@ where
     fn delete_selected(&mut self) {
         let Some(idx) = self.selected() else { return };
         let entry = &self.entries[idx];
-        if !entry.scope.is_connector() {
-            let identity = entry.identity.clone();
+        let identity = entry.identity.clone();
+        let scope = entry.scope;
+        if !scope.is_connector() {
             self.entries.retain(|e| e.identity != identity);
             self.cs_configs.remove(&identity);
+            self.lua_states.write().unwrap().stations.remove(&identity);
         } else {
             self.entries.remove(idx);
+            if let Some(st) = self.lua_states.write().unwrap().stations.get_mut(&identity) {
+                st.conns.retain(|(s, _)| *s != scope);
+            }
         }
     }
 
@@ -448,7 +499,7 @@ where
         let entry = &self.entries[idx];
         let identity = entry.identity.clone();
         let scope = entry.scope;
-        let mut overlay = DetailOverlay::new(identity.clone(), scope);
+        let mut overlay = DetailOverlay::new(identity.clone(), scope, V::config_has_component());
         if !scope.is_connector()
             && let Some(rows) = self.cs_configs.get(&identity)
         {
@@ -498,15 +549,6 @@ where
         }
     }
 
-    fn enabled_scripts(&self) -> Vec<(String, String)> {
-        self.device
-            .scripts
-            .iter()
-            .filter(|s| s.enabled)
-            .map(|s| (s.name.clone(), s.code.clone()))
-            .collect()
-    }
-
     /// Resolve (and cache) a connection's charge-point identity.
     fn identity_of(&mut self, conn: ConnectionId) -> String {
         if let Some(id) = self.conn_identity.get(&conn) {
@@ -529,25 +571,30 @@ where
         {
             return i;
         }
+        // Build the shared state and register it for the Lua sim (keyed by identity + scope).
         let state = if scope.is_connector() {
-            EntryState::Conn(Arc::new(RwLock::new(V::Conn::default())))
+            let arc = Arc::new(RwLock::new(V::Conn::default()));
+            let mut reg = self.lua_states.write().unwrap();
+            reg.stations
+                .entry(identity.to_string())
+                .or_default()
+                .conns
+                .push((scope, arc.clone()));
+            EntryState::Conn(arc)
         } else {
-            EntryState::Cs(Arc::new(RwLock::new(V::Cs::default())))
+            let arc = Arc::new(RwLock::new(V::Cs::default()));
+            let mut reg = self.lua_states.write().unwrap();
+            reg.stations.entry(identity.to_string()).or_default().cs = Some(arc.clone());
+            EntryState::Cs(arc)
         };
-        let mut entry = Entry {
+        self.entries.push(Entry {
             identity: identity.to_string(),
             scope,
             conn,
             online: conn.is_some(),
             state,
             messages: Vec::new(),
-            queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-            sim: None,
-        };
-        if self.want_running {
-            entry.restart_sim(self.enabled_scripts(), self.log.clone());
-        }
-        self.entries.push(entry);
+        });
         self.entries.len() - 1
     }
 
@@ -557,6 +604,7 @@ where
         while let Ok(ev) = self.events_rx.try_recv() {
             events.push(ev);
         }
+        let had_events = !events.is_empty();
         for ev in events {
             match ev {
                 ServerEvent::Connected { conn } => {
@@ -638,6 +686,31 @@ where
                     );
                 }
             }
+        }
+        // Keep the table sorted (CS → connector, grouped by station) without losing the selection.
+        if had_events {
+            self.sort_entries();
+        }
+    }
+
+    /// Sort entries by `(identity, CS-before-connector, evse, connector)`, preserving the selected
+    /// entry across the reorder.
+    fn sort_entries(&mut self) {
+        let selected_key = self
+            .cs_table
+            .state
+            .table_state()
+            .selected()
+            .and_then(|i| self.entries.get(i))
+            .map(|e| (e.identity.clone(), e.scope));
+        self.entries.sort_by_key(entry_sort_key);
+        if let Some(key) = selected_key
+            && let Some(idx) = self
+                .entries
+                .iter()
+                .position(|e| e.identity == key.0 && e.scope == key.1)
+        {
+            select_index(&mut self.cs_table.state, idx);
         }
     }
 
@@ -729,22 +802,31 @@ where
         }
     }
 
-    /// Drain each entry's Lua action queue and send the actions to its connection.
+    /// Drain the single Lua action queue and route each action to its station/scope. Each item is
+    /// `(identity, scope, action, overrides)`: the payload is derived from the matching entry's
+    /// observed state (falling back to the action default), then overrides are merged.
     fn drain_lua_actions(&mut self) {
+        let queued: Vec<(String, Scope, String, serde_json::Value)> =
+            self.lua_queue.lock().unwrap().drain(..).collect();
         let mut sends: Vec<(ConnectionId, Scope, String, serde_json::Value)> = Vec::new();
-        for entry in &self.entries {
-            let Some(conn) = entry.conn else { continue };
-            let queued: Vec<(String, serde_json::Value)> =
-                entry.queue.lock().unwrap().drain(..).collect();
-            for (name, overrides) in queued {
-                let mut payload = entry.derive_payload(&name).unwrap_or_else(|| {
+        for (identity, scope, name, overrides) in queued {
+            let Some(conn) = self.conn_for(&identity) else {
+                continue;
+            };
+            let mut payload = self
+                .entries
+                .iter()
+                .find(|e| e.identity == identity && e.scope == scope)
+                .and_then(|e| e.derive_payload(&name))
+                .unwrap_or_else(|| {
                     V::default_action(&name)
                         .and_then(|a| V::encode_action(&a).ok())
                         .unwrap_or_else(|| serde_json::json!({}))
                 });
-                merge_overrides(&mut payload, overrides);
-                sends.push((conn, entry.scope, name, payload));
-            }
+            // Default any connector/EVSE id from the entry's scope before user overrides win.
+            V::inject_scope(&mut payload, scope);
+            merge_overrides(&mut payload, overrides);
+            sends.push((conn, scope, name, payload));
         }
         for (conn, scope, name, payload) in sends {
             self.send_to(conn, scope, &name, payload);
@@ -798,15 +880,6 @@ where
 
     fn open_scripts(&mut self) {
         self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
-    }
-
-    /// Restart every entry's sim (after a script edit).
-    fn restart_all_sims(&mut self) {
-        let scripts = self.enabled_scripts();
-        let log = self.log.clone();
-        for entry in &mut self.entries {
-            entry.restart_sim(scripts.clone(), log.clone());
-        }
     }
 
     fn focus_next(&mut self) {
@@ -891,9 +964,21 @@ where
                     .collect()
             })
             .unwrap_or_default();
+        let at_bottom = msg_log_at_bottom(&self.msg_table.state);
         self.msg_table.state.set_values(rows);
-        // Autoscroll the message log to the newest row unless the user is scrolling it.
-        if !(focused && self.focus == Pane::Messages) {
+        // Tail the log to the newest message so incoming traffic shows instantly, but never while
+        // the user is reading it (Messages scrolled up) or scrolling the payload pane (whose
+        // content is driven by the selected message row).
+        let follow = if focused {
+            match self.focus {
+                Pane::Payload => false,
+                Pane::Messages => at_bottom,
+                _ => true,
+            }
+        } else {
+            true
+        };
+        if follow {
             self.msg_table.state.move_to_bottom();
         }
         let cs_rows: Vec<CsRow> = self
@@ -1078,7 +1163,7 @@ where
             if dialog.handle_events(modifiers, code) {
                 let scripts = self.script_dialog.take().unwrap().resolve();
                 self.device.scripts = scripts;
-                self.restart_all_sims();
+                self.start_sim();
             }
             return EventResult::Consumed;
         }
@@ -1176,6 +1261,7 @@ where
                 self.entries.clear();
                 self.conn_identity.clear();
                 self.cs_configs.clear();
+                self.clear_lua_states();
                 self.log.write().await.write("Settings updated");
             }
 
@@ -1239,6 +1325,7 @@ where
                     self.entries.clear();
                     self.conn_identity.clear();
                     self.cs_configs.clear();
+                    self.clear_lua_states();
                     CommandResult::Handled(Some("CSMS server stopped".into()))
                 }
                 "restart" => {
@@ -1246,6 +1333,7 @@ where
                     self.entries.clear();
                     self.conn_identity.clear();
                     self.cs_configs.clear();
+                    self.clear_lua_states();
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
@@ -1393,6 +1481,36 @@ static OCPP_SERVER_COMMANDS: [CommandDescriptor; 9] = [
 
 fn border_style() -> Style {
     Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
+}
+
+/// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
+fn entry_sort_key<V: ServerVersion>(e: &Entry<V>) -> (String, bool, i64, i64) {
+    (
+        e.identity.clone(),
+        e.scope.is_connector(),
+        e.scope.evse.unwrap_or(0),
+        e.scope.connector.unwrap_or(0),
+    )
+}
+
+/// Whether a message table's selection is on (or past) the last row — i.e. the user is tailing it.
+/// An empty table or no selection counts as tailing.
+fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(state: &TableState<E, N>) -> bool {
+    let len = state.values().len();
+    len == 0
+        || state
+            .table_state()
+            .selected()
+            .map(|s| s + 1 >= len)
+            .unwrap_or(true)
+}
+
+/// Select row `idx` in a table (no direct setter on `TableState`): jump to the top, then step down.
+fn select_index<E: TableEntry<N>, const N: usize>(state: &mut TableState<E, N>, idx: usize) {
+    state.move_to_top();
+    for _ in 0..idx {
+        state.move_down();
+    }
 }
 
 fn cs_table() -> CsTable {

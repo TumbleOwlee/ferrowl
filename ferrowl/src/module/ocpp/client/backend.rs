@@ -16,6 +16,7 @@ use ferrowl_ocpp::cs::{Client, ClientBuilder, Command, Config, CsActionHandler};
 use ferrowl_ocpp::{Error, Version};
 
 use crate::module::ocpp::config::session::OcppSpec;
+use crate::module::ocpp::scope::Scope;
 
 /// Number of `refresh` ticks per second (the UI ticks at ~100ms), used to convert second-based
 /// cadences (heartbeat interval, MeterValues period) into tick counts.
@@ -74,11 +75,27 @@ pub struct OcppMessage {
     pub ok: Option<bool>,
     /// Extra context: a status string on success, an error message on failure.
     pub context: String,
+    /// The connector/CS scope this message belongs to, for the client view's per-connector message
+    /// filtering. CS-level (Boot/Heartbeat/etc.) is [`Scope::CS`]; connector traffic carries its
+    /// connector scope. The server view ignores this (it routes by its own per-entry log).
+    pub scope: Scope,
 }
 
 impl OcppMessage {
-    /// Build a message, stamping it with the current time and the next sequence id.
+    /// Build a CS-level message, stamping it with the current time and the next sequence id.
     pub fn new(
+        direction: Dir,
+        name: impl Into<String>,
+        payload: Value,
+        ok: Option<bool>,
+        context: impl Into<String>,
+    ) -> Self {
+        Self::new_scoped(Scope::CS, direction, name, payload, ok, context)
+    }
+
+    /// Build a message tagged with a connector/CS [`Scope`].
+    pub fn new_scoped(
+        scope: Scope,
         direction: Dir,
         name: impl Into<String>,
         payload: Value,
@@ -93,6 +110,7 @@ impl OcppMessage {
             payload,
             ok,
             context: context.into(),
+            scope,
         }
     }
 
@@ -223,13 +241,15 @@ pub struct OcppSender<V: Version> {
 }
 
 impl<V: Version> OcppSender<V> {
-    /// Send a typed Call, recording the request and the response (or error). Returns the response
-    /// JSON on success. Awaiting this never blocks the UI loop because the caller spawns it.
-    pub async fn send(self, action: V::Action) -> Result<Value, Error> {
+    /// Send a typed Call tagging the recorded request/reply with `scope`, so the client view can
+    /// filter the message log per connector. Returns the response JSON on success. Awaiting this
+    /// never blocks the UI loop because the caller spawns it.
+    pub async fn send_scoped(self, action: V::Action, scope: Scope) -> Result<Value, Error> {
         let name = V::action_name(&action).to_string();
         let request = V::encode_action(&action).unwrap_or(Value::Null);
         record(
             &self.messages,
+            scope,
             Dir::Out,
             &name,
             request,
@@ -247,6 +267,7 @@ impl<V: Version> OcppSender<V> {
                 let payload = V::encode_response(&response).unwrap_or(Value::Null);
                 record(
                     &self.messages,
+                    scope,
                     Dir::In,
                     &name,
                     payload.clone(),
@@ -260,6 +281,7 @@ impl<V: Version> OcppSender<V> {
                 let msg = e.to_string();
                 record(
                     &self.messages,
+                    scope,
                     Dir::In,
                     &name,
                     Value::Null,
@@ -276,6 +298,7 @@ impl<V: Version> OcppSender<V> {
 /// Push one message into a shared message log (bounded to [`MAX_MESSAGES`]).
 async fn record(
     messages: &Messages,
+    scope: Scope,
     dir: Dir,
     name: &str,
     payload: Value,
@@ -285,7 +308,7 @@ async fn record(
     let mut guard = messages.write().await;
     push_capped(
         &mut guard,
-        OcppMessage::new(dir, name, payload, ok, context),
+        OcppMessage::new_scoped(scope, dir, name, payload, ok, context),
     );
 }
 

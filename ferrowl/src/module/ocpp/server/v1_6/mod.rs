@@ -28,6 +28,17 @@ impl ServerVersion for V1_6 {
         }
     }
 
+    fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
+        if let (Some(c), Some(obj)) = (scope.connector, payload.as_object_mut()) {
+            // Set the connector id when absent or still the `0` default the encoded request struct
+            // carries; a genuine non-zero value (and later user overrides) win.
+            let cur = obj.get("connectorId").and_then(|v| v.as_i64());
+            if cur.is_none() || cur == Some(0) {
+                obj.insert("connectorId".into(), serde_json::json!(c));
+            }
+        }
+    }
+
     fn config_action() -> &'static str {
         "GetConfiguration"
     }
@@ -99,6 +110,26 @@ mod tests {
             V1_6::inbound_connector("BootNotification", &json!({})),
             Scope::CS
         );
+    }
+
+    #[test]
+    fn ut_inject_scope_defaults_connector_id() {
+        // A connector-scoped Lua payload gets the connector id when it lacks one.
+        let mut p = json!({});
+        V1_6::inject_scope(&mut p, Scope::connector(2));
+        assert_eq!(p["connectorId"], 2);
+        // The `0` default an encoded request struct carries is treated as unset and overwritten.
+        let mut p0 = json!({ "connectorId": 0 });
+        V1_6::inject_scope(&mut p0, Scope::connector(2));
+        assert_eq!(p0["connectorId"], 2);
+        // A genuine non-zero connectorId is preserved.
+        let mut p2 = json!({ "connectorId": 9 });
+        V1_6::inject_scope(&mut p2, Scope::connector(2));
+        assert_eq!(p2["connectorId"], 9);
+        // CS-level scope is a no-op.
+        let mut p3 = json!({});
+        V1_6::inject_scope(&mut p3, Scope::CS);
+        assert!(p3.get("connectorId").is_none());
     }
 
     #[test]
