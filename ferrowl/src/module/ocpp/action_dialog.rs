@@ -529,6 +529,7 @@ pub fn value_to_string(v: ValueType) -> String {
         ValueType::Float(f) => f.to_string(),
         ValueType::String(s) => s,
         ValueType::Bool(b) => b.to_string(),
+        ValueType::Nil => "nil".into(),
     }
 }
 

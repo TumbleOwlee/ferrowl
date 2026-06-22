@@ -93,7 +93,10 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         Line::from(vec![
             Span::styled(
                 format!("{cmd:<34}"),
-                Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+                Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg)
+                    .bold(),
             ),
             Span::styled(
                 desc.to_string(),

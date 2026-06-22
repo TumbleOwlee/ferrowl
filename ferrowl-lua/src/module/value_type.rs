@@ -7,6 +7,7 @@ pub enum ValueType {
     Float(f64),
     String(String),
     Bool(bool),
+    Nil,
 }
 
 impl mlua::IntoLua for ValueType {
@@ -16,6 +17,7 @@ impl mlua::IntoLua for ValueType {
             ValueType::Float(v) => v.into_lua(lua),
             ValueType::String(v) => v.into_lua(lua),
             ValueType::Bool(v) => v.into_lua(lua),
+            ValueType::Nil => Ok(mlua::Value::Nil),
         }
     }
 }
@@ -27,6 +29,7 @@ impl mlua::FromLua for ValueType {
             mlua::Value::Number(v) => Ok(ValueType::Float(v)),
             mlua::Value::String(v) => Ok(ValueType::String(v.to_str()?.to_owned())),
             mlua::Value::Boolean(v) => Ok(ValueType::Bool(v)),
+            mlua::Value::Nil => Ok(ValueType::Nil),
             other => Err(mlua::Error::FromLuaConversionError {
                 from: other.type_name(),
                 to: "ValueType".to_string(),

@@ -192,7 +192,7 @@ impl CsState {
             "Frequency" => Vt::Float(self.frequency),
             "TotalEnergy" => Vt::Float(self.total_energy),
             "SessionEnergy" => Vt::Float(self.session_energy),
-            "Soc" => Vt::Float(self.soc),
+            "Soc" | "StateOfCharge" => Vt::Float(self.soc),
             "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
@@ -201,6 +201,10 @@ impl CsState {
             "Vendor" => Vt::String(self.vendor.clone()),
             "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
             "SerialNumber" => Vt::String(self.serial_number.clone()),
+            "ChargeLimit" => match self.limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
             _ => return None,
         })
     }
@@ -271,7 +275,7 @@ impl CsState {
                 }
                 None => false,
             },
-            ("Soc", _) => match num(&value) {
+            ("Soc" | "StateOfCharge", _) => match num(&value) {
                 Some(n) => {
                     self.soc = n;
                     true
@@ -327,6 +331,13 @@ impl CsState {
                 self.serial_number = s.clone();
                 true
             }
+            ("ChargeLimit", _) => match num(&value) {
+                Some(n) => {
+                    self.limit = Some(n);
+                    true
+                }
+                None => false,
+            },
             _ => false,
         }
     }

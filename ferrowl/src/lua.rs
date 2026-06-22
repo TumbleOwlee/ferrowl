@@ -88,6 +88,7 @@ impl Write for RegisterBridge {
             ValueType::Float(v) => v.to_string(),
             ValueType::String(s) => s,
             ValueType::Bool(b) => (b as u8).to_string(),
+            ValueType::Nil => "nil".to_string(),
         };
         let register = self.register(&name)?;
         let addr = match register.address() {

@@ -111,6 +111,7 @@ fn vt_to_json(value: ValueType) -> serde_json::Value {
         ValueType::Float(v) => serde_json::json!(v),
         ValueType::String(v) => serde_json::Value::String(v),
         ValueType::Bool(v) => serde_json::Value::Bool(v),
+        ValueType::Nil => serde_json::Value::Null,
     }
 }
 
