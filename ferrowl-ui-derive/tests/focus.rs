@@ -1,5 +1,5 @@
 use derive_builder::Builder;
-use ferrowl_ui::traits::IsFocus;
+use ferrowl_ui::traits::{IsFocus, SetFocus};
 use ferrowl_ui_derive::{Focus, focusable};
 
 #[derive(Default, Clone, Debug)]
@@ -49,6 +49,7 @@ fn make_app() -> TestApp {
         .second(Widget::default())
         .third(Widget::default())
         .focus(TestAppFocus::First)
+        .view_focused(false)
         .build()
         .expect("TestApp builder failed")
 }
@@ -141,6 +142,7 @@ fn make_gated(second_enabled: bool, start: GatedAppFocus) -> GatedApp {
         .third(Widget::default())
         .second_enabled(second_enabled)
         .focus(start)
+        .view_focused(false)
         .build()
         .expect("GatedApp builder failed")
 }
@@ -167,4 +169,61 @@ fn ut_focus_previous_skips_disabled_gated_widget() {
     app.focus_previous(); // Third → (Second disabled, skipped) → First
     assert!(app.first.is_focused());
     assert!(!app.second.is_focused());
+}
+
+// --- whole-view SetFocus / IsFocus -----------------------------------------
+
+#[test]
+fn ut_set_focused_true_focuses_first_and_reports_focused() {
+    let mut app = make_app(); // view unfocused, nothing focused
+    assert!(!app.is_focused());
+    app.set_focused(true);
+    assert!(app.is_focused());
+    assert!(app.first.is_focused());
+    assert!(!app.second.is_focused());
+    assert!(!app.third.is_focused());
+}
+
+#[test]
+fn ut_set_focused_false_clears_all_widgets() {
+    let mut app = make_app();
+    app.set_focused(true);
+    app.focus_next(); // Second focused
+    app.set_focused(false);
+    assert!(!app.is_focused());
+    let focused = [&app.first, &app.second, &app.third]
+        .iter()
+        .filter(|w| w.is_focused())
+        .count();
+    assert_eq!(focused, 0);
+}
+
+#[test]
+fn ut_set_focused_restores_prior_pane() {
+    let mut app = make_app();
+    app.set_focused(true);
+    app.focus_next(); // remember Second
+    app.set_focused(false);
+    app.set_focused(true); // restore Second, not First
+    assert!(app.second.is_focused());
+    assert!(!app.first.is_focused());
+}
+
+#[test]
+fn ut_set_focused_falls_back_to_first_eligible_when_remembered_ineligible() {
+    // Remembered pane is the gated Second, but it is disabled → enable lands on the first
+    // eligible pane in declaration order (First).
+    let mut app = make_gated(false, GatedAppFocus::Second);
+    app.set_focused(true);
+    assert!(app.first.is_focused());
+    assert!(!app.second.is_focused());
+}
+
+#[test]
+fn ut_set_focused_keeps_remembered_eligible_gated_pane() {
+    // Remembered Second is eligible (enabled) → kept on enable.
+    let mut app = make_gated(true, GatedAppFocus::Second);
+    app.set_focused(true);
+    assert!(app.second.is_focused());
+    assert!(!app.first.is_focused());
 }

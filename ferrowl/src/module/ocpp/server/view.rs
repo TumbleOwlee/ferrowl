@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_ui::traits::HandleEvents;
+use ferrowl_ui::traits::{HandleEvents, IsFocus};
 use ferrowl_ui::widgets::GetValue;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult,
@@ -30,7 +30,7 @@ use ferrowl_ui::{
         Table, TableBuilder, TableEntry, TextBuilder, Widget,
     },
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
     Frame,
@@ -266,18 +266,32 @@ impl<V: ServerVersion> Entry<V> {
 
 // --- View ------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Pane {
-    CsTable,
-    Scripts,
-    Actions,
-    Messages,
-    Payload,
-}
-
 type CsTable = Widget<TableState<CsRow, 3>, Table<CsRow, CsHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
+/// Results produced mid-tick and consumed by a later `refresh`: a queued module re-setup or a
+/// built replacement view (version/role switch).
+#[derive(Default)]
+struct Deferred {
+    setup: Option<(OcppSpec, String)>,
+    replacement: Option<Box<dyn ModuleView>>,
+}
+
+/// Simulation + liveness bookkeeping: the single Lua sim handle, its action queue, and the
+/// log tee/`:log` tracking advanced each `refresh`.
+#[derive(Default)]
+struct SimRuntime {
+    handle: Option<OcppSimHandle>,
+    /// Actions enqueued by the Lua sim (identity + scope), drained and routed each refresh.
+    lua_queue: ServerActionQueue,
+    /// Highest message `seq` already teed into the persistent log, so each is logged once.
+    logged_seq: u64,
+    /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
+    applied_log_file: Option<String>,
+}
+
+#[focusable]
+#[derive(Focus)]
 pub struct ServerView<V: ServerVersion> {
     spec: OcppSpec,
     device_path: String,
@@ -289,30 +303,30 @@ pub struct ServerView<V: ServerVersion> {
     entries: Vec<Entry<V>>,
     /// conn → resolved charge-point identity, cached as events arrive.
     conn_identity: HashMap<ConnectionId, String>,
+    #[focus]
     cs_table: CsTable,
+    #[focus]
     scripts_button: Widget<ButtonState, Button>,
+    #[focus]
     actions: Widget<SelectionState<String>, Selection<String>>,
     /// Whether the action list is currently built for a connector entry (`Some(true)`), a CS-level
     /// entry (`Some(false)`), or not yet built (`None`) — to avoid rebuilding every tick.
     actions_for_connector: Option<bool>,
+    #[focus]
     msg_table: MsgTable,
+    #[focus]
     code: Widget<CodeInputFieldState, CodeInputField>,
     script_dialog: Option<ScriptDialog>,
     /// A JSON action editor: (action name, target conn, connector id, editor widget).
     /// An open per-action send dialog with its target (connection, connector).
     action_dialog: Option<(ConnectionId, Scope, ActionDialog)>,
     setup_overlay: Option<OcppSetupDialog>,
-    pending_setup: Option<(OcppSpec, String)>,
-    replacement: Option<Box<dyn ModuleView>>,
+    /// Results produced mid-tick, consumed by a later `refresh` (re-setup / replacement).
+    deferred: Deferred,
     /// Delete-confirmation dialog for the focused CS-table entry.
     delete_confirm: Option<ConfirmDeleteDialog>,
-    focus: Pane,
     /// Whether the listener should be running (auto-bind on open; toggled by `:start`/`:stop`).
     want_running: bool,
-    /// Highest message `seq` already teed into the persistent log, so each is logged once.
-    logged_seq: u64,
-    /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
-    applied_log_file: Option<String>,
     /// Last content pushed into the payload viewer, so periodic refreshes don't reset its scroll.
     code_content: String,
     /// Shared RFID accept-list handed to each (re)built inbound handler; edited via `:rfid`.
@@ -326,10 +340,8 @@ pub struct ServerView<V: ServerVersion> {
     cs_configs: HashMap<String, Vec<(String, String, bool)>>,
     /// Shared registry of every entry's observed state, read by the single Lua sim.
     lua_states: SharedServerStates<V>,
-    /// Actions enqueued by the Lua sim (identity + scope), drained and routed each refresh.
-    lua_queue: ServerActionQueue,
-    /// The single Lua sim thread for the whole module, if scripts are enabled.
-    sim: Option<OcppSimHandle>,
+    /// Simulation + liveness bookkeeping (sim handle, action queue, log tee/`:log` tracking).
+    runtime: SimRuntime,
 }
 
 impl<V: ServerVersion> ServerView<V>
@@ -358,21 +370,18 @@ where
             script_dialog: None,
             action_dialog: None,
             setup_overlay: None,
-            pending_setup: None,
-            replacement: None,
+            deferred: Deferred::default(),
             delete_confirm: None,
-            focus: Pane::CsTable,
+            focus: ServerViewFocus::CsTable,
+            view_focused: false,
             want_running: true,
-            logged_seq: 0,
-            applied_log_file: None,
             code_content: String::new(),
             rfids,
             compact: false,
             detail: None,
             cs_configs: HashMap::new(),
             lua_states: Arc::new(RwLock::new(ServerStates::default())),
-            lua_queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-            sim: None,
+            runtime: SimRuntime::default(),
         };
         view.start_sim();
         view
@@ -390,12 +399,12 @@ where
 
     /// (Re)start the single Lua sim over the shared state registry (no-op if no enabled scripts).
     fn start_sim(&mut self) {
-        if let Some(mut sim) = self.sim.take() {
+        if let Some(mut sim) = self.runtime.handle.take() {
             sim.stop();
         }
-        self.sim = run_server_sim(
+        self.runtime.handle = run_server_sim(
             self.lua_states.clone(),
-            self.lua_queue.clone(),
+            self.runtime.lua_queue.clone(),
             self.enabled_scripts(),
             self.log.clone(),
         );
@@ -748,7 +757,7 @@ where
     /// observed state (falling back to the action default), then overrides are merged.
     fn drain_lua_actions(&mut self) {
         let queued: Vec<(String, Scope, String, serde_json::Value)> =
-            self.lua_queue.lock().unwrap().drain(..).collect();
+            self.runtime.lua_queue.lock().unwrap().drain(..).collect();
         let mut sends: Vec<(ConnectionId, Scope, String, serde_json::Value)> = Vec::new();
         for (identity, scope, name, overrides) in queued {
             let Some(conn) = self.conn_for(&identity) else {
@@ -823,26 +832,6 @@ where
         self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
     }
 
-    fn focus_next(&mut self) {
-        self.focus = match self.focus {
-            Pane::CsTable => Pane::Scripts,
-            Pane::Scripts => Pane::Actions,
-            Pane::Actions => Pane::Messages,
-            Pane::Messages => Pane::Payload,
-            Pane::Payload => Pane::CsTable,
-        };
-    }
-
-    fn focus_previous(&mut self) {
-        self.focus = match self.focus {
-            Pane::CsTable => Pane::Payload,
-            Pane::Payload => Pane::Messages,
-            Pane::Messages => Pane::Actions,
-            Pane::Actions => Pane::Scripts,
-            Pane::Scripts => Pane::CsTable,
-        };
-    }
-
     fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
@@ -874,12 +863,13 @@ where
             || self.action_dialog.is_some()
             || self.setup_overlay.is_some()
             || self.delete_confirm.is_some()
-            || self.pending_setup.is_some()
+            || self.deferred.setup.is_some()
             || self.detail.is_some()
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
         let buf = frame.buffer_mut();
+        let view_focused = self.is_focused();
         let [body, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         let [left, right] =
@@ -910,10 +900,10 @@ where
         // Tail the log to the newest message so incoming traffic shows instantly, but never while
         // the user is reading it (Messages scrolled up) or scrolling the payload pane (whose
         // content is driven by the selected message row).
-        let follow = if focused {
+        let follow = if view_focused {
             match self.focus {
-                Pane::Payload => false,
-                Pane::Messages => at_bottom,
+                ServerViewFocus::Code => false,
+                ServerViewFocus::MsgTable => at_bottom,
                 _ => true,
             }
         } else {
@@ -939,21 +929,8 @@ where
         self.cs_table.state.set_values(cs_rows);
         self.sync_code();
 
-        self.cs_table
-            .state
-            .set_focused(focused && self.focus == Pane::CsTable);
-        self.scripts_button
-            .state
-            .set_focused(focused && self.focus == Pane::Scripts);
-        self.actions
-            .state
-            .set_focused(focused && self.focus == Pane::Actions);
-        self.msg_table
-            .state
-            .set_focused(focused && self.focus == Pane::Messages);
-        self.code
-            .state
-            .set_focused(focused && self.focus == Pane::Payload);
+        // Per-widget focus is maintained by the derived `SetFocus`/`focus_next` at focus-change
+        // time (no per-frame recompute).
 
         StatefulWidget::render(
             &self.cs_table.widget,
@@ -1087,7 +1064,7 @@ where
                     if let Ok(spec) = setup.resolve() {
                         let path = setup.config_path();
                         self.setup_overlay = None;
-                        self.pending_setup = Some((spec, path));
+                        self.deferred.setup = Some((spec, path));
                     }
                 }
                 (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_step(true),
@@ -1139,19 +1116,21 @@ where
                 self.focus_previous();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Pane::CsTable => {
+            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == ServerViewFocus::CsTable => {
                 self.open_detail();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Pane::Scripts => {
+            (KeyModifiers::NONE, KeyCode::Enter)
+                if self.focus == ServerViewFocus::ScriptsButton =>
+            {
                 self.open_scripts();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Pane::Actions => {
+            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == ServerViewFocus::Actions => {
                 self.trigger_action();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == Pane::CsTable => {
+            (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == ServerViewFocus::CsTable => {
                 if let Some(idx) = self.selected() {
                     self.delete_confirm =
                         Some(ConfirmDeleteDialog::new(&self.entries[idx].identity));
@@ -1159,15 +1138,15 @@ where
                 EventResult::Consumed
             }
             _ => match self.focus {
-                Pane::CsTable => self.cs_table.state.handle_events(modifiers, code),
-                Pane::Actions => self.actions.state.handle_events(modifiers, code),
-                Pane::Messages => {
+                ServerViewFocus::CsTable => self.cs_table.state.handle_events(modifiers, code),
+                ServerViewFocus::Actions => self.actions.state.handle_events(modifiers, code),
+                ServerViewFocus::MsgTable => {
                     let consumed = self.msg_table.state.handle_events(modifiers, code);
                     self.sync_code();
                     consumed
                 }
-                Pane::Scripts => EventResult::Unhandled(modifiers, code),
-                Pane::Payload => self.code.state.handle_events(modifiers, code),
+                ServerViewFocus::ScriptsButton => EventResult::Unhandled(modifiers, code),
+                ServerViewFocus::Code => self.code.state.handle_events(modifiers, code),
             },
         }
     }
@@ -1175,7 +1154,7 @@ where
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
             // Apply a resolved `:edit`.
-            if let Some((spec, path)) = self.pending_setup.take() {
+            if let Some((spec, path)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
                 device.rfids = self.rfids.read().unwrap().clone();
@@ -1183,7 +1162,7 @@ where
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind.
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(build_client_view(spec, path, device));
+                    self.deferred.replacement = Some(build_client_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {
@@ -1191,7 +1170,7 @@ where
                     // generic over the *old* version and would rebind with the old subprotocol,
                     // rejecting the (now-different-version) client handshake with a 400.
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(build_server_view(spec, path, device));
+                    self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 self.spec = spec;
@@ -1219,21 +1198,25 @@ where
             self.drain_lua_actions();
 
             // Apply a pending `:log` change (or device-config log file) to the persistent sink.
-            if self.applied_log_file != self.device.log_file {
+            if self.runtime.applied_log_file != self.device.log_file {
                 let name = self.spec.name.clone();
                 self.log
                     .write()
                     .await
                     .set_log_file(self.device.log_file.as_deref(), &name);
-                self.applied_log_file = self.device.log_file.clone();
+                self.runtime.applied_log_file = self.device.log_file.clone();
             }
 
             // Tee new protocol messages (across all entries) into the persistent log. Each entry's
             // log is filtered separately on screen, but the persistent log is the whole CSMS.
-            let mut max_seq = self.logged_seq;
+            let mut max_seq = self.runtime.logged_seq;
             let mut new: Vec<(u64, String)> = Vec::new();
             for entry in &self.entries {
-                for m in entry.messages.iter().filter(|m| m.seq > self.logged_seq) {
+                for m in entry
+                    .messages
+                    .iter()
+                    .filter(|m| m.seq > self.runtime.logged_seq)
+                {
                     max_seq = max_seq.max(m.seq);
                     new.push((m.seq, m.log_line()));
                 }
@@ -1244,7 +1227,7 @@ where
                 for (_, line) in new {
                     log.write(&line);
                 }
-                self.logged_seq = max_seq;
+                self.runtime.logged_seq = max_seq;
             }
         })
     }
@@ -1375,7 +1358,7 @@ where
     }
 
     fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
-        self.replacement.take()
+        self.deferred.replacement.take()
     }
 }
 
@@ -1603,13 +1586,16 @@ mod tests {
             seen.push(v.focus);
         }
         assert!(
-            seen.contains(&Pane::Payload),
+            seen.contains(&ServerViewFocus::Code),
             "Payload pane not in Tab order"
         );
-        assert!(v.focus == Pane::CsTable, "focus_next did not wrap to start");
+        assert!(
+            v.focus == ServerViewFocus::CsTable,
+            "focus_next did not wrap to start"
+        );
         // BackTab from CsTable lands on Payload (reverse order).
         v.focus_previous();
-        assert!(v.focus == Pane::Payload);
+        assert!(v.focus == ServerViewFocus::Code);
     }
 
     #[test]
@@ -1727,7 +1713,8 @@ mod tests {
             .unwrap()
             .merge_config("HeartbeatInterval".into(), "30".into(), false);
         // Close the overlay (Esc) — keep rows in memory, not discard.
-        v.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        // Qualified: ServerView now also derives `HandleEvents` via `#[derive(Focus)]`.
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
         assert!(v.detail.is_none());
         assert_eq!(
             v.cs_configs.get("CP1").unwrap(),

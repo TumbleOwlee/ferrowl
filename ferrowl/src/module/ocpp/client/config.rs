@@ -2,14 +2,13 @@
 //! 1.6 config store (GetConfiguration) and the 2.0.1 variable store (GetVariables). A "key" is a
 //! name/value pair with a readonly flag.
 
-use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle},
-    traits::HandleEvents,
     widgets::{GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Widget},
 };
+use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -24,23 +23,19 @@ pub struct ConfigKey {
     pub readonly: bool,
 }
 
-/// Which dialog field has focus.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Field {
-    Key,
-    Value,
-    Readonly,
-}
-
 const READONLY_CHOICES: [&str; 2] = ["false", "true"];
 
 /// Editor for the config key at `index` in a view's config/variable store.
+#[focusable]
+#[derive(Focus)]
 pub struct ConfigEditDialog {
     index: usize,
+    #[focus]
     key: Widget<InputFieldState, InputField<String>>,
+    #[focus]
     value: Widget<InputFieldState, InputField<String>>,
+    #[focus]
     readonly: Widget<SelectionState<String>, Selection<String>>,
-    focus: Field,
 }
 
 impl ConfigEditDialog {
@@ -50,42 +45,13 @@ impl ConfigEditDialog {
             key: input("Key", &current.key),
             value: input("Value", &current.value),
             readonly: readonly_select(current.readonly),
-            focus: Field::Key,
+            focus: ConfigEditDialogFocus::Key,
+            view_focused: true,
         }
     }
 
     pub fn index(&self) -> usize {
         self.index
-    }
-
-    pub fn focus_next(&mut self) {
-        self.focus = match self.focus {
-            Field::Key => Field::Value,
-            Field::Value => Field::Readonly,
-            Field::Readonly => Field::Key,
-        };
-    }
-
-    pub fn focus_previous(&mut self) {
-        self.focus = match self.focus {
-            Field::Key => Field::Readonly,
-            Field::Value => Field::Key,
-            Field::Readonly => Field::Value,
-        };
-    }
-
-    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        match self.focus {
-            Field::Key => {
-                let _ = self.key.state.handle_events(modifiers, code);
-            }
-            Field::Value => {
-                let _ = self.value.state.handle_events(modifiers, code);
-            }
-            Field::Readonly => {
-                let _ = self.readonly.state.handle_events(modifiers, code);
-            }
-        }
     }
 
     /// The edited key. Returns `None` when the key field is empty.
@@ -136,11 +102,15 @@ impl ConfigEditDialog {
         ])
         .areas(inner);
 
-        self.key.state.set_focused(self.focus == Field::Key);
-        self.value.state.set_focused(self.focus == Field::Value);
+        self.key
+            .state
+            .set_focused(self.focus == ConfigEditDialogFocus::Key);
+        self.value
+            .state
+            .set_focused(self.focus == ConfigEditDialogFocus::Value);
         self.readonly
             .state
-            .set_focused(self.focus == Field::Readonly);
+            .set_focused(self.focus == ConfigEditDialogFocus::Readonly);
 
         StatefulWidget::render(&self.key.widget, key_area, buf, &mut self.key.state);
         StatefulWidget::render(&self.value.widget, value_area, buf, &mut self.value.state);

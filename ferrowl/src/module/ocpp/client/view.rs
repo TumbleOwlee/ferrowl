@@ -13,10 +13,9 @@
 //! 2.0.1 `StartTransaction`/`StopTransaction` transaction-shortcut buttons) lives behind the
 //! [`ClientVersion`] trait; the two concrete views are `ClientView<V1_6>` / `ClientView<V2_0_1>`.
 
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
@@ -30,14 +29,14 @@ use ferrowl_ui::{
         ButtonStyle, InputFieldStyle, InputFieldStyleBuilder, SelectionStyle,
         SelectionStyleBuilder, TableStyleBuilder, TextStyle,
     },
-    traits::HandleEvents,
+    traits::{HandleEvents, OverlayKeys, OverlayRoute},
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, TableEntry,
         TextBuilder, Widget,
     },
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, Overlay, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
     Frame,
@@ -350,6 +349,44 @@ pub enum ResolvedEdit {
     Text(String),
 }
 
+/// The single modal overlay over the client view (mutually exclusive by construction). The derive
+/// supplies `is_active`/`take`/`close` and common-key routing (`Esc` closes, `Tab`/`BackTab` cycle
+/// focus on the tagged variants); each variant's `Enter`/inner dispatch stays in `handle_events`.
+#[derive(Overlay)]
+enum ClientOverlay {
+    #[overlay(none)]
+    None,
+    /// State-row edit (choice/number/text).
+    #[overlay(esc_close)]
+    Edit(Box<EditOverlay>),
+    /// Config-key editor.
+    #[overlay(esc_close, focus_cycle)]
+    Config(Box<ConfigEditDialog>),
+    /// Action send dialog (routes all keys via its own `input()`).
+    Action(Box<ActionDialog>),
+    /// Module re-setup dialog.
+    #[overlay(esc_close, focus_cycle)]
+    Setup(Box<OcppSetupDialog>),
+    /// Lua scripts editor (routes all keys via its own `handle_events()`).
+    Scripts(Box<ScriptDialog>),
+}
+
+impl OverlayKeys for ConfigEditDialog {
+    fn focus_cycle(&mut self, forward: bool) {
+        if forward {
+            self.focus_next();
+        } else {
+            self.focus_previous();
+        }
+    }
+}
+
+impl OverlayKeys for OcppSetupDialog {
+    fn focus_cycle(&mut self, forward: bool) {
+        self.focus_step(forward);
+    }
+}
+
 /// A state-row edit overlay: which field, the scope it targets (`Scope::CS` = CS-level), and the
 /// input widget.
 pub struct EditOverlay {
@@ -401,59 +438,28 @@ fn msg_row(m: &OcppMessage) -> MsgRow {
 
 // --- View ------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pane {
-    Connectors,
-    ConnectorInput,
-    State,
-    Scripts,
-    ConfigTable,
-    ConfigKey,
-    ConfigValue,
-    Actions,
-    Messages,
-    Payload,
-}
-
 type StateTable = Widget<TableState<NvRow, 3>, Table<NvRow, NvHeader, 3>>;
 type ConnTable = Widget<TableState<ConnRow, 2>, Table<ConnRow, ConnHeader, 2>>;
 type ConfigTable = Widget<TableState<ConfigRow, 3>, Table<ConfigRow, ConfigHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
-pub struct ClientView<V: ClientVersion> {
-    spec: OcppSpec,
-    device_path: String,
-    device: OcppDeviceConfig,
-    backend: OcppClient<V>,
-    state: Arc<RwLock<V::Cs>>,
-    log: SharedLog,
-    conn_table: ConnTable,
-    conn_input: Widget<InputFieldState, InputField<String>>,
-    state_table: StateTable,
-    config_table: ConfigTable,
-    key_input: Widget<InputFieldState, InputField<String>>,
-    value_input: Widget<InputFieldState, InputField<String>>,
-    actions: Widget<SelectionState<String>, Selection<String>>,
-    msg_table: MsgTable,
-    /// All messages from the backend (every scope).
-    messages: Vec<OcppMessage>,
-    /// Messages for the currently-selected scope, indexed by the message table.
-    visible_messages: Vec<OcppMessage>,
-    code: Widget<CodeInputFieldState, CodeInputField>,
-    scripts_button: Widget<ButtonState, Button>,
-    script_dialog: Option<ScriptDialog>,
-    focus: Pane,
-    edit: Option<EditOverlay>,
-    config_edit: Option<ConfigEditDialog>,
-    action_dialog: Option<ActionDialog>,
+/// Results produced mid-tick (in `handle_events`/`refresh`) and consumed by a later `refresh`:
+/// a queued send, a queued module re-setup, or a built replacement view (version/role switch).
+#[derive(Default)]
+struct Deferred {
     /// A pending send: action name, payload, and the scope it targets.
-    pending_send: Option<(String, serde_json::Value, Scope)>,
-    setup_overlay: Option<OcppSetupDialog>,
-    pending_setup: Option<(OcppSpec, String)>,
+    send: Option<(String, serde_json::Value, Scope)>,
+    setup: Option<(OcppSpec, String)>,
     replacement: Option<Box<dyn ModuleView>>,
+}
+
+/// Simulation + liveness bookkeeping: the Lua sim handle, the script action queue, and the tick
+/// counters / online & log-file tracking advanced each `refresh`.
+#[derive(Default)]
+struct SimRuntime {
+    handle: Option<OcppSimHandle>,
     /// Actions enqueued by Lua scripts (with their scope), drained and sent each `refresh`.
     action_queue: ScopedActionQueue,
-    sim: Option<OcppSimHandle>,
     meter_tick: u32,
     /// Whether any connector had an open transaction on the previous `refresh` (1.6 meter reset).
     tx_was_active: bool,
@@ -461,6 +467,49 @@ pub struct ClientView<V: ClientVersion> {
     was_online: bool,
     logged_seq: u64,
     applied_log_file: Option<String>,
+}
+
+#[focusable]
+#[derive(Focus)]
+pub struct ClientView<V: ClientVersion> {
+    spec: OcppSpec,
+    device_path: String,
+    device: OcppDeviceConfig,
+    backend: OcppClient<V>,
+    state: Arc<RwLock<V::Cs>>,
+    log: SharedLog,
+    // Focus panes, declared in Tab-cycle order (see `#[derive(Focus)]`). The config trio is only
+    // reachable for the CS-level entry, gated with `#[focus(when = self.cs_selected())]`.
+    #[focus]
+    conn_input: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    conn_table: ConnTable,
+    #[focus]
+    state_table: StateTable,
+    #[focus]
+    scripts_button: Widget<ButtonState, Button>,
+    #[focus]
+    actions: Widget<SelectionState<String>, Selection<String>>,
+    #[focus(when = self.cs_selected())]
+    config_table: ConfigTable,
+    #[focus(when = self.cs_selected())]
+    key_input: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = self.cs_selected())]
+    value_input: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    msg_table: MsgTable,
+    #[focus]
+    code: Widget<CodeInputFieldState, CodeInputField>,
+    /// All messages from the backend (every scope).
+    messages: Vec<OcppMessage>,
+    /// Messages for the currently-selected scope, indexed by the message table.
+    visible_messages: Vec<OcppMessage>,
+    /// The single active modal overlay (edit / config / action / setup / scripts).
+    overlay: ClientOverlay,
+    /// Results produced mid-tick, consumed by a later `refresh` (send / re-setup / replacement).
+    deferred: Deferred,
+    /// Simulation + liveness bookkeeping (sim handle, action queue, tick counters, online/log).
+    runtime: SimRuntime,
     code_content: String,
     compact: bool,
     /// Action-list level cached so `sync_actions` only rebuilds on a CS↔connector change.
@@ -522,23 +571,11 @@ impl<V: ClientVersion> ClientView<V> {
             visible_messages: Vec::new(),
             code: code_view(),
             scripts_button: scripts_button(),
-            script_dialog: None,
-            focus: Pane::Connectors,
-            edit: None,
-            config_edit: None,
-            action_dialog: None,
-            pending_send: None,
-            setup_overlay: None,
-            pending_setup: None,
-            replacement: None,
-            action_queue: Arc::new(Mutex::new(VecDeque::new())),
-            sim: None,
-            meter_tick: 0,
-            tx_was_active: false,
-            heartbeat_tick: 0,
-            was_online: false,
-            logged_seq: 0,
-            applied_log_file: None,
+            overlay: ClientOverlay::None,
+            focus: ClientViewFocus::ConnTable,
+            view_focused: false,
+            deferred: Deferred::default(),
+            runtime: SimRuntime::default(),
             code_content: String::new(),
             compact: false,
             actions_for_connector: None,
@@ -582,22 +619,22 @@ impl<V: ClientVersion> ClientView<V> {
 
     fn start_sim(&mut self) {
         self.stop_sim();
-        self.sim = run_client_sim(
+        self.runtime.handle = run_client_sim(
             self.state.clone(),
-            self.action_queue.clone(),
+            self.runtime.action_queue.clone(),
             self.enabled_scripts(),
             self.log.clone(),
         );
     }
 
     fn stop_sim(&mut self) {
-        if let Some(mut sim) = self.sim.take() {
+        if let Some(mut sim) = self.runtime.handle.take() {
             sim.stop();
         }
     }
 
     fn open_scripts(&mut self) {
-        self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
+        self.overlay = ClientOverlay::Scripts(Box::new(ScriptDialog::new(&self.device.scripts)));
     }
 
     /// Rebuild the action list for the selected level (CS vs connector), preserving the selection
@@ -744,19 +781,19 @@ impl<V: ClientVersion> ClientView<V> {
         match name.as_str() {
             "StartTransaction" if V::has_tx_shortcuts() => {
                 let payload = self.start_event(scope);
-                self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
+                self.deferred.send = Some(("TransactionEvent".to_string(), payload, scope));
             }
             "StopTransaction" if V::has_tx_shortcuts() => {
                 if let Some(payload) = self.stop_event(scope) {
-                    self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
+                    self.deferred.send = Some(("TransactionEvent".to_string(), payload, scope));
                 }
             }
             n if V::state_driven().contains(&n) => {
                 let payload = self.state_payload(n, scope);
-                self.pending_send = Some((name, payload, scope));
+                self.deferred.send = Some((name, payload, scope));
             }
             _ => {
-                self.action_dialog = Some(match V::action_spec(&name) {
+                self.overlay = ClientOverlay::Action(match V::action_spec(&name) {
                     Some(spec) => {
                         let state = self.state.clone();
                         let lookup = move |f: &str| {
@@ -767,7 +804,7 @@ impl<V: ClientVersion> ClientView<V> {
                                 .or_else(|| s.cs_get_field_named(f))
                                 .map(value_to_string)
                         };
-                        ActionDialog::new(name, &spec, lookup, gen_tx_id)
+                        Box::new(ActionDialog::new(name, &spec, lookup, gen_tx_id))
                     }
                     None => {
                         debug_assert!(
@@ -778,7 +815,7 @@ impl<V: ClientVersion> ClientView<V> {
                             .and_then(|a| V::encode_action(&a).ok())
                             .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
                             .unwrap_or_else(|| "{}".to_string());
-                        ActionDialog::json_only(name, &template)
+                        Box::new(ActionDialog::json_only(name, &template))
                     }
                 });
             }
@@ -789,7 +826,7 @@ impl<V: ClientVersion> ClientView<V> {
         let payload = V::start_event(&mut self.state.write().unwrap(), scope);
         // 2.0.1 resets the meter tick eagerly on a started transaction.
         if V::has_tx_shortcuts() {
-            self.meter_tick = 0;
+            self.runtime.meter_tick = 0;
         }
         payload
     }
@@ -800,38 +837,6 @@ impl<V: ClientVersion> ClientView<V> {
 
     fn state_payload(&self, name: &str, scope: Scope) -> serde_json::Value {
         V::state_payload(&self.state.read().unwrap(), name, scope)
-    }
-
-    fn focus_next(&mut self) {
-        self.focus = match self.focus {
-            Pane::ConnectorInput => Pane::Connectors,
-            Pane::Connectors => Pane::State,
-            Pane::State => Pane::Scripts,
-            Pane::Scripts => Pane::Actions,
-            Pane::Actions if self.cs_selected() => Pane::ConfigTable,
-            Pane::Actions => Pane::Messages,
-            Pane::ConfigTable => Pane::ConfigKey,
-            Pane::ConfigKey => Pane::ConfigValue,
-            Pane::ConfigValue => Pane::Messages,
-            Pane::Messages => Pane::Payload,
-            Pane::Payload => Pane::ConnectorInput,
-        };
-    }
-
-    fn focus_previous(&mut self) {
-        self.focus = match self.focus {
-            Pane::ConnectorInput => Pane::Payload,
-            Pane::Connectors => Pane::ConnectorInput,
-            Pane::State => Pane::Connectors,
-            Pane::Scripts => Pane::State,
-            Pane::Actions => Pane::Scripts,
-            Pane::ConfigTable => Pane::Actions,
-            Pane::ConfigKey => Pane::ConfigTable,
-            Pane::ConfigValue => Pane::ConfigKey,
-            Pane::Messages if self.cs_selected() => Pane::ConfigValue,
-            Pane::Messages => Pane::Actions,
-            Pane::Payload => Pane::Messages,
-        };
     }
 
     /// Append a config key from the key/value inputs (readonly=false), then clear them.
@@ -864,12 +869,12 @@ impl<V: ClientVersion> ClientView<V> {
         };
         let s = self.state.read().unwrap();
         if let Some(current) = s.config().get(row) {
-            self.config_edit = Some(ConfigEditDialog::new(row, current));
+            self.overlay = ClientOverlay::Config(Box::new(ConfigEditDialog::new(row, current)));
         }
     }
 
     fn apply_config_edit(&mut self) {
-        let Some(dialog) = self.config_edit.take() else {
+        let ClientOverlay::Config(dialog) = self.overlay.take() else {
             return;
         };
         let Some(edited) = dialog.resolve() else {
@@ -898,11 +903,13 @@ impl<V: ClientVersion> ClientView<V> {
             return;
         };
         drop(s);
-        self.edit = Some(EditOverlay { field, scope, kind });
+        self.overlay = ClientOverlay::Edit(Box::new(EditOverlay { field, scope, kind }));
     }
 
     fn apply_edit(&mut self) {
-        let Some(edit) = self.edit.take() else { return };
+        let ClientOverlay::Edit(edit) = self.overlay.take() else {
+            return;
+        };
         let resolved = match &edit.kind {
             EditKind::Choice(sel) => ResolvedEdit::Choice(sel.state.get_value()),
             EditKind::Number(input) => {
@@ -976,14 +983,10 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
     }
 
     fn is_overlay_active(&self) -> bool {
-        self.edit.is_some()
-            || self.config_edit.is_some()
-            || self.action_dialog.is_some()
-            || self.setup_overlay.is_some()
-            || self.script_dialog.is_some()
+        self.overlay.is_active()
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
         let buf = frame.buffer_mut();
         let cs = self.cs_selected();
         let [body, status_area] =
@@ -1019,36 +1022,8 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         let [right_top, right_bottom] =
             Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(right);
 
-        self.conn_table
-            .state
-            .set_focused(focused && self.focus == Pane::Connectors);
-        self.conn_input
-            .state
-            .set_focused(focused && self.focus == Pane::ConnectorInput);
-        self.state_table
-            .state
-            .set_focused(focused && self.focus == Pane::State);
-        self.config_table
-            .state
-            .set_focused(focused && self.focus == Pane::ConfigTable);
-        self.key_input
-            .state
-            .set_focused(focused && self.focus == Pane::ConfigKey);
-        self.value_input
-            .state
-            .set_focused(focused && self.focus == Pane::ConfigValue);
-        self.actions
-            .state
-            .set_focused(focused && self.focus == Pane::Actions);
-        self.scripts_button
-            .state
-            .set_focused(focused && self.focus == Pane::Scripts);
-        self.msg_table
-            .state
-            .set_focused(focused && self.focus == Pane::Messages);
-        self.code
-            .state
-            .set_focused(focused && self.focus == Pane::Payload);
+        // Per-widget focus is maintained by the derived `SetFocus`/`focus_next` at focus-change
+        // time (no per-frame recompute).
 
         StatefulWidget::render(
             &self.conn_table.widget,
@@ -1131,134 +1106,150 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         let mut status = if online { "ONLINE" } else { "OFFLINE" }.to_string();
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
 
-        // State-row edit overlay over the state table.
-        if let Some(edit) = self.edit.as_mut() {
-            let title = edit.field.label();
-            let height = match &edit.kind {
-                EditKind::Choice(sel) => sel.state.values().len() as u16 + 2,
-                EditKind::Number(_) | EditKind::Text(_) => 3,
-            };
-            let width = state_area.width.min(30);
-            let [_, hc, _] = Layout::horizontal([
-                Constraint::Min(0),
-                Constraint::Length(width),
-                Constraint::Min(0),
-            ])
-            .areas(state_area);
-            let [_, vc, _] = Layout::vertical([
-                Constraint::Min(0),
-                Constraint::Length(height),
-                Constraint::Min(0),
-            ])
-            .areas(hc);
-            UiWidget::render(&Clear, vc, buf);
-            let block = boxed(title);
-            let inner = block.inner(vc);
-            block.render(vc, buf);
-            match &mut edit.kind {
-                EditKind::Choice(sel) => {
-                    StatefulWidget::render(&sel.widget, inner, buf, &mut sel.state)
-                }
-                EditKind::Number(input) => {
-                    StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
-                }
-                EditKind::Text(input) => {
-                    StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
+        match &mut self.overlay {
+            // State-row edit overlay over the state table.
+            ClientOverlay::Edit(edit) => {
+                let title = edit.field.label();
+                let height = match &edit.kind {
+                    EditKind::Choice(sel) => sel.state.values().len() as u16 + 2,
+                    EditKind::Number(_) | EditKind::Text(_) => 3,
+                };
+                let width = state_area.width.min(30);
+                let [_, hc, _] = Layout::horizontal([
+                    Constraint::Min(0),
+                    Constraint::Length(width),
+                    Constraint::Min(0),
+                ])
+                .areas(state_area);
+                let [_, vc, _] = Layout::vertical([
+                    Constraint::Min(0),
+                    Constraint::Length(height),
+                    Constraint::Min(0),
+                ])
+                .areas(hc);
+                UiWidget::render(&Clear, vc, buf);
+                let block = boxed(title);
+                let inner = block.inner(vc);
+                block.render(vc, buf);
+                match &mut edit.kind {
+                    EditKind::Choice(sel) => {
+                        StatefulWidget::render(&sel.widget, inner, buf, &mut sel.state)
+                    }
+                    EditKind::Number(input) => {
+                        StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
+                    }
+                    EditKind::Text(input) => {
+                        StatefulWidget::render(&input.widget, inner, buf, &mut input.state)
+                    }
                 }
             }
-        }
-
-        if let Some(dialog) = self.config_edit.as_mut() {
-            dialog.render(area, buf);
-        }
-        if let Some(dlg) = self.action_dialog.as_mut() {
-            dlg.render(area, buf);
-        }
-        if let Some(setup) = self.setup_overlay.as_mut() {
-            setup.render(area, buf);
-        }
-        if let Some(dialog) = self.script_dialog.as_mut() {
-            dialog.render(area, buf);
+            ClientOverlay::Config(dialog) => dialog.render(area, buf),
+            ClientOverlay::Action(dlg) => dlg.render(area, buf),
+            ClientOverlay::Setup(setup) => setup.render(area, buf),
+            ClientOverlay::Scripts(dialog) => dialog.render(area, buf),
+            ClientOverlay::None => {}
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
-        if let Some(dialog) = self.script_dialog.as_mut() {
-            if dialog.handle_events(modifiers, code) {
-                let scripts = self.script_dialog.take().unwrap().resolve();
-                self.device.scripts = scripts;
-                self.start_sim();
+        if self.overlay.is_active() {
+            // Common keys first: `Esc` closes `esc_close` variants, `Tab`/`BackTab` cycle focus on
+            // `focus_cycle` variants. Anything else falls through to per-variant `Enter`/inner keys.
+            match self.overlay.route_keys(modifiers, code) {
+                OverlayRoute::Closed | OverlayRoute::Cycled => return EventResult::Consumed,
+                OverlayRoute::Unhandled => {}
             }
-            return EventResult::Consumed;
-        }
 
-        if let Some(setup) = self.setup_overlay.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.setup_overlay = None,
-                (KeyModifiers::NONE, KeyCode::Enter) => {
-                    if let Ok(spec) = setup.resolve() {
-                        let path = setup.config_path();
-                        self.setup_overlay = None;
-                        self.pending_setup = Some((spec, path));
+            // Scripts editor: routes every key through its own handler; commit on done.
+            if matches!(self.overlay, ClientOverlay::Scripts(_)) {
+                let done = if let ClientOverlay::Scripts(dialog) = &mut self.overlay {
+                    dialog.handle_events(modifiers, code)
+                } else {
+                    false
+                };
+                if done {
+                    let ClientOverlay::Scripts(dialog) = self.overlay.take() else {
+                        unreachable!()
+                    };
+                    self.device.scripts = dialog.resolve();
+                    self.start_sim();
+                }
+                return EventResult::Consumed;
+            }
+
+            // Setup dialog: `Esc`/`Tab` already routed; `Enter` resolves, other keys are forwarded.
+            if matches!(self.overlay, ClientOverlay::Setup(_)) {
+                if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
+                    let resolved = if let ClientOverlay::Setup(setup) = &self.overlay {
+                        setup.resolve().ok().map(|spec| (spec, setup.config_path()))
+                    } else {
+                        None
+                    };
+                    if let Some((spec, path)) = resolved {
+                        self.deferred.setup = Some((spec, path));
+                        self.overlay.close();
                     }
-                }
-                (KeyModifiers::NONE, KeyCode::Tab) => setup.focus_step(true),
-                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    setup.focus_step(false)
-                }
-                _ => {
+                } else if let ClientOverlay::Setup(setup) = &mut self.overlay {
                     let _ = setup.handle_events(modifiers, code);
                 }
+                return EventResult::Consumed;
             }
-            return EventResult::Consumed;
-        }
 
-        if self.action_dialog.is_some() {
-            let res = self.action_dialog.as_mut().unwrap().input(modifiers, code);
-            match res {
-                Some(ActionResult::Close) => self.action_dialog = None,
-                Some(ActionResult::Send(payload)) => {
-                    let name = self.action_dialog.as_ref().unwrap().name.clone();
-                    if V::decode_call(&name, payload.clone()).is_ok() {
-                        let scope = self.selected_scope();
-                        self.action_dialog = None;
-                        self.pending_send = Some((name, payload, scope));
+            // Action dialog: routes every key through its own `input()`.
+            if matches!(self.overlay, ClientOverlay::Action(_)) {
+                let res = if let ClientOverlay::Action(dlg) = &mut self.overlay {
+                    dlg.input(modifiers, code)
+                } else {
+                    None
+                };
+                match res {
+                    Some(ActionResult::Close) => self.overlay.close(),
+                    Some(ActionResult::Send(payload)) => {
+                        let name = match &self.overlay {
+                            ClientOverlay::Action(dlg) => dlg.name.clone(),
+                            _ => unreachable!(),
+                        };
+                        if V::decode_call(&name, payload.clone()).is_ok() {
+                            let scope = self.selected_scope();
+                            self.deferred.send = Some((name, payload, scope));
+                            self.overlay.close();
+                        }
+                    }
+                    None => {}
+                }
+                return EventResult::Consumed;
+            }
+
+            // State-row edit: `Esc` already routed; `Enter` applies, other keys hit the inner widget.
+            if matches!(self.overlay, ClientOverlay::Edit(_)) {
+                if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
+                    self.apply_edit();
+                } else if let ClientOverlay::Edit(edit) = &mut self.overlay {
+                    match &mut edit.kind {
+                        EditKind::Choice(sel) => {
+                            let _ = sel.state.handle_events(modifiers, code);
+                        }
+                        EditKind::Number(input) => {
+                            let _ = input.state.handle_events(modifiers, code);
+                        }
+                        EditKind::Text(input) => {
+                            let _ = input.state.handle_events(modifiers, code);
+                        }
                     }
                 }
-                None => {}
+                return EventResult::Consumed;
             }
-            return EventResult::Consumed;
-        }
 
-        if let Some(edit) = self.edit.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.edit = None,
-                (KeyModifiers::NONE, KeyCode::Enter) => self.apply_edit(),
-                _ => match &mut edit.kind {
-                    EditKind::Choice(sel) => {
-                        let _ = sel.state.handle_events(modifiers, code);
-                    }
-                    EditKind::Number(input) => {
-                        let _ = input.state.handle_events(modifiers, code);
-                    }
-                    EditKind::Text(input) => {
-                        let _ = input.state.handle_events(modifiers, code);
-                    }
-                },
-            }
-            return EventResult::Consumed;
-        }
-
-        if let Some(dialog) = self.config_edit.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.config_edit = None,
-                (KeyModifiers::NONE, KeyCode::Enter) => self.apply_config_edit(),
-                (KeyModifiers::NONE, KeyCode::Tab) => dialog.focus_next(),
-                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    dialog.focus_previous()
+            // Config-key editor: `Esc`/`Tab` already routed; `Enter` applies, other keys forwarded.
+            if matches!(self.overlay, ClientOverlay::Config(_)) {
+                if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
+                    self.apply_config_edit();
+                } else if let ClientOverlay::Config(dialog) = &mut self.overlay {
+                    dialog.handle_events(modifiers, code);
                 }
-                _ => dialog.handle_events(modifiers, code),
+                return EventResult::Consumed;
             }
+
             return EventResult::Consumed;
         }
 
@@ -1273,18 +1264,22 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 match self.focus {
-                    Pane::Connectors => self.sync_actions(),
-                    Pane::ConnectorInput => self.add_connector(),
-                    Pane::State => self.open_edit(),
-                    Pane::Scripts => self.open_scripts(),
-                    Pane::ConfigTable => self.open_config_edit(),
-                    Pane::ConfigKey | Pane::ConfigValue => self.add_config_key(),
-                    Pane::Actions => self.trigger_action(),
-                    Pane::Messages | Pane::Payload => {}
+                    ClientViewFocus::ConnTable => self.sync_actions(),
+                    ClientViewFocus::ConnInput => self.add_connector(),
+                    ClientViewFocus::StateTable => self.open_edit(),
+                    ClientViewFocus::ScriptsButton => self.open_scripts(),
+                    ClientViewFocus::ConfigTable => self.open_config_edit(),
+                    ClientViewFocus::KeyInput | ClientViewFocus::ValueInput => {
+                        self.add_config_key()
+                    }
+                    ClientViewFocus::Actions => self.trigger_action(),
+                    ClientViewFocus::MsgTable | ClientViewFocus::Code => {}
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('d')) if matches!(self.focus, Pane::ConfigTable) => {
+            (KeyModifiers::NONE, KeyCode::Char('d'))
+                if matches!(self.focus, ClientViewFocus::ConfigTable) =>
+            {
                 let mut s = self.state.write().unwrap();
                 if let Some(i) = self.config_table.state.table_state().selected()
                     && i < s.config().len()
@@ -1294,7 +1289,9 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                 }
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('d')) if matches!(self.focus, Pane::Connectors) => {
+            (KeyModifiers::NONE, KeyCode::Char('d'))
+                if matches!(self.focus, ClientViewFocus::ConnTable) =>
+            {
                 self.remove_connector();
                 EventResult::Consumed
             }
@@ -1302,51 +1299,59 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             (KeyModifiers::NONE, KeyCode::Char(' '))
                 if !matches!(
                     self.focus,
-                    Pane::ConfigKey | Pane::ConfigValue | Pane::ConnectorInput
+                    ClientViewFocus::KeyInput
+                        | ClientViewFocus::ValueInput
+                        | ClientViewFocus::ConnInput
                 ) =>
             {
                 match self.focus {
-                    Pane::State => self.open_edit(),
-                    Pane::Scripts => self.open_scripts(),
-                    Pane::ConfigTable => self.open_config_edit(),
-                    Pane::Actions => self.trigger_action(),
+                    ClientViewFocus::StateTable => self.open_edit(),
+                    ClientViewFocus::ScriptsButton => self.open_scripts(),
+                    ClientViewFocus::ConfigTable => self.open_config_edit(),
+                    ClientViewFocus::Actions => self.trigger_action(),
                     _ => {}
                 }
                 EventResult::Consumed
             }
             _ => match self.focus {
-                Pane::Connectors => {
+                ClientViewFocus::ConnTable => {
                     let r = self.conn_table.state.handle_events(modifiers, code);
                     self.sync_actions();
                     r
                 }
-                Pane::ConnectorInput => self.conn_input.state.handle_events(modifiers, code),
-                Pane::State => self.state_table.state.handle_events(modifiers, code),
-                Pane::Scripts => EventResult::Consumed,
-                Pane::ConfigTable => self.config_table.state.handle_events(modifiers, code),
-                Pane::ConfigKey => self.key_input.state.handle_events(modifiers, code),
-                Pane::ConfigValue => self.value_input.state.handle_events(modifiers, code),
-                Pane::Actions => self.actions.state.handle_events(modifiers, code),
-                Pane::Messages => {
+                ClientViewFocus::ConnInput => self.conn_input.state.handle_events(modifiers, code),
+                ClientViewFocus::StateTable => {
+                    self.state_table.state.handle_events(modifiers, code)
+                }
+                ClientViewFocus::ScriptsButton => EventResult::Consumed,
+                ClientViewFocus::ConfigTable => {
+                    self.config_table.state.handle_events(modifiers, code)
+                }
+                ClientViewFocus::KeyInput => self.key_input.state.handle_events(modifiers, code),
+                ClientViewFocus::ValueInput => {
+                    self.value_input.state.handle_events(modifiers, code)
+                }
+                ClientViewFocus::Actions => self.actions.state.handle_events(modifiers, code),
+                ClientViewFocus::MsgTable => {
                     let r = self.msg_table.state.handle_events(modifiers, code);
                     self.sync_code();
                     r
                 }
-                Pane::Payload => self.code.state.handle_events(modifiers, code),
+                ClientViewFocus::Code => self.code.state.handle_events(modifiers, code),
             },
         }
     }
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            if let Some((spec, path)) = self.pending_setup.take() {
+            if let Some((spec, path)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
                 device.connectors = self.device.connectors.clone();
                 device.config = self.device.config.clone();
                 if spec.role == OcppRole::Server {
                     let _ = self.backend.stop().await;
-                    self.replacement = Some(build_server_view(spec, path, device));
+                    self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {
@@ -1356,7 +1361,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                             "Version switched: scripts kept but may call actions the new version lacks",
                         );
                     }
-                    self.replacement = Some(build_client_view(spec, path, device));
+                    self.deferred.replacement = Some(build_client_view(spec, path, device));
                     return;
                 } else {
                     let was_online = self.backend.is_online();
@@ -1373,26 +1378,31 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                 }
             }
 
-            if let Some((name, payload, scope)) = self.pending_send.take() {
+            if let Some((name, payload, scope)) = self.deferred.send.take() {
                 self.send_payload(&name, payload, scope);
             }
 
             // Drain Lua-enqueued actions (each with its scope) and send them.
-            let queued: Vec<(Scope, String, serde_json::Value)> =
-                self.action_queue.lock().unwrap().drain(..).collect();
+            let queued: Vec<(Scope, String, serde_json::Value)> = self
+                .runtime
+                .action_queue
+                .lock()
+                .unwrap()
+                .drain(..)
+                .collect();
             for (scope, name, overrides) in queued {
                 self.dispatch_lua_action(scope, &name, overrides);
             }
 
             let online = self.backend.is_online();
-            if self.was_online && !online {
+            if self.runtime.was_online && !online {
                 self.log
                     .write()
                     .await
                     .write("Connection lost — auto-transmit halted");
-                self.heartbeat_tick = 0;
+                self.runtime.heartbeat_tick = 0;
             }
-            self.was_online = online;
+            self.runtime.was_online = online;
 
             // Auto-Heartbeat (CS-level) at the BootNotification-supplied cadence while connected.
             if online {
@@ -1403,9 +1413,9 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                     .heartbeat_interval_secs()
                     .unwrap_or(DEFAULT_HEARTBEAT_SECS)
                     .max(1);
-                self.heartbeat_tick = self.heartbeat_tick.wrapping_add(1);
-                if self.heartbeat_tick >= interval_secs as u32 * TICKS_PER_SEC {
-                    self.heartbeat_tick = 0;
+                self.runtime.heartbeat_tick = self.runtime.heartbeat_tick.wrapping_add(1);
+                if self.runtime.heartbeat_tick >= interval_secs as u32 * TICKS_PER_SEC {
+                    self.runtime.heartbeat_tick = 0;
                     self.send_payload("Heartbeat", serde_json::json!({}), Scope::CS);
                 }
             }
@@ -1414,12 +1424,12 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             let active: Vec<Scope> = V::active_meter_scopes(&self.state.read().unwrap());
             V::track_meter_reset(
                 &self.state.read().unwrap(),
-                &mut self.tx_was_active,
-                &mut self.meter_tick,
+                &mut self.runtime.tx_was_active,
+                &mut self.runtime.meter_tick,
             );
             if !active.is_empty() && online {
-                self.meter_tick = self.meter_tick.wrapping_add(1);
-                if self.meter_tick.is_multiple_of(50) {
+                self.runtime.meter_tick = self.runtime.meter_tick.wrapping_add(1);
+                if self.runtime.meter_tick.is_multiple_of(50) {
                     for scope in active {
                         let payload = self.state_payload("MeterValues", scope);
                         self.send_payload("MeterValues", payload, scope);
@@ -1427,23 +1437,23 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                 }
             }
 
-            if self.applied_log_file != self.device.log_file {
+            if self.runtime.applied_log_file != self.device.log_file {
                 let name = self.spec.name.clone();
                 self.log
                     .write()
                     .await
                     .set_log_file(self.device.log_file.as_deref(), &name);
-                self.applied_log_file = self.device.log_file.clone();
+                self.runtime.applied_log_file = self.device.log_file.clone();
             }
 
             // Refresh tables. Messages are teed to the persistent log (all scopes) then filtered to
             // the selected entry for display.
             self.messages = self.backend.messages_snapshot().await;
-            let mut max_seq = self.logged_seq;
+            let mut max_seq = self.runtime.logged_seq;
             let new_lines: Vec<String> = self
                 .messages
                 .iter()
-                .filter(|m| m.seq > self.logged_seq)
+                .filter(|m| m.seq > self.runtime.logged_seq)
                 .map(|m| {
                     max_seq = max_seq.max(m.seq);
                     m.log_line()
@@ -1454,7 +1464,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                 for line in new_lines {
                     log.write(&line);
                 }
-                self.logged_seq = max_seq;
+                self.runtime.logged_seq = max_seq;
             }
 
             let scope = self.selected_scope();
@@ -1471,8 +1481,8 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             // while the user is reading it (Messages scrolled up) or scrolling the payload pane
             // (whose content is driven by the selected message row).
             let follow = match self.focus {
-                Pane::Payload => false,
-                Pane::Messages => at_bottom,
+                ClientViewFocus::Code => false,
+                ClientViewFocus::MsgTable => at_bottom,
                 _ => true,
             };
             if follow {
@@ -1521,7 +1531,10 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                 }
             }),
             "edit" | "e" => {
-                self.setup_overlay = Some(OcppSetupDialog::edit(&self.spec, &self.device_path));
+                self.overlay = ClientOverlay::Setup(Box::new(OcppSetupDialog::edit(
+                    &self.spec,
+                    &self.device_path,
+                )));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
             "compact" => {
@@ -1578,7 +1591,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
     }
 
     fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
-        self.replacement.take()
+        self.deferred.replacement.take()
     }
 }
 
@@ -1955,25 +1968,25 @@ mod tests {
     fn assert_focus_cycle<V: ClientVersion>(version: OcppVersion) {
         let mut v = client_view::<V>(version);
         // Default selection is the CS row, so the config panes are in the cycle.
-        v.focus = Pane::Connectors;
+        v.focus = ClientViewFocus::ConnTable;
         let mut seen = vec![v.focus];
         for _ in 0..10 {
             v.focus_next();
             seen.push(v.focus);
         }
         assert!(
-            seen.contains(&Pane::Payload),
+            seen.contains(&ClientViewFocus::Code),
             "Payload pane not in Tab order"
         );
         // 10 steps from Connectors wraps the full CS-level cycle back to Connectors.
         assert_eq!(
             v.focus,
-            Pane::Connectors,
+            ClientViewFocus::ConnTable,
             "focus_next did not wrap to start"
         );
         // BackTab from Connectors lands on the add-connector input (reverse order).
         v.focus_previous();
-        assert_eq!(v.focus, Pane::ConnectorInput);
+        assert_eq!(v.focus, ClientViewFocus::ConnInput);
     }
 
     #[test]

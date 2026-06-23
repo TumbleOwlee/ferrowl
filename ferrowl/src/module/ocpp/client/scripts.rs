@@ -18,7 +18,7 @@ use ferrowl_ui::{
         Widget,
     },
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -42,21 +42,18 @@ struct ScriptRow {
 
 type ScriptTable = Widget<TableState<ScriptRow, 2>, Table<ScriptRow, ScriptHeader, 2>>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Focus {
-    List,
-    NewInput,
-    Code,
-}
-
 /// The script manager dialog. Works on a private copy of the script list; the view applies the
 /// result on close.
+#[focusable]
+#[derive(Focus)]
 pub struct ScriptDialog {
     scripts: Vec<ScriptDef>,
+    #[focus]
     table: ScriptTable,
+    #[focus]
     name_input: Widget<InputFieldState, InputField<String>>,
+    #[focus]
     code: Widget<CodeInputFieldState, CodeInputField>,
-    focus: Focus,
     confirm: Option<ConfirmDeleteDialog>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
@@ -69,7 +66,8 @@ impl ScriptDialog {
             table: script_table(rows(&scripts)),
             name_input: name_input(),
             code: code_editor(),
-            focus: Focus::List,
+            focus: ScriptDialogFocus::Table,
+            view_focused: true,
             confirm: None,
             compact: false,
             scripts,
@@ -152,22 +150,6 @@ impl ScriptDialog {
         }
     }
 
-    fn focus_next(&mut self) {
-        self.focus = match self.focus {
-            Focus::List => Focus::NewInput,
-            Focus::NewInput => Focus::Code,
-            Focus::Code => Focus::List,
-        };
-    }
-
-    fn focus_previous(&mut self) {
-        self.focus = match self.focus {
-            Focus::List => Focus::Code,
-            Focus::NewInput => Focus::List,
-            Focus::Code => Focus::NewInput,
-        };
-    }
-
     /// Handle a key. Returns `true` when the dialog should close (Esc at the top level).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         // Delete-confirmation sub-dialog takes precedence.
@@ -197,7 +179,7 @@ impl ScriptDialog {
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             _ => match self.focus {
-                Focus::List => match (modifiers, code) {
+                ScriptDialogFocus::Table => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
                     (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
                     (KeyModifiers::NONE, KeyCode::Char('d')) => {
@@ -210,13 +192,13 @@ impl ScriptDialog {
                         self.sync_code_from_selection();
                     }
                 },
-                Focus::NewInput => match (modifiers, code) {
+                ScriptDialogFocus::NameInput => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Enter) => self.create_script(),
                     _ => {
                         let _ = self.name_input.state.handle_events(modifiers, code);
                     }
                 },
-                Focus::Code => {
+                ScriptDialogFocus::Code => {
                     let _ = self.code.state.handle_events(modifiers, code);
                     self.flush_code_to_selection();
                 }
@@ -261,11 +243,15 @@ impl ScriptDialog {
         let [list_area, input_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
 
-        self.table.state.set_focused(self.focus == Focus::List);
+        self.table
+            .state
+            .set_focused(self.focus == ScriptDialogFocus::Table);
         self.name_input
             .state
-            .set_focused(self.focus == Focus::NewInput);
-        self.code.state.set_focused(self.focus == Focus::Code);
+            .set_focused(self.focus == ScriptDialogFocus::NameInput);
+        self.code
+            .state
+            .set_focused(self.focus == ScriptDialogFocus::Code);
 
         StatefulWidget::render(&self.table.widget, list_area, buf, &mut self.table.state);
         StatefulWidget::render(
@@ -387,7 +373,7 @@ mod tests {
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(!d.compact);
         // `c` in the name input is text, not a compact toggle.
-        d.focus = Focus::NewInput;
+        d.focus = ScriptDialogFocus::NameInput;
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(!d.compact);
         assert_eq!(d.name_input.state.input(), "c");

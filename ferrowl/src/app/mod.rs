@@ -12,6 +12,8 @@ mod render;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_ring::Ring;
 use ferrowl_ui::AlternateScreen;
+use ferrowl_ui::traits::SetFocus;
+use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::Duration;
@@ -86,11 +88,12 @@ impl LogRing {
     }
 }
 
-/// Which pane currently receives input.
+/// Which top-level surface receives input. The content↔log split lives inside the active [`Tab`]
+/// (its `#[derive(Focus)]` enum), so `App` only tracks the modal layer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
-    Table,
-    Log,
+    /// The active tab's content/log panes (the tab decides which of the two).
+    Content,
     Command,
     Dialog,
 }
@@ -135,11 +138,18 @@ impl Overlay {
 }
 
 /// Per-module UI state shown under one tab.
+/// A module tab: the content view plus its log pane. Itself a focusable node — `#[derive(Focus)]`
+/// makes "switch content↔log" a `focus_next()` and lets `App` toggle the whole tab's focus
+/// (recursing into whichever pane is active).
+#[focusable]
+#[derive(Focus)]
 pub struct Tab {
     pub name: String,
     pub log: SharedLog,
-    pub log_view: LogView,
+    #[focus]
     pub view: Box<dyn ModuleView>,
+    #[focus]
+    pub log_view: LogView,
 }
 
 impl Tab {
@@ -148,8 +158,25 @@ impl Tab {
         Self {
             name,
             log,
-            log_view: new_log_view(),
             view,
+            log_view: new_log_view(),
+            focus: TabFocus::View,
+            view_focused: false,
+        }
+    }
+
+    /// True when the tab is focused and its log pane (not the content view) has focus.
+    pub fn is_log_focused(&self) -> bool {
+        self.view_focused && matches!(self.focus, TabFocus::LogView)
+    }
+
+    /// Swap in a replacement content view (e.g. after an OCPP role switch), carrying over the log
+    /// channel and re-applying focus so the fresh view isn't left unfocused mid-session.
+    pub fn replace_view(&mut self, new_view: Box<dyn ModuleView>) {
+        self.view = new_view;
+        self.log = self.view.log();
+        if self.view_focused && matches!(self.focus, TabFocus::View) {
+            self.view.set_focused(true);
         }
     }
 }
@@ -179,9 +206,9 @@ impl App {
                 Focus::Dialog,
             )
         } else {
-            (None, Focus::Table)
+            (None, Focus::Content)
         };
-        Ok(Self {
+        let mut app = Self {
             screen: AlternateScreen::new()?,
             tabs,
             active: 0,
@@ -189,7 +216,19 @@ impl App {
             command: new_command_line(),
             overlay,
             keymode: None,
-        })
+        };
+        // Give the starting tab keyboard focus (unless a creation dialog is up).
+        app.set_content_focus(app.focus == Focus::Content);
+        Ok(app)
+    }
+
+    /// Focus (or unfocus) the active tab's content/log panes. The single choke point for the
+    /// event-driven focus model: every transition that changes `self.focus` routes through here so
+    /// the tab's stored widget focus never goes stale.
+    fn set_content_focus(&mut self, on: bool) {
+        if let Some(tab) = self.tabs.get_mut(self.active) {
+            tab.set_focused(on);
+        }
     }
 
     /// Run the async UI loop until the user quits.
@@ -229,8 +268,7 @@ impl App {
             tab.view.refresh().await;
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
             if let Some(new_view) = tab.view.take_replacement() {
-                tab.view = new_view;
-                tab.log = tab.view.log();
+                tab.replace_view(new_view);
             }
             tab.name = tab.view.name();
         }
@@ -239,7 +277,8 @@ impl App {
             return;
         }
         let active = self.active;
-        let follow = self.focus != Focus::Log;
+        // Tail the log ring unless the user is reading the log pane of the active tab.
+        let follow = !self.tabs[active].is_log_focused();
 
         let log = self.tabs[active].log.clone();
         let lines = {
@@ -278,13 +317,14 @@ impl App {
         match self.focus {
             Focus::Command => self.handle_command_key(modifiers, code).await,
             Focus::Dialog => self.handle_dialog_key(modifiers, code).await,
-            Focus::Table | Focus::Log => self.handle_nav_key(modifiers, code),
+            Focus::Content => self.handle_nav_key(modifiers, code),
         }
     }
 
     fn close_overlay(&mut self) {
         self.overlay = None;
-        self.focus = Focus::Table;
+        self.focus = Focus::Content;
+        self.set_content_focus(true);
     }
 
     async fn log_active(&self, message: String) {

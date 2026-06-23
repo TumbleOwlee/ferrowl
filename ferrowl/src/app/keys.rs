@@ -74,25 +74,20 @@ impl App {
         false
     }
 
-    /// Forward a key to the focused pane. Returns `true` if consumed.
+    /// Forward a key to the active tab, which dispatches to whichever of its panes (content view or
+    /// log) currently holds focus. Returns `true` if consumed.
     fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let Some(tab) = self.tabs.get_mut(self.active) else {
             return false;
         };
         match self.focus {
-            Focus::Table => matches!(
-                tab.view.handle_events(modifiers, code),
-                EventResult::Consumed
-            ),
-            Focus::Log => {
-                let _ = tab.log_view.state.handle_events(modifiers, code);
-                false
-            }
+            Focus::Content => matches!(tab.handle_events(modifiers, code), EventResult::Consumed),
             Focus::Command | Focus::Dialog => false,
         }
     }
 
     fn enter_command(&mut self) {
+        self.set_content_focus(false);
         self.focus = Focus::Command;
         self.command.state.set_input(String::new());
         self.command.state.set_cursor(0);
@@ -103,28 +98,31 @@ impl App {
         self.command.state.set_focused(false);
         self.command.state.set_input(String::new());
         self.command.state.set_cursor(0);
-        self.focus = Focus::Table;
+        self.focus = Focus::Content;
+        self.set_content_focus(true);
     }
 
+    /// `Ctrl+w` j/k: toggle focus between the active tab's content view and its log pane. Only
+    /// reachable while the content surface is focused (the modal layers route keys elsewhere).
     fn toggle_pane(&mut self) {
-        self.focus = match self.focus {
-            Focus::Log => Focus::Table,
-            _ => Focus::Log,
-        };
         if let Some(tab) = self.tabs.get_mut(self.active) {
-            tab.log_view.state.set_focused(self.focus == Focus::Log);
+            tab.focus_next();
         }
     }
 
     pub(super) fn next_tab(&mut self) {
         if !self.tabs.is_empty() {
+            self.set_content_focus(false);
             self.active = (self.active + 1) % self.tabs.len();
+            self.set_content_focus(self.focus == Focus::Content);
         }
     }
 
     pub(super) fn prev_tab(&mut self) {
         if !self.tabs.is_empty() {
+            self.set_content_focus(false);
             self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+            self.set_content_focus(self.focus == Focus::Content);
         }
     }
 }

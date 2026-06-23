@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
+use ferrowl_ui::traits::{HandleEvents, IsFocus, SetFocus};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -32,13 +33,17 @@ pub type RefreshFuture<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = 
 ///
 /// `Tab` and `App` interact with a module exclusively through this interface.
 /// No module-type-specific types are visible outside the module's own directory.
-pub trait ModuleView {
+///
+/// A module view is a focusable node ([`SetFocus`] + [`IsFocus`]): the owning [`Tab`] toggles its
+/// whole-view focus, and the view reads [`IsFocus::is_focused`] for focus-dependent rendering (e.g.
+/// message-log autoscroll). Concrete views get these from `#[derive(Focus)]`.
+pub trait ModuleView: SetFocus + IsFocus {
     // Name of the module instance
     fn name(&self) -> String;
 
     /// Render the module content area (everything except the log pane and tab bar).
-    /// `focused` is true when the view's content pane (not log) has keyboard focus.
-    fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool);
+    /// Focus-dependent rendering reads [`IsFocus::is_focused`] on `self`.
+    fn render(&mut self, frame: &mut Frame, area: Rect);
 
     /// Handle a terminal key event. Returns `Consumed` or `Unhandled`.
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult;
@@ -75,5 +80,25 @@ pub trait ModuleView {
     /// Polled by `App` once per tick after [`refresh`]. Default: never replaced.
     fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
         None
+    }
+}
+
+// Forwarding impls so a boxed module view is itself a focusable, event-handling node — lets the
+// owning `Tab` carry it as a `#[focus]` field under `#[derive(Focus)]`.
+impl SetFocus for Box<dyn ModuleView> {
+    fn set_focused(&mut self, focus: bool) {
+        (**self).set_focused(focus);
+    }
+}
+
+impl IsFocus for Box<dyn ModuleView> {
+    fn is_focused(&self) -> bool {
+        (**self).is_focused()
+    }
+}
+
+impl HandleEvents for Box<dyn ModuleView> {
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        (**self).handle_events(modifiers, code)
     }
 }

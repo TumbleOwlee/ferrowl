@@ -189,7 +189,7 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
             let impl_previous = focus_loop(quote! { (#def_len - 1) });
             let impl_next = focus_loop(quote! { 1 });
 
-            // Generate implementation for focus switching methods
+            // Generate implementation for focus switching methods.
             let focus_def = quote! {
                 impl #impl_generic #identifier #ty_generic #where_clause {
                     // `% #def_len` collapses to `% 1` for single-field views; that is
@@ -201,6 +201,63 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
                     #[allow(clippy::modulo_one)]
                     pub fn focus_next(&mut self) {
                         #impl_next
+                    }
+                }
+            };
+
+            // `set_focused`/`is_focused` for the whole view (a `#[focus]`-bearing struct is itself a
+            // focusable node, so it composes with parent views). Enabling restores the remembered
+            // pane if its `#[focus(when=…)]` guard still holds, else the first eligible pane;
+            // disabling unfocuses every child and keeps the remembered pane.
+            let mut impl_clear_all = quote! {};
+            let mut impl_eligibility = quote! {};
+            let mut impl_candidates = quote! {};
+            let mut impl_focus_one = quote! {};
+            for def in definitions.iter() {
+                let name = &def.widget_name;
+                let enum_field = &def.enum_field;
+                let when = match &def.when {
+                    Some(when) => quote! { #when },
+                    None => quote! { true },
+                };
+                impl_clear_all.extend(quote! {
+                    ferrowl_ui::traits::SetFocus::set_focused(&mut self.#name, false);
+                });
+                impl_eligibility.extend(quote! {
+                    #enum_name::#enum_field => #when,
+                });
+                impl_candidates.extend(quote! {
+                    (#enum_name::#enum_field, #when),
+                });
+                impl_focus_one.extend(quote! {
+                    #enum_name::#enum_field => ferrowl_ui::traits::SetFocus::set_focused(&mut self.#name, true),
+                });
+            }
+            let set_focus_def = quote! {
+                impl #impl_generic ferrowl_ui::traits::IsFocus for #identifier #ty_generic #where_clause {
+                    fn is_focused(&self) -> bool {
+                        self.view_focused
+                    }
+                }
+                impl #impl_generic ferrowl_ui::traits::SetFocus for #identifier #ty_generic #where_clause {
+                    fn set_focused(&mut self, focus: bool) {
+                        self.view_focused = focus;
+                        #impl_clear_all
+                        if !focus {
+                            return;
+                        }
+                        let remembered_ok = match self.focus {
+                            #impl_eligibility
+                        };
+                        if !remembered_ok {
+                            let candidates = [ #impl_candidates ];
+                            if let Some(&(f, _)) = candidates.iter().find(|&&(_, ok)| ok) {
+                                self.focus = f;
+                            }
+                        }
+                        match self.focus {
+                            #impl_focus_one
+                        }
                     }
                 }
             };
@@ -239,6 +296,7 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
             TokenStream::from(quote! {
                 #enum_def
                 #focus_def
+                #set_focus_def
                 #handle_def
             })
         }
@@ -584,12 +642,24 @@ fn expand_overlay(input: syn::DeriveInput) -> syn::Result<proc_macro2::TokenStre
     })
 }
 
-/// Attribute that appends a private `focus: <StructName>Focus` field to a
-/// struct, wiring it up for `#[derive(Focus)]`. Must appear *above* the
-/// derive so the field exists when the derive runs.
+/// Attribute that appends the private state `#[derive(Focus)]` needs: a
+/// `focus: <StructName>Focus` field (which pane is focused) and a
+/// `view_focused: bool` field (whether the whole view is focused). Must appear
+/// *above* the derive so the fields exist when the derive runs.
 #[proc_macro_attribute]
 pub fn focusable(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = syn::parse_macro_input!(item as syn::DeriveInput);
+
+    // Structs that also `#[derive(Builder)]` get `#[builder(default)]` on the injected
+    // `view_focused` flag so callers needn't set it (it defaults to `false`); the `focus` field is
+    // still set explicitly by those builders (its enum has no `Default`).
+    let uses_builder = input.attrs.iter().any(|attr| {
+        attr.path().is_ident("derive")
+            && attr
+                .parse_args_with(Punctuated::<syn::Path, Token![,]>::parse_terminated)
+                .map(|paths| paths.iter().any(|p| p.is_ident("Builder")))
+                .unwrap_or(false)
+    });
 
     match &mut input.data {
         syn::Data::Struct(s) => {
@@ -602,10 +672,24 @@ pub fn focusable(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 colon_token: Some(Default::default()),
                 ty: syn::parse_str::<Type>(&ident).unwrap(),
             };
+            let view_focused_attrs = if uses_builder {
+                vec![syn::parse_quote!(#[builder(default)])]
+            } else {
+                Vec::new()
+            };
+            let view_focused_field = Field {
+                attrs: view_focused_attrs,
+                mutability: syn::FieldMutability::None,
+                vis: Visibility::Inherited,
+                ident: Some(Ident::new("view_focused", Span::call_site())),
+                colon_token: Some(Default::default()),
+                ty: syn::parse_str::<Type>("bool").unwrap(),
+            };
 
             match &mut s.fields {
                 Fields::Named(named) => {
                     named.named.push(focus_field);
+                    named.named.push(view_focused_field);
                 }
                 _ => {
                     unreachable!("FocusSwitch only works on named fields.");

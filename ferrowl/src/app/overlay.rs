@@ -61,6 +61,7 @@ impl App {
 
     /// Open the module-type selector for a new module tab (`:n`/`:new`).
     pub(super) fn enter_new(&mut self) {
+        self.set_content_focus(false);
         self.overlay = Some(Overlay::TypeSelect(Box::new(TypeSelectDialog::new())));
         self.focus = Focus::Dialog;
     }
@@ -78,6 +79,7 @@ impl App {
                 .state
                 .set_cursor(path.chars().count());
         }
+        self.set_content_focus(false);
         self.overlay = Some(Overlay::Creation(Box::new(sv)));
         self.focus = Focus::Dialog;
     }

@@ -71,6 +71,15 @@ pub trait OverlayKeys {
     fn focus_cycle(&mut self, forward: bool);
 }
 
+impl<T> OverlayKeys for Box<T>
+where
+    T: OverlayKeys,
+{
+    fn focus_cycle(&mut self, forward: bool) {
+        self.as_mut().focus_cycle(forward)
+    }
+}
+
 /// Outcome of a `#[derive(Overlay)]` enum's common-key router (`route_keys`):
 /// whether the key closed the overlay, cycled its focus, or was left for the
 /// view's own `Enter`/custom handling.

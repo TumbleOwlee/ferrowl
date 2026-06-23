@@ -42,9 +42,10 @@ pub(super) fn render(
         render_tabs(&names, active, tabs_area, buf);
     }
 
-    // Phase 2: module content view (includes its own status bar).
+    // Phase 2: module content view (includes its own status bar). Focus is carried by the view's
+    // own stored state (set at focus-change time), not recomputed here.
     if let Some(tab) = tabs.get_mut(active) {
-        tab.view.render(frame, view_area, focus == Focus::Table);
+        tab.view.render(frame, view_area);
     }
 
     // Phase 3: log pane, command line, overlay.

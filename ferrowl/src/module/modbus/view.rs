@@ -246,6 +246,8 @@ pub struct ModbusModuleView {
     overlay: Option<ModbusOverlay>,
     setup_overlay: Option<SetupDialog>,
     pending: Option<PendingAction>,
+    /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
+    view_focused: bool,
 }
 
 impl ModbusModuleView {
@@ -271,6 +273,7 @@ impl ModbusModuleView {
             overlay: None,
             setup_overlay: None,
             pending: None,
+            view_focused: false,
         }
     }
 
@@ -819,6 +822,18 @@ impl ModbusModuleView {
     }
 }
 
+impl ferrowl_ui::traits::SetFocus for ModbusModuleView {
+    fn set_focused(&mut self, focus: bool) {
+        self.view_focused = focus;
+    }
+}
+
+impl ferrowl_ui::traits::IsFocus for ModbusModuleView {
+    fn is_focused(&self) -> bool {
+        self.view_focused
+    }
+}
+
 impl ModuleView for ModbusModuleView {
     fn name(&self) -> String {
         self.spec.name.clone()
@@ -828,7 +843,7 @@ impl ModuleView for ModbusModuleView {
         self.overlay.is_some() || self.setup_overlay.is_some()
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool) {
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
         use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
         use ratatui::{
             layout::{Constraint, HorizontalAlignment, Layout},
@@ -838,10 +853,9 @@ impl ModuleView for ModbusModuleView {
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        self.table
-            .table
-            .state
-            .set_focused(focused && self.overlay.is_none() && self.setup_overlay.is_none());
+        self.table.table.state.set_focused(
+            self.view_focused && self.overlay.is_none() && self.setup_overlay.is_none(),
+        );
         self.table.render(content_area, frame.buffer_mut());
 
         let online = self.module.is_instance_active();
