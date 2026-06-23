@@ -1,11 +1,20 @@
-//! OCPP 2.0.1 charging-station (client) view. Same multi-connector layout as the 1.6 view (a
-//! connector table + add-connector input over the selected entry's state table, scripts button,
-//! action list and CS-level variable block on the left; message log filtered to the selection over
-//! a JSON payload viewer on the right), adapted to 2.0.1: EVSE+connector scope, a connector-status
-//! enum, a GetVariables-backed variable store, and `StartTransaction`/`StopTransaction` *shortcut*
-//! buttons that emit a `TransactionEvent` for the selected connector.
+//! OCPP charging-station (client) view, generic over the OCPP version via [`ClientVersion`]. Left
+//! column: a connector table (CS row + one row per connector) over an add-connector input, then the
+//! selected entry's state table, the scripts button, the action list and (CS-level only) the
+//! config/variable block. Right column: the message log (filtered to the selected entry) over a JSON
+//! payload viewer; an ONLINE/OFFLINE status line.
+//!
+//! Selecting the CS row shows CS-level state (identity), the config table, and non-connector
+//! actions. Selecting a connector shows that connector's metering/status, hides config, and shows
+//! connector-scoped actions. The message log is partitioned by the same scope.
+//!
+//! Per-version behaviour (scope ctor, the `EditField` row map + labels, the connector-status choice
+//! list, the state-driven action set, the config-vs-variable labels, the exact request JSON, and the
+//! 2.0.1 `StartTransaction`/`StopTransaction` transaction-shortcut buttons) lives behind the
+//! [`ClientVersion`] trait; the two concrete views are `ClientView<V1_6>` / `ClientView<V2_0_1>`.
 
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 
@@ -23,11 +32,12 @@ use ferrowl_ui::{
     },
     traits::HandleEvents,
     widgets::{
-        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, Header, InputField,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
         InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, TableEntry,
-        TextBuilder, Widget, Width,
+        TextBuilder, Widget,
     },
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
 use ratatui::{
     Frame,
@@ -36,12 +46,13 @@ use ratatui::{
 };
 use tokio::sync::RwLock as AsyncRwLock;
 
-use ferrowl_ocpp::{V2_0_1, Version};
+use ferrowl_ocpp::Version;
+use ferrowl_ocpp::cs::CsActionHandler;
 
 use crate::app::LogRing;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::backend::{
-    DEFAULT_HEARTBEAT_SECS, OcppClient, OcppMessage, TICKS_PER_SEC, boot_interval, rfc3339_now,
+    DEFAULT_HEARTBEAT_SECS, Messages, OcppClient, OcppMessage, TICKS_PER_SEC,
 };
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
@@ -49,8 +60,6 @@ use crate::module::ocpp::client::lua_sim::{
     ClientFields, OcppSimHandle, ScopedActionQueue, merge_overrides, run_client_sim,
 };
 use crate::module::ocpp::client::scripts::ScriptDialog;
-use crate::module::ocpp::client::v2_0_1::handler::CsStateHandler;
-use crate::module::ocpp::client::v2_0_1::state::{ConfigRow, CsState, NvRow};
 use crate::module::ocpp::config::device::{ConfigKeyDef, ConnectorRef, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::scope::Scope;
@@ -61,92 +70,212 @@ use crate::module::view::{
 };
 use crate::view::log::format_timestamp;
 
-// --- State table -----------------------------------------------------------
+// --- Version trait ---------------------------------------------------------
 
-impl TableEntry<3> for NvRow {
-    fn values(&self) -> [String; 3] {
-        [self.name.clone(), self.unit.clone(), self.value.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
+/// The shared charging-station state surface the generic client view needs: a list of connectors,
+/// the CS-level identity/config store, and the heartbeat cadence. Each version's `CsState`
+/// implements this; the version-specific operations stay on [`ClientVersion`].
+pub trait ClientState: ClientFields + Default + Send + Sync + 'static {
+    /// Number of connectors (always ≥ 1).
+    fn connector_count(&self) -> usize;
+    /// Remove all connectors (re-seeded from device config).
+    fn clear_connectors(&mut self);
+    /// Remove the connector at list index `idx`.
+    fn remove_connector_at(&mut self, idx: usize);
+    /// The list index of the connector with `connector_id`.
+    fn connector_position(&self, connector_id: i64) -> Option<usize>;
+    /// Read a connector field (by list index) for the action-dialog field lookup.
+    fn conn_get_field(&self, idx: usize, name: &str) -> Option<ferrowl_lua::module::ValueType>;
+    /// Read a CS-level field for the action-dialog field lookup.
+    fn cs_get_field_named(&self, name: &str) -> Option<ferrowl_lua::module::ValueType>;
+    /// The CS-level state table rows.
+    fn cs_state_rows(&self) -> Vec<NvRowData>;
+    /// The connector state table rows for the connector at list index `idx`.
+    fn conn_state_rows(&self, idx: usize) -> Vec<NvRowData>;
+    /// The config/variable store.
+    fn config(&self) -> &[ConfigKey];
+    /// The config/variable store (mutable).
+    fn config_mut(&mut self) -> &mut Vec<ConfigKey>;
+    /// The heartbeat cadence (seconds) from the last BootNotification response, if any.
+    fn heartbeat_interval_secs(&self) -> Option<u64>;
 }
 
-#[derive(Clone, Debug)]
-struct NvHeader;
+/// One row of a state table (decoupled from the per-version `NvRow` so the generic view owns its
+/// own table-row type).
+pub struct NvRowData {
+    pub name: String,
+    pub unit: String,
+    pub value: String,
+}
 
-impl Header<3> for NvHeader {
-    fn header() -> [String; 3] {
-        ["Name".into(), "Unit".into(), "Value".into()]
+/// Everything version-specific the generic charging-station (client) view needs. Parallels the
+/// server's `ServerVersion`. Each version supplies its split [`ClientState`], its inbound handler,
+/// and the per-version seams: scope construction, the connector lookup/add, the `EditField` row
+/// map + the connector-status choices, the state-driven action set, the exact request payloads, and
+/// (2.0.1) the `StartTransaction`/`StopTransaction` transaction shortcuts.
+pub trait ClientVersion: Version + Sized + 'static {
+    /// The charging-station state (CS-level identity, the config/variable store, the connectors),
+    /// shared behind a `std::sync::RwLock`.
+    type Cs: ClientState;
+    /// The inbound (CSMS→CS) handler answering Calls from observed state.
+    type Handler: CsActionHandler<Self>;
+
+    /// Build the inbound handler, wiring it to the backend's online flag + message log and the
+    /// shared state.
+    fn handler(
+        online: Arc<std::sync::atomic::AtomicBool>,
+        messages: Messages,
+        state: Arc<RwLock<Self::Cs>>,
+    ) -> Self::Handler;
+
+    /// State-driven actions (their request is fully built from state, no dialog).
+    fn state_driven() -> &'static [&'static str];
+
+    /// The title of the config/variable table ("Config" for 1.6, "Variables" for 2.0.1).
+    fn config_title() -> &'static str;
+
+    /// The placeholder of the add-connector input ("Add connector id" / "Add evse/connector").
+    fn add_connector_placeholder() -> &'static str;
+
+    /// Whether this version exposes the `StartTransaction`/`StopTransaction` transaction-shortcut
+    /// buttons (which emit a `TransactionEvent`). 1.6 builds those as ordinary state-driven actions.
+    fn has_tx_shortcuts() -> bool {
+        false
     }
-    fn widths() -> [Width; 3] {
-        [
-            Width { min: 18, max: 30 },
-            Width { min: 6, max: 6 },
-            Width { min: 6, max: 30 },
-        ]
+
+    /// The per-action send-dialog spec for `name`, or `None` (raw JSON editor).
+    fn action_spec(name: &str) -> Option<crate::module::ocpp::action_dialog::ActionSpec>;
+
+    /// Dialog-reachable actions that intentionally use the raw JSON editor (no typed form yet).
+    fn json_actions() -> &'static [&'static str];
+
+    /// The scope of the connector at list index `idx` (1.6 `Scope::connector`, 2.0.1 `Scope::evse`).
+    fn scope_of(s: &Self::Cs, idx: usize) -> Scope;
+
+    /// The connectors targeted by `scope` resolved to a list index (the connector on its EVSE /
+    /// connector id, falling back to the first connector). Used for the action-dialog field lookup.
+    fn connector_index(s: &Self::Cs, scope: Scope) -> Option<usize>;
+
+    /// The connector index `scope` *explicitly* targets (no fall-back to the first connector): the
+    /// state table shows the CS-level rows for the CS scope or an unresolved connector. `None` =
+    /// show `cs_rows`.
+    fn connector_index_for_state(s: &Self::Cs, scope: Scope) -> Option<usize>;
+
+    /// Parse `raw` and add a connector, returning the new connector's id (for selection) or `None`.
+    fn add_connector(s: &mut Self::Cs, raw: &str) -> Option<i64>;
+
+    /// Seed a connector from a device-config [`ConnectorRef`] (1.6 keys on `connector`, ignoring
+    /// `evse`; 2.0.1 uses `evse` defaulting to 1).
+    fn seed_connector(s: &mut Self::Cs, c: &ConnectorRef);
+
+    /// Save-time `ConnectorRef` for the connector at `idx` (1.6 `evse: None`, 2.0.1 `evse: Some`).
+    fn connector_ref(s: &Self::Cs, idx: usize) -> ConnectorRef;
+
+    /// Map a connector state-table row to its [`EditField`] (`None` = read-only / no field).
+    fn conn_edit_field(row: usize) -> Option<EditField>;
+
+    /// Build the [`EditKind`] (overlay widget) for `field`, seeded from the connector resolved by
+    /// `scope` (or the CS-level identity), or `None` to suppress the overlay.
+    fn edit_kind(s: &Self::Cs, scope: Scope, cs: bool, field: EditField) -> Option<EditKind>;
+
+    /// Apply a resolved edit value back into state.
+    fn apply_edit(s: &mut Self::Cs, edit: &EditOverlay, value: ResolvedEdit);
+
+    /// Build the request payload for a state-driven action from state and `scope`.
+    fn state_payload(s: &Self::Cs, name: &str, scope: Scope) -> serde_json::Value;
+
+    /// Build a `TransactionEvent(Started)` for `scope`, minting a tx id (2.0.1 only).
+    fn start_event(_s: &mut Self::Cs, _scope: Scope) -> serde_json::Value {
+        serde_json::json!({})
+    }
+
+    /// Build a `TransactionEvent(Ended)` for `scope`, or `None` if idle (2.0.1 only).
+    fn stop_event(_s: &mut Self::Cs, _scope: Scope) -> Option<serde_json::Value> {
+        None
+    }
+
+    /// Apply a successful response's side-effects (1.6 transaction bookkeeping + heartbeat cadence;
+    /// 2.0.1 confirms the eagerly-minted tx + sets heartbeat cadence).
+    fn apply_post_send(
+        s: &mut Self::Cs,
+        name: &str,
+        scope: Scope,
+        started_tx: Option<&str>,
+        response: &serde_json::Value,
+    );
+
+    /// Roll back an eagerly-minted transaction whose send failed (2.0.1 only; 1.6 is a no-op).
+    fn rollback_tx(_s: &mut Self::Cs, _scope: Scope, _started_tx: Option<&str>) {}
+
+    /// Scopes with a live transaction (1.6: open; 2.0.1: confirmed), for the auto-MeterValues tick.
+    fn active_meter_scopes(s: &Self::Cs) -> Vec<Scope>;
+
+    /// Reset the meter tick when transactions transition idle→active (1.6 only; 2.0.1 resets eagerly
+    /// in `start_event`). Updates the remembered "any active" flag.
+    fn track_meter_reset(_s: &Self::Cs, _tx_was_active: &mut bool, _meter_tick: &mut u32) {}
+}
+
+/// Parse a connector/evse id, tolerating a leading `e`/`c` label (e.g. `e1`, `c2`).
+pub fn parse_id(raw: &str) -> Option<i64> {
+    raw.trim()
+        .trim_start_matches(['e', 'c', 'E', 'C'])
+        .trim()
+        .parse()
+        .ok()
+}
+
+// --- State table -----------------------------------------------------------
+
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = NvHeader)]
+struct NvRow {
+    #[column(name = "Name", min = 18, max = 30)]
+    name: String,
+    #[column(name = "Unit", min = 6, max = 6)]
+    unit: String,
+    #[column(name = "Value", min = 6, max = 30)]
+    value: String,
+}
+
+impl From<NvRowData> for NvRow {
+    fn from(d: NvRowData) -> Self {
+        NvRow {
+            name: d.name,
+            unit: d.unit,
+            value: d.value,
+        }
     }
 }
 
 // --- Connector table -------------------------------------------------------
 
-#[derive(Clone, Debug)]
+/// A row in the connector table: charge-point id + connector label (empty for the CS row).
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = ConnHeader)]
 struct ConnRow {
+    #[column(name = "Charge Point", min = 12, max = 40)]
     cp: String,
+    #[column(name = "Connector", min = 9, max = 16)]
     connector: String,
 }
 
-impl TableEntry<2> for ConnRow {
-    fn values(&self) -> [String; 2] {
-        [self.cp.clone(), self.connector.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
+// --- Config / variable table -----------------------------------------------
 
-#[derive(Clone, Debug)]
-struct ConnHeader;
-
-impl Header<2> for ConnHeader {
-    fn header() -> [String; 2] {
-        ["Charge Point".into(), "Connector".into()]
-    }
-    fn widths() -> [Width; 2] {
-        [Width { min: 12, max: 40 }, Width { min: 9, max: 16 }]
-    }
-}
-
-// --- Variable table --------------------------------------------------------
-
-impl TableEntry<3> for ConfigRow {
-    fn values(&self) -> [String; 3] {
-        [self.key.clone(), self.value.clone(), self.ro.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ConfigHeader;
-
-impl Header<3> for ConfigHeader {
-    fn header() -> [String; 3] {
-        ["Variable".into(), "Value".into(), "ReadOnly".into()]
-    }
-    fn widths() -> [Width; 3] {
-        [
-            Width { min: 16, max: 30 },
-            Width { min: 8, max: 30 },
-            Width { min: 9, max: 9 },
-        ]
-    }
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = ConfigHeader)]
+struct ConfigRow {
+    #[column(name = "Key", min = 16, max = 30)]
+    key: String,
+    #[column(name = "Value", min = 8, max = 30)]
+    value: String,
+    #[column(name = "ReadOnly", min = 9, max = 9)]
+    ro: String,
 }
 
 /// Which state row an edit overlay is changing (CS-level identity or connector metering/status).
+/// `open_edit` picks the right mapping from the selection.
 #[derive(Clone, Copy)]
-enum EditField {
+pub enum EditField {
     // Connector-level
     EvseId,
     ConnectorId,
@@ -169,8 +298,8 @@ enum EditField {
 }
 
 impl EditField {
-    /// Map a CS-level state-table row (see [`CsState::cs_rows`]). Reserved RFID (row 4) is read-only.
-    fn from_cs_row(row: usize) -> Option<EditField> {
+    /// Map a CS-level state-table row (see `CsState::cs_rows`). Reserved RFID (row 4) is read-only.
+    pub fn from_cs_row(row: usize) -> Option<EditField> {
         Some(match row {
             0 => EditField::Model,
             1 => EditField::Vendor,
@@ -180,30 +309,7 @@ impl EditField {
         })
     }
 
-    /// Map a connector state-table row (see [`ConnectorState::rows`]). Charge Limit (row 15) is
-    /// read-only.
-    fn from_conn_row(row: usize) -> Option<EditField> {
-        Some(match row {
-            0 => EditField::EvseId,
-            1 => EditField::ConnectorId,
-            2 => EditField::Phases,
-            3 => EditField::Voltage,
-            4 => EditField::Current(0),
-            5 => EditField::Current(1),
-            6 => EditField::Current(2),
-            7 => EditField::Power,
-            8 => EditField::Frequency,
-            9 => EditField::TotalEnergy,
-            10 => EditField::SessionEnergy,
-            11 => EditField::Soc,
-            12 => EditField::Temperature,
-            13 => EditField::Status,
-            14 => EditField::Rfid,
-            _ => return None,
-        })
-    }
-
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             EditField::EvseId => "EVSE ID",
             EditField::ConnectorId => "Connector ID",
@@ -228,93 +334,54 @@ impl EditField {
     }
 }
 
-const PHASE_CHOICES: [&str; 7] = ["L1", "L2", "L3", "L1,L2", "L1,L3", "L2,L3", "L1,L2,L3"];
-const STATUS_CHOICES: [&str; 5] = [
-    "Available",
-    "Occupied",
-    "Reserved",
-    "Unavailable",
-    "Faulted",
-];
+pub const PHASE_CHOICES: [&str; 7] = ["L1", "L2", "L3", "L1,L2", "L1,L3", "L2,L3", "L1,L2,L3"];
 
-/// State-driven real actions: built straight from state, no dialog.
-const STATE_DRIVEN: [&str; 5] = [
-    "Authorize",
-    "BootNotification",
-    "Heartbeat",
-    "MeterValues",
-    "StatusNotification",
-];
-
-enum EditKind {
+/// A widget for an edit overlay's value (a choice list / number / text input).
+pub enum EditKind {
     Choice(Widget<SelectionState<String>, Selection<String>>),
     Number(Widget<InputFieldState, InputField<f64>>),
     Text(Widget<InputFieldState, InputField<String>>),
 }
 
-struct EditOverlay {
-    field: EditField,
-    /// The EVSE id of the connector being edited (`None` = CS-level field).
-    evse: Option<i64>,
+/// A resolved edit value, handed to [`ClientVersion::apply_edit`].
+pub enum ResolvedEdit {
+    Choice(String),
+    Number(f64),
+    Text(String),
+}
+
+/// A state-row edit overlay: which field, the scope it targets (`Scope::CS` = CS-level), and the
+/// input widget.
+pub struct EditOverlay {
+    pub field: EditField,
+    pub scope: Scope,
     kind: EditKind,
 }
 
 // --- Message table ---------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = MsgHeader, styles = msg_cell_styles)]
 struct MsgRow {
+    #[column(name = "Timestamp", min = 23, max = 23)]
     timestamp: String,
+    #[column(name = "Direction", min = 8, max = 10)]
     direction: String,
+    #[column(name = "Message", min = 14, max = 30)]
     name: String,
+    #[column(name = "Status", min = 7, max = 8)]
     status: String,
+    #[column(name = "Context", min = 6, max = 40)]
     context: String,
 }
 
-impl TableEntry<5> for MsgRow {
-    fn values(&self) -> [String; 5] {
-        [
-            self.timestamp.clone(),
-            self.direction.clone(),
-            self.name.clone(),
-            self.status.clone(),
-            self.context.clone(),
-        ]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-    fn cell_styles(&self) -> [Option<ratatui::prelude::Style>; 5] {
-        let status_style = match self.status.as_str() {
-            "Success" => Some(ratatui::prelude::Style::default().fg(COLOR_SCHEME.success)),
-            "Error" => Some(ratatui::prelude::Style::default().fg(COLOR_SCHEME.error)),
-            _ => None,
-        };
-        [None, None, None, status_style, None]
-    }
-}
-
-#[derive(Clone, Debug)]
-struct MsgHeader;
-
-impl Header<5> for MsgHeader {
-    fn header() -> [String; 5] {
-        [
-            "Timestamp".into(),
-            "Direction".into(),
-            "Message".into(),
-            "Status".into(),
-            "Context".into(),
-        ]
-    }
-    fn widths() -> [Width; 5] {
-        [
-            Width { min: 23, max: 23 },
-            Width { min: 8, max: 10 },
-            Width { min: 14, max: 30 },
-            Width { min: 7, max: 8 },
-            Width { min: 6, max: 40 },
-        ]
-    }
+fn msg_cell_styles(row: &MsgRow) -> [Option<Style>; 5] {
+    let status_style = match row.status.as_str() {
+        "Success" => Some(Style::default().fg(COLOR_SCHEME.success)),
+        "Error" => Some(Style::default().fg(COLOR_SCHEME.error)),
+        _ => None,
+    };
+    [None, None, None, status_style, None]
 }
 
 fn msg_row(m: &OcppMessage) -> MsgRow {
@@ -334,7 +401,7 @@ fn msg_row(m: &OcppMessage) -> MsgRow {
 
 // --- View ------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pane {
     Connectors,
     ConnectorInput,
@@ -353,12 +420,12 @@ type ConnTable = Widget<TableState<ConnRow, 2>, Table<ConnRow, ConnHeader, 2>>;
 type ConfigTable = Widget<TableState<ConfigRow, 3>, Table<ConfigRow, ConfigHeader, 3>>;
 type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 
-pub struct OcppClientV201View {
+pub struct ClientView<V: ClientVersion> {
     spec: OcppSpec,
     device_path: String,
     device: OcppDeviceConfig,
-    backend: OcppClient<V2_0_1>,
-    state: Arc<RwLock<CsState>>,
+    backend: OcppClient<V>,
+    state: Arc<RwLock<V::Cs>>,
     log: SharedLog,
     conn_table: ConnTable,
     conn_input: Widget<InputFieldState, InputField<String>>,
@@ -368,7 +435,9 @@ pub struct OcppClientV201View {
     value_input: Widget<InputFieldState, InputField<String>>,
     actions: Widget<SelectionState<String>, Selection<String>>,
     msg_table: MsgTable,
+    /// All messages from the backend (every scope).
     messages: Vec<OcppMessage>,
+    /// Messages for the currently-selected scope, indexed by the message table.
     visible_messages: Vec<OcppMessage>,
     code: Widget<CodeInputFieldState, CodeInputField>,
     scripts_button: Widget<ButtonState, Button>,
@@ -377,39 +446,46 @@ pub struct OcppClientV201View {
     edit: Option<EditOverlay>,
     config_edit: Option<ConfigEditDialog>,
     action_dialog: Option<ActionDialog>,
+    /// A pending send: action name, payload, and the scope it targets.
     pending_send: Option<(String, serde_json::Value, Scope)>,
     setup_overlay: Option<OcppSetupDialog>,
     pending_setup: Option<(OcppSpec, String)>,
     replacement: Option<Box<dyn ModuleView>>,
+    /// Actions enqueued by Lua scripts (with their scope), drained and sent each `refresh`.
     action_queue: ScopedActionQueue,
     sim: Option<OcppSimHandle>,
     meter_tick: u32,
+    /// Whether any connector had an open transaction on the previous `refresh` (1.6 meter reset).
+    tx_was_active: bool,
     heartbeat_tick: u32,
     was_online: bool,
     logged_seq: u64,
     applied_log_file: Option<String>,
     code_content: String,
     compact: bool,
+    /// Action-list level cached so `sync_actions` only rebuilds on a CS↔connector change.
     actions_for_connector: Option<bool>,
+    _version: PhantomData<V>,
 }
 
-impl OcppClientV201View {
+impl<V: ClientVersion> ClientView<V> {
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
-        let state = Arc::new(RwLock::new(CsState::default()));
+        let state = Arc::new(RwLock::new(V::Cs::default()));
+        // Seed connectors from the device config (else keep the single default connector).
         if !device.connectors.is_empty() {
             let mut s = state.write().unwrap();
-            s.connectors.clear();
+            s.clear_connectors();
             for c in &device.connectors {
-                s.add_connector(c.evse.unwrap_or(1), c.connector);
+                V::seed_connector(&mut s, c);
             }
-            if s.connectors.is_empty() {
-                s.add_connector(1, 1);
+            if s.connector_count() == 0 {
+                V::add_connector(&mut s, "1");
             }
         }
         // Seed persisted config keys from the device config (else keep the built-in defaults).
         if !device.config.is_empty() {
             let mut s = state.write().unwrap();
-            s.config = device
+            *s.config_mut() = device
                 .config
                 .iter()
                 .map(|c| ConfigKey {
@@ -422,7 +498,11 @@ impl OcppClientV201View {
         let cp = spec.name.clone();
         let (conn_rows, state_rows, config_rows) = {
             let s = state.read().unwrap();
-            (conn_rows(&cp, &s), s.cs_rows(), s.config_rows())
+            (
+                conn_rows::<V>(&cp, &s),
+                nv_rows(s.cs_state_rows()),
+                config_rows(&*s),
+            )
         };
         let mut view = Self {
             device_path,
@@ -431,9 +511,9 @@ impl OcppClientV201View {
             state,
             log: Arc::new(AsyncRwLock::new(LogRing::init())),
             conn_table: conn_table(conn_rows),
-            conn_input: panel_input("Add evse/connector"),
+            conn_input: panel_input(V::add_connector_placeholder()),
             state_table: nv_table(state_rows),
-            config_table: config_table(config_rows),
+            config_table: config_table::<V>(config_rows),
             key_input: panel_input("Key"),
             value_input: panel_input("Value"),
             actions: action_list(Vec::new()),
@@ -454,6 +534,7 @@ impl OcppClientV201View {
             action_queue: Arc::new(Mutex::new(VecDeque::new())),
             sim: None,
             meter_tick: 0,
+            tx_was_active: false,
             heartbeat_tick: 0,
             was_online: false,
             logged_seq: 0,
@@ -461,13 +542,16 @@ impl OcppClientV201View {
             code_content: String::new(),
             compact: false,
             actions_for_connector: None,
+            _version: PhantomData,
             spec,
         };
+        // The connector table defaults to row 0 (the CS row) selected.
         view.sync_actions();
         view.start_sim();
         view
     }
 
+    /// Whether the connector table's selection is the CS-level row (row 0 / none).
     fn cs_selected(&self) -> bool {
         !matches!(self.conn_table.state.table_state().selected(), Some(i) if i >= 1)
     }
@@ -477,10 +561,11 @@ impl OcppClientV201View {
         match self.conn_table.state.table_state().selected() {
             Some(i) if i >= 1 => {
                 let s = self.state.read().unwrap();
-                s.connectors
-                    .get(i - 1)
-                    .map(|c| Scope::evse(c.evse_id, None))
-                    .unwrap_or(Scope::CS)
+                if i - 1 < s.connector_count() {
+                    V::scope_of(&s, i - 1)
+                } else {
+                    Scope::CS
+                }
             }
             _ => Scope::CS,
         }
@@ -515,15 +600,17 @@ impl OcppClientV201View {
         self.script_dialog = Some(ScriptDialog::new(&self.device.scripts));
     }
 
+    /// Rebuild the action list for the selected level (CS vs connector), preserving the selection
+    /// while the level is unchanged.
     fn sync_actions(&mut self) {
         let want = !self.cs_selected();
         if self.actions_for_connector == Some(want) {
             return;
         }
         let names = if want {
-            <CsState as ClientFields>::conn_actions()
+            <V::Cs as ClientFields>::conn_actions()
         } else {
-            <CsState as ClientFields>::cs_actions()
+            <V::Cs as ClientFields>::cs_actions()
         };
         let values: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
         self.actions.state.set_values(values);
@@ -534,15 +621,17 @@ impl OcppClientV201View {
     /// for the action's connector; state-driven and other actions build their payload then merge.
     fn dispatch_lua_action(&mut self, scope: Scope, name: &str, overrides: serde_json::Value) {
         let (send_name, mut payload) = match name {
-            "StartTransaction" => ("TransactionEvent".to_string(), self.start_event(scope)),
-            "StopTransaction" => match self.stop_event(scope) {
+            "StartTransaction" if V::has_tx_shortcuts() => {
+                ("TransactionEvent".to_string(), self.start_event(scope))
+            }
+            "StopTransaction" if V::has_tx_shortcuts() => match self.stop_event(scope) {
                 Some(payload) => ("TransactionEvent".to_string(), payload),
                 None => return,
             },
-            n if STATE_DRIVEN.contains(&n) => (name.to_string(), self.state_payload(n, scope)),
+            n if V::state_driven().contains(&n) => (name.to_string(), self.state_payload(n, scope)),
             _ => {
-                let template = V2_0_1::default_action(name)
-                    .and_then(|a| V2_0_1::encode_action(&a).ok())
+                let template = V::default_action(name)
+                    .and_then(|a| V::encode_action(&a).ok())
                     .unwrap_or_else(|| serde_json::json!({}));
                 (name.to_string(), template)
             }
@@ -551,14 +640,15 @@ impl OcppClientV201View {
         self.send_payload(&send_name, payload, scope);
     }
 
-    fn make_handler(&self) -> CsStateHandler {
-        CsStateHandler::new(
+    fn make_handler(&self) -> V::Handler {
+        V::handler(
             self.backend.online_handle(),
             self.backend.messages_handle(),
             self.state.clone(),
         )
     }
 
+    /// Write the device config (reconciled with the live spec, scripts + connectors preserved).
     fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
@@ -569,23 +659,18 @@ impl OcppClientV201View {
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
         device.log_file = self.device.log_file.clone();
-        device.connectors = self
-            .state
-            .read()
-            .unwrap()
-            .connectors
-            .iter()
-            .map(|c| ConnectorRef {
-                evse: Some(c.evse_id),
-                connector: c.connector_id,
-            })
-            .collect();
+        device.connectors = {
+            let s = self.state.read().unwrap();
+            (0..s.connector_count())
+                .map(|i| V::connector_ref(&s, i))
+                .collect()
+        };
         // Persist the client's config keys (server config is transient, never written).
         device.config = self
             .state
             .read()
             .unwrap()
-            .config
+            .config()
             .iter()
             .map(|c| ConfigKeyDef {
                 key: c.key.clone(),
@@ -611,31 +696,19 @@ impl OcppClientV201View {
         self.msg_table.widget.set_row_margin(margin);
     }
 
-    /// Add a connector from the input field (`evse/connector` or bare `connector`, evse default 1).
+    /// Add a connector from the input field, then clear it and select the new row.
     fn add_connector(&mut self) {
         let raw = self.conn_input.state.input().trim().to_string();
-        let (evse, connector) = match raw.split_once('/') {
-            Some((e, c)) => (parse_id(e).unwrap_or(1), parse_id(c)),
-            None => (1, parse_id(&raw)),
-        };
-        let Some(connector) = connector else {
-            return;
-        };
-        let added = self.state.write().unwrap().add_connector(evse, connector);
+        let id = V::add_connector(&mut self.state.write().unwrap(), &raw);
         self.conn_input.state.set_input(String::new());
         self.conn_input.state.set_cursor(0);
-        if added {
+        if let Some(id) = id {
             // Rebuild the (now-sorted) table and select the new connector's row (CS row = 0).
             let cp = self.spec.name.clone();
             let (rows, row) = {
                 let s = self.state.read().unwrap();
-                let row = s
-                    .connectors
-                    .iter()
-                    .position(|c| c.connector_id == connector)
-                    .map(|p| p + 1)
-                    .unwrap_or(0);
-                (conn_rows(&cp, &s), row)
+                let row = s.connector_position(id).map(|p| p + 1).unwrap_or(0);
+                (conn_rows::<V>(&cp, &s), row)
             };
             self.conn_table.state.set_values(rows);
             select_index(&mut self.conn_table.state, row);
@@ -643,6 +716,7 @@ impl OcppClientV201View {
         }
     }
 
+    /// Remove the selected connector (never the CS row, never the last connector).
     fn remove_connector(&mut self) {
         let Some(i) = self.conn_table.state.table_state().selected() else {
             return;
@@ -651,15 +725,16 @@ impl OcppClientV201View {
             return;
         }
         let mut s = self.state.write().unwrap();
-        if s.connectors.len() <= 1 || i > s.connectors.len() {
+        if s.connector_count() <= 1 || i > s.connector_count() {
             return;
         }
-        s.connectors.remove(i - 1);
+        s.remove_connector_at(i - 1);
         drop(s);
         self.conn_table.state.move_up();
         self.sync_actions();
     }
 
+    /// Enqueue the focused action for sending, or open a dialog when it needs more than state.
     fn trigger_action(&mut self) {
         let name = self.actions.state.get_value();
         if name.is_empty() {
@@ -667,135 +742,64 @@ impl OcppClientV201View {
         }
         let scope = self.selected_scope();
         match name.as_str() {
-            "StartTransaction" => {
+            "StartTransaction" if V::has_tx_shortcuts() => {
                 let payload = self.start_event(scope);
                 self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
             }
-            "StopTransaction" => {
+            "StopTransaction" if V::has_tx_shortcuts() => {
                 if let Some(payload) = self.stop_event(scope) {
                     self.pending_send = Some(("TransactionEvent".to_string(), payload, scope));
                 }
             }
-            n if STATE_DRIVEN.contains(&n) => {
+            n if V::state_driven().contains(&n) => {
                 let payload = self.state_payload(n, scope);
                 self.pending_send = Some((name, payload, scope));
             }
             _ => {
-                self.action_dialog = Some(
-                    match crate::module::ocpp::spec::v2_0_1::action_spec(&name) {
-                        Some(spec) => {
-                            let state = self.state.clone();
-                            let eid = scope.evse;
-                            let lookup = move |f: &str| {
-                                let s = state.read().unwrap();
-                                eid.and_then(|e| s.connector_by_evse(e))
-                                    .or_else(|| s.connectors.first())
-                                    .and_then(|c| c.get_field(f))
-                                    .or_else(|| s.cs_get_field(f))
-                                    .map(value_to_string)
-                            };
-                            ActionDialog::new(name, &spec, lookup, gen_tx_id)
-                        }
-                        None => {
-                            debug_assert!(
-                                crate::module::ocpp::spec::v2_0_1::json_actions()
-                                    .contains(&name.as_str()),
-                                "{name} has no spec and is not a registered JSON action"
-                            );
-                            let template = V2_0_1::default_action(&name)
-                                .and_then(|a| V2_0_1::encode_action(&a).ok())
-                                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                                .unwrap_or_else(|| "{}".to_string());
-                            ActionDialog::json_only(name, &template)
-                        }
-                    },
-                );
+                self.action_dialog = Some(match V::action_spec(&name) {
+                    Some(spec) => {
+                        let state = self.state.clone();
+                        let lookup = move |f: &str| {
+                            let s = state.read().unwrap();
+                            // Resolve from the targeted connector first, then CS-level.
+                            V::connector_index(&s, scope)
+                                .and_then(|i| s.conn_get_field(i, f))
+                                .or_else(|| s.cs_get_field_named(f))
+                                .map(value_to_string)
+                        };
+                        ActionDialog::new(name, &spec, lookup, gen_tx_id)
+                    }
+                    None => {
+                        debug_assert!(
+                            V::json_actions().contains(&name.as_str()),
+                            "{name} has no spec and is not a registered JSON action"
+                        );
+                        let template = V::default_action(&name)
+                            .and_then(|a| V::encode_action(&a).ok())
+                            .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                            .unwrap_or_else(|| "{}".to_string());
+                        ActionDialog::json_only(name, &template)
+                    }
+                });
             }
         }
     }
 
-    /// Build a `TransactionEvent(Started)` for the connector resolved from `scope`, minting a tx id.
     fn start_event(&mut self, scope: Scope) -> serde_json::Value {
-        let mut s = self.state.write().unwrap();
-        let idx = connector_index(&s, scope);
-        let Some(i) = idx else {
-            return serde_json::json!({});
-        };
-        let tx = s.connectors[i].start_tx();
-        let seq = s.connectors[i].next_seq();
-        s.connectors[i].status = "Occupied".to_string();
-        s.connectors[i].session_energy = 0.0;
-        let c = &s.connectors[i];
-        let payload = serde_json::json!({
-            "eventType": "Started",
-            "timestamp": rfc3339_now(),
-            "triggerReason": "Authorized",
-            "seqNo": seq,
-            "transactionInfo": { "transactionId": tx },
-            "idToken": { "idToken": c.rfid, "type": "Central" },
-            "evse": { "id": c.evse_id, "connectorId": c.connector_id },
-        });
-        drop(s);
-        self.meter_tick = 0;
+        let payload = V::start_event(&mut self.state.write().unwrap(), scope);
+        // 2.0.1 resets the meter tick eagerly on a started transaction.
+        if V::has_tx_shortcuts() {
+            self.meter_tick = 0;
+        }
         payload
     }
 
-    /// Build a `TransactionEvent(Ended)` for the connector resolved from `scope`, or `None` if idle.
     fn stop_event(&mut self, scope: Scope) -> Option<serde_json::Value> {
-        let mut s = self.state.write().unwrap();
-        let i = connector_index(&s, scope)?;
-        let tx = s.connectors[i].transaction_id.clone()?;
-        let seq = s.connectors[i].next_seq();
-        s.connectors[i].status = "Available".to_string();
-        s.connectors[i].transaction_id = None;
-        s.connectors[i].tx_confirmed = false;
-        let c = &s.connectors[i];
-        Some(serde_json::json!({
-            "eventType": "Ended",
-            "timestamp": rfc3339_now(),
-            "triggerReason": "StopAuthorized",
-            "seqNo": seq,
-            "transactionInfo": { "transactionId": tx },
-            "idToken": { "idToken": c.rfid, "type": "Central" },
-        }))
+        V::stop_event(&mut self.state.write().unwrap(), scope)
     }
 
-    /// Build the request payload for a state-driven action, using the connector from `scope`.
     fn state_payload(&self, name: &str, scope: Scope) -> serde_json::Value {
-        let s = self.state.read().unwrap();
-        let conn = scope
-            .evse
-            .and_then(|e| s.connector_by_evse(e))
-            .or_else(|| s.connectors.first());
-        let evse = conn.map(|c| c.evse_id).unwrap_or(1);
-        let cid = conn.map(|c| c.connector_id).unwrap_or(1);
-        let rfid = conn.map(|c| c.rfid.clone()).unwrap_or_default();
-        match name {
-            "Authorize" => serde_json::json!({
-                "idToken": { "idToken": rfid, "type": "Central" },
-            }),
-            "BootNotification" => serde_json::json!({
-                "reason": "PowerUp",
-                "chargingStation": {
-                    "model": s.model,
-                    "vendorName": s.vendor,
-                    "serialNumber": s.serial_number,
-                    "firmwareVersion": s.firmware_version,
-                },
-            }),
-            "Heartbeat" => serde_json::json!({}),
-            "MeterValues" => serde_json::json!({
-                "evseId": evse,
-                "meterValue": conn.map(|c| c.meter_value_json()).unwrap_or(serde_json::json!([])),
-            }),
-            "StatusNotification" => serde_json::json!({
-                "timestamp": rfc3339_now(),
-                "connectorStatus": conn.map(|c| c.status.clone()).unwrap_or_default(),
-                "evseId": evse,
-                "connectorId": cid,
-            }),
-            _ => serde_json::json!({}),
-        }
+        V::state_payload(&self.state.read().unwrap(), name, scope)
     }
 
     fn focus_next(&mut self) {
@@ -830,6 +834,7 @@ impl OcppClientV201View {
         };
     }
 
+    /// Append a config key from the key/value inputs (readonly=false), then clear them.
     fn add_config_key(&mut self) {
         let key = self.key_input.state.input().trim().to_string();
         if key.is_empty() {
@@ -838,9 +843,9 @@ impl OcppClientV201View {
         let value = self.value_input.state.input().trim().to_string();
         {
             let mut s = self.state.write().unwrap();
-            match s.config.iter_mut().find(|c| c.key == key) {
+            match s.config_mut().iter_mut().find(|c| c.key == key) {
                 Some(c) => c.value = value,
-                None => s.config.push(ConfigKey {
+                None => s.config_mut().push(ConfigKey {
                     key,
                     value,
                     readonly: false,
@@ -858,7 +863,7 @@ impl OcppClientV201View {
             return;
         };
         let s = self.state.read().unwrap();
-        if let Some(current) = s.config.get(row) {
+        if let Some(current) = s.config().get(row) {
             self.config_edit = Some(ConfigEditDialog::new(row, current));
         }
     }
@@ -871,7 +876,7 @@ impl OcppClientV201View {
             return;
         };
         let mut s = self.state.write().unwrap();
-        if let Some(slot) = s.config.get_mut(dialog.index()) {
+        if let Some(slot) = s.config_mut().get_mut(dialog.index()) {
             *slot = edited;
         }
     }
@@ -884,115 +889,32 @@ impl OcppClientV201View {
         let field = if cs {
             EditField::from_cs_row(row)
         } else {
-            EditField::from_conn_row(row)
+            V::conn_edit_field(row)
         };
         let Some(field) = field else { return };
-        let evse = if cs { None } else { self.selected_scope().evse };
+        let scope = if cs { Scope::CS } else { self.selected_scope() };
         let s = self.state.read().unwrap();
-        let conn = evse
-            .and_then(|e| s.connector_by_evse(e))
-            .or_else(|| s.connectors.first());
-        let kind = match field {
-            EditField::Phases => EditKind::Choice(choice(
-                &PHASE_CHOICES,
-                conn.map(|c| c.phases.as_str()).unwrap_or(""),
-            )),
-            EditField::Status => EditKind::Choice(choice(
-                &STATUS_CHOICES,
-                conn.map(|c| c.status.as_str()).unwrap_or(""),
-            )),
-            EditField::EvseId => {
-                EditKind::Number(number(conn.map(|c| c.evse_id as f64).unwrap_or(1.0)))
-            }
-            EditField::ConnectorId => {
-                EditKind::Number(number(conn.map(|c| c.connector_id as f64).unwrap_or(0.0)))
-            }
-            EditField::Voltage => EditKind::Number(number(conn.map(|c| c.voltage).unwrap_or(0.0))),
-            EditField::Current(i) => {
-                EditKind::Number(number(conn.map(|c| c.current[i]).unwrap_or(0.0)))
-            }
-            EditField::Power => EditKind::Number(number(conn.map(|c| c.power).unwrap_or(0.0))),
-            EditField::Frequency => {
-                EditKind::Number(number(conn.map(|c| c.frequency).unwrap_or(0.0)))
-            }
-            EditField::TotalEnergy => {
-                EditKind::Number(number(conn.map(|c| c.total_energy).unwrap_or(0.0)))
-            }
-            EditField::SessionEnergy => {
-                EditKind::Number(number(conn.map(|c| c.session_energy).unwrap_or(0.0)))
-            }
-            EditField::Soc => EditKind::Number(number(conn.map(|c| c.soc).unwrap_or(0.0))),
-            EditField::Temperature => {
-                EditKind::Number(number(conn.map(|c| c.temperature).unwrap_or(0.0)))
-            }
-            EditField::Rfid => {
-                EditKind::Text(text_input(conn.map(|c| c.rfid.as_str()).unwrap_or("")))
-            }
-            EditField::Model => EditKind::Text(text_input(&s.model)),
-            EditField::Vendor => EditKind::Text(text_input(&s.vendor)),
-            EditField::FirmwareVersion => EditKind::Text(text_input(&s.firmware_version)),
-            EditField::SerialNumber => EditKind::Text(text_input(&s.serial_number)),
+        let Some(kind) = V::edit_kind(&s, scope, cs, field) else {
+            return;
         };
         drop(s);
-        self.edit = Some(EditOverlay { field, evse, kind });
+        self.edit = Some(EditOverlay { field, scope, kind });
     }
 
     fn apply_edit(&mut self) {
         let Some(edit) = self.edit.take() else { return };
-        let mut s = self.state.write().unwrap();
-        let conn_idx = edit
-            .evse
-            .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e))
-            .or((!s.connectors.is_empty()).then_some(0));
-        match edit.kind {
-            EditKind::Choice(sel) => {
-                let value = sel.state.get_value();
-                if let Some(i) = conn_idx {
-                    let c = &mut s.connectors[i];
-                    match edit.field {
-                        EditField::Phases => c.phases = value,
-                        EditField::Status => c.status = value,
-                        _ => {}
-                    }
-                }
-            }
+        let resolved = match &edit.kind {
+            EditKind::Choice(sel) => ResolvedEdit::Choice(sel.state.get_value()),
             EditKind::Number(input) => {
                 let Ok(value) = input.state.input().trim().parse::<f64>() else {
                     return;
                 };
-                if let Some(i) = conn_idx {
-                    let c = &mut s.connectors[i];
-                    match edit.field {
-                        EditField::EvseId => c.evse_id = value as i64,
-                        EditField::ConnectorId => c.connector_id = value as i64,
-                        EditField::Voltage => c.voltage = value,
-                        EditField::Current(j) => c.current[j] = value,
-                        EditField::Power => c.power = value,
-                        EditField::Frequency => c.frequency = value,
-                        EditField::TotalEnergy => c.total_energy = value,
-                        EditField::SessionEnergy => c.session_energy = value,
-                        EditField::Soc => c.soc = value,
-                        EditField::Temperature => c.temperature = value,
-                        _ => {}
-                    }
-                }
+                ResolvedEdit::Number(value)
             }
-            EditKind::Text(input) => {
-                let value = input.state.input().trim().to_string();
-                match edit.field {
-                    EditField::Rfid => {
-                        if let Some(i) = conn_idx {
-                            s.connectors[i].rfid = value;
-                        }
-                    }
-                    EditField::Model => s.model = value,
-                    EditField::Vendor => s.vendor = value,
-                    EditField::FirmwareVersion => s.firmware_version = value,
-                    EditField::SerialNumber => s.serial_number = value,
-                    _ => {}
-                }
-            }
-        }
+            EditKind::Text(input) => ResolvedEdit::Text(input.state.input().trim().to_string()),
+        };
+        let mut s = self.state.write().unwrap();
+        V::apply_edit(&mut s, &edit, resolved);
     }
 
     fn sync_code(&mut self) {
@@ -1001,16 +923,15 @@ impl OcppClientV201View {
             .and_then(|i| self.visible_messages.get(i))
             .map(|m| serde_json::to_string_pretty(&m.payload).unwrap_or_default())
             .unwrap_or_default();
-        if content == self.code_content {
-            return;
+        if content != self.code_content {
+            self.code.state.set_content(&content);
+            self.code_content = content;
         }
-        self.code_content = content.clone();
-        self.code.state.set_content(&content);
     }
 
     /// Decode + send a (name, payload) at `scope` without blocking the UI loop. A transaction start
-    /// mints its id eagerly (carried in the payload); confirm or roll it back on the response so
-    /// auto-MeterValues only fire once the start is acknowledged.
+    /// mints its id eagerly (carried in the payload, 2.0.1); confirm or roll it back on the response
+    /// so auto-MeterValues only fire once the start is acknowledged.
     fn send_payload(&mut self, name: &str, payload: serde_json::Value, scope: Scope) {
         let sender = self.backend.sender();
         let state = self.state.clone();
@@ -1025,34 +946,17 @@ impl OcppClientV201View {
                 .map(String::from)
         })
         .flatten();
-        let evse_id = scope.evse;
         tokio::spawn(async move {
-            match V2_0_1::decode_call(&name, payload) {
+            match V::decode_call(&name, payload) {
                 Ok(action) => match sender.send_scoped(action, scope).await {
                     Ok(response) => {
-                        if name == "BootNotification" {
-                            state.write().unwrap().heartbeat_interval_secs =
-                                boot_interval(&response);
-                        }
-                        if let Some(tx_id) = started_tx {
-                            let mut s = state.write().unwrap();
-                            if let Some(c) = evse_id.and_then(|e| s.connector_mut_by_evse(e))
-                                && c.transaction_id.as_deref() == Some(tx_id.as_str())
-                            {
-                                c.tx_confirmed = true;
-                            }
-                        }
+                        let mut s = state.write().unwrap();
+                        V::apply_post_send(&mut s, &name, scope, started_tx.as_deref(), &response);
                     }
                     Err(e) => {
-                        if let Some(tx_id) = started_tx {
+                        {
                             let mut s = state.write().unwrap();
-                            if let Some(c) = evse_id.and_then(|e| s.connector_mut_by_evse(e))
-                                && c.transaction_id.as_deref() == Some(tx_id.as_str())
-                            {
-                                c.transaction_id = None;
-                                c.tx_confirmed = false;
-                                c.status = "Available".to_string();
-                            }
+                            V::rollback_tx(&mut s, scope, started_tx.as_deref());
                         }
                         log.write().await.write(&format!("{name} failed: {e}"));
                     }
@@ -1066,24 +970,7 @@ impl OcppClientV201View {
     }
 }
 
-/// Resolve the connector index targeted by `scope` (the connector on its EVSE, else the first).
-fn connector_index(s: &CsState, scope: Scope) -> Option<usize> {
-    scope
-        .evse
-        .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e))
-        .or((!s.connectors.is_empty()).then_some(0))
-}
-
-/// Parse a connector/evse id, tolerating a leading `e`/`c` label (e.g. `e1`, `c2`).
-fn parse_id(raw: &str) -> Option<i64> {
-    raw.trim()
-        .trim_start_matches(['e', 'c', 'E', 'C'])
-        .trim()
-        .parse()
-        .ok()
-}
-
-impl ModuleView for OcppClientV201View {
+impl<V: ClientVersion> ModuleView for ClientView<V> {
     fn name(&self) -> String {
         self.spec.name.clone()
     }
@@ -1221,6 +1108,7 @@ impl ModuleView for OcppClientV201View {
         );
         StatefulWidget::render(&self.code.widget, right_bottom, buf, &mut self.code.state);
 
+        // ONLINE/OFFLINE status line.
         let online = self.backend.is_online();
         let status_widget = TextBuilder::default()
             .horizontal_alignment(HorizontalAlignment::Center)
@@ -1243,6 +1131,7 @@ impl ModuleView for OcppClientV201View {
         let mut status = if online { "ONLINE" } else { "OFFLINE" }.to_string();
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
 
+        // State-row edit overlay over the state table.
         if let Some(edit) = self.edit.as_mut() {
             let title = edit.field.label();
             let height = match &edit.kind {
@@ -1330,7 +1219,7 @@ impl ModuleView for OcppClientV201View {
                 Some(ActionResult::Close) => self.action_dialog = None,
                 Some(ActionResult::Send(payload)) => {
                     let name = self.action_dialog.as_ref().unwrap().name.clone();
-                    if V2_0_1::decode_call(&name, payload.clone()).is_ok() {
+                    if V::decode_call(&name, payload.clone()).is_ok() {
                         let scope = self.selected_scope();
                         self.action_dialog = None;
                         self.pending_send = Some((name, payload, scope));
@@ -1398,9 +1287,9 @@ impl ModuleView for OcppClientV201View {
             (KeyModifiers::NONE, KeyCode::Char('d')) if matches!(self.focus, Pane::ConfigTable) => {
                 let mut s = self.state.write().unwrap();
                 if let Some(i) = self.config_table.state.table_state().selected()
-                    && i < s.config.len()
+                    && i < s.config().len()
                 {
-                    s.config.remove(i);
+                    s.config_mut().remove(i);
                     self.config_table.state.move_up();
                 }
                 EventResult::Consumed
@@ -1409,6 +1298,7 @@ impl ModuleView for OcppClientV201View {
                 self.remove_connector();
                 EventResult::Consumed
             }
+            // Space activates list/table panes, but must type into the text inputs.
             (KeyModifiers::NONE, KeyCode::Char(' '))
                 if !matches!(
                     self.focus,
@@ -1487,6 +1377,7 @@ impl ModuleView for OcppClientV201View {
                 self.send_payload(&name, payload, scope);
             }
 
+            // Drain Lua-enqueued actions (each with its scope) and send them.
             let queued: Vec<(Scope, String, serde_json::Value)> =
                 self.action_queue.lock().unwrap().drain(..).collect();
             for (scope, name, overrides) in queued {
@@ -1503,12 +1394,13 @@ impl ModuleView for OcppClientV201View {
             }
             self.was_online = online;
 
+            // Auto-Heartbeat (CS-level) at the BootNotification-supplied cadence while connected.
             if online {
                 let interval_secs = self
                     .state
                     .read()
                     .unwrap()
-                    .heartbeat_interval_secs
+                    .heartbeat_interval_secs()
                     .unwrap_or(DEFAULT_HEARTBEAT_SECS)
                     .max(1);
                 self.heartbeat_tick = self.heartbeat_tick.wrapping_add(1);
@@ -1518,15 +1410,13 @@ impl ModuleView for OcppClientV201View {
                 }
             }
 
-            // Auto-MeterValues per connector with a confirmed transaction (~every 5s), gated online.
-            let active: Vec<Scope> = {
-                let s = self.state.read().unwrap();
-                s.connectors
-                    .iter()
-                    .filter(|c| c.transaction_id.is_some() && c.tx_confirmed)
-                    .map(|c| Scope::evse(c.evse_id, None))
-                    .collect()
-            };
+            // Auto-MeterValues per connector with a live transaction (~every 5s), gated online.
+            let active: Vec<Scope> = V::active_meter_scopes(&self.state.read().unwrap());
+            V::track_meter_reset(
+                &self.state.read().unwrap(),
+                &mut self.tx_was_active,
+                &mut self.meter_tick,
+            );
             if !active.is_empty() && online {
                 self.meter_tick = self.meter_tick.wrapping_add(1);
                 if self.meter_tick.is_multiple_of(50) {
@@ -1546,6 +1436,8 @@ impl ModuleView for OcppClientV201View {
                 self.applied_log_file = self.device.log_file.clone();
             }
 
+            // Refresh tables. Messages are teed to the persistent log (all scopes) then filtered to
+            // the selected entry for display.
             self.messages = self.backend.messages_snapshot().await;
             let mut max_seq = self.logged_seq;
             let new_lines: Vec<String> = self
@@ -1590,14 +1482,11 @@ impl ModuleView for OcppClientV201View {
             let cp = self.spec.name.clone();
             let (conn_rows, state_rows, config_rows) = {
                 let s = self.state.read().unwrap();
-                let state_rows = match scope.evse {
-                    Some(e) => s
-                        .connector_by_evse(e)
-                        .map(|c| c.rows())
-                        .unwrap_or_else(|| s.cs_rows()),
-                    None => s.cs_rows(),
+                let state_rows = match V::connector_index_for_state(&s, scope) {
+                    Some(i) => nv_rows(s.conn_state_rows(i)),
+                    None => nv_rows(s.cs_state_rows()),
                 };
-                (conn_rows(&cp, &s), state_rows, s.config_rows())
+                (conn_rows::<V>(&cp, &s), state_rows, config_rows(&*s))
             };
             self.conn_table.state.set_values(conn_rows);
             self.state_table.state.set_values(state_rows);
@@ -1728,7 +1617,7 @@ static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 7] = [
 
 /// Whether a message table's selection is on (or past) the last row — i.e. the user is tailing it.
 /// An empty table or no selection counts as tailing.
-fn msg_log_at_bottom<V: TableEntry<N>, const N: usize>(state: &TableState<V, N>) -> bool {
+fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(state: &TableState<E, N>) -> bool {
     let len = state.values().len();
     len == 0
         || state
@@ -1739,25 +1628,43 @@ fn msg_log_at_bottom<V: TableEntry<N>, const N: usize>(state: &TableState<V, N>)
 }
 
 /// Select row `idx` in a table (no direct setter on `TableState`): jump to the top, then step down.
-fn select_index<V: TableEntry<N>, const N: usize>(state: &mut TableState<V, N>, idx: usize) {
+fn select_index<E: TableEntry<N>, const N: usize>(state: &mut TableState<E, N>, idx: usize) {
     state.move_to_top();
     for _ in 0..idx {
         state.move_down();
     }
 }
 
-fn conn_rows(cp: &str, s: &CsState) -> Vec<ConnRow> {
+/// Convert version-agnostic state rows into the view's table rows.
+fn nv_rows(rows: Vec<NvRowData>) -> Vec<NvRow> {
+    rows.into_iter().map(NvRow::from).collect()
+}
+
+/// Connector-table rows: a CS row (empty connector) followed by one row per connector.
+fn conn_rows<V: ClientVersion>(cp: &str, s: &V::Cs) -> Vec<ConnRow> {
     let mut rows = vec![ConnRow {
         cp: cp.to_string(),
         connector: String::new(),
     }];
-    for c in &s.connectors {
+    for i in 0..s.connector_count() {
         rows.push(ConnRow {
             cp: cp.to_string(),
-            connector: Scope::evse(c.evse_id, None).label(),
+            connector: V::scope_of(s, i).label(),
         });
     }
     rows
+}
+
+/// Config/variable-table rows from the store.
+fn config_rows<S: ClientState>(s: &S) -> Vec<ConfigRow> {
+    s.config()
+        .iter()
+        .map(|c| ConfigRow {
+            key: c.key.clone(),
+            value: c.value.clone(),
+            ro: if c.readonly { "yes" } else { "no" }.to_string(),
+        })
+        .collect()
 }
 
 fn border_style() -> ratatui::prelude::Style {
@@ -1810,12 +1717,12 @@ fn conn_table(rows: Vec<ConnRow>) -> ConnTable {
     }
 }
 
-fn config_table(rows: Vec<ConfigRow>) -> ConfigTable {
+fn config_table<V: ClientVersion>(rows: Vec<ConfigRow>) -> ConfigTable {
     Widget {
         state: TableStateBuilder::default().values(rows).build().unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Variables".into()))
+            .title(Some(V::config_title().into()))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,
@@ -1902,7 +1809,11 @@ fn action_list(values: Vec<String>) -> Widget<SelectionState<String>, Selection<
     }
 }
 
-fn choice(options: &[&str], current: &str) -> Widget<SelectionState<String>, Selection<String>> {
+/// A choice-list overlay widget, preselecting `current` if present (for the Status/Phases editors).
+pub fn choice(
+    options: &[&str],
+    current: &str,
+) -> Widget<SelectionState<String>, Selection<String>> {
     let values: Vec<String> = options.iter().map(|s| s.to_string()).collect();
     let mut state = SelectionStateBuilder::default()
         .focused(true)
@@ -1925,7 +1836,8 @@ fn choice(options: &[&str], current: &str) -> Widget<SelectionState<String>, Sel
     }
 }
 
-fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
+/// A numeric input overlay widget seeded with `current` (for metering editors).
+pub fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
     let mut state = InputFieldStateBuilder::default()
         .focused(true)
         .disabled(false)
@@ -1947,7 +1859,8 @@ fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
     }
 }
 
-fn text_input(current: &str) -> Widget<InputFieldState, InputField<String>> {
+/// A text input overlay widget seeded with `current` (for the RFID / identity editors).
+pub fn text_input(current: &str) -> Widget<InputFieldState, InputField<String>> {
     let mut state = InputFieldStateBuilder::default()
         .focused(true)
         .disabled(false)
@@ -2020,37 +1933,119 @@ fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
 
 #[cfg(test)]
 mod tests {
-    use super::EditField;
-    use crate::module::ocpp::client::v2_0_1::state::{ConnectorState, CsState};
+    use super::*;
+    use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
+    use ferrowl_ocpp::{V1_6, V2_0_1};
+
+    fn client_view<V: ClientVersion>(version: OcppVersion) -> ClientView<V> {
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 0,
+            path: String::new(),
+            timeout_ms: None,
+        };
+        ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
+    }
+
+    /// The Tab focus order visits the Payload pane and wraps; BackTab reverses it. One per version.
+    fn assert_focus_cycle<V: ClientVersion>(version: OcppVersion) {
+        let mut v = client_view::<V>(version);
+        // Default selection is the CS row, so the config panes are in the cycle.
+        v.focus = Pane::Connectors;
+        let mut seen = vec![v.focus];
+        for _ in 0..10 {
+            v.focus_next();
+            seen.push(v.focus);
+        }
+        assert!(
+            seen.contains(&Pane::Payload),
+            "Payload pane not in Tab order"
+        );
+        // 10 steps from Connectors wraps the full CS-level cycle back to Connectors.
+        assert_eq!(
+            v.focus,
+            Pane::Connectors,
+            "focus_next did not wrap to start"
+        );
+        // BackTab from Connectors lands on the add-connector input (reverse order).
+        v.focus_previous();
+        assert_eq!(v.focus, Pane::ConnectorInput);
+    }
 
     #[test]
-    fn ut_edit_field_conn_rows_align() {
-        let rows = ConnectorState::new(1, 1).rows();
+    fn focus_cycle_includes_payload_pane_v1_6() {
+        assert_focus_cycle::<V1_6>(OcppVersion::V1_6);
+    }
+
+    #[test]
+    fn focus_cycle_includes_payload_pane_v2_0_1() {
+        assert_focus_cycle::<V2_0_1>(OcppVersion::V2_0_1);
+    }
+
+    /// The connector state-table row order and `V::conn_edit_field` must stay in lockstep, with the
+    /// only unmapped (read-only) connector row being Charge Limit.
+    #[test]
+    fn edit_field_conn_rows_align_v1_6() {
+        use crate::module::ocpp::client::v1_6::state::ConnectorState;
+        let rows = ConnectorState::new(1).rows();
         for (i, row) in rows.iter().enumerate() {
-            match EditField::from_conn_row(i) {
+            match V1_6::conn_edit_field(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
                     row.name == "Charge Limit",
-                    "row {i} ({}) maps to no field",
+                    "row {i} ({}) unmapped",
                     row.name
                 ),
             }
         }
-        assert!(EditField::from_conn_row(rows.len()).is_none());
+        assert!(V1_6::conn_edit_field(rows.len()).is_none());
     }
 
     #[test]
-    fn ut_edit_field_cs_rows_align() {
-        let rows = CsState::default().cs_rows();
+    fn edit_field_conn_rows_align_v2_0_1() {
+        use crate::module::ocpp::client::v2_0_1::state::ConnectorState;
+        let rows = ConnectorState::new(1, 1).rows();
+        for (i, row) in rows.iter().enumerate() {
+            match V2_0_1::conn_edit_field(i) {
+                Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
+                None => assert!(
+                    row.name == "Charge Limit",
+                    "row {i} ({}) unmapped",
+                    row.name
+                ),
+            }
+        }
+        assert!(V2_0_1::conn_edit_field(rows.len()).is_none());
+    }
+
+    /// The CS state-table row order and `EditField::from_cs_row` must stay in lockstep (shared
+    /// across versions; the only unmapped row is the read-only Reserved RFID).
+    fn assert_cs_rows_align(rows: &[NvRowData]) {
         for (i, row) in rows.iter().enumerate() {
             match EditField::from_cs_row(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
                     row.name == "Reserved RFID",
-                    "row {i} ({}) maps to no field",
+                    "row {i} ({}) unmapped",
                     row.name
                 ),
             }
         }
+    }
+
+    #[test]
+    fn edit_field_cs_rows_align_v1_6() {
+        let s = crate::module::ocpp::client::v1_6::state::CsState::default();
+        assert_cs_rows_align(&s.cs_state_rows());
+    }
+
+    #[test]
+    fn edit_field_cs_rows_align_v2_0_1() {
+        let s = crate::module::ocpp::client::v2_0_1::state::CsState::default();
+        assert_cs_rows_align(&s.cs_state_rows());
     }
 }

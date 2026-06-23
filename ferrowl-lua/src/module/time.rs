@@ -1,9 +1,11 @@
-use crate::module::Module;
+use ferrowl_lua_derive::Module;
 use mlua::{Result, UserData};
 
 /// Lua module `C_Time`: elapsed time since module creation.
 ///
 /// Exposed Lua methods: `Get` (seconds) and `GetMs` (milliseconds).
+#[derive(Module)]
+#[module = "C_Time"]
 pub struct Time {
     start: std::time::Instant,
 }
@@ -13,12 +15,6 @@ impl Default for Time {
         Self {
             start: std::time::Instant::now(),
         }
-    }
-}
-
-impl Module for Time {
-    fn module() -> &'static str {
-        "C_Time"
     }
 }
 

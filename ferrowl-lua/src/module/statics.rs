@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::module::{Module, ValueType};
+use crate::module::ValueType;
+use ferrowl_lua_derive::Module;
 use mlua::{Result, UserData};
 
 /// Lua module `C_Statics`: read-only key/value store of host-provided
@@ -10,15 +11,10 @@ use mlua::{Result, UserData};
 /// matching Lua type (number / string / boolean), erroring if the key is
 /// missing.
 #[allow(dead_code)]
-#[derive(Default)]
+#[derive(Default, Module)]
+#[module = "C_Statics"]
 pub struct Statics {
     data: HashMap<String, ValueType>,
-}
-
-impl Module for Statics {
-    fn module() -> &'static str {
-        "C_Statics"
-    }
 }
 
 impl UserData for Statics {

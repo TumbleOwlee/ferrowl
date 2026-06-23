@@ -16,7 +16,6 @@ use ferrowl_codec::format::{
     Resolution, Width,
 };
 use ferrowl_codec::{Address, Register, RegisterBuilder};
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
@@ -32,6 +31,7 @@ use ferrowl_ui::{
         ValidateResult, Widget,
     },
 };
+use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},

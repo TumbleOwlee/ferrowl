@@ -15,7 +15,8 @@
 
 pub mod traits;
 
-use crate::module::{Module, ValueType};
+use crate::module::ValueType;
+use ferrowl_lua_derive::Module;
 use mlua::{Result, Table, UserData, UserDataMethods};
 use traits::{OcppClientHost, OcppHandle, OcppServerHost};
 
@@ -67,6 +68,8 @@ impl<H: OcppHandle> UserData for Accessor<H> {
 
 /// Lua module `C_OCPP`, parameterised over a host handle providing state read/write and action
 /// dispatch. Flat single-scope shape.
+#[derive(Module)]
+#[module = "C_OCPP"]
 pub struct Ocpp<H: OcppHandle> {
     handle: H,
 }
@@ -78,12 +81,6 @@ impl<H: OcppHandle> Ocpp<H> {
     }
 }
 
-impl<H: OcppHandle> Module for Ocpp<H> {
-    fn module() -> &'static str {
-        "C_OCPP"
-    }
-}
-
 impl<H: OcppHandle> UserData for Ocpp<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         register_state_actions(methods, |o: &Ocpp<H>| &o.handle);
@@ -91,6 +88,8 @@ impl<H: OcppHandle> UserData for Ocpp<H> {
 }
 
 /// Lua module `C_OCPP` for the **client**: CS-level `Get`/`Set`/`<Action>` plus `Connector(id)`.
+#[derive(Module)]
+#[module = "C_OCPP"]
 pub struct OcppClient<H: OcppHandle + OcppClientHost> {
     handle: H,
 }
@@ -99,12 +98,6 @@ impl<H: OcppHandle + OcppClientHost> OcppClient<H> {
     /// Creates the module around the client host handle.
     pub fn init(handle: H) -> Self {
         Self { handle }
-    }
-}
-
-impl<H: OcppHandle + OcppClientHost> Module for OcppClient<H> {
-    fn module() -> &'static str {
-        "C_OCPP"
     }
 }
 
@@ -118,6 +111,8 @@ impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
 }
 
 /// Lua module `C_OCPP` for the **server**: enumeration plus per-station / per-connector accessors.
+#[derive(Module)]
+#[module = "C_OCPP"]
 pub struct OcppServer<H: OcppServerHost + 'static> {
     handle: H,
 }
@@ -126,12 +121,6 @@ impl<H: OcppServerHost + 'static> OcppServer<H> {
     /// Creates the module around the server host handle.
     pub fn init(handle: H) -> Self {
         Self { handle }
-    }
-}
-
-impl<H: OcppServerHost + 'static> Module for OcppServer<H> {
-    fn module() -> &'static str {
-        "C_OCPP"
     }
 }
 

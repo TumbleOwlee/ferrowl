@@ -60,3 +60,26 @@ pub trait IsFocus {
 pub trait Margins {
     fn margins(&self) -> Margin;
 }
+
+/// Common focus cycling for an overlay payload, routed from a
+/// `#[derive(Overlay)]` enum's generated `Tab`/`BackTab` handling.
+///
+/// Implemented by each overlay variant that opts into `#[overlay(focus_cycle)]`,
+/// adapting whatever the payload calls internally (`focus_next`/`focus_previous`,
+/// `focus_step`, …) to a single `forward: bool` step.
+pub trait OverlayKeys {
+    fn focus_cycle(&mut self, forward: bool);
+}
+
+/// Outcome of a `#[derive(Overlay)]` enum's common-key router (`route_keys`):
+/// whether the key closed the overlay, cycled its focus, or was left for the
+/// view's own `Enter`/custom handling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayRoute {
+    /// `Esc` closed an `#[overlay(esc_close)]` variant; overlay is now `None`.
+    Closed,
+    /// `Tab`/`BackTab` cycled focus on a `#[overlay(focus_cycle)]` variant.
+    Cycled,
+    /// Key not handled by common routing; the view should handle it.
+    Unhandled,
+}

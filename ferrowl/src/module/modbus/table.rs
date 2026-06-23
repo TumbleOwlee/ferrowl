@@ -6,13 +6,13 @@ use crate::{
 };
 use derive_builder::Builder;
 use ferrowl_codec::{Register, Value};
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
 };
+use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},

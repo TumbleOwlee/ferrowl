@@ -2,7 +2,6 @@
 //! websocket endpoint (ip/port), validating live like the Modbus dialog.
 
 use derive_builder::Builder;
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
@@ -13,6 +12,7 @@ use ferrowl_ui::{
         Validate, ValidateResult, Widget,
     },
 };
+use ferrowl_ui_derive::{Focus, focusable};
 use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,

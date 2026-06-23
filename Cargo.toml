@@ -10,5 +10,6 @@ members = [
     "ferrowl-util",
     "ferrowl-ui",
     "ferrowl",
-    "ferrowl-focus",
+    "ferrowl-ui-derive",
+    "ferrowl-lua-derive",
 ]

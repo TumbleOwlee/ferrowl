@@ -22,11 +22,11 @@ use ferrowl_ui::{
     style::{ButtonStyle, InputFieldStyleBuilder, SelectionStyleBuilder, TableStyleBuilder},
     traits::HandleEvents,
     widgets::{
-        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, Header, InputField,
-        InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, TableEntry, Widget,
-        Width,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
+        InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, Widget,
     },
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -134,36 +134,15 @@ pub enum ActionResult {
 
 // --- Property table --------------------------------------------------------
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = PropHeader)]
 struct PropRow {
+    #[column(name = "Property", min = 16, max = 28)]
     name: String,
+    #[column(name = "Type", min = 8, max = 10)]
     kind: String,
+    #[column(name = "Value", min = 10, max = 40)]
     value: String,
-}
-
-impl TableEntry<3> for PropRow {
-    fn values(&self) -> [String; 3] {
-        [self.name.clone(), self.kind.clone(), self.value.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct PropHeader;
-
-impl Header<3> for PropHeader {
-    fn header() -> [String; 3] {
-        ["Property".into(), "Type".into(), "Value".into()]
-    }
-    fn widths() -> [Width; 3] {
-        [
-            Width { min: 16, max: 28 },
-            Width { min: 8, max: 10 },
-            Width { min: 10, max: 40 },
-        ]
-    }
 }
 
 type PropTable = Widget<TableState<PropRow, 3>, Table<PropRow, PropHeader, 3>>;

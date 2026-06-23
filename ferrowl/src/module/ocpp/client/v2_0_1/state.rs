@@ -295,20 +295,12 @@ impl Default for CsState {
     }
 }
 
-/// A row in a state table.
+/// A row in a state table (rendered by the generic client view).
 #[derive(Clone, Debug)]
 pub struct NvRow {
     pub name: String,
     pub unit: String,
     pub value: String,
-}
-
-/// A row in the variable table.
-#[derive(Clone, Debug)]
-pub struct ConfigRow {
-    pub key: String,
-    pub value: String,
-    pub ro: String,
 }
 
 impl CsState {
@@ -362,17 +354,6 @@ impl CsState {
                     .unwrap_or_else(|| "—".to_string()),
             ),
         ]
-    }
-
-    pub fn config_rows(&self) -> Vec<ConfigRow> {
-        self.config
-            .iter()
-            .map(|c| ConfigRow {
-                key: c.key.clone(),
-                value: c.value.clone(),
-                ro: if c.readonly { "yes" } else { "no" }.to_string(),
-            })
-            .collect()
     }
 
     /// Read a CS-level field by name, for the bare `C_OCPP:Get(name)` Lua binding.

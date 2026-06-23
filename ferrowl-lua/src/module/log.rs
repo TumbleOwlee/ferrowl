@@ -4,7 +4,7 @@
 //! lives (e.g. the on-screen ring log + the optional file sink). Keeping the sink behind a trait
 //! lets this crate stay agnostic of the host's logging types.
 
-use crate::module::Module;
+use ferrowl_lua_derive::Module;
 use mlua::UserData;
 
 /// A host-provided sink for lines printed from Lua via `C_Log:Print(..)`.
@@ -14,6 +14,8 @@ pub trait LogSink {
 }
 
 /// Lua module `C_Log`: exposes `Print(message)` which appends a line to the host log.
+#[derive(Module)]
+#[module = "C_Log"]
 pub struct Log<S: LogSink> {
     sink: S,
 }
@@ -22,12 +24,6 @@ impl<S: LogSink> Log<S> {
     /// Build the module over a host log sink.
     pub fn init(sink: S) -> Self {
         Self { sink }
-    }
-}
-
-impl<S: LogSink> Module for Log<S> {
-    fn module() -> &'static str {
-        "C_Log"
     }
 }
 
@@ -43,6 +39,7 @@ impl<S: LogSink + 'static> UserData for Log<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::Module;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]

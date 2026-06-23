@@ -14,10 +14,11 @@ use ferrowl_ui::{
     style::{InputFieldStyleBuilder, TableStyleBuilder},
     traits::HandleEvents,
     widgets::{
-        CodeInputField, CodeInputFieldBuilder, Header, InputField, InputFieldBuilder, Table,
-        TableBuilder, TableEntry, Widget, Width,
+        CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
+        Widget,
     },
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -30,31 +31,13 @@ use crate::module::ocpp::config::device::ScriptDef;
 
 // --- Script table ----------------------------------------------------------
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = ScriptHeader)]
 struct ScriptRow {
+    #[column(name = "Name", min = 10, max = 40)]
     name: String,
+    #[column(name = "Status", min = 6, max = 6)]
     status: String,
-}
-
-impl TableEntry<2> for ScriptRow {
-    fn values(&self) -> [String; 2] {
-        [self.name.clone(), self.status.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ScriptHeader;
-
-impl Header<2> for ScriptHeader {
-    fn header() -> [String; 2] {
-        ["Name".into(), "Status".into()]
-    }
-    fn widths() -> [Width; 2] {
-        [Width { min: 10, max: 40 }, Width { min: 6, max: 6 }]
-    }
 }
 
 type ScriptTable = Widget<TableState<ScriptRow, 2>, Table<ScriptRow, ScriptHeader, 2>>;

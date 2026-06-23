@@ -1,6 +1,6 @@
 use derive_builder::Builder;
-use ferrowl_focus::{Focus, focusable};
 use ferrowl_ui::traits::IsFocus;
+use ferrowl_ui_derive::{Focus, focusable};
 
 #[derive(Default, Clone, Debug)]
 struct Widget {

@@ -26,10 +26,11 @@ use ferrowl_ui::{
         ButtonStyle, InputFieldStyleBuilder, SelectionStyleBuilder, TableStyleBuilder, TextStyle,
     },
     widgets::{
-        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, Header, Selection,
-        SelectionBuilder, Table, TableBuilder, TableEntry, TextBuilder, Widget, Width,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, Selection, SelectionBuilder,
+        Table, TableBuilder, TableEntry, TextBuilder, Widget,
     },
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
 use ratatui::{
     Frame,
@@ -146,110 +147,50 @@ pub trait ServerVersion: Version + Sized + 'static {
 
 // --- Connection table ------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = CsHeader, styles = cs_cell_styles)]
 struct CsRow {
+    #[column(name = "Charging Station", min = 18, max = 40)]
     name: String,
+    #[column(name = "Connector", min = 9, max = 9)]
     connector: String,
+    #[column(name = "State", min = 12, max = 12)]
     state: String,
 }
 
-impl TableEntry<3> for CsRow {
-    fn values(&self) -> [String; 3] {
-        [
-            self.name.clone(),
-            self.connector.clone(),
-            self.state.clone(),
-        ]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-    fn cell_styles(&self) -> [Option<Style>; 3] {
-        let style = match self.state.as_str() {
-            "Connected" => Some(Style::default().fg(COLOR_SCHEME.success)),
-            "Disconnected" => Some(Style::default().fg(COLOR_SCHEME.error)),
-            _ => None,
-        };
-        [None, None, style]
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CsHeader;
-
-impl Header<3> for CsHeader {
-    fn header() -> [String; 3] {
-        [
-            "Charging Station".into(),
-            "Connector".into(),
-            "State".into(),
-        ]
-    }
-    fn widths() -> [Width; 3] {
-        [
-            Width { min: 18, max: 40 },
-            Width { min: 9, max: 9 },
-            Width { min: 12, max: 12 },
-        ]
-    }
+fn cs_cell_styles(row: &CsRow) -> [Option<Style>; 3] {
+    let style = match row.state.as_str() {
+        "Connected" => Some(Style::default().fg(COLOR_SCHEME.success)),
+        "Disconnected" => Some(Style::default().fg(COLOR_SCHEME.error)),
+        _ => None,
+    };
+    [None, None, style]
 }
 
 // --- Message table ---------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = MsgHeader, styles = msg_cell_styles)]
 struct MsgRow {
+    #[column(name = "Timestamp", min = 23, max = 23)]
     timestamp: String,
+    #[column(name = "Direction", min = 8, max = 10)]
     direction: String,
+    #[column(name = "Message", min = 14, max = 30)]
     name: String,
+    #[column(name = "Status", min = 7, max = 8)]
     status: String,
+    #[column(name = "Context", min = 6, max = 40)]
     context: String,
 }
 
-impl TableEntry<5> for MsgRow {
-    fn values(&self) -> [String; 5] {
-        [
-            self.timestamp.clone(),
-            self.direction.clone(),
-            self.name.clone(),
-            self.status.clone(),
-            self.context.clone(),
-        ]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-    fn cell_styles(&self) -> [Option<Style>; 5] {
-        let status_style = match self.status.as_str() {
-            "Success" => Some(Style::default().fg(COLOR_SCHEME.success)),
-            "Error" => Some(Style::default().fg(COLOR_SCHEME.error)),
-            _ => None,
-        };
-        [None, None, None, status_style, None]
-    }
-}
-
-#[derive(Clone, Debug)]
-struct MsgHeader;
-
-impl Header<5> for MsgHeader {
-    fn header() -> [String; 5] {
-        [
-            "Timestamp".into(),
-            "Direction".into(),
-            "Message".into(),
-            "Status".into(),
-            "Context".into(),
-        ]
-    }
-    fn widths() -> [Width; 5] {
-        [
-            Width { min: 23, max: 23 },
-            Width { min: 8, max: 10 },
-            Width { min: 14, max: 30 },
-            Width { min: 7, max: 8 },
-            Width { min: 6, max: 40 },
-        ]
-    }
+fn msg_cell_styles(row: &MsgRow) -> [Option<Style>; 5] {
+    let status_style = match row.status.as_str() {
+        "Success" => Some(Style::default().fg(COLOR_SCHEME.success)),
+        "Error" => Some(Style::default().fg(COLOR_SCHEME.error)),
+        _ => None,
+    };
+    [None, None, None, status_style, None]
 }
 
 fn msg_row(m: &OcppMessage) -> MsgRow {

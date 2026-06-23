@@ -4,44 +4,19 @@ use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
+    widgets::{Table, TableBuilder, Widget},
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::layout::Margin;
 
 /// One log line with a formatted timestamp and message text.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, TableEntry)]
+#[table_entry(header = LogHeader)]
 pub struct LogEntry {
+    #[column(name = "Timestamp", min = 23, max = 23)]
     pub timestamp: String,
+    #[column(name = "Message", min = 0, max = 100_000)]
     pub message: String,
-}
-
-impl TableEntry<2> for LogEntry {
-    fn values(&self) -> [String; 2] {
-        [self.timestamp.clone(), self.message.clone()]
-    }
-
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct LogHeader;
-
-impl Header<2> for LogHeader {
-    fn header() -> [String; 2] {
-        ["Timestamp".to_string(), "Message".to_string()]
-    }
-
-    fn widths() -> [Width; 2] {
-        [
-            Width { min: 23, max: 23 },
-            Width {
-                min: 0,
-                max: 100_000,
-            },
-        ]
-    }
 }
 
 /// The composed log widget: a `Table` plus its scroll/selection state.
@@ -133,6 +108,7 @@ pub fn new_log_view() -> LogView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_ui::widgets::{Header, TableEntry};
 
     #[test]
     fn epoch_is_1970_01_01() {

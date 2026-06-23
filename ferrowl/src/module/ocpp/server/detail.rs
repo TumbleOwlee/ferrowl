@@ -20,11 +20,9 @@ use ferrowl_ui::{
     state::{InputFieldState, InputFieldStateBuilder, TableState, TableStateBuilder},
     style::{InputFieldStyleBuilder, TableStyleBuilder},
     traits::HandleEvents,
-    widgets::{
-        GetValue, Header, InputField, InputFieldBuilder, Table, TableBuilder, TableEntry, Widget,
-        Width,
-    },
+    widgets::{GetValue, InputField, InputFieldBuilder, Table, TableBuilder, Widget},
 };
+use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -44,115 +42,45 @@ pub enum DetailRequest {
 
 // --- Key/value table -------------------------------------------------------
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = KvHeader)]
 struct KvRow {
+    #[column(name = "Field", min = 16, max = 30)]
     key: String,
+    #[column(name = "Value", min = 10, max = 40)]
     value: String,
-}
-
-impl TableEntry<2> for KvRow {
-    fn values(&self) -> [String; 2] {
-        [self.key.clone(), self.value.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct KvHeader;
-
-impl Header<2> for KvHeader {
-    fn header() -> [String; 2] {
-        ["Field".into(), "Value".into()]
-    }
-    fn widths() -> [Width; 2] {
-        [Width { min: 16, max: 30 }, Width { min: 10, max: 40 }]
-    }
 }
 
 type KvTable = Widget<TableState<KvRow, 2>, Table<KvRow, KvHeader, 2>>;
 
 // --- Configuration table (key/value/readonly) ------------------------------
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = CfgHeader)]
 struct CfgRow {
+    #[column(name = "Key", min = 16, max = 30)]
     key: String,
+    #[column(name = "Value", min = 10, max = 40)]
     value: String,
+    #[column(name = "ReadOnly", min = 8, max = 9)]
     readonly: String,
-}
-
-impl TableEntry<3> for CfgRow {
-    fn values(&self) -> [String; 3] {
-        [self.key.clone(), self.value.clone(), self.readonly.clone()]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CfgHeader;
-
-impl Header<3> for CfgHeader {
-    fn header() -> [String; 3] {
-        ["Key".into(), "Value".into(), "ReadOnly".into()]
-    }
-    fn widths() -> [Width; 3] {
-        [
-            Width { min: 16, max: 30 },
-            Width { min: 10, max: 40 },
-            Width { min: 8, max: 9 },
-        ]
-    }
 }
 
 type CfgTable = Widget<TableState<CfgRow, 3>, Table<CfgRow, CfgHeader, 3>>;
 
 // --- Configuration table with a Component column (2.0.1 component/variable/value/readonly) -------
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = CfgHeaderC)]
 struct CfgRowC {
+    #[column(name = "Component", min = 12, max = 24)]
     component: String,
+    #[column(name = "Key", min = 12, max = 30)]
     key: String,
+    #[column(name = "Value", min = 10, max = 40)]
     value: String,
+    #[column(name = "ReadOnly", min = 8, max = 9)]
     readonly: String,
-}
-
-impl TableEntry<4> for CfgRowC {
-    fn values(&self) -> [String; 4] {
-        [
-            self.component.clone(),
-            self.key.clone(),
-            self.value.clone(),
-            self.readonly.clone(),
-        ]
-    }
-    fn height(&self) -> u16 {
-        1
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CfgHeaderC;
-
-impl Header<4> for CfgHeaderC {
-    fn header() -> [String; 4] {
-        [
-            "Component".into(),
-            "Key".into(),
-            "Value".into(),
-            "ReadOnly".into(),
-        ]
-    }
-    fn widths() -> [Width; 4] {
-        [
-            Width { min: 12, max: 24 },
-            Width { min: 12, max: 30 },
-            Width { min: 10, max: 40 },
-            Width { min: 8, max: 9 },
-        ]
-    }
 }
 
 type CfgTableC = Widget<TableState<CfgRowC, 4>, Table<CfgRowC, CfgHeaderC, 4>>;

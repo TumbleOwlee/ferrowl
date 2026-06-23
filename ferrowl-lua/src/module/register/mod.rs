@@ -1,6 +1,7 @@
 pub mod traits;
 
-use crate::module::{Module, ValueType};
+use crate::module::ValueType;
+use ferrowl_lua_derive::Module;
 use mlua::{Result, UserData};
 use traits::{Read, Write};
 
@@ -10,6 +11,8 @@ use traits::{Read, Write};
 /// Exposed Lua methods: `Get(name)` — returns a number for integer/float
 /// registers, a string for strings and a boolean for booleans — and
 /// `Set(name, value)`, which accepts any of those Lua types.
+#[derive(Module)]
+#[module = "C_Register"]
 pub struct Register<T>
 where
     T: Write + Read + 'static,
@@ -24,15 +27,6 @@ where
     /// Creates the module around the host's register access handle.
     pub fn init(handle: T) -> Self {
         Self { handle }
-    }
-}
-
-impl<T> Module for Register<T>
-where
-    T: Write + Read + 'static,
-{
-    fn module() -> &'static str {
-        "C_Register"
     }
 }
 
