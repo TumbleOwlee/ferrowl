@@ -162,11 +162,14 @@ mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
 
+    /// Record of dispatched actions: `(action name, overrides as name/value pairs)`.
+    type Dispatched = Rc<RefCell<Vec<(String, Vec<(String, ValueType)>)>>>;
+
     /// A mock host: an in-memory key/value store plus a record of dispatched actions.
     #[derive(Clone, Default)]
     struct MockHandle {
         store: Rc<RefCell<HashMap<String, ValueType>>>,
-        dispatched: Rc<RefCell<Vec<(String, Vec<(String, ValueType)>)>>>,
+        dispatched: Dispatched,
     }
 
     impl Read for MockHandle {

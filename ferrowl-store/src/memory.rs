@@ -484,7 +484,7 @@ mod tests {
         let mut memory: Memory<u8> = Memory::default();
         // Vacant key with no ranges: nothing to insert, still succeeds.
         assert!(memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[]));
-        assert!(memory.slices.get(&1u8).is_none());
+        assert!(!memory.slices.contains_key(&1u8));
     }
 
     #[test]

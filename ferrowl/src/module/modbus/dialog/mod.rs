@@ -313,13 +313,28 @@ mod helper_tests {
         let bf = BitField::default();
         let r = Resolution(1.0);
         let e = RegisterEndian::Big;
-        assert_eq!(format_index(&RegisterFormat::U8((e.clone(), r.clone(), bf.clone()))), 0);
-        assert_eq!(format_index(&RegisterFormat::I128((e.clone(), r.clone(), bf.clone()))), 9);
-        assert_eq!(format_index(&RegisterFormat::F32((e.clone(), r.clone()))), 10);
-        assert_eq!(format_index(&RegisterFormat::F64((e.clone(), r.clone()))), 11);
+        assert_eq!(
+            format_index(&RegisterFormat::U8((e.clone(), r.clone(), bf.clone()))),
+            0
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::I128((e.clone(), r.clone(), bf.clone()))),
+            9
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::F32((e.clone(), r.clone()))),
+            10
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::F64((e.clone(), r.clone()))),
+            11
+        );
         // ASCII has no number-format slot and maps to index 0.
         assert_eq!(
-            format_index(&RegisterFormat::Ascii((TextAlignment::Left, ferrowl_codec::format::Width(2)))),
+            format_index(&RegisterFormat::Ascii((
+                TextAlignment::Left,
+                ferrowl_codec::format::Width(2)
+            ))),
             0
         );
     }
@@ -329,9 +344,20 @@ mod helper_tests {
         let bf = BitField::default();
         let r = Resolution(1.0);
         let e = RegisterEndian::Big;
-        assert!(is_integer_format(&RegisterFormat::U16((e.clone(), r.clone(), bf.clone()))));
-        assert!(is_integer_format(&RegisterFormat::I64((e.clone(), r.clone(), bf.clone()))));
-        assert!(!is_integer_format(&RegisterFormat::F32((e.clone(), r.clone()))));
+        assert!(is_integer_format(&RegisterFormat::U16((
+            e.clone(),
+            r.clone(),
+            bf.clone()
+        ))));
+        assert!(is_integer_format(&RegisterFormat::I64((
+            e.clone(),
+            r.clone(),
+            bf.clone()
+        ))));
+        assert!(!is_integer_format(&RegisterFormat::F32((
+            e.clone(),
+            r.clone()
+        ))));
         assert!(!is_integer_format(&RegisterFormat::Ascii((
             TextAlignment::Left,
             ferrowl_codec::format::Width(2)
@@ -361,7 +387,11 @@ mod helper_tests {
         // Same variant (U32), new endian/resolution/bitfield.
         assert_eq!(
             rebuilt,
-            RegisterFormat::U32((RegisterEndian::Little, Resolution(0.25), BitField { mask: 0x0F0F }))
+            RegisterFormat::U32((
+                RegisterEndian::Little,
+                Resolution(0.25),
+                BitField { mask: 0x0F0F }
+            ))
         );
         // Floats ignore the supplied bitfield.
         let float = with_numeric_parts(

@@ -321,7 +321,8 @@ mod tests {
         let action = V2_0_1::default_action("Reset").expect("Reset is a known action");
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = handler.handle_call(action);
+            // Building the response is the synchronous part that deadlocked; dropping the future is fine.
+            drop(handler.handle_call(action));
             let _ = tx.send(());
         });
         assert!(

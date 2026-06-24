@@ -356,6 +356,17 @@ impl LogSink for LuaLogSink {
     }
 }
 
+/// Sleep up to `interval` in small chunks so the stop flag is observed promptly.
+pub(crate) fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
+    let chunk = Duration::from_millis(25);
+    let mut slept = Duration::ZERO;
+    while slept < interval && !stop.load(Ordering::Relaxed) {
+        let step = chunk.min(interval - slept);
+        std::thread::sleep(step);
+        slept += step;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,16 +412,5 @@ mod tests {
         let cs = <Cs201 as ClientFields>::cs_actions();
         assert!(!cs.contains(&"MeterValues"));
         assert!(cs.contains(&"BootNotification"));
-    }
-}
-
-/// Sleep up to `interval` in small chunks so the stop flag is observed promptly.
-pub(crate) fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
-    let chunk = Duration::from_millis(25);
-    let mut slept = Duration::ZERO;
-    while slept < interval && !stop.load(Ordering::Relaxed) {
-        let step = chunk.min(interval - slept);
-        std::thread::sleep(step);
-        slept += step;
     }
 }

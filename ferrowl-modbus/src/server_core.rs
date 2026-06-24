@@ -13,6 +13,7 @@ use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 /// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
 /// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
 /// `name` is the only thing that varies between the read arms (and appears verbatim in the logs).
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/cnt) + server state
 async fn handle_read<T, L>(
     name: &str,
     slave: SlaveId,
@@ -67,6 +68,7 @@ where
 /// Shared body of the two multi-write function codes (registers/coils): write `values` at `addr`
 /// for the `(slave, fc)` key as `cell`, log the outcome, and return the count written (for the
 /// response). Coil callers pass their bits already widened to `u16`.
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/values) + server state
 async fn handle_write_multi<T, L>(
     name: &str,
     slave: SlaveId,
@@ -121,6 +123,7 @@ where
 /// Shared body of the two single-write function codes (register/coil): write `stored` at `addr`
 /// for the `(slave, fc)` key as `cell`, logging `value` (the protocol-level value — a `u16` for a
 /// register, a `bool` for a coil) so the log text matches the wire request.
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/value/stored) + server state
 async fn handle_write_single<T, L, V>(
     name: &str,
     slave: SlaveId,

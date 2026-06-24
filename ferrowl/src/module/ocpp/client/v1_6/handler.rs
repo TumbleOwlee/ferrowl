@@ -288,7 +288,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             // Building the response is the synchronous part that deadlocked; dropping the future is fine.
-            let _ = handler.handle_call(action);
+            drop(handler.handle_call(action));
             let _ = tx.send(());
         });
         assert!(
