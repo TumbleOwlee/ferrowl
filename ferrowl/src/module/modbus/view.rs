@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 
 use crate::config::{DeviceConfig, ModuleSpec};
 use crate::module::modbus::dialog::{
-    EditInputDialog, EditSelectionDialog, EditedRegister, SubDialogs,
+    EditInputDialog, EditSelectionDialog, EditedRegister, RegisterDialog,
 };
 use crate::module::modbus::setup_dialog::{SetupDialog, SetupValues};
 use crate::module::modbus::table::{
@@ -45,171 +45,114 @@ enum ModbusOverlay {
 }
 
 impl ModbusOverlay {
-    fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+    /// The open dialog as a shared [`RegisterDialog`] trait object. Both the typed
+    /// (`Edit`/`Add` → `EditInputDialog`) and selection (`EditSelection`) variants implement the
+    /// trait, so the per-method forwarders below dispatch through one place instead of re-matching.
+    fn inner(&self) -> &dyn RegisterDialog {
         match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.render(area, buf),
-            ModbusOverlay::EditSelection(d) => d.render(area, buf),
+            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d,
+            ModbusOverlay::EditSelection(d) => d,
         }
+    }
+
+    /// The open dialog as a mutable [`RegisterDialog`] trait object.
+    fn inner_mut(&mut self) -> &mut dyn RegisterDialog {
+        match self {
+            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d,
+            ModbusOverlay::EditSelection(d) => d,
+        }
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        self.inner_mut().render(area, buf)
     }
 
     fn focus_next(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.focus_next(),
-            ModbusOverlay::EditSelection(d) => d.focus_next(),
-        }
+        self.inner_mut().focus_next()
     }
 
     fn focus_previous(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.focus_previous(),
-            ModbusOverlay::EditSelection(d) => d.focus_previous(),
-        }
+        self.inner_mut().focus_previous()
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => {
-                let _ = d.handle_events(modifiers, code);
-            }
-            ModbusOverlay::EditSelection(d) => {
-                let _ = d.handle_events(modifiers, code);
-            }
-        }
+        self.inner_mut().handle_events(modifiers, code)
     }
 
     fn clear_name_error(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.clear_name_error(),
-            ModbusOverlay::EditSelection(d) => d.clear_name_error(),
-        }
+        self.inner_mut().clear_name_error()
     }
 
     fn has_confirm_delete(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.has_confirm_delete(),
-            ModbusOverlay::EditSelection(d) => d.has_confirm_delete(),
-        }
+        self.inner().has_confirm_delete()
     }
 
     fn confirm_delete_is_confirmed(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.confirm_delete_is_confirmed(),
-            ModbusOverlay::EditSelection(d) => d.confirm_delete_is_confirmed(),
-        }
+        self.inner().confirm_delete_is_confirmed()
     }
 
     fn close_confirm_delete(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.close_confirm_delete(),
-            ModbusOverlay::EditSelection(d) => d.close_confirm_delete(),
-        }
+        self.inner_mut().close_confirm_delete()
     }
 
     fn open_confirm_delete(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.open_confirm_delete(),
-            ModbusOverlay::EditSelection(d) => d.open_confirm_delete(),
-        }
+        self.inner_mut().open_confirm_delete()
     }
 
     fn confirm_delete_focus_next(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.confirm_delete_focus_next(),
-            ModbusOverlay::EditSelection(d) => d.confirm_delete_focus_next(),
-        }
+        self.inner_mut().confirm_delete_focus_next()
     }
 
     fn confirm_delete_focus_previous(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.confirm_delete_focus_previous(),
-            ModbusOverlay::EditSelection(d) => d.confirm_delete_focus_previous(),
-        }
+        self.inner_mut().confirm_delete_focus_previous()
     }
 
     fn has_sub_dialog(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.has_sub_dialog(),
-            ModbusOverlay::EditSelection(d) => d.has_sub_dialog(),
-        }
+        self.inner().has_sub_dialog()
     }
 
     fn close_add_dialog(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.close_add_dialog(),
-            ModbusOverlay::EditSelection(d) => d.close_add_dialog(),
-        }
+        self.inner_mut().close_add_dialog()
     }
 
     fn confirm_add_dialog(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.confirm_add_dialog(),
-            ModbusOverlay::EditSelection(d) => d.confirm_add_dialog(),
-        }
+        self.inner_mut().confirm_add_dialog()
     }
 
     fn add_dialog_focus_next(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.add_dialog_focus_next(),
-            ModbusOverlay::EditSelection(d) => d.add_dialog_focus_next(),
-        }
+        self.inner_mut().add_dialog_focus_next()
     }
 
     fn add_dialog_focus_previous(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.add_dialog_focus_previous(),
-            ModbusOverlay::EditSelection(d) => d.add_dialog_focus_previous(),
-        }
+        self.inner_mut().add_dialog_focus_previous()
     }
 
     fn add_dialog_handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => {
-                d.add_dialog_handle_events(modifiers, code)
-            }
-            ModbusOverlay::EditSelection(d) => d.add_dialog_handle_events(modifiers, code),
-        }
+        self.inner_mut().add_dialog_handle_events(modifiers, code)
     }
 
     fn is_update_script_focused(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.is_update_script_focused(),
-            ModbusOverlay::EditSelection(d) => d.is_update_script_focused(),
-        }
+        self.inner().is_update_script_focused()
     }
 
     fn is_confirm_button_focused(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.is_confirm_button_focused(),
-            ModbusOverlay::EditSelection(d) => d.is_confirm_button_focused(),
-        }
+        self.inner().is_confirm_button_focused()
     }
 
     fn is_delete_register_button_focused(&self) -> bool {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.is_delete_register_button_focused(),
-            ModbusOverlay::EditSelection(d) => d.is_delete_register_button_focused(),
-        }
+        self.inner().is_delete_register_button_focused()
     }
 
     fn handle_space(&mut self) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.handle_space(),
-            ModbusOverlay::EditSelection(d) => d.handle_space(),
-        }
+        self.inner_mut().handle_space()
     }
 
     fn set_name_error(&mut self, msg: String) {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.set_name_error(msg),
-            ModbusOverlay::EditSelection(d) => d.set_name_error(msg),
-        }
+        self.inner_mut().set_name_error(msg)
     }
 
     fn apply(&self) -> Option<EditedRegister> {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d.apply().ok(),
-            ModbusOverlay::EditSelection(d) => d.apply().ok(),
-        }
+        self.inner().apply().ok()
     }
 
     fn is_add(&self) -> bool {
@@ -1285,5 +1228,44 @@ fn parse_set_args(rest: &str) -> (String, String) {
             Some((reg, val)) => (reg.to_string(), val.trim_start().to_string()),
             None => (rest.to_string(), String::new()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_set_args, raw_hex};
+
+    #[test]
+    fn ut_raw_hex_formats_words_lowercase_space_separated() {
+        assert_eq!(raw_hex(&[]), "[]");
+        assert_eq!(raw_hex(&[0x0001]), "[0001]");
+        assert_eq!(raw_hex(&[0x00a0, 0x0001]), "[00a0 0001]");
+        assert_eq!(raw_hex(&[0xffff, 0x0000]), "[ffff 0000]");
+    }
+
+    #[test]
+    fn ut_parse_set_args_unquoted_splits_on_first_whitespace() {
+        assert_eq!(parse_set_args("reg 123"), ("reg".into(), "123".into()));
+        // Extra leading whitespace before the value is trimmed.
+        assert_eq!(parse_set_args("reg   123"), ("reg".into(), "123".into()));
+        // No value -> empty string.
+        assert_eq!(parse_set_args("reg"), ("reg".into(), String::new()));
+    }
+
+    #[test]
+    fn ut_parse_set_args_quoted_name_keeps_inner_spaces() {
+        assert_eq!(
+            parse_set_args("\"my reg\" 456"),
+            ("my reg".into(), "456".into())
+        );
+        assert_eq!(
+            parse_set_args("\"my reg\" hello world"),
+            ("my reg".into(), "hello world".into())
+        );
+        // Quoted name, no value.
+        assert_eq!(
+            parse_set_args("\"my reg\""),
+            ("my reg".into(), String::new())
+        );
     }
 }

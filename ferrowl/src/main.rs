@@ -131,14 +131,14 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
     Tab::new_from_view(spec.name.clone(), view)
 }
 
-fn demo_ocpp_tab(name: String, role: OcppRole) -> Tab {
+fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) -> Tab {
     let spec = OcppSpec {
         name,
-        version: OcppVersion::V1_6,
+        version,
         role,
         protocol: OcppProtocol::Ws,
         ip: "127.0.0.1".into(),
-        port: 9000,
+        port,
         path: "/ocpp/cp001".into(),
         timeout_ms: None,
     };
@@ -160,8 +160,30 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         let mut tabs = vec![
             demo_modbus_tab("Modbus Server".to_string(), Role::Server),
             demo_modbus_tab("Modbus Client".to_string(), Role::Client),
-            demo_ocpp_tab("OCPP CSMS".to_string(), OcppRole::Server),
-            demo_ocpp_tab("OCPP CS".to_string(), OcppRole::Client),
+            demo_ocpp_tab(
+                "CSMS v1.6".to_string(),
+                OcppVersion::V1_6,
+                OcppRole::Server,
+                9000,
+            ),
+            demo_ocpp_tab(
+                "CS v1.6".to_string(),
+                OcppVersion::V1_6,
+                OcppRole::Client,
+                9000,
+            ),
+            demo_ocpp_tab(
+                "CSMS v2.0.1".to_string(),
+                OcppVersion::V2_0_1,
+                OcppRole::Server,
+                9001,
+            ),
+            demo_ocpp_tab(
+                "CS v2.0,1".to_string(),
+                OcppVersion::V2_0_1,
+                OcppRole::Client,
+                9001,
+            ),
         ];
         for tab in tabs.iter_mut() {
             if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {

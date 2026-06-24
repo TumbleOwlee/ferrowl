@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// ([`Resolution`]) and a [`BitField`] selector; float variants carry just
 /// endian and resolution; [`Ascii`](Self::Ascii) carries its [`Alignment`] and
 /// [`Width`] in registers.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Format {
     Ascii((Alignment, Width)),
     U8((Endian, Resolution, BitField)),

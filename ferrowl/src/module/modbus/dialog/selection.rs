@@ -49,6 +49,36 @@ pub fn parse_raw_value(raw: &str) -> Option<i64> {
     Some(result as i64)
 }
 
+#[cfg(test)]
+mod parse_raw_value_tests {
+    use super::parse_raw_value;
+
+    #[test]
+    fn ut_parses_single_and_multi_word_big_endian() {
+        assert_eq!(parse_raw_value("[0001]"), Some(1));
+        assert_eq!(parse_raw_value("[0001 0002]"), Some(0x0001_0002));
+        assert_eq!(parse_raw_value("[00a0 0001]"), Some(0x00a0_0001));
+        // Empty body folds to zero.
+        assert_eq!(parse_raw_value("[]"), Some(0));
+        // Surrounding whitespace is tolerated.
+        assert_eq!(parse_raw_value("  [00ff]  "), Some(0xff));
+    }
+
+    #[test]
+    fn ut_rejects_unbracketed_or_non_hex() {
+        assert_eq!(parse_raw_value("nope"), None);
+        assert_eq!(parse_raw_value("[zz]"), None);
+        assert_eq!(parse_raw_value("0001"), None);
+    }
+
+    #[test]
+    fn ut_inverts_raw_hex_layout() {
+        // Mirrors `view::raw_hex`'s `[wwww wwww]` formatting.
+        assert_eq!(parse_raw_value("[0000 0000]"), Some(0));
+        assert_eq!(parse_raw_value("[ffff ffff]"), Some(0xffff_ffff));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EditSelectionDialog
 // ---------------------------------------------------------------------------
@@ -1298,5 +1328,35 @@ impl SubDialogs for EditSelectionDialog<NamedValue> {
         self.value.state.set_selection(idx);
         // Keep default selection in sync: append after the sentinel.
         self.default_value.state.values_mut().push(nv);
+    }
+}
+
+impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.render(area, buf)
+    }
+    fn focus_next(&mut self) {
+        self.focus_next()
+    }
+    fn focus_previous(&mut self) {
+        self.focus_previous()
+    }
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+        let _ = HandleEvents::handle_events(self, modifiers, code);
+    }
+    fn handle_space(&mut self) {
+        self.handle_space()
+    }
+    fn is_update_script_focused(&self) -> bool {
+        self.is_update_script_focused()
+    }
+    fn is_confirm_button_focused(&self) -> bool {
+        self.is_confirm_button_focused()
+    }
+    fn is_delete_register_button_focused(&self) -> bool {
+        self.is_delete_register_button_focused()
+    }
+    fn apply(&self) -> Result<EditedRegister, String> {
+        self.apply()
     }
 }

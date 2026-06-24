@@ -1,7 +1,6 @@
 //! Contiguous runs of memory cells backing a [`Memory`](crate::Memory).
 
 use crate::{cell::CellType, range::Range};
-use itertools::Itertools;
 use std::fmt::Debug;
 
 use crate::cell::{Cell, CellKind, ValueRange};
@@ -68,46 +67,46 @@ impl Slice {
         }
     }
 
+    /// Returns `true` if `range` lies fully within this slice's address range.
+    fn contains(&self, range: &Range) -> bool {
+        range.start >= self.range.start && range.end <= self.range.end
+    }
+
+    /// Iterates the cells covering `range`. The caller must ensure
+    /// [`contains`](Self::contains) holds, else the offset subtraction underflows.
+    fn cells_in(&self, range: &Range) -> impl Iterator<Item = &Cell> {
+        self.buffer
+            .iter()
+            .skip(range.start - self.range.start)
+            .take(range.length())
+    }
+
+    /// Mutable counterpart of [`cells_in`](Self::cells_in).
+    fn cells_in_mut(&mut self, range: &Range) -> impl Iterator<Item = &mut Cell> {
+        let offset = range.start - self.range.start;
+        self.buffer.iter_mut().skip(offset).take(range.length())
+    }
+
     /// Returns `true` if `range` lies within the slice and every cell in it
     /// accepts writes of type `ty`.
     pub fn writable(&self, ty: &CellType, range: &Range) -> bool {
-        let in_range = range.start >= self.range.start && range.end <= self.range.end;
-        if in_range {
-            self.buffer
-                .iter()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .fold_while(true, |_, mem| match mem {
-                    Cell::Write(t, _) | Cell::ReadWrite(t, _) if t == ty => {
-                        itertools::FoldWhile::Continue(true)
-                    }
-                    _ => itertools::FoldWhile::Done(false),
-                })
-                .into_inner()
-        } else {
-            in_range
-        }
+        self.contains(range)
+            && self
+                .cells_in(range)
+                .all(|mem| matches!(mem, Cell::Write(t, _) | Cell::ReadWrite(t, _) if t == ty))
     }
 
     /// Writes `values` into `range`, skipping read-only cells silently.
     /// Returns `false` if `range` is out of bounds or the value count does
     /// not match the range length.
     pub fn write(&mut self, range: &Range, values: &[u16]) -> bool {
-        let in_range = range.start >= self.range.start && range.end <= self.range.end;
-        let writable = range.length() == values.len() && in_range;
+        let writable = self.contains(range) && range.length() == values.len();
         if writable {
-            for (mem, val) in self
-                .buffer
-                .iter_mut()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .zip(values.iter())
-            {
+            for (mem, val) in self.cells_in_mut(range).zip(values.iter()) {
                 match mem {
-                    Cell::Write(_, w) => *w = *val,
-                    Cell::ReadWrite(_, rw) => *rw = *val,
+                    Cell::Write(_, w) | Cell::ReadWrite(_, w) => *w = *val,
                     Cell::Read(_, _) => {}
-                };
+                }
             }
         }
         writable
@@ -115,22 +114,12 @@ impl Slice {
 
     /// Write values regardless of cell kind — forces writes to `Read` cells too.
     pub fn write_unchecked(&mut self, range: &Range, values: &[u16]) -> bool {
-        let ok = range.start >= self.range.start
-            && range.end <= self.range.end
-            && range.length() == values.len();
+        let ok = self.contains(range) && range.length() == values.len();
         if ok {
-            for (mem, val) in self
-                .buffer
-                .iter_mut()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .zip(values.iter())
-            {
+            for (mem, val) in self.cells_in_mut(range).zip(values.iter()) {
                 match mem {
-                    Cell::Write(_, w) => *w = *val,
-                    Cell::ReadWrite(_, rw) => *rw = *val,
-                    Cell::Read(_, r) => *r = *val,
-                };
+                    Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = *val,
+                }
             }
         }
         ok
@@ -139,76 +128,40 @@ impl Slice {
     /// Reads the values in `range`. Returns `None` if `range` is out of
     /// bounds or contains a write-only cell.
     pub fn read(&self, range: &Range) -> Option<Vec<u16>> {
-        let readable = range.start >= self.range.start && range.end <= self.range.end;
-        if readable {
-            self.buffer
-                .iter()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .fold_while(Some(Vec::with_capacity(range.length())), |init, val| {
-                    if let Some(mut values) = init {
-                        match val {
-                            Cell::Read(_, r) => values.push(*r),
-                            Cell::ReadWrite(_, rw) => values.push(*rw),
-                            Cell::Write(_, _) => return itertools::FoldWhile::Done(None),
-                        };
-                        itertools::FoldWhile::Continue(Some(values))
-                    } else {
-                        itertools::FoldWhile::Done(None)
-                    }
-                })
-                .into_inner()
-        } else {
-            None
+        if !self.contains(range) {
+            return None;
         }
+        // Collecting into `Option<Vec<_>>` short-circuits on the first write-only cell.
+        self.cells_in(range)
+            .map(|mem| match mem {
+                Cell::Read(_, r) | Cell::ReadWrite(_, r) => Some(*r),
+                Cell::Write(_, _) => None,
+            })
+            .collect()
     }
 
     /// Reads values regardless of cell kind — write-only cells return their
     /// stored value. Returns `None` only if `range` is out of bounds.
     pub fn read_unchecked(&self, range: &Range) -> Option<Vec<u16>> {
-        let readable = range.start >= self.range.start && range.end <= self.range.end;
-        if readable {
-            self.buffer
-                .iter()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .fold_while(Some(Vec::with_capacity(range.length())), |init, val| {
-                    if let Some(mut values) = init {
-                        match val {
-                            Cell::Read(_, r) => values.push(*r),
-                            Cell::ReadWrite(_, rw) => values.push(*rw),
-                            Cell::Write(_, r) => values.push(*r),
-                        };
-                        itertools::FoldWhile::Continue(Some(values))
-                    } else {
-                        itertools::FoldWhile::Done(None)
-                    }
-                })
-                .into_inner()
-        } else {
-            None
+        if !self.contains(range) {
+            return None;
         }
+        Some(
+            self.cells_in(range)
+                .map(|mem| match mem {
+                    Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v,
+                })
+                .collect(),
+        )
     }
 
     /// Returns `true` if `range` lies within the slice and every cell in it
     /// is readable as type `ty`.
     pub fn readable(&self, ty: &CellType, range: &Range) -> bool {
-        let in_range = range.start >= self.range.start && range.end <= self.range.end;
-        if in_range {
-            self.buffer
-                .iter()
-                .skip(range.start - self.range.start)
-                .take(range.length())
-                .fold_while(true, |_, mem| match mem {
-                    Cell::Read(t, _) | Cell::ReadWrite(t, _) if t == ty => {
-                        itertools::FoldWhile::Continue(true)
-                    }
-                    _ => itertools::FoldWhile::Done(false),
-                })
-                .into_inner()
-        } else {
-            in_range
-        }
+        self.contains(range)
+            && self
+                .cells_in(range)
+                .all(|mem| matches!(mem, Cell::Read(t, _) | Cell::ReadWrite(t, _) if t == ty))
     }
 }
 

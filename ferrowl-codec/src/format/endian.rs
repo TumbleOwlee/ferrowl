@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Byte order of a multi-byte value across registers.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Endian {
     Little,
     Big,

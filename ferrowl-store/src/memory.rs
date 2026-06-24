@@ -84,35 +84,19 @@ where
                 let mut slice = m.remove(&range).unwrap();
                 if let Some(rg) = r.intersect(&slice.range) {
                     for i in (rg.start - slice.range.start)..(rg.end - slice.range.start) {
-                        if let Cell::Read(t1, v1) = &slice.buffer[i] {
-                            match kind {
-                                CellKind::Read(t2) if *t1 == *t2 => {}
-                                CellKind::Write(t2) if *t1 == *t2 => {
-                                    slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
-                                }
-                                _ => {
-                                    return false;
-                                }
+                        // Same register type: a Read+Write (in either order) widens to ReadWrite;
+                        // matching access is a no-op. Any other combination is incompatible.
+                        match (&slice.buffer[i], kind) {
+                            (Cell::Read(t1, _), CellKind::Read(t2)) if t1 == t2 => {}
+                            (Cell::Write(t1, _), CellKind::Write(t2)) if t1 == t2 => {}
+                            (Cell::ReadWrite(t1, _), CellKind::ReadWrite(t2)) if t1 == t2 => {}
+                            (Cell::Read(t1, v1), CellKind::Write(t2)) if t1 == t2 => {
+                                slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
                             }
-                        } else if let Cell::Write(t1, v1) = &slice.buffer[i] {
-                            match kind {
-                                CellKind::Read(t2) if *t1 == *t2 => {
-                                    slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
-                                }
-                                CellKind::Write(t2) if *t1 == *t2 => {}
-                                _ => {
-                                    return false;
-                                }
+                            (Cell::Write(t1, v1), CellKind::Read(t2)) if t1 == t2 => {
+                                slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
                             }
-                        } else if let Cell::ReadWrite(t1, _v1) = &slice.buffer[i] {
-                            match kind {
-                                CellKind::ReadWrite(t2) if *t1 == *t2 => {}
-                                _ => {
-                                    return false;
-                                }
-                            }
-                        } else {
-                            return false;
+                            _ => return false,
                         }
                     }
                 }

@@ -1261,6 +1261,36 @@ impl SubDialogs for EditInputDialog {
     }
 }
 
+impl super::RegisterDialog for EditInputDialog {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.render(area, buf)
+    }
+    fn focus_next(&mut self) {
+        self.focus_next()
+    }
+    fn focus_previous(&mut self) {
+        self.focus_previous()
+    }
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+        let _ = HandleEvents::handle_events(self, modifiers, code);
+    }
+    fn handle_space(&mut self) {
+        self.handle_space()
+    }
+    fn is_update_script_focused(&self) -> bool {
+        self.is_update_script_focused()
+    }
+    fn is_confirm_button_focused(&self) -> bool {
+        self.is_confirm_button_focused()
+    }
+    fn is_delete_register_button_focused(&self) -> bool {
+        self.is_delete_register_button_focused()
+    }
+    fn apply(&self) -> Result<EditedRegister, String> {
+        self.apply()
+    }
+}
+
 use super::{
     AddNamedValueDialog, ConfirmDeleteDialog, SubDialogs, access_index, alignment_index,
     endian_index, format_index, is_integer_format, kind_index, numeric_parts, parse_bitmask,
@@ -1268,3 +1298,256 @@ use super::{
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::traits::HandleEvents;
+
+#[cfg(test)]
+mod apply_tests {
+    //! Characterization tests for the `from_register` → `apply` round-trip: editing an existing
+    //! register and confirming must reproduce its metadata.
+    use super::EditInputDialog;
+    use ferrowl_codec::format::{
+        Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
+        Resolution, Width,
+    };
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+
+    fn reg(kind: Kind, access: Access, address: Address, slave: u8, format: RegisterFormat) -> Register {
+        RegisterBuilder::default()
+            .slave_id(slave)
+            .access(access)
+            .kind(kind)
+            .address(address)
+            .format(format)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn ut_numeric_register_round_trips_through_apply() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(100),
+            7,
+            RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+        );
+        let edited = EditInputDialog::from_register("temp", "a sensor", &original, "42", None, None)
+            .apply()
+            .expect("valid register should apply");
+
+        assert_eq!(edited.name, "temp");
+        assert_eq!(edited.description, "a sensor");
+        assert_eq!(*edited.register.slave_id(), 7);
+        assert_eq!(*edited.register.kind(), Kind::HoldingRegister);
+        assert_eq!(*edited.register.access(), Access::ReadWrite);
+        assert_eq!(*edited.register.address(), Address::Fixed(100));
+        assert_eq!(edited.register.format(), original.format());
+        assert_eq!(edited.value.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn ut_virtual_address_and_read_only_round_trip() {
+        let original = reg(
+            Kind::InputRegister,
+            Access::ReadOnly,
+            Address::Virtual,
+            1,
+            RegisterFormat::U16((RegisterEndian::Little, Resolution(0.5), BitField::default())),
+        );
+        let edited = EditInputDialog::from_register("v", "", &original, "3", None, None)
+            .apply()
+            .expect("valid register should apply");
+
+        assert_eq!(*edited.register.address(), Address::Virtual);
+        assert_eq!(*edited.register.access(), Access::ReadOnly);
+        assert_eq!(edited.register.format(), original.format());
+    }
+
+    #[test]
+    fn ut_non_full_bitmask_round_trips() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(5),
+            1,
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField { mask: 0xFF00 })),
+        );
+        let edited = EditInputDialog::from_register("masked", "", &original, "0", None, None)
+            .apply()
+            .expect("valid register should apply");
+        assert_eq!(edited.register.format(), original.format());
+    }
+
+    #[test]
+    fn ut_ascii_register_round_trips_format() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::Ascii((TextAlignment::Left, Width(4))),
+        );
+        let edited = EditInputDialog::from_register("label", "", &original, "AB", None, None)
+            .apply()
+            .expect("valid register should apply");
+        assert_eq!(edited.register.format(), original.format());
+    }
+
+    #[test]
+    fn ut_boolean_kind_forces_default_u16_format() {
+        let original = reg(
+            Kind::Coil,
+            Access::ReadWrite,
+            Address::Fixed(1),
+            1,
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+        );
+        let edited = EditInputDialog::from_register("c", "", &original, "1", None, None)
+            .apply()
+            .expect("valid register should apply");
+        assert_eq!(*edited.register.kind(), Kind::Coil);
+        // Boolean kinds (Coil/DiscreteInput) always serialize as a default big-endian U16.
+        assert_eq!(
+            *edited.register.format(),
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default()))
+        );
+    }
+
+    #[test]
+    fn ut_empty_add_dialog_does_not_apply() {
+        // A freshly opened "Add" dialog has empty fields (no slave id / value), so confirming it
+        // must fail validation rather than produce a bogus register.
+        assert!(EditInputDialog::new().apply().is_err());
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    //! Characterization tests for the `#[derive(Focus)]`-generated event dispatch and focus cycle:
+    //! `handle_events` routes a key to the focused pane, and `focus_next`/`focus_previous` cycle
+    //! through the focusable panes while skipping `#[focus(when = …)]`-gated ones.
+    use super::{EditInputDialog, EditInputDialogFocus};
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_codec::format::{
+        BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+    };
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_ui::traits::HandleEvents;
+
+    fn numeric_dialog() -> EditInputDialog {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::U32((
+                RegisterEndian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        // `from_register` focuses the value field and sets the cursor at the end of "4".
+        EditInputDialog::from_register("name", "", &register, "4", None, None)
+    }
+
+    fn coil_dialog() -> EditInputDialog {
+        let register: Register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::Coil)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::U16((
+                RegisterEndian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        EditInputDialog::from_register("c", "", &register, "1", None, None)
+    }
+
+    /// Walk a full forward focus cycle, returning every focus state visited (starting state first).
+    fn forward_cycle(dialog: &mut EditInputDialog) -> Vec<EditInputDialogFocus> {
+        let start = dialog.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            dialog.focus_next();
+            if dialog.focus == start {
+                return seen;
+            }
+            seen.push(dialog.focus);
+        }
+        panic!("focus_next did not return to the starting pane within 64 steps");
+    }
+
+    #[test]
+    fn ut_handle_events_types_into_focused_value_field() {
+        let mut d = numeric_dialog();
+        assert_eq!(d.focus, EditInputDialogFocus::Value);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('2'));
+        // The keystroke is routed to the focused value field (cursor was at the end of "4").
+        assert_eq!(d.value.state.input(), "42");
+        // Other fields are untouched.
+        assert_eq!(d.label.state.input(), "name");
+    }
+
+    #[test]
+    fn ut_handle_events_follows_focus_to_another_pane() {
+        let mut d = numeric_dialog();
+        d.focus = EditInputDialogFocus::Label;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        // Now the label receives the keystroke; the value field stays at "4".
+        assert_eq!(d.label.state.input(), "namex");
+        assert_eq!(d.value.state.input(), "4");
+    }
+
+    #[test]
+    fn ut_focus_cycle_wraps_and_visits_core_panes() {
+        let mut d = numeric_dialog();
+        let seen = forward_cycle(&mut d);
+        // Wrapped back to the starting pane.
+        assert_eq!(d.focus, EditInputDialogFocus::Value);
+        // Core always-present panes and the editing register's numeric + delete panes are reached.
+        for expected in [
+            EditInputDialogFocus::Label,
+            EditInputDialogFocus::SlaveId,
+            EditInputDialogFocus::Address,
+            EditInputDialogFocus::Value,
+            EditInputDialogFocus::NumberFormat,
+            EditInputDialogFocus::ConfirmButton,
+            EditInputDialogFocus::DeleteRegisterButton,
+        ] {
+            assert!(seen.contains(&expected), "cycle missing {expected:?}: {seen:?}");
+        }
+    }
+
+    #[test]
+    fn ut_focus_previous_reverses_focus_next() {
+        let mut d = numeric_dialog();
+        let start = d.focus;
+        d.focus_next();
+        assert_ne!(d.focus, start);
+        d.focus_previous();
+        assert_eq!(d.focus, start);
+    }
+
+    #[test]
+    fn ut_focus_cycle_skips_gated_number_panes_for_boolean_kind() {
+        let mut d = coil_dialog();
+        let seen = forward_cycle(&mut d);
+        // Coil/DiscreteInput are boolean: the type selector and all numeric/text sub-panes are
+        // gated off and must be skipped by the cycle.
+        for gated in [
+            EditInputDialogFocus::ValueType,
+            EditInputDialogFocus::NumberFormat,
+            EditInputDialogFocus::NumberEndian,
+            EditInputDialogFocus::NumberResolution,
+            EditInputDialogFocus::TextAlignment,
+            EditInputDialogFocus::TextWidth,
+        ] {
+            assert!(!seen.contains(&gated), "boolean cycle should skip {gated:?}: {seen:?}");
+        }
+        // The value field is still reachable.
+        assert!(seen.contains(&EditInputDialogFocus::Value));
+    }
+}

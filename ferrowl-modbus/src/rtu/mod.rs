@@ -7,7 +7,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 pub use client::{Client, ClientBuilder};
-pub use server::{Server, ServerBuilder};
+pub use server::ServerBuilder;
 
 /// Modbus RTU serial settings; doubles as the clap argument group for RTU
 /// mode.
