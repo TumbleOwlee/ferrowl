@@ -1,6 +1,9 @@
 //! OCPP 1.6 inbound (CSMS→CS) handler, answered from [`CsState`]. GetConfiguration is built from
-//! the config store, ChangeConfiguration writes it, Reset mutates state; every other inbound Call
-//! is default-accepted (see `UNHANDLED.md`). Each inbound Call and our reply are recorded.
+//! the config store, ChangeConfiguration writes it, Reset mutates state. Connector-scoped Calls are
+//! simulated against the targeted connector (or charge-point-wide for connectorId 0): ReserveNow /
+//! CancelReservation (matched by reservationId), ChangeAvailability (status), Remote Start/Stop
+//! (transaction), SetChargingProfile / ClearChargingProfile (limit), UnlockConnector. Every other
+//! inbound Call is default-accepted (see `UNHANDLED.md`). Each inbound Call and our reply are recorded.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -11,7 +14,9 @@ use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::v1_6::messages::change_configuration::ChangeConfigurationResponse;
 use ferrowl_ocpp::v1_6::messages::get_configuration::GetConfigurationResponse;
 use ferrowl_ocpp::v1_6::messages::reset::ResetResponse;
-use ferrowl_ocpp::v1_6::types::{ConfigurationStatus, KeyValue, ResetResponseStatus};
+use ferrowl_ocpp::v1_6::types::{
+    AvailabilityType, ConfigurationStatus, KeyValue, ResetResponseStatus,
+};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version};
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
@@ -150,16 +155,150 @@ impl CsStateHandler {
                 (Ok(resp), context)
             }
             Action16::ReserveNow(req) => {
-                self.state.write().unwrap().reserved_rfid = Some(req.id_tag.clone());
+                let id = req.reservation_id as i64;
+                let mut state = self.state.write().unwrap();
+                // connectorId 0 reserves the charge point itself (CS-level); any other id targets
+                // that connector.
+                let context = if req.connector_id == 0 {
+                    state.reserved_rfid = Some(req.id_tag.clone());
+                    state.reservation_id = Some(id);
+                    format!("reserved CS for {}", req.id_tag)
+                } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
+                    c.reserved_rfid = Some(req.id_tag.clone());
+                    c.reservation_id = Some(id);
+                    format!("reserved connector {} for {}", req.connector_id, req.id_tag)
+                } else {
+                    format!("unknown connector {}", req.connector_id)
+                };
                 let resp =
                     V1_6::default_response("ReserveNow").expect("ReserveNow is a known action");
-                (Ok(resp), format!("reserved for {}", req.id_tag))
+                (Ok(resp), context)
             }
-            Action16::CancelReservation(_) => {
-                self.state.write().unwrap().reserved_rfid = None;
+            Action16::CancelReservation(req) => {
+                let id = req.reservation_id as i64;
+                let mut state = self.state.write().unwrap();
+                // Clear whichever level holds the matching reservationId.
+                let context = if state.reservation_id == Some(id) {
+                    state.reserved_rfid = None;
+                    state.reservation_id = None;
+                    format!("cancelled CS reservation {id}")
+                } else if let Some(c) = state
+                    .connectors
+                    .iter_mut()
+                    .find(|c| c.reservation_id == Some(id))
+                {
+                    c.reserved_rfid = None;
+                    c.reservation_id = None;
+                    format!("cancelled connector {} reservation {id}", c.connector_id)
+                } else {
+                    format!("no reservation {id}")
+                };
                 let resp = V1_6::default_response("CancelReservation")
                     .expect("CancelReservation is a known action");
-                (Ok(resp), "reservation cancelled".to_string())
+                (Ok(resp), context)
+            }
+            Action16::ChangeAvailability(req) => {
+                let status = match req.kind {
+                    AvailabilityType::Operative => "Available",
+                    AvailabilityType::Inoperative => "Unavailable",
+                };
+                let mut state = self.state.write().unwrap();
+                // connectorId 0 targets the whole charge point (every connector).
+                if req.connector_id == 0 {
+                    for c in &mut state.connectors {
+                        c.status = status.to_string();
+                    }
+                } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
+                    c.status = status.to_string();
+                }
+                let resp = V1_6::default_response("ChangeAvailability")
+                    .expect("ChangeAvailability is a known action");
+                (
+                    Ok(resp),
+                    format!("connector {} -> {status}", req.connector_id),
+                )
+            }
+            Action16::RemoteStartTransaction(req) => {
+                let mut state = self.state.write().unwrap();
+                // Optional connectorId; fall back to the first connector. Mint a local transaction
+                // id (one greater than any existing) and put the connector into Charging.
+                let next = state
+                    .connectors
+                    .iter()
+                    .filter_map(|c| c.transaction_id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+                let idx = req
+                    .connector_id
+                    .and_then(|t| {
+                        state
+                            .connectors
+                            .iter()
+                            .position(|c| c.connector_id == t as i64)
+                    })
+                    .or((!state.connectors.is_empty()).then_some(0));
+                let context = match idx {
+                    Some(i) => {
+                        state.connectors[i].transaction_id = Some(next);
+                        state.connectors[i].status = "Charging".to_string();
+                        format!(
+                            "started tx {next} on connector {}",
+                            state.connectors[i].connector_id
+                        )
+                    }
+                    None => "no connector to start".to_string(),
+                };
+                let resp = V1_6::default_response("RemoteStartTransaction")
+                    .expect("RemoteStartTransaction is a known action");
+                (Ok(resp), context)
+            }
+            Action16::RemoteStopTransaction(req) => {
+                let tx = req.transaction_id as i64;
+                let mut state = self.state.write().unwrap();
+                let context = match state
+                    .connectors
+                    .iter_mut()
+                    .find(|c| c.transaction_id == Some(tx))
+                {
+                    Some(c) => {
+                        c.transaction_id = None;
+                        c.status = "Available".to_string();
+                        format!("stopped tx {tx} on connector {}", c.connector_id)
+                    }
+                    None => format!("no active tx {tx}"),
+                };
+                let resp = V1_6::default_response("RemoteStopTransaction")
+                    .expect("RemoteStopTransaction is a known action");
+                (Ok(resp), context)
+            }
+            Action16::ClearChargingProfile(req) => {
+                let mut state = self.state.write().unwrap();
+                // Optional connectorId; absent clears every connector's limit.
+                match req.connector_id {
+                    Some(id) => {
+                        if let Some(c) = state.connector_mut(id as i64) {
+                            c.limit = None;
+                        }
+                    }
+                    None => {
+                        for c in &mut state.connectors {
+                            c.limit = None;
+                        }
+                    }
+                }
+                let resp = V1_6::default_response("ClearChargingProfile")
+                    .expect("ClearChargingProfile is a known action");
+                (Ok(resp), "charging profile cleared".to_string())
+            }
+            Action16::UnlockConnector(req) => {
+                let mut state = self.state.write().unwrap();
+                if let Some(c) = state.connector_mut(req.connector_id as i64) {
+                    c.status = "Available".to_string();
+                }
+                let resp = V1_6::default_response("UnlockConnector")
+                    .expect("UnlockConnector is a known action");
+                (Ok(resp), format!("connector {} unlocked", req.connector_id))
             }
             other => {
                 let name = V1_6::action_name(other);
@@ -294,6 +433,143 @@ mod tests {
         assert!(
             rx.recv_timeout(Duration::from_secs(5)).is_ok(),
             "handle_call deadlocked on a write-arm inbound action"
+        );
+    }
+
+    fn handler_with(state: CsState) -> CsStateHandler {
+        use std::sync::atomic::AtomicBool;
+        CsStateHandler::new(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            Arc::new(RwLock::new(state)),
+        )
+    }
+
+    /// Build an action, drive it through `respond`, and assert it was accepted.
+    fn drive(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+        let action = V1_6::decode_call(name, payload).expect("action decodes");
+        assert!(h.respond(&action).0.is_ok(), "{name} rejected");
+    }
+
+    fn two_connectors() -> CsState {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        s.add_connector(1);
+        s.add_connector(2);
+        s
+    }
+
+    #[test]
+    fn ut_reserve_now_targets_connector_not_cs() {
+        let h = handler_with(two_connectors());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "connectorId": 2, "expiryDate": "2030-01-01T00:00:00Z",
+                    "idTag": "TAG1", "reservationId": 42 }),
+        );
+        let st = h.state.read().unwrap();
+        assert_eq!(
+            st.connector(2).unwrap().reserved_rfid.as_deref(),
+            Some("TAG1")
+        );
+        assert_eq!(st.connector(2).unwrap().reservation_id, Some(42));
+        // The CS level and the untargeted connector are untouched.
+        assert!(st.reserved_rfid.is_none());
+        assert!(st.connector(1).unwrap().reserved_rfid.is_none());
+    }
+
+    #[test]
+    fn ut_reserve_now_connector_zero_is_cs_level() {
+        let h = handler_with(CsState::default());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "connectorId": 0, "expiryDate": "2030-01-01T00:00:00Z",
+                    "idTag": "CP", "reservationId": 1 }),
+        );
+        let st = h.state.read().unwrap();
+        assert_eq!(st.reserved_rfid.as_deref(), Some("CP"));
+        assert_eq!(st.reservation_id, Some(1));
+        assert!(st.connector(1).unwrap().reserved_rfid.is_none());
+    }
+
+    #[test]
+    fn ut_cancel_reservation_clears_matching_connector() {
+        let h = handler_with(two_connectors());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "connectorId": 2, "expiryDate": "2030-01-01T00:00:00Z",
+                    "idTag": "T", "reservationId": 7 }),
+        );
+        drive(&h, "CancelReservation", json!({ "reservationId": 7 }));
+        let st = h.state.read().unwrap();
+        assert!(st.connector(2).unwrap().reserved_rfid.is_none());
+        assert!(st.connector(2).unwrap().reservation_id.is_none());
+    }
+
+    #[test]
+    fn ut_change_availability_status_and_zero_targets_all() {
+        let h = handler_with(two_connectors());
+        drive(
+            &h,
+            "ChangeAvailability",
+            json!({ "connectorId": 2, "type": "Inoperative" }),
+        );
+        assert_eq!(
+            h.state.read().unwrap().connector(2).unwrap().status,
+            "Unavailable"
+        );
+        drive(
+            &h,
+            "ChangeAvailability",
+            json!({ "connectorId": 0, "type": "Operative" }),
+        );
+        let st = h.state.read().unwrap();
+        assert!(st.connectors.iter().all(|c| c.status == "Available"));
+    }
+
+    #[test]
+    fn ut_remote_start_then_stop_transaction() {
+        let h = handler_with(two_connectors());
+        drive(
+            &h,
+            "RemoteStartTransaction",
+            json!({ "connectorId": 1, "idTag": "T" }),
+        );
+        let tx = {
+            let st = h.state.read().unwrap();
+            let c = st.connector(1).unwrap();
+            assert_eq!(c.status, "Charging");
+            c.transaction_id.expect("transaction assigned")
+        };
+        drive(&h, "RemoteStopTransaction", json!({ "transactionId": tx }));
+        let st = h.state.read().unwrap();
+        assert!(st.connector(1).unwrap().transaction_id.is_none());
+        assert_eq!(st.connector(1).unwrap().status, "Available");
+    }
+
+    #[test]
+    fn ut_clear_profile_and_unlock_connector() {
+        let mut s = two_connectors();
+        s.connector_mut(1).unwrap().limit = Some(16.0);
+        s.connector_mut(1).unwrap().status = "Unavailable".to_string();
+        let h = handler_with(s);
+        drive(&h, "ClearChargingProfile", json!({}));
+        assert!(
+            h.state
+                .read()
+                .unwrap()
+                .connector(1)
+                .unwrap()
+                .limit
+                .is_none()
+        );
+        drive(&h, "UnlockConnector", json!({ "connectorId": 1 }));
+        assert_eq!(
+            h.state.read().unwrap().connector(1).unwrap().status,
+            "Available"
         );
     }
 }

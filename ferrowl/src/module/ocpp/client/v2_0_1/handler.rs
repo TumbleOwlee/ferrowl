@@ -1,5 +1,9 @@
 //! OCPP 2.0.1 inbound (CSMS→CS) handler, answered from [`CsState`]. GetVariables is built from the
-//! variable store, SetVariables writes it, Reset mutates state; every other inbound Call is
+//! variable store, SetVariables writes it, Reset mutates state. EVSE-scoped Calls are simulated
+//! against the connector on the targeted EVSE (or station-wide when the evseId is absent): ReserveNow
+//! / CancelReservation (matched by reservationId), ChangeAvailability (status), Request Start/Stop
+//! (transaction), SetChargingProfile / ClearChargingProfile (limit), UnlockConnector. Entries are
+//! addressed by EVSE id, so connectorId is not used for matching. Every other inbound Call is
 //! default-accepted (see `UNHANDLED.md`). Each inbound Call and our reply are recorded.
 
 use std::future::Future;
@@ -182,16 +186,165 @@ impl CsStateHandler {
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                self.state.write().unwrap().reserved_rfid = Some(tag.clone());
+                let id = json["id"].as_i64();
+                let mut state = self.state.write().unwrap();
+                // An evseId-less (or evseId 0) ReserveNow reserves the station itself (CS-level);
+                // otherwise it targets the connector on that EVSE (entries are addressed by EVSE id).
+                let context = match json["evseId"].as_i64().filter(|&e| e != 0) {
+                    Some(e) => match state.connector_mut_by_evse(e) {
+                        Some(c) => {
+                            c.reserved_rfid = Some(tag.clone());
+                            c.reservation_id = id;
+                            format!("reserved evse {e} for {tag}")
+                        }
+                        None => format!("unknown evse {e}"),
+                    },
+                    None => {
+                        state.reserved_rfid = Some(tag.clone());
+                        state.reservation_id = id;
+                        format!("reserved CS for {tag}")
+                    }
+                };
                 let resp =
                     V2_0_1::default_response("ReserveNow").expect("ReserveNow is a known action");
-                (Ok(resp), format!("reserved for {tag}"))
+                (Ok(resp), context)
             }
             Action201::CancelReservation(_) => {
-                self.state.write().unwrap().reserved_rfid = None;
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let mut state = self.state.write().unwrap();
+                // Clear whichever level holds the matching reservationId.
+                let context = match json["reservationId"].as_i64() {
+                    Some(rid) if state.reservation_id == Some(rid) => {
+                        state.reserved_rfid = None;
+                        state.reservation_id = None;
+                        format!("cancelled CS reservation {rid}")
+                    }
+                    Some(rid) => match state
+                        .connectors
+                        .iter_mut()
+                        .find(|c| c.reservation_id == Some(rid))
+                    {
+                        Some(c) => {
+                            c.reserved_rfid = None;
+                            c.reservation_id = None;
+                            format!("cancelled evse {} reservation {rid}", c.evse_id)
+                        }
+                        None => "no matching reservation".to_string(),
+                    },
+                    None => "no matching reservation".to_string(),
+                };
                 let resp = V2_0_1::default_response("CancelReservation")
                     .expect("CancelReservation is a known action");
-                (Ok(resp), "reservation cancelled".to_string())
+                (Ok(resp), context)
+            }
+            Action201::ChangeAvailability(_) => {
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let status = match json["operationalStatus"].as_str() {
+                    Some("Inoperative") => "Unavailable",
+                    _ => "Available",
+                };
+                let mut state = self.state.write().unwrap();
+                // An evseId-less (or evseId 0) ChangeAvailability targets the whole station.
+                let context = match json["evse"]["id"].as_i64().filter(|&e| e != 0) {
+                    Some(e) => {
+                        if let Some(c) = state.connector_mut_by_evse(e) {
+                            c.status = status.to_string();
+                        }
+                        format!("evse {e} -> {status}")
+                    }
+                    None => {
+                        for c in &mut state.connectors {
+                            c.status = status.to_string();
+                        }
+                        format!("all -> {status}")
+                    }
+                };
+                let resp = V2_0_1::default_response("ChangeAvailability")
+                    .expect("ChangeAvailability is a known action");
+                (Ok(resp), context)
+            }
+            Action201::RequestStartTransaction(_) => {
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let mut state = self.state.write().unwrap();
+                // Optional evseId; fall back to the first connector. Mint a transaction and charge.
+                let idx = json["evseId"]
+                    .as_i64()
+                    .filter(|&e| e != 0)
+                    .and_then(|e| state.connectors.iter().position(|c| c.evse_id == e))
+                    .or((!state.connectors.is_empty()).then_some(0));
+                let context = match idx {
+                    Some(i) => {
+                        let tx = state.connectors[i].start_tx();
+                        state.connectors[i].status = "Charging".to_string();
+                        format!("started tx {tx} on evse {}", state.connectors[i].evse_id)
+                    }
+                    None => "no connector to start".to_string(),
+                };
+                let resp = V2_0_1::default_response("RequestStartTransaction")
+                    .expect("RequestStartTransaction is a known action");
+                (Ok(resp), context)
+            }
+            Action201::RequestStopTransaction(_) => {
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let tx = json["transactionId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let mut state = self.state.write().unwrap();
+                let context = match state
+                    .connectors
+                    .iter_mut()
+                    .find(|c| c.transaction_id.as_deref() == Some(tx.as_str()))
+                {
+                    Some(c) => {
+                        c.transaction_id = None;
+                        c.status = "Available".to_string();
+                        format!("stopped tx {tx} on evse {}", c.evse_id)
+                    }
+                    None => format!("no active tx {tx}"),
+                };
+                let resp = V2_0_1::default_response("RequestStopTransaction")
+                    .expect("RequestStopTransaction is a known action");
+                (Ok(resp), context)
+            }
+            Action201::ClearChargingProfile(_) => {
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let mut state = self.state.write().unwrap();
+                // evseId lives in the criteria; absent (or 0) clears every connector's limit.
+                match json["chargingProfileCriteria"]["evseId"]
+                    .as_i64()
+                    .filter(|&e| e != 0)
+                {
+                    Some(e) => {
+                        if let Some(c) = state.connector_mut_by_evse(e) {
+                            c.limit = None;
+                        }
+                    }
+                    None => {
+                        for c in &mut state.connectors {
+                            c.limit = None;
+                        }
+                    }
+                }
+                let resp = V2_0_1::default_response("ClearChargingProfile")
+                    .expect("ClearChargingProfile is a known action");
+                (Ok(resp), "charging profile cleared".to_string())
+            }
+            Action201::UnlockConnector(_) => {
+                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let mut state = self.state.write().unwrap();
+                let context = match json["evseId"].as_i64().filter(|&e| e != 0) {
+                    Some(e) => {
+                        if let Some(c) = state.connector_mut_by_evse(e) {
+                            c.status = "Available".to_string();
+                        }
+                        format!("evse {e} unlocked")
+                    }
+                    None => "no evse to unlock".to_string(),
+                };
+                let resp = V2_0_1::default_response("UnlockConnector")
+                    .expect("UnlockConnector is a known action");
+                (Ok(resp), context)
             }
             other => {
                 let name = V2_0_1::action_name(other);
@@ -328,6 +481,150 @@ mod tests {
         assert!(
             rx.recv_timeout(Duration::from_secs(5)).is_ok(),
             "handle_call deadlocked on a write-arm inbound action"
+        );
+    }
+
+    fn handler_with(state: CsState) -> CsStateHandler {
+        use std::sync::atomic::AtomicBool;
+        CsStateHandler::new(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            Arc::new(RwLock::new(state)),
+        )
+    }
+
+    /// Build an action, drive it through `respond`, and assert it was accepted.
+    fn drive(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+        let action = V2_0_1::decode_call(name, payload).expect("action decodes");
+        assert!(h.respond(&action).0.is_ok(), "{name} rejected");
+    }
+
+    fn two_evses() -> CsState {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        s.add_connector(1, 1);
+        s.add_connector(2, 2);
+        s
+    }
+
+    fn id_token(tag: &str) -> serde_json::Value {
+        json!({ "idToken": tag, "type": "ISO14443" })
+    }
+
+    #[test]
+    fn ut_reserve_now_targets_evse_not_cs() {
+        let h = handler_with(two_evses());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "id": 42, "expiryDateTime": "2030-01-01T00:00:00Z",
+                    "idToken": id_token("TAG1"), "evseId": 2 }),
+        );
+        let st = h.state.read().unwrap();
+        let c = st.connector_by_evse(2).unwrap();
+        assert_eq!(c.reserved_rfid.as_deref(), Some("TAG1"));
+        assert_eq!(c.reservation_id, Some(42));
+        assert!(st.reserved_rfid.is_none());
+        assert!(st.connector_by_evse(1).unwrap().reserved_rfid.is_none());
+    }
+
+    #[test]
+    fn ut_reserve_now_without_evse_is_cs_level() {
+        let h = handler_with(two_evses());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "id": 1, "expiryDateTime": "2030-01-01T00:00:00Z",
+                    "idToken": id_token("STN") }),
+        );
+        let st = h.state.read().unwrap();
+        assert_eq!(st.reserved_rfid.as_deref(), Some("STN"));
+        assert_eq!(st.reservation_id, Some(1));
+        assert!(st.connector_by_evse(1).unwrap().reserved_rfid.is_none());
+    }
+
+    #[test]
+    fn ut_cancel_reservation_clears_matching_evse() {
+        let h = handler_with(two_evses());
+        drive(
+            &h,
+            "ReserveNow",
+            json!({ "id": 9, "expiryDateTime": "2030-01-01T00:00:00Z",
+                    "idToken": id_token("T"), "evseId": 2 }),
+        );
+        drive(&h, "CancelReservation", json!({ "reservationId": 9 }));
+        let st = h.state.read().unwrap();
+        let c = st.connector_by_evse(2).unwrap();
+        assert!(c.reserved_rfid.is_none());
+        assert!(c.reservation_id.is_none());
+    }
+
+    #[test]
+    fn ut_change_availability_status_and_absent_evse_targets_all() {
+        let h = handler_with(two_evses());
+        drive(
+            &h,
+            "ChangeAvailability",
+            json!({ "operationalStatus": "Inoperative", "evse": { "id": 2 } }),
+        );
+        assert_eq!(
+            h.state.read().unwrap().connector_by_evse(2).unwrap().status,
+            "Unavailable"
+        );
+        drive(
+            &h,
+            "ChangeAvailability",
+            json!({ "operationalStatus": "Operative" }),
+        );
+        let st = h.state.read().unwrap();
+        assert!(st.connectors.iter().all(|c| c.status == "Available"));
+    }
+
+    #[test]
+    fn ut_request_start_then_stop_transaction() {
+        let h = handler_with(two_evses());
+        drive(
+            &h,
+            "RequestStartTransaction",
+            json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+        );
+        let tx = {
+            let st = h.state.read().unwrap();
+            let c = st.connector_by_evse(1).unwrap();
+            assert_eq!(c.status, "Charging");
+            c.transaction_id.clone().expect("transaction assigned")
+        };
+        drive(&h, "RequestStopTransaction", json!({ "transactionId": tx }));
+        let st = h.state.read().unwrap();
+        let c = st.connector_by_evse(1).unwrap();
+        assert!(c.transaction_id.is_none());
+        assert_eq!(c.status, "Available");
+    }
+
+    #[test]
+    fn ut_clear_profile_and_unlock_by_evse() {
+        let mut s = two_evses();
+        s.connector_mut_by_evse(1).unwrap().limit = Some(16.0);
+        s.connector_mut_by_evse(1).unwrap().status = "Unavailable".to_string();
+        let h = handler_with(s);
+        drive(&h, "ClearChargingProfile", json!({}));
+        assert!(
+            h.state
+                .read()
+                .unwrap()
+                .connector_by_evse(1)
+                .unwrap()
+                .limit
+                .is_none()
+        );
+        drive(
+            &h,
+            "UnlockConnector",
+            json!({ "evseId": 1, "connectorId": 1 }),
+        );
+        assert_eq!(
+            h.state.read().unwrap().connector_by_evse(1).unwrap().status,
+            "Available"
         );
     }
 }

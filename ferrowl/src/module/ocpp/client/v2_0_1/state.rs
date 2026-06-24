@@ -31,6 +31,11 @@ pub struct ConnectorState {
     /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
     pub limit: Option<f64>,
     pub limit_unit: String,
+    /// idToken of the latest accepted ReserveNow targeting this EVSE, cleared on a matching
+    /// CancelReservation. An evseId-less ReserveNow reserves the station itself (CS-level).
+    pub reserved_rfid: Option<String>,
+    /// The ReserveNow `id` of that reservation, matched by CancelReservation's `reservationId`.
+    pub reservation_id: Option<i64>,
 }
 
 impl ConnectorState {
@@ -56,6 +61,8 @@ impl ConnectorState {
             tx_counter: 0,
             limit: None,
             limit_unit: "A".to_string(),
+            reserved_rfid: None,
+            reservation_id: None,
         }
     }
 
@@ -109,6 +116,20 @@ impl ConnectorState {
                     .map(|l| format!("{l:.1}"))
                     .unwrap_or_else(|| "—".to_string()),
             ),
+            nv(
+                "Reserved RFID",
+                "",
+                self.reserved_rfid
+                    .clone()
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
+                "Reservation ID",
+                "",
+                self.reservation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
         ]
     }
 
@@ -131,6 +152,11 @@ impl ConnectorState {
             "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
+            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "ReservationId" => match self.reservation_id {
+                Some(id) => Vt::Int(id as i128),
+                None => Vt::Nil,
+            },
             "ChargeLimit" => match self.limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
@@ -262,8 +288,11 @@ pub struct CsState {
     pub vendor: String,
     pub firmware_version: String,
     pub serial_number: String,
-    /// idToken of the latest accepted ReserveNow from the CSMS, cleared on CancelReservation.
+    /// idToken of the latest accepted station-wide ReserveNow (no `evseId`), cleared on a matching
+    /// CancelReservation. Per-EVSE reservations live on [`ConnectorState`].
     pub reserved_rfid: Option<String>,
+    /// The ReserveNow `id` of that CS-level reservation, matched by CancelReservation.
+    pub reservation_id: Option<i64>,
     /// Variable store (component-agnostic name/value), answers GetVariables.
     pub config: Vec<ConfigKey>,
     /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response.
@@ -284,6 +313,7 @@ impl Default for CsState {
             firmware_version: "1.0.0".to_string(),
             serial_number: "FERROWL-0001".to_string(),
             reserved_rfid: None,
+            reservation_id: None,
             config: vec![
                 var("HeartbeatInterval", "300", false),
                 var("AuthCtrlr.Enabled", "true", false),
@@ -353,6 +383,12 @@ impl CsState {
                     .clone()
                     .unwrap_or_else(|| "—".to_string()),
             ),
+            nv(
+                "Reservation ID",
+                self.reservation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
         ]
     }
 
@@ -365,6 +401,10 @@ impl CsState {
             "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
             "SerialNumber" => Vt::String(self.serial_number.clone()),
             "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "ReservationId" => match self.reservation_id {
+                Some(id) => Vt::Int(id as i128),
+                None => Vt::Nil,
+            },
             _ => return None,
         })
     }

@@ -1,16 +1,19 @@
 //! Per-entry detail overlay for the CSMS view, opened with Enter on a Charging Stations row.
 //!
-//! A CS-level overlay stacks vertically: a read-only "State" table, a "Configuration" table fed
-//! from `GetConfiguration`/`GetVariables` responses, and a free-form "Fetch key" input. A connector
-//! overlay shows "State" beside a "Metering" table. The view feeds live rows in on each render and
-//! merges config responses as they arrive; this struct owns the widgets, the accumulated config
-//! rows, and an optional value-input dialog.
+//! A CS-level overlay shows a read-only "State" table on top; below it the "Configuration" table
+//! (fed from `GetConfiguration`/`GetVariables`, with a free-form "Fetch key" input) beside an
+//! "RFIDs" accept-list table (with an "Add RFID" input). A connector overlay shows "State" above its
+//! own "RFIDs" table/input on the left and a "Metering" table on the right; the connector RFID table
+//! also lists the inherited CS tags read-only. The view feeds live rows in on each render and merges
+//! config responses as they arrive; this struct owns the widgets, the accumulated config rows, the
+//! RFID rows, and an optional value-input dialog.
 //!
 //! Keys: Esc closes (or closes the value dialog); Tab cycles focus; `c` (on a focused table)
 //! toggles compact rows. In the Configuration table: `d` removes the selected key, `u` re-requests
 //! its value, Enter opens a value dialog whose Enter writes the value (`ChangeConfiguration` /
-//! `SetVariables`). Enter in the Fetch-key input requests that key. Network actions are returned to
-//! the view as a [`DetailRequest`].
+//! `SetVariables`). Enter in the Fetch-key input requests that key. In the RFIDs table `d` removes
+//! the selected own tag; Enter in the Add-RFID input adds a tag. Network actions and RFID edits are
+//! returned to the view as a [`DetailRequest`].
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -38,6 +41,10 @@ pub enum DetailRequest {
     Fetch(String),
     /// Write a configuration value (`ChangeConfiguration` / `SetVariables`).
     Set(String, String),
+    /// Add an RFID tag to this entry's accept-list (CS-level or connector, per the overlay scope).
+    AddRfid(String),
+    /// Remove an RFID tag from this entry's own accept-list.
+    DelRfid(String),
 }
 
 // --- Key/value table -------------------------------------------------------
@@ -85,6 +92,19 @@ struct CfgRowC {
 
 type CfgTableC = Widget<TableState<CfgRowC, 4>, Table<CfgRowC, CfgHeaderC, 4>>;
 
+// --- RFID accept-list table (tag/source) -----------------------------------
+
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = RfidHeader)]
+struct RfidRow {
+    #[column(name = "RFID", min = 12, max = 40)]
+    tag: String,
+    #[column(name = "Source", min = 6, max = 16)]
+    source: String,
+}
+
+type RfidTable = Widget<TableState<RfidRow, 2>, Table<RfidRow, RfidHeader, 2>>;
+
 /// Split a stored config key into `(component, variable)`. 2.0.1 keys are `Component/Variable`;
 /// a key without a `/` has an empty component.
 fn split_component(key: &str) -> (String, String) {
@@ -99,6 +119,10 @@ enum Focus {
     State,
     Side,
     Key,
+    /// The RFID accept-list table.
+    Rfid,
+    /// The "add RFID" input below the RFID table.
+    RfidInput,
 }
 
 /// The detail overlay for one entry (CS-level or connector).
@@ -121,6 +145,13 @@ pub struct DetailOverlay {
     key_input: Widget<InputFieldState, InputField<String>>,
     /// Config rows (key, value, readonly) from `GetConfiguration`/`GetVariables` (CS-level only).
     config: Vec<(String, String, bool)>,
+    /// RFID accept-list table: this entry's own tags plus, for a connector, the inherited CS tags.
+    rfid: RfidTable,
+    /// The "add RFID" input below the RFID table.
+    rfid_input: Widget<InputFieldState, InputField<String>>,
+    /// `(tag, inherited)` rows backing the RFID table; inherited rows are read-only (the CS tags
+    /// shown for reference in a connector overlay).
+    rfid_rows: Vec<(String, bool)>,
     focus: Focus,
     /// Compact (no vertical row margin) tables; toggled with `c`. Default off (margin 1).
     compact: bool,
@@ -142,9 +173,55 @@ impl DetailOverlay {
             component_col,
             key_input: key_input(),
             config: Vec::new(),
+            rfid: rfid_table(),
+            rfid_input: rfid_input(),
+            rfid_rows: Vec::new(),
             focus: Focus::State,
             compact: false,
             set_dialog: None,
+        }
+    }
+
+    /// Replace the RFID table rows: this entry's `own` tags followed by `inherited` CS tags (the
+    /// latter shown read-only in a connector overlay). Fed by the view each render; only rebuilds the
+    /// widget when the data changes so the table selection stays put.
+    pub fn set_rfids(&mut self, own: Vec<String>, inherited: Vec<String>) {
+        let rows: Vec<(String, bool)> = own
+            .into_iter()
+            .map(|t| (t, false))
+            .chain(inherited.into_iter().map(|t| (t, true)))
+            .collect();
+        if rows != self.rfid_rows {
+            self.rfid_rows = rows;
+            self.refresh_rfid_table();
+        }
+    }
+
+    fn refresh_rfid_table(&mut self) {
+        let is_cs = self.is_cs;
+        let rows: Vec<RfidRow> = self
+            .rfid_rows
+            .iter()
+            .map(|(tag, inherited)| RfidRow {
+                tag: tag.clone(),
+                source: if *inherited {
+                    "CS (inherited)".to_string()
+                } else if is_cs {
+                    "CS".to_string()
+                } else {
+                    "connector".to_string()
+                },
+            })
+            .collect();
+        self.rfid.state.set_values(rows);
+    }
+
+    /// The selected RFID tag if it is a deletable (own, non-inherited) row.
+    fn selected_own_rfid(&self) -> Option<String> {
+        let i = self.rfid.state.table_state().selected()?;
+        match self.rfid_rows.get(i) {
+            Some((tag, false)) => Some(tag.clone()),
+            _ => None,
         }
     }
 
@@ -221,22 +298,32 @@ impl DetailOverlay {
         self.is_cs && self.focus == Focus::Key
     }
 
+    /// Focus order for Tab cycling. CS: State → Configuration → Fetch-key → RFIDs → Add-RFID.
+    /// Connector: State → Metering → RFIDs → Add-RFID.
+    fn focus_order(&self) -> &'static [Focus] {
+        if self.is_cs {
+            &[
+                Focus::State,
+                Focus::Side,
+                Focus::Key,
+                Focus::Rfid,
+                Focus::RfidInput,
+            ]
+        } else {
+            &[Focus::State, Focus::Side, Focus::Rfid, Focus::RfidInput]
+        }
+    }
+
     pub fn focus_next(&mut self) {
-        self.focus = match (self.focus, self.is_cs) {
-            (Focus::State, _) => Focus::Side,
-            (Focus::Side, true) => Focus::Key,
-            (Focus::Side, false) => Focus::State,
-            (Focus::Key, _) => Focus::State,
-        };
+        let order = self.focus_order();
+        let i = order.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = order[(i + 1) % order.len()];
     }
 
     pub fn focus_previous(&mut self) {
-        self.focus = match (self.focus, self.is_cs) {
-            (Focus::State, true) => Focus::Key,
-            (Focus::State, false) => Focus::Side,
-            (Focus::Side, _) => Focus::State,
-            (Focus::Key, _) => Focus::Side,
-        };
+        let order = self.focus_order();
+        let i = order.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = order[(i + order.len() - 1) % order.len()];
     }
 
     fn toggle_compact(&mut self) {
@@ -249,6 +336,7 @@ impl DetailOverlay {
         self.side.widget.set_row_margin(margin);
         self.cfg.widget.set_row_margin(margin);
         self.cfg4.widget.set_row_margin(margin);
+        self.rfid.widget.set_row_margin(margin);
     }
 
     /// The selected row index of the active config table.
@@ -312,9 +400,26 @@ impl DetailOverlay {
             (KeyModifiers::NONE, KeyCode::Esc) => return Some(DetailRequest::Close),
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
-            // `c` toggles compact rows when a table is focused (the key input keeps `c` as text).
-            (KeyModifiers::NONE, KeyCode::Char('c')) if self.focus != Focus::Key => {
+            // `c` toggles compact rows when a table is focused (the inputs keep `c` as text).
+            (KeyModifiers::NONE, KeyCode::Char('c'))
+                if !matches!(self.focus, Focus::Key | Focus::RfidInput) =>
+            {
                 self.toggle_compact()
+            }
+            // `d` on the RFID table removes the selected own (non-inherited) tag.
+            (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == Focus::Rfid => {
+                if let Some(tag) = self.selected_own_rfid() {
+                    return Some(DetailRequest::DelRfid(tag));
+                }
+            }
+            // Enter in the add-RFID input adds the typed tag (cleared for the next entry).
+            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Focus::RfidInput => {
+                let tag = self.rfid_input.state.get_value().trim().to_string();
+                self.rfid_input.state.set_input(String::new());
+                self.rfid_input.state.set_cursor(0);
+                if !tag.is_empty() {
+                    return Some(DetailRequest::AddRfid(tag));
+                }
             }
             (KeyModifiers::NONE, KeyCode::Char('d')) if self.is_cs && self.focus == Focus::Side => {
                 self.delete_selected_config()
@@ -359,6 +464,12 @@ impl DetailOverlay {
             Focus::Key => {
                 let _ = self.key_input.state.handle_events(modifiers, code);
             }
+            Focus::Rfid => {
+                let _ = self.rfid.state.handle_events(modifiers, code);
+            }
+            Focus::RfidInput => {
+                let _ = self.rfid_input.state.handle_events(modifiers, code);
+            }
         }
     }
 
@@ -397,15 +508,23 @@ impl DetailOverlay {
         self.side.state.set_focused(self.focus == Focus::Side);
         self.cfg.state.set_focused(self.focus == Focus::Side);
         self.cfg4.state.set_focused(self.focus == Focus::Side);
+        self.rfid.state.set_focused(self.focus == Focus::Rfid);
+        self.rfid_input
+            .state
+            .set_focused(self.focus == Focus::RfidInput);
 
         if self.is_cs {
-            // Vertically stacked: State, Configuration, then the free-form fetch input.
-            let [state_area, config_area, input_area] = Layout::vertical([
-                Constraint::Percentage(40),
-                Constraint::Min(1),
-                Constraint::Length(3),
-            ])
-            .areas(inner);
+            // State on top; below it the Configuration (+ fetch input) beside the RFID list
+            // (+ add input).
+            let [state_area, mid] =
+                Layout::vertical([Constraint::Percentage(35), Constraint::Min(1)]).areas(inner);
+            let [left, right] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas(mid);
+            let [config_area, fetch_area] =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
+            let [rfid_area, rfid_input_area] =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(right);
             self.key_input.state.set_focused(self.focus == Focus::Key);
             StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
             if self.component_col {
@@ -415,15 +534,35 @@ impl DetailOverlay {
             }
             StatefulWidget::render(
                 &self.key_input.widget,
-                input_area,
+                fetch_area,
                 buf,
                 &mut self.key_input.state,
             );
+            StatefulWidget::render(&self.rfid.widget, rfid_area, buf, &mut self.rfid.state);
+            StatefulWidget::render(
+                &self.rfid_input.widget,
+                rfid_input_area,
+                buf,
+                &mut self.rfid_input.state,
+            );
         } else {
-            // Connector: State beside Metering.
+            // Connector: State above the RFID list (+ add input) on the left, Metering on the right.
             let [left, right] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Min(1)]).areas(inner);
-            StatefulWidget::render(&self.state.widget, left, buf, &mut self.state.state);
+            let [state_area, rfid_area, rfid_input_area] = Layout::vertical([
+                Constraint::Percentage(45),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .areas(left);
+            StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
+            StatefulWidget::render(&self.rfid.widget, rfid_area, buf, &mut self.rfid.state);
+            StatefulWidget::render(
+                &self.rfid_input.widget,
+                rfid_input_area,
+                buf,
+                &mut self.rfid_input.state,
+            );
             StatefulWidget::render(&self.side.widget, right, buf, &mut self.side.state);
         }
 
@@ -506,6 +645,51 @@ fn cfg4_table() -> CfgTableC {
                 vertical: 1,
                 horizontal: 0,
             })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn rfid_table() -> RfidTable {
+    Widget {
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .unwrap(),
+        widget: TableBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some("RFIDs".into()))
+            .style(TableStyleBuilder::default().build().unwrap())
+            .row_margin(Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn rfid_input() -> Widget<InputFieldState, InputField<String>> {
+    Widget {
+        state: InputFieldStateBuilder::default()
+            .focused(false)
+            .disabled(false)
+            .placeholder(Some("rfid tag (Enter to add)".to_string()))
+            .build()
+            .unwrap(),
+        widget: InputFieldBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some(("Add RFID", HorizontalAlignment::Left).into()))
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 1,
+            })
+            .style(
+                InputFieldStyleBuilder::default()
+                    .border(border_style())
+                    .build()
+                    .unwrap(),
+            )
             .build()
             .unwrap(),
     }
@@ -633,6 +817,56 @@ mod tests {
         assert!(
             matches!(req, Some(DetailRequest::Fetch(k)) if k == "OCPPCommCtrlr/HeartbeatInterval")
         );
+    }
+
+    #[test]
+    fn rfid_input_enter_emits_add_request() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        d.focus = Focus::RfidInput;
+        d.rfid_input.state.set_input("DEADBEEF".to_string());
+        let req = d.input(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(matches!(req, Some(DetailRequest::AddRfid(t)) if t == "DEADBEEF"));
+        // The input is cleared for the next tag.
+        assert_eq!(d.rfid_input.state.get_value(), "");
+    }
+
+    #[test]
+    fn rfid_delete_targets_own_rows_only() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::connector(1), false);
+        // Own tag first, then the inherited CS tag (read-only).
+        d.set_rfids(vec!["OWN".into()], vec!["CS".into()]);
+        let rows = d.rfid.state.values();
+        assert_eq!(rows[0].source, "connector");
+        assert_eq!(rows[1].source, "CS (inherited)");
+        d.focus = Focus::Rfid;
+        // Row 0 (own) is deletable.
+        let req = d.input(KeyModifiers::NONE, KeyCode::Char('d'));
+        assert!(matches!(req, Some(DetailRequest::DelRfid(t)) if t == "OWN"));
+        // Row 1 (inherited) is not.
+        d.input(KeyModifiers::NONE, KeyCode::Down);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Char('d')).is_none());
+    }
+
+    #[test]
+    fn focus_cycle_includes_rfid_panes() {
+        // CS: State -> Side -> Key -> Rfid -> RfidInput -> wrap.
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        for expected in [
+            Focus::Side,
+            Focus::Key,
+            Focus::Rfid,
+            Focus::RfidInput,
+            Focus::State,
+        ] {
+            d.focus_next();
+            assert!(d.focus == expected);
+        }
+        // Connector: State -> Side -> Rfid -> RfidInput -> wrap (no Key pane).
+        let mut c = DetailOverlay::new("CP".into(), Scope::connector(1), false);
+        for expected in [Focus::Side, Focus::Rfid, Focus::RfidInput, Focus::State] {
+            c.focus_next();
+            assert!(c.focus == expected);
+        }
     }
 
     #[test]

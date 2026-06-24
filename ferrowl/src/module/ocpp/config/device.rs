@@ -26,6 +26,18 @@ pub struct ConnectorRef {
     pub connector: i64,
 }
 
+/// A persisted per-connector CSMS RFID accept-list (server role). The connector is identified the
+/// same way as [`ConnectorRef`] (`evse` is `None` for 1.6, `Some` for 2.0.1); `rfids` are the tags
+/// accepted for that connector *in addition to* the inherited charge-point-wide list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorRfids {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evse: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<i64>,
+    pub rfids: Vec<String>,
+}
+
 /// A persisted configuration key for a charging-station (client) device type: a name/value pair and
 /// its read-only flag, seeded into the client's config store (GetConfiguration / GetVariables) on
 /// load and written by `:wd`. Server (CSMS) config is per-connected-station and transient, so it is
@@ -73,10 +85,15 @@ pub struct OcppDeviceConfig {
     /// file is `<stem>.<tab-name>.<ext>` next to this path (see `module_log_path`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_file: Option<String>,
-    /// CSMS RFID accept-list (server role): id tags accepted for Authorize / StartTransaction.
-    /// Empty = accept every tag (the default-accept behaviour). Ignored for the client role.
+    /// Charge-point-wide CSMS RFID accept-list (server role): id tags accepted for Authorize /
+    /// transaction starts, inherited by every connector. Empty (together with all connector lists)
+    /// = accept every tag (the default-accept behaviour). Ignored for the client role.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rfids: Vec<String>,
+    /// Per-connector CSMS RFID accept-lists (server role), each unioned with [`rfids`](Self::rfids)
+    /// when gating that connector's transaction starts. Ignored for the client role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connector_rfids: Vec<ConnectorRfids>,
     /// Connector entries for the charging-station (client) view, seeded into its connector table on
     /// load and written by `:wd`. Empty = CS-level only. Ignored for the server role (connectors
     /// there are discovered from connected stations).
@@ -101,6 +118,7 @@ impl OcppDeviceConfig {
             scripts,
             log_file: None,
             rfids: Vec::new(),
+            connector_rfids: Vec::new(),
             connectors: Vec::new(),
             config: Vec::new(),
         }
@@ -133,6 +151,11 @@ mod tests {
             }],
             log_file: Some("/tmp/ferrowl.log".into()),
             rfids: vec!["DEADBEEF".into(), "CAFE1234".into()],
+            connector_rfids: vec![ConnectorRfids {
+                evse: Some(1),
+                connector: Some(2),
+                rfids: vec!["CONN2TAG".into()],
+            }],
             connectors: vec![
                 ConnectorRef {
                     evse: None,

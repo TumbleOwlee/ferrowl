@@ -26,6 +26,11 @@ pub struct ConnectorState {
     /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
     pub limit: Option<f64>,
     pub limit_unit: String,
+    /// idTag of the latest accepted ReserveNow targeting this connector, cleared on a matching
+    /// CancelReservation. A `connectorId` of 0 reserves the charge point itself (CS-level).
+    pub reserved_rfid: Option<String>,
+    /// reservationId of that reservation, used to match the CancelReservation that clears it.
+    pub reservation_id: Option<i64>,
 }
 
 impl ConnectorState {
@@ -47,6 +52,8 @@ impl ConnectorState {
             transaction_id: None,
             limit: None,
             limit_unit: "A".to_string(),
+            reserved_rfid: None,
+            reservation_id: None,
         }
     }
 }
@@ -57,8 +64,11 @@ pub struct CsState {
     pub vendor: String,
     pub firmware_version: String,
     pub serial_number: String,
-    /// idTag of the latest accepted ReserveNow from the CSMS, cleared on CancelReservation.
+    /// idTag of the latest accepted charge-point-wide ReserveNow (`connectorId` 0), cleared on a
+    /// matching CancelReservation. Per-connector reservations live on [`ConnectorState`].
     pub reserved_rfid: Option<String>,
+    /// reservationId of that CS-level reservation, used to match its CancelReservation.
+    pub reservation_id: Option<i64>,
     pub config: Vec<ConfigKey>,
     /// Heartbeat cadence (seconds) the CSMS returned in its last BootNotification response. `None`
     /// until a BootNotification round-trips; the view falls back to a built-in default.
@@ -80,6 +90,7 @@ impl Default for CsState {
             firmware_version: "1.0.0".to_string(),
             serial_number: "FERROWL-0001".to_string(),
             reserved_rfid: None,
+            reservation_id: None,
             heartbeat_interval_secs: None,
             config: vec![
                 cfg("HeartbeatInterval", "300", false),
@@ -139,6 +150,12 @@ impl CsState {
                     .clone()
                     .unwrap_or_else(|| "—".to_string()),
             ),
+            nv(
+                "Reservation ID",
+                self.reservation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
         ]
     }
 
@@ -151,6 +168,10 @@ impl CsState {
             "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
             "SerialNumber" => Vt::String(self.serial_number.clone()),
             "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "ReservationId" => match self.reservation_id {
+                Some(id) => Vt::Int(id as i128),
+                None => Vt::Nil,
+            },
             _ => return None,
         })
     }
@@ -203,6 +224,20 @@ impl ConnectorState {
                     .map(|l| format!("{l:.1}"))
                     .unwrap_or_else(|| "—".to_string()),
             ),
+            nv(
+                "Reserved RFID",
+                "",
+                self.reserved_rfid
+                    .clone()
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
+                "Reservation ID",
+                "",
+                self.reservation_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
         ]
     }
 
@@ -226,6 +261,11 @@ impl ConnectorState {
             "Rfid" => Vt::String(self.rfid.clone()),
             "ChargeLimit" => match self.limit {
                 Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "ReservationId" => match self.reservation_id {
+                Some(id) => Vt::Int(id as i128),
                 None => Vt::Nil,
             },
             _ => return None,

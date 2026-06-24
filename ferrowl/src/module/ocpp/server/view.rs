@@ -49,10 +49,10 @@ use crate::module::ocpp::client::backend::{Dir, OcppMessage, push_capped};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{OcppFields, OcppSimHandle, merge_overrides};
 use crate::module::ocpp::client::scripts::ScriptDialog;
-use crate::module::ocpp::config::device::OcppDeviceConfig;
+use crate::module::ocpp::config::device::{ConnectorRfids, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::server::backend::{
-    EventRx, EventTx, OcppServer, RfidList, Scope, ServerEvent, inbound_messages,
+    EventRx, EventTx, OcppServer, RfidLists, RfidStore, Scope, ServerEvent, inbound_messages,
 };
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
@@ -64,6 +64,41 @@ use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
 use crate::view::log::format_timestamp;
+
+/// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
+fn rfid_store_from_device(device: &OcppDeviceConfig) -> RfidStore {
+    let mut store = RfidStore {
+        cs: device.rfids.clone(),
+        ..Default::default()
+    };
+    for cr in &device.connector_rfids {
+        let scope = Scope {
+            evse: cr.evse,
+            connector: cr.connector,
+        };
+        store.by_scope.insert(scope, cr.rfids.clone());
+    }
+    store
+}
+
+/// Write the runtime RFID store back into a device config for persistence, dropping empty
+/// per-connector lists.
+fn fill_device_rfids(device: &mut OcppDeviceConfig, store: &RfidStore) {
+    device.rfids = store.cs.clone();
+    let mut conns: Vec<ConnectorRfids> = store
+        .by_scope
+        .iter()
+        .filter(|(_, list)| !list.is_empty())
+        .map(|(scope, list)| ConnectorRfids {
+            evse: scope.evse,
+            connector: scope.connector,
+            rfids: list.clone(),
+        })
+        .collect();
+    // Stable order so saves are deterministic.
+    conns.sort_by_key(|c| (c.evse, c.connector));
+    device.connector_rfids = conns;
+}
 
 /// Per-entry observed state behaviour the generic view needs from each version's state types.
 pub trait EntryStateT: OcppFields + Default + Send + Sync + 'static {
@@ -98,7 +133,7 @@ pub trait ServerVersion: Version + Sized + 'static {
     type Handler: CsmsActionHandler<Self>;
 
     /// Build the inbound handler, wiring it to the view's event channel and RFID accept-list.
-    fn handler(tx: EventTx, rfids: RfidList) -> Self::Handler;
+    fn handler(tx: EventTx, rfids: RfidLists) -> Self::Handler;
 
     /// The scope an inbound request targets (CS-level/connector/EVSE), used to bucket it.
     fn inbound_connector(name: &str, request: &serde_json::Value) -> Scope;
@@ -329,8 +364,9 @@ pub struct ServerView<V: ServerVersion> {
     want_running: bool,
     /// Last content pushed into the payload viewer, so periodic refreshes don't reset its scroll.
     code_content: String,
-    /// Shared RFID accept-list handed to each (re)built inbound handler; edited via `:rfid`.
-    rfids: RfidList,
+    /// Shared RFID accept-lists (CS + per-connector) handed to each (re)built inbound handler;
+    /// edited via the detail dialogs and `:rfid`.
+    rfids: RfidLists,
     /// Compact table rows (no vertical margin); toggled by `:compact`.
     compact: bool,
     /// The per-entry detail overlay (Enter on a Charging Stations row), if open.
@@ -350,7 +386,7 @@ where
 {
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
-        let rfids: RfidList = Arc::new(std::sync::RwLock::new(device.rfids.clone()));
+        let rfids: RfidLists = Arc::new(std::sync::RwLock::new(rfid_store_from_device(&device)));
         let mut view = Self {
             backend: OcppServer::new(spec.clone()),
             spec,
@@ -492,11 +528,22 @@ where
                 (g.fields(), g.metering())
             }
         };
+        // RFID lists for this entry: a CS entry owns the CS list (nothing inherited); a connector
+        // owns its own list and inherits the CS list (shown read-only).
+        let (own, inherited) = {
+            let store = self.rfids.read().unwrap();
+            if is_cs {
+                (store.cs.clone(), Vec::new())
+            } else {
+                (store.scope_list(scope).to_vec(), store.cs.clone())
+            }
+        };
         let detail = self.detail.as_mut().unwrap();
         detail.set_state_rows(fields);
         if !is_cs {
             detail.set_metering_rows(metering);
         }
+        detail.set_rfids(own, inherited);
     }
 
     /// Resolve (and cache) a connection's charge-point identity.
@@ -842,7 +889,7 @@ where
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
         device.log_file = self.device.log_file.clone();
-        device.rfids = self.rfids.read().unwrap().clone();
+        fill_device_rfids(&mut device, &self.rfids.read().unwrap());
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
             Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
@@ -1007,6 +1054,7 @@ where
         if self.detail.is_some() {
             let req = self.detail.as_mut().unwrap().input(modifiers, code);
             let identity = self.detail.as_ref().unwrap().identity.clone();
+            let scope = self.detail.as_ref().unwrap().scope;
             match req {
                 Some(DetailRequest::Close) => {
                     // Keep the (possibly edited) config rows in memory so reopening keeps them
@@ -1032,6 +1080,14 @@ where
                             V::set_request(&key, &value),
                         );
                     }
+                }
+                // RFID edits mutate the shared store live (gating takes effect immediately); the
+                // device file is written on `:wd`. CS-scoped overlays edit the CS list.
+                Some(DetailRequest::AddRfid(tag)) => {
+                    self.rfids.write().unwrap().add(scope, tag);
+                }
+                Some(DetailRequest::DelRfid(tag)) => {
+                    self.rfids.write().unwrap().remove(scope, &tag);
                 }
                 None => {}
             }
@@ -1157,7 +1213,7 @@ where
             if let Some((spec, path)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
-                device.rfids = self.rfids.read().unwrap().clone();
+                fill_device_rfids(&mut device, &self.rfids.read().unwrap());
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind.
@@ -1301,38 +1357,35 @@ where
                     }
                 }
                 "rfid" => {
-                    let list = self.rfids.read().unwrap();
+                    let list = &self.rfids.read().unwrap().cs;
                     let msg = if list.is_empty() {
-                        "RFID accept-list empty (all tags accepted)".to_string()
+                        "CS RFID accept-list empty (all tags accepted)".to_string()
                     } else {
-                        format!("Accepted RFIDs: {}", list.join(", "))
+                        format!("Accepted CS RFIDs: {}", list.join(", "))
                     };
                     CommandResult::Handled(Some(msg))
                 }
                 "rfid clear" => {
-                    self.rfids.write().unwrap().clear();
-                    CommandResult::Handled(Some("RFID accept-list cleared (all accepted)".into()))
+                    self.rfids.write().unwrap().cs.clear();
+                    CommandResult::Handled(Some(
+                        "CS RFID accept-list cleared (all accepted)".into(),
+                    ))
                 }
                 cmd if cmd.starts_with("rfid add ") => {
                     let tag = cmd["rfid add ".len()..].trim().to_string();
                     if tag.is_empty() {
                         return CommandResult::Handled(Some("Usage: :rfid add <tag>".into()));
                     }
-                    let mut list = self.rfids.write().unwrap();
-                    if list.contains(&tag) {
-                        CommandResult::Handled(Some(format!("{tag} already in accept-list")))
+                    if self.rfids.write().unwrap().add(Scope::CS, tag.clone()) {
+                        CommandResult::Handled(Some(format!("Added CS RFID {tag}")))
                     } else {
-                        list.push(tag.clone());
-                        CommandResult::Handled(Some(format!("Added RFID {tag}")))
+                        CommandResult::Handled(Some(format!("{tag} already in accept-list")))
                     }
                 }
                 cmd if cmd.starts_with("rfid del ") => {
                     let tag = cmd["rfid del ".len()..].trim().to_string();
-                    let mut list = self.rfids.write().unwrap();
-                    let before = list.len();
-                    list.retain(|t| t != &tag);
-                    if list.len() < before {
-                        CommandResult::Handled(Some(format!("Removed RFID {tag}")))
+                    if self.rfids.write().unwrap().remove(Scope::CS, &tag) {
+                        CommandResult::Handled(Some(format!("Removed CS RFID {tag}")))
                     } else {
                         CommandResult::Handled(Some(format!("{tag} not in accept-list")))
                     }
@@ -1561,6 +1614,39 @@ mod tests {
     use super::*;
     use crate::module::ocpp::config::session::{OcppProtocol, OcppVersion};
     use ferrowl_ocpp::V1_6;
+
+    #[test]
+    fn ut_rfid_store_device_roundtrip() {
+        // Device config -> runtime store -> device config preserves CS + per-connector lists.
+        let device = OcppDeviceConfig {
+            rfids: vec!["CS1".into()],
+            connector_rfids: vec![ConnectorRfids {
+                evse: Some(2),
+                connector: None,
+                rfids: vec!["EVSE2".into()],
+            }],
+            ..Default::default()
+        };
+        let store = rfid_store_from_device(&device);
+        assert_eq!(store.cs, ["CS1"]);
+        assert_eq!(store.scope_list(Scope::evse(2, None)), ["EVSE2"]);
+
+        let mut back = OcppDeviceConfig::default();
+        fill_device_rfids(&mut back, &store);
+        assert_eq!(back.rfids, device.rfids);
+        assert_eq!(back.connector_rfids, device.connector_rfids);
+    }
+
+    #[test]
+    fn ut_empty_connector_lists_not_persisted() {
+        // A connector whose list was emptied is dropped from the persisted config.
+        let mut store = RfidStore::default();
+        store.add(Scope::connector(1), "X".into());
+        store.remove(Scope::connector(1), "X");
+        let mut device = OcppDeviceConfig::default();
+        fill_device_rfids(&mut device, &store);
+        assert!(device.connector_rfids.is_empty());
+    }
 
     fn server_view() -> ServerView<V1_6> {
         let spec = OcppSpec {

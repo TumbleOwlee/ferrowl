@@ -1999,8 +1999,12 @@ mod tests {
         assert_focus_cycle::<V2_0_1>(OcppVersion::V2_0_1);
     }
 
+    /// Connector rows that are display-only (no editable field): the charge limit and the
+    /// CSMS-driven reservation readouts.
+    const READONLY_CONN_ROWS: &[&str] = &["Charge Limit", "Reserved RFID", "Reservation ID"];
+
     /// The connector state-table row order and `V::conn_edit_field` must stay in lockstep, with the
-    /// only unmapped (read-only) connector row being Charge Limit.
+    /// only unmapped rows being the read-only ones in [`READONLY_CONN_ROWS`].
     #[test]
     fn edit_field_conn_rows_align_v1_6() {
         use crate::module::ocpp::client::v1_6::state::ConnectorState;
@@ -2009,7 +2013,7 @@ mod tests {
             match V1_6::conn_edit_field(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
-                    row.name == "Charge Limit",
+                    READONLY_CONN_ROWS.contains(&row.name.as_str()),
                     "row {i} ({}) unmapped",
                     row.name
                 ),
@@ -2026,7 +2030,7 @@ mod tests {
             match V2_0_1::conn_edit_field(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
-                    row.name == "Charge Limit",
+                    READONLY_CONN_ROWS.contains(&row.name.as_str()),
                     "row {i} ({}) unmapped",
                     row.name
                 ),
@@ -2036,13 +2040,14 @@ mod tests {
     }
 
     /// The CS state-table row order and `EditField::from_cs_row` must stay in lockstep (shared
-    /// across versions; the only unmapped row is the read-only Reserved RFID).
+    /// across versions; the only unmapped rows are the read-only reservation readouts).
     fn assert_cs_rows_align(rows: &[NvRowData]) {
+        const READONLY_CS_ROWS: &[&str] = &["Reserved RFID", "Reservation ID"];
         for (i, row) in rows.iter().enumerate() {
             match EditField::from_cs_row(i) {
                 Some(f) => assert_eq!(f.label(), row.name, "row {i} label mismatch"),
                 None => assert!(
-                    row.name == "Reserved RFID",
+                    READONLY_CS_ROWS.contains(&row.name.as_str()),
                     "row {i} ({}) unmapped",
                     row.name
                 ),

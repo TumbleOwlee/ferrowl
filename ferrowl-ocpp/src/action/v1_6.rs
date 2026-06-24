@@ -24,7 +24,7 @@ define_ocpp_version! {
         GetConfiguration => None,
         GetDiagnostics => None,
         GetLocalListVersion => None,
-        RemoteStartTransaction => Required,
+        RemoteStartTransaction => Optional,
         RemoteStopTransaction => None,
         ReserveNow => Required,
         Reset => None,
@@ -144,8 +144,9 @@ mod tests {
         };
         assert_eq!(scope("Reset"), None);
         assert_eq!(scope("UnlockConnector"), Required);
-        // RemoteStartTransaction is connector-scoped: it targets a connector and prefills its id.
-        assert_eq!(scope("RemoteStartTransaction"), Required);
+        // RemoteStartTransaction's connectorId is optional in the wire schema (a CSMS may start a
+        // transaction without targeting a specific connector), so it is shown at both levels.
+        assert_eq!(scope("RemoteStartTransaction"), Optional);
     }
 
     #[test]

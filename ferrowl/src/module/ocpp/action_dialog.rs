@@ -70,8 +70,7 @@ pub fn prop<'a>(pairs: &'a [(&'static str, Value)], name: &str) -> Option<&'a Va
 pub enum PropKind {
     Text,
     Number,
-    /// Boolean dropdown (used by Stage 2 nested actions).
-    #[allow(dead_code)]
+    /// Boolean dropdown.
     Bool,
     /// A closed set of allowed string values, rendered as a dropdown.
     Enum(&'static [&'static str]),
@@ -219,6 +218,38 @@ impl ActionDialog {
         dlg.json_mode = true;
         dlg.toggle = button("Table");
         dlg
+    }
+
+    /// Test-only: build a dialog with every property filled with a kind-appropriate placeholder, so
+    /// the assembled payload exercises all required fields (the source-based prefill leaves
+    /// `Empty`-source required fields blank, which would not decode).
+    #[cfg(test)]
+    pub(crate) fn filled_for_test(name: String, spec: &ActionSpec) -> Self {
+        let mut rows = Vec::new();
+        let mut props = Vec::new();
+        for p in spec.props {
+            let value = match p.kind {
+                PropKind::Enum(variants) => variants.first().copied().unwrap_or("").to_string(),
+                PropKind::Bool => "true".to_string(),
+                PropKind::Timestamp => crate::module::ocpp::client::backend::rfc3339_now(),
+                PropKind::Number | PropKind::Text => "1".to_string(),
+            };
+            rows.push(PropRow {
+                name: p.name.to_string(),
+                kind: p.kind.label().to_string(),
+                value,
+            });
+            props.push((p.name, p.kind, p.optional));
+        }
+        let mut dlg = Self::scaffold(name, Some(spec.assemble), props);
+        dlg.table.state.set_values(rows);
+        dlg
+    }
+
+    /// Test-only accessor for the assembled payload (the real `payload` is private).
+    #[cfg(test)]
+    pub(crate) fn payload_for_test(&self) -> Value {
+        self.payload()
     }
 
     fn scaffold(
