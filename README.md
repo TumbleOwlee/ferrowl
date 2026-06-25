@@ -161,13 +161,6 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
         <img src="./images/new-module.png" style="border-radius: 8px">
     </p>
 </p>
-### Command Help
-
-<p align="center">
-    <p align="center">
-        <img src="./images/commands.png" style="border-radius: 8px">
-    </p>
-</p>
 
 ### Modbus
 
