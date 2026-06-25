@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ferrowl_codec::{Address, Register, Value};
-use ferrowl_lua::module::{Read, RegisterModule, TimeModule, ValueType, Write};
+use ferrowl_lua::module::{LogModule, LogSink, Read, RegisterModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
@@ -188,7 +188,11 @@ pub fn run_sim(
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
-            .with_module(TimeModule::default());
+            .with_module(TimeModule::default())
+            .with_module(LogModule::init(LuaLogSink {
+                log: log.clone(),
+                sink: sink.clone(),
+            }));
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
@@ -225,6 +229,19 @@ pub fn run_sim(
 fn emit(log: &ModuleLog, sink: &FileSink, line: &str) {
     log.blocking_write().write(line);
     append(sink, line);
+}
+
+/// Routes `C_Log:Print(..)` lines from a Modbus sim into the module's ring log and file sink,
+/// mirroring the `emit` path used for sim diagnostics.
+struct LuaLogSink {
+    log: ModuleLog,
+    sink: FileSink,
+}
+
+impl LogSink for LuaLogSink {
+    fn print(&self, line: &str) {
+        emit(&self.log, &self.sink, line);
+    }
 }
 
 /// Sleep up to `interval` in small chunks so the stop flag is observed promptly.

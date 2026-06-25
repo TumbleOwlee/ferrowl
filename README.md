@@ -1,22 +1,19 @@
 ![Banner](./images/ferrowl-banner.svg)
 
-# Ferrowl - TUI Modbus Server + Client
+# Ferrowl - TUI Modbus + OCPP Server/Client
 
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](#) [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=check)](https://github-ci.code-ape.dev/repos/3) [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=nightly)](https://github-ci.code-ape.dev/repos/3)
 
-Ferrowl is a TUI application, written in Rust, to provide Modbus Client and Server capabilities. Create configurations on the fly, save and load configurations or session to setup multiple Modbus Clients or Servers. The aim is to provide a technical but intuitive interface that can run on any device without an available GUI environment.
+Ferrowl is a TUI application, written in Rust, to simulate both **Modbus** (Client and Server) and **OCPP** (Charging Station / CSMS) devices. Create configurations on the fly, save and load configurations or sessions to set up multiple Modbus or OCPP instances side by side. The aim is to provide a technical but intuitive interface that can run on any device without an available GUI environment.
 
-If you prefer a GUI application, this tool is not the right choice. In these cases refer to GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
-
-> [!WARNING]
-> Support of OCPP modules is planned and currently under development. As of now, the draft of the OCPP abstraction layer is added. The implementation of the CS and CSMS modules are ongoing.
+If you prefer a GUI application, this tool is not the right choice. For Modbus, refer to a GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
 
 > [!WARNING]
 > Prior to **v0.4.0** the application was based on a draft implementation. Over time additional features were added but messed up the architecture and made it difficult to add new views, dialogs and support of multiple instances. Thus, starting with **v0.4.0** the application got a full rewrite. This also affects the configuration files and their management. You can migrate configuration files created by versions prior to **v0.4.0** using the `migrate` subcommand - e.g. `ferrowl migrate -i old-config.json -o new-config.json` (supports JSON and TOML as input and output).
 
 ## Goal
 
-Provide a CLI application to simulate Modbus Servers and Clients, visualize the states of all registers, make register manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs based on the Modbus protocol.
+Provide a CLI application to simulate Modbus Servers and Clients as well as OCPP Charging Stations and Central Systems (CSMS, OCPP 1.6 and 2.0.1), visualize the states of all registers and charging-station fields, make manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs over Modbus or OCPP.
 
 ## Architecture
 
@@ -31,15 +28,35 @@ The project is organized as a Cargo workspace and builds the `ferrowl` binary. S
 | ----- | ----- |
 | `ferrowl` | Binary. Event/redraw loop, tabs, views, dialogs, `:` commands, session & device configuration, `migrate` subcommand. |
 | `ferrowl-ui` | Reusable [ratatui](https://ratatui.rs) building blocks: widgets with their state types, styling and alternate-screen handling. |
-| `ferrowl-focus` | Proc macros that generate keyboard focus cycling and event dispatch for UI views. |
+| `ferrowl-ui-derive` | Proc macros for the UI layer: `#[derive(TableEntry)]`, `#[derive(Overlay)]` and `#[derive(Focus)]` (keyboard focus cycling and event dispatch for views). |
+| `ferrowl-lua-derive` | Proc macro `#[derive(Module)]` that bridges Rust host types into Lua modules. |
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
+| `ferrowl-ocpp` | OCPP protocol types and actions with a version-generic `Version` trait; Charging Station (CS) and Central System (CSMS) over JSON-on-WebSocket, wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). Supports OCPP 1.6 and 2.0.1. |
 | `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time`, `C_OCPP` and `C_Log` modules to simulation scripts. |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
 
 All runtime interaction meets in the shared memory of a module: the network task polls a remote server (client role) or answers incoming requests (server role) against it, the Lua simulation thread reads and writes it through the `C_Register` bridge, and the UI decodes its raw words into the typed values shown in the register table.
+
+## OCPP
+
+Alongside Modbus, Ferrowl simulates **OCPP** charging infrastructure over JSON-on-WebSocket. Both protocol versions and both roles are supported:
+
+- **Versions:** OCPP **1.6** and **2.0.1**.
+- **Roles:** **Charging Station** (client, connects out to a CSMS) and **Central System / CSMS** (server, accepts incoming stations and tracks each connection).
+
+Supported capabilities (grouped by area):
+
+- **Transactions & metering** — start/stop transactions, `MeterValues`, live connector state (status, phases, voltage, per-phase current, power, energy).
+- **Reservations** — `ReserveNow` / `CancelReservation`, per connector.
+- **Authorization** — RFID accept-lists, both station-wide and per-connector, plus local-list management.
+- **Smart charging** — charging profiles and per-purpose charge limits, including stack-level reject.
+- **Remote control** — remote (1.6) / requested (2.0.1) start & stop, availability changes, reset, firmware update and diagnostics.
+- **OCPP 2.0.1 extras** — variable get/set and monitoring, display messages, certificate management, and the EVSE/connector object model.
+
+In the TUI each OCPP module shows a connector/station table, a scope-filtered action list with per-version send dialogs (typed value editors plus a raw-JSON mode), and a capped message log that can be mirrored to a file via `:log`. Simulation behaviour is scripted in Lua for both roles — see [Lua Support](#lua-support).
 
 ## Nightly Build
 
@@ -73,7 +90,9 @@ ferrowl --session session.toml
 ferrowl --device device.toml
 ```
 
-If started without any additional parameters, the module setup dialog is shown. After the module is created, you can add registers using the `:add` command.
+If started without any additional parameters, the module setup dialog is shown. After the module is created, you can add registers using the `:add` command. To create an OCPP module instead, choose the OCPP type in the `:new` setup dialog.
+
+The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-demo.toml` / `cs-demo.toml`), so `ferrowl --session session.toml` brings both OCPP modules online at once.
 
 > [!IMPORTANT]
 > You can use *VIM*-like table navigation or alternatively the arrow keys. You can exit using the `:qa` command. Typing `:` will automatically switch to command mode. See the shown overlay for all available commands.
@@ -319,7 +338,7 @@ code = "C_OCPP:Set(\"Power\", C_OCPP:Get(\"Power\") + 100)"
 
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules these are the per-register `update` snippets (run each cycle), interacting with the registers through `C_Register`. For **OCPP** modules, scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the charging-station state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time` (both), `C_Register` (Modbus only), and `C_OCPP` + `C_Log` (OCPP only).
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules these are the per-register `update` snippets (run each cycle), interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time` and `C_Log` (both), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
 
 ### Module C_Time
 
@@ -382,11 +401,19 @@ Return: nil
 
 ### Module C_OCPP
 
-Exposed to the Lua scripts of an **OCPP** module (charging-station / client role). All loaded,
-enabled scripts run every ~100 ms. `C_Time` is also available; `C_Register` is **not** (it is
-Modbus-only).
+Exposed to the Lua scripts of an **OCPP** module, in both the charging-station (client) and CSMS
+(server) roles. All loaded, enabled scripts run about once per second. `C_Time` is also available;
+`C_Register` is **not** (it is Modbus-only).
 
-`Get`/`Set` read and write the charging-station state by name. Supported names (compact forms of
+The module has a flat surface plus role-specific scope accessors:
+
+- **Client** — bare `Get`/`Set`/`<Action>` address the charging station itself; `Connector(id)`
+  returns an accessor scoped to one connector with the same `Get`/`Set`/`<Action>` surface.
+- **Server (CSMS)** — `GetChargingStations()` and `GetConnectors(cs)` enumerate the connected
+  stations and their connectors; `ChargingStation(cs)` and `Connector(cs, id)` return accessors
+  scoped to one station or one of its connectors.
+
+`Get`/`Set` read and write the addressed scope's state by name. Supported names (compact forms of
 the state-table labels):
 
 ```
@@ -440,6 +467,30 @@ Arguments:
         Description: Key/value fields shallow-merged over the state-derived payload.
 
 Return: true when the action was queued, false on an argument error.
+```
+
+#### Scope accessors
+
+The same `Get`/`Set`/`<Action>` surface is reachable on a narrower scope. On the **client** a
+connector accessor is obtained by id; on the **server** the connected stations and their
+connectors are enumerated and then addressed by id.
+
+```
+Method:   C_OCPP:Connector(id)                 -- client role
+Return:   accessor scoped to connector `id`, exposing Get/Set/<Action>.
+
+Method:   C_OCPP:GetChargingStations()         -- server role
+Return:   list of connected charging-station ids.
+
+Method:   C_OCPP:GetConnectors(cs)             -- server role
+Return:   list of connector ids seen for station `cs`.
+
+Method:   C_OCPP:ChargingStation(cs)           -- server role
+Return:   accessor scoped to station `cs` (or nil if unknown), exposing Get/Set/<Action>.
+
+Method:   C_OCPP:Connector(cs, id)             -- server role
+Return:   accessor scoped to connector `id` of station `cs` (or nil if unknown),
+          exposing Get/Set/<Action>.
 ```
 
 #### Example
