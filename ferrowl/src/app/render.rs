@@ -48,13 +48,25 @@ pub(super) fn render(
         tab.view.render(frame, view_area);
     }
 
-    // Phase 3: log pane, command line, overlay.
+    // Phase 3: log pane and command line.
     {
         let buf = frame.buffer_mut();
         if let Some(tab) = tabs.get_mut(active) {
             StatefulWidget::render(&tab.log_view.widget, log_area, buf, &mut tab.log_view.state);
         }
         render_command(command, focus, cmd_area, buf);
+    }
+
+    // Phase 4: overlays, painted on top of content and log (bottom-to-top z-order).
+    // 1. Module dialogs. Drawn first so command help and the app dialog sit above them. The view's
+    //    own match no-ops when no overlay is open, so this is called unconditionally.
+    if let Some(tab) = tabs.get_mut(active) {
+        tab.view.render_overlay(frame, view_area);
+    }
+    // 2. Command help popup and 3. app-level modal dialog. Both draw to the buffer; the module
+    //    overlay above needed `&mut Frame`, so these go in a separate, sequential borrow.
+    {
+        let buf = frame.buffer_mut();
         if focus == Focus::Command {
             let module_cmds = tabs.get(active).map(|t| t.view.commands()).unwrap_or(&[]);
             render_command_help(cmd_area, buf, module_cmds);

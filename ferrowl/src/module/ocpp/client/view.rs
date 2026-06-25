@@ -593,6 +593,29 @@ impl<V: ClientVersion> ClientView<V> {
         !matches!(self.conn_table.state.table_state().selected(), Some(i) if i >= 1)
     }
 
+    /// The left-column vertical split of the content area:
+    /// `[conn_input, conn, state, scripts_btn, actions, config]`. Shared by `render` and
+    /// `render_overlay` so the Edit overlay anchors to the same `state` rect drawn this frame.
+    fn body_layout(&self, area: Rect) -> [Rect; 6] {
+        let [body, _status] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+        let [left, _right] =
+            Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
+        let n_conn = self.conn_table.state.values().len() as u16;
+        let n_actions = self.actions.state.values().len() as u16;
+        // Config block only when the CS row is selected (13 table + 3 input).
+        let config_len = if self.cs_selected() { 16 } else { 0 };
+        Layout::vertical([
+            Constraint::Length(3),                         // Add-connector input (top)
+            Constraint::Length((n_conn + 3).clamp(6, 12)), // Connectors (compact, ≥3 entries)
+            Constraint::Min(16),                           // State (≥5 entries + header)
+            Constraint::Length(3),                         // Scripts button
+            Constraint::Max(2 + n_actions),                // Actions
+            Constraint::Length(config_len),                // Config block (CS only)
+        ])
+        .areas(left)
+    }
+
     /// The scope of the selected connector-table row (CS row → `Scope::CS`).
     fn selected_scope(&self) -> Scope {
         match self.conn_table.state.table_state().selected() {
@@ -991,13 +1014,9 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         let cs = self.cs_selected();
         let [body, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-        let [left, right] =
+        let [_left, right] =
             Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
 
-        let n_conn = self.conn_table.state.values().len() as u16;
-        let n_actions = self.actions.state.values().len() as u16;
-        // Config block only when the CS row is selected (13 table + 3 input).
-        let config_len = if cs { 16 } else { 0 };
         let [
             conn_input_area,
             conn_area,
@@ -1005,15 +1024,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             scripts_btn_area,
             actions_area,
             config_area,
-        ] = Layout::vertical([
-            Constraint::Length(3),                         // Add-connector input (top)
-            Constraint::Length((n_conn + 3).clamp(6, 12)), // Connectors (compact, ≥3 entries)
-            Constraint::Min(16),                           // State (≥5 entries + header)
-            Constraint::Length(3),                         // Scripts button
-            Constraint::Max(2 + n_actions),                // Actions
-            Constraint::Length(config_len),                // Config block (CS only)
-        ])
-        .areas(left);
+        ] = self.body_layout(area);
         let [config_table_area, config_input_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(config_area);
         let [key_area, value_area] =
@@ -1105,7 +1116,13 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             .unwrap();
         let mut status = if online { "ONLINE" } else { "OFFLINE" }.to_string();
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
+    }
 
+    fn render_overlay(&mut self, frame: &mut Frame, area: Rect) {
+        // Recompute the left-column split so the Edit overlay can anchor to the state table area,
+        // matching what `render` drew this frame (shared via `body_layout`, no cached rects).
+        let [_, _, state_area, _, _, _] = self.body_layout(area);
+        let buf = frame.buffer_mut();
         match &mut self.overlay {
             // State-row edit overlay over the state table.
             ClientOverlay::Edit(edit) => {

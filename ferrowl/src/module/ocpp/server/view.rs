@@ -1084,7 +1084,10 @@ where
             "OFFLINE".to_string()
         };
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
+    }
 
+    fn render_overlay(&mut self, frame: &mut Frame, area: Rect) {
+        let buf = frame.buffer_mut();
         if let Some(dialog) = self.script_dialog.as_mut() {
             dialog.render(area, buf);
         }
@@ -1093,8 +1096,10 @@ where
         }
         if self.detail.is_some() {
             self.refresh_detail();
+            let buf = frame.buffer_mut();
             self.detail.as_mut().unwrap().render(area, buf);
         }
+        let buf = frame.buffer_mut();
         if let Some(setup) = self.setup_overlay.as_mut() {
             setup.render(area, buf);
         }

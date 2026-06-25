@@ -144,22 +144,23 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
 
 ## Impressions
 
-### Module Setup
+### General
+
+#### Command Help
 
 <p align="center">
     <p align="center">
-        <img src="./images/module-setup.png" style="border-radius: 8px">
+        <img src="./images/command-help.png" style="border-radius: 8px">
     </p>
 </p>
 
-### New Dialog
+#### Dialog: New Module
 
 <p align="center">
     <p align="center">
-        <img src="./images/new-dialog.png" style="border-radius: 8px">
+        <img src="./images/new-module.png" style="border-radius: 8px">
     </p>
 </p>
-
 ### Command Help
 
 <p align="center">
@@ -168,25 +169,103 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
     </p>
 </p>
 
-### Add Dialog
+### Modbus
+
+#### Dialog: New Module
 
 <p align="center">
     <p align="center">
-        <img src="./images/add-dialog.png" style="border-radius: 8px">
+        <img src="./images/modbus/new-module.png" style="border-radius: 8px">
     </p>
 </p>
 
-### Edit Dialog
+#### Dialog: Add Register
 
 <p align="center">
     <p align="center">
-        <img src="./images/edit-input-dialog.png" style="border-radius: 8px">
+        <img src="./images/modbus/add-register.png" style="border-radius: 8px">
     </p>
 </p>
 
+#### Dialog: Edit Register
+
 <p align="center">
     <p align="center">
-        <img src="./images/edit-selection-dialog.png" style="border-radius: 8px">
+        <img src="./images/modbus/edit-register.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Dialog: Edit Selection Register
+
+<p align="center">
+    <p align="center">
+        <img src="./images/modbus/edit-selection-register.png" style="border-radius: 8px">
+    </p>
+</p>
+
+### OCPP 
+
+#### Dialog: New Module
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/new-module.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Dialog: Action
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/action.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Client View - General
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/client.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Client View - CS
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/client-cp.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Client View - Connector
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/client-con.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Server View - General
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/server.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Server View - CS
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/server-cp.png" style="border-radius: 8px">
+    </p>
+</p>
+
+#### Server View - Connector
+
+<p align="center">
+    <p align="center">
+        <img src="./images/ocpp/server-con.png" style="border-radius: 8px">
     </p>
 </p>
 

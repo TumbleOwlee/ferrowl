@@ -45,6 +45,11 @@ pub trait ModuleView: SetFocus + IsFocus {
     /// Focus-dependent rendering reads [`IsFocus::is_focused`] on `self`.
     fn render(&mut self, frame: &mut Frame, area: Rect);
 
+    /// Render the module's open dialogs/overlays, if any. Called after content and the log pane are
+    /// painted, so overlays may extend over the log area without being overwritten. No-ops when no
+    /// overlay is open. `area` is the same content area passed to [`render`].
+    fn render_overlay(&mut self, frame: &mut Frame, area: Rect);
+
     /// Handle a terminal key event. Returns `Consumed` or `Unhandled`.
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult;
 

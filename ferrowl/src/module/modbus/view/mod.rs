@@ -307,7 +307,9 @@ impl ModuleView for ModbusModuleView {
             };
             StatefulWidget::render(&status_widget, status_area, buf, &mut label);
         }
+    }
 
+    fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
         let full_area = frame.area();
         if let Some(setup) = &mut self.setup_overlay {
             setup.render(full_area, frame.buffer_mut());
