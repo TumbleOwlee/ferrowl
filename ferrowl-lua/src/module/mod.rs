@@ -1,10 +1,15 @@
 //! Host modules exposed to Lua scripts as global userdata objects.
 
+mod log;
+mod ocpp;
 mod register;
 mod statics;
 mod time;
 mod value_type;
 
+pub use log::{Log as LogModule, LogSink};
+pub use ocpp::traits::{OcppActions, OcppClientHost, OcppHandle, OcppServerHost};
+pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppServer};
 pub use register::Register as RegisterModule;
 pub use register::traits::{Read, Write};
 pub use statics::Statics as StaticsModule;

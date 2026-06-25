@@ -1,0 +1,19 @@
+pre-commit:
+  piped: true
+  commands:
+
+    fmt:
+      glob: "*.rs"
+      run: cargo fmt -- --check
+      fail_text: |
+        cargo fmt found formatting issues.
+        Run `cargo fmt` to fix them, then re-stage your changes.
+ 
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy -- -D warnings
+
+      fail_text: |
+
+        cargo clippy found issues.
+        Fix the warnings above, then re-stage your changes.

@@ -15,4 +15,4 @@ ratatui = { version = "0.30.0", features = [
 ] }
 
 [dev-dependencies]
-ferrowl-focus = { path = "../ferrowl-focus" }
+ferrowl-ui-derive = { path = "../ferrowl-ui-derive" }

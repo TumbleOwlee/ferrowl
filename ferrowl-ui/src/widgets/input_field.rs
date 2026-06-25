@@ -194,7 +194,7 @@ where
             }
         } else {
             match valid {
-                ValidateResult::Success | ValidateResult::None => self.style.general,
+                ValidateResult::Success | ValidateResult::None => self.style.border,
                 ValidateResult::Error(_) => self.style.error,
             }
         };

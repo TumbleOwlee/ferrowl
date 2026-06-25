@@ -11,16 +11,14 @@ mod correlation;
 mod error;
 mod log;
 mod ocppj;
-mod semantic;
 
 pub mod cs;
 pub mod csms;
 
-pub use action::Version;
+pub use action::{ConnectorScope, Version};
 pub use error::{CallError, Error, FramingError, OcppError, ValidationError, WsError};
 pub use log::LogFn;
 pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};
-pub use semantic::types;
 
 #[cfg(feature = "v1_6")]
 pub use rust_ocpp::v1_6;

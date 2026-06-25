@@ -116,13 +116,14 @@ impl<V: Version> OutboundHandle<V> {
 }
 
 /// All the moving parts of a live connection, handed to a role's command loop.
+///
+/// The `pending` correlation map and the outbound sender live inside [`OutboundHandle`]; the
+/// teardown path reaches them through `outbound` rather than keeping its own copies.
 pub(crate) struct Connection<V: Version> {
     pub(crate) outbound: OutboundHandle<V>,
     pub(crate) shutdown: Arc<Notify>,
     writer: tokio::task::JoinHandle<()>,
     reader: tokio::task::JoinHandle<()>,
-    pending: PendingCalls,
-    out_tx: mpsc::Sender<OcppJMessage>,
 }
 
 impl<V: Version> Connection<V> {
@@ -152,9 +153,10 @@ impl<V: Version> Connection<V> {
             shutdown.clone(),
         ));
 
+        // `out_tx`/`pending` move into the handle; the reader keeps its own clones.
         let outbound = OutboundHandle {
-            out_tx: out_tx.clone(),
-            pending: pending.clone(),
+            out_tx,
+            pending,
             timeout,
             _v: PhantomData,
         };
@@ -164,19 +166,18 @@ impl<V: Version> Connection<V> {
             shutdown,
             writer,
             reader,
-            pending,
-            out_tx,
         }
     }
 
     /// Tear the connection down: stop the reader, fail every pending call, and drain the writer.
     pub(crate) async fn shutdown(self) {
         self.reader.abort();
-        self.pending.fail_all(&CallError::new(
+        self.outbound.pending.fail_all(&CallError::new(
             CallErrorCode::GenericError,
             "connection terminated",
         ));
-        drop(self.out_tx);
+        // Dropping the handle drops the last live outbound sender; with the reader aborted, the
+        // writer's channel then closes and the writer task drains and exits.
         drop(self.outbound);
         let _ = self.writer.await;
     }

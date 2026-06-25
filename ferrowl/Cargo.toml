@@ -11,8 +11,9 @@ ferrowl-ui = { path = "../ferrowl-ui" }
 ferrowl-ring = { path = "../ferrowl-ring" }
 ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-modbus = { path = "../ferrowl-modbus" }
+ferrowl-ocpp = { path = "../ferrowl-ocpp" }
 ferrowl-lua = { path = "../ferrowl-lua" }
-ferrowl-focus = { path = "../ferrowl-focus" }
+ferrowl-ui-derive = { path = "../ferrowl-ui-derive" }
 anyhow = "1.0.100"
 thiserror = "2.0"
 clap = { version = "4.5.54", features = ["derive"] }

@@ -37,6 +37,10 @@ pub trait TableEntry<const N: usize> {
     fn values(&self) -> [String; N];
     /// The row height in lines.
     fn height(&self) -> u16;
+    /// Optional per-cell style overrides (e.g. status coloring). `None` keeps the row style.
+    fn cell_styles(&self) -> [Option<ratatui::style::Style>; N] {
+        [None; N]
+    }
 }
 
 /// A scrollable table of [`TableEntry`] rows with an `N`-column [`Header`],
@@ -197,6 +201,7 @@ where
             let color = self.style.rows.get(i % 2).unwrap();
             let spacing =
                 itertools::repeat_n('\n', self.row_margin.vertical as usize).collect::<String>();
+            let cell_styles = item.cell_styles();
             let mut max_line_cnt = 0;
             let row = item
                 .values()
@@ -269,7 +274,11 @@ where
                         line_cnt += 1;
                     }
                     max_line_cnt = std::cmp::max(line_cnt, max_line_cnt);
-                    Cell::from(Text::from(format!("{spacing}{output}{spacing}")))
+                    let cell = Cell::from(Text::from(format!("{spacing}{output}{spacing}")));
+                    match cell_styles[col] {
+                        Some(style) => cell.style(style),
+                        None => cell,
+                    }
                 })
                 .collect::<Row>()
                 .style(*color)

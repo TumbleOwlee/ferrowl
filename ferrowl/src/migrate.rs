@@ -22,6 +22,7 @@
 
 use std::collections::BTreeMap;
 
+use ferrowl_codec::Kind;
 use ferrowl_util::convert::{Converter, FileType};
 use serde::Deserialize;
 
@@ -150,15 +151,13 @@ impl From<LegacyScalar> for Scalar {
 // ── Conversion helpers ────────────────────────────────────────────────────────
 
 /// Remap the read code from the old convention to the new one.
-///
-/// The old format followed the Modbus standard (FC03 = Holding, FC04 = Input).
-/// The current format swaps those two codes (4 = Holding, 3 = Input).
-/// Coil (1) and DiscreteInput (2) are unchanged.
-fn migrate_read_code(old: u8) -> u8 {
+fn migrate_read_code(old: u8) -> Kind {
     match old {
-        3 => 4,
-        4 => 3,
-        other => other,
+        1 => Kind::Coil,
+        2 => Kind::DiscreteInput,
+        3 => Kind::HoldingRegister,
+        4 => Kind::InputRegister,
+        _ => unreachable!("Invalid read code"),
     }
 }
 
@@ -329,11 +328,11 @@ fn convert_def(
     };
 
     let values = convert_values(src.values, reg_name, warnings);
-    let read_code = migrate_read_code(src.read_code);
+    let kind = migrate_read_code(src.read_code);
 
     Ok(RegisterDef {
         slave_id: src.slave_id,
-        read_code,
+        kind,
         address,
         is_virtual: src.is_virtual,
         access,
@@ -545,10 +544,10 @@ mod tests {
 
     #[test]
     fn ut_migrate_read_code_swap() {
-        assert_eq!(migrate_read_code(3), 4);
-        assert_eq!(migrate_read_code(4), 3);
-        assert_eq!(migrate_read_code(1), 1);
-        assert_eq!(migrate_read_code(2), 2);
+        assert_eq!(migrate_read_code(1), Kind::Coil);
+        assert_eq!(migrate_read_code(2), Kind::DiscreteInput);
+        assert_eq!(migrate_read_code(3), Kind::HoldingRegister);
+        assert_eq!(migrate_read_code(4), Kind::InputRegister);
     }
 
     #[test]
@@ -623,7 +622,7 @@ mod tests {
 
         // setpoint_rpm: old read_code=3 (Holding) → new read_code=4; default preserved
         let rpm = &device.definitions["setpoint_rpm"];
-        assert_eq!(rpm.read_code, 4);
+        assert_eq!(rpm.kind, Kind::HoldingRegister);
         assert_eq!(rpm.value_type, ValueType::U32);
         assert_eq!(rpm.endian, EndianCfg::Big);
         assert_eq!(rpm.address, Some(0x1000));
@@ -631,7 +630,7 @@ mod tests {
 
         // temperature_f32le: old read_code=4 (Input) → new read_code=3; endian=Little
         let temp = &device.definitions["temperature_f32le"];
-        assert_eq!(temp.read_code, 3);
+        assert_eq!(temp.kind, Kind::InputRegister);
         assert_eq!(temp.value_type, ValueType::F32);
         assert_eq!(temp.endian, EndianCfg::Little);
 

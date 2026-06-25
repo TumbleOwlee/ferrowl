@@ -3,12 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Width of an ASCII value, in 16-bit registers (2 characters each).
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Width(pub usize);
 
 /// Scale factor applied when displaying a numeric value
 /// (`displayed = raw * resolution`).
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Resolution(pub f64);
 
 impl Default for Resolution {

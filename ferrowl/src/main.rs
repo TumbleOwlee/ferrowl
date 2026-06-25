@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::io::Stdout;
 
 use clap::Parser;
+use ferrowl_codec::Kind;
 use ferrowl_ui::AlternateScreen;
 use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
@@ -29,9 +30,14 @@ use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
 };
-use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+use crate::config::ocpp::{OcppProtocol, OcppRole, OcppVersion};
+use crate::config::{
+    DeviceConfig, Endpoint, ModuleSpec, OcppDeviceConfig, OcppModuleSpec, OcppSpec, Role,
+};
 use crate::module::Module;
 use crate::module::modbus::view::ModbusModuleView;
+use crate::module::ocpp::client::build_client_view;
+use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView};
 
 /// In-code demo module shown when no `--module`/`--session` is given (not started, so it
@@ -40,7 +46,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
     let reg = |address: u16, value_type: ValueType, description: &str, values: Vec<NamedValue>| {
         RegisterDef {
             slave_id: 1,
-            read_code: 4,
+            kind: Kind::HoldingRegister,
             address: Some(address),
             is_virtual: false,
             access: AccessCfg::ReadWrite,
@@ -118,13 +124,29 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
             ip: "127.0.0.1".to_string(),
             port: 5020,
         },
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     };
 
     let module = Module::new(&spec, &device);
     let view: Box<dyn ModuleView> = Box::new(ModbusModuleView::new(module, spec.clone(), device));
+    Tab::new_from_view(spec.name.clone(), view)
+}
+
+fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) -> Tab {
+    let spec = OcppSpec {
+        name,
+        version,
+        role,
+        protocol: OcppProtocol::Ws,
+        ip: "127.0.0.1".into(),
+        port,
+        path: "/ocpp/cp001".into(),
+        timeout_ms: None,
+    };
+    let device = OcppDeviceConfig::from_spec(&spec, Vec::new());
+    let view = match role {
+        OcppRole::Client => build_client_view(spec.clone(), String::new(), device),
+        OcppRole::Server => build_server_view(spec.clone(), String::new(), device),
+    };
     Tab::new_from_view(spec.name.clone(), view)
 }
 
@@ -136,8 +158,32 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
 
     if args.demo {
         let mut tabs = vec![
-            demo_modbus_tab("Demo Server".to_string(), Role::Server),
-            demo_modbus_tab("Demo Client".to_string(), Role::Client),
+            demo_modbus_tab("Modbus Server".to_string(), Role::Server),
+            demo_modbus_tab("Modbus Client".to_string(), Role::Client),
+            demo_ocpp_tab(
+                "CSMS v1.6".to_string(),
+                OcppVersion::V1_6,
+                OcppRole::Server,
+                9000,
+            ),
+            demo_ocpp_tab(
+                "CS v1.6".to_string(),
+                OcppVersion::V1_6,
+                OcppRole::Client,
+                9000,
+            ),
+            demo_ocpp_tab(
+                "CSMS v2.0.1".to_string(),
+                OcppVersion::V2_0_1,
+                OcppRole::Server,
+                9001,
+            ),
+            demo_ocpp_tab(
+                "CS v2.0,1".to_string(),
+                OcppVersion::V2_0_1,
+                OcppRole::Client,
+                9001,
+            ),
         ];
         for tab in tabs.iter_mut() {
             if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
@@ -168,7 +214,29 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         }
         tabs.push(tab);
     }
+
+    for spec in args.ocpp_specs()? {
+        tabs.push(build_ocpp_tab(spec).await);
+    }
     Ok(tabs)
+}
+
+/// Build a UI tab for one OCPP module spec, starting it via `handle_command("start")`. The
+/// device-config file (role/version/timeout/scripts) is loaded from the spec's path; a missing or
+/// unreadable file falls back to defaults.
+async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
+    let name = module.name.clone();
+    let device = config::load_ocpp_device(&module.device).unwrap_or_default();
+    let spec = OcppSpec::from_parts(&module, &device);
+    let view: Box<dyn ModuleView> = match device.role {
+        OcppRole::Client => build_client_view(spec, module.device.clone(), device),
+        OcppRole::Server => build_server_view(spec, module.device.clone(), device),
+    };
+    let mut tab = Tab::new_from_view(name, view);
+    if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
+        tab.log.write().await.write(&msg);
+    }
+    tab
 }
 
 fn main() {

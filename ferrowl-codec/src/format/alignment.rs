@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Text alignment of an ASCII value inside its fixed-width register block.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Alignment {
     Left,
     Right,

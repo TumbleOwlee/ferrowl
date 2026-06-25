@@ -5,6 +5,10 @@
 //! through [`module`]s (registers, static values, time) registered as
 //! global userdata objects.
 
+// Lets the `#[derive(Module)]` macro's emitted `ferrowl_lua::module::Module`
+// path resolve when adopted inside this crate.
+extern crate self as ferrowl_lua;
+
 mod builder;
 mod context;
 pub mod module;

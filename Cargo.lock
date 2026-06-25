@@ -831,12 +831,13 @@ dependencies = [
  "crossterm",
  "derive_builder",
  "ferrowl-codec",
- "ferrowl-focus",
  "ferrowl-lua",
  "ferrowl-modbus",
+ "ferrowl-ocpp",
  "ferrowl-ring",
  "ferrowl-store",
  "ferrowl-ui",
+ "ferrowl-ui-derive",
  "ferrowl-util",
  "ratatui",
  "serde",
@@ -860,23 +861,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrowl-focus"
-version = "0.4.4"
-dependencies = [
- "convert_case 0.11.0",
- "crossterm",
- "derive_builder",
- "ferrowl-ui",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "ferrowl-lua"
 version = "0.4.4"
 dependencies = [
+ "ferrowl-lua-derive",
  "mlua",
+]
+
+[[package]]
+name = "ferrowl-lua-derive"
+version = "0.4.4"
+dependencies = [
+ "ferrowl-lua",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -929,10 +928,24 @@ version = "0.4.4"
 dependencies = [
  "crossterm",
  "derive_builder",
- "ferrowl-focus",
+ "ferrowl-ui-derive",
  "getset",
  "itertools",
  "ratatui",
+]
+
+[[package]]
+name = "ferrowl-ui-derive"
+version = "0.4.4"
+dependencies = [
+ "convert_case 0.11.0",
+ "crossterm",
+ "derive_builder",
+ "ferrowl-ui",
+ "proc-macro2",
+ "quote",
+ "ratatui",
+ "syn 2.0.117",
 ]
 
 [[package]]

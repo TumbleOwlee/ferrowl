@@ -3,11 +3,173 @@
 use crate::{Key, KeyParams, LogFn, SlaveId};
 
 use ferrowl_store::{CellType, Memory, Range};
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_modbus::FunctionCode;
 use tokio_modbus::Request;
-use tokio_modbus::prelude::{ExceptionCode, Response};
+use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
+
+/// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
+/// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
+/// `name` is the only thing that varies between the read arms (and appears verbatim in the logs).
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/cnt) + server state
+async fn handle_read<T, L>(
+    name: &str,
+    slave: SlaveId,
+    fc: FunctionCode,
+    cell: CellType,
+    addr: u16,
+    cnt: u16,
+    memory: &Arc<RwLock<Memory<Key<T>>>>,
+    log: &L,
+    verbose: bool,
+) -> Result<Vec<u16>, ExceptionCode>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    log.invoke(format!(
+        "{name} request received for slave ID {slave} and range [{}, {}).",
+        addr,
+        addr + cnt
+    ))
+    .await;
+    let key = Key {
+        id: T::from_slave_fn(slave, fc),
+    };
+    let guard = memory.read().await;
+    match guard.read(key, &cell, &Range::new(addr as usize, cnt as usize)) {
+        Ok(v) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave} and range [{}, {}) successful.",
+                    addr,
+                    addr + cnt
+                ))
+                .await;
+            }
+            Ok(v)
+        }
+        Err(e) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
+                    addr,
+                    addr + cnt
+                ))
+                .await;
+            }
+            Err(ExceptionCode::IllegalFunction)
+        }
+    }
+}
+
+/// Shared body of the two multi-write function codes (registers/coils): write `values` at `addr`
+/// for the `(slave, fc)` key as `cell`, log the outcome, and return the count written (for the
+/// response). Coil callers pass their bits already widened to `u16`.
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/values) + server state
+async fn handle_write_multi<T, L>(
+    name: &str,
+    slave: SlaveId,
+    fc: FunctionCode,
+    cell: CellType,
+    addr: u16,
+    values: &[u16],
+    memory: &Arc<RwLock<Memory<Key<T>>>>,
+    log: &L,
+    verbose: bool,
+) -> Result<u16, ExceptionCode>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    log.invoke(format!(
+        "{name} request received for slave ID {slave}, range [{}, {}), and values {values:?}.",
+        addr,
+        addr as usize + values.len()
+    ))
+    .await;
+    let key = Key {
+        id: T::from_slave_fn(slave, fc),
+    };
+    let mut guard = memory.write().await;
+    match guard.write(key, &cell, &Range::new(addr as usize, values.len()), values) {
+        Ok(()) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} successful.",
+                    addr,
+                    addr as usize + values.len()
+                ))
+                .await;
+            }
+            Ok(values.len() as u16)
+        }
+        Err(e) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} failed: {e}.",
+                    addr,
+                    addr as usize + values.len()
+                ))
+                .await;
+            }
+            Err(ExceptionCode::IllegalFunction)
+        }
+    }
+}
+
+/// Shared body of the two single-write function codes (register/coil): write `stored` at `addr`
+/// for the `(slave, fc)` key as `cell`, logging `value` (the protocol-level value — a `u16` for a
+/// register, a `bool` for a coil) so the log text matches the wire request.
+#[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/value/stored) + server state
+async fn handle_write_single<T, L, V>(
+    name: &str,
+    slave: SlaveId,
+    fc: FunctionCode,
+    cell: CellType,
+    addr: u16,
+    value: V,
+    stored: u16,
+    memory: &Arc<RwLock<Memory<Key<T>>>>,
+    log: &L,
+    verbose: bool,
+) -> Result<(), ExceptionCode>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+    V: Display,
+{
+    log.invoke(format!(
+        "{name} request received for slave ID {slave}, address {addr}, and value {value}."
+    ))
+    .await;
+    let key = Key {
+        id: T::from_slave_fn(slave, fc),
+    };
+    let mut guard = memory.write().await;
+    match guard.write(key, &cell, &Range::new(addr as usize, 1), &[stored]) {
+        Ok(()) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave}, address {addr}, and value {value} successful."
+                ))
+                .await;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if verbose {
+                log.invoke(format!(
+                    "{name} request for slave ID {slave}, address {addr}, and value {value} failed: {e}."
+                ))
+                .await;
+            }
+            Err(ExceptionCode::IllegalFunction)
+        }
+    }
+}
 
 /// Handle one inbound Modbus server request against `memory`, shared by the TCP and RTU servers.
 ///
@@ -26,345 +188,129 @@ where
 {
     match request {
         Request::ReadCoils(addr, cnt) => {
-            log.invoke(format!(
-                "ReadCoils request received for slave ID {} and range [{}, {}).",
+            let v = handle_read(
+                "ReadCoils",
                 slave,
+                FunctionCode::ReadCoils,
+                CellType::Coil,
                 addr,
-                addr + cnt
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::ReadCoils),
-            };
-            let guard = memory.read().await;
-            match guard.read(
-                key,
-                &CellType::Coil,
-                &Range::new(addr as usize, cnt as usize),
-            ) {
-                Ok(v) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadCoils request for slave ID {} and range [{}, {}) successful.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Ok(Response::ReadCoils(v.into_iter().map(|b| b != 0).collect()))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadCoils request for slave ID {} and range [{}, {}) failed: {e}.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+                cnt,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::ReadCoils(v.into_iter().map(|b| b != 0).collect()))
         }
         Request::ReadDiscreteInputs(addr, cnt) => {
-            log.invoke(format!(
-                "ReadDiscreteInputs request received for slave ID {} and range [{}, {}).",
+            let v = handle_read(
+                "ReadDiscreteInputs",
                 slave,
+                FunctionCode::ReadDiscreteInputs,
+                CellType::Coil,
                 addr,
-                addr + cnt
+                cnt,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::ReadDiscreteInputs(
+                v.into_iter().map(|b| b != 0).collect(),
             ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::ReadDiscreteInputs),
-            };
-            let guard = memory.read().await;
-            match guard.read(
-                key,
-                &CellType::Coil,
-                &Range::new(addr as usize, cnt as usize),
-            ) {
-                Ok(v) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadDiscreteInputs request for slave ID {} and range [{}, {}) successful.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Ok(Response::ReadDiscreteInputs(
-                        v.into_iter().map(|b| b != 0).collect(),
-                    ))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadDiscreteInputs request for slave ID {} and range [{}, {}) failed: {e}.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
         }
         Request::ReadInputRegisters(addr, cnt) => {
-            log.invoke(format!(
-                "ReadInputRegisters request received for slave ID {} and range [{}, {}).",
+            let v = handle_read(
+                "ReadInputRegisters",
                 slave,
+                FunctionCode::ReadInputRegisters,
+                CellType::Register,
                 addr,
-                addr + cnt
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::ReadInputRegisters),
-            };
-            let guard = memory.read().await;
-            match guard.read(
-                key,
-                &CellType::Register,
-                &Range::new(addr as usize, cnt as usize),
-            ) {
-                Ok(v) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadInputRegisters request for slave ID {} and range [{}, {}) successful.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Ok(Response::ReadInputRegisters(v))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadInputRegisters request for slave ID {} and range [{}, {}) failed: {e}.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+                cnt,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::ReadInputRegisters(v))
         }
         Request::ReadHoldingRegisters(addr, cnt) => {
-            log.invoke(format!(
-                "ReadHoldingRegisters request received for slave ID {} and range [{}, {}).",
+            let v = handle_read(
+                "ReadHoldingRegisters",
                 slave,
+                FunctionCode::ReadHoldingRegisters,
+                CellType::Register,
                 addr,
-                addr + cnt
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::ReadHoldingRegisters),
-            };
-            let guard = memory.read().await;
-            match guard.read(
-                key,
-                &CellType::Register,
-                &Range::new(addr as usize, cnt as usize),
-            ) {
-                Ok(v) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadHoldingRegisters request for slave ID {} and range [{}, {}) successful.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Ok(Response::ReadHoldingRegisters(v))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "ReadHoldingRegisters request for slave ID {} and range [{}, {}) failed: {e}.",
-                            slave,
-                            addr,
-                            addr + cnt
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+                cnt,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::ReadHoldingRegisters(v))
         }
         Request::WriteMultipleRegisters(addr, values) => {
-            log.invoke(format!(
-                "WriteMultipleRegisters request received for slave ID {}, range [{}, {}), and values {:?}.",
+            let len = handle_write_multi(
+                "WriteMultipleRegisters",
                 slave,
+                FunctionCode::WriteMultipleRegisters,
+                CellType::Register,
                 addr,
-                addr as usize + values.len(),
-                values
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::WriteMultipleRegisters),
-            };
-            let mut guard = memory.write().await;
-            match guard.write(
-                key,
-                &CellType::Register,
-                &Range::new(addr as usize, values.len()),
                 &values,
-            ) {
-                Ok(()) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} successful.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(),
-                            values
-                        ))
-                        .await;
-                    }
-                    Ok(Response::WriteMultipleRegisters(addr, values.len() as u16))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteMultipleRegisters request for slave ID {}, range [{}, {}), and values {:?} failed: {e}.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(),
-                            values
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::WriteMultipleRegisters(addr, len))
         }
         Request::WriteSingleRegister(addr, value) => {
-            log.invoke(format!(
-                "WriteSingleRegister request received for slave ID {}, address {}, and value {}.",
-                slave, addr, value
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::WriteSingleRegister),
-            };
-            let mut guard = memory.write().await;
-            match guard.write(
-                key,
-                &CellType::Register,
-                &Range::new(addr as usize, 1),
-                &[value],
-            ) {
-                Ok(()) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteSingleRegister request for slave ID {}, address {}, and value {} successful.",
-                            slave, addr, value
-                        ))
-                        .await;
-                    }
-                    Ok(Response::WriteSingleRegister(addr, value))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteSingleRegister request for slave ID {}, address {}, and value {} failed: {e}.",
-                            slave, addr, value
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+            handle_write_single(
+                "WriteSingleRegister",
+                slave,
+                FunctionCode::WriteSingleRegister,
+                CellType::Register,
+                addr,
+                value,
+                value,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::WriteSingleRegister(addr, value))
         }
         Request::WriteMultipleCoils(addr, values) => {
-            log.invoke(format!(
-                "WriteMultipleCoils request received for slave ID {}, range [{}, {}), and values {:?}.",
-                slave,
-                addr,
-                addr as usize + values.len(),
-                values
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::WriteMultipleCoils),
-            };
-            let mut guard = memory.write().await;
             let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
-            match guard.write(
-                key,
-                &CellType::Coil,
-                &Range::new(addr as usize, values.len()),
+            let len = handle_write_multi(
+                "WriteMultipleCoils",
+                slave,
+                FunctionCode::WriteMultipleCoils,
+                CellType::Coil,
+                addr,
                 &values,
-            ) {
-                Ok(()) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} successful.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(),
-                            values
-                        ))
-                        .await;
-                    }
-                    Ok(Response::WriteMultipleCoils(addr, values.len() as u16))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteMultipleCoils request for slave ID {}, range [{}, {}), and values {:?} failed: {e}.",
-                            slave,
-                            addr,
-                            addr as usize + values.len(),
-                            values
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::WriteMultipleCoils(addr, len))
         }
         Request::WriteSingleCoil(addr, value) => {
-            log.invoke(format!(
-                "WriteSingleCoil request received for slave ID {}, address {}, and value {}.",
-                slave, addr, value
-            ))
-            .await;
-            let key = Key {
-                id: T::from_slave_fn(slave, FunctionCode::WriteSingleCoil),
-            };
-            let mut guard = memory.write().await;
-            let val = value as u16;
-            match guard.write(key, &CellType::Coil, &Range::new(addr as usize, 1), &[val]) {
-                Ok(()) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteSingleCoil request for slave ID {}, address {}, and value {} successful.",
-                            slave, addr, value
-                        ))
-                        .await;
-                    }
-                    Ok(Response::WriteSingleCoil(addr, value))
-                }
-                Err(e) => {
-                    if verbose {
-                        log.invoke(format!(
-                            "WriteSingleCoil request for slave ID {}, address {}, and value {} failed: {e}.",
-                            slave, addr, value
-                        ))
-                        .await;
-                    }
-                    Err(ExceptionCode::IllegalFunction)
-                }
-            }
+            handle_write_single(
+                "WriteSingleCoil",
+                slave,
+                FunctionCode::WriteSingleCoil,
+                CellType::Coil,
+                addr,
+                value,
+                value as u16,
+                memory,
+                log,
+                verbose,
+            )
+            .await?;
+            Ok(Response::WriteSingleCoil(addr, value))
         }
         Request::ReportServerId => {
             log.invoke(format!(
@@ -477,6 +423,55 @@ where
             .await;
             Err(ExceptionCode::IllegalFunction)
         }
+    }
+}
+
+/// Per-connection Modbus server service shared by the TCP and RTU servers: every request is
+/// answered directly from the shared `memory` via [`handle_request`]. `verbose` toggles the
+/// per-request success/failure logging — TCP sets it, RTU leaves it off. (The transport-specific
+/// bind/accept vs serial-open setup stays in `tcp::server`/`rtu::server`.)
+pub(crate) struct Server<T, L>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    memory: Arc<RwLock<Memory<Key<T>>>>,
+    log: L,
+    verbose: bool,
+}
+
+impl<T, L> Server<T, L>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    pub(crate) fn new(memory: Arc<RwLock<Memory<Key<T>>>>, log: L, verbose: bool) -> Self {
+        Self {
+            memory,
+            log,
+            verbose,
+        }
+    }
+}
+
+impl<T, L> tokio_modbus::server::Service for Server<T, L>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    type Request = SlaveRequest<'static>;
+    type Exception = ExceptionCode;
+    type Response = Response;
+    type Future = std::future::Ready<Result<Response, ExceptionCode>>;
+
+    fn call(&self, request: Self::Request) -> Self::Future {
+        let SlaveRequest { slave, request } = request;
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                handle_request(slave, request, &self.memory, &self.log, self.verbose).await
+            })
+        });
+        std::future::ready(response)
     }
 }
 

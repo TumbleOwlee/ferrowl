@@ -18,7 +18,8 @@ pub struct Session {
     pub modules: Vec<serde_json::Value>,
 }
 
-/// One module instance: which device type, named, with a role and an endpoint.
+/// One module instance: which device type, named, with a role and an endpoint. Timing
+/// (timeout/delay/interval ms) is not per-instance — it lives in the device config.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleSpec {
     pub name: String,
@@ -27,14 +28,6 @@ pub struct ModuleSpec {
     #[serde(default)]
     pub role: Role,
     pub endpoint: Endpoint,
-    /// Per-instance timing overrides (ms). When unset, the device config — then the built-in
-    /// default — supplies the value. See `Module::resolve_timing`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_ms: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delay_ms: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interval_ms: Option<usize>,
 }
 
 /// Whether a module polls a remote device (client) or simulates one (server).
@@ -128,12 +121,11 @@ mod tests {
             device: device.into(),
             role,
             endpoint,
-            timeout_ms: None,
-            delay_ms: None,
-            interval_ms: None,
         };
         let mut v = serde_json::to_value(spec).unwrap();
-        v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+        v.as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
         v
     }
 
@@ -162,12 +154,11 @@ mod tests {
                             data_bits: Some(8),
                             stop_bits: Some(1),
                         },
-                        timeout_ms: Some(750),
-                        delay_ms: None,
-                        interval_ms: Some(1500),
                     };
                     let mut v = serde_json::to_value(spec).unwrap();
-                    v.as_object_mut().unwrap().insert("type".into(), "modbus".into());
+                    v.as_object_mut()
+                        .unwrap()
+                        .insert("type".into(), "modbus".into());
                     v
                 },
             ],

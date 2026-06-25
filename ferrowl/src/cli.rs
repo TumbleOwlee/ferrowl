@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::config::{self, Endpoint, ModuleSpec, Role};
+use crate::config::{self, Endpoint, ModuleSpec, OcppModuleSpec, Role};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Ferrowl — a modbus client/server TUI", long_about = None)]
@@ -72,6 +72,8 @@ impl CliArgs {
                             .map_err(|e| format!("invalid modbus module spec: {e}"))?;
                         specs.push(spec);
                     }
+                    // OCPP modules are resolved separately by `ocpp_specs`.
+                    "ocpp" => {}
                     other => {
                         return Err(format!("unsupported module type '{other}'"));
                     }
@@ -89,6 +91,25 @@ impl CliArgs {
         }
         Ok(specs)
     }
+
+    /// Resolve every OCPP module instance from `--session` files (modules tagged
+    /// `"type":"ocpp"`). Each entry carries the device-config path + endpoint; the device file
+    /// (version/role/timeout/scripts) is loaded separately when the tab is built.
+    pub fn ocpp_specs(&self) -> Result<Vec<OcppModuleSpec>, String> {
+        let mut specs = Vec::new();
+        for path in &self.sessions {
+            let session = config::load_session(path).map_err(|e| e.to_string())?;
+            for module_val in session.modules {
+                let ty = module_val.get("type").and_then(|v| v.as_str());
+                if ty == Some("ocpp") {
+                    let spec: OcppModuleSpec = serde_json::from_value(module_val)
+                        .map_err(|e| format!("invalid ocpp module spec: {e}"))?;
+                    specs.push(spec);
+                }
+            }
+        }
+        Ok(specs)
+    }
 }
 
 /// Build a [`ModuleSpec`] for a `--device` flag: a TCP client polling the default demo
@@ -103,9 +124,6 @@ pub fn create_module_spec_by_device(name: String, device: String) -> ModuleSpec 
             ip: "127.0.0.1".to_string(),
             port: 5020,
         },
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     }
 }
 
@@ -161,9 +179,6 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
         device,
         role,
         endpoint,
-        timeout_ms: None,
-        delay_ms: None,
-        interval_ms: None,
     })
 }
 
@@ -279,6 +294,53 @@ mod tests {
         };
         let specs = args.module_specs().unwrap();
         assert_eq!(specs.len(), 3); // session + module + device
+    }
+
+    #[test]
+    fn ut_session_splits_modbus_and_ocpp() {
+        use ferrowl_util::convert::{Converter, FileType};
+        let mut modbus =
+            serde_json::to_value(create_module_spec_by_device("mb".into(), "s.toml".into()))
+                .unwrap();
+        modbus
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        let mut ocpp = serde_json::to_value(OcppModuleSpec {
+            name: "cs".into(),
+            device: "cs.toml".into(),
+            protocol: config::ocpp::OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+        })
+        .unwrap();
+        ocpp.as_object_mut()
+            .unwrap()
+            .insert("type".into(), "ocpp".into());
+
+        let session = config::Session {
+            version: None,
+            modules: vec![modbus, ocpp],
+        };
+        let path = std::env::temp_dir().join("ferrowl_cli_mixed_session.json");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Json).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        // Modbus loader sees only the modbus module; OCPP loader sees only the ocpp module.
+        assert_eq!(args.module_specs().unwrap().len(), 1);
+        let ocpp = args.ocpp_specs().unwrap();
+        assert_eq!(ocpp.len(), 1);
+        assert_eq!(ocpp[0].name, "cs");
+        assert_eq!(ocpp[0].device, "cs.toml");
+        assert_eq!(ocpp[0].port, 9000);
     }
 
     #[test]

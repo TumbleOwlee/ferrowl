@@ -1,0 +1,305 @@
+//! Single per-module Lua sim for the CSMS **server** view. Unlike the client (one charging station)
+//! the server spans many connected stations, so one Lua context backs the whole module and the
+//! `C_OCPP` global is the multi-station [`OcppServer`] shape: `GetChargingStations()` /
+//! `GetConnectors(cs)` enumerate, `ChargingStation(cs)` / `Connector(cs, id)` return per-scope
+//! accessors. State is reached through a [`SharedServerStates`] registry the view keeps in step with
+//! its entries; dispatched actions land on a [`ServerActionQueue`] the view drains and routes.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+
+use ferrowl_lua::module::{
+    LogModule, OcppActions, OcppServer, OcppServerHost, Read, TimeModule, ValueType, Write,
+};
+use ferrowl_lua::{ContextBuilder, Error};
+
+use crate::module::ocpp::client::lua_sim::{
+    LuaLogSink, OcppFields, OcppSimHandle, emit, sleep_responsive, vt_to_json,
+};
+use crate::module::ocpp::scope::Scope;
+use crate::module::ocpp::server::view::ServerVersion;
+use crate::module::view::SharedLog;
+
+/// Actions enqueued by the server Lua sim: `(identity, scope, action, overrides-json)`, drained by
+/// the view each refresh and routed to the matching connection/entry.
+pub type ServerActionQueue = Arc<Mutex<VecDeque<(String, Scope, String, serde_json::Value)>>>;
+
+/// One charging station's shared observed states, by level.
+pub struct Station<V: ServerVersion> {
+    pub cs: Option<Arc<RwLock<V::Cs>>>,
+    /// `(scope, state)` per connector entry; the scope carries the EVSE for 2.0.1.
+    pub conns: Vec<(Scope, Arc<RwLock<V::Conn>>)>,
+}
+
+impl<V: ServerVersion> Default for Station<V> {
+    fn default() -> Self {
+        Self {
+            cs: None,
+            conns: Vec::new(),
+        }
+    }
+}
+
+/// Registry of every connected station's shared states, written by the view as entries appear and
+/// read by the sim thread.
+pub struct ServerStates<V: ServerVersion> {
+    pub stations: HashMap<String, Station<V>>,
+}
+
+impl<V: ServerVersion> Default for ServerStates<V> {
+    fn default() -> Self {
+        Self {
+            stations: HashMap::new(),
+        }
+    }
+}
+
+pub type SharedServerStates<V> = Arc<RwLock<ServerStates<V>>>;
+
+/// Push a `(identity, scope, action, overrides-json)` item onto the server action queue.
+fn enqueue(
+    queue: &ServerActionQueue,
+    identity: String,
+    scope: Scope,
+    action: &str,
+    args: Vec<(String, ValueType)>,
+) {
+    let mut overrides = serde_json::Map::new();
+    for (key, value) in args {
+        overrides.insert(key, vt_to_json(value));
+    }
+    queue.lock().unwrap().push_back((
+        identity,
+        scope,
+        action.to_string(),
+        serde_json::Value::Object(overrides),
+    ));
+}
+
+/// Accessor handle for a station's CS-level state.
+pub struct CsHandle<V: ServerVersion> {
+    identity: String,
+    state: Arc<RwLock<V::Cs>>,
+    queue: ServerActionQueue,
+}
+
+impl<V: ServerVersion> Read for CsHandle<V> {
+    fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
+        self.state
+            .read()
+            .unwrap()
+            .get_field(&name)
+            .ok_or_else(|| Error::RuntimeError(format!("unknown CS field '{name}'")))
+    }
+}
+impl<V: ServerVersion> Write for CsHandle<V> {
+    fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
+        if self.state.write().unwrap().set_field(&name, value) {
+            Ok(())
+        } else {
+            Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+        }
+    }
+}
+impl<V: ServerVersion> OcppActions for CsHandle<V> {
+    fn actions() -> Vec<&'static str> {
+        <V::Cs as OcppFields>::actions()
+    }
+    fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
+        enqueue(&self.queue, self.identity.clone(), Scope::CS, action, args);
+        true
+    }
+}
+
+/// Accessor handle for one connector of a station.
+pub struct ConnHandle<V: ServerVersion> {
+    identity: String,
+    scope: Scope,
+    state: Arc<RwLock<V::Conn>>,
+    queue: ServerActionQueue,
+}
+
+impl<V: ServerVersion> Read for ConnHandle<V> {
+    fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
+        self.state
+            .read()
+            .unwrap()
+            .get_field(&name)
+            .ok_or_else(|| Error::RuntimeError(format!("unknown connector field '{name}'")))
+    }
+}
+impl<V: ServerVersion> Write for ConnHandle<V> {
+    fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
+        if self.state.write().unwrap().set_field(&name, value) {
+            Ok(())
+        } else {
+            Err(Error::RuntimeError(format!(
+                "cannot set connector field '{name}'"
+            )))
+        }
+    }
+}
+impl<V: ServerVersion> OcppActions for ConnHandle<V> {
+    fn actions() -> Vec<&'static str> {
+        <V::Conn as OcppFields>::actions()
+    }
+    fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
+        enqueue(&self.queue, self.identity.clone(), self.scope, action, args);
+        true
+    }
+}
+
+/// Host backing the server `C_OCPP` module over the shared state registry.
+pub struct ServerHost<V: ServerVersion> {
+    states: SharedServerStates<V>,
+    queue: ServerActionQueue,
+}
+
+impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
+    type Station = CsHandle<V>;
+    type Conn = ConnHandle<V>;
+
+    fn stations(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .states
+            .read()
+            .unwrap()
+            .stations
+            .keys()
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn connectors(&self, cs: &str) -> Vec<i64> {
+        let states = self.states.read().unwrap();
+        let Some(station) = states.stations.get(cs) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<i64> = station
+            .conns
+            .iter()
+            .filter_map(|(scope, _)| V::lua_connector_id(*scope))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn station(&self, cs: &str) -> Option<CsHandle<V>> {
+        let states = self.states.read().unwrap();
+        let state = states.stations.get(cs)?.cs.clone()?;
+        Some(CsHandle {
+            identity: cs.to_string(),
+            state,
+            queue: self.queue.clone(),
+        })
+    }
+
+    fn connector(&self, cs: &str, id: i64) -> Option<ConnHandle<V>> {
+        let states = self.states.read().unwrap();
+        let station = states.stations.get(cs)?;
+        let (scope, state) = station
+            .conns
+            .iter()
+            .find(|(scope, _)| V::lua_connector_id(*scope) == Some(id))?;
+        Some(ConnHandle {
+            identity: cs.to_string(),
+            scope: *scope,
+            state: state.clone(),
+            queue: self.queue.clone(),
+        })
+    }
+}
+
+/// Spawn the single Lua sim thread for the whole server module. Returns `None` when there are no
+/// scripts. The Lua `Context` is built inside the thread (it is `!Send`); script errors go to the
+/// module log. Mirrors the client [`run_client_sim`](crate::module::ocpp::client::lua_sim::run_client_sim).
+pub fn run_server_sim<V: ServerVersion>(
+    states: SharedServerStates<V>,
+    queue: ServerActionQueue,
+    scripts: Vec<(String, String)>,
+    log: SharedLog,
+) -> Option<OcppSimHandle> {
+    if scripts.is_empty() {
+        return None;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop.clone();
+    let handle = std::thread::spawn(move || {
+        let host = ServerHost { states, queue };
+        let mut builder = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppServer::init(host))
+            .with_module(TimeModule::default())
+            .with_module(LogModule::init(LuaLogSink(log.clone())));
+        for (name, code) in &scripts {
+            builder = builder.with_script(name.clone(), code);
+        }
+        let mut context = match builder.build() {
+            Ok(context) => context,
+            Err(e) => {
+                emit(&log, &format!("[lua] failed to build context: {e}"));
+                return;
+            }
+        };
+        while !thread_stop.load(Ordering::Relaxed) {
+            if let Err(errors) = context.refresh_all(Duration::from_secs(1)) {
+                for e in errors {
+                    emit(&log, &format!("[lua] {e}"));
+                }
+            }
+            sleep_responsive(Duration::from_millis(50), &thread_stop);
+        }
+    });
+    Some(OcppSimHandle::from_parts(stop, handle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ocpp::V1_6;
+
+    type Cs = <V1_6 as ServerVersion>::Cs;
+    type Conn = <V1_6 as ServerVersion>::Conn;
+
+    #[test]
+    fn ut_server_host_resolves_and_routes_by_identity() {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        {
+            let mut reg = states.write().unwrap();
+            let st = reg.stations.entry("CP1".to_string()).or_default();
+            st.cs = Some(Arc::new(RwLock::new(Cs::default())));
+            st.conns
+                .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
+        }
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let host = ServerHost {
+            states,
+            queue: queue.clone(),
+        };
+
+        // Enumeration + resolution.
+        assert_eq!(host.stations(), vec!["CP1".to_string()]);
+        assert_eq!(host.connectors("CP1"), vec![1]);
+        assert!(host.station("CP1").is_some());
+        assert!(host.station("nope").is_none());
+        assert!(host.connector("CP1", 9).is_none());
+
+        // A connector action enqueues with the station identity + connector scope.
+        let conn = host.connector("CP1", 1).expect("connector handle");
+        assert!(conn.dispatch("RemoteStartTransaction", vec![]));
+        let (identity, scope, action, _) = queue.lock().unwrap().pop_front().unwrap();
+        assert_eq!(identity, "CP1");
+        assert_eq!(scope, Scope::connector(1));
+        assert_eq!(action, "RemoteStartTransaction");
+
+        // CS-level Get/Set round-trips through the shared state.
+        let cs = host.station("CP1").unwrap();
+        cs.write("Model".to_string(), ValueType::String("X".into()))
+            .unwrap();
+        assert!(matches!(cs.read("Model".to_string()).unwrap(), ValueType::String(s) if s == "X"));
+    }
+}

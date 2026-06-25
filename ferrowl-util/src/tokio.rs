@@ -32,7 +32,6 @@ struct Context(HashMap<&'static str, Vec<Box<dyn Joinable>>>);
 ///
 /// A task spawned by `ferrowl_util::tokio::spawn_detach()` or `ferrowl_util::tokio::spawn()` will be part of
 /// the global context. These tasks can be joined using `ferrowl_util::tokio::join_all()`.
-#[allow(dead_code)]
 pub static GLOBAL_CONTEXT: &str = "";
 
 /// Context storage.
@@ -65,14 +64,7 @@ pub async fn spawn_detach<F: Send + IntoFuture + Future + 'static>(future: F)
 where
     <F as Future>::Output: Send + Sync + 'static,
 {
-    let handle: JoinHandle<<F as Future>::Output> = tokio_spawn(future);
-    let mut context = CONTEXT.lock().await;
-    let collection = &mut context.get_mut().0;
-    if let Some(v) = collection.get_mut("") {
-        v.push(Box::new(handle));
-    } else {
-        drop(collection.insert("", vec![Box::new(handle)]));
-    }
+    spawn_detach_with_context(GLOBAL_CONTEXT, future).await;
 }
 
 /// Spawn the given future as a tokio task in background in the given context
@@ -104,12 +96,12 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
 {
     let handle: JoinHandle<<F as Future>::Output> = tokio_spawn(future);
     let mut context = CONTEXT.lock().await;
-    let collection = &mut context.get_mut().0;
-    if let Some(v) = collection.get_mut(ctx) {
-        v.push(Box::new(handle));
-    } else {
-        drop(collection.insert(ctx, vec![Box::new(handle)]));
-    }
+    context
+        .get_mut()
+        .0
+        .entry(ctx)
+        .or_default()
+        .push(Box::new(handle));
 }
 
 /// Join all tasks that are stored in any of the contexts

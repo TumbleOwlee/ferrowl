@@ -28,6 +28,8 @@ pub(crate) use ocpp_validate_arm;
 macro_rules! define_ocpp_version {
     (
         $version_ty:ident, $subprotocol:literal,
+        cs = [ $( $cs_variant:ident ),* $(,)? ];
+        csms = [ $( $csms_variant:ident => $scope:ident ),* $(,)? ];
         $( $variant:ident => $req:path, $resp:path, $validate:tt ; )+
     ) => {
         /// Full action set for this OCPP version; each variant wraps `rust_ocpp`'s request struct.
@@ -48,6 +50,34 @@ macro_rules! define_ocpp_version {
 
             fn action_name(action: &Action) -> &'static str {
                 match action { $( Action::$variant(_) => stringify!($variant), )+ }
+            }
+
+            fn action_names() -> &'static [&'static str] {
+                &[ $( stringify!($variant), )+ ]
+            }
+
+            fn cs_actions() -> &'static [&'static str] {
+                &[ $( stringify!($cs_variant), )* ]
+            }
+
+            fn csms_actions() -> &'static [(&'static str, $crate::action::ConnectorScope)] {
+                &[ $( (stringify!($csms_variant), $crate::action::ConnectorScope::$scope), )* ]
+            }
+
+            fn default_action(name: &str) -> ::core::option::Option<Action> {
+                match name {
+                    $( n if n == stringify!($variant) =>
+                        Some(Action::$variant(<$req as ::core::default::Default>::default())), )+
+                    _ => None,
+                }
+            }
+
+            fn default_response(name: &str) -> ::core::option::Option<Response> {
+                match name {
+                    $( n if n == stringify!($variant) =>
+                        Some(Response::$variant(<$resp as ::core::default::Default>::default())), )+
+                    _ => None,
+                }
             }
 
             fn subprotocol() -> &'static str { $subprotocol }

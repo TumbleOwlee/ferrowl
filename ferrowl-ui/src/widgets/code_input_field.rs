@@ -78,10 +78,12 @@ impl StatefulWidget for &CodeInputField {
         .split(area)[1];
 
         if let Border::Full(m) = &self.border {
-            let border_style = if state.focused() && !state.disabled() {
+            // A focused field shows the focused border even when disabled (read-only): a disabled
+            // viewer can still hold focus for scrolling, and the border must reflect that.
+            let border_style = if state.focused() {
                 self.style.focused
             } else {
-                self.style.general
+                self.style.border
             };
             let mut block = Block::bordered().style(border_style);
             if let Some(t) = self.title.as_ref() {
@@ -146,17 +148,17 @@ impl StatefulWidget for &CodeInputField {
                 break;
             }
 
-            let gutter_style: Style = if line_idx == active {
-                self.style.focused
+            let gutter_style: Style = if line_idx == active && state.focused() {
+                self.style.focused.reversed().bold()
             } else {
                 self.style.general
             };
             let gutter_str = format!(
-                "{:>width$} ",
+                "{:>width$}",
                 line_idx + 1,
                 width = gutter_width as usize - 1
             );
-            let gutter_rect = Rect::new(area.x, y, gutter_width, 1);
+            let gutter_rect = Rect::new(area.x, y, gutter_width - 1, 1);
             Paragraph::new(Text::from(gutter_str).style(gutter_style)).render(gutter_rect, buf);
 
             if content_width == 0 {

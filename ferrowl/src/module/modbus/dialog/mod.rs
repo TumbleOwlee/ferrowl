@@ -3,12 +3,14 @@
 mod add_value;
 mod confirm;
 mod input;
+mod register_dialog;
 mod selection;
 mod subdialog;
 
 pub use add_value::*;
 pub use confirm::*;
 pub use input::*;
+pub use register_dialog::*;
 pub use selection::*;
 pub use subdialog::*;
 
@@ -271,5 +273,136 @@ pub(super) fn with_numeric_parts(
         RegisterFormat::F32(_) => RegisterFormat::F32(float),
         RegisterFormat::F64(_) => RegisterFormat::F64(float),
         RegisterFormat::Ascii(_) => RegisterFormat::U16(int),
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn ut_parse_address_virtual_case_insensitive_and_numeric() {
+        assert_eq!(parse_address("virtual"), Ok(Address::Virtual));
+        assert_eq!(parse_address("  VIRTUAL  "), Ok(Address::Virtual));
+        assert_eq!(parse_address("42"), Ok(Address::Fixed(42)));
+        assert!(parse_address("nope").is_err());
+        // Out of u16 range -> error.
+        assert!(parse_address("70000").is_err());
+    }
+
+    #[test]
+    fn ut_selection_indices_match_dialog_order() {
+        assert_eq!(access_index(&Access::ReadOnly), 0);
+        assert_eq!(access_index(&Access::WriteOnly), 1);
+        assert_eq!(access_index(&Access::ReadWrite), 2);
+
+        assert_eq!(kind_index(&Kind::Coil), 0);
+        assert_eq!(kind_index(&Kind::DiscreteInput), 1);
+        assert_eq!(kind_index(&Kind::HoldingRegister), 2);
+        assert_eq!(kind_index(&Kind::InputRegister), 3);
+
+        assert_eq!(endian_index(&RegisterEndian::Big), 0);
+        assert_eq!(endian_index(&RegisterEndian::Little), 1);
+
+        assert_eq!(alignment_index(&TextAlignment::Left), 0);
+        assert_eq!(alignment_index(&TextAlignment::Right), 1);
+    }
+
+    #[test]
+    fn ut_format_index_covers_all_variants() {
+        let bf = BitField::default();
+        let r = Resolution(1.0);
+        let e = RegisterEndian::Big;
+        assert_eq!(
+            format_index(&RegisterFormat::U8((e.clone(), r.clone(), bf.clone()))),
+            0
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::I128((e.clone(), r.clone(), bf.clone()))),
+            9
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::F32((e.clone(), r.clone()))),
+            10
+        );
+        assert_eq!(
+            format_index(&RegisterFormat::F64((e.clone(), r.clone()))),
+            11
+        );
+        // ASCII has no number-format slot and maps to index 0.
+        assert_eq!(
+            format_index(&RegisterFormat::Ascii((
+                TextAlignment::Left,
+                ferrowl_codec::format::Width(2)
+            ))),
+            0
+        );
+    }
+
+    #[test]
+    fn ut_is_integer_format_excludes_float_and_ascii() {
+        let bf = BitField::default();
+        let r = Resolution(1.0);
+        let e = RegisterEndian::Big;
+        assert!(is_integer_format(&RegisterFormat::U16((
+            e.clone(),
+            r.clone(),
+            bf.clone()
+        ))));
+        assert!(is_integer_format(&RegisterFormat::I64((
+            e.clone(),
+            r.clone(),
+            bf.clone()
+        ))));
+        assert!(!is_integer_format(&RegisterFormat::F32((
+            e.clone(),
+            r.clone()
+        ))));
+        assert!(!is_integer_format(&RegisterFormat::Ascii((
+            TextAlignment::Left,
+            ferrowl_codec::format::Width(2)
+        ))));
+    }
+
+    #[test]
+    fn ut_parse_bitmask_hex_decimal_empty_and_invalid() {
+        assert_eq!(parse_bitmask("").unwrap().mask, BitField::default().mask);
+        assert_eq!(parse_bitmask("0xFF00").unwrap().mask, 0xFF00);
+        assert_eq!(parse_bitmask("0X00ff").unwrap().mask, 0x00ff);
+        assert_eq!(parse_bitmask("255").unwrap().mask, 255);
+        assert_eq!(parse_bitmask("  16  ").unwrap().mask, 16);
+        assert!(parse_bitmask("zz").is_err());
+        assert!(parse_bitmask("0xZZ").is_err());
+    }
+
+    #[test]
+    fn ut_with_numeric_parts_preserves_variant_and_applies_fields() {
+        let src = RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0), BitField::default()));
+        let rebuilt = with_numeric_parts(
+            &src,
+            RegisterEndian::Little,
+            Resolution(0.25),
+            BitField { mask: 0x0F0F },
+        );
+        // Same variant (U32), new endian/resolution/bitfield.
+        assert_eq!(
+            rebuilt,
+            RegisterFormat::U32((
+                RegisterEndian::Little,
+                Resolution(0.25),
+                BitField { mask: 0x0F0F }
+            ))
+        );
+        // Floats ignore the supplied bitfield.
+        let float = with_numeric_parts(
+            &RegisterFormat::F32((RegisterEndian::Big, Resolution(1.0))),
+            RegisterEndian::Little,
+            Resolution(2.0),
+            BitField { mask: 0x1234 },
+        );
+        assert_eq!(
+            float,
+            RegisterFormat::F32((RegisterEndian::Little, Resolution(2.0)))
+        );
     }
 }

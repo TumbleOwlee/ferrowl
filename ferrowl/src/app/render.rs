@@ -42,9 +42,10 @@ pub(super) fn render(
         render_tabs(&names, active, tabs_area, buf);
     }
 
-    // Phase 2: module content view (includes its own status bar).
+    // Phase 2: module content view (includes its own status bar). Focus is carried by the view's
+    // own stored state (set at focus-change time), not recomputed here.
     if let Some(tab) = tabs.get_mut(active) {
-        tab.view.render(frame, view_area, focus == Focus::Table);
+        tab.view.render(frame, view_area);
     }
 
     // Phase 3: log pane, command line, overlay.
@@ -93,7 +94,10 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         Line::from(vec![
             Span::styled(
                 format!("{cmd:<34}"),
-                Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+                Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg)
+                    .bold(),
             ),
             Span::styled(
                 desc.to_string(),

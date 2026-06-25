@@ -8,6 +8,59 @@ use crate::action::macros::define_ocpp_version;
 
 define_ocpp_version! {
     V2_0_1, "ocpp2.0.1",
+    cs = [
+        Authorize, BootNotification, ClearedChargingLimit, DataTransfer,
+        FirmwareStatusNotification, Get15118EVCertificate, GetCertificateStatus, Heartbeat,
+        LogStatusNotification, MeterValues, NotifyChargingLimit, NotifyCustomerInformation,
+        NotifyDisplayMessages, NotifyEVChargingNeeds, NotifyEVChargingSchedule, NotifyEvent,
+        NotifyMonitoringReport, NotifyReport, PublishFirmwareStatusNotification,
+        ReportChargingProfiles, ReservationStatusUpdate, SecurityEventNotification, SignCertificate,
+        StatusNotification, TransactionEvent,
+    ];
+    // CSMS-originated actions, tagged by evse/evseId presence in the rust_ocpp request (2.0.1's
+    // connector target). Nested-optional evse fields (charging profiles, variables) are treated as
+    // None — charge-point-wide from the UI's perspective.
+    csms = [
+        CancelReservation => None,
+        CertificateSigned => None,
+        ChangeAvailability => Optional,
+        ClearCache => None,
+        ClearChargingProfile => None,
+        ClearDisplayMessage => None,
+        ClearVariableMonitoring => None,
+        CostUpdated => None,
+        CustomerInformation => None,
+        DeleteCertificate => None,
+        GetBaseReport => None,
+        GetChargingProfiles => Optional,
+        GetCompositeSchedule => Required,
+        GetDisplayMessages => None,
+        GetInstalledCertificateIds => None,
+        GetLocalListVersion => None,
+        GetLog => None,
+        GetMonitoringReport => None,
+        GetReport => None,
+        GetTransactionStatus => None,
+        GetVariables => None,
+        InstallCertificate => None,
+        PublishFirmware => None,
+        RequestStartTransaction => Optional,
+        RequestStopTransaction => None,
+        ReserveNow => Optional,
+        Reset => Optional,
+        SendLocalList => None,
+        SetChargingProfile => Required,
+        SetDisplayMessage => None,
+        SetMonitoringBase => None,
+        SetMonitoringLevel => None,
+        SetNetworkProfile => None,
+        SetVariableMonitoring => None,
+        SetVariables => None,
+        TriggerMessage => Optional,
+        UnlockConnector => Required,
+        UnpublishFirmware => None,
+        UpdateFirmware => None,
+    ];
     Authorize => ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeRequest, ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeResponse, yes ;
     BootNotification => ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationRequest, ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationResponse, no ;
     CancelReservation => ::rust_ocpp::v2_0_1::messages::cancel_reservation::CancelReservationRequest, ::rust_ocpp::v2_0_1::messages::cancel_reservation::CancelReservationResponse, no ;
@@ -72,4 +125,35 @@ define_ocpp_version! {
     UnlockConnector => ::rust_ocpp::v2_0_1::messages::unlock_connector::UnlockConnectorRequest, ::rust_ocpp::v2_0_1::messages::unlock_connector::UnlockConnectorResponse, no ;
     UnpublishFirmware => ::rust_ocpp::v2_0_1::messages::unpublish_firmware::UnpublishFirmwareRequest, ::rust_ocpp::v2_0_1::messages::unpublish_firmware::UnpublishFirmwareResponse, no ;
     UpdateFirmware => ::rust_ocpp::v2_0_1::messages::update_firmware::UpdateFirmwareRequest, ::rust_ocpp::v2_0_1::messages::update_firmware::UpdateFirmwareResponse, no ;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::action::Version;
+
+    #[test]
+    fn ut_csms_actions_partition_and_scopes() {
+        use crate::action::ConnectorScope::*;
+        let cs: std::collections::HashSet<_> = V2_0_1::cs_actions().iter().copied().collect();
+        let csms: std::collections::HashSet<_> =
+            V2_0_1::csms_actions().iter().map(|(n, _)| *n).collect();
+        // cs and csms partition the full action set: disjoint and together complete.
+        assert!(cs.is_disjoint(&csms));
+        assert_eq!(cs.len() + csms.len(), V2_0_1::action_names().len());
+        for n in V2_0_1::action_names() {
+            assert!(cs.contains(n) || csms.contains(n), "{n} uncategorized");
+        }
+        let scope = |name: &str| {
+            V2_0_1::csms_actions()
+                .iter()
+                .find(|(n, _)| *n == name)
+                .unwrap()
+                .1
+        };
+        assert_eq!(scope("Reset"), Optional);
+        assert_eq!(scope("UnlockConnector"), Required);
+        assert_eq!(scope("SetChargingProfile"), Required);
+        assert_eq!(scope("ClearCache"), None);
+    }
 }

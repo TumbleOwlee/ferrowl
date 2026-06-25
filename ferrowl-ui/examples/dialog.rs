@@ -18,7 +18,7 @@ use ferrowl_ui::{
     },
 };
 
-use ferrowl_focus::{Focus, focusable};
+use ferrowl_ui_derive::{Focus, focusable};
 
 #[derive(Debug, Clone)]
 struct Day {}

@@ -7,7 +7,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 pub use client::{Client, ClientBuilder};
-pub use server::{Server, ServerBuilder};
+pub use server::ServerBuilder;
 
 /// Modbus TCP connection settings; doubles as the clap argument group for
 /// TCP mode.

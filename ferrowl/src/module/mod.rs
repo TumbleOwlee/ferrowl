@@ -1,10 +1,12 @@
-//! Module system: trait definitions, type registry, and Modbus implementation.
+//! Module system: trait definitions, type registry, and per-type implementations.
 //!
 //! Submodules carry the trait surface ([`view`], [`type_descriptor`]) and the
-//! Modbus-specific implementation ([`modbus`]).
+//! per-type implementations ([`modbus`], [`ocpp`]).
 
 pub mod modbus;
+pub mod ocpp;
 pub mod type_descriptor;
+pub mod type_select;
 pub mod view;
 
 pub use modbus::{FileSink, Module, ModuleLog, ModuleMemory, VirtualStore};
@@ -14,8 +16,13 @@ use type_descriptor::ModuleTypeDescriptor;
 
 /// All available module types. The UI uses this registry to populate the type-selector
 /// in the new-module dialog.
-#[allow(dead_code)]
-pub static MODULE_TYPES: &[ModuleTypeDescriptor] = &[ModuleTypeDescriptor {
-    label: "Modbus",
-    new_setup_view: || Box::new(modbus::setup::ModbusSetupView::new_create()),
-}];
+pub static MODULE_TYPES: &[ModuleTypeDescriptor] = &[
+    ModuleTypeDescriptor {
+        label: "Modbus",
+        new_setup_view: || Box::new(modbus::setup::ModbusSetupView::new_create()),
+    },
+    ModuleTypeDescriptor {
+        label: "OCPP",
+        new_setup_view: || Box::new(ocpp::setup::OcppSetupView::new()),
+    },
+];

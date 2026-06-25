@@ -4,32 +4,32 @@ description = "EVSE charge point"
 
 [definitions.setpoint]
 slave_id = 1
-read_code = 4          # 4 = holding register
+kind = "HoldingRegister"
 address = 0
 type = "U16"
 access = "ReadWrite"
 description = "charge setpoint (W)"
-default = 0            # start at zero watts on every load
+default = 0                         # start at zero watts on every load
 
 [definitions.power]
 slave_id = 1
-read_code = 4
+kind = "HoldingRegister"
 address = 1
 type = "U16"
 access = "ReadWrite"
 description = "active power (W)"
 default = 0
 # Lua run every cycle: mirror the setpoint into the power register (server simulation).
-update = "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))"
+update = "C_Register:Set(\"power\", C_Register:Get(\"setpoint\"))"
 
 [definitions.state]
 slave_id = 1
-read_code = 4
+kind = "HoldingRegister"
 address = 2
 type = "I16"
 access = "ReadWrite"
 description = "charge state"
-default = 0            # start in the "waiting" state
+default = 0 # start in the "waiting" state
 values = [
     { name = "waiting", value = 0 },
     { name = "charging", value = 2 },
