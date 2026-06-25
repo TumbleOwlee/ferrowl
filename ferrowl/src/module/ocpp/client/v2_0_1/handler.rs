@@ -14,11 +14,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::v2_0_1::datatypes::get_variable_result_type::GetVariableResultType;
 use ferrowl_ocpp::v2_0_1::datatypes::set_variable_result_type::SetVariableResultType;
+use ferrowl_ocpp::v2_0_1::enumerations::charging_profile_status_enum_type::ChargingProfileStatusEnumType;
 use ferrowl_ocpp::v2_0_1::enumerations::get_variable_status_enum_type::GetVariableStatusEnumType;
 use ferrowl_ocpp::v2_0_1::enumerations::reset_status_enum_type::ResetStatusEnumType;
 use ferrowl_ocpp::v2_0_1::enumerations::set_variable_status_enum_type::SetVariableStatusEnumType;
 use ferrowl_ocpp::v2_0_1::messages::get_variables::GetVariablesResponse;
 use ferrowl_ocpp::v2_0_1::messages::reset::ResetResponse;
+use ferrowl_ocpp::v2_0_1::messages::set_charging_profile::SetChargingProfileResponse;
 use ferrowl_ocpp::v2_0_1::messages::set_variables::SetVariablesResponse;
 use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1, Version};
 
@@ -26,6 +28,24 @@ use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capp
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 use crate::module::ocpp::scope::Scope;
+
+/// Clear the per-purpose charge limit a ClearChargingProfile targets: the field matching `purpose`,
+/// or every per-purpose limit when no purpose criterion is given. An unknown purpose clears nothing.
+fn clear_limit_by_purpose(c: &mut super::state::ConnectorState, purpose: Option<&str>) {
+    match purpose {
+        Some("TxProfile") => c.limit = None,
+        Some("TxDefaultProfile") => c.default_limit = None,
+        Some("ChargingStationMaxProfile") => c.max_limit = None,
+        Some("ChargingStationExternalConstraints") => c.external_limit = None,
+        Some(_) => {}
+        None => {
+            c.limit = None;
+            c.default_limit = None;
+            c.max_limit = None;
+            c.external_limit = None;
+        }
+    }
+}
 
 /// The EVSE id an inbound Call targets, from a nested `evse.id` or a top-level `evseId`. A bare
 /// `connectorId` is ignored: in 2.0.1 messages are addressed by EVSE only.
@@ -155,30 +175,75 @@ impl CsStateHandler {
             }
             Action201::SetChargingProfile(_) => {
                 let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
-                let schedule = &json["chargingProfile"]["chargingSchedule"][0];
+                let profile = &json["chargingProfile"];
+                let stack = profile["stackLevel"].as_i64().unwrap_or(0);
+                let purpose = profile["chargingProfilePurpose"]
+                    .as_str()
+                    .unwrap_or("TxProfile")
+                    .to_string();
+                let schedule = &profile["chargingSchedule"][0];
                 let period = &schedule["chargingSchedulePeriod"][0];
-                let context = if let Some(limit) = period["limit"].as_f64() {
-                    let unit = schedule["chargingRateUnit"]
-                        .as_str()
-                        .unwrap_or("A")
-                        .to_string();
-                    let evse = json["evseId"].as_i64();
-                    let mut state = self.state.write().unwrap();
-                    // Apply the limit to the connector on the targeted EVSE (fall back to the first).
-                    let idx = evse
-                        .and_then(|e| state.connectors.iter().position(|c| c.evse_id == e))
-                        .or((!state.connectors.is_empty()).then_some(0));
-                    if let Some(i) = idx {
-                        state.connectors[i].limit = Some(limit);
-                        state.connectors[i].limit_unit = unit.clone();
-                    }
-                    format!("limit {limit} {unit}")
+                let evse = json["evseId"].as_i64();
+                let mut state = self.state.write().unwrap();
+                // Reject profiles whose stack level exceeds ChargeProfileMaxStackLevel (when that
+                // key is configured with a numeric value); otherwise accept (no ceiling).
+                let max_stack = state
+                    .config
+                    .iter()
+                    .find(|c| c.key == "ChargeProfileMaxStackLevel")
+                    .and_then(|c| c.value.parse::<i64>().ok());
+                if let Some(max) = max_stack
+                    && stack > max
+                {
+                    drop(state);
+                    let resp = Response201::SetChargingProfile(SetChargingProfileResponse {
+                        status: ChargingProfileStatusEnumType::Rejected,
+                        status_info: None,
+                    });
+                    (
+                        Ok(resp),
+                        format!("rejected: stackLevel {stack} > max {max}"),
+                    )
                 } else {
-                    "no limit in profile".to_string()
-                };
-                let resp = V2_0_1::default_response("SetChargingProfile")
-                    .expect("SetChargingProfile is a known action");
-                (Ok(resp), context)
+                    // Apply the limit to the connector on the targeted EVSE (fall back to the
+                    // first), routed by charging-profile purpose into the matching field.
+                    let context = if let Some(limit) = period["limit"].as_f64() {
+                        let unit = schedule["chargingRateUnit"]
+                            .as_str()
+                            .unwrap_or("A")
+                            .to_string();
+                        let idx = evse
+                            .and_then(|e| state.connectors.iter().position(|c| c.evse_id == e))
+                            .or((!state.connectors.is_empty()).then_some(0));
+                        if let Some(i) = idx {
+                            let c = &mut state.connectors[i];
+                            match purpose.as_str() {
+                                "TxDefaultProfile" => {
+                                    c.default_limit = Some(limit);
+                                    c.default_limit_unit = unit.clone();
+                                }
+                                "ChargingStationMaxProfile" => {
+                                    c.max_limit = Some(limit);
+                                    c.max_limit_unit = unit.clone();
+                                }
+                                "ChargingStationExternalConstraints" => {
+                                    c.external_limit = Some(limit);
+                                    c.external_limit_unit = unit.clone();
+                                }
+                                _ => {
+                                    c.limit = Some(limit);
+                                    c.limit_unit = unit.clone();
+                                }
+                            }
+                        }
+                        format!("{purpose} limit {limit} {unit}")
+                    } else {
+                        "no limit in profile".to_string()
+                    };
+                    let resp = V2_0_1::default_response("SetChargingProfile")
+                        .expect("SetChargingProfile is a known action");
+                    (Ok(resp), context)
+                }
             }
             Action201::ReserveNow(_) => {
                 let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
@@ -298,6 +363,7 @@ impl CsStateHandler {
                 {
                     Some(c) => {
                         c.transaction_id = None;
+                        c.limit = None;
                         c.status = "Available".to_string();
                         format!("stopped tx {tx} on evse {}", c.evse_id)
                     }
@@ -309,20 +375,22 @@ impl CsStateHandler {
             }
             Action201::ClearChargingProfile(_) => {
                 let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let criteria = &json["chargingProfileCriteria"];
+                let purpose = criteria["chargingProfilePurpose"]
+                    .as_str()
+                    .map(str::to_owned);
                 let mut state = self.state.write().unwrap();
-                // evseId lives in the criteria; absent (or 0) clears every connector's limit.
-                match json["chargingProfileCriteria"]["evseId"]
-                    .as_i64()
-                    .filter(|&e| e != 0)
-                {
+                // evseId lives in the criteria; absent (or 0) clears every connector. The purpose
+                // criterion (when given) selects which per-purpose limit is erased; absent clears all.
+                match criteria["evseId"].as_i64().filter(|&e| e != 0) {
                     Some(e) => {
                         if let Some(c) = state.connector_mut_by_evse(e) {
-                            c.limit = None;
+                            clear_limit_by_purpose(c, purpose.as_deref());
                         }
                     }
                     None => {
                         for c in &mut state.connectors {
-                            c.limit = None;
+                            clear_limit_by_purpose(c, purpose.as_deref());
                         }
                     }
                 }

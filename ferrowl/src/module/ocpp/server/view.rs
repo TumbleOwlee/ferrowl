@@ -110,15 +110,24 @@ pub trait EntryStateT: OcppFields + Default + Send + Sync + 'static {
         request: &serde_json::Value,
         response: &serde_json::Value,
     );
+    /// Update the observed state from a CSMS→CS request we *sent* and the CS response (e.g. mirror an
+    /// accepted SetChargingProfile's limit). Default no-op; connector states override.
+    fn apply_outbound(
+        &mut self,
+        _name: &str,
+        _request: &serde_json::Value,
+        _response: &serde_json::Value,
+    ) {
+    }
     /// Derive a complete outbound payload for `name` from observed state (e.g. `idTag` from the
     /// last RFID, the connector/EVSE id from `scope`), or `None` to fall back to the JSON editor.
     fn derive_payload(&self, name: &str, scope: Scope) -> Option<serde_json::Value>;
-    /// Ordered (field, value) rows describing the observed non-metering state, for the detail
-    /// overlay's "State" table.
-    fn fields(&self) -> Vec<(String, String)>;
-    /// Ordered (field, value) metering rows for the detail overlay's "Metering" table (default
+    /// Ordered (field, unit, value) rows describing the observed non-metering state, for the detail
+    /// overlay's "State" table. `unit` is empty for non-dimensional fields.
+    fn fields(&self) -> Vec<(String, String, String)>;
+    /// Ordered (field, unit, value) metering rows for the detail overlay's "Metering" table (default
     /// empty; connector states override).
-    fn metering(&self) -> Vec<(String, String)> {
+    fn metering(&self) -> Vec<(String, String, String)> {
         Vec::new()
     }
 }
@@ -137,6 +146,13 @@ pub trait ServerVersion: Version + Sized + 'static {
 
     /// The scope an inbound request targets (CS-level/connector/EVSE), used to bucket it.
     fn inbound_connector(name: &str, request: &serde_json::Value) -> Scope;
+
+    /// The transactionId a stop message clears (1.6 `StopTransaction`, 2.0.1 `TransactionEvent`
+    /// with `eventType == "Ended"`), as a string, or `None` for non-stop messages. Used to route a
+    /// stop that carries no connector/EVSE id to the connector holding that transaction.
+    fn stop_tx_id(_name: &str, _request: &serde_json::Value) -> Option<String> {
+        None
+    }
 
     /// The CSMS action that retrieves configuration (`GetConfiguration` for 1.6, `GetVariables` for
     /// 2.0.1).
@@ -278,6 +294,18 @@ impl<V: ServerVersion> Entry<V> {
         match &self.state {
             EntryState::Cs(s) => s.write().unwrap().apply_inbound(name, request, response),
             EntryState::Conn(s) => s.write().unwrap().apply_inbound(name, request, response),
+        }
+    }
+
+    fn apply_outbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        response: &serde_json::Value,
+    ) {
+        match &self.state {
+            EntryState::Cs(s) => s.write().unwrap().apply_outbound(name, request, response),
+            EntryState::Conn(s) => s.write().unwrap().apply_outbound(name, request, response),
         }
     }
 
@@ -559,6 +587,18 @@ where
         id
     }
 
+    /// The scope of the connector entry (of `identity`) whose observed transactionId equals `tx`.
+    fn connector_scope_for_tx(&self, identity: &str, tx: &str) -> Option<Scope> {
+        self.entries
+            .iter()
+            .find(|e| {
+                e.identity == identity
+                    && e.scope.is_connector()
+                    && e.get_field_str("TransactionId").as_deref() == Some(tx)
+            })
+            .map(|e| e.scope)
+    }
+
     /// Find an entry by (identity, connector), creating it if missing. Returns its index.
     fn entry_index(&mut self, identity: &str, scope: Scope, conn: Option<ConnectionId>) -> usize {
         if let Some(i) = self
@@ -626,9 +666,17 @@ where
                     response,
                 } => {
                     let identity = self.identity_of(conn);
-                    let scope = V::inbound_connector(&name, &request);
+                    let mut scope = V::inbound_connector(&name, &request);
                     // Always make sure the CS-level entry exists for this connection.
                     self.entry_index(&identity, Scope::CS, Some(conn));
+                    // A stop carrying no connector/EVSE id buckets to CS scope; re-route it to the
+                    // connector holding the stopping transaction so its tx id (and limit) clear.
+                    if scope == Scope::CS
+                        && let Some(tx) = V::stop_tx_id(&name, &request)
+                        && let Some(conn_scope) = self.connector_scope_for_tx(&identity, &tx)
+                    {
+                        scope = conn_scope;
+                    }
                     let idx = self.entry_index(&identity, scope, Some(conn));
                     let entry = &mut self.entries[idx];
                     entry.online = true;
@@ -673,6 +721,11 @@ where
                     }
                     let idx = self.entry_index(&identity, scope, Some(conn));
                     let entry = &mut self.entries[idx];
+                    // Mirror state we successfully pushed to the station (e.g. an accepted
+                    // SetChargingProfile's per-purpose limit).
+                    if ok {
+                        entry.apply_outbound(&name, &request, &response);
+                    }
                     push_capped(
                         &mut entry.messages,
                         OcppMessage::new(Dir::Out, name.clone(), request, None, "outbound call"),
@@ -1733,6 +1786,46 @@ mod tests {
             ok: true,
             context: String::new(),
         }
+    }
+
+    #[test]
+    fn stop_transaction_clears_connector_tx_via_tx_id_routing() {
+        let mut v = server_view();
+        let conn = ConnectionId(1);
+        v.conn_identity.insert(conn, "CP1".into());
+        // Start a transaction on connector 1; the CSMS response mints transactionId 77.
+        v.events_tx
+            .send(ServerEvent::Inbound {
+                conn,
+                name: "StartTransaction".into(),
+                request: serde_json::json!({ "connectorId": 1, "idTag": "T" }),
+                response: serde_json::json!({ "transactionId": 77 }),
+            })
+            .unwrap();
+        v.drain_events();
+        let idx = v.entry_index("CP1", Scope::connector(1), Some(conn));
+        assert_eq!(
+            v.entries[idx].get_field_str("TransactionId").as_deref(),
+            Some("77"),
+            "connector 1 should hold the started transaction"
+        );
+        // StopTransaction carries no connectorId, only the transactionId. It buckets to CS scope but
+        // must be re-routed to connector 1 (which holds tx 77) so its transaction id clears.
+        v.events_tx
+            .send(ServerEvent::Inbound {
+                conn,
+                name: "StopTransaction".into(),
+                request: serde_json::json!({ "transactionId": 77 }),
+                response: serde_json::Value::Null,
+            })
+            .unwrap();
+        v.drain_events();
+        let idx = v.entry_index("CP1", Scope::connector(1), Some(conn));
+        assert_eq!(
+            v.entries[idx].get_field_str("TransactionId").as_deref(),
+            Some(""),
+            "connector 1's transaction id should be cleared on stop"
+        );
     }
 
     #[test]

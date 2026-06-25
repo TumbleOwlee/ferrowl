@@ -23,9 +23,16 @@ pub struct ConnectorState {
     pub status: String,
     pub rfid: String,
     pub transaction_id: Option<i64>,
-    /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
+    /// Charging limit from the latest `TxProfile` SetChargingProfile (in `limit_unit`), if any.
+    /// Transaction-scoped: cleared when the transaction ends.
     pub limit: Option<f64>,
     pub limit_unit: String,
+    /// Charging limit from the latest `TxDefaultProfile` SetChargingProfile (in `default_limit_unit`).
+    pub default_limit: Option<f64>,
+    pub default_limit_unit: String,
+    /// Charging limit from the latest `ChargePointMaxProfile` SetChargingProfile (in `max_limit_unit`).
+    pub max_limit: Option<f64>,
+    pub max_limit_unit: String,
     /// idTag of the latest accepted ReserveNow targeting this connector, cleared on a matching
     /// CancelReservation. A `connectorId` of 0 reserves the charge point itself (CS-level).
     pub reserved_rfid: Option<String>,
@@ -52,6 +59,10 @@ impl ConnectorState {
             transaction_id: None,
             limit: None,
             limit_unit: "A".to_string(),
+            default_limit: None,
+            default_limit_unit: "A".to_string(),
+            max_limit: None,
+            max_limit_unit: "A".to_string(),
             reserved_rfid: None,
             reservation_id: None,
         }
@@ -92,11 +103,51 @@ impl Default for CsState {
             reserved_rfid: None,
             reservation_id: None,
             heartbeat_interval_secs: None,
+            // Common OCPP 1.6 standard configuration keys (§9.1) with sensible defaults and
+            // spec-accurate read-only flags.
             config: vec![
+                cfg("AuthorizeRemoteTxRequests", "true", false),
+                cfg("ClockAlignedDataInterval", "0", false),
+                cfg("ConnectionTimeOut", "60", false),
+                cfg("ConnectorPhaseRotation", "NotApplicable", false),
+                cfg("GetConfigurationMaxKeys", "100", true),
                 cfg("HeartbeatInterval", "300", false),
+                cfg("LocalAuthorizeOffline", "true", false),
+                cfg("LocalPreAuthorize", "false", false),
+                cfg(
+                    "MeterValuesAlignedData",
+                    "Energy.Active.Import.Register",
+                    false,
+                ),
+                cfg(
+                    "MeterValuesSampledData",
+                    "Energy.Active.Import.Register",
+                    false,
+                ),
                 cfg("MeterValueSampleInterval", "60", false),
                 cfg("NumberOfConnectors", "1", true),
-                cfg("ConnectorPhaseRotation", "NotApplicable", false),
+                cfg("ResetRetries", "1", false),
+                cfg("StopTransactionOnEVSideDisconnect", "true", false),
+                cfg("StopTransactionOnInvalidId", "true", false),
+                cfg("StopTxnAlignedData", "", false),
+                cfg("StopTxnSampledData", "", false),
+                cfg("SupportedFeatureProfiles", "Core,SmartCharging", true),
+                cfg("TransactionMessageAttempts", "3", false),
+                cfg("TransactionMessageRetryInterval", "60", false),
+                cfg("UnlockConnectorOnEVSideDisconnect", "true", false),
+                cfg("WebSocketPingInterval", "60", false),
+                cfg("LocalAuthListEnabled", "true", false),
+                cfg("LocalAuthListMaxLength", "100", true),
+                cfg("SendLocalListMaxLength", "100", true),
+                // SmartCharging profile.
+                cfg("ChargeProfileMaxStackLevel", "10", false),
+                cfg(
+                    "ChargingScheduleAllowedChargingRateUnit",
+                    "Current,Power",
+                    true,
+                ),
+                cfg("ChargingScheduleMaxPeriods", "10", true),
+                cfg("MaxChargingProfilesInstalled", "10", true),
             ],
             connectors: vec![ConnectorState::new(1)],
         }
@@ -225,6 +276,20 @@ impl ConnectorState {
                     .unwrap_or_else(|| "—".to_string()),
             ),
             nv(
+                "Default Charge Limit",
+                &self.default_limit_unit,
+                self.default_limit
+                    .map(|l| format!("{l:.1}"))
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
+                "Max Charge Limit",
+                &self.max_limit_unit,
+                self.max_limit
+                    .map(|l| format!("{l:.1}"))
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
                 "Reserved RFID",
                 "",
                 self.reserved_rfid
@@ -260,6 +325,14 @@ impl ConnectorState {
             "Status" => Vt::String(self.status.clone()),
             "Rfid" => Vt::String(self.rfid.clone()),
             "ChargeLimit" => match self.limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "DefaultChargeLimit" => match self.default_limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "MaxChargeLimit" => match self.max_limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
@@ -331,6 +404,14 @@ impl ConnectorState {
             ("Rfid", Vt::String(s)) => self.rfid = s.clone(),
             ("ChargeLimit", _) => match num(&value) {
                 Some(n) => self.limit = Some(n),
+                None => return false,
+            },
+            ("DefaultChargeLimit", _) => match num(&value) {
+                Some(n) => self.default_limit = Some(n),
+                None => return false,
+            },
+            ("MaxChargeLimit", _) => match num(&value) {
+                Some(n) => self.max_limit = Some(n),
                 None => return false,
             },
             _ => return false,

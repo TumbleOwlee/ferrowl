@@ -363,6 +363,7 @@ impl ClientVersion for V2_0_1 {
         let seq = s.connectors[i].next_seq();
         s.connectors[i].status = "Available".to_string();
         s.connectors[i].transaction_id = None;
+        s.connectors[i].limit = None;
         s.connectors[i].tx_confirmed = false;
         let c = &s.connectors[i];
         Some(serde_json::json!({
@@ -399,6 +400,7 @@ impl ClientVersion for V2_0_1 {
             && c.transaction_id.as_deref() == Some(tx_id)
         {
             c.transaction_id = None;
+            c.limit = None;
             c.tx_confirmed = false;
             c.status = "Available".to_string();
         }

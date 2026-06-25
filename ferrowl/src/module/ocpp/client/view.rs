@@ -1999,9 +1999,16 @@ mod tests {
         assert_focus_cycle::<V2_0_1>(OcppVersion::V2_0_1);
     }
 
-    /// Connector rows that are display-only (no editable field): the charge limit and the
-    /// CSMS-driven reservation readouts.
-    const READONLY_CONN_ROWS: &[&str] = &["Charge Limit", "Reserved RFID", "Reservation ID"];
+    /// Connector rows that are display-only (no editable field): the CSMS-driven charge limits and
+    /// reservation readouts.
+    const READONLY_CONN_ROWS: &[&str] = &[
+        "Charge Limit",
+        "Default Charge Limit",
+        "Max Charge Limit",
+        "External Charge Limit",
+        "Reserved RFID",
+        "Reservation ID",
+    ];
 
     /// The connector state-table row order and `V::conn_edit_field` must stay in lockstep, with the
     /// only unmapped rows being the read-only ones in [`READONLY_CONN_ROWS`].

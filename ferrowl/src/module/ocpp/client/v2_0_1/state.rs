@@ -28,9 +28,19 @@ pub struct ConnectorState {
     pub tx_confirmed: bool,
     pub seq_no: i32,
     tx_counter: u64,
-    /// Charging limit from the latest SetChargingProfile (in `limit_unit`), if any.
+    /// Charging limit from the latest `TxProfile` SetChargingProfile (in `limit_unit`), if any.
+    /// Transaction-scoped: cleared when the transaction ends.
     pub limit: Option<f64>,
     pub limit_unit: String,
+    /// Charging limit from the latest `TxDefaultProfile` SetChargingProfile (in `default_limit_unit`).
+    pub default_limit: Option<f64>,
+    pub default_limit_unit: String,
+    /// Charging limit from the latest `ChargingStationMaxProfile` SetChargingProfile.
+    pub max_limit: Option<f64>,
+    pub max_limit_unit: String,
+    /// Charging limit from the latest `ChargingStationExternalConstraints` SetChargingProfile.
+    pub external_limit: Option<f64>,
+    pub external_limit_unit: String,
     /// idToken of the latest accepted ReserveNow targeting this EVSE, cleared on a matching
     /// CancelReservation. An evseId-less ReserveNow reserves the station itself (CS-level).
     pub reserved_rfid: Option<String>,
@@ -61,6 +71,12 @@ impl ConnectorState {
             tx_counter: 0,
             limit: None,
             limit_unit: "A".to_string(),
+            default_limit: None,
+            default_limit_unit: "A".to_string(),
+            max_limit: None,
+            max_limit_unit: "A".to_string(),
+            external_limit: None,
+            external_limit_unit: "A".to_string(),
             reserved_rfid: None,
             reservation_id: None,
         }
@@ -117,6 +133,27 @@ impl ConnectorState {
                     .unwrap_or_else(|| "—".to_string()),
             ),
             nv(
+                "Default Charge Limit",
+                &self.default_limit_unit,
+                self.default_limit
+                    .map(|l| format!("{l:.1}"))
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
+                "Max Charge Limit",
+                &self.max_limit_unit,
+                self.max_limit
+                    .map(|l| format!("{l:.1}"))
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
+                "External Charge Limit",
+                &self.external_limit_unit,
+                self.external_limit
+                    .map(|l| format!("{l:.1}"))
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            nv(
                 "Reserved RFID",
                 "",
                 self.reserved_rfid
@@ -158,6 +195,18 @@ impl ConnectorState {
                 None => Vt::Nil,
             },
             "ChargeLimit" => match self.limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "DefaultChargeLimit" => match self.default_limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "MaxChargeLimit" => match self.max_limit {
+                Some(l) => Vt::Float(l),
+                None => Vt::Nil,
+            },
+            "ExternalChargeLimit" => match self.external_limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
@@ -227,6 +276,18 @@ impl ConnectorState {
             ("Rfid", Vt::String(s)) => self.rfid = s.clone(),
             ("ChargeLimit", _) => match num(&value) {
                 Some(n) => self.limit = Some(n),
+                None => return false,
+            },
+            ("DefaultChargeLimit", _) => match num(&value) {
+                Some(n) => self.default_limit = Some(n),
+                None => return false,
+            },
+            ("MaxChargeLimit", _) => match num(&value) {
+                Some(n) => self.max_limit = Some(n),
+                None => return false,
+            },
+            ("ExternalChargeLimit", _) => match num(&value) {
+                Some(n) => self.external_limit = Some(n),
                 None => return false,
             },
             _ => return false,
@@ -314,10 +375,27 @@ impl Default for CsState {
             serial_number: "FERROWL-0001".to_string(),
             reserved_rfid: None,
             reservation_id: None,
+            // Common OCPP 2.0.1 standard variables (Component.Variable) with sensible defaults.
             config: vec![
-                var("HeartbeatInterval", "300", false),
                 var("AuthCtrlr.Enabled", "true", false),
                 var("EVSE.AvailabilityState", "Available", true),
+                var("OCPPCommCtrlr.HeartbeatInterval", "300", false),
+                var("OCPPCommCtrlr.WebSocketPingInterval", "60", false),
+                var("SampledDataCtrlr.TxUpdatedInterval", "60", false),
+                var(
+                    "SampledDataCtrlr.TxStartedMeasurands",
+                    "Energy.Active.Import.Register",
+                    false,
+                ),
+                var("AlignedDataCtrlr.Interval", "0", false),
+                var("SmartChargingCtrlr.Enabled", "true", false),
+                var("SmartChargingCtrlr.ProfileStackLevel", "10", true),
+                var(
+                    "SmartChargingCtrlr.ChargingProfileMaxStackLevel",
+                    "10",
+                    true,
+                ),
+                var("ChargeProfileMaxStackLevel", "10", false),
             ],
             heartbeat_interval_secs: None,
             connectors: vec![ConnectorState::new(1, 1)],

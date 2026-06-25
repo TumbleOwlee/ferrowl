@@ -352,6 +352,7 @@ impl ClientVersion for V1_6 {
             }
             "StopTransaction" => {
                 c.transaction_id = None;
+                c.limit = None;
                 c.status = "Available".to_string();
             }
             _ => {}

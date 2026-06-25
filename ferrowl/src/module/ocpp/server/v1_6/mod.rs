@@ -28,6 +28,13 @@ impl ServerVersion for V1_6 {
         }
     }
 
+    fn stop_tx_id(name: &str, request: &serde_json::Value) -> Option<String> {
+        // StopTransaction.req carries no connectorId, only the transactionId.
+        (name == "StopTransaction")
+            .then(|| request["transactionId"].as_i64().map(|t| t.to_string()))
+            .flatten()
+    }
+
     fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
         if let (Some(c), Some(obj)) = (scope.connector, payload.as_object_mut()) {
             // Set the connector id when absent or still the `0` default the encoded request struct

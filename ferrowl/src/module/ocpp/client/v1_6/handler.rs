@@ -14,8 +14,9 @@ use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::v1_6::messages::change_configuration::ChangeConfigurationResponse;
 use ferrowl_ocpp::v1_6::messages::get_configuration::GetConfigurationResponse;
 use ferrowl_ocpp::v1_6::messages::reset::ResetResponse;
+use ferrowl_ocpp::v1_6::messages::set_charging_profile::SetChargingProfileResponse;
 use ferrowl_ocpp::v1_6::types::{
-    AvailabilityType, ConfigurationStatus, KeyValue, ResetResponseStatus,
+    AvailabilityType, ChargingProfileStatus, ConfigurationStatus, KeyValue, ResetResponseStatus,
 };
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version};
 
@@ -29,6 +30,22 @@ fn inbound_scope(request: &serde_json::Value) -> Scope {
     match request["connectorId"].as_i64() {
         Some(c) => Scope::connector(c),
         None => Scope::CS,
+    }
+}
+
+/// Clear the per-purpose charge limit a ClearChargingProfile targets: the field matching `purpose`,
+/// or every per-purpose limit when no purpose criterion is given. An unknown purpose clears nothing.
+fn clear_limit_by_purpose(c: &mut super::state::ConnectorState, purpose: Option<&str>) {
+    match purpose {
+        Some("TxProfile") => c.limit = None,
+        Some("TxDefaultProfile") => c.default_limit = None,
+        Some("ChargePointMaxProfile") => c.max_limit = None,
+        Some(_) => {}
+        None => {
+            c.limit = None;
+            c.default_limit = None;
+            c.max_limit = None;
+        }
     }
 }
 
@@ -127,32 +144,72 @@ impl CsStateHandler {
             }
             Action16::SetChargingProfile(req) => {
                 let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
-                let schedule = &json["csChargingProfiles"]["chargingSchedule"];
+                let profile = &json["csChargingProfiles"];
+                let stack = profile["stackLevel"].as_i64().unwrap_or(0);
+                let purpose = profile["chargingProfilePurpose"]
+                    .as_str()
+                    .unwrap_or("TxProfile")
+                    .to_string();
+                let schedule = &profile["chargingSchedule"];
                 let period = &schedule["chargingSchedulePeriod"][0];
-                let context = if let Some(limit) = period["limit"].as_f64() {
-                    let unit = schedule["chargingRateUnit"]
-                        .as_str()
-                        .unwrap_or("A")
-                        .to_string();
-                    let mut state = self.state.write().unwrap();
-                    // Apply the limit to the targeted connector (fall back to the first).
-                    let target = req.connector_id as i64;
-                    let idx = state
-                        .connectors
-                        .iter()
-                        .position(|c| c.connector_id == target)
-                        .or((!state.connectors.is_empty()).then_some(0));
-                    if let Some(i) = idx {
-                        state.connectors[i].limit = Some(limit);
-                        state.connectors[i].limit_unit = unit.clone();
-                    }
-                    format!("limit {limit} {unit}")
+                let mut state = self.state.write().unwrap();
+                // Reject profiles whose stack level exceeds ChargeProfileMaxStackLevel (when that
+                // key is configured with a numeric value); otherwise accept (no ceiling).
+                let max_stack = state
+                    .config
+                    .iter()
+                    .find(|c| c.key == "ChargeProfileMaxStackLevel")
+                    .and_then(|c| c.value.parse::<i64>().ok());
+                if let Some(max) = max_stack
+                    && stack > max
+                {
+                    drop(state);
+                    let resp = Response16::SetChargingProfile(SetChargingProfileResponse {
+                        status: ChargingProfileStatus::Rejected,
+                    });
+                    (
+                        Ok(resp),
+                        format!("rejected: stackLevel {stack} > max {max}"),
+                    )
                 } else {
-                    "no limit in profile".to_string()
-                };
-                let resp = V1_6::default_response("SetChargingProfile")
-                    .expect("SetChargingProfile is a known action");
-                (Ok(resp), context)
+                    // Apply the limit to the targeted connector (fall back to the first), routed by
+                    // charging-profile purpose into the matching per-purpose field.
+                    let context = if let Some(limit) = period["limit"].as_f64() {
+                        let unit = schedule["chargingRateUnit"]
+                            .as_str()
+                            .unwrap_or("A")
+                            .to_string();
+                        let target = req.connector_id as i64;
+                        let idx = state
+                            .connectors
+                            .iter()
+                            .position(|c| c.connector_id == target)
+                            .or((!state.connectors.is_empty()).then_some(0));
+                        if let Some(i) = idx {
+                            let c = &mut state.connectors[i];
+                            match purpose.as_str() {
+                                "TxDefaultProfile" => {
+                                    c.default_limit = Some(limit);
+                                    c.default_limit_unit = unit.clone();
+                                }
+                                "ChargePointMaxProfile" => {
+                                    c.max_limit = Some(limit);
+                                    c.max_limit_unit = unit.clone();
+                                }
+                                _ => {
+                                    c.limit = Some(limit);
+                                    c.limit_unit = unit.clone();
+                                }
+                            }
+                        }
+                        format!("{purpose} limit {limit} {unit}")
+                    } else {
+                        "no limit in profile".to_string()
+                    };
+                    let resp = V1_6::default_response("SetChargingProfile")
+                        .expect("SetChargingProfile is a known action");
+                    (Ok(resp), context)
+                }
             }
             Action16::ReserveNow(req) => {
                 let id = req.reservation_id as i64;
@@ -263,6 +320,7 @@ impl CsStateHandler {
                 {
                     Some(c) => {
                         c.transaction_id = None;
+                        c.limit = None;
                         c.status = "Available".to_string();
                         format!("stopped tx {tx} on connector {}", c.connector_id)
                     }
@@ -273,17 +331,20 @@ impl CsStateHandler {
                 (Ok(resp), context)
             }
             Action16::ClearChargingProfile(req) => {
+                let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let purpose = json["chargingProfilePurpose"].as_str().map(str::to_owned);
                 let mut state = self.state.write().unwrap();
-                // Optional connectorId; absent clears every connector's limit.
+                // Optional connectorId; absent clears every connector. The purpose criterion (when
+                // given) selects which per-purpose limit is erased; absent clears all of them.
                 match req.connector_id {
                     Some(id) => {
                         if let Some(c) = state.connector_mut(id as i64) {
-                            c.limit = None;
+                            clear_limit_by_purpose(c, purpose.as_deref());
                         }
                     }
                     None => {
                         for c in &mut state.connectors {
-                            c.limit = None;
+                            clear_limit_by_purpose(c, purpose.as_deref());
                         }
                     }
                 }
@@ -571,5 +632,109 @@ mod tests {
             h.state.read().unwrap().connector(1).unwrap().status,
             "Available"
         );
+    }
+
+    #[test]
+    fn ut_clear_profile_erases_only_named_purpose() {
+        let mut s = two_connectors();
+        {
+            let c = s.connector_mut(1).unwrap();
+            c.limit = Some(16.0);
+            c.default_limit = Some(10.0);
+            c.max_limit = Some(32.0);
+        }
+        let h = handler_with(s);
+        // Clearing TxDefaultProfile erases only default_limit; the others stay.
+        drive(
+            &h,
+            "ClearChargingProfile",
+            json!({ "chargingProfilePurpose": "TxDefaultProfile" }),
+        );
+        {
+            let st = h.state.read().unwrap();
+            let c = st.connector(1).unwrap();
+            assert_eq!(c.limit, Some(16.0));
+            assert_eq!(c.default_limit, None);
+            assert_eq!(c.max_limit, Some(32.0));
+        }
+        // No purpose criterion clears every per-purpose limit.
+        drive(&h, "ClearChargingProfile", json!({}));
+        let st = h.state.read().unwrap();
+        let c = st.connector(1).unwrap();
+        assert_eq!(c.limit, None);
+        assert_eq!(c.max_limit, None);
+    }
+
+    /// Build a SetChargingProfile wire payload for connector 1 with the given purpose/stack/limit.
+    fn set_profile(purpose: &str, stack: i64, limit: f64) -> serde_json::Value {
+        json!({
+            "connectorId": 1,
+            "csChargingProfiles": {
+                "chargingProfileId": 1,
+                "stackLevel": stack,
+                "chargingProfilePurpose": purpose,
+                "chargingProfileKind": "Absolute",
+                "chargingSchedule": {
+                    "chargingRateUnit": "A",
+                    "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": limit }],
+                },
+            },
+        })
+    }
+
+    #[test]
+    fn ut_set_charging_profile_rejects_above_max_stack() {
+        // Default config seeds ChargeProfileMaxStackLevel = 10.
+        let h = handler_with(two_connectors());
+        let action = V1_6::decode_call("SetChargingProfile", set_profile("TxProfile", 11, 16.0))
+            .expect("action decodes");
+        match h.respond(&action).0.expect("response built") {
+            Response16::SetChargingProfile(r) => {
+                assert_eq!(r.status, ChargingProfileStatus::Rejected)
+            }
+            other => panic!("unexpected response {other:?}"),
+        }
+        // Nothing applied to the connector.
+        assert_eq!(h.state.read().unwrap().connector(1).unwrap().limit, None);
+    }
+
+    #[test]
+    fn ut_set_charging_profile_routes_by_purpose() {
+        let h = handler_with(two_connectors());
+        drive(&h, "SetChargingProfile", set_profile("TxProfile", 0, 16.0));
+        drive(
+            &h,
+            "SetChargingProfile",
+            set_profile("TxDefaultProfile", 0, 10.0),
+        );
+        drive(
+            &h,
+            "SetChargingProfile",
+            set_profile("ChargePointMaxProfile", 0, 32.0),
+        );
+        let st = h.state.read().unwrap();
+        let c = st.connector(1).unwrap();
+        assert_eq!(c.limit, Some(16.0));
+        assert_eq!(c.default_limit, Some(10.0));
+        assert_eq!(c.max_limit, Some(32.0));
+    }
+
+    #[test]
+    fn ut_stop_clears_only_tx_limit() {
+        let mut s = two_connectors();
+        {
+            let c = s.connector_mut(1).unwrap();
+            c.transaction_id = Some(42);
+            c.limit = Some(16.0);
+            c.default_limit = Some(10.0);
+            c.max_limit = Some(32.0);
+        }
+        let h = handler_with(s);
+        drive(&h, "RemoteStopTransaction", json!({ "transactionId": 42 }));
+        let st = h.state.read().unwrap();
+        let c = st.connector(1).unwrap();
+        assert_eq!(c.limit, None, "TxProfile limit cleared on stop");
+        assert_eq!(c.default_limit, Some(10.0), "default limit persists");
+        assert_eq!(c.max_limit, Some(32.0), "max limit persists");
     }
 }

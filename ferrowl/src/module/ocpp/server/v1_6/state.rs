@@ -97,14 +97,26 @@ impl EntryStateT for CsLevelState {
         })
     }
 
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, String, String)> {
         vec![
-            ("Model".into(), self.model.clone()),
-            ("Vendor".into(), self.vendor.clone()),
-            ("FirmwareVersion".into(), self.firmware_version.clone()),
-            ("SerialNumber".into(), self.serial_number.clone()),
-            ("Iccid".into(), self.iccid.clone()),
-            ("LastHeartbeat".into(), self.last_heartbeat.clone()),
+            ("Model".into(), String::new(), self.model.clone()),
+            ("Vendor".into(), String::new(), self.vendor.clone()),
+            (
+                "FirmwareVersion".into(),
+                String::new(),
+                self.firmware_version.clone(),
+            ),
+            (
+                "SerialNumber".into(),
+                String::new(),
+                self.serial_number.clone(),
+            ),
+            ("Iccid".into(), String::new(), self.iccid.clone()),
+            (
+                "LastHeartbeat".into(),
+                String::new(),
+                self.last_heartbeat.clone(),
+            ),
         ]
     }
 }
@@ -124,6 +136,14 @@ pub struct ConnectorState {
     pub status: String,
     pub rfid: String,
     pub transaction_id: Option<i64>,
+    /// Read-only mirror of the per-purpose charging limits we have transmitted-and-had-accepted via
+    /// SetChargingProfile. `limit` (TxProfile) is transaction-scoped; the others persist.
+    pub limit: Option<f64>,
+    pub limit_unit: String,
+    pub default_limit: Option<f64>,
+    pub default_limit_unit: String,
+    pub max_limit: Option<f64>,
+    pub max_limit_unit: String,
 }
 
 impl Default for ConnectorState {
@@ -142,6 +162,12 @@ impl Default for ConnectorState {
             status: "Unknown".to_string(),
             rfid: String::new(),
             transaction_id: None,
+            limit: None,
+            limit_unit: "A".to_string(),
+            default_limit: None,
+            default_limit_unit: "A".to_string(),
+            max_limit: None,
+            max_limit_unit: "A".to_string(),
         }
     }
 }
@@ -166,6 +192,23 @@ impl OcppFields for ConnectorState {
             "Temperature" => ValueType::Float(self.temperature),
             "Status" => ValueType::String(self.status.clone()),
             "Rfid" => ValueType::String(self.rfid.clone()),
+            "TransactionId" => ValueType::String(
+                self.transaction_id
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+            ),
+            "ChargeLimit" => match self.limit {
+                Some(l) => ValueType::Float(l),
+                None => return None,
+            },
+            "DefaultChargeLimit" => match self.default_limit {
+                Some(l) => ValueType::Float(l),
+                None => return None,
+            },
+            "MaxChargeLimit" => match self.max_limit {
+                Some(l) => ValueType::Float(l),
+                None => return None,
+            },
             _ => return None,
         })
     }
@@ -232,10 +275,47 @@ impl EntryStateT for ConnectorState {
             }
             "StopTransaction" => {
                 self.transaction_id = None;
+                self.limit = None;
                 self.status = "Available".to_string();
             }
             "MeterValues" => apply_meter_values(self, request),
             _ => {}
+        }
+    }
+
+    fn apply_outbound(
+        &mut self,
+        name: &str,
+        request: &serde_json::Value,
+        response: &serde_json::Value,
+    ) {
+        // Mirror a SetChargingProfile the station accepted into the matching per-purpose limit.
+        if name != "SetChargingProfile" || response["status"].as_str() != Some("Accepted") {
+            return;
+        }
+        let profile = &request["csChargingProfiles"];
+        let schedule = &profile["chargingSchedule"];
+        let period = &schedule["chargingSchedulePeriod"][0];
+        let Some(limit) = period["limit"].as_f64() else {
+            return;
+        };
+        let unit = schedule["chargingRateUnit"]
+            .as_str()
+            .unwrap_or("A")
+            .to_string();
+        match profile["chargingProfilePurpose"].as_str() {
+            Some("TxDefaultProfile") => {
+                self.default_limit = Some(limit);
+                self.default_limit_unit = unit;
+            }
+            Some("ChargePointMaxProfile") => {
+                self.max_limit = Some(limit);
+                self.max_limit_unit = unit;
+            }
+            _ => {
+                self.limit = Some(limit);
+                self.limit_unit = unit;
+            }
         }
     }
 
@@ -254,36 +334,73 @@ impl EntryStateT for ConnectorState {
         })
     }
 
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, String, String)> {
         vec![
-            ("ConnectorId".into(), self.connector_id.to_string()),
-            ("Status".into(), self.status.clone()),
-            ("Rfid".into(), self.rfid.clone()),
+            (
+                "ConnectorId".into(),
+                String::new(),
+                self.connector_id.to_string(),
+            ),
+            ("Status".into(), String::new(), self.status.clone()),
+            ("Rfid".into(), String::new(), self.rfid.clone()),
             (
                 "TransactionId".into(),
+                String::new(),
                 self.transaction_id
                     .map(|t| t.to_string())
                     .unwrap_or_default(),
             ),
-            ("Phases".into(), self.phases.clone()),
+            ("Phases".into(), String::new(), self.phases.clone()),
+            limit_field("ChargeLimit", self.limit, &self.limit_unit),
+            limit_field(
+                "DefaultChargeLimit",
+                self.default_limit,
+                &self.default_limit_unit,
+            ),
+            limit_field("MaxChargeLimit", self.max_limit, &self.max_limit_unit),
         ]
     }
 
-    fn metering(&self) -> Vec<(String, String)> {
+    fn metering(&self) -> Vec<(String, String, String)> {
         vec![
-            ("Voltage".into(), format!("{:.1}", self.voltage)),
-            ("CurrentL1".into(), format!("{:.1}", self.current[0])),
-            ("CurrentL2".into(), format!("{:.1}", self.current[1])),
-            ("CurrentL3".into(), format!("{:.1}", self.current[2])),
-            ("Power".into(), format!("{:.1}", self.power)),
-            ("Frequency".into(), format!("{:.2}", self.frequency)),
-            ("TotalEnergy".into(), format!("{:.3}", self.total_energy)),
+            ("Voltage".into(), "V".into(), format!("{:.1}", self.voltage)),
+            (
+                "CurrentL1".into(),
+                "A".into(),
+                format!("{:.1}", self.current[0]),
+            ),
+            (
+                "CurrentL2".into(),
+                "A".into(),
+                format!("{:.1}", self.current[1]),
+            ),
+            (
+                "CurrentL3".into(),
+                "A".into(),
+                format!("{:.1}", self.current[2]),
+            ),
+            ("Power".into(), "W".into(), format!("{:.1}", self.power)),
+            (
+                "Frequency".into(),
+                "Hz".into(),
+                format!("{:.2}", self.frequency),
+            ),
+            (
+                "TotalEnergy".into(),
+                "kWh".into(),
+                format!("{:.3}", self.total_energy),
+            ),
             (
                 "SessionEnergy".into(),
+                "kWh".into(),
                 format!("{:.3}", self.session_energy),
             ),
-            ("Soc".into(), format!("{:.1}", self.soc)),
-            ("Temperature".into(), format!("{:.1}", self.temperature)),
+            ("Soc".into(), "%".into(), format!("{:.1}", self.soc)),
+            (
+                "Temperature".into(),
+                "°C".into(),
+                format!("{:.1}", self.temperature),
+            ),
         ]
     }
 }
@@ -296,6 +413,18 @@ impl ConnectorState {
             self.rfid.clone()
         }
     }
+}
+
+/// A `(field, unit, value)` state row for an optional per-purpose charging limit; the value is `—`
+/// when no limit has been mirrored.
+fn limit_field(name: &str, limit: Option<f64>, unit: &str) -> (String, String, String) {
+    (
+        name.into(),
+        unit.into(),
+        limit
+            .map(|l| format!("{l:.1}"))
+            .unwrap_or_else(|| "—".to_string()),
+    )
 }
 
 /// Fold an OCPP 1.6 MeterValues request's `sampledValue`s into the connector's metering fields.
@@ -386,6 +515,65 @@ mod tests {
             s.derive_payload("ReserveNow", Scope::connector(1))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn ut_apply_outbound_mirrors_accepted_profile_by_purpose() {
+        let mut s = ConnectorState::default();
+        let profile = |purpose: &str, limit: f64| {
+            serde_json::json!({
+                "connectorId": 1,
+                "csChargingProfiles": {
+                    "chargingProfilePurpose": purpose,
+                    "chargingSchedule": {
+                        "chargingRateUnit": "A",
+                        "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": limit }],
+                    },
+                },
+            })
+        };
+        let accepted = serde_json::json!({ "status": "Accepted" });
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("TxDefaultProfile", 10.0),
+            &accepted,
+        );
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("ChargePointMaxProfile", 32.0),
+            &accepted,
+        );
+        assert_eq!(s.default_limit, Some(10.0));
+        assert_eq!(s.max_limit, Some(32.0));
+        assert_eq!(s.limit, None);
+        // A rejected response is not mirrored.
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("TxProfile", 16.0),
+            &serde_json::json!({ "status": "Rejected" }),
+        );
+        assert_eq!(s.limit, None);
+    }
+
+    #[test]
+    fn ut_limit_fields_are_readonly_and_stop_clears_only_tx() {
+        let mut s = ConnectorState::default();
+        // The mirror fields reject writes via the Lua/edit path.
+        assert!(!s.set_field("ChargeLimit", ValueType::Float(16.0)));
+        assert!(!s.set_field("DefaultChargeLimit", ValueType::Float(10.0)));
+        assert_eq!(s.limit, None);
+        // A stop clears only the transaction-scoped limit.
+        s.limit = Some(16.0);
+        s.default_limit = Some(10.0);
+        s.transaction_id = Some(7);
+        s.apply_inbound(
+            "StopTransaction",
+            &serde_json::json!({}),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.transaction_id, None);
+        assert_eq!(s.limit, None);
+        assert_eq!(s.default_limit, Some(10.0));
     }
 
     #[test]

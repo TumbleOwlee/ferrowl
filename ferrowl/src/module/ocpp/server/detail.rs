@@ -54,11 +54,13 @@ pub enum DetailRequest {
 struct KvRow {
     #[column(name = "Field", min = 16, max = 30)]
     key: String,
+    #[column(name = "Unit", min = 6, max = 6)]
+    unit: String,
     #[column(name = "Value", min = 10, max = 40)]
     value: String,
 }
 
-type KvTable = Widget<TableState<KvRow, 2>, Table<KvRow, KvHeader, 2>>;
+type KvTable = Widget<TableState<KvRow, 3>, Table<KvRow, KvHeader, 3>>;
 
 // --- Configuration table (key/value/readonly) ------------------------------
 
@@ -225,13 +227,13 @@ impl DetailOverlay {
         }
     }
 
-    /// Replace the "State" table rows (the view supplies live values each render).
-    pub fn set_state_rows(&mut self, rows: Vec<(String, String)>) {
+    /// Replace the "State" table rows (the view supplies live `(field, unit, value)` each render).
+    pub fn set_state_rows(&mut self, rows: Vec<(String, String, String)>) {
         self.state.state.set_values(to_kv(rows));
     }
 
     /// Replace the connector "Metering" table rows (no-op visual for CS-level entries).
-    pub fn set_metering_rows(&mut self, rows: Vec<(String, String)>) {
+    pub fn set_metering_rows(&mut self, rows: Vec<(String, String, String)>) {
         self.side.state.set_values(to_kv(rows));
     }
 
@@ -583,9 +585,9 @@ impl DetailOverlay {
     }
 }
 
-fn to_kv(rows: Vec<(String, String)>) -> Vec<KvRow> {
+fn to_kv(rows: Vec<(String, String, String)>) -> Vec<KvRow> {
     rows.into_iter()
-        .map(|(key, value)| KvRow { key, value })
+        .map(|(key, unit, value)| KvRow { key, unit, value })
         .collect()
 }
 

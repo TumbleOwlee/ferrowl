@@ -33,6 +33,18 @@ impl ServerVersion for V2_0_1 {
         }
     }
 
+    fn stop_tx_id(name: &str, request: &serde_json::Value) -> Option<String> {
+        // A TransactionEvent(Ended) may omit `evse`, in which case it buckets to CS scope; route it
+        // to the connector holding this transactionId instead.
+        (name == "TransactionEvent" && request["eventType"].as_str() == Some("Ended"))
+            .then(|| {
+                request["transactionInfo"]["transactionId"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .flatten()
+    }
+
     fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
         if let (Some(e), Some(obj)) = (scope.evse, payload.as_object_mut()) {
             // Set the EVSE id when absent or still the `0` default the encoded request struct
