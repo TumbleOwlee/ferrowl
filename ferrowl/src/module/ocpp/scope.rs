@@ -45,8 +45,8 @@ impl Scope {
         match (self.evse, self.connector) {
             (None, None) => String::new(),
             (None, Some(c)) => c.to_string(),
-            (Some(e), Some(c)) => format!("e{e}/c{c}"),
-            (Some(e), None) => format!("e{e}"),
+            (Some(e), Some(c)) => format!("{e}/{c}"),
+            (Some(e), None) => format!("{e}"),
         }
     }
 }
@@ -63,8 +63,8 @@ mod tests {
         assert_eq!(Scope::connector(1).label(), "1");
         assert!(Scope::connector(1).is_connector());
         // 2.0.1 EVSE + connector, and EVSE-only.
-        assert_eq!(Scope::evse(1, Some(2)).label(), "e1/c2");
-        assert_eq!(Scope::evse(3, None).label(), "e3");
+        assert_eq!(Scope::evse(1, Some(2)).label(), "1/2");
+        assert_eq!(Scope::evse(3, None).label(), "3");
         assert!(Scope::evse(3, None).is_connector());
     }
 }
