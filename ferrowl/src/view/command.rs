@@ -30,7 +30,7 @@ pub fn new_command_line() -> CommandLine {
                     .bg(COLOR_SCHEME.bg),
                 cursor: ratatui::style::Style::default()
                     .bg(COLOR_SCHEME.hi)
-                    .fg(COLOR_SCHEME.text_dark),
+                    .fg(COLOR_SCHEME.text_hi),
                 ..InputFieldStyle::default()
             })
             .build()

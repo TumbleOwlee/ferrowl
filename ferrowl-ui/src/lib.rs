@@ -19,12 +19,12 @@ pub use border::Border;
 pub use event_result::EventResult;
 pub use screen::AlternateScreen;
 
-use ratatui::style::{Color, palette::tailwind};
+use ratatui::style::Color;
 
 /// The named colors making up the application's theme.
 pub struct ColorScheme {
     pub text: Color,
-    pub text_dark: Color,
+    pub text_hi: Color,
     pub hi: Color,
     pub hi_bg: Color,
     pub bg: Color,
@@ -35,17 +35,17 @@ pub struct ColorScheme {
     pub success: Color,
 }
 
-/// The fixed color scheme used by all widgets (dark background, amber
-/// highlights).
+/// The fixed color scheme used by all widgets (Material 3 dark with warm taupe
+/// surfaces and a fresh coral highlight).
 pub const COLOR_SCHEME: ColorScheme = ColorScheme {
-    text: Color::White,                // white   #FFFFFF
-    text_dark: Color::Black,           // black   #000000
-    hi: Color::Rgb(196, 154, 99),      // amber gold  #C49A63
-    hi_bg: Color::Rgb(155, 121, 73),   // mid amber   #5A4618
-    bg: Color::Rgb(13, 16, 20),        // deep dark   #0D1014
-    border: Color::Rgb(156, 138, 114), // warm stone  #9C8A72
-    row: [Color::Rgb(27, 32, 37), Color::Rgb(39, 44, 50)],
-    placeholder: Color::Rgb(110, 95, 78), // dim clay   #6E5F4E
-    error: tailwind::RED.c500,
-    success: Color::Rgb(143, 179, 154), // sage green  #8FB39A
+    text: Color::Rgb(240, 235, 229),    // warm white   #F0EBE5
+    text_hi: Color::Rgb(240, 235, 229), // near-black   #1A1815
+    hi: Color::Rgb(255, 138, 101),      // coral accent   #FF8A65 (deep orange 300)
+    hi_bg: Color::Rgb(93, 64, 55),      // warm brown   #5D4037 (brown 700)
+    bg: Color::Rgb(26, 24, 21),         // warm dark   #1A1815
+    border: Color::Rgb(124, 109, 95),   // warm taupe   #7C6D5F
+    row: [Color::Rgb(35, 32, 28), Color::Rgb(48, 44, 39)], // warm elevations
+    placeholder: Color::Rgb(141, 126, 112), // muted clay   #8D7E70
+    error: Color::Rgb(229, 115, 115),   // soft red   #E57373 (red 300)
+    success: Color::Rgb(129, 199, 132), // fresh green   #81C784 (green 300)
 };

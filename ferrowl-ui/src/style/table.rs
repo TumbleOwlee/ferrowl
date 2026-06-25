@@ -9,9 +9,7 @@ use ratatui::style::{Color, Style};
 #[getset(set = "pub")]
 pub struct TableStyle {
     #[getset(get = "pub")]
-    #[builder(
-        default = "Style::default().fg(COLOR_SCHEME.text_dark).bg(COLOR_SCHEME.hi_bg).bold()"
-    )]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.text_hi).bg(COLOR_SCHEME.hi_bg).bold()")]
     pub focused: Style,
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg).bold()")]

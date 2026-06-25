@@ -1095,7 +1095,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
                         COLOR_SCHEME.error
                     })
                     .fg(if online {
-                        COLOR_SCHEME.text_dark
+                        COLOR_SCHEME.text_hi
                     } else {
                         COLOR_SCHEME.text
                     })

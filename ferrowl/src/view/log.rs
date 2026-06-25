@@ -95,7 +95,7 @@ pub fn new_log_view() -> LogView {
                     .focused(
                         ratatui::style::Style::default()
                             .bg(COLOR_SCHEME.hi_bg)
-                            .fg(COLOR_SCHEME.text_dark),
+                            .fg(COLOR_SCHEME.text_hi),
                     )
                     .build()
                     .unwrap(),
