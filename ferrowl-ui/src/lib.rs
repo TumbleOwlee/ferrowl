@@ -42,7 +42,7 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     text_hi: Color::Rgb(240, 235, 229), // near-black   #1A1815
     hi: Color::Rgb(255, 138, 101),      // coral accent   #FF8A65 (deep orange 300)
     hi_bg: Color::Rgb(93, 64, 55),      // warm brown   #5D4037 (brown 700)
-    bg: Color::Rgb(26, 24, 21),         // warm dark   #1A1815
+    bg: Color::Rgb(13, 13, 13),         // dark   #0d0d0d
     border: Color::Rgb(124, 109, 95),   // warm taupe   #7C6D5F
     row: [Color::Rgb(35, 32, 28), Color::Rgb(48, 44, 39)], // warm elevations
     placeholder: Color::Rgb(141, 126, 112), // muted clay   #8D7E70
