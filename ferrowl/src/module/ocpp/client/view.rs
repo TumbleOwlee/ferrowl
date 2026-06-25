@@ -771,7 +771,7 @@ impl<V: ClientVersion> ClientView<V> {
                 (conn_rows::<V>(&cp, &s), row)
             };
             self.conn_table.state.set_values(rows);
-            select_index(&mut self.conn_table.state, row);
+            self.conn_table.state.select_index(row);
             self.sync_actions();
         }
     }
@@ -1655,14 +1655,6 @@ fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(state: &TableState<E, N>)
             .selected()
             .map(|s| s + 1 >= len)
             .unwrap_or(true)
-}
-
-/// Select row `idx` in a table (no direct setter on `TableState`): jump to the top, then step down.
-fn select_index<E: TableEntry<N>, const N: usize>(state: &mut TableState<E, N>, idx: usize) {
-    state.move_to_top();
-    for _ in 0..idx {
-        state.move_down();
-    }
 }
 
 /// Convert version-agnostic state rows into the view's table rows.

@@ -760,7 +760,7 @@ where
                 .iter()
                 .position(|e| e.identity == key.0 && e.scope == key.1)
         {
-            select_index(&mut self.cs_table.state, idx);
+            self.cs_table.state.select_index(idx);
         }
     }
 
@@ -1538,14 +1538,6 @@ fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(state: &TableState<E, N>)
             .selected()
             .map(|s| s + 1 >= len)
             .unwrap_or(true)
-}
-
-/// Select row `idx` in a table (no direct setter on `TableState`): jump to the top, then step down.
-fn select_index<E: TableEntry<N>, const N: usize>(state: &mut TableState<E, N>, idx: usize) {
-    state.move_to_top();
-    for _ in 0..idx {
-        state.move_down();
-    }
 }
 
 fn cs_table() -> CsTable {

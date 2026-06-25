@@ -27,7 +27,9 @@ where
     #[getset(get_copy = "pub")]
     #[builder(setter(skip), default = "0")]
     horizontal_scroll: u16,
-    #[getset(get = "pub")]
+    // Selection is coupled to the rows, so the setter is hand-written (see `set_values`)
+    // to maintain the selection invariant; getset only generates the getter.
+    #[getset(skip)]
     values: Vec<V>,
     #[getset(get_copy = "pub")]
     #[builder(setter(skip), default = "0")]
@@ -124,6 +126,36 @@ where
             self.table_state.select(Some(0));
             self.vertical_scroll = self.vertical_scroll.position(0);
         }
+    }
+
+    pub fn values(&self) -> &Vec<V> {
+        &self.values
+    }
+
+    /// Replace the rows, maintaining the selection invariant: an empty list has no
+    /// selection (`None`); a non-empty list always has a valid `Some(idx)` (clamped
+    /// to the last row, defaulting to the first when previously unselected).
+    pub fn set_values(&mut self, values: Vec<V>) {
+        self.values = values;
+        if self.values.is_empty() {
+            self.table_state.select(None);
+            self.vertical_scroll = self.vertical_scroll.position(0);
+        } else {
+            let i = std::cmp::min(
+                self.table_state.selected().unwrap_or(0),
+                self.values.len() - 1,
+            );
+            self.table_state.select(Some(i));
+            self.vertical_scroll = self.vertical_scroll.position(i);
+        }
+    }
+
+    /// Select a row by index directly, without depending on `values` being
+    /// populated. Callers pass an index known to be valid for the rows that will be
+    /// rendered; [`set_values`](Self::set_values) clamps as a safety net.
+    pub fn select_index(&mut self, idx: usize) {
+        self.table_state.select(Some(idx));
+        self.vertical_scroll = self.vertical_scroll.position(idx);
     }
 
     pub fn move_right(&mut self) {
@@ -304,6 +336,48 @@ mod tests {
         assert_eq!(selected(&s), Some(2));
         s.handle_events(KeyModifiers::NONE, KeyCode::Char('g'));
         assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn set_values_selects_first_row_when_previously_unselected() {
+        let mut s = table(0);
+        s.move_down(); // empty -> selection becomes None
+        assert_eq!(selected(&s), None);
+        s.set_values(vec![Row("a".into()), Row("b".into())]);
+        assert_eq!(selected(&s), Some(0));
+    }
+
+    #[test]
+    fn set_values_clamps_selection_when_list_shrinks() {
+        let mut s = table(5);
+        s.move_to_bottom();
+        assert_eq!(selected(&s), Some(4));
+        s.set_values(vec![Row("a".into()), Row("b".into()), Row("c".into())]);
+        assert_eq!(selected(&s), Some(2));
+    }
+
+    #[test]
+    fn set_values_clears_selection_when_emptied() {
+        let mut s = table(3);
+        s.set_values(Vec::new());
+        assert_eq!(selected(&s), None);
+    }
+
+    #[test]
+    fn set_values_keeps_existing_in_range_selection() {
+        let mut s = table(5);
+        s.move_down();
+        s.move_down();
+        assert_eq!(selected(&s), Some(2));
+        s.set_values((0..5).map(|i| Row(format!("x{i}"))).collect());
+        assert_eq!(selected(&s), Some(2));
+    }
+
+    #[test]
+    fn select_index_sets_selection_directly() {
+        let mut s = table(4);
+        s.select_index(3);
+        assert_eq!(selected(&s), Some(3));
     }
 
     #[test]
