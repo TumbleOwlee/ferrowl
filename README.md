@@ -13,7 +13,7 @@ If you prefer a GUI application, this tool is not the right choice. For Modbus, 
 
 ## Goal
 
-Provide a CLI application to simulate Modbus Servers and Clients as well as OCPP Charging Stations and Central Systems (CSMS, OCPP 1.6 and 2.0.1), visualize the states of all registers and charging-station fields, make manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs over Modbus or OCPP.
+Provide a CLI application to simulate Modbus Servers and Clients as well as OCPP Charging Stations and Central Systems (CSMS, OCPP 1.6, 2.0.1 and 2.1), visualize the states of all registers and charging-station fields, make manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs over Modbus or OCPP.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ The project is organized as a Cargo workspace and builds the `ferrowl` binary. S
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
-| `ferrowl-ocpp` | OCPP protocol types and actions with a version-generic `Version` trait; Charging Station (CS) and Central System (CSMS) over JSON-on-WebSocket, wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). Supports OCPP 1.6 and 2.0.1. |
+| `ferrowl-ocpp` | OCPP protocol types and actions with a version-generic `Version` trait; Charging Station (CS) and Central System (CSMS) over JSON-on-WebSocket, wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). Supports OCPP 1.6, 2.0.1, and 2.1. |
 | `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time`, `C_OCPP` and `C_Log` modules to simulation scripts. |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
@@ -44,7 +44,7 @@ All runtime interaction meets in the shared memory of a module: the network task
 
 Alongside Modbus, Ferrowl simulates **OCPP** charging infrastructure over JSON-on-WebSocket. Both protocol versions and both roles are supported:
 
-- **Versions:** OCPP **1.6** and **2.0.1**.
+- **Versions:** OCPP **1.6**, **2.0.1**, and **2.1**.
 - **Roles:** **Charging Station** (client, connects out to a CSMS) and **Central System / CSMS** (server, accepts incoming stations and tracks each connection).
 
 Supported capabilities (grouped by area):
@@ -53,7 +53,7 @@ Supported capabilities (grouped by area):
 - **Reservations** — `ReserveNow` / `CancelReservation`, per connector.
 - **Authorization** — RFID accept-lists, both station-wide and per-connector, plus local-list management.
 - **Smart charging** — charging profiles and per-purpose charge limits, including stack-level reject.
-- **Remote control** — remote (1.6) / requested (2.0.1) start & stop, availability changes, reset, firmware update and diagnostics.
+- **Remote control** — remote (1.6) / requested (2.0.1, 2.1) start & stop, availability changes, reset, firmware update and diagnostics.
 - **OCPP 2.0.1 extras** — variable get/set and monitoring, display messages, certificate management, and the EVSE/connector object model.
 
 In the TUI each OCPP module shows a connector/station table, a scope-filtered action list with per-version send dialogs (typed value editors plus a raw-JSON mode), and a capped message log that can be mirrored to a file via `:log`. Simulation behaviour is scripted in Lua for both roles — see [Lua Support](#lua-support).
@@ -398,7 +398,7 @@ lives in the session, not here.
 
 ```toml
 version = "0.4.4"        # ferrowl version, stamped on save
-ocpp_version = "1.6"     # or "2.0.1"
+ocpp_version = "1.6"     # or "2.0.1" or "2.1"
 role = "client"          # client = charging station, server = management system
 timeout_ms = 30000       # awaited-reply timeout
 
@@ -522,7 +522,7 @@ Return: nil (errors on an unknown name or a type mismatch).
 ```
 
 In addition, every supported OCPP action is callable as `C_OCPP:<Action>(overrides?)`. The set of
-actions is version-specific (OCPP 1.6 and 2.0.1 differ), so a script must match the device's OCPP
+actions is version-specific (OCPP 1.6, 2.0.1 and 2.1 differ), so a script must match the device's OCPP
 version. The action's payload is built from the current state exactly like the on-screen action
 buttons; an optional table of overrides is shallow-merged over it. The call returns `true` once the
 action is queued, or `false` on an argument error. The result of the exchange with the CSMS appears
