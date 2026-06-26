@@ -12,12 +12,12 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ferrowl_ocpp::cs::CsActionHandler;
-use ferrowl_ocpp::v2_0_1::datatypes::get_variable_result_type::GetVariableResultType;
-use ferrowl_ocpp::v2_0_1::datatypes::set_variable_result_type::SetVariableResultType;
-use ferrowl_ocpp::v2_0_1::enumerations::charging_profile_status_enum_type::ChargingProfileStatusEnumType;
-use ferrowl_ocpp::v2_0_1::enumerations::get_variable_status_enum_type::GetVariableStatusEnumType;
-use ferrowl_ocpp::v2_0_1::enumerations::reset_status_enum_type::ResetStatusEnumType;
-use ferrowl_ocpp::v2_0_1::enumerations::set_variable_status_enum_type::SetVariableStatusEnumType;
+use ferrowl_ocpp::v2_0_1::datatypes::get_variable_result::GetVariableResultType;
+use ferrowl_ocpp::v2_0_1::datatypes::set_variable_result::SetVariableResultType;
+use ferrowl_ocpp::v2_0_1::enumerations::charging_profile_status::ChargingProfileStatusEnumType;
+use ferrowl_ocpp::v2_0_1::enumerations::get_variable_status::GetVariableStatusEnumType;
+use ferrowl_ocpp::v2_0_1::enumerations::reset_status::ResetStatusEnumType;
+use ferrowl_ocpp::v2_0_1::enumerations::set_variable_status::SetVariableStatusEnumType;
 use ferrowl_ocpp::v2_0_1::messages::get_variables::GetVariablesResponse;
 use ferrowl_ocpp::v2_0_1::messages::reset::ResetResponse;
 use ferrowl_ocpp::v2_0_1::messages::set_charging_profile::SetChargingProfileResponse;
@@ -110,12 +110,14 @@ impl CsStateHandler {
                             component: d.component.clone(),
                             variable: d.variable.clone(),
                             attribute_status_info: None,
+                            custom_data: None,
                         }
                     })
                     .collect();
                 (
                     Ok(Response201::GetVariables(GetVariablesResponse {
                         get_variable_result: results,
+                        custom_data: None,
                     })),
                     "answered from variables".to_string(),
                 )
@@ -148,12 +150,14 @@ impl CsStateHandler {
                             component: d.component.clone(),
                             variable: d.variable.clone(),
                             attribute_status_info: None,
+                            custom_data: None,
                         }
                     })
                     .collect();
                 (
                     Ok(Response201::SetVariables(SetVariablesResponse {
                         set_variable_result: results,
+                        custom_data: None,
                     })),
                     "variables updated".to_string(),
                 )
@@ -169,6 +173,7 @@ impl CsStateHandler {
                     Ok(Response201::Reset(ResetResponse {
                         status: ResetStatusEnumType::Accepted,
                         status_info: None,
+                        custom_data: None,
                     })),
                     "state reset".to_string(),
                 )
@@ -199,6 +204,7 @@ impl CsStateHandler {
                     let resp = Response201::SetChargingProfile(SetChargingProfileResponse {
                         status: ChargingProfileStatusEnumType::Rejected,
                         status_info: None,
+                        custom_data: None,
                     });
                     (
                         Ok(resp),
