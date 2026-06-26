@@ -85,7 +85,7 @@ impl OcppSetupDialog {
             .config_path(input("Config", "device.toml", &input_style, false))
             .version(selection(
                 "Version",
-                vec![OcppVersion::V1_6, OcppVersion::V2_0_1],
+                vec![OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1],
                 &selection_style,
             ))
             .role(selection(
@@ -120,6 +120,7 @@ impl OcppSetupDialog {
         d.version.state.set_selection(match spec.version {
             OcppVersion::V1_6 => 0,
             OcppVersion::V2_0_1 => 1,
+            OcppVersion::V2_1 => 2,
         });
         d.role.state.set_selection(match spec.role {
             OcppRole::Client => 0,

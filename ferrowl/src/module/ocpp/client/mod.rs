@@ -8,11 +8,13 @@ pub mod lua_sim;
 pub mod scripts;
 pub mod v1_6;
 pub mod v2_0_1;
+pub mod v2_1;
+pub mod v2_common;
 pub mod view;
 
 pub use view::ClientView;
 
-use ferrowl_ocpp::{V1_6, V2_0_1};
+use ferrowl_ocpp::{V1_6, V2_0_1, V2_1};
 
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppSpec, OcppVersion};
@@ -28,5 +30,6 @@ pub fn build_client_view(
     match spec.version {
         OcppVersion::V1_6 => Box::new(ClientView::<V1_6>::new(spec, device_path, device)),
         OcppVersion::V2_0_1 => Box::new(ClientView::<V2_0_1>::new(spec, device_path, device)),
+        OcppVersion::V2_1 => Box::new(ClientView::<V2_1>::new(spec, device_path, device)),
     }
 }

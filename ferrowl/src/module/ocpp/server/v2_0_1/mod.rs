@@ -1,134 +1,20 @@
-//! OCPP 2.0.1 CSMS (server) specifics: the two observed-state types, the inbound handler, and the
-//! [`ServerVersion`] glue that lets the generic server view drive OCPP 2.0.1.
+//! OCPP 2.0.1 CSMS (server) specifics. The observed-state types live in [`state`] and are shared
+//! with 2.1; the inbound handler ([`handler`]) and the [`ServerVersion`] glue are shared via the
+//! macros in [`crate::module::ocpp::server::v2_common`] and instantiated here for `V2_0_1`.
 
-mod handler;
-mod state;
+pub(crate) mod handler;
+pub(crate) mod state;
 
-use ferrowl_ocpp::V2_0_1;
+use crate::module::ocpp::server::v2_common::define_server_version;
 
-use crate::module::ocpp::server::backend::{EventTx, RfidLists, Scope};
-use crate::module::ocpp::server::view::ServerVersion;
-
-use handler::CsmsHandler201;
-use state::{ConnectorState, CsLevelState};
-
-impl ServerVersion for V2_0_1 {
-    type Cs = CsLevelState;
-    type Conn = ConnectorState;
-    type Handler = CsmsHandler201;
-
-    fn handler(tx: EventTx, rfids: RfidLists) -> Self::Handler {
-        CsmsHandler201::new(tx, rfids)
-    }
-
-    fn inbound_connector(_name: &str, request: &serde_json::Value) -> Scope {
-        // 2.0.1 connectors are listed and addressed by EVSE id only; a nested/top-level
-        // `connectorId` is ignored for bucketing (connector kept `None`).
-        let evse = request["evse"]["id"]
-            .as_i64()
-            .or_else(|| request["evseId"].as_i64());
-        match evse {
-            Some(e) if e >= 1 => Scope::evse(e, None),
-            _ => Scope::CS,
-        }
-    }
-
-    fn stop_tx_id(name: &str, request: &serde_json::Value) -> Option<String> {
-        // A TransactionEvent(Ended) may omit `evse`, in which case it buckets to CS scope; route it
-        // to the connector holding this transactionId instead.
-        (name == "TransactionEvent" && request["eventType"].as_str() == Some("Ended"))
-            .then(|| {
-                request["transactionInfo"]["transactionId"]
-                    .as_str()
-                    .map(str::to_owned)
-            })
-            .flatten()
-    }
-
-    fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
-        if let (Some(e), Some(obj)) = (scope.evse, payload.as_object_mut()) {
-            // Set the EVSE id when absent or still the `0` default the encoded request struct
-            // carries; a genuine non-zero value (and later user overrides) win.
-            let cur = obj.get("evseId").and_then(|v| v.as_i64());
-            if cur.is_none() || cur == Some(0) {
-                obj.insert("evseId".into(), serde_json::json!(e));
-            }
-        }
-    }
-
-    fn lua_connector_id(scope: Scope) -> Option<i64> {
-        // 2.0.1 connectors are addressed by EVSE id (the connector dimension is always `None`).
-        scope.evse
-    }
-
-    fn config_has_component() -> bool {
-        // GetVariables/SetVariables keys are `Component/Variable`; show a Component column.
-        true
-    }
-
-    fn config_action() -> &'static str {
-        "GetVariables"
-    }
-
-    fn config_request(key: &str) -> serde_json::Value {
-        // GetVariables needs an explicit component + variable. Accept "Component/Variable";
-        // a bare key uses it for both names.
-        let (component, variable) = key.split_once('/').unwrap_or((key, key));
-        serde_json::json!({
-            "getVariableData": [{
-                "component": { "name": component },
-                "variable": { "name": variable },
-            }]
-        })
-    }
-
-    fn parse_config(response: &serde_json::Value) -> Vec<(String, String, bool)> {
-        let mut rows = Vec::new();
-        let Some(results) = response["getVariableResult"].as_array() else {
-            return rows;
-        };
-        for r in results {
-            let component = r["component"]["name"].as_str().unwrap_or_default();
-            let variable = r["variable"]["name"].as_str().unwrap_or_default();
-            let status = r["attributeStatus"].as_str().unwrap_or("Unknown");
-            let value = if status == "Accepted" {
-                r["attributeValue"].as_str().unwrap_or_default().to_string()
-            } else {
-                format!("<{status}>")
-            };
-            // 2.0.1 mutability is per-attribute (not a simple bool); treat as writable.
-            rows.push((format!("{component}/{variable}"), value, false));
-        }
-        rows
-    }
-
-    fn set_action() -> &'static str {
-        "SetVariables"
-    }
-
-    fn set_request(key: &str, value: &str) -> serde_json::Value {
-        let (component, variable) = key.split_once('/').unwrap_or((key, key));
-        serde_json::json!({
-            "setVariableData": [{
-                "attributeValue": value,
-                "component": { "name": component },
-                "variable": { "name": variable },
-            }]
-        })
-    }
-
-    fn action_spec(name: &str) -> Option<crate::module::ocpp::action_dialog::ActionSpec> {
-        crate::module::ocpp::spec::v2_0_1::action_spec(name)
-    }
-
-    fn json_actions() -> &'static [&'static str] {
-        crate::module::ocpp::spec::v2_0_1::json_actions()
-    }
-}
+define_server_version!(V2_0_1, v2_0_1, v2_0_1);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::ocpp::server::backend::Scope;
+    use crate::module::ocpp::server::view::ServerVersion;
+    use ferrowl_ocpp::V2_0_1;
     use serde_json::json;
 
     #[test]

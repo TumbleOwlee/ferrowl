@@ -24,8 +24,12 @@ pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};
 pub use rust_ocpp::v1_6;
 #[cfg(feature = "v2_0_1")]
 pub use rust_ocpp::v2_0_1;
+#[cfg(feature = "v2_1")]
+pub use rust_ocpp::v2_1;
 
 #[cfg(feature = "v1_6")]
 pub use action::v1_6::{Action as Action16, Response as Response16, V1_6};
 #[cfg(feature = "v2_0_1")]
 pub use action::v2_0_1::{Action as Action201, Response as Response201, V2_0_1};
+#[cfg(feature = "v2_1")]
+pub use action::v2_1::{Action as Action21, Response as Response21, V2_1};

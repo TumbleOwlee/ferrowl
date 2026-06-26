@@ -179,10 +179,22 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
                 9001,
             ),
             demo_ocpp_tab(
-                "CS v2.0,1".to_string(),
+                "CS v2.0.1".to_string(),
                 OcppVersion::V2_0_1,
                 OcppRole::Client,
                 9001,
+            ),
+            demo_ocpp_tab(
+                "CSMS v2.1".to_string(),
+                OcppVersion::V2_1,
+                OcppRole::Server,
+                9002,
+            ),
+            demo_ocpp_tab(
+                "CS v2.1".to_string(),
+                OcppVersion::V2_1,
+                OcppRole::Client,
+                9002,
             ),
         ];
         for tab in tabs.iter_mut() {

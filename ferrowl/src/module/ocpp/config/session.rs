@@ -13,6 +13,8 @@ pub enum OcppVersion {
     V1_6,
     #[serde(rename = "2.0.1")]
     V2_0_1,
+    #[serde(rename = "2.1")]
+    V2_1,
 }
 
 impl std::fmt::Display for OcppVersion {
@@ -20,6 +22,7 @@ impl std::fmt::Display for OcppVersion {
         match self {
             OcppVersion::V1_6 => write!(fmt, "1.6"),
             OcppVersion::V2_0_1 => write!(fmt, "2.0.1"),
+            OcppVersion::V2_1 => write!(fmt, "2.1"),
         }
     }
 }

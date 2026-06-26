@@ -6,9 +6,11 @@ mod detail;
 pub mod lua;
 mod v1_6;
 mod v2_0_1;
+mod v2_1;
+mod v2_common;
 pub mod view;
 
-use ferrowl_ocpp::{V1_6, V2_0_1};
+use ferrowl_ocpp::{V1_6, V2_0_1, V2_1};
 
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::{OcppSpec, OcppVersion};
@@ -24,5 +26,6 @@ pub fn build_server_view(
     match spec.version {
         OcppVersion::V1_6 => Box::new(view::ServerView::<V1_6>::new(spec, device_path, device)),
         OcppVersion::V2_0_1 => Box::new(view::ServerView::<V2_0_1>::new(spec, device_path, device)),
+        OcppVersion::V2_1 => Box::new(view::ServerView::<V2_1>::new(spec, device_path, device)),
     }
 }

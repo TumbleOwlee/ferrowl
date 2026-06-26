@@ -5,9 +5,10 @@ edition = "2024"
 authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
 
 [features]
-default = ["v1_6", "v2_0_1"]
+default = ["v1_6", "v2_0_1", "v2_1"]
 v1_6 = ["rust-ocpp/v1_6"]
 v2_0_1 = ["rust-ocpp/v2_0_1"]
+v2_1 = ["rust-ocpp/v2_1"]
 
 [dependencies]
 rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", branch = "main", default-features = false }

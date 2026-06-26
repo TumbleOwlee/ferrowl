@@ -11,6 +11,8 @@ pub(crate) mod macros;
 pub mod v1_6;
 #[cfg(feature = "v2_0_1")]
 pub mod v2_0_1;
+#[cfg(feature = "v2_1")]
+pub mod v2_1;
 
 use serde_json::Value;
 
