@@ -70,12 +70,12 @@ mod tests {
     use crate::action::Version;
     use ::rust_ocpp::v1_6::messages::boot_notification::BootNotificationRequest;
 
-    fn boot_req(model: &str) -> BootNotificationRequest {
-        BootNotificationRequest {
+    fn boot_req(model: &str) -> Box<BootNotificationRequest> {
+        Box::new(BootNotificationRequest {
             charge_point_model: model.to_owned(),
             charge_point_vendor: "Ferrowl".to_owned(),
             ..Default::default()
-        }
+        })
     }
 
     #[test]

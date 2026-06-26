@@ -11,7 +11,6 @@ define_server_version!(V2_0_1, v2_0_1, v2_0_1);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::module::ocpp::server::backend::Scope;
     use crate::module::ocpp::server::view::ServerVersion;
     use ferrowl_ocpp::V2_0_1;
