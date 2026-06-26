@@ -34,11 +34,11 @@ macro_rules! define_ocpp_version {
     ) => {
         /// Full action set for this OCPP version; each variant wraps `rust_ocpp`'s request struct.
         #[derive(Debug, Clone, PartialEq)]
-        pub enum Action { $( $variant($req), )+ }
+        pub enum Action { $( $variant(Box<$req>), )+ }
 
         /// Full response set for this OCPP version; each variant wraps `rust_ocpp`'s response struct.
         #[derive(Debug, Clone, PartialEq)]
-        pub enum Response { $( $variant($resp), )+ }
+        pub enum Response { $( $variant(Box<$resp>), )+ }
 
         /// Zero-sized marker type implementing [`Version`](crate::action::Version).
         #[derive(Debug, Clone, Copy, Default)]
@@ -67,7 +67,7 @@ macro_rules! define_ocpp_version {
             fn default_action(name: &str) -> ::core::option::Option<Action> {
                 match name {
                     $( n if n == stringify!($variant) =>
-                        Some(Action::$variant(<$req as ::core::default::Default>::default())), )+
+                        Some(Action::$variant(Box::default())), )+
                     _ => None,
                 }
             }
@@ -75,7 +75,7 @@ macro_rules! define_ocpp_version {
             fn default_response(name: &str) -> ::core::option::Option<Response> {
                 match name {
                     $( n if n == stringify!($variant) =>
-                        Some(Response::$variant(<$resp as ::core::default::Default>::default())), )+
+                        Some(Response::$variant(Box::default())), )+
                     _ => None,
                 }
             }
@@ -97,7 +97,7 @@ macro_rules! define_ocpp_version {
             {
                 match action {
                     $( Action::$variant(req) =>
-                        $crate::action::macros::ocpp_validate_arm!($validate, req), )+
+                        $crate::action::macros::ocpp_validate_arm!($validate, req.as_ref()), )+
                 }
             }
 

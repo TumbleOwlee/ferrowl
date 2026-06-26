@@ -100,7 +100,7 @@ impl CsStateHandler {
                     unknown_key: (!unknown.is_empty()).then_some(unknown),
                 };
                 (
-                    Ok(Response16::GetConfiguration(resp)),
+                    Ok(Response16::GetConfiguration(Box::new(resp))),
                     "answered from config".to_string(),
                 )
             }
@@ -122,9 +122,9 @@ impl CsStateHandler {
                     }
                 };
                 (
-                    Ok(Response16::ChangeConfiguration(
+                    Ok(Response16::ChangeConfiguration(Box::new(
                         ChangeConfigurationResponse { status },
-                    )),
+                    ))),
                     format!("{} = {}", req.key, req.value),
                 )
             }
@@ -136,9 +136,9 @@ impl CsStateHandler {
                     c.session_energy = 0.0;
                 }
                 (
-                    Ok(Response16::Reset(ResetResponse {
+                    Ok(Response16::Reset(Box::new(ResetResponse {
                         status: ResetResponseStatus::Accepted,
-                    })),
+                    }))),
                     "state reset".to_string(),
                 )
             }
@@ -164,9 +164,10 @@ impl CsStateHandler {
                     && stack > max
                 {
                     drop(state);
-                    let resp = Response16::SetChargingProfile(SetChargingProfileResponse {
-                        status: ChargingProfileStatus::Rejected,
-                    });
+                    let resp =
+                        Response16::SetChargingProfile(Box::new(SetChargingProfileResponse {
+                            status: ChargingProfileStatus::Rejected,
+                        }));
                     (
                         Ok(resp),
                         format!("rejected: stackLevel {stack} > max {max}"),
