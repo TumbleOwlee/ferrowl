@@ -153,7 +153,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    |    <C-w>j <C-w>k  table/log    |    ] [  tabs    |    <C-t>h <C-t>l  tabs",
+            "  :  command    |    C-w+j C-w+k  table/log    |    C-t+h C-t+l  tabs",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }
