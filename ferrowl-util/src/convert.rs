@@ -16,11 +16,13 @@ pub enum FileType {
 
 /// Error raised by [`Converter`] operations, carrying a human-readable
 /// message that includes the underlying cause.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Writing or serializing failed.
+    #[error("{0}")]
     Serialize(String),
     /// Reading or deserializing failed.
+    #[error("{0}")]
     Deserialize(String),
 }
 

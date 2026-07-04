@@ -26,5 +26,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.49.0", features = ["sync", "time", "rt"] }
 derive_builder = "0.20.2"
+parking_lot = { workspace = true }
+futures-util = "0.3.31"
 
 [dev-dependencies]

@@ -4,33 +4,23 @@ use crate::cell::{Cell, CellKind, CellType};
 use crate::range::Range;
 use crate::slice::Slice;
 use std::collections::BTreeMap;
-use std::fmt;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// Why a [`Memory`] read or write operation failed.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum MemoryError {
     /// The device key has no registered memory regions.
+    #[error("key not registered")]
     UnknownKey,
     /// The requested address range is not registered or not readable as the given cell type.
+    #[error("address not readable")]
     AddressNotReadable,
     /// The requested address range is not registered or not writable as the given cell type.
+    #[error("address not writable")]
     AddressNotWritable,
     /// The number of supplied values does not match the range length.
+    #[error("length mismatch: expected {expected}, got {got}")]
     LengthMismatch { expected: usize, got: usize },
-}
-
-impl fmt::Display for MemoryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MemoryError::UnknownKey => write!(f, "key not registered"),
-            MemoryError::AddressNotReadable => write!(f, "address not readable"),
-            MemoryError::AddressNotWritable => write!(f, "address not writable"),
-            MemoryError::LengthMismatch { expected, got } => {
-                write!(f, "length mismatch: expected {expected}, got {got}")
-            }
-        }
-    }
 }
 
 /// Register storage for multiple devices, keyed by `K` (e.g. a unit/slave id).

@@ -11,7 +11,7 @@ use crate::module::modbus::setup_dialog::SetupValues;
 use crate::module::modbus::table::{Definition, TableHeader, column_index};
 use crate::module::view::CommandResult;
 
-use super::super::Module;
+use super::super::ModbusModule;
 use super::super::registers::{
     collect_scripts, register_mem_binding, sync_register_def, write_command,
 };
@@ -106,7 +106,7 @@ impl ModbusModuleView {
         }
 
         if let Address::Virtual = edited.register.address() {
-            let seed = crate::module::default_value(&edited.register);
+            let seed = crate::module::modbus::default_value(&edited.register);
             self.module.set_virtual_value(&edited.name, seed).await;
         }
 
@@ -252,7 +252,7 @@ impl ModbusModuleView {
         self.device.interval_ms = values.interval_ms;
         self.device.read_ranges = values.read_ranges.clone();
 
-        let timing = Module::resolve_timing(&self.device);
+        let timing = ModbusModule::resolve_timing(&self.device);
         let role = self.spec.role.to_string();
         let endpoint = self.spec.endpoint.to_string();
 
@@ -309,7 +309,10 @@ impl ModbusModuleView {
         if let Address::Virtual = register.address() {
             if role == Role::Server {
                 self.module
-                    .set_virtual_value(register_name, crate::module::str_to_value(value, &register))
+                    .set_virtual_value(
+                        register_name,
+                        crate::module::modbus::str_to_value(value, &register),
+                    )
                     .await;
                 return CommandResult::Handled(Some(format!(
                     "set {register_name} = {value} (virtual)"

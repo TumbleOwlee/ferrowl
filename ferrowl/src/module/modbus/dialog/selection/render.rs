@@ -322,3 +322,81 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         }
     }
 }
+
+#[cfg(test)]
+mod render_tests {
+    //! Render-to-buffer characterization: the selection dialog draws its box title, fields,
+    //! and named-value list without panicking, in both Add and Edit configurations.
+    use super::EditSelectionDialog;
+    use crate::config::device::{NamedValue, Scalar};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    fn buffer_text(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render(dialog: &mut EditSelectionDialog<NamedValue>) -> String {
+        let area = Rect::new(0, 0, 80, 50);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        buffer_text(&buf)
+    }
+
+    #[test]
+    fn ut_render_add_dialog_shows_title_and_fields() {
+        let mut dialog = EditSelectionDialog::new(vec![NamedValue {
+            name: "on".into(),
+            value: Scalar::Int(1),
+        }]);
+        let text = render(&mut dialog);
+        assert!(text.contains("Add"), "missing box title:\n{text}");
+        for field in ["Label", "Slave ID", "Address", "Kind", "Access", "Value"] {
+            assert!(text.contains(field), "missing field '{field}':\n{text}");
+        }
+        // The named value is shown in the Value selection.
+        assert!(text.contains("on"), "missing named value:\n{text}");
+    }
+
+    #[test]
+    fn ut_render_edit_dialog_shows_edit_title_and_delete_button() {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        let mut dialog = EditSelectionDialog::from_register(
+            "state",
+            "d",
+            &register,
+            vec![NamedValue {
+                name: "on".into(),
+                value: Scalar::Int(1),
+            }],
+            "1",
+            "[0001]",
+            None,
+            None,
+        );
+        let text = render(&mut dialog);
+        assert!(text.contains("Edit"), "missing box title:\n{text}");
+        assert!(text.contains("DELETE"), "missing delete button:\n{text}");
+        assert!(text.contains("state"), "missing label value:\n{text}");
+    }
+}

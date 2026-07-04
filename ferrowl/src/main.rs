@@ -34,7 +34,7 @@ use crate::config::ocpp::{OcppProtocol, OcppRole, OcppVersion};
 use crate::config::{
     DeviceConfig, Endpoint, ModuleSpec, OcppDeviceConfig, OcppModuleSpec, OcppSpec, Role,
 };
-use crate::module::Module;
+use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;

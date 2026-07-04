@@ -18,12 +18,13 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::module::ocpp::server::backend::Scope;
+use crate::module::ocpp::widgets;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder, TableState, TableStateBuilder},
-    style::{InputFieldStyleBuilder, TableStyleBuilder},
+    COLOR_SCHEME,
+    state::{InputFieldState, TableState},
+    style::InputFieldStyle,
     traits::HandleEvents,
-    widgets::{GetValue, InputField, InputFieldBuilder, Table, TableBuilder, Widget},
+    widgets::{GetValue, InputField, Table, Widget},
 };
 use ferrowl_ui_derive::TableEntry;
 use ratatui::style::Style;
@@ -591,158 +592,47 @@ fn to_kv(rows: Vec<(String, String, String)>) -> Vec<KvRow> {
         .collect()
 }
 
-fn border_style() -> Style {
-    Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
-}
-
 fn kv_table(title: &str) -> KvTable {
-    Widget {
-        state: TableStateBuilder::default()
-            .values(Vec::new())
-            .build()
-            .unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(title.into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::table(title)
 }
 
 fn cfg_table() -> CfgTable {
-    Widget {
-        state: TableStateBuilder::default()
-            .values(Vec::new())
-            .build()
-            .unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Configuration".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::table("Configuration")
 }
 
 fn cfg4_table() -> CfgTableC {
-    Widget {
-        state: TableStateBuilder::default()
-            .values(Vec::new())
-            .build()
-            .unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Configuration".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::table("Configuration")
 }
 
 fn rfid_table() -> RfidTable {
-    Widget {
-        state: TableStateBuilder::default()
-            .values(Vec::new())
-            .build()
-            .unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("RFIDs".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::table("RFIDs")
 }
 
 fn rfid_input() -> Widget<InputFieldState, InputField<String>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some("rfid tag (Enter to add)".to_string()))
-            .build()
-            .unwrap(),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(("Add RFID", HorizontalAlignment::Left).into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(
-                InputFieldStyleBuilder::default()
-                    .border(border_style())
-                    .build()
-                    .unwrap(),
-            )
-            .build()
-            .unwrap(),
-    }
+    widgets::input(
+        ("Add RFID", HorizontalAlignment::Left),
+        "rfid tag (Enter to add)",
+        false,
+        widgets::bordered_input_style(),
+    )
 }
 
 fn key_input() -> Widget<InputFieldState, InputField<String>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some("config key (Enter to fetch)".to_string()))
-            .build()
-            .unwrap(),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(("Fetch key", HorizontalAlignment::Left).into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(
-                InputFieldStyleBuilder::default()
-                    .border(border_style())
-                    .build()
-                    .unwrap(),
-            )
-            .build()
-            .unwrap(),
-    }
+    widgets::input(
+        ("Fetch key", HorizontalAlignment::Left),
+        "config key (Enter to fetch)",
+        false,
+        widgets::bordered_input_style(),
+    )
 }
 
 fn value_input(key: &str) -> Widget<InputFieldState, InputField<String>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(true)
-            .disabled(false)
-            .placeholder(Some("new value (Enter to set)".to_string()))
-            .build()
-            .unwrap(),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(
-                (format!("Set {key}"), HorizontalAlignment::Left).into(),
-            ))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::input(
+        (format!("Set {key}"), HorizontalAlignment::Left),
+        "new value (Enter to set)",
+        true,
+        InputFieldStyle::default(),
+    )
 }
 
 #[cfg(test)]

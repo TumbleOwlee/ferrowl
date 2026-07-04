@@ -1,6 +1,7 @@
 //! Stateful ratatui widgets: button, text, single-/multi-line input,
 //! selection list, and table.
 
+mod build;
 mod button;
 mod code_input_field;
 mod input_field;
@@ -9,6 +10,7 @@ mod selection;
 mod table;
 mod text;
 
+pub use build::*;
 pub use button::*;
 pub use code_input_field::*;
 use crossterm::event::{KeyCode, KeyModifiers};

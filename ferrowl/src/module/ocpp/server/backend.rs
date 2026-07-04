@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use parking_lot::RwLock;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -17,6 +18,7 @@ use ferrowl_ocpp::{Error, Version};
 
 use crate::module::ocpp::client::backend::{Dir, OcppMessage};
 use crate::module::ocpp::config::session::OcppSpec;
+use crate::module::ocpp::lock::{with_state, with_state_mut};
 pub use crate::module::ocpp::scope::Scope;
 
 /// A lifecycle/message event delivered from the CSMS server tasks to the view. Version-agnostic:
@@ -106,35 +108,47 @@ impl RfidStore {
 
 /// Shared CSMS RFID accept-lists, edited live by the view (detail dialogs / `:rfid`) and read by the
 /// inbound handler to gate Authorize / transaction starts.
-pub type RfidLists = std::sync::Arc<std::sync::RwLock<RfidStore>>;
+pub type RfidLists = Arc<RwLock<RfidStore>>;
+
+/// Run `f` with a read guard on `store`, dropped before returning.
+pub fn with_rfids<R>(store: &RfidLists, f: impl FnOnce(&RfidStore) -> R) -> R {
+    with_state(store, f)
+}
+
+/// Run `f` with a write guard on `store`, dropped before returning.
+pub fn with_rfids_mut<R>(store: &RfidLists, f: impl FnOnce(&mut RfidStore) -> R) -> R {
+    with_state_mut(store, f)
+}
 
 /// Whether a tag passes a CS-wide check (Authorize, which carries no connector): accepted if the
 /// effective set — the CS list unioned with *every* connector list — is empty or contains the tag.
 pub fn cs_authorized(store: &RfidLists, id_tag: &str) -> bool {
-    let s = store.read().unwrap();
-    let mut empty = s.cs.is_empty();
-    if s.cs.iter().any(|t| t == id_tag) {
-        return true;
-    }
-    for list in s.by_scope.values() {
-        if !list.is_empty() {
-            empty = false;
-            if list.iter().any(|t| t == id_tag) {
-                return true;
+    with_rfids(store, |s| {
+        let mut empty = s.cs.is_empty();
+        if s.cs.iter().any(|t| t == id_tag) {
+            return true;
+        }
+        for list in s.by_scope.values() {
+            if !list.is_empty() {
+                empty = false;
+                if list.iter().any(|t| t == id_tag) {
+                    return true;
+                }
             }
         }
-    }
-    empty
+        empty
+    })
 }
 
 /// Whether a tag passes a connector-scoped check (a transaction start that names a connector):
 /// accepted if the effective set — that connector's list unioned with the inherited CS list — is
 /// empty or contains the tag.
 pub fn scope_authorized(store: &RfidLists, scope: Scope, id_tag: &str) -> bool {
-    let s = store.read().unwrap();
-    let conn = s.scope_list(scope);
-    let effective_empty = s.cs.is_empty() && conn.is_empty();
-    effective_empty || s.cs.iter().chain(conn).any(|t| t == id_tag)
+    with_rfids(store, |s| {
+        let conn = s.scope_list(scope);
+        let effective_empty = s.cs.is_empty() && conn.is_empty();
+        effective_empty || s.cs.iter().chain(conn).any(|t| t == id_tag)
+    })
 }
 
 /// The version-generic CSMS backend owned by a server view.
@@ -245,7 +259,7 @@ mod tests {
     use super::*;
 
     fn store(cs: &[&str]) -> RfidLists {
-        Arc::new(std::sync::RwLock::new(RfidStore {
+        Arc::new(RwLock::new(RfidStore {
             cs: cs.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
         }))
@@ -273,7 +287,7 @@ mod tests {
     #[test]
     fn ut_cs_authorize_unions_all_connectors() {
         let s = store(&["CS"]);
-        s.write().unwrap().add(Scope::connector(2), "CONN2".into());
+        with_rfids_mut(&s, |s| s.add(Scope::connector(2), "CONN2".into()));
         // The CS list and any connector list both authorize at the CS (connector-less) level.
         assert!(cs_authorized(&s, "CS"));
         assert!(cs_authorized(&s, "CONN2"));
@@ -284,7 +298,7 @@ mod tests {
     #[test]
     fn ut_scope_authorize_inherits_cs_only() {
         let s = store(&["CS"]);
-        s.write().unwrap().add(Scope::connector(1), "CONN1".into());
+        with_rfids_mut(&s, |s| s.add(Scope::connector(1), "CONN1".into()));
         // Connector 1 accepts its own tag and the inherited CS tag.
         assert!(scope_authorized(&s, Scope::connector(1), "CONN1"));
         assert!(scope_authorized(&s, Scope::connector(1), "CS"));

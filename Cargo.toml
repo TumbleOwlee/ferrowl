@@ -13,3 +13,6 @@ members = [
     "ferrowl-ui-derive",
     "ferrowl-lua-derive",
 ]
+
+[workspace.dependencies]
+parking_lot = "0.12"

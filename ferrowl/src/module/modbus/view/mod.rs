@@ -17,14 +17,14 @@ use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
 
-use super::Module;
+use super::ModbusModule;
 
 mod mutate;
 mod overlay;
 use overlay::{ModbusOverlay, PendingAction};
 
 pub struct ModbusModuleView {
-    module: Module,
+    module: ModbusModule,
     spec: ModuleSpec,
     device: DeviceConfig,
     table: TableView,
@@ -37,7 +37,7 @@ pub struct ModbusModuleView {
 }
 
 impl ModbusModuleView {
-    pub fn new(module: Module, spec: ModuleSpec, device: DeviceConfig) -> Self {
+    pub fn new(module: ModbusModule, spec: ModuleSpec, device: DeviceConfig) -> Self {
         let definitions = module
             .registers()
             .iter()
@@ -446,7 +446,7 @@ impl ModuleView for ModbusModuleView {
                     }
                 };
                 let _ = self.module.stop().await;
-                let new_module = Module::new(&self.spec, &device);
+                let new_module = ModbusModule::new(&self.spec, &device);
                 self.module = new_module;
                 self.device = device;
                 let defs: Vec<_> = self
@@ -465,7 +465,7 @@ impl ModuleView for ModbusModuleView {
         }
 
         if trimmed == "edit" || trimmed == "e" {
-            let timing = Module::resolve_timing(&self.device);
+            let timing = ModbusModule::resolve_timing(&self.device);
             let dialog = SetupDialog::edit(
                 &self.spec.name,
                 &self.spec.device,
@@ -713,7 +713,300 @@ fn parse_set_args(rest: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_set_args, raw_hex};
+    use super::{ModbusModuleView, decode_definition, parse_set_args, raw_hex};
+    use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+    use crate::module::modbus::table::Definition;
+    use crate::module::view::ModuleView;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder, Value};
+    use ferrowl_modbus::{Key, SlaveKey};
+    use ferrowl_store::{CellKind, Memory, Range};
+    use ferrowl_ui::EventResult;
+    use ratatui::Frame;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use std::collections::HashMap;
+
+    fn empty_device() -> DeviceConfig {
+        DeviceConfig {
+            version: None,
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            log_file: None,
+            read_ranges: Default::default(),
+            definitions: Default::default(),
+        }
+    }
+
+    fn tcp_server_spec() -> ModuleSpec {
+        ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        }
+    }
+
+    fn new_view() -> ModbusModuleView {
+        let device = empty_device();
+        let spec = tcp_server_spec();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        ModbusModuleView::new(module, spec, device)
+    }
+
+    // --- decode_definition -------------------------------------------------
+
+    fn fixed_def() -> Definition {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        Definition::new("hold".to_string(), "d".to_string(), register, vec![])
+    }
+
+    fn virtual_def() -> Definition {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Virtual)
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        Definition::new("virt".to_string(), "d".to_string(), register, vec![])
+    }
+
+    #[test]
+    fn ut_decode_definition_fixed_reads_memory_word() {
+        let def = fixed_def();
+        let mut memory = Memory::<Key<SlaveKey>>::default();
+        let key = Key {
+            id: SlaveKey {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+            },
+        };
+        memory.add_ranges(
+            key.clone(),
+            &CellKind::ReadWrite(ferrowl_store::CellType::Register),
+            std::slice::from_ref(&Range::new(0, 1)),
+        );
+        memory.write_unchecked(key, &Range::new(0, 1), &[42u16]);
+        let empty_vs: HashMap<String, Value> = HashMap::new();
+        let decoded = decode_definition(def, &memory, &empty_vs);
+        assert!(matches!(decoded.value, Value::U16((42, _))));
+        assert_eq!(decoded.raw_value, "[002a]");
+    }
+
+    #[test]
+    fn ut_decode_definition_fixed_missing_memory_defaults_to_zero() {
+        let def = fixed_def();
+        let memory = Memory::<Key<SlaveKey>>::default();
+        let empty_vs: HashMap<String, Value> = HashMap::new();
+        let decoded = decode_definition(def, &memory, &empty_vs);
+        assert!(matches!(decoded.value, Value::U16((0, _))));
+    }
+
+    #[test]
+    fn ut_decode_definition_virtual_uses_store_value() {
+        let def = virtual_def();
+        let memory = Memory::<Key<SlaveKey>>::default();
+        let mut vs: HashMap<String, Value> = HashMap::new();
+        vs.insert("virt".into(), Value::U16((9, Resolution(1.0))));
+        let decoded = decode_definition(def, &memory, &vs);
+        assert!(matches!(decoded.value, Value::U16((9, _))));
+        assert_eq!(decoded.raw_value, "[0009]");
+    }
+
+    #[test]
+    fn ut_decode_definition_virtual_missing_value_is_blank() {
+        let def = virtual_def();
+        let memory = Memory::<Key<SlaveKey>>::default();
+        let empty_vs: HashMap<String, Value> = HashMap::new();
+        let decoded = decode_definition(def, &memory, &empty_vs);
+        assert!(matches!(decoded.value, Value::Ascii(ref s) if s.is_empty()));
+        assert!(decoded.raw_value.is_empty());
+    }
+
+    // --- view construction & key handling -----------------------------------
+
+    #[test]
+    fn ut_new_view_starts_with_no_overlay() {
+        let view = new_view();
+        assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_enter_on_empty_table_does_not_open_overlay() {
+        // No registers selected -> open_edit returns early without an overlay.
+        let mut view = new_view();
+        let result = view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(matches!(result, EventResult::Consumed));
+        assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_edit_command_opens_setup_overlay() {
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        assert!(view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_add_command_opens_add_overlay() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        assert!(view.is_overlay_active());
+        // Esc closes the overlay again.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_compact_command_toggles_table_compact_flag() {
+        let mut view = new_view();
+        assert!(!view.table.compact);
+        drop(view.handle_command("compact"));
+        assert!(view.table.compact);
+    }
+
+    /// All buffer cell symbols joined into one string, for containment assertions.
+    fn buffer_text(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// A device config with one plain fixed register ("hold") and one with named values
+    /// ("named"), to drive both edit-overlay flavours.
+    fn device_with_defs() -> DeviceConfig {
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar,
+            ValueType as CfgValueType,
+        };
+
+        let base = |address: u16, values: Vec<NamedValue>| RegisterDef {
+            slave_id: 1,
+            kind: Kind::HoldingRegister,
+            address: Some(address),
+            is_virtual: false,
+            access: AccessCfg::ReadWrite,
+            value_type: CfgValueType::U16,
+            endian: EndianCfg::Big,
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: AlignmentCfg::Left,
+            values,
+            update: None,
+            description: "desc".into(),
+            default: None,
+        };
+
+        let mut device = empty_device();
+        device.definitions.insert("hold".into(), base(0, vec![]));
+        device.definitions.insert(
+            "named".into(),
+            base(
+                1,
+                vec![NamedValue {
+                    name: "on".into(),
+                    value: Scalar::Int(1),
+                }],
+            ),
+        );
+        device
+    }
+
+    fn view_for(device: DeviceConfig) -> ModbusModuleView {
+        let spec = tcp_server_spec();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        ModbusModuleView::new(module, spec, device)
+    }
+
+    #[test]
+    fn ut_enter_on_plain_register_opens_edit_overlay_and_esc_closes() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        // Definitions are BTreeMap-ordered: "hold" (no named values) comes first.
+        assert_eq!(view.table.selected().map(|d| d.name.as_str()), Some("hold"));
+        let result = view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(matches!(result, EventResult::Consumed));
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_enter_on_named_value_register_opens_selection_overlay() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        // Move to "named" (second row) which carries named values -> selection dialog.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        assert_eq!(
+            view.table.selected().map(|d| d.name.as_str()),
+            Some("named")
+        );
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        // The selection overlay renders with the "Edit" box title and the named-value label.
+        let area = Rect::new(0, 0, 80, 48);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 48)).unwrap();
+        term.draw(|f: &mut Frame| view.render_overlay(f, area))
+            .unwrap();
+        let text = buffer_text(term.backend().buffer());
+        assert!(text.contains("Edit"), "missing dialog title:\n{text}");
+        assert!(text.contains("on"), "missing named value label:\n{text}");
+    }
+
+    #[test]
+    fn ut_render_shows_table_and_offline_status() {
+        let mut view = view_for(device_with_defs());
+        let area = Rect::new(0, 0, 120, 24);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+        let text = buffer_text(term.backend().buffer());
+        // Table title, a register row, and the not-started status line are all drawn.
+        assert!(text.contains("Register"), "missing table title:\n{text}");
+        assert!(text.contains("hold"), "missing register row:\n{text}");
+        assert!(text.contains("OFFLINE"), "missing status line:\n{text}");
+    }
+
+    #[test]
+    fn ut_render_overlay_add_dialog_shows_box_title_and_fields() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        let area = Rect::new(0, 0, 80, 52);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 52)).unwrap();
+        term.draw(|f: &mut Frame| view.render_overlay(f, area))
+            .unwrap();
+        let text = buffer_text(term.backend().buffer());
+        assert!(text.contains("Add"), "missing dialog title:\n{text}");
+        assert!(text.contains("Label"), "missing label field:\n{text}");
+        assert!(text.contains("CONFIRM"), "missing confirm button:\n{text}");
+    }
 
     #[test]
     fn ut_raw_hex_formats_words_lowercase_space_separated() {

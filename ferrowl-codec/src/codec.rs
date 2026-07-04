@@ -1,5 +1,6 @@
 //! Decode register words into [`Value`]s and encode string input back into words.
 
+use crate::error::CodecError;
 use crate::format::{Alignment, Endian, Format};
 use crate::traits::{IntoVec, ParseFromU8};
 use crate::value::Value;
@@ -9,13 +10,10 @@ use crate::value::Value;
 /// Only the first `format.width()` words are consumed; errors if `bytes` is
 /// shorter than that, or if ASCII data is not valid UTF-8. For integer formats
 /// the configured [`BitField`] is applied: `field = (raw & mask) >> shift`.
-pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
+pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
     let width = format.width();
     if bytes.len() < width {
-        Err(anyhow::anyhow!(format!(
-            "Too few bytes to parse {:?}",
-            format
-        )))
+        Err(CodecError::TooFewBytes(format.clone()))
     } else {
         let bytes = bytes
             .iter()
@@ -72,8 +70,7 @@ pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
                 Ok(Value::F64((f64::from_bits(u), r.clone())))
             }
             Format::Ascii(_) => Ok(Value::Ascii(
-                String::from_utf8(bytes.collect())
-                    .map_err(|_| anyhow::anyhow!("Parse PackedAscii failed."))?,
+                String::from_utf8(bytes.collect()).map_err(|_| CodecError::PackedAscii)?,
             )),
         }
     }
@@ -88,7 +85,7 @@ pub fn decode(format: &Format, bytes: &[u16]) -> anyhow::Result<Value> {
 /// the string is the raw value. For an integer format the value is placed
 /// according to the [`BitField`] (`raw = (value << shift) & mask`) with all
 /// other bits left zero.
-pub fn encode(format: &Format, s: &str) -> anyhow::Result<Vec<u16>> {
+pub fn encode(format: &Format, s: &str) -> Result<Vec<u16>, CodecError> {
     // Multi-byte unsigned: parse decimal or `0x` hex, position per the bit-field,
     // then split to register words.
     macro_rules! encode_uint {

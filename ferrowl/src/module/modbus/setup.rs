@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
 use crate::config::{DeviceConfig, ModuleSpec};
 use crate::dialog::SetupDialog;
-use crate::module::modbus::Module;
+use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 

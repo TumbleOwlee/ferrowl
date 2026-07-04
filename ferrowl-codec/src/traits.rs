@@ -1,5 +1,6 @@
 //! Helper traits for converting between byte streams and register words.
 
+use crate::error::CodecError;
 use std::borrow::Borrow;
 
 /// Builds an integer from a big-endian stream of bytes.
@@ -34,7 +35,7 @@ where
 /// byte of the final word.
 pub trait IntoVec<T> {
     /// Consumes the iterator and packs its items into a `Vec<T>`.
-    fn into_vec(self) -> anyhow::Result<Vec<T>>;
+    fn into_vec(self) -> Result<Vec<T>, CodecError>;
 }
 
 impl<I, T> IntoVec<u16> for I
@@ -42,7 +43,7 @@ where
     I: Iterator<Item = T>,
     T: Borrow<u8>,
 {
-    fn into_vec(self) -> anyhow::Result<Vec<u16>> {
+    fn into_vec(self) -> Result<Vec<u16>, CodecError> {
         let mut values = vec![];
         let mut idx: usize = 0;
         let mut val: u16 = 0;
