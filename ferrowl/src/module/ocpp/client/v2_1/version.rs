@@ -58,6 +58,10 @@ impl ClientVersion for V2_1 {
         crate::module::ocpp::spec::v2_1::json_actions()
     }
 
+    fn json_template(name: &str) -> Option<serde_json::Value> {
+        crate::module::ocpp::spec::v2_1::json_template(name)
+    }
+
     fn scope_of(s: &CsState, idx: usize) -> Scope {
         common::scope_of(s, idx)
     }

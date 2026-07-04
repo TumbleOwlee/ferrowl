@@ -134,6 +134,10 @@ impl ClientVersion for V1_6 {
         crate::module::ocpp::spec::v1_6::json_actions()
     }
 
+    fn json_template(name: &str) -> Option<serde_json::Value> {
+        crate::module::ocpp::spec::v1_6::json_template(name)
+    }
+
     fn scope_of(s: &CsState, idx: usize) -> Scope {
         Scope::connector(s.connectors[idx].connector_id)
     }

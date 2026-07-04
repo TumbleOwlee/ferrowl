@@ -103,6 +103,16 @@ pub fn json_actions() -> &'static [&'static str] {
     &["GetConfiguration"]
 }
 
+/// A decode-valid example payload for a [`json_actions`] entry (see
+/// [`super::v2_0_1::json_template`]). `GetConfiguration` never opens a form today, but the
+/// template keeps the version-agnostic wiring total.
+pub fn json_template(name: &str) -> Option<Value> {
+    match name {
+        "GetConfiguration" => Some(json!({ "key": ["HeartbeatInterval"] })),
+        _ => None,
+    }
+}
+
 /// The flat action spec for `name`, or `None` (JSON editor) for complex/unsupported actions.
 pub fn action_spec(name: &str) -> Option<ActionSpec> {
     use PropKind::*;
@@ -425,8 +435,21 @@ pub fn action_spec(name: &str) -> Option<ActionSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_spec, json_actions};
+    use super::{action_spec, json_actions, json_template};
     use ferrowl_ocpp::{V1_6, Version};
+
+    /// Every JSON-only action ships a handcrafted template that decodes and validates.
+    #[test]
+    fn ut_json_templates_cover_all_json_actions_and_decode() {
+        for name in json_actions() {
+            let template =
+                json_template(name).unwrap_or_else(|| panic!("{name} has no JSON template"));
+            let action = V1_6::decode_call(name, template)
+                .unwrap_or_else(|e| panic!("{name} template does not decode: {e}"));
+            V1_6::validate(&action)
+                .unwrap_or_else(|e| panic!("{name} template fails validation: {e}"));
+        }
+    }
 
     /// CS actions a charging station builds from state (sent without a dialog); excluded from
     /// dialog completeness. Mirrors the client view's `STATE_DRIVEN`.

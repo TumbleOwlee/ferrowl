@@ -68,4 +68,8 @@ impl ServerVersion for V2_1 {
     fn json_actions() -> &'static [&'static str] {
         crate::module::ocpp::spec::v2_1::json_actions()
     }
+
+    fn json_template(name: &str) -> Option<serde_json::Value> {
+        crate::module::ocpp::spec::v2_1::json_template(name)
+    }
 }
