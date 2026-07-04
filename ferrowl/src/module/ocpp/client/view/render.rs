@@ -1,6 +1,7 @@
 //! Frame rendering: the left-column layout shared with the Edit overlay, the two `ModuleView`
 //! render entry points, and the widget builders used by [`super::ClientView::new`].
 
+use ferrowl_syntax::Language;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
@@ -476,6 +477,7 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
             .focused(false)
             .disabled(true)
             .placeholder(Some("select a message".to_string()))
+            .language(Some(Language::Json))
             .build()
             .unwrap(),
         widget: CodeInputFieldBuilder::default()

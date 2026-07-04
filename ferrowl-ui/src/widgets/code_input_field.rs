@@ -4,13 +4,13 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
     style::Style,
-    text::Text,
+    text::{Line, Span, Text},
     widgets::{Block, Paragraph, StatefulWidget, Widget},
 };
 
 use crate::Border;
 use crate::state::CodeInputFieldState;
-use crate::style::InputFieldStyle;
+use crate::style::{InputFieldStyle, SyntaxTheme};
 use crate::traits::Margins;
 use crate::widgets::Title;
 
@@ -33,6 +33,9 @@ pub struct CodeInputField {
     #[getset(get = "pub")]
     #[builder(default = "Margin::default()")]
     margin: Margin,
+    #[getset(get = "pub")]
+    #[builder(default = "SyntaxTheme::default()")]
+    syntax_theme: SyntaxTheme,
 }
 
 impl Margins for CodeInputField {
@@ -142,6 +145,24 @@ impl StatefulWidget for &CodeInputField {
         };
         state.set_h_scroll(h_scroll);
 
+        // Fold `LineState` from line 0 through the last visible line, stashing the spans
+        // for the visible window. Recomputed every render; buffers are small.
+        let visible_spans: Option<Vec<Vec<(usize, usize, ferrowl_syntax::SyntaxKind)>>> =
+            state.language().map(|lang| {
+                let last_visible = (scroll + visible_height - 1).min(line_count - 1);
+                let mut carry = ferrowl_syntax::LineState::default();
+                let mut spans = Vec::with_capacity(visible_height);
+                for i in 0..=last_visible {
+                    let (line_spans, next_carry) =
+                        ferrowl_syntax::highlight_line(lang, &state.lines()[i], carry);
+                    carry = next_carry;
+                    if i >= scroll {
+                        spans.push(line_spans);
+                    }
+                }
+                spans
+            });
+
         for (row, line_idx) in (scroll..scroll + visible_height).enumerate() {
             let y = area.y + row as u16;
             if line_idx >= line_count {
@@ -167,13 +188,41 @@ impl StatefulWidget for &CodeInputField {
 
             let line = &state.lines()[line_idx];
             let chars: Vec<char> = line.chars().collect();
-            let visible: String = chars
-                .get(h_scroll..h_scroll.saturating_add(content_width).min(chars.len()))
-                .unwrap_or(&[])
-                .iter()
-                .collect();
             let content_rect = Rect::new(content_x, y, content_width as u16, 1);
-            Paragraph::new(Text::from(visible).style(self.style.general)).render(content_rect, buf);
+
+            if let Some(spans) = visible_spans.as_ref() {
+                let window_start = h_scroll;
+                let window_end = h_scroll.saturating_add(content_width).min(chars.len());
+                let mut line_spans = Vec::new();
+                let mut cursor = window_start;
+                for &(start, end, kind) in &spans[row] {
+                    let s = start.max(window_start);
+                    let e = end.min(window_end);
+                    if s >= e {
+                        continue;
+                    }
+                    if cursor < s {
+                        let gap: String = chars[cursor..s].iter().collect();
+                        line_spans.push(Span::styled(gap, self.style.general));
+                    }
+                    let text: String = chars[s..e].iter().collect();
+                    line_spans.push(Span::styled(text, self.syntax_theme.style(kind)));
+                    cursor = e;
+                }
+                if cursor < window_end {
+                    let gap: String = chars[cursor..window_end].iter().collect();
+                    line_spans.push(Span::styled(gap, self.style.general));
+                }
+                Paragraph::new(Text::from(Line::from(line_spans))).render(content_rect, buf);
+            } else {
+                let visible: String = chars
+                    .get(h_scroll..h_scroll.saturating_add(content_width).min(chars.len()))
+                    .unwrap_or(&[])
+                    .iter()
+                    .collect();
+                Paragraph::new(Text::from(visible).style(self.style.general))
+                    .render(content_rect, buf);
+            }
 
             if state.focused() && !state.disabled() && line_idx == active {
                 let cursor_in_view = cursor_col.saturating_sub(h_scroll) as u16;

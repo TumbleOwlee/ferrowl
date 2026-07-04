@@ -13,6 +13,7 @@ ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-modbus = { path = "../ferrowl-modbus" }
 ferrowl-ocpp = { path = "../ferrowl-ocpp" }
 ferrowl-lua = { path = "../ferrowl-lua" }
+ferrowl-syntax = { path = "../ferrowl-syntax" }
 ferrowl-ui-derive = { path = "../ferrowl-ui-derive" }
 anyhow = "1.0.100"
 thiserror = "2.0"

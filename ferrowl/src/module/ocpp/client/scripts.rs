@@ -12,12 +12,13 @@ use ferrowl_ui::{
         TableState, TableStateBuilder,
     },
     style::{InputFieldStyleBuilder, TableStyleBuilder},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{
         CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
         Widget,
     },
 };
+use ferrowl_syntax::Language;
 use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
@@ -331,6 +332,7 @@ fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
             .focused(false)
             .disabled(false)
             .placeholder(Some("-- select or create a script".to_string()))
+            .language(Some(Language::Lua))
             .build()
             .unwrap(),
         widget: CodeInputFieldBuilder::default()

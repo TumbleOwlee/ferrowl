@@ -54,8 +54,6 @@ impl App {
                 self.keymode = None;
                 self.prev_tab();
             }
-            (None, _, KeyCode::Char(']')) => self.next_tab(),
-            (None, _, KeyCode::Char('[')) => self.prev_tab(),
             // Command
             (None, _, KeyCode::Char(':'))
                 if !self

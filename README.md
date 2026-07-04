@@ -138,8 +138,8 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
 | `0` | Move to left edge of table |
 | `$` | Move to right edge of table |
 | `z` | Toggle compact table mode |
-| `gt \| ]` | Switch to next tab |
-| `gT \| [` | Switch to previous tab |
+| `ctrl + t, l` | Switch to next tab |
+| `ctrl + t, h` | Switch to previous tab |
 | `ctrl + d` | Clear input field |
 | `ctrl + f` | Accept autofill in input field |
 

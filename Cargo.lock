@@ -769,6 +769,7 @@ dependencies = [
  "ferrowl-ocpp",
  "ferrowl-ring",
  "ferrowl-store",
+ "ferrowl-syntax",
  "ferrowl-ui",
  "ferrowl-ui-derive",
  "ferrowl-util",
@@ -858,11 +859,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrowl-syntax"
+version = "0.4.5"
+
+[[package]]
 name = "ferrowl-ui"
 version = "0.4.5"
 dependencies = [
  "crossterm",
  "derive_builder",
+ "ferrowl-syntax",
  "ferrowl-ui-derive",
  "getset",
  "itertools",

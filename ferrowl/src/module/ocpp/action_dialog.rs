@@ -13,6 +13,7 @@
 use crate::module::ocpp::widgets;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
+use ferrowl_syntax::Language;
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{
@@ -20,7 +21,7 @@ use ferrowl_ui::{
         SelectionState, SelectionStateBuilder, TableState,
     },
     style::{InputFieldStyle, SelectionStyleBuilder},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{
         Button, CodeInputField, CodeInputFieldBuilder, GetValue, InputField, Selection,
         SelectionBuilder, Table, Widget,
@@ -554,6 +555,7 @@ fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
         state: CodeInputFieldStateBuilder::default()
             .focused(false)
             .disabled(false)
+            .language(Some(Language::Json))
             .build()
             .expect("static code-input state"),
         widget: CodeInputFieldBuilder::default()
