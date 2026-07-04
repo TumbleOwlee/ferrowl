@@ -17,17 +17,13 @@ fn mem_type(register: &Register) -> CellType {
     }
 }
 
-/// (name, script) pairs for every register carrying a non-empty `update` Lua snippet.
+/// (name, code) pairs for every enabled, non-empty global script (run on the sim thread).
 pub(crate) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(String, String)> {
     device
-        .definitions
+        .scripts
         .iter()
-        .filter_map(|(name, def)| {
-            def.update
-                .as_ref()
-                .filter(|s| !s.trim().is_empty())
-                .map(|s| (name.clone(), s.clone()))
-        })
+        .filter(|s| s.enabled && !s.code.trim().is_empty())
+        .map(|s| (s.name.clone(), s.code.clone()))
         .collect()
 }
 

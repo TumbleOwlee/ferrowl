@@ -28,7 +28,7 @@ use super::log::{FileSink, append, open_sink};
 pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Shared store of virtual-register values (no Modbus address), keyed by register name. Shared
-/// with the Lua sim thread so `update` scripts can drive virtual registers and the table shows them.
+/// with the Lua sim thread so scripts can drive virtual registers and the table shows them.
 pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_codec::Value>>>;
 
 /// One module instance: a modbus client (reads an external server) or server (simulates a
@@ -43,7 +43,7 @@ pub struct ModbusModule {
     memory: ModuleMemory,
     log: ModuleLog,
     file_sink: FileSink,
-    /// Per-register `update` Lua snippets (register name → code), run on the sim thread.
+    /// Enabled global Lua scripts (name → code), run on the sim thread.
     scripts: Vec<(String, String)>,
     /// Explicit per-function-code read ranges from the device config (empty = auto-merge).
     read_ranges: ReadRanges,
@@ -60,7 +60,7 @@ impl ModbusModule {
     pub fn new(spec: &ModuleSpec, device: &DeviceConfig) -> Self {
         let mut memory = Memory::<Key<SlaveKey>>::default();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
-        let mut scripts: Vec<(String, String)> = Vec::new();
+        let scripts = super::registers::collect_scripts(device);
         let mut virtual_init: HashMap<String, ferrowl_codec::Value> = HashMap::new();
 
         for (name, def) in &device.definitions {
@@ -71,11 +71,6 @@ impl ModbusModule {
                 register.clone(),
                 def.values.clone(),
             ));
-            if let Some(code) = &def.update
-                && !code.trim().is_empty()
-            {
-                scripts.push((name.clone(), code.clone()));
-            }
             if let Address::Virtual = register.address() {
                 let init = def
                     .default
@@ -259,7 +254,7 @@ impl ModbusModule {
         self.instance.stop().await
     }
 
-    /// Spawn the Lua simulation thread (no-op if there are no `update` scripts). Any previously
+    /// Spawn the Lua simulation thread (no-op if there are no scripts). Any previously
     /// running thread is stopped first so this is safe to call on restart.
     fn start_sim(&mut self) {
         self.stop_sim();
@@ -286,7 +281,7 @@ impl ModbusModule {
         }
     }
 
-    /// Start the Lua simulation thread (`:lua start`). No-op when there are no `update` scripts.
+    /// Start the Lua simulation thread (`:lua start`). No-op when there are no scripts.
     pub fn start_lua(&mut self) {
         self.start_sim();
     }
@@ -437,6 +432,7 @@ mod tests {
                 ..Default::default()
             },
             definitions,
+            scripts: Vec::new(),
         }
     }
 

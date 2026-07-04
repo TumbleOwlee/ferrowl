@@ -14,11 +14,11 @@ use derive_builder::Builder;
 use ferrowl_codec::format::{BitField, Format as RegisterFormat, Resolution, Width};
 use ferrowl_codec::{Address, Register, RegisterBuilder};
 use ferrowl_ui::{
-    state::{ButtonState, CodeInputFieldState, InputFieldState, SelectionState},
+    state::{ButtonState, InputFieldState, SelectionState},
     traits::HandleEvents,
     traits::ToLabel,
     widgets::{
-        Button, CodeInputField, GetValue, InputField, Selection, Text, Validate, ValidateResult,
+        Button, GetValue, InputField, Selection, Text, Validate, ValidateResult,
         Widget,
     },
 };
@@ -130,9 +130,6 @@ where
     // Default value selection (same options as value, plus a leading "no default" sentinel)
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub default_value: Widget<SelectionState<V>, Selection<V>>,
-    // Lua simulation script (optional multiline)
-    #[focus]
-    pub update_script: Widget<CodeInputFieldState, CodeInputField>,
     // Confirm button
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
@@ -206,16 +203,12 @@ impl EditSelectionDialog<NamedValue> {
         named_values: Vec<NamedValue>,
         current_value: &str,
         raw_value: &str,
-        update: Option<&str>,
         default: Option<&Scalar>,
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
         dialog.deletable = true;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
-        if let Some(script) = update {
-            dialog.update_script.state.set_content(script);
-        }
         // Populate default selection: sentinel at index 0, then all named values.
         let mut default_vals = vec![NamedValue {
             name: "(no default)".to_string(),
@@ -355,13 +348,6 @@ impl EditSelectionDialog<NamedValue> {
         } else {
             Some(self.value.state.get_value().value.to_string())
         };
-        let update_script = self.update_script.state.content().trim().to_string();
-        let update = Some(if update_script.is_empty() {
-            String::new()
-        } else {
-            update_script
-        });
-
         let default = {
             let sel = self.default_value.state.selection();
             let vals = self.default_value.state.values();
@@ -378,7 +364,6 @@ impl EditSelectionDialog<NamedValue> {
             register,
             value,
             named_values: Some(named_values),
-            update,
             default,
         })
     }
@@ -396,10 +381,6 @@ impl EditSelectionDialog<NamedValue> {
 
     pub fn is_delete_register_button_focused(&self) -> bool {
         matches!(self.focus, EditSelectionDialogFocus::DeleteRegisterButton)
-    }
-
-    pub fn is_update_script_focused(&self) -> bool {
-        matches!(self.focus, EditSelectionDialogFocus::UpdateScript)
     }
 
     pub fn is_confirm_button_focused(&self) -> bool {
@@ -424,7 +405,6 @@ impl EditSelectionDialog<NamedValue> {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
-        d.update_script.state = self.update_script.state.clone();
         // Convert selected default → text (skip sentinel at index 0).
         let sel = self.default_value.state.selection();
         if sel > 0
@@ -562,7 +542,6 @@ mod apply_tests {
             "1",
             "[0001]",
             None,
-            None,
         )
         .apply()
         .expect("valid dialog should apply");
@@ -588,7 +567,6 @@ mod apply_tests {
             "0",
             "[0000]",
             None,
-            None,
         );
         assert_eq!(dialog.value.state.selection(), 1); // "off" (value 0)
     }
@@ -607,7 +585,6 @@ mod apply_tests {
             named_values(),
             "1",
             "[0001]",
-            None,
             None,
         );
         assert_eq!(dialog.value.state.values().len(), 2);
@@ -654,7 +631,7 @@ mod focus_tests {
             name: "on".into(),
             value: Scalar::Int(1),
         }];
-        EditSelectionDialog::from_register("s", "", &original, values, "1", "[0001]", None, None)
+        EditSelectionDialog::from_register("s", "", &original, values, "1", "[0001]", None)
     }
 
     #[test]
@@ -729,7 +706,6 @@ mod default_and_conversion_tests {
             named_values(),
             "1",
             "[0001]",
-            None,
             Some(&Scalar::Int(1)),
         )
     }
@@ -854,9 +830,6 @@ impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
     }
     fn handle_space(&mut self) {
         self.handle_space()
-    }
-    fn is_update_script_focused(&self) -> bool {
-        self.is_update_script_focused()
     }
     fn is_confirm_button_focused(&self) -> bool {
         self.is_confirm_button_focused()

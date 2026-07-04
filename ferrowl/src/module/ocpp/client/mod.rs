@@ -5,7 +5,6 @@
 pub mod backend;
 pub mod config;
 pub mod lua_sim;
-pub mod scripts;
 pub mod v1_6;
 pub mod v2_0_1;
 pub mod v2_1;

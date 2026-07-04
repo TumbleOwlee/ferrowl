@@ -74,10 +74,6 @@ impl EditInputDialog {
                 "Default value (applied on startup)...",
             ))
             .add_button(widgets::button("ADD PREDEFINED", 1))
-            .update_script(widgets::code(
-                "Lua Update",
-                "-- Lua update script (optional)",
-            ))
             .delete_register_button(widgets::button("DELETE", 1))
             .confirm_button(widgets::button("CONFIRM", 1))
             .error(widgets::error_text())

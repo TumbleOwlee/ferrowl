@@ -10,6 +10,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::config::{DeviceConfig, ModuleSpec};
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
 use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
@@ -31,6 +32,7 @@ pub struct ModbusModuleView {
     sort: Option<(usize, bool)>,
     overlay: Option<ModbusOverlay>,
     setup_overlay: Option<SetupDialog>,
+    scripts_overlay: Option<ScriptDialog>,
     pending: Option<PendingAction>,
     /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
     view_focused: bool,
@@ -58,6 +60,7 @@ impl ModbusModuleView {
             sort: None,
             overlay: None,
             setup_overlay: None,
+            scripts_overlay: None,
             pending: None,
             view_focused: false,
         }
@@ -67,14 +70,11 @@ impl ModbusModuleView {
         let Some(def) = self.table.selected().cloned() else {
             return;
         };
-        let (update_script, current_default) = self
+        let current_default = self
             .device
             .definitions
             .get(&def.name)
-            .map(|d| (d.update.as_deref(), d.default.as_ref()))
-            .unzip();
-        let update_script = update_script.flatten();
-        let current_default = current_default.flatten();
+            .and_then(|d| d.default.as_ref());
         let unscaled = def.value.clone().unscaled().to_string();
         if def.named_values.is_empty() {
             self.overlay = Some(ModbusOverlay::Edit(EditInputDialog::from_register(
@@ -82,7 +82,6 @@ impl ModbusModuleView {
                 &def.description,
                 &def.register,
                 &unscaled,
-                update_script,
                 current_default,
             )));
         } else {
@@ -94,7 +93,6 @@ impl ModbusModuleView {
                     def.named_values.clone(),
                     &unscaled,
                     &def.raw_value,
-                    update_script,
                     current_default,
                 ),
             ));
@@ -149,7 +147,6 @@ impl ModbusModuleView {
 
         self.overlay.as_mut().unwrap().clear_name_error();
 
-        let update_script_focused = self.overlay.as_ref().unwrap().is_update_script_focused();
         let confirm_button_focused = self.overlay.as_ref().unwrap().is_confirm_button_focused();
         let delete_button_focused = self
             .overlay
@@ -162,12 +159,7 @@ impl ModbusModuleView {
                 self.overlay = None;
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                if update_script_focused {
-                    self.overlay
-                        .as_mut()
-                        .unwrap()
-                        .handle_events(modifiers, code);
-                } else if delete_button_focused {
+                if delete_button_focused {
                     self.overlay.as_mut().unwrap().open_confirm_delete();
                 } else {
                     self.confirm_overlay();
@@ -261,7 +253,7 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn is_overlay_active(&self) -> bool {
-        self.overlay.is_some() || self.setup_overlay.is_some()
+        self.overlay.is_some() || self.setup_overlay.is_some() || self.scripts_overlay.is_some()
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -275,7 +267,10 @@ impl ModuleView for ModbusModuleView {
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
         self.table.table.state.set_focused(
-            self.view_focused && self.overlay.is_none() && self.setup_overlay.is_none(),
+            self.view_focused
+                && self.overlay.is_none()
+                && self.setup_overlay.is_none()
+                && self.scripts_overlay.is_none(),
         );
         self.table.render(content_area, frame.buffer_mut());
 
@@ -311,7 +306,9 @@ impl ModuleView for ModbusModuleView {
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
         let full_area = frame.area();
-        if let Some(setup) = &mut self.setup_overlay {
+        if let Some(scripts) = &mut self.scripts_overlay {
+            scripts.render(full_area, frame.buffer_mut());
+        } else if let Some(setup) = &mut self.setup_overlay {
             setup.render(full_area, frame.buffer_mut());
         } else if let Some(overlay) = &mut self.overlay {
             overlay.render(full_area, frame.buffer_mut());
@@ -319,6 +316,15 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let Some(ref mut scripts) = self.scripts_overlay {
+            if scripts.handle_events(modifiers, code) {
+                let dialog = self.scripts_overlay.take().expect("checked above");
+                self.device.scripts = dialog.resolve();
+                self.module
+                    .reload_scripts(super::registers::collect_scripts(&self.device));
+            }
+            return EventResult::Consumed;
+        }
         if let Some(ref mut setup) = self.setup_overlay {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => {
@@ -483,6 +489,11 @@ impl ModuleView for ModbusModuleView {
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
+        if trimmed == "scripts" {
+            self.scripts_overlay = Some(ScriptDialog::new(&self.device.scripts));
+            return Box::pin(std::future::ready(CommandResult::Handled(None)));
+        }
+
         if trimmed == "compact" {
             self.table.set_compact(!self.table.compact);
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
@@ -592,7 +603,7 @@ impl ModuleView for ModbusModuleView {
     }
 }
 
-static MODBUS_COMMANDS: [CommandDescriptor; 12] = [
+static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
     CommandDescriptor {
         name: ":e | :edit",
         description: "edit module setup",
@@ -636,6 +647,10 @@ static MODBUS_COMMANDS: [CommandDescriptor; 12] = [
     CommandDescriptor {
         name: ":lua start|stop|status",
         description: "lua simulation",
+    },
+    CommandDescriptor {
+        name: ":scripts",
+        description: "manage lua scripts",
     },
     CommandDescriptor {
         name: ":order [col] [asc|desc]",
@@ -743,6 +758,7 @@ mod tests {
             log_file: None,
             read_ranges: Default::default(),
             definitions: Default::default(),
+            scripts: Default::default(),
         }
     }
 
@@ -901,6 +917,25 @@ mod tests {
         let result = view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(matches!(result, EventResult::Consumed));
         assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_scripts_command_opens_overlay_and_close_applies() {
+        let mut view = new_view();
+        drop(view.handle_command("scripts"));
+        assert!(view.is_overlay_active());
+        // Create a script through the dialog: Tab to the name input (the code editor is
+        // skipped while nothing is selected), type a name, Enter creates it, Esc closes.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        for c in "sim".chars() {
+            view.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(!view.is_overlay_active());
+        assert_eq!(view.device.scripts.len(), 1);
+        assert_eq!(view.device.scripts[0].name, "sim");
+        assert!(view.device.scripts[0].enabled);
     }
 
     #[test]

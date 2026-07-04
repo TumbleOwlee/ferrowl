@@ -8,7 +8,7 @@ use ferrowl_ui::widgets::GetValue;
 
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
-use crate::module::ocpp::client::scripts::ScriptDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::server::backend::{Scope, with_rfids_mut};
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
 

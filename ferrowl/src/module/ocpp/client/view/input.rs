@@ -7,7 +7,7 @@ use ferrowl_ui::{EventResult, traits::HandleEvents, widgets::GetValue};
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::ClientFields;
-use crate::module::ocpp::client::scripts::ScriptDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::lock::{HasState, with_state};
 use crate::module::ocpp::scope::Scope;
 

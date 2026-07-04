@@ -19,7 +19,6 @@ pub trait RegisterDialog: SubDialogs {
     /// Route a key to the focused field (the dialog's `HandleEvents` result is not surfaced here).
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode);
     fn handle_space(&mut self);
-    fn is_update_script_focused(&self) -> bool;
     fn is_confirm_button_focused(&self) -> bool;
     fn is_delete_register_button_focused(&self) -> bool;
     /// Validate the dialog and produce the edited register (or a user-facing error string).

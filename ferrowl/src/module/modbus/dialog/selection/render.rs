@@ -29,7 +29,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3 + 4),
+            Constraint::Length(27 + 2 + 2 + 3 + 3 + 3 + 4 - 10),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -48,7 +48,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 13] = Layout::vertical([
+        let vertical_layout: [Rect; 12] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
@@ -56,7 +56,6 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(10),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(1),
@@ -246,14 +245,6 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         }
         vertical_index += 1;
 
-        StatefulWidget::render(
-            &self.update_script.widget,
-            vertical_layout[vertical_index],
-            buf,
-            &mut self.update_script.state,
-        );
-        vertical_index += 1;
-
         if self.deletable {
             let buttons: [Rect; 2] =
                 Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -391,7 +382,6 @@ mod render_tests {
             }],
             "1",
             "[0001]",
-            None,
             None,
         );
         let text = render(&mut dialog);
