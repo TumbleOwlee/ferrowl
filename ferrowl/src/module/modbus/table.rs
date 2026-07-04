@@ -7,7 +7,7 @@ use crate::{
 use derive_builder::Builder;
 use ferrowl_codec::{Register, Value};
 use ferrowl_ui::{
-    Border,
+    Border, COLOR_SCHEME,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     widgets::{Header, Table, TableBuilder, TableEntry, Widget, Width},
@@ -16,11 +16,16 @@ use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
+    style::Style,
     widgets::StatefulWidget,
 };
 use std::fmt::Debug;
+use std::time::{Duration, Instant};
 
 pub const COLUMN_COUNT: usize = 11;
+
+/// How long a row stays highlighted after a register change.
+pub const CHANGE_HIGHLIGHT: Duration = Duration::from_secs(2);
 
 /// Resolve a user-supplied column name to its index in [`TableHeader::header`].
 /// Matching is case-insensitive and ignores spaces, so `slaveid`, `slave id`, and
@@ -105,6 +110,9 @@ pub struct Definition {
     pub named_values: Vec<NamedValue>,
     pub value: Value,
     pub raw_value: String,
+    /// When the decoded value last changed; drives the change highlight (see
+    /// [`CHANGE_HIGHLIGHT`]). `None` until the first observed change.
+    pub changed_at: Option<Instant>,
 }
 
 impl Definition {
@@ -121,7 +129,14 @@ impl Definition {
             named_values,
             value: Value::Ascii(String::new()),
             raw_value: String::new(),
+            changed_at: None,
         }
+    }
+
+    /// Whether the row is inside its post-change highlight window.
+    fn highlight_active(&self) -> bool {
+        self.changed_at
+            .is_some_and(|at| at.elapsed() < CHANGE_HIGHLIGHT)
     }
 }
 
@@ -171,6 +186,14 @@ impl TableEntry<COLUMN_COUNT> for Definition {
 
     fn height(&self) -> u16 {
         3
+    }
+
+    fn cell_styles(&self) -> [Option<Style>; COLUMN_COUNT] {
+        if self.highlight_active() {
+            [Some(Style::default().fg(COLOR_SCHEME.hi)); COLUMN_COUNT]
+        } else {
+            [None; COLUMN_COUNT]
+        }
     }
 }
 
@@ -252,5 +275,49 @@ impl TableView {
     /// Select the first register row (or clear the selection when the table is empty).
     pub fn select_first(&mut self) {
         self.table.state.move_to_top();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+
+    fn definition() -> Definition {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        Definition::new("reg".to_string(), "d".to_string(), register, vec![])
+    }
+
+    #[test]
+    fn ut_no_change_has_no_cell_styles() {
+        let d = definition();
+        assert!(d.cell_styles().iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn ut_recent_change_highlights_full_row() {
+        let mut d = definition();
+        d.changed_at = Some(Instant::now());
+        assert!(d.cell_styles().iter().all(Option::is_some));
+    }
+
+    #[test]
+    fn ut_highlight_expires_after_window() {
+        let mut d = definition();
+        d.changed_at = Instant::now().checked_sub(CHANGE_HIGHLIGHT + Duration::from_secs(1));
+        assert!(d.changed_at.is_some(), "back-dating must succeed");
+        assert!(d.cell_styles().iter().all(Option::is_none));
     }
 }
