@@ -24,12 +24,8 @@ use std::time::{Duration, Instant};
 
 pub const COLUMN_COUNT: usize = 11;
 
-/// How long the Value/Raw Value cells stay highlighted after a register change.
+/// How long a row stays highlighted after a register change.
 pub const CHANGE_HIGHLIGHT: Duration = Duration::from_secs(2);
-
-/// Column indices of the live-value cells highlighted on change.
-const VALUE_COL: usize = 9;
-const RAW_VALUE_COL: usize = 10;
 
 /// Resolve a user-supplied column name to its index in [`TableHeader::header`].
 /// Matching is case-insensitive and ignores spaces, so `slaveid`, `slave id`, and
@@ -193,13 +189,11 @@ impl TableEntry<COLUMN_COUNT> for Definition {
     }
 
     fn cell_styles(&self) -> [Option<Style>; COLUMN_COUNT] {
-        let mut styles = [None; COLUMN_COUNT];
         if self.highlight_active() {
-            let hi = Some(Style::default().fg(COLOR_SCHEME.hi));
-            styles[VALUE_COL] = hi;
-            styles[RAW_VALUE_COL] = hi;
+            [Some(Style::default().fg(COLOR_SCHEME.hi)); COLUMN_COUNT]
+        } else {
+            [None; COLUMN_COUNT]
         }
-        styles
     }
 }
 
@@ -313,17 +307,10 @@ mod tests {
     }
 
     #[test]
-    fn ut_recent_change_highlights_value_cells_only() {
+    fn ut_recent_change_highlights_full_row() {
         let mut d = definition();
         d.changed_at = Some(Instant::now());
-        let styles = d.cell_styles();
-        for (i, style) in styles.iter().enumerate() {
-            if i == VALUE_COL || i == RAW_VALUE_COL {
-                assert!(style.is_some(), "column {i} must be highlighted");
-            } else {
-                assert!(style.is_none(), "column {i} must stay unstyled");
-            }
-        }
+        assert!(d.cell_styles().iter().all(Option::is_some));
     }
 
     #[test]
