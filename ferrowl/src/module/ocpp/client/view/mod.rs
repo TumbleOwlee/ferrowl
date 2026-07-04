@@ -45,7 +45,7 @@ use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{Messages, OcppClient, OcppMessage};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::{ClientFields, OcppSimHandle, ScopedActionQueue};
-use crate::module::ocpp::client::scripts::ScriptDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::{ConnectorRef, OcppDeviceConfig};
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};

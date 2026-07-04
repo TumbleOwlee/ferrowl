@@ -114,10 +114,6 @@ impl ModbusOverlay {
         self.inner_mut().add_dialog_handle_events(modifiers, code)
     }
 
-    pub(super) fn is_update_script_focused(&self) -> bool {
-        self.inner().is_update_script_focused()
-    }
-
     pub(super) fn is_confirm_button_focused(&self) -> bool {
         self.inner().is_confirm_button_focused()
     }

@@ -1,4 +1,4 @@
-//! Lua script manager dialog, shared by both OCPP client views. Left: a table of scripts with an
+//! Lua script manager dialog, shared by the OCPP views and the Modbus view. Left: a table of scripts with an
 //! On/Off status over a "New Script" name input; right: a code editor for the selected script.
 //! Edits are live on a working copy; the view reads it back via [`ScriptDialog::resolve`] on close
 //! and reloads the simulation. `t` toggles a script, `d` deletes (with confirmation), `c` toggles
@@ -28,7 +28,7 @@ use ratatui::{
 };
 
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
-use crate::module::ocpp::config::device::ScriptDef;
+use crate::config::script::ScriptDef;
 
 // --- Script table ----------------------------------------------------------
 

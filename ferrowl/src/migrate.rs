@@ -376,7 +376,10 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
         log_file: None,
         read_ranges,
         definitions,
+        scripts: Vec::new(),
     };
+    let mut device = device;
+    device.migrate_update_scripts();
 
     (device, warnings)
 }
@@ -634,10 +637,16 @@ mod tests {
         assert_eq!(temp.value_type, ValueType::F32);
         assert_eq!(temp.endian, EndianCfg::Little);
 
-        // on_update → update
+        // on_update → migrated into the global script list, named after the register.
         let label = &device.definitions["status_label"];
-        assert!(label.update.is_some());
+        assert!(label.update.is_none());
         assert_eq!(label.value_type, ValueType::Ascii);
         assert!(label.is_virtual);
+        assert!(
+            device
+                .scripts
+                .iter()
+                .any(|s| s.name == "status_label" && s.enabled)
+        );
     }
 }

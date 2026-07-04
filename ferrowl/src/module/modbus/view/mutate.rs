@@ -12,9 +12,7 @@ use crate::module::modbus::table::{Definition, TableHeader, column_index};
 use crate::module::view::CommandResult;
 
 use super::super::ModbusModule;
-use super::super::registers::{
-    collect_scripts, register_mem_binding, sync_register_def, write_command,
-};
+use super::super::registers::{register_mem_binding, sync_register_def, write_command};
 use super::ModbusModuleView;
 
 impl ModbusModuleView {
@@ -62,7 +60,7 @@ impl ModbusModuleView {
             length: 1,
             alignment: crate::config::device::AlignmentCfg::default(),
             values: named_values.clone(),
-            update: edited.update.as_ref().filter(|s| !s.is_empty()).cloned(),
+            update: None,
             description: edited.description.clone(),
             default: edited.default.clone(),
         };
@@ -94,16 +92,6 @@ impl ModbusModuleView {
             named_values,
         ));
         self.table.set_definitions(defs);
-
-        if edited
-            .update
-            .as_ref()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false)
-        {
-            let scripts = collect_scripts(&self.device);
-            self.module.reload_scripts(scripts);
-        }
 
         if let Address::Virtual = edited.register.address() {
             let seed = crate::module::modbus::default_value(&edited.register);
@@ -178,13 +166,6 @@ impl ModbusModuleView {
                 if let Some(nv) = &edited.named_values {
                     def.values = nv.clone();
                 }
-                if let Some(script) = &edited.update {
-                    def.update = if script.is_empty() {
-                        None
-                    } else {
-                        Some(script.clone())
-                    };
-                }
                 def.default = edited.default.clone();
             }
             if edited.name != original_name
@@ -205,11 +186,6 @@ impl ModbusModuleView {
         }
 
         self.module.rebuild_operations().await;
-
-        if edited.update.is_some() {
-            let scripts = collect_scripts(&self.device);
-            self.module.reload_scripts(scripts);
-        }
 
         if let Some(v) = preserved_value
             && edited.value.is_none()
@@ -237,9 +213,6 @@ impl ModbusModuleView {
         self.table.select_first();
 
         self.module.rebuild_operations().await;
-
-        let scripts = collect_scripts(&self.device);
-        self.module.reload_scripts(scripts);
     }
 
     pub(super) async fn apply_setup(&mut self, values: SetupValues) {

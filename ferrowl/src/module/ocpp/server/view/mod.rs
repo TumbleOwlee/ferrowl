@@ -39,7 +39,7 @@ use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::OcppMessage;
 use crate::module::ocpp::client::lua_sim::OcppFields;
-use crate::module::ocpp::client::scripts::ScriptDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::{ConnectorRfids, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppSpec};
 use crate::module::ocpp::lock::{with_state, with_state_mut};

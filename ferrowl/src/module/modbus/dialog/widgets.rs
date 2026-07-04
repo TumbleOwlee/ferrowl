@@ -13,18 +13,17 @@ use ferrowl_codec::format::{
     Resolution,
 };
 use ferrowl_codec::{Access, Kind};
-use ferrowl_syntax::Language;
 use ferrowl_ui::state::ButtonState;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
-        CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
+        InputFieldState, InputFieldStateBuilder,
         SelectionState, SelectionStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
     widgets::{
-        Button, CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Selection,
+        Button, InputField, InputFieldBuilder, Selection,
         SelectionBuilder, Text, TextBuilder, Title, Validate, Widget,
     },
 };
@@ -127,28 +126,6 @@ pub(super) fn button(label: &str, horizontal: u16) -> Widget<ButtonState, Button
     ferrowl_ui::widgets::button(label, ButtonStyle::default(), horizontal)
 }
 
-/// An unfocused, bordered, titled multiline code-input field (the Lua update script).
-pub(super) fn code(
-    title: impl Into<Title>,
-    placeholder: &str,
-) -> Widget<CodeInputFieldState, CodeInputField> {
-    Widget {
-        state: CodeInputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some(placeholder.to_string()))
-            .language(Some(Language::Lua))
-            .build()
-            .expect("static code-input state"),
-        widget: CodeInputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(title.into()))
-            .margin(field_margin())
-            .style(InputFieldStyle::default())
-            .build()
-            .expect("static code-input config"),
-    }
-}
 
 /// A bordered, titled static text box showing `content`.
 pub(super) fn text_boxed(

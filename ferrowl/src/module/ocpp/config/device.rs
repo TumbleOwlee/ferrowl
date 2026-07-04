@@ -8,12 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::session::{OcppRole, OcppSpec, OcppVersion};
+pub use crate::config::script::ScriptDef;
 
-/// Default for `ScriptDef::enabled`: a script with no explicit flag is active.
-fn default_true() -> bool {
-    true
-}
+use super::session::{OcppRole, OcppSpec, OcppVersion};
 
 /// A persisted connector entry for a charging-station (client) device type. `evse` is `None` for
 /// OCPP 1.6 (connector-only) and `Some` for 2.0.1; `connector` is the connector id. The CS-level
@@ -49,18 +46,6 @@ pub struct ConfigKeyDef {
     pub value: String,
     #[serde(default)]
     pub readonly: bool,
-}
-
-/// One Lua simulation script attached to an OCPP device type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScriptDef {
-    pub name: String,
-    #[serde(default)]
-    pub code: String,
-    /// Whether the script runs in the simulation loop. Defaults to On (a freshly-created script
-    /// and a flag-less file entry are both active).
-    #[serde(default = "default_true")]
-    pub enabled: bool,
 }
 
 /// An OCPP device-type configuration file.

@@ -9,9 +9,9 @@ use ferrowl_codec::format::{
 };
 use ferrowl_codec::{Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::{
-    state::{ButtonState, CodeInputFieldState, InputFieldState, SelectionState},
+    state::{ButtonState, InputFieldState, SelectionState},
     widgets::{
-        Button, CodeInputField, GetValue, InputField, Selection, Text, Validate, ValidateResult,
+        Button, GetValue, InputField, Selection, Text, Validate, ValidateResult,
         Widget,
     },
 };
@@ -75,9 +75,6 @@ pub struct EditInputDialog {
     // Button to add a predefined named value
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
-    // Lua simulation script (optional multiline)
-    #[focus]
-    pub update_script: Widget<CodeInputFieldState, CodeInputField>,
     // Confirm button
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
@@ -118,8 +115,6 @@ pub struct EditedRegister {
     pub value: Option<String>,
     /// Updated named-value list from EditSelectionDialog; None means unchanged.
     pub named_values: Option<Vec<crate::config::device::NamedValue>>,
-    /// Lua update script content; None means unchanged (field not shown).
-    pub update: Option<String>,
     /// Default value to store in the device config (applied on startup). None = no default.
     pub default: Option<Scalar>,
 }
@@ -186,16 +181,12 @@ impl EditInputDialog {
         description: &str,
         register: &Register,
         value: &str,
-        update: Option<&str>,
         default: Option<&Scalar>,
     ) -> Self {
         let mut dialog = Self::new();
         dialog.deletable = true;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
-        if let Some(script) = update {
-            dialog.update_script.state.set_content(script);
-        }
         if let Some(def) = default {
             set_input(&mut dialog.default_value, &def.to_string());
         }
@@ -340,13 +331,6 @@ impl EditInputDialog {
         } else {
             None
         };
-        let update_script = self.update_script.state.content().trim().to_string();
-        let update = Some(if update_script.is_empty() {
-            String::new()
-        } else {
-            update_script
-        });
-
         let named_values = if self.pending_named_values.is_empty() {
             None
         } else {
@@ -368,7 +352,6 @@ impl EditInputDialog {
             register,
             value,
             named_values,
-            update,
             default,
         })
     }
@@ -385,10 +368,6 @@ impl EditInputDialog {
 
     pub fn is_delete_register_button_focused(&self) -> bool {
         matches!(self.focus, EditInputDialogFocus::DeleteRegisterButton)
-    }
-
-    pub fn is_update_script_focused(&self) -> bool {
-        matches!(self.focus, EditInputDialogFocus::UpdateScript)
     }
 
     pub fn is_confirm_button_focused(&self) -> bool {
@@ -417,7 +396,6 @@ impl EditInputDialog {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
-        d.update_script.state = self.update_script.state.clone();
 
         // Set up default selection with sentinel and try to match prior text default.
         let mut default_vals = vec![NamedValue {
@@ -484,9 +462,6 @@ impl super::RegisterDialog for EditInputDialog {
     fn handle_space(&mut self) {
         self.handle_space()
     }
-    fn is_update_script_focused(&self) -> bool {
-        self.is_update_script_focused()
-    }
     fn is_confirm_button_focused(&self) -> bool {
         self.is_confirm_button_focused()
     }
@@ -544,7 +519,7 @@ mod apply_tests {
             RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0), BitField::default())),
         );
         let edited =
-            EditInputDialog::from_register("temp", "a sensor", &original, "42", None, None)
+            EditInputDialog::from_register("temp", "a sensor", &original, "42", None)
                 .apply()
                 .expect("valid register should apply");
 
@@ -567,7 +542,7 @@ mod apply_tests {
             1,
             RegisterFormat::U16((RegisterEndian::Little, Resolution(0.5), BitField::default())),
         );
-        let edited = EditInputDialog::from_register("v", "", &original, "3", None, None)
+        let edited = EditInputDialog::from_register("v", "", &original, "3", None)
             .apply()
             .expect("valid register should apply");
 
@@ -589,7 +564,7 @@ mod apply_tests {
                 BitField { mask: 0xFF00 },
             )),
         );
-        let edited = EditInputDialog::from_register("masked", "", &original, "0", None, None)
+        let edited = EditInputDialog::from_register("masked", "", &original, "0", None)
             .apply()
             .expect("valid register should apply");
         assert_eq!(edited.register.format(), original.format());
@@ -604,7 +579,7 @@ mod apply_tests {
             1,
             RegisterFormat::Ascii((TextAlignment::Left, Width(4))),
         );
-        let edited = EditInputDialog::from_register("label", "", &original, "AB", None, None)
+        let edited = EditInputDialog::from_register("label", "", &original, "AB", None)
             .apply()
             .expect("valid register should apply");
         assert_eq!(edited.register.format(), original.format());
@@ -619,7 +594,7 @@ mod apply_tests {
             1,
             RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
         );
-        let edited = EditInputDialog::from_register("c", "", &original, "1", None, None)
+        let edited = EditInputDialog::from_register("c", "", &original, "1", None)
             .apply()
             .expect("valid register should apply");
         assert_eq!(*edited.register.kind(), Kind::Coil);
@@ -665,7 +640,7 @@ mod focus_tests {
             .build()
             .unwrap();
         // `from_register` focuses the value field and sets the cursor at the end of "4".
-        EditInputDialog::from_register("name", "", &register, "4", None, None)
+        EditInputDialog::from_register("name", "", &register, "4", None)
     }
 
     fn coil_dialog() -> EditInputDialog {
@@ -681,7 +656,7 @@ mod focus_tests {
             )))
             .build()
             .unwrap();
-        EditInputDialog::from_register("c", "", &register, "1", None, None)
+        EditInputDialog::from_register("c", "", &register, "1", None)
     }
 
     /// Walk a full forward focus cycle, returning every focus state visited (starting state first).

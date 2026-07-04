@@ -1,5 +1,7 @@
 //! Device and session configuration loading (TOML/JSON).
 
+pub mod script;
+
 pub mod device {
     pub use crate::module::modbus::config::device::*;
 }
@@ -39,9 +41,12 @@ fn load<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ConfigError> {
     Converter::load(path, ty).map_err(|e| ConfigError::Io(format!("{:?}", e)))
 }
 
-/// Load a device-type config file.
+/// Load a device-type config file, migrating legacy per-register `update` scripts
+/// into the global script list.
 pub fn load_device(path: &str) -> Result<DeviceConfig, ConfigError> {
-    load(path)
+    let mut device: DeviceConfig = load(path)?;
+    device.migrate_update_scripts();
+    Ok(device)
 }
 
 /// Load an OCPP device-type config file.
@@ -75,6 +80,22 @@ mod tests {
         let spath = tmp("ferrowl_cfgmod_session.json");
         Converter::save(&Session::default(), &spath, FileType::Json).unwrap();
         assert_eq!(load_session(&spath).unwrap(), Session::default());
+    }
+
+    #[test]
+    fn ut_load_device_migrates_update_scripts() {
+        let path = tmp("ferrowl_cfgmod_legacy_update.toml");
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\nupdate = \"C_Time:Sleep(1)\"\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert!(device.definitions["reg"].update.is_none());
+        assert_eq!(device.scripts.len(), 1);
+        assert_eq!(device.scripts[0].name, "reg");
+        assert_eq!(device.scripts[0].code, "C_Time:Sleep(1)");
+        assert!(device.scripts[0].enabled);
     }
 
     #[test]

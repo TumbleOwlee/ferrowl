@@ -29,7 +29,7 @@ impl EditInputDialog {
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(48),
+            Constraint::Length(38),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -48,7 +48,7 @@ impl EditInputDialog {
         block.render(dialog_box, buf);
 
         let mut vertical_index = 0;
-        let vertical_layout: [Rect; 14] = Layout::vertical([
+        let vertical_layout: [Rect; 13] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(3),
@@ -57,7 +57,6 @@ impl EditInputDialog {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(10),
             Constraint::Length(3),
             Constraint::Length(4),
             Constraint::Length(1),
@@ -222,17 +221,9 @@ impl EditInputDialog {
         );
         vertical_index += 1;
 
-        StatefulWidget::render(
-            &self.update_script.widget,
-            vertical_layout[vertical_index],
-            buf,
-            &mut self.update_script.state,
-        );
-        vertical_index += 1;
-
         if self.deletable {
             let buttons: [Rect; 2] =
-                Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(vertical_layout[vertical_index]);
             StatefulWidget::render(
                 &self.confirm_button.widget,
@@ -356,7 +347,7 @@ mod render_tests {
             )))
             .build()
             .unwrap();
-        let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None, None);
+        let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None);
         let text = render(&mut dialog);
         assert!(text.contains("Edit"), "missing box title:\n{text}");
         assert!(text.contains("DELETE"), "missing delete button:\n{text}");

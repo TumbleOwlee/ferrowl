@@ -11,6 +11,8 @@ use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
 
+use crate::config::script::ScriptDef;
+
 /// Fallback timing (ms) when neither the module spec nor the device config sets a value.
 pub const DEFAULT_TIMEOUT_MS: usize = 3000;
 pub const DEFAULT_DELAY_MS: usize = 1000;
@@ -39,6 +41,32 @@ pub struct DeviceConfig {
     #[serde(default, skip_serializing_if = "ReadRanges::is_empty")]
     pub read_ranges: ReadRanges,
     pub definitions: BTreeMap<String, RegisterDef>,
+    /// Global Lua simulation scripts (named, toggleable; run on the sim thread). Managed via
+    /// the `:scripts` dialog; replaces the legacy per-register `update` snippets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<ScriptDef>,
+}
+
+impl DeviceConfig {
+    /// Migrate legacy per-register `update` snippets into [`scripts`](Self::scripts): each
+    /// non-empty snippet becomes an enabled script named after its register (skipped when a
+    /// script of that name already exists). The `update` fields are cleared, so a subsequent
+    /// save writes only the global list. Called by `config::load_device`.
+    pub fn migrate_update_scripts(&mut self) {
+        for (name, def) in self.definitions.iter_mut() {
+            let Some(code) = def.update.take() else {
+                continue;
+            };
+            if code.trim().is_empty() || self.scripts.iter().any(|s| s.name == *name) {
+                continue;
+            }
+            self.scripts.push(ScriptDef {
+                name: name.clone(),
+                code,
+                enabled: true,
+            });
+        }
+    }
 }
 
 /// Per-function-code explicit read ranges. Each string is a comma-separated list of inclusive
@@ -133,8 +161,9 @@ pub struct RegisterDef {
     /// Named values for selection-style registers (e.g. enum states).
     #[serde(default)]
     pub values: Vec<NamedValue>,
-    /// Optional Lua snippet run every simulation cycle (see Lua phase).
-    #[serde(default)]
+    /// Legacy per-register Lua snippet. Read-only for backward compatibility: migrated into
+    /// [`DeviceConfig::scripts`] on load and never written back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update: Option<String>,
     #[serde(default)]
     pub description: String,
@@ -492,7 +521,7 @@ mod tests {
                         value: Scalar::Text("idle".into()),
                     },
                 ],
-                update: Some("C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into()),
+                update: None,
                 description: String::new(),
                 default: None,
             },
@@ -510,7 +539,33 @@ mod tests {
                 ..Default::default()
             },
             definitions,
+            scripts: vec![ScriptDef {
+                name: "sim".into(),
+                code: "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into(),
+                enabled: true,
+            }],
         }
+    }
+
+    #[test]
+    fn ut_migrate_update_scripts() {
+        let mut cfg = sample();
+        cfg.scripts.clear();
+        cfg.definitions.get_mut("state").unwrap().update = Some("C_Time:Sleep(1)".into());
+        cfg.definitions.get_mut("setpoint").unwrap().update = Some("   ".into());
+        cfg.migrate_update_scripts();
+        // Non-empty snippet becomes an enabled script named after its register; the
+        // whitespace-only one is dropped; both update fields are cleared.
+        assert_eq!(cfg.scripts.len(), 1);
+        assert_eq!(cfg.scripts[0].name, "state");
+        assert_eq!(cfg.scripts[0].code, "C_Time:Sleep(1)");
+        assert!(cfg.scripts[0].enabled);
+        assert!(cfg.definitions.values().all(|d| d.update.is_none()));
+        // A name collision with an existing script keeps the existing script.
+        cfg.definitions.get_mut("state").unwrap().update = Some("other".into());
+        cfg.migrate_update_scripts();
+        assert_eq!(cfg.scripts.len(), 1);
+        assert_eq!(cfg.scripts[0].code, "C_Time:Sleep(1)");
     }
 
     fn roundtrip(ty: FileType, ext: &str) {

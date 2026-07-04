@@ -69,10 +69,6 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             .default_value(widgets::selection("Default", default_values, 0))
             .add_button(widgets::button("ADD", 0))
             .delete_button(widgets::button("DEL", 0))
-            .update_script(widgets::code(
-                "Lua Update",
-                "-- Lua update script (optional)",
-            ))
             .delete_register_button(widgets::button("DELETE", 1))
             .confirm_button(widgets::button("Confirm", 1))
             .error(widgets::error_text())
