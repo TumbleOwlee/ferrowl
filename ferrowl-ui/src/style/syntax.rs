@@ -31,6 +31,12 @@ pub struct SyntaxTheme {
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(Color::Yellow)")]
     pub literal: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(Color::LightCyan)")]
+    pub object: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(Color::LightBlue)")]
+    pub function: Style,
 }
 
 impl SyntaxTheme {
@@ -44,6 +50,8 @@ impl SyntaxTheme {
             SyntaxKind::Punct => self.punct,
             SyntaxKind::Key => self.key,
             SyntaxKind::Literal => self.literal,
+            SyntaxKind::Object => self.object,
+            SyntaxKind::Function => self.function,
         }
     }
 }

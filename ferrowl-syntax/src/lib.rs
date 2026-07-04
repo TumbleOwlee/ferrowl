@@ -5,8 +5,10 @@
 //! constructs that span multiple lines (Lua long strings/comments). Consumers (e.g. a
 //! TUI editor widget) own the mapping from [`SyntaxKind`] to actual colors/styles.
 
+mod format;
 mod lang;
 
+pub use format::format;
 pub use lang::Language;
 
 /// Classification of a highlighted span.
@@ -22,6 +24,10 @@ pub enum SyntaxKind {
     Key,
     /// `true` / `false` / `nil` / `null`.
     Literal,
+    /// Identifier accessed via `.`/`:` (e.g. `C_Register` in `C_Register:Set`).
+    Object,
+    /// Identifier in call or method position (e.g. `Set` in `C_Register:Set(1)`).
+    Function,
 }
 
 /// Whether a line ends mid-way through a Lua long bracket (`[[...]]` / `[=[...=]` etc.)

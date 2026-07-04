@@ -210,11 +210,11 @@ fn code_input_field_render_variants() {
 fn code_input_field_lua_syntax_highlighting() {
     let theme = SyntaxTheme::default();
     let content = "local x = 1 -- hi";
-    let w = CodeInputFieldBuilder::default()
+    let w = CodeInputFieldBuilder::default().build().unwrap();
+    let mut st = CodeInputFieldStateBuilder::default()
         .language(Some(Language::Lua))
         .build()
         .unwrap();
-    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
     st.set_content(content);
     let mut b = buffer(40, 1);
     StatefulWidget::render(&w, Rect::new(0, 0, 40, 1), &mut b, &mut st);
@@ -243,11 +243,11 @@ fn code_input_field_lua_syntax_highlighting() {
 fn code_input_field_json_key_and_string_styles() {
     let theme = SyntaxTheme::default();
     let content = r#"{"key": "value"}"#;
-    let w = CodeInputFieldBuilder::default()
+    let w = CodeInputFieldBuilder::default().build().unwrap();
+    let mut st = CodeInputFieldStateBuilder::default()
         .language(Some(Language::Json))
         .build()
         .unwrap();
-    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
     st.set_content(content);
     let mut b = buffer(40, 1);
     StatefulWidget::render(&w, Rect::new(0, 0, 40, 1), &mut b, &mut st);
@@ -293,11 +293,11 @@ fn code_input_field_h_scroll_clips_mid_span() {
     assert!(string_end - string_start >= 6, "string span too short for test");
     let h_scroll = string_start + 2;
 
-    let w = CodeInputFieldBuilder::default()
+    let w = CodeInputFieldBuilder::default().build().unwrap();
+    let mut st = CodeInputFieldStateBuilder::default()
         .language(Some(Language::Lua))
         .build()
         .unwrap();
-    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
     st.set_content(content);
     // Keep the cursor away from content_x (offset 0) so its overlay style doesn't
     // mask the syntax color we're asserting on there.

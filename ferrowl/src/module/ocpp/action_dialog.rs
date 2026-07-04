@@ -21,7 +21,7 @@ use ferrowl_ui::{
         SelectionState, SelectionStateBuilder, TableState,
     },
     style::{InputFieldStyle, SelectionStyleBuilder},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{
         Button, CodeInputField, CodeInputFieldBuilder, GetValue, InputField, Selection,
         SelectionBuilder, Table, Widget,
@@ -555,6 +555,7 @@ fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
         state: CodeInputFieldStateBuilder::default()
             .focused(false)
             .disabled(false)
+            .language(Some(Language::Json))
             .build()
             .expect("static code-input state"),
         widget: CodeInputFieldBuilder::default()
@@ -565,7 +566,6 @@ fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
-            .language(Some(Language::Json))
             .build()
             .expect("static code-input config"),
     }

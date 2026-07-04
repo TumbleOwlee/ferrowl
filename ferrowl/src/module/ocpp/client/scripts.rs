@@ -12,7 +12,7 @@ use ferrowl_ui::{
         TableState, TableStateBuilder,
     },
     style::{InputFieldStyleBuilder, TableStyleBuilder},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{
         CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
         Widget,
@@ -332,6 +332,7 @@ fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
             .focused(false)
             .disabled(false)
             .placeholder(Some("-- select or create a script".to_string()))
+            .language(Some(Language::Lua))
             .build()
             .unwrap(),
         widget: CodeInputFieldBuilder::default()
@@ -347,7 +348,6 @@ fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
-            .language(Some(Language::Lua))
             .build()
             .unwrap(),
     }

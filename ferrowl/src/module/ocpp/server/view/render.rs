@@ -282,6 +282,7 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
             .focused(false)
             .disabled(true)
             .placeholder(Some("select a message".to_string()))
+            .language(Some(Language::Json))
             .build()
             .unwrap(),
         widget: CodeInputFieldBuilder::default()
@@ -297,7 +298,6 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
-            .language(Some(Language::Json))
             .build()
             .unwrap(),
     }

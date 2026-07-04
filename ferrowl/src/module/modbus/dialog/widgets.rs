@@ -137,6 +137,7 @@ pub(super) fn code(
             .focused(false)
             .disabled(false)
             .placeholder(Some(placeholder.to_string()))
+            .language(Some(Language::Lua))
             .build()
             .expect("static code-input state"),
         widget: CodeInputFieldBuilder::default()
@@ -144,7 +145,6 @@ pub(super) fn code(
             .title(Some(title.into()))
             .margin(field_margin())
             .style(InputFieldStyle::default())
-            .language(Some(Language::Lua))
             .build()
             .expect("static code-input config"),
     }

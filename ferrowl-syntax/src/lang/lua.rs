@@ -144,7 +144,45 @@ pub(crate) fn highlight_line(
         i += 1;
     }
 
+    contextual_pass(&chars, &mut spans);
     (spans, LineState(carry))
+}
+
+/// Second pass: reclassify plain identifiers by syntactic context. An identifier
+/// directly followed by a call (`(`, `{`, or a string argument) or directly preceded by
+/// `:` (method position) becomes [`SyntaxKind::Function`]; an identifier followed by
+/// `.`/`:` plus another identifier becomes [`SyntaxKind::Object`] (e.g. `C_Register` in
+/// `C_Register:Set(1)`).
+fn contextual_pass(chars: &[char], spans: &mut [(usize, usize, SyntaxKind)]) {
+    for k in 0..spans.len() {
+        if spans[k].2 != SyntaxKind::Ident {
+            continue;
+        }
+        let method_pos = k > 0 && is_punct(chars, spans[k - 1], ":");
+        let call_pos = spans.get(k + 1).is_some_and(|n| {
+            n.2 == SyntaxKind::String || is_punct(chars, *n, "(") || is_punct(chars, *n, "{")
+        });
+        let access_pos = spans
+            .get(k + 1)
+            .zip(spans.get(k + 2))
+            .is_some_and(|(n, n2)| {
+                (is_punct(chars, *n, ".") || is_punct(chars, *n, ":"))
+                    && n2.2 == SyntaxKind::Ident
+            });
+        if method_pos || call_pos {
+            spans[k].2 = SyntaxKind::Function;
+        } else if access_pos {
+            spans[k].2 = SyntaxKind::Object;
+        }
+    }
+}
+
+/// True when the span is a `Punct` whose text is exactly `pat` (so `.` never matches
+/// the `..` concat operator or `:` the `::` label marker).
+fn is_punct(chars: &[char], span: (usize, usize, SyntaxKind), pat: &str) -> bool {
+    span.2 == SyntaxKind::Punct
+        && span.1 - span.0 == pat.chars().count()
+        && chars[span.0..span.1].iter().copied().eq(pat.chars())
 }
 
 /// Checks whether `chars[pos..]` starts with a long-bracket opener `[`, `=`*N, `[` and, if
@@ -337,6 +375,43 @@ mod tests {
         let kinds: Vec<_> = spans.iter().map(|s| s.2).collect();
         assert!(kinds.contains(&SyntaxKind::Keyword));
         assert!(kinds.contains(&SyntaxKind::Literal));
+    }
+
+    #[test]
+    fn ut_object_and_method_position() {
+        // `C_Register:Set(1)` — object before the `:`, method after it.
+        let spans = spans_for("C_Register:Set(1)");
+        assert_eq!(spans[0].2, SyntaxKind::Object);
+        assert_eq!(spans[2].2, SyntaxKind::Function);
+        // Method position wins even without a call: `C_Register:Set`.
+        let spans = spans_for("x = C_Register:Set");
+        assert_eq!(spans[2].2, SyntaxKind::Object);
+        assert_eq!(spans[4].2, SyntaxKind::Function);
+    }
+
+    #[test]
+    fn ut_field_chain_and_call_positions() {
+        // `a.b.c` — everything before the last access is an object; `c` stays plain.
+        let spans = spans_for("a.b.c");
+        assert_eq!(spans[0].2, SyntaxKind::Object);
+        assert_eq!(spans[2].2, SyntaxKind::Object);
+        assert_eq!(spans[4].2, SyntaxKind::Ident);
+        // Plain calls, table-arg and string-arg sugar are all functions.
+        let spans = spans_for("print \"x\" foo{1} bar(2)");
+        assert_eq!(spans[0].2, SyntaxKind::Function);
+        assert_eq!(spans[2].2, SyntaxKind::Function);
+        assert_eq!(spans[6].2, SyntaxKind::Function);
+    }
+
+    #[test]
+    fn ut_concat_and_labels_are_not_access() {
+        // `..` is concat, `::` is a label marker — neither makes an object/function.
+        let spans = spans_for("a .. b ::lbl::");
+        assert!(
+            spans
+                .iter()
+                .all(|s| s.2 != SyntaxKind::Object && s.2 != SyntaxKind::Function)
+        );
     }
 
     #[test]

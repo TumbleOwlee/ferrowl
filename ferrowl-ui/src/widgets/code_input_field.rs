@@ -34,9 +34,6 @@ pub struct CodeInputField {
     #[builder(default = "Margin::default()")]
     margin: Margin,
     #[getset(get = "pub")]
-    #[builder(default = "None")]
-    language: Option<ferrowl_syntax::Language>,
-    #[getset(get = "pub")]
     #[builder(default = "SyntaxTheme::default()")]
     syntax_theme: SyntaxTheme,
 }
@@ -151,7 +148,7 @@ impl StatefulWidget for &CodeInputField {
         // Fold `LineState` from line 0 through the last visible line, stashing the spans
         // for the visible window. Recomputed every render; buffers are small.
         let visible_spans: Option<Vec<Vec<(usize, usize, ferrowl_syntax::SyntaxKind)>>> =
-            self.language.map(|lang| {
+            state.language().map(|lang| {
                 let last_visible = (scroll + visible_height - 1).min(line_count - 1);
                 let mut carry = ferrowl_syntax::LineState::default();
                 let mut spans = Vec::with_capacity(visible_height);
