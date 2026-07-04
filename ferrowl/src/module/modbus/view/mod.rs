@@ -648,6 +648,7 @@ fn decode_definition(
     memory: &Memory<Key<SlaveKey>>,
     virtual_values: &HashMap<String, Value>,
 ) -> Definition {
+    let prev_raw = std::mem::take(&mut d.raw_value);
     match d.register.address() {
         Address::Fixed(addr) => {
             let width = d.register.format().width();
@@ -680,6 +681,11 @@ fn decode_definition(
                 d.raw_value.clear();
             }
         },
+    }
+    // The first fill-in (empty previous raw) is not a change; later differing
+    // decodes stamp the highlight window (see `Definition::cell_styles`).
+    if !prev_raw.is_empty() && d.raw_value != prev_raw {
+        d.changed_at = Some(std::time::Instant::now());
     }
     d
 }
@@ -843,6 +849,41 @@ mod tests {
         let decoded = decode_definition(def, &memory, &empty_vs);
         assert!(matches!(decoded.value, Value::Ascii(ref s) if s.is_empty()));
         assert!(decoded.raw_value.is_empty());
+    }
+
+    #[test]
+    fn ut_decode_definition_first_fill_is_not_a_change() {
+        let def = fixed_def();
+        let memory = Memory::<Key<SlaveKey>>::default();
+        let empty_vs: HashMap<String, Value> = HashMap::new();
+        let decoded = decode_definition(def, &memory, &empty_vs);
+        assert!(decoded.changed_at.is_none());
+        // A second identical decode is not a change either.
+        let decoded = decode_definition(decoded, &memory, &empty_vs);
+        assert!(decoded.changed_at.is_none());
+    }
+
+    #[test]
+    fn ut_decode_definition_value_change_stamps_changed_at() {
+        let mut memory = Memory::<Key<SlaveKey>>::default();
+        let key = Key {
+            id: SlaveKey {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+            },
+        };
+        memory.add_ranges(
+            key.clone(),
+            &CellKind::ReadWrite(ferrowl_store::CellType::Register),
+            std::slice::from_ref(&Range::new(0, 1)),
+        );
+        memory.write_unchecked(key.clone(), &Range::new(0, 1), &[1u16]);
+        let empty_vs: HashMap<String, Value> = HashMap::new();
+        let decoded = decode_definition(fixed_def(), &memory, &empty_vs);
+        assert!(decoded.changed_at.is_none(), "first fill must not stamp");
+        memory.write_unchecked(key, &Range::new(0, 1), &[2u16]);
+        let decoded = decode_definition(decoded, &memory, &empty_vs);
+        assert!(decoded.changed_at.is_some(), "changed value must stamp");
     }
 
     // --- view construction & key handling -----------------------------------
