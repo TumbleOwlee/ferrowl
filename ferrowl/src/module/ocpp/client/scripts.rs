@@ -18,6 +18,7 @@ use ferrowl_ui::{
         Widget,
     },
 };
+use ferrowl_syntax::Language;
 use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
@@ -346,6 +347,7 @@ fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
+            .language(Some(Language::Lua))
             .build()
             .unwrap(),
     }

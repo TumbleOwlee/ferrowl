@@ -13,6 +13,7 @@ use ferrowl_codec::format::{
     Resolution,
 };
 use ferrowl_codec::{Access, Kind};
+use ferrowl_syntax::Language;
 use ferrowl_ui::state::ButtonState;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
@@ -143,6 +144,7 @@ pub(super) fn code(
             .title(Some(title.into()))
             .margin(field_margin())
             .style(InputFieldStyle::default())
+            .language(Some(Language::Lua))
             .build()
             .expect("static code-input config"),
     }

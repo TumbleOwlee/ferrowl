@@ -1,6 +1,7 @@
 //! Frame rendering: the two `ModuleView` render entry points and the widget builders used by
 //! [`super::ServerView::new`].
 
+use ferrowl_syntax::Language;
 use ferrowl_ui::traits::IsFocus;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
@@ -296,6 +297,7 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
+            .language(Some(Language::Json))
             .build()
             .unwrap(),
     }

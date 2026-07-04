@@ -8,13 +8,15 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{HorizontalAlignment, Margin, Rect};
 use ratatui::widgets::{StatefulWidget, Widget as RWidget};
 
+use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
     SelectionStateBuilder, TableStateBuilder,
 };
 use ferrowl_ui::style::{
-    ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, TableStyle, TextStyle,
+    ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SyntaxTheme, TableStyle,
+    TextStyle,
 };
 use ferrowl_ui::traits::{Init, ToLabel};
 use ferrowl_ui::widgets::{
@@ -202,6 +204,116 @@ fn code_input_field_render_variants() {
     st.set_cursor_col(50);
     let mut b = buffer(8, 2);
     StatefulWidget::render(w, Rect::new(0, 0, 8, 2), &mut b, &mut st);
+}
+
+#[test]
+fn code_input_field_lua_syntax_highlighting() {
+    let theme = SyntaxTheme::default();
+    let content = "local x = 1 -- hi";
+    let w = CodeInputFieldBuilder::default()
+        .language(Some(Language::Lua))
+        .build()
+        .unwrap();
+    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+    st.set_content(content);
+    let mut b = buffer(40, 1);
+    StatefulWidget::render(&w, Rect::new(0, 0, 40, 1), &mut b, &mut st);
+
+    // gutter_width = line_count.to_string().len() + 1 = "1".len() + 1 = 2.
+    let content_x = 2u16;
+
+    // "local" keyword starts at char 0.
+    assert_eq!(b[(content_x, 0)].fg, theme.keyword().fg.unwrap());
+
+    // "-- hi" comment: find its start via the syntax crate directly.
+    let (spans, _) =
+        ferrowl_syntax::highlight_line(Language::Lua, content, ferrowl_syntax::LineState::default());
+    let comment_start = spans
+        .iter()
+        .find(|(_, _, kind)| *kind == SyntaxKind::Comment)
+        .map(|(start, _, _)| *start)
+        .expect("expected a comment span");
+    assert_eq!(
+        b[(content_x + comment_start as u16, 0)].fg,
+        theme.comment().fg.unwrap()
+    );
+}
+
+#[test]
+fn code_input_field_json_key_and_string_styles() {
+    let theme = SyntaxTheme::default();
+    let content = r#"{"key": "value"}"#;
+    let w = CodeInputFieldBuilder::default()
+        .language(Some(Language::Json))
+        .build()
+        .unwrap();
+    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+    st.set_content(content);
+    let mut b = buffer(40, 1);
+    StatefulWidget::render(&w, Rect::new(0, 0, 40, 1), &mut b, &mut st);
+
+    let content_x = 2u16;
+
+    let (spans, _) = ferrowl_syntax::highlight_line(
+        Language::Json,
+        content,
+        ferrowl_syntax::LineState::default(),
+    );
+    let key_start = spans
+        .iter()
+        .find(|(_, _, kind)| *kind == SyntaxKind::Key)
+        .map(|(start, _, _)| *start)
+        .expect("expected a key span");
+    let string_start = spans
+        .iter()
+        .find(|(_, _, kind)| *kind == SyntaxKind::String)
+        .map(|(start, _, _)| *start)
+        .expect("expected a string span");
+
+    assert_eq!(
+        b[(content_x + key_start as u16, 0)].fg,
+        theme.key().fg.unwrap()
+    );
+    assert_eq!(
+        b[(content_x + string_start as u16, 0)].fg,
+        theme.string().fg.unwrap()
+    );
+}
+
+#[test]
+fn code_input_field_h_scroll_clips_mid_span() {
+    let theme = SyntaxTheme::default();
+    let content = r#"local s = "abcdefghijklmnopqrstuvwxyz""#;
+    let (spans, _) =
+        ferrowl_syntax::highlight_line(Language::Lua, content, ferrowl_syntax::LineState::default());
+    let (string_start, string_end, _) = spans
+        .into_iter()
+        .find(|(_, _, kind)| *kind == SyntaxKind::String)
+        .expect("expected a string span");
+    assert!(string_end - string_start >= 6, "string span too short for test");
+    let h_scroll = string_start + 2;
+
+    let w = CodeInputFieldBuilder::default()
+        .language(Some(Language::Lua))
+        .build()
+        .unwrap();
+    let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+    st.set_content(content);
+    // Keep the cursor away from content_x (offset 0) so its overlay style doesn't
+    // mask the syntax color we're asserting on there.
+    st.set_cursor_col(h_scroll + 3);
+    st.set_h_scroll(h_scroll);
+    let mut b = buffer(12, 1);
+    StatefulWidget::render(&w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
+
+    // gutter_width = 2 (single line); the clipped span should appear at content_x
+    // even though its unclipped start (`string_start`) is earlier in the line.
+    let content_x = 2u16;
+    assert_eq!(
+        b[(content_x, 0)].fg,
+        theme.string().fg.unwrap(),
+        "expected string style at the clipped screen offset"
+    );
 }
 
 // ---- ScrollingTabs ----

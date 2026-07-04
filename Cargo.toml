@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "ferrowl-lua",
     "ferrowl-store",
+    "ferrowl-syntax",
     "ferrowl-codec",
     "ferrowl-ring",
     "ferrowl-modbus",

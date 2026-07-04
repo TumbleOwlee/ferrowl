@@ -13,6 +13,7 @@
 use crate::module::ocpp::widgets;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
+use ferrowl_syntax::Language;
 use ferrowl_ui::{
     COLOR_SCHEME,
     state::{
@@ -564,6 +565,7 @@ fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
                 vertical: 0,
                 horizontal: 0,
             })
+            .language(Some(Language::Json))
             .build()
             .expect("static code-input config"),
     }

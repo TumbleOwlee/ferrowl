@@ -1,0 +1,362 @@
+//! Lua 5.4 lexer. Best-effort: never panics on malformed input, doesn't need to reject
+//! every invalid form. Operates one line at a time, threading [`LineState`] across calls
+//! for long strings/comments that span lines.
+
+use crate::{LineState, LuaCarry, SyntaxKind};
+
+const KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end", "for", "function", "goto", "if", "in",
+    "local", "not", "or", "repeat", "return", "then", "until", "while",
+];
+const LITERALS: &[&str] = &["true", "false", "nil"];
+
+/// Multi-char operators, longest first so matching greedily picks the right one.
+const OPS: &[&str] = &[
+    "...", "..", "::", "==", "~=", "<=", ">=", "+", "-", "*", "/", "%", "^", "#", "<", ">", "=",
+    "(", ")", "{", "}", "[", "]", ";", ":", ",", ".",
+];
+
+pub(crate) fn highlight_line(
+    line: &str,
+    state: LineState,
+) -> (Vec<(usize, usize, SyntaxKind)>, LineState) {
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut spans = Vec::new();
+    let mut i = 0usize;
+    let mut carry = state.0;
+
+    // Resume a long string/comment opened on a previous line.
+    if let Some(level) = match carry {
+        LuaCarry::LongString(l) | LuaCarry::LongComment(l) => Some(l),
+        LuaCarry::None => None,
+    } {
+        let kind = match carry {
+            LuaCarry::LongComment(_) => SyntaxKind::Comment,
+            _ => SyntaxKind::String,
+        };
+        match find_long_close(&chars, 0, level) {
+            Some(end) => {
+                spans.push((0, end, kind));
+                i = end;
+                carry = LuaCarry::None;
+            }
+            None => {
+                spans.push((0, len, kind));
+                return (spans, LineState(carry));
+            }
+        }
+    }
+
+    while i < len {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        if c == '-' && i + 1 < len && chars[i + 1] == '-' {
+            if let Some((level, open_end)) = match_long_open(&chars, i + 2) {
+                match find_long_close(&chars, open_end, level) {
+                    Some(end) => {
+                        spans.push((i, end, SyntaxKind::Comment));
+                        i = end;
+                    }
+                    None => {
+                        spans.push((i, len, SyntaxKind::Comment));
+                        carry = LuaCarry::LongComment(level);
+                        break;
+                    }
+                }
+            } else {
+                spans.push((i, len, SyntaxKind::Comment));
+                break;
+            }
+            continue;
+        }
+
+        if c == '[' && let Some((level, open_end)) = match_long_open(&chars, i) {
+            match find_long_close(&chars, open_end, level) {
+                Some(end) => {
+                    spans.push((i, end, SyntaxKind::String));
+                    i = end;
+                }
+                None => {
+                    spans.push((i, len, SyntaxKind::String));
+                    carry = LuaCarry::LongString(level);
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if c == '"' || c == '\'' {
+            let start = i;
+            let quote = c;
+            i += 1;
+            while i < len {
+                if chars[i] == '\\' && i + 1 < len {
+                    i += 2;
+                    continue;
+                }
+                if chars[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            spans.push((start, i, SyntaxKind::String));
+            continue;
+        }
+
+        if c.is_ascii_digit() || (c == '.' && i + 1 < len && chars[i + 1].is_ascii_digit()) {
+            let start = i;
+            i = parse_number(&chars, i);
+            spans.push((start, i, SyntaxKind::Number));
+            continue;
+        }
+
+        if c == '_' || c.is_alphabetic() {
+            let start = i;
+            while i < len && (chars[i] == '_' || chars[i].is_alphanumeric()) {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            let kind = if KEYWORDS.contains(&word.as_str()) {
+                SyntaxKind::Keyword
+            } else if LITERALS.contains(&word.as_str()) {
+                SyntaxKind::Literal
+            } else {
+                SyntaxKind::Ident
+            };
+            spans.push((start, i, kind));
+            continue;
+        }
+
+        if let Some(op) = OPS.iter().find(|op| starts_with(&chars, i, op)) {
+            let end = i + op.chars().count();
+            spans.push((i, end, SyntaxKind::Punct));
+            i = end;
+            continue;
+        }
+
+        // Unrecognized character: no span, just skip it.
+        i += 1;
+    }
+
+    (spans, LineState(carry))
+}
+
+/// Checks whether `chars[pos..]` starts with a long-bracket opener `[`, `=`*N, `[` and, if
+/// so, returns `(N, index_after_opener)`.
+fn match_long_open(chars: &[char], pos: usize) -> Option<(u8, usize)> {
+    let len = chars.len();
+    if pos >= len || chars[pos] != '[' {
+        return None;
+    }
+    let mut p = pos + 1;
+    let mut level = 0u8;
+    while p < len && chars[p] == '=' {
+        level += 1;
+        p += 1;
+    }
+    if p < len && chars[p] == '[' {
+        Some((level, p + 1))
+    } else {
+        None
+    }
+}
+
+/// Scans `chars[from..]` for a closing long bracket `]`, `=`*level, `]` at the exact
+/// level given. Returns the index just past the closer, or `None` if not found on this
+/// line.
+fn find_long_close(chars: &[char], from: usize, level: u8) -> Option<usize> {
+    let len = chars.len();
+    let level = level as usize;
+    let mut p = from;
+    while p < len {
+        if chars[p] == ']' {
+            let eq_end = p + 1 + level;
+            if eq_end < len
+                && chars[p + 1..eq_end].iter().all(|&c| c == '=')
+                && chars[eq_end] == ']'
+            {
+                return Some(eq_end + 1);
+            }
+        }
+        p += 1;
+    }
+    None
+}
+
+fn parse_number(chars: &[char], start: usize) -> usize {
+    let len = chars.len();
+    let mut i = start;
+    if chars[i] == '0' && i + 1 < len && (chars[i + 1] == 'x' || chars[i + 1] == 'X') {
+        i += 2;
+        while i < len && chars[i].is_ascii_hexdigit() {
+            i += 1;
+        }
+        if i < len && chars[i] == '.' {
+            i += 1;
+            while i < len && chars[i].is_ascii_hexdigit() {
+                i += 1;
+            }
+        }
+        if i < len && (chars[i] == 'p' || chars[i] == 'P') {
+            i += 1;
+            if i < len && (chars[i] == '+' || chars[i] == '-') {
+                i += 1;
+            }
+            while i < len && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        return i;
+    }
+
+    while i < len && chars[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i < len && chars[i] == '.' {
+        i += 1;
+        while i < len && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+    }
+    if i < len && (chars[i] == 'e' || chars[i] == 'E') {
+        let save = i;
+        i += 1;
+        if i < len && (chars[i] == '+' || chars[i] == '-') {
+            i += 1;
+        }
+        if i < len && chars[i].is_ascii_digit() {
+            while i < len && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+        } else {
+            i = save;
+        }
+    }
+    i
+}
+
+fn starts_with(chars: &[char], pos: usize, pat: &str) -> bool {
+    for (p, pc) in (pos..).zip(pat.chars()) {
+        if p >= chars.len() || chars[p] != pc {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Language, highlight_line as top_highlight_line};
+
+    fn spans_for(line: &str) -> Vec<(usize, usize, SyntaxKind)> {
+        top_highlight_line(Language::Lua, line, LineState::default()).0
+    }
+
+    #[test]
+    fn ut_spans_sorted_non_overlapping() {
+        let spans = spans_for("local x = 1 + foo -- comment");
+        for w in spans.windows(2) {
+            assert!(w[0].1 <= w[1].0);
+            assert!(w[0].0 < w[0].1);
+        }
+    }
+
+    #[test]
+    fn ut_long_string_carries_across_lines() {
+        let (spans1, state1) = top_highlight_line(
+            Language::Lua,
+            "local s = [==[",
+            LineState::default(),
+        );
+        assert_eq!(state1.0, LuaCarry::LongString(2));
+        assert!(spans1.iter().any(|s| s.2 == SyntaxKind::String));
+
+        let (spans2, state2) = top_highlight_line(Language::Lua, "still inside", state1);
+        assert_eq!(state2.0, LuaCarry::LongString(2));
+        // The whole line should be swallowed as string, not tokenized as an identifier.
+        assert_eq!(spans2, vec![(0, 12, SyntaxKind::String)]);
+
+        let (_spans3, state3) = top_highlight_line(Language::Lua, "]==]", state2);
+        assert_eq!(state3.0, LuaCarry::None);
+    }
+
+    #[test]
+    fn ut_long_comment_carries_across_lines() {
+        let (_spans1, state1) =
+            top_highlight_line(Language::Lua, "--[[ start", LineState::default());
+        assert_eq!(state1.0, LuaCarry::LongComment(0));
+
+        let (spans2, state2) = top_highlight_line(Language::Lua, "middle line", state1);
+        assert_eq!(state2.0, LuaCarry::LongComment(0));
+        assert_eq!(spans2, vec![(0, 11, SyntaxKind::Comment)]);
+
+        let (_spans3, state3) = top_highlight_line(Language::Lua, "]] print(1)", state2);
+        assert_eq!(state3.0, LuaCarry::None);
+    }
+
+    #[test]
+    fn ut_long_bracket_level_mismatch_does_not_close_early() {
+        let (_spans1, state1) =
+            top_highlight_line(Language::Lua, "local s = [=[", LineState::default());
+        assert_eq!(state1.0, LuaCarry::LongString(1));
+
+        // Neither a plain `]]` nor a `]==]` (level 2) should close a level-1 long string.
+        let (spans2, state2) = top_highlight_line(Language::Lua, "]] not closed ]==]", state1);
+        assert_eq!(state2.0, LuaCarry::LongString(1));
+        assert_eq!(spans2.len(), 1);
+        assert_eq!(spans2[0].2, SyntaxKind::String);
+
+        let (_spans3, state3) = top_highlight_line(Language::Lua, "]=]", state2);
+        assert_eq!(state3.0, LuaCarry::None);
+    }
+
+    #[test]
+    fn ut_escaped_quote_does_not_terminate_string() {
+        let spans = spans_for(r#"local s = "a\"b""#);
+        let strings: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::String).collect();
+        assert_eq!(strings.len(), 1);
+    }
+
+    #[test]
+    fn ut_numbers_hex_and_exponent() {
+        let spans = spans_for("local a = 0x1F local b = 1e10");
+        let nums: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::Number).collect();
+        assert_eq!(nums.len(), 2);
+    }
+
+    #[test]
+    fn ut_keywords_vs_literals() {
+        let spans = spans_for("if true then return nil end");
+        let kinds: Vec<_> = spans.iter().map(|s| s.2).collect();
+        assert!(kinds.contains(&SyntaxKind::Keyword));
+        assert!(kinds.contains(&SyntaxKind::Literal));
+    }
+
+    #[test]
+    fn ut_garbage_input_does_not_panic() {
+        let cases = [
+            "\"abc",
+            "local s = \"abc",
+            "]",
+            "]=]",
+            "",
+            "--",
+            "[==[ unterminated",
+        ];
+        for case in cases {
+            let (spans, _state) = top_highlight_line(Language::Lua, case, LineState::default());
+            let len = case.chars().count();
+            for (start, end, _) in spans {
+                assert!(start <= end);
+                assert!(end <= len);
+            }
+        }
+    }
+}
