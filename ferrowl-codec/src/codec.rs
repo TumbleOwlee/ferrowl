@@ -70,8 +70,7 @@ pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
                 Ok(Value::F64((f64::from_bits(u), r.clone())))
             }
             Format::Ascii(_) => Ok(Value::Ascii(
-                String::from_utf8(bytes.collect())
-                    .map_err(|_| CodecError::PackedAscii)?,
+                String::from_utf8(bytes.collect()).map_err(|_| CodecError::PackedAscii)?,
             )),
         }
     }
