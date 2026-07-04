@@ -89,13 +89,15 @@ impl ScriptDialog {
         (sel < self.scripts.len()).then_some(sel)
     }
 
-    /// Load the selected script's code into the editor.
+    /// Load the selected script's code into the editor. Without a selection the editor is
+    /// disabled: it shows only its placeholder and there is nothing edits could apply to.
     fn sync_code_from_selection(&mut self) {
         let content = self
             .selected()
             .map(|i| self.scripts[i].code.clone())
             .unwrap_or_default();
         self.code.state.set_content(&content);
+        self.code.state.set_disabled(self.selected().is_none());
     }
 
     /// Write the editor's content back into the selected script.
@@ -177,8 +179,18 @@ impl ScriptDialog {
 
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => return true,
-            (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
+            (KeyModifiers::NONE, KeyCode::Tab) => {
+                self.focus_next();
+                if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
+                    self.focus_next();
+                }
+            }
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                self.focus_previous();
+                if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
+                    self.focus_previous();
+                }
+            }
             _ => match self.focus {
                 ScriptDialogFocus::Table => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
@@ -363,6 +375,49 @@ mod tests {
             code: String::new(),
             enabled: true,
         }])
+    }
+
+    #[test]
+    fn code_editor_disabled_and_skipped_without_selection() {
+        let mut d = ScriptDialog::new(&[]);
+        assert!(d.code.state.disabled());
+        // Tab cycles Table -> NameInput -> Table, never landing on Code.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::NameInput);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Table);
+        // BackTab from Table skips Code in the other direction.
+        d.handle_events(KeyModifiers::NONE, KeyCode::BackTab);
+        assert_eq!(d.focus, ScriptDialogFocus::NameInput);
+    }
+
+    #[test]
+    fn code_editor_reachable_with_selection() {
+        let mut d = dialog();
+        assert!(!d.code.state.disabled());
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+    }
+
+    #[test]
+    fn deleting_last_script_disables_code_editor() {
+        let mut d = dialog();
+        assert!(!d.code.state.disabled());
+        d.delete_selected();
+        assert!(d.code.state.disabled());
+    }
+
+    #[test]
+    fn creating_first_script_enables_code_editor() {
+        let mut d = ScriptDialog::new(&[]);
+        assert!(d.code.state.disabled());
+        d.focus = ScriptDialogFocus::NameInput;
+        for c in "boot".chars() {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(!d.code.state.disabled());
     }
 
     #[test]
