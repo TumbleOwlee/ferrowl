@@ -223,7 +223,7 @@ impl EditInputDialog {
 
         if self.deletable {
             let buttons: [Rect; 2] =
-                Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(vertical_layout[vertical_index]);
             StatefulWidget::render(
                 &self.confirm_button.widget,
