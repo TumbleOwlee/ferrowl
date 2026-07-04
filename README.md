@@ -55,6 +55,7 @@ Supported capabilities (grouped by area):
 - **Smart charging** — charging profiles and per-purpose charge limits, including stack-level reject.
 - **Remote control** — remote (1.6) / requested (2.0.1, 2.1) start & stop, availability changes, reset, firmware update and diagnostics.
 - **OCPP 2.0.1 extras** — variable get/set and monitoring, display messages, certificate management, and the EVSE/connector object model.
+- **OCPP 2.1 extras** — DER control (get/clear/set), tariffs, priority charging, settlement and web-payment notifications, battery swapping. Most 2.1-only actions get a typed send dialog; a few whose payload is an inherently nested/repeated structure (battery data, certificate-chain-status requests, DER-control reports, full tariff objects, periodic-event-stream setup, dynamic-schedule updates) stay on the raw-JSON editor.
 
 In the TUI each OCPP module shows a connector/station table, a scope-filtered action list with per-version send dialogs (typed value editors plus a raw-JSON mode), and a capped message log that can be mirrored to a file via `:log`. Simulation behaviour is scripted in Lua for both roles — see [Lua Support](#lua-support).
 

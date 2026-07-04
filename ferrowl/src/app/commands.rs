@@ -54,7 +54,7 @@ impl App {
                     CommandResult::Handled(msg) => {
                         if let Some(m) = msg {
                             self.log_active(m).await;
-                        }            
+                        }
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             tab.log = tab.view.log();
                         }

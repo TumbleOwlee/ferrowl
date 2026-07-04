@@ -24,7 +24,7 @@ pub struct DeviceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     /// Device-level timing defaults (ms). Used when a `ModuleSpec` does not override them; the
-    /// built-in defaults (`DEFAULT_*_MS`) are the final fallback. See `Module::resolve_timing`.
+    /// built-in defaults (`DEFAULT_*_MS`) are the final fallback. See `ModbusModule::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

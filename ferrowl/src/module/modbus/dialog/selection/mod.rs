@@ -512,6 +512,333 @@ impl SubDialogs for EditSelectionDialog<NamedValue> {
     }
 }
 
+#[cfg(test)]
+mod apply_tests {
+    //! Characterization tests for the `from_register` → `apply` round-trip and `delete_selected`,
+    //! pinning current behavior before the mod.rs split / unwrap sweep.
+    use super::EditSelectionDialog;
+    use crate::config::device::{NamedValue, Scalar};
+    use ferrowl_codec::format::{
+        BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+    };
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+
+    fn reg(kind: Kind, address: Address, format: RegisterFormat) -> Register {
+        RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(kind)
+            .address(address)
+            .format(format)
+            .build()
+            .unwrap()
+    }
+
+    fn named_values() -> Vec<NamedValue> {
+        vec![
+            NamedValue {
+                name: "on".into(),
+                value: Scalar::Int(1),
+            },
+            NamedValue {
+                name: "off".into(),
+                value: Scalar::Int(0),
+            },
+        ]
+    }
+
+    #[test]
+    fn ut_round_trips_through_apply() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Address::Fixed(10),
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+        );
+        let edited = EditSelectionDialog::from_register(
+            "state",
+            "desc",
+            &original,
+            named_values(),
+            "1",
+            "[0001]",
+            None,
+            None,
+        )
+        .apply()
+        .expect("valid dialog should apply");
+
+        assert_eq!(edited.name, "state");
+        assert_eq!(edited.description, "desc");
+        assert_eq!(*edited.register.address(), Address::Fixed(10));
+        assert_eq!(edited.value.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn ut_from_register_preselects_matching_named_value() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Address::Fixed(0),
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+        );
+        let dialog = EditSelectionDialog::from_register(
+            "s",
+            "",
+            &original,
+            named_values(),
+            "0",
+            "[0000]",
+            None,
+            None,
+        );
+        assert_eq!(dialog.value.state.selection(), 1); // "off" (value 0)
+    }
+
+    #[test]
+    fn ut_delete_selected_removes_entry_and_syncs_default() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Address::Fixed(0),
+            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+        );
+        let mut dialog = EditSelectionDialog::from_register(
+            "s",
+            "",
+            &original,
+            named_values(),
+            "1",
+            "[0001]",
+            None,
+            None,
+        );
+        assert_eq!(dialog.value.state.values().len(), 2);
+        dialog.value.state.set_selection(0);
+        dialog.delete_selected();
+        assert_eq!(dialog.value.state.values().len(), 1);
+        assert_eq!(dialog.value.state.values()[0].name, "off");
+    }
+
+    #[test]
+    fn ut_empty_dialog_fails_validation() {
+        assert!(
+            EditSelectionDialog::<NamedValue>::new(vec![])
+                .apply()
+                .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    //! Focus-cycle characterization, mirroring `EditInputDialog`'s coverage.
+    use super::EditSelectionDialog;
+    use crate::config::device::{NamedValue, Scalar};
+    use ferrowl_codec::format::{
+        BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+    };
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+
+    fn dialog_with_values() -> EditSelectionDialog<NamedValue> {
+        let original: Register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::U16((
+                RegisterEndian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        let values = vec![NamedValue {
+            name: "on".into(),
+            value: Scalar::Int(1),
+        }];
+        EditSelectionDialog::from_register("s", "", &original, values, "1", "[0001]", None, None)
+    }
+
+    #[test]
+    fn ut_focus_cycle_wraps_back_to_start() {
+        let mut d = dialog_with_values();
+        let start = d.focus;
+        for _ in 0..64 {
+            d.focus_next();
+            if d.focus == start {
+                return;
+            }
+        }
+        panic!("focus_next did not return to the starting pane within 64 steps");
+    }
+
+    #[test]
+    fn ut_focus_previous_reverses_focus_next() {
+        let mut d = dialog_with_values();
+        let start = d.focus;
+        d.focus_next();
+        assert_ne!(d.focus, start);
+        d.focus_previous();
+        assert_eq!(d.focus, start);
+    }
+}
+
+#[cfg(test)]
+mod default_and_conversion_tests {
+    //! Characterization of the default-value list sync, named-value append, mode conversion
+    //! (`to_edit_input_dialog`), and gated focus panes on an empty-values dialog.
+    use super::{EditSelectionDialog, EditSelectionDialogFocus};
+    use crate::config::device::{NamedValue, Scalar};
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_ui::traits::HandleEvents;
+
+    fn u16_register() -> Register {
+        RegisterBuilder::default()
+            .slave_id(3u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(7))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap()
+    }
+
+    fn named_values() -> Vec<NamedValue> {
+        vec![
+            NamedValue {
+                name: "off".into(),
+                value: Scalar::Int(0),
+            },
+            NamedValue {
+                name: "on".into(),
+                value: Scalar::Int(1),
+            },
+        ]
+    }
+
+    /// Dialog editing a register whose current raw value matches "on", with "on" as default.
+    fn dialog() -> EditSelectionDialog<NamedValue> {
+        EditSelectionDialog::from_register(
+            "state",
+            "power state",
+            &u16_register(),
+            named_values(),
+            "1",
+            "[0001]",
+            None,
+            Some(&Scalar::Int(1)),
+        )
+    }
+
+    #[test]
+    fn ut_from_register_preselects_default_after_sentinel() {
+        let d = dialog();
+        // Default list gains the "(no default)" sentinel at 0; Scalar::Int(1) sits at 1 + 1.
+        assert_eq!(d.default_value.state.values().len(), 3);
+        assert_eq!(d.default_value.state.values()[0].name, "(no default)");
+        assert_eq!(d.default_value.state.selection(), 2);
+    }
+
+    #[test]
+    fn ut_apply_carries_selected_default() {
+        let edited = dialog().apply().expect("valid dialog should apply");
+        assert!(matches!(edited.default, Some(Scalar::Int(1))));
+        // And the named-value list survives unchanged.
+        assert_eq!(edited.named_values.as_ref().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn ut_delete_selected_shifts_default_selection_down() {
+        let mut d = dialog();
+        d.value.state.set_selection(0); // delete "off"; default "on" must stay selected
+        d.delete_selected();
+        assert_eq!(d.default_value.state.values().len(), 2);
+        assert_eq!(d.default_value.state.selection(), 1);
+    }
+
+    #[test]
+    fn ut_delete_selected_default_resets_to_sentinel_when_its_entry_dies() {
+        let mut d = dialog();
+        d.value.state.set_selection(1); // "on", which is also the default
+        d.delete_selected();
+        assert_eq!(d.value.state.values().len(), 1);
+        // The deleted entry was the default -> back to "(no default)".
+        assert_eq!(d.default_value.state.selection(), 0);
+    }
+
+    #[test]
+    fn ut_accept_named_value_appends_selects_and_syncs_default_options() {
+        use super::SubDialogs;
+        let mut d = dialog();
+        d.accept_named_value(NamedValue {
+            name: "auto".into(),
+            value: Scalar::Int(2),
+        });
+        assert_eq!(d.value.state.values().len(), 3);
+        assert_eq!(d.value.state.selection(), 2);
+        // Default options track the value list (sentinel + 3).
+        assert_eq!(d.default_value.state.values().len(), 4);
+    }
+
+    #[test]
+    fn ut_to_edit_input_dialog_carries_state_and_default_text() {
+        let d = dialog();
+        let input = d.to_edit_input_dialog();
+        assert_eq!(input.label.state.input(), "state");
+        assert_eq!(input.slave_id.state.input(), "3");
+        assert_eq!(input.address.state.input(), "7");
+        assert!(input.deletable);
+        // The selected default (Int 1) becomes free text.
+        assert_eq!(input.default_value.state.input(), "1");
+    }
+
+    #[test]
+    fn ut_focus_cycle_skips_value_panes_when_no_named_values() {
+        let mut d = EditSelectionDialog::<NamedValue>::new(vec![]);
+        // `new()` always starts focus on `Value`, even though it's gated off (not focusable)
+        // when there are no named values yet; one `focus_next()` lands on the first real pane.
+        d.focus_next();
+        let start = d.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            d.focus_next();
+            if d.focus == start {
+                break;
+            }
+            seen.push(d.focus);
+        }
+        assert_eq!(d.focus, start, "focus_next never wrapped: {seen:?}");
+        for gated in [
+            EditSelectionDialogFocus::Value,
+            EditSelectionDialogFocus::DeleteButton,
+            EditSelectionDialogFocus::DefaultValue,
+        ] {
+            assert!(
+                !seen.contains(&gated),
+                "empty-values cycle should skip {gated:?}: {seen:?}"
+            );
+        }
+        assert!(seen.contains(&EditSelectionDialogFocus::ConfirmButton));
+    }
+
+    #[test]
+    fn ut_handle_events_routes_key_to_focused_selection() {
+        let mut d = dialog();
+        assert!(matches!(d.focus, EditSelectionDialogFocus::Value));
+        assert_eq!(d.value.state.selection(), 1);
+        // Up/Down cycle the focused selection widget's item (Left/Right instead scroll a long
+        // label horizontally, they don't change `selection`).
+        let _ = HandleEvents::handle_events(&mut d, KeyModifiers::NONE, KeyCode::Up);
+        assert_eq!(d.value.state.selection(), 0);
+        let _ = HandleEvents::handle_events(&mut d, KeyModifiers::NONE, KeyCode::Down);
+        assert_eq!(d.value.state.selection(), 1);
+    }
+}
+
 impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.render(area, buf)

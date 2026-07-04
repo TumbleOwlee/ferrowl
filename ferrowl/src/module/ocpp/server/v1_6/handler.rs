@@ -136,11 +136,11 @@ mod tests {
     use crate::module::ocpp::server::backend::{RfidLists, RfidStore};
 
     fn empty_rfids() -> RfidLists {
-        std::sync::Arc::new(std::sync::RwLock::new(RfidStore::default()))
+        std::sync::Arc::new(parking_lot::RwLock::new(RfidStore::default()))
     }
 
     fn rfids(store: RfidStore) -> RfidLists {
-        std::sync::Arc::new(std::sync::RwLock::new(store))
+        std::sync::Arc::new(parking_lot::RwLock::new(store))
     }
 
     #[tokio::test]

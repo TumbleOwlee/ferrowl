@@ -11,6 +11,15 @@ pub struct Scope {
     pub connector: Option<i64>,
 }
 
+/// The EVSE id an inbound 2.x Call targets: a nested `evse.id` (per the OCPP 2.x schema), falling
+/// back to a flat `evseId` (some Calls, e.g. `TransactionEvent`, carry it top-level instead).
+/// `None` when neither key is present (a CS-level Call).
+pub(crate) fn evse_id(request: &serde_json::Value) -> Option<i64> {
+    request["evse"]["id"]
+        .as_i64()
+        .or_else(|| request["evseId"].as_i64())
+}
+
 impl Scope {
     /// The charge-point-wide (CS-level) scope.
     pub const CS: Scope = Scope {

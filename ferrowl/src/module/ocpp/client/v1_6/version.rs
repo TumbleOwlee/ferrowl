@@ -5,8 +5,9 @@
 //! state-driven actions whose side-effects land in `apply_post_send`.
 
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
+
+use parking_lot::RwLock;
 
 use ferrowl_lua::module::ValueType;
 use ferrowl_ocpp::V1_6;

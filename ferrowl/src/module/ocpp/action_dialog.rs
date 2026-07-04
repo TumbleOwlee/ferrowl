@@ -10,20 +10,20 @@
 //! Actions with no spec open straight in JSON mode (transitional, removed once every action has a
 //! spec). Nested/abstracted actions supply a custom [`Assembler`] (see Stage 2).
 
+use crate::module::ocpp::widgets;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    COLOR_SCHEME,
     state::{
-        ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder, TableState,
-        TableStateBuilder,
+        ButtonState, CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState,
+        SelectionState, SelectionStateBuilder, TableState,
     },
-    style::{ButtonStyle, InputFieldStyleBuilder, SelectionStyleBuilder, TableStyleBuilder},
+    style::{InputFieldStyle, SelectionStyleBuilder},
     traits::HandleEvents,
     widgets::{
-        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, GetValue, InputField,
-        InputFieldBuilder, Selection, SelectionBuilder, Table, TableBuilder, Widget,
+        Button, CodeInputField, CodeInputFieldBuilder, GetValue, InputField, Selection,
+        SelectionBuilder, Table, Widget,
     },
 };
 use ferrowl_ui_derive::TableEntry;
@@ -545,27 +545,8 @@ pub fn value_to_string(v: ValueType) -> String {
 
 // --- Widget builders -------------------------------------------------------
 
-fn border_style() -> Style {
-    Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
-}
-
 fn prop_table() -> PropTable {
-    Widget {
-        state: TableStateBuilder::default()
-            .values(Vec::new())
-            .build()
-            .unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Properties (Enter to edit, c: compact)".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::table("Properties (Enter to edit, c: compact)")
 }
 
 fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
@@ -574,43 +555,27 @@ fn json_editor() -> Widget<CodeInputFieldState, CodeInputField> {
             .focused(false)
             .disabled(false)
             .build()
-            .unwrap(),
+            .expect("static code-input state"),
         widget: CodeInputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
+            .border(ferrowl_ui::Border::Full(Margin::new(1, 0)))
             .title(Some("JSON payload".into()))
-            .style(
-                InputFieldStyleBuilder::default()
-                    .border(border_style())
-                    .build()
-                    .unwrap(),
-            )
+            .style(widgets::bordered_input_style())
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("static code-input config"),
     }
 }
 
 fn text_editor() -> Widget<InputFieldState, InputField<String>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(true)
-            .disabled(false)
-            .placeholder(Some("value (Enter to set)".to_string()))
-            .build()
-            .unwrap(),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(("Value", HorizontalAlignment::Left).into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .build()
-            .unwrap(),
-    }
+    widgets::input(
+        ("Value", HorizontalAlignment::Left),
+        "value (Enter to set)",
+        true,
+        InputFieldStyle::default(),
+    )
 }
 
 /// A dropdown editor with `current` moved to the front so it is preselected.
@@ -629,13 +594,13 @@ fn choice_editor(variants: &[&str], current: &str) -> ValueEditor {
             .focused(true)
             .values(values)
             .build()
-            .unwrap(),
+            .expect("builder invariants satisfied by literal fields above"),
         widget: SelectionBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
+            .border(ferrowl_ui::Border::Full(Margin::new(1, 0)))
             .title(Some(("Value", HorizontalAlignment::Left).into()))
             .style(
                 SelectionStyleBuilder::default()
-                    .general(border_style())
+                    .general(widgets::border_style())
                     .focused(
                         Style::default()
                             .fg(COLOR_SCHEME.bg)
@@ -643,39 +608,19 @@ fn choice_editor(variants: &[&str], current: &str) -> ValueEditor {
                             .bold(),
                     )
                     .build()
-                    .unwrap(),
+                    .expect("builder invariants satisfied by literal fields above"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("builder invariants satisfied by literal fields above"),
     })
 }
 
 fn button(label: &str) -> Widget<ButtonState, Button> {
-    Widget {
-        state: ButtonStateBuilder::default()
-            .focused(false)
-            .label(label.to_string())
-            .disabled(false)
-            .build()
-            .unwrap(),
-        widget: ButtonBuilder::default()
-            .border_margin(Margin::new(1, 0))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 0,
-            })
-            .style(ButtonStyle {
-                general: border_style(),
-                ..ButtonStyle::default()
-            })
-            .horizontal_alignment(HorizontalAlignment::Center)
-            .build()
-            .unwrap(),
-    }
+    widgets::button(label)
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@
 mod access;
 mod address;
 pub mod codec;
+pub mod error;
 pub mod format;
 mod kind;
 pub mod traits;
@@ -22,6 +23,7 @@ use tokio_modbus::SlaveId;
 pub use crate::access::Access;
 pub use crate::address::Address;
 pub use crate::codec::{decode, encode};
+pub use crate::error::CodecError;
 pub use crate::format::{Alignment, BitField, Endian, Format};
 pub use crate::kind::Kind;
 pub use crate::traits::{IntoVec, ParseFromU8};
@@ -57,14 +59,14 @@ pub struct Register {
 impl Register {
     /// Decodes raw register words into a typed [`Value`] using this
     /// register's [`Format`].
-    pub fn decode(&self, bytes: &[u16]) -> anyhow::Result<Value> {
+    pub fn decode(&self, bytes: &[u16]) -> Result<Value, CodecError> {
         decode(&self.format, bytes)
     }
 
     /// Parses a user-entered string into raw register words using this
     /// register's [`Format`]. For a bit-field format the field is positioned
     /// per its mask/shift with all other bits left zero.
-    pub fn encode(&self, s: &str) -> anyhow::Result<Vec<u16>> {
+    pub fn encode(&self, s: &str) -> Result<Vec<u16>, CodecError> {
         encode(&self.format, s)
     }
 

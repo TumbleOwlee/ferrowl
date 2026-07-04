@@ -772,6 +772,8 @@ dependencies = [
  "ferrowl-ui",
  "ferrowl-ui-derive",
  "ferrowl-util",
+ "futures-util",
+ "parking_lot",
  "ratatui",
  "serde",
  "serde_json",
@@ -783,13 +785,13 @@ dependencies = [
 name = "ferrowl-codec"
 version = "0.4.5"
 dependencies = [
- "anyhow",
  "derive-getters",
  "derive_builder",
  "derive_setters",
  "getset",
  "itertools",
  "serde",
+ "thiserror 2.0.18",
  "tokio-modbus",
 ]
 
@@ -850,9 +852,9 @@ version = "0.4.5"
 name = "ferrowl-store"
 version = "0.4.5"
 dependencies = [
- "anyhow",
  "itertools",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -885,13 +887,13 @@ dependencies = [
 name = "ferrowl-util"
 version = "0.4.5"
 dependencies = [
- "anyhow",
  "async-trait",
  "clap",
  "futures-util",
  "once_cell",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
 ]

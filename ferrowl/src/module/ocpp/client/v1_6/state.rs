@@ -3,7 +3,7 @@
 //! ChangeConfiguration, the latest CSMS reservation, the heartbeat cadence) plus a list of
 //! [`ConnectorState`]s — one per connector multiplexed over the single websocket. Each connector
 //! carries its own metering (fed into MeterValues), status and transaction. Shared (behind a
-//! `std::sync::RwLock`) between the view, the inbound handler, and the Lua sim.
+//! `parking_lot::RwLock`) between the view, the inbound handler, and the Lua sim.
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 pub use crate::module::ocpp::client::config::ConfigKey;

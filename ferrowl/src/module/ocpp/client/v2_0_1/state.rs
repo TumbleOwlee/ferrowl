@@ -2,7 +2,7 @@
 //! identity, the variable store answering GetVariables / mutated by SetVariables, the latest CSMS
 //! reservation, the heartbeat cadence) plus a list of [`ConnectorState`]s. Each connector carries
 //! its EVSE id, 2.0.1 status enum, metering, and a locally-minted string transaction (with a seq
-//! counter). Shared (behind `std::sync::RwLock`) between view, inbound handler, and Lua sim.
+//! counter). Shared (behind `parking_lot::RwLock`) between view, inbound handler, and Lua sim.
 
 use crate::module::ocpp::client::backend::rfc3339_now;
 pub use crate::module::ocpp::client::config::ConfigKey;

@@ -6,6 +6,7 @@ mod input;
 mod register_dialog;
 mod selection;
 mod subdialog;
+mod widgets;
 
 pub use add_value::*;
 pub use confirm::*;

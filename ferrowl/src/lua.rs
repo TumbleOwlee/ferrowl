@@ -13,7 +13,7 @@ use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
 
-use crate::module::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
+use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
 /// Bridges Lua register access (`C_Register`) to the module's shared `Memory` (fixed-address
 /// registers) and `VirtualStore` (virtual registers). Runs on the dedicated simulation thread, so
@@ -94,7 +94,7 @@ impl Write for RegisterBridge {
         let addr = match register.address() {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
-                let value = crate::module::str_to_value(&value, register);
+                let value = crate::module::modbus::str_to_value(&value, register);
                 self.virtual_store.blocking_write().insert(name, value);
                 return Ok(());
             }

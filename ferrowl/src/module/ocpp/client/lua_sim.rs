@@ -6,9 +6,11 @@
 //! alongside in `server/lua.rs`.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+
+use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
     LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TimeModule, ValueType, Write,
@@ -16,6 +18,7 @@ use ferrowl_lua::module::{
 use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
 
+use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::view::SharedLog;
 
@@ -66,16 +69,13 @@ struct ClientCsHandle<S: ClientFields> {
 
 impl<S: ClientFields + 'static> Read for ClientCsHandle<S> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
-        self.state
-            .read()
-            .unwrap()
-            .cs_get(&name)
+        with_state(&self.state, |s| s.cs_get(&name))
             .ok_or_else(|| Error::RuntimeError(format!("unknown CS field '{name}'")))
     }
 }
 impl<S: ClientFields + 'static> Write for ClientCsHandle<S> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if self.state.write().unwrap().cs_set(&name, value) {
+        if with_state_mut(&self.state, |s| s.cs_set(&name, value)) {
             Ok(())
         } else {
             Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
@@ -111,16 +111,13 @@ struct ClientConnHandle<S: ClientFields> {
 
 impl<S: ClientFields + 'static> Read for ClientConnHandle<S> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
-        self.state
-            .read()
-            .unwrap()
-            .conn_get(self.id, &name)
+        with_state(&self.state, |s| s.conn_get(self.id, &name))
             .ok_or_else(|| Error::RuntimeError(format!("unknown connector field '{name}'")))
     }
 }
 impl<S: ClientFields + 'static> Write for ClientConnHandle<S> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if self.state.write().unwrap().conn_set(self.id, &name, value) {
+        if with_state_mut(&self.state, |s| s.conn_set(self.id, &name, value)) {
             Ok(())
         } else {
             Err(Error::RuntimeError(format!(
@@ -134,7 +131,7 @@ impl<S: ClientFields + 'static> OcppActions for ClientConnHandle<S> {
         S::conn_actions()
     }
     fn dispatch(&self, action: &str, args: Vec<(String, ValueType)>) -> bool {
-        let scope = self.state.read().unwrap().conn_scope(self.id);
+        let scope = with_state(&self.state, |s| s.conn_scope(self.id));
         enqueue(&self.queue, scope, action, args);
         true
     }
@@ -146,7 +143,7 @@ fn enqueue(queue: &ScopedActionQueue, scope: Scope, action: &str, args: Vec<(Str
     for (key, value) in args {
         overrides.insert(key, vt_to_json(value));
     }
-    queue.lock().unwrap().push_back((
+    queue.lock().push_back((
         scope,
         action.to_string(),
         serde_json::Value::Object(overrides),

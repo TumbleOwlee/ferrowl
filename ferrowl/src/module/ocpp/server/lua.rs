@@ -6,9 +6,11 @@
 //! its entries; dispatched actions land on a [`ServerActionQueue`] the view drains and routes.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+
+use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
     LogModule, OcppActions, OcppServer, OcppServerHost, Read, TimeModule, ValueType, Write,
@@ -18,6 +20,7 @@ use ferrowl_lua::{ContextBuilder, Error};
 use crate::module::ocpp::client::lua_sim::{
     LuaLogSink, OcppFields, OcppSimHandle, emit, sleep_responsive, vt_to_json,
 };
+use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
@@ -70,7 +73,7 @@ fn enqueue(
     for (key, value) in args {
         overrides.insert(key, vt_to_json(value));
     }
-    queue.lock().unwrap().push_back((
+    queue.lock().push_back((
         identity,
         scope,
         action.to_string(),
@@ -87,16 +90,13 @@ pub struct CsHandle<V: ServerVersion> {
 
 impl<V: ServerVersion> Read for CsHandle<V> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
-        self.state
-            .read()
-            .unwrap()
-            .get_field(&name)
+        with_state(&self.state, |s| s.get_field(&name))
             .ok_or_else(|| Error::RuntimeError(format!("unknown CS field '{name}'")))
     }
 }
 impl<V: ServerVersion> Write for CsHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if self.state.write().unwrap().set_field(&name, value) {
+        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
             Ok(())
         } else {
             Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
@@ -123,16 +123,13 @@ pub struct ConnHandle<V: ServerVersion> {
 
 impl<V: ServerVersion> Read for ConnHandle<V> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
-        self.state
-            .read()
-            .unwrap()
-            .get_field(&name)
+        with_state(&self.state, |s| s.get_field(&name))
             .ok_or_else(|| Error::RuntimeError(format!("unknown connector field '{name}'")))
     }
 }
 impl<V: ServerVersion> Write for ConnHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if self.state.write().unwrap().set_field(&name, value) {
+        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
             Ok(())
         } else {
             Err(Error::RuntimeError(format!(
@@ -162,35 +159,29 @@ impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
     type Conn = ConnHandle<V>;
 
     fn stations(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self
-            .states
-            .read()
-            .unwrap()
-            .stations
-            .keys()
-            .cloned()
-            .collect();
+        let mut ids: Vec<String> =
+            with_state(&self.states, |s| s.stations.keys().cloned().collect());
         ids.sort();
         ids
     }
 
     fn connectors(&self, cs: &str) -> Vec<i64> {
-        let states = self.states.read().unwrap();
-        let Some(station) = states.stations.get(cs) else {
-            return Vec::new();
-        };
-        let mut ids: Vec<i64> = station
-            .conns
-            .iter()
-            .filter_map(|(scope, _)| V::lua_connector_id(*scope))
-            .collect();
+        let mut ids: Vec<i64> = with_state(&self.states, |states| {
+            let Some(station) = states.stations.get(cs) else {
+                return Vec::new();
+            };
+            station
+                .conns
+                .iter()
+                .filter_map(|(scope, _)| V::lua_connector_id(*scope))
+                .collect()
+        });
         ids.sort();
         ids
     }
 
     fn station(&self, cs: &str) -> Option<CsHandle<V>> {
-        let states = self.states.read().unwrap();
-        let state = states.stations.get(cs)?.cs.clone()?;
+        let state = with_state(&self.states, |states| states.stations.get(cs)?.cs.clone())?;
         Some(CsHandle {
             identity: cs.to_string(),
             state,
@@ -199,16 +190,18 @@ impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
     }
 
     fn connector(&self, cs: &str, id: i64) -> Option<ConnHandle<V>> {
-        let states = self.states.read().unwrap();
-        let station = states.stations.get(cs)?;
-        let (scope, state) = station
-            .conns
-            .iter()
-            .find(|(scope, _)| V::lua_connector_id(*scope) == Some(id))?;
+        let (scope, state) = with_state(&self.states, |states| {
+            let station = states.stations.get(cs)?;
+            let (scope, state) = station
+                .conns
+                .iter()
+                .find(|(scope, _)| V::lua_connector_id(*scope) == Some(id))?;
+            Some((*scope, state.clone()))
+        })?;
         Some(ConnHandle {
             identity: cs.to_string(),
-            scope: *scope,
-            state: state.clone(),
+            scope,
+            state,
             queue: self.queue.clone(),
         })
     }
@@ -268,13 +261,12 @@ mod tests {
     #[test]
     fn ut_server_host_resolves_and_routes_by_identity() {
         let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
-        {
-            let mut reg = states.write().unwrap();
+        with_state_mut(&states, |reg| {
             let st = reg.stations.entry("CP1".to_string()).or_default();
             st.cs = Some(Arc::new(RwLock::new(Cs::default())));
             st.conns
                 .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
-        }
+        });
         let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
         let host = ServerHost {
             states,
@@ -291,7 +283,7 @@ mod tests {
         // A connector action enqueues with the station identity + connector scope.
         let conn = host.connector("CP1", 1).expect("connector handle");
         assert!(conn.dispatch("RemoteStartTransaction", vec![]));
-        let (identity, scope, action, _) = queue.lock().unwrap().pop_front().unwrap();
+        let (identity, scope, action, _) = queue.lock().pop_front().unwrap();
         assert_eq!(identity, "CP1");
         assert_eq!(scope, Scope::connector(1));
         assert_eq!(action, "RemoteStartTransaction");

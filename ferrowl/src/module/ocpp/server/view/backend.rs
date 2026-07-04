@@ -1,0 +1,683 @@
+//! Simulation + backend glue: the Lua sim lifecycle, entry bookkeeping (create/update/sort/delete),
+//! the per-tick `refresh` (deferred setup, backend + Lua-queued events, log tee) and `:` command
+//! execution.
+
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
+use ferrowl_ocpp::ConnectorScope;
+use ferrowl_ocpp::csms::ConnectionId;
+
+use crate::module::ocpp::client::build_client_view;
+use crate::module::ocpp::client::lua_sim::merge_overrides;
+use crate::module::ocpp::config::device::OcppDeviceConfig;
+use crate::module::ocpp::config::session::OcppRole;
+use crate::module::ocpp::lock::{with_state, with_state_mut};
+use crate::module::ocpp::server::backend::{
+    Scope, ServerEvent, inbound_messages, with_rfids, with_rfids_mut,
+};
+use crate::module::ocpp::server::build_server_view;
+use crate::module::ocpp::server::lua::run_server_sim;
+use crate::module::view::{CommandFuture, CommandResult, RefreshFuture};
+
+use super::{
+    Entry, EntryState, EntryStateT, ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
+};
+
+/// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
+fn entry_sort_key<V: ServerVersion>(e: &Entry<V>) -> (String, bool, i64, i64) {
+    (
+        e.identity.clone(),
+        e.scope.is_connector(),
+        e.scope.evse.unwrap_or(0),
+        e.scope.connector.unwrap_or(0),
+    )
+}
+
+impl<V: ServerVersion> ServerView<V>
+where
+    V::Action: Clone,
+{
+    /// (Re)start the single Lua sim over the shared state registry (no-op if no enabled scripts).
+    pub(super) fn start_sim(&mut self) {
+        if let Some(mut sim) = self.runtime.handle.take() {
+            sim.stop();
+        }
+        self.runtime.handle = run_server_sim(
+            self.lua_states.clone(),
+            self.runtime.lua_queue.clone(),
+            self.enabled_scripts(),
+            self.log.clone(),
+        );
+    }
+
+    /// Forget every station's registered state (after the entry set is cleared).
+    fn clear_lua_states(&mut self) {
+        with_state_mut(&self.lua_states, |s| s.stations.clear());
+    }
+
+    fn set_compact(&mut self, compact: bool) {
+        self.compact = compact;
+        let margin = ratatui::layout::Margin {
+            vertical: if compact { 0 } else { 1 },
+            horizontal: 0,
+        };
+        self.cs_table.widget.set_row_margin(margin);
+        self.msg_table.widget.set_row_margin(margin);
+    }
+
+    /// Delete the selected entry. A CS-level entry takes its connector entries with it.
+    pub(super) fn delete_selected(&mut self) {
+        let Some(idx) = self.selected() else { return };
+        let entry = &self.entries[idx];
+        let identity = entry.identity.clone();
+        let scope = entry.scope;
+        if !scope.is_connector() {
+            self.entries.retain(|e| e.identity != identity);
+            self.cs_configs.remove(&identity);
+            with_state_mut(&self.lua_states, |s| {
+                s.stations.remove(&identity);
+            });
+        } else {
+            self.entries.remove(idx);
+            with_state_mut(&self.lua_states, |s| {
+                if let Some(st) = s.stations.get_mut(&identity) {
+                    st.conns.retain(|(sc, _)| *sc != scope);
+                }
+            });
+        }
+    }
+
+    /// The live connection for a charge-point identity, if any entry of it is online.
+    pub(super) fn conn_for(&self, identity: &str) -> Option<ConnectionId> {
+        self.entries
+            .iter()
+            .find(|e| e.identity == identity && e.conn.is_some())
+            .and_then(|e| e.conn)
+    }
+
+    /// Feed the open detail overlay live state/metering rows from its target entry.
+    pub(super) fn refresh_detail(&mut self) {
+        let ServerOverlay::Detail(detail) = &self.overlay else {
+            return;
+        };
+        let (identity, scope, is_cs) = (detail.identity.clone(), detail.scope, detail.is_cs);
+        let Some(entry) = self
+            .entries
+            .iter()
+            .find(|e| e.identity == identity && e.scope == scope)
+        else {
+            return;
+        };
+        let (fields, metering) = match &entry.state {
+            EntryState::Cs(s) => with_state(s, |g| (g.fields(), g.metering())),
+            EntryState::Conn(s) => with_state(s, |g| (g.fields(), g.metering())),
+        };
+        // RFID lists for this entry: a CS entry owns the CS list (nothing inherited); a connector
+        // owns its own list and inherits the CS list (shown read-only).
+        let (own, inherited) = with_rfids(&self.rfids, |store| {
+            if is_cs {
+                (store.cs.clone(), Vec::new())
+            } else {
+                (store.scope_list(scope).to_vec(), store.cs.clone())
+            }
+        });
+        let ServerOverlay::Detail(detail) = &mut self.overlay else {
+            unreachable!()
+        };
+        detail.set_state_rows(fields);
+        if !is_cs {
+            detail.set_metering_rows(metering);
+        }
+        detail.set_rfids(own, inherited);
+    }
+
+    /// Resolve (and cache) a connection's charge-point identity.
+    fn identity_of(&mut self, conn: ConnectionId) -> String {
+        if let Some(id) = self.conn_identity.get(&conn) {
+            return id.clone();
+        }
+        let id = self
+            .backend
+            .identity(conn)
+            .unwrap_or_else(|| conn.to_string());
+        self.conn_identity.insert(conn, id.clone());
+        id
+    }
+
+    /// The scope of the connector entry (of `identity`) whose observed transactionId equals `tx`.
+    fn connector_scope_for_tx(&self, identity: &str, tx: &str) -> Option<Scope> {
+        self.entries
+            .iter()
+            .find(|e| {
+                e.identity == identity
+                    && e.scope.is_connector()
+                    && e.get_field_str("TransactionId").as_deref() == Some(tx)
+            })
+            .map(|e| e.scope)
+    }
+
+    /// Find an entry by (identity, connector), creating it if missing. Returns its index.
+    pub(super) fn entry_index(
+        &mut self,
+        identity: &str,
+        scope: Scope,
+        conn: Option<ConnectionId>,
+    ) -> usize {
+        if let Some(i) = self
+            .entries
+            .iter()
+            .position(|e| e.identity == identity && e.scope == scope)
+        {
+            return i;
+        }
+        // Build the shared state and register it for the Lua sim (keyed by identity + scope).
+        let state = if scope.is_connector() {
+            let arc = Arc::new(RwLock::new(V::Conn::default()));
+            with_state_mut(&self.lua_states, |reg| {
+                reg.stations
+                    .entry(identity.to_string())
+                    .or_default()
+                    .conns
+                    .push((scope, arc.clone()));
+            });
+            EntryState::Conn(arc)
+        } else {
+            let arc = Arc::new(RwLock::new(V::Cs::default()));
+            with_state_mut(&self.lua_states, |reg| {
+                reg.stations.entry(identity.to_string()).or_default().cs = Some(arc.clone());
+            });
+            EntryState::Cs(arc)
+        };
+        self.entries.push(Entry {
+            identity: identity.to_string(),
+            scope,
+            conn,
+            online: conn.is_some(),
+            state,
+            messages: Vec::new(),
+        });
+        self.entries.len() - 1
+    }
+
+    /// Drain backend events into entries (create/update state, append to per-entry logs).
+    pub(super) fn drain_events(&mut self) {
+        let mut events = Vec::new();
+        while let Ok(ev) = self.events_rx.try_recv() {
+            events.push(ev);
+        }
+        let had_events = !events.is_empty();
+        for ev in events {
+            match ev {
+                ServerEvent::Connected { conn } => {
+                    let identity = self.identity_of(conn);
+                    // Ensure the CS-level entry exists and bring every entry of this CS online.
+                    self.entry_index(&identity, Scope::CS, Some(conn));
+                    for e in self.entries.iter_mut().filter(|e| e.identity == identity) {
+                        e.online = true;
+                        e.conn = Some(conn);
+                    }
+                }
+                ServerEvent::Disconnected { conn } => {
+                    for e in self.entries.iter_mut().filter(|e| e.conn == Some(conn)) {
+                        e.online = false;
+                        e.conn = None;
+                    }
+                }
+                ServerEvent::Inbound {
+                    conn,
+                    name,
+                    request,
+                    response,
+                } => {
+                    let identity = self.identity_of(conn);
+                    let mut scope = V::inbound_connector(&name, &request);
+                    // Always make sure the CS-level entry exists for this connection.
+                    self.entry_index(&identity, Scope::CS, Some(conn));
+                    // A stop carrying no connector/EVSE id buckets to CS scope; re-route it to the
+                    // connector holding the stopping transaction so its tx id (and limit) clear.
+                    if scope == Scope::CS
+                        && let Some(tx) = V::stop_tx_id(&name, &request)
+                        && let Some(conn_scope) = self.connector_scope_for_tx(&identity, &tx)
+                    {
+                        scope = conn_scope;
+                    }
+                    let idx = self.entry_index(&identity, scope, Some(conn));
+                    let entry = &mut self.entries[idx];
+                    entry.online = true;
+                    entry.conn = Some(conn);
+                    entry.apply_inbound(&name, &request, &response);
+                    for m in inbound_messages(&name, request, response) {
+                        crate::module::ocpp::client::backend::push_capped(&mut entry.messages, m);
+                    }
+                }
+                ServerEvent::Outbound {
+                    conn,
+                    scope,
+                    name,
+                    request,
+                    response,
+                    ok,
+                    context,
+                } => {
+                    let identity = self.identity_of(conn);
+                    // Persist a config-fetch response for this CS so it is available whether or not
+                    // the detail overlay is open, and live-merge it into an open matching overlay.
+                    if ok && name == V::config_action() {
+                        let rows = V::parse_config(&response);
+                        if !rows.is_empty() {
+                            let store = self.cs_configs.entry(identity.clone()).or_default();
+                            for (k, v, ro) in rows {
+                                match store.iter_mut().find(|(ek, _, _)| *ek == k) {
+                                    Some(r) => {
+                                        r.1 = v;
+                                        r.2 = ro;
+                                    }
+                                    None => store.push((k, v, ro)),
+                                }
+                            }
+                            if let ServerOverlay::Detail(d) = &mut self.overlay
+                                && d.is_cs
+                                && d.identity == identity
+                            {
+                                d.set_config(self.cs_configs[&identity].clone());
+                            }
+                        }
+                    }
+                    let idx = self.entry_index(&identity, scope, Some(conn));
+                    let entry = &mut self.entries[idx];
+                    // Mirror state we successfully pushed to the station (e.g. an accepted
+                    // SetChargingProfile's per-purpose limit).
+                    if ok {
+                        entry.apply_outbound(&name, &request, &response);
+                    }
+                    crate::module::ocpp::client::backend::push_capped(
+                        &mut entry.messages,
+                        crate::module::ocpp::client::backend::OcppMessage::new(
+                            crate::module::ocpp::client::backend::Dir::Out,
+                            name.clone(),
+                            request,
+                            None,
+                            "outbound call",
+                        ),
+                    );
+                    crate::module::ocpp::client::backend::push_capped(
+                        &mut entry.messages,
+                        crate::module::ocpp::client::backend::OcppMessage::new(
+                            crate::module::ocpp::client::backend::Dir::In,
+                            name,
+                            response,
+                            Some(ok),
+                            context,
+                        ),
+                    );
+                }
+            }
+        }
+        // Keep the table sorted (CS → connector, grouped by station) without losing the selection.
+        if had_events {
+            self.sort_entries();
+        }
+    }
+
+    /// Sort entries by `(identity, CS-before-connector, evse, connector)`, preserving the selected
+    /// entry across the reorder.
+    fn sort_entries(&mut self) {
+        let selected_key = self
+            .cs_table
+            .state
+            .table_state()
+            .selected()
+            .and_then(|i| self.entries.get(i))
+            .map(|e| (e.identity.clone(), e.scope));
+        self.entries.sort_by_key(entry_sort_key);
+        if let Some(key) = selected_key
+            && let Some(idx) = self
+                .entries
+                .iter()
+                .position(|e| e.identity == key.0 && e.scope == key.1)
+        {
+            self.cs_table.state.select_index(idx);
+        }
+    }
+
+    /// Spawn an outbound Call to `conn` and post its result back as an [`ServerEvent::Outbound`].
+    pub(super) fn send_to(
+        &self,
+        conn: ConnectionId,
+        scope: Scope,
+        name: &str,
+        payload: serde_json::Value,
+    ) {
+        let Some(sender) = self.backend.sender() else {
+            return;
+        };
+        let tx = self.events_tx.clone();
+        let name = name.to_string();
+        let action = match V::decode_call(&name, payload.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                let _ = tx.send(ServerEvent::Outbound {
+                    conn,
+                    scope,
+                    name,
+                    request: payload,
+                    response: serde_json::Value::Null,
+                    ok: false,
+                    context: format!("invalid payload: {e}"),
+                });
+                return;
+            }
+        };
+        let request = payload;
+        tokio::spawn(async move {
+            let (response, ok, context) = match sender.call(conn, action).await {
+                Ok(resp) => (resp, true, String::new()),
+                Err(e) => (serde_json::Value::Null, false, e.to_string()),
+            };
+            let _ = tx.send(ServerEvent::Outbound {
+                conn,
+                scope,
+                name,
+                request,
+                response,
+                ok,
+                context,
+            });
+        });
+    }
+
+    /// Selected entry index, if any.
+    pub(super) fn selected(&self) -> Option<usize> {
+        let i = self.cs_table.state.table_state().selected()?;
+        (i < self.entries.len()).then_some(i)
+    }
+
+    /// Drain the single Lua action queue and route each action to its station/scope. Each item is
+    /// `(identity, scope, action, overrides)`: the payload is derived from the matching entry's
+    /// observed state (falling back to the action default), then overrides are merged.
+    fn drain_lua_actions(&mut self) {
+        let queued: Vec<(String, Scope, String, serde_json::Value)> =
+            self.runtime.lua_queue.lock().drain(..).collect();
+        let mut sends: Vec<(ConnectionId, Scope, String, serde_json::Value)> = Vec::new();
+        for (identity, scope, name, overrides) in queued {
+            let Some(conn) = self.conn_for(&identity) else {
+                continue;
+            };
+            let mut payload = self
+                .entries
+                .iter()
+                .find(|e| e.identity == identity && e.scope == scope)
+                .and_then(|e| e.derive_payload(&name))
+                .unwrap_or_else(|| {
+                    V::default_action(&name)
+                        .and_then(|a| V::encode_action(&a).ok())
+                        .unwrap_or_else(|| serde_json::json!({}))
+                });
+            // Default any connector/EVSE id from the entry's scope before user overrides win.
+            V::inject_scope(&mut payload, scope);
+            merge_overrides(&mut payload, overrides);
+            sends.push((conn, scope, name, payload));
+        }
+        for (conn, scope, name, payload) in sends {
+            self.send_to(conn, scope, &name, payload);
+        }
+    }
+
+    /// Rebuild the action list for the selected entry's level, if it changed.
+    pub(super) fn sync_actions(&mut self) {
+        let is_connector = self
+            .selected()
+            .map(|i| self.entries[i].scope.is_connector());
+        let want = is_connector.unwrap_or(false);
+        // Rebuild only when the level (CS vs connector) actually changes. Gating on a live
+        // selection rebuilt the list every frame while the table was empty, resetting the
+        // selection so it could never move.
+        if self.actions_for_connector == Some(want) {
+            return;
+        }
+        self.actions_for_connector = Some(want);
+        let values: Vec<String> = V::csms_actions()
+            .iter()
+            .filter(|(_, scope)| {
+                matches!(
+                    (want, scope),
+                    (true, ConnectorScope::Required | ConnectorScope::Optional)
+                        | (false, ConnectorScope::None | ConnectorScope::Optional)
+                )
+            })
+            .map(|(n, _)| n.to_string())
+            .collect();
+        self.actions = super::render::action_list(values);
+    }
+
+    /// Load the selected message's payload into the read-only viewer.
+    pub(super) fn sync_code(&mut self) {
+        let content = self
+            .selected()
+            .and_then(|i| {
+                let sel = self.msg_table.state.table_state().selected()?;
+                self.entries[i].messages.get(sel).cloned()
+            })
+            .map(|m| serde_json::to_string_pretty(&m.payload).unwrap_or_default())
+            .unwrap_or_default();
+        // Only reset the viewer when the selected payload actually changes; otherwise the periodic
+        // refresh would snap its scroll position back to the top every tick.
+        if content != self.code_content {
+            self.code.state.set_content(&content);
+            self.code_content = content;
+        }
+    }
+
+    fn save_device_to(&self, path: &str) -> CommandResult {
+        use ferrowl_util::convert::{Converter, FileType};
+        let Some(ty) = FileType::from_path(path) else {
+            return CommandResult::Handled(Some(format!(
+                "unknown format for '{path}' (use .toml or .json)"
+            )));
+        };
+        let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
+        device.version = Some(crate::config::VERSION.to_string());
+        device.log_file = self.device.log_file.clone();
+        with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
+        match Converter::save(&device, path, ty) {
+            Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
+            Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
+        }
+    }
+
+    pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
+        Box::pin(async move {
+            // Apply a resolved `:edit`.
+            if let Some((spec, path)) = self.deferred.setup.take() {
+                let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
+                device.log_file = self.device.log_file.clone();
+                with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
+                if spec.role == OcppRole::Client {
+                    // Stop the listener first: dropping `Server<V>` only detaches its accept task,
+                    // leaving the port bound, so the swapped-in view could never rebind.
+                    let _ = self.backend.stop().await;
+                    self.deferred.replacement = Some(build_client_view(spec, path, device));
+                    return;
+                }
+                if spec.version != self.spec.version {
+                    // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
+                    // generic over the *old* version and would rebind with the old subprotocol,
+                    // rejecting the (now-different-version) client handshake with a 400.
+                    let _ = self.backend.stop().await;
+                    self.deferred.replacement = Some(build_server_view(spec, path, device));
+                    return;
+                }
+                self.spec = spec;
+                self.device = device;
+                self.device_path = path;
+                // Rebind on the (possibly changed) endpoint.
+                let _ = self.backend.stop().await;
+                self.entries.clear();
+                self.conn_identity.clear();
+                self.cs_configs.clear();
+                self.clear_lua_states();
+                self.log.write().await.write("Settings updated");
+            }
+
+            // Auto-bind / honour `:start`.
+            if self.want_running && !self.backend.is_online() {
+                let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
+                if let Err(e) = self.backend.start(handler).await {
+                    self.log.write().await.write(&format!("listen failed: {e}"));
+                    self.want_running = false;
+                }
+            }
+
+            self.drain_events();
+            self.drain_lua_actions();
+
+            // Apply a pending `:log` change (or device-config log file) to the persistent sink.
+            if self.runtime.applied_log_file != self.device.log_file {
+                let name = self.spec.name.clone();
+                self.log
+                    .write()
+                    .await
+                    .set_log_file(self.device.log_file.as_deref(), &name);
+                self.runtime.applied_log_file = self.device.log_file.clone();
+            }
+
+            // Tee new protocol messages (across all entries) into the persistent log. Each entry's
+            // log is filtered separately on screen, but the persistent log is the whole CSMS.
+            let mut max_seq = self.runtime.logged_seq;
+            let mut new: Vec<(u64, String)> = Vec::new();
+            for entry in &self.entries {
+                for m in entry
+                    .messages
+                    .iter()
+                    .filter(|m| m.seq > self.runtime.logged_seq)
+                {
+                    max_seq = max_seq.max(m.seq);
+                    new.push((m.seq, m.log_line()));
+                }
+            }
+            if !new.is_empty() {
+                new.sort_by_key(|(seq, _)| *seq);
+                let mut log = self.log.write().await;
+                for (_, line) in new {
+                    log.write(&line);
+                }
+                self.runtime.logged_seq = max_seq;
+            }
+        })
+    }
+
+    pub(super) fn handle_command_impl<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
+        Box::pin(async move {
+            match cmd.trim() {
+                "start" => {
+                    self.want_running = true;
+                    let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
+                    match self.backend.start(handler).await {
+                        Ok(()) => CommandResult::Handled(Some("CSMS server started".into())),
+                        Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
+                    }
+                }
+                "stop" => {
+                    self.want_running = false;
+                    let _ = self.backend.stop().await;
+                    self.entries.clear();
+                    self.conn_identity.clear();
+                    self.cs_configs.clear();
+                    self.clear_lua_states();
+                    CommandResult::Handled(Some("CSMS server stopped".into()))
+                }
+                "restart" => {
+                    let _ = self.backend.stop().await;
+                    self.entries.clear();
+                    self.conn_identity.clear();
+                    self.cs_configs.clear();
+                    self.clear_lua_states();
+                    self.want_running = true;
+                    let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
+                    match self.backend.start(handler).await {
+                        Ok(()) => CommandResult::Handled(Some("CSMS server restarted".into())),
+                        Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
+                    }
+                }
+                "edit" | "e" => {
+                    self.overlay = ServerOverlay::Setup(Box::new(
+                        crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
+                            &self.spec,
+                            &self.device_path,
+                        ),
+                    ));
+                    CommandResult::Handled(None)
+                }
+                "wd" => {
+                    if self.device_path.is_empty() {
+                        CommandResult::Handled(Some(
+                            "No configuration file path configured.".into(),
+                        ))
+                    } else {
+                        self.save_device_to(&self.device_path.clone())
+                    }
+                }
+                cmd if cmd.starts_with("wd ") => {
+                    let path = cmd["wd ".len()..].trim().to_string();
+                    self.save_device_to(&path)
+                }
+                "compact" => {
+                    self.set_compact(!self.compact);
+                    CommandResult::Handled(None)
+                }
+                "log" => {
+                    self.device.log_file = None;
+                    CommandResult::Handled(Some("File logging disabled".into()))
+                }
+                cmd if cmd.starts_with("log ") => {
+                    let path = cmd["log ".len()..].trim().to_string();
+                    if path.is_empty() {
+                        self.device.log_file = None;
+                        CommandResult::Handled(Some("File logging disabled".into()))
+                    } else {
+                        self.device.log_file = Some(path.clone());
+                        CommandResult::Handled(Some(format!("Logging to {path}")))
+                    }
+                }
+                "rfid" => {
+                    let msg = with_rfids(&self.rfids, |s| {
+                        if s.cs.is_empty() {
+                            "CS RFID accept-list empty (all tags accepted)".to_string()
+                        } else {
+                            format!("Accepted CS RFIDs: {}", s.cs.join(", "))
+                        }
+                    });
+                    CommandResult::Handled(Some(msg))
+                }
+                "rfid clear" => {
+                    with_rfids_mut(&self.rfids, |s| s.cs.clear());
+                    CommandResult::Handled(Some(
+                        "CS RFID accept-list cleared (all accepted)".into(),
+                    ))
+                }
+                cmd if cmd.starts_with("rfid add ") => {
+                    let tag = cmd["rfid add ".len()..].trim().to_string();
+                    if tag.is_empty() {
+                        return CommandResult::Handled(Some("Usage: :rfid add <tag>".into()));
+                    }
+                    if with_rfids_mut(&self.rfids, |s| s.add(Scope::CS, tag.clone())) {
+                        CommandResult::Handled(Some(format!("Added CS RFID {tag}")))
+                    } else {
+                        CommandResult::Handled(Some(format!("{tag} already in accept-list")))
+                    }
+                }
+                cmd if cmd.starts_with("rfid del ") => {
+                    let tag = cmd["rfid del ".len()..].trim().to_string();
+                    if with_rfids_mut(&self.rfids, |s| s.remove(Scope::CS, &tag)) {
+                        CommandResult::Handled(Some(format!("Removed CS RFID {tag}")))
+                    } else {
+                        CommandResult::Handled(Some(format!("{tag} not in accept-list")))
+                    }
+                }
+                _ => CommandResult::Unhandled,
+            }
+        })
+    }
+}

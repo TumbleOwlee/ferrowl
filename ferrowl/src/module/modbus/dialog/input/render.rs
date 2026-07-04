@@ -296,3 +296,72 @@ impl EditInputDialog {
         }
     }
 }
+
+#[cfg(test)]
+mod render_tests {
+    //! Render-to-buffer characterization: the dialog draws its box title, fields, and
+    //! validation-error text without panicking, in both Add and Edit configurations.
+    use super::EditInputDialog;
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    fn buffer_text(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render(dialog: &mut EditInputDialog) -> String {
+        let area = Rect::new(0, 0, 80, 54);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        buffer_text(&buf)
+    }
+
+    #[test]
+    fn ut_render_add_dialog_shows_title_fields_and_validation_error() {
+        let mut dialog = EditInputDialog::new();
+        let text = render(&mut dialog);
+        assert!(text.contains("Add"), "missing box title:\n{text}");
+        for field in ["Label", "Slave ID", "Address", "Kind", "Access", "CONFIRM"] {
+            assert!(text.contains(field), "missing field '{field}':\n{text}");
+        }
+        // A fresh dialog has an empty slave ID -> the validation error is surfaced in the
+        // Error pane instead of panicking. (`validate()` checks label via `String::validate`,
+        // which never errors — slave ID is the first field that actually rejects empty input.)
+        assert!(
+            text.contains("Slave ID:"),
+            "missing validation error:\n{text}"
+        );
+    }
+
+    #[test]
+    fn ut_render_edit_dialog_shows_edit_title_and_delete_button() {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None, None);
+        let text = render(&mut dialog);
+        assert!(text.contains("Edit"), "missing box title:\n{text}");
+        assert!(text.contains("DELETE"), "missing delete button:\n{text}");
+        // Pre-filled fields are drawn.
+        assert!(text.contains("temp"), "missing label value:\n{text}");
+        assert!(text.contains("42"), "missing value:\n{text}");
+    }
+}

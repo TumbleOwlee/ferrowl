@@ -7,8 +7,9 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use parking_lot::RwLock;
 
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::v1_6::messages::change_configuration::ChangeConfigurationResponse;
@@ -22,6 +23,7 @@ use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
+use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::scope::Scope;
 
 /// Scope an inbound CSMS→CS Call belongs to, for the message log: a top-level `connectorId` targets
@@ -75,12 +77,21 @@ impl CsStateHandler {
             state,
         }
     }
+}
 
+impl HasState for CsStateHandler {
+    type State = CsState;
+
+    fn state(&self) -> &Arc<RwLock<CsState>> {
+        &self.state
+    }
+}
+
+impl CsStateHandler {
     /// Build the response for an inbound action from state (or default-accept), and a log context.
     fn respond(&self, action: &Action16) -> (Result<Response16, CallError>, String) {
         match action {
-            Action16::GetConfiguration(req) => {
-                let state = self.state.read().unwrap();
+            Action16::GetConfiguration(req) => self.with_state(|state| {
                 let wanted = req.key.as_deref();
                 let mut keys = Vec::new();
                 let mut unknown = Vec::new();
@@ -103,9 +114,8 @@ impl CsStateHandler {
                     Ok(Response16::GetConfiguration(Box::new(resp))),
                     "answered from config".to_string(),
                 )
-            }
-            Action16::ChangeConfiguration(req) => {
-                let mut state = self.state.write().unwrap();
+            }),
+            Action16::ChangeConfiguration(req) => self.with_state_mut(|state| {
                 let status = match state.config.iter_mut().find(|c| c.key == req.key) {
                     Some(c) if c.readonly => ConfigurationStatus::Rejected,
                     Some(c) => {
@@ -127,9 +137,8 @@ impl CsStateHandler {
                     ))),
                     format!("{} = {}", req.key, req.value),
                 )
-            }
-            Action16::Reset(_) => {
-                let mut state = self.state.write().unwrap();
+            }),
+            Action16::Reset(_) => self.with_state_mut(|state| {
                 for c in &mut state.connectors {
                     c.status = "Available".to_string();
                     c.transaction_id = None;
@@ -141,7 +150,7 @@ impl CsStateHandler {
                     }))),
                     "state reset".to_string(),
                 )
-            }
+            }),
             Action16::SetChargingProfile(req) => {
                 let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
                 let profile = &json["csChargingProfiles"];
@@ -152,132 +161,134 @@ impl CsStateHandler {
                     .to_string();
                 let schedule = &profile["chargingSchedule"];
                 let period = &schedule["chargingSchedulePeriod"][0];
-                let mut state = self.state.write().unwrap();
-                // Reject profiles whose stack level exceeds ChargeProfileMaxStackLevel (when that
-                // key is configured with a numeric value); otherwise accept (no ceiling).
-                let max_stack = state
-                    .config
-                    .iter()
-                    .find(|c| c.key == "ChargeProfileMaxStackLevel")
-                    .and_then(|c| c.value.parse::<i64>().ok());
-                if let Some(max) = max_stack
-                    && stack > max
-                {
-                    drop(state);
-                    let resp =
-                        Response16::SetChargingProfile(Box::new(SetChargingProfileResponse {
-                            status: ChargingProfileStatus::Rejected,
-                        }));
-                    (
-                        Ok(resp),
-                        format!("rejected: stackLevel {stack} > max {max}"),
-                    )
-                } else {
-                    // Apply the limit to the targeted connector (fall back to the first), routed by
-                    // charging-profile purpose into the matching per-purpose field.
-                    let context = if let Some(limit) = period["limit"].as_f64() {
-                        let unit = schedule["chargingRateUnit"]
-                            .as_str()
-                            .unwrap_or("A")
-                            .to_string();
-                        let target = req.connector_id as i64;
-                        let idx = state
-                            .connectors
-                            .iter()
-                            .position(|c| c.connector_id == target)
-                            .or((!state.connectors.is_empty()).then_some(0));
-                        if let Some(i) = idx {
-                            let c = &mut state.connectors[i];
-                            match purpose.as_str() {
-                                "TxDefaultProfile" => {
-                                    c.default_limit = Some(limit);
-                                    c.default_limit_unit = unit.clone();
-                                }
-                                "ChargePointMaxProfile" => {
-                                    c.max_limit = Some(limit);
-                                    c.max_limit_unit = unit.clone();
-                                }
-                                _ => {
-                                    c.limit = Some(limit);
-                                    c.limit_unit = unit.clone();
+                self.with_state_mut(|state| {
+                    // Reject profiles whose stack level exceeds ChargeProfileMaxStackLevel (when
+                    // that key is configured with a numeric value); otherwise accept (no ceiling).
+                    let max_stack = state
+                        .config
+                        .iter()
+                        .find(|c| c.key == "ChargeProfileMaxStackLevel")
+                        .and_then(|c| c.value.parse::<i64>().ok());
+                    if let Some(max) = max_stack
+                        && stack > max
+                    {
+                        let resp =
+                            Response16::SetChargingProfile(Box::new(SetChargingProfileResponse {
+                                status: ChargingProfileStatus::Rejected,
+                            }));
+                        (
+                            Ok(resp),
+                            format!("rejected: stackLevel {stack} > max {max}"),
+                        )
+                    } else {
+                        // Apply the limit to the targeted connector (fall back to the first),
+                        // routed by charging-profile purpose into the matching per-purpose field.
+                        let context = if let Some(limit) = period["limit"].as_f64() {
+                            let unit = schedule["chargingRateUnit"]
+                                .as_str()
+                                .unwrap_or("A")
+                                .to_string();
+                            let target = req.connector_id as i64;
+                            let idx = state
+                                .connectors
+                                .iter()
+                                .position(|c| c.connector_id == target)
+                                .or((!state.connectors.is_empty()).then_some(0));
+                            if let Some(i) = idx {
+                                let c = &mut state.connectors[i];
+                                match purpose.as_str() {
+                                    "TxDefaultProfile" => {
+                                        c.default_limit = Some(limit);
+                                        c.default_limit_unit = unit.clone();
+                                    }
+                                    "ChargePointMaxProfile" => {
+                                        c.max_limit = Some(limit);
+                                        c.max_limit_unit = unit.clone();
+                                    }
+                                    _ => {
+                                        c.limit = Some(limit);
+                                        c.limit_unit = unit.clone();
+                                    }
                                 }
                             }
-                        }
-                        format!("{purpose} limit {limit} {unit}")
-                    } else {
-                        "no limit in profile".to_string()
-                    };
-                    let resp = V1_6::default_response("SetChargingProfile")
-                        .expect("SetChargingProfile is a known action");
-                    (Ok(resp), context)
-                }
+                            format!("{purpose} limit {limit} {unit}")
+                        } else {
+                            "no limit in profile".to_string()
+                        };
+                        let resp = V1_6::default_response("SetChargingProfile")
+                            .expect("SetChargingProfile is a known action");
+                        (Ok(resp), context)
+                    }
+                })
             }
             Action16::ReserveNow(req) => {
                 let id = req.reservation_id as i64;
-                let mut state = self.state.write().unwrap();
-                // connectorId 0 reserves the charge point itself (CS-level); any other id targets
-                // that connector.
-                let context = if req.connector_id == 0 {
-                    state.reserved_rfid = Some(req.id_tag.clone());
-                    state.reservation_id = Some(id);
-                    format!("reserved CS for {}", req.id_tag)
-                } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
-                    c.reserved_rfid = Some(req.id_tag.clone());
-                    c.reservation_id = Some(id);
-                    format!("reserved connector {} for {}", req.connector_id, req.id_tag)
-                } else {
-                    format!("unknown connector {}", req.connector_id)
-                };
-                let resp =
-                    V1_6::default_response("ReserveNow").expect("ReserveNow is a known action");
-                (Ok(resp), context)
+                self.with_state_mut(|state| {
+                    // connectorId 0 reserves the charge point itself (CS-level); any other id
+                    // targets that connector.
+                    let context = if req.connector_id == 0 {
+                        state.reserved_rfid = Some(req.id_tag.clone());
+                        state.reservation_id = Some(id);
+                        format!("reserved CS for {}", req.id_tag)
+                    } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
+                        c.reserved_rfid = Some(req.id_tag.clone());
+                        c.reservation_id = Some(id);
+                        format!("reserved connector {} for {}", req.connector_id, req.id_tag)
+                    } else {
+                        format!("unknown connector {}", req.connector_id)
+                    };
+                    let resp =
+                        V1_6::default_response("ReserveNow").expect("ReserveNow is a known action");
+                    (Ok(resp), context)
+                })
             }
             Action16::CancelReservation(req) => {
                 let id = req.reservation_id as i64;
-                let mut state = self.state.write().unwrap();
-                // Clear whichever level holds the matching reservationId.
-                let context = if state.reservation_id == Some(id) {
-                    state.reserved_rfid = None;
-                    state.reservation_id = None;
-                    format!("cancelled CS reservation {id}")
-                } else if let Some(c) = state
-                    .connectors
-                    .iter_mut()
-                    .find(|c| c.reservation_id == Some(id))
-                {
-                    c.reserved_rfid = None;
-                    c.reservation_id = None;
-                    format!("cancelled connector {} reservation {id}", c.connector_id)
-                } else {
-                    format!("no reservation {id}")
-                };
-                let resp = V1_6::default_response("CancelReservation")
-                    .expect("CancelReservation is a known action");
-                (Ok(resp), context)
+                self.with_state_mut(|state| {
+                    // Clear whichever level holds the matching reservationId.
+                    let context = if state.reservation_id == Some(id) {
+                        state.reserved_rfid = None;
+                        state.reservation_id = None;
+                        format!("cancelled CS reservation {id}")
+                    } else if let Some(c) = state
+                        .connectors
+                        .iter_mut()
+                        .find(|c| c.reservation_id == Some(id))
+                    {
+                        c.reserved_rfid = None;
+                        c.reservation_id = None;
+                        format!("cancelled connector {} reservation {id}", c.connector_id)
+                    } else {
+                        format!("no reservation {id}")
+                    };
+                    let resp = V1_6::default_response("CancelReservation")
+                        .expect("CancelReservation is a known action");
+                    (Ok(resp), context)
+                })
             }
             Action16::ChangeAvailability(req) => {
                 let status = match req.kind {
                     AvailabilityType::Operative => "Available",
                     AvailabilityType::Inoperative => "Unavailable",
                 };
-                let mut state = self.state.write().unwrap();
-                // connectorId 0 targets the whole charge point (every connector).
-                if req.connector_id == 0 {
-                    for c in &mut state.connectors {
+                self.with_state_mut(|state| {
+                    // connectorId 0 targets the whole charge point (every connector).
+                    if req.connector_id == 0 {
+                        for c in &mut state.connectors {
+                            c.status = status.to_string();
+                        }
+                    } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
                         c.status = status.to_string();
                     }
-                } else if let Some(c) = state.connector_mut(req.connector_id as i64) {
-                    c.status = status.to_string();
-                }
-                let resp = V1_6::default_response("ChangeAvailability")
-                    .expect("ChangeAvailability is a known action");
-                (
-                    Ok(resp),
-                    format!("connector {} -> {status}", req.connector_id),
-                )
+                    let resp = V1_6::default_response("ChangeAvailability")
+                        .expect("ChangeAvailability is a known action");
+                    (
+                        Ok(resp),
+                        format!("connector {} -> {status}", req.connector_id),
+                    )
+                })
             }
-            Action16::RemoteStartTransaction(req) => {
-                let mut state = self.state.write().unwrap();
+            Action16::RemoteStartTransaction(req) => self.with_state_mut(|state| {
                 // Optional connectorId; fall back to the first connector. Mint a local transaction
                 // id (one greater than any existing) and put the connector into Charging.
                 let next = state
@@ -310,58 +321,59 @@ impl CsStateHandler {
                 let resp = V1_6::default_response("RemoteStartTransaction")
                     .expect("RemoteStartTransaction is a known action");
                 (Ok(resp), context)
-            }
+            }),
             Action16::RemoteStopTransaction(req) => {
                 let tx = req.transaction_id as i64;
-                let mut state = self.state.write().unwrap();
-                let context = match state
-                    .connectors
-                    .iter_mut()
-                    .find(|c| c.transaction_id == Some(tx))
-                {
-                    Some(c) => {
-                        c.transaction_id = None;
-                        c.limit = None;
-                        c.status = "Available".to_string();
-                        format!("stopped tx {tx} on connector {}", c.connector_id)
-                    }
-                    None => format!("no active tx {tx}"),
-                };
-                let resp = V1_6::default_response("RemoteStopTransaction")
-                    .expect("RemoteStopTransaction is a known action");
-                (Ok(resp), context)
+                self.with_state_mut(|state| {
+                    let context = match state
+                        .connectors
+                        .iter_mut()
+                        .find(|c| c.transaction_id == Some(tx))
+                    {
+                        Some(c) => {
+                            c.transaction_id = None;
+                            c.limit = None;
+                            c.status = "Available".to_string();
+                            format!("stopped tx {tx} on connector {}", c.connector_id)
+                        }
+                        None => format!("no active tx {tx}"),
+                    };
+                    let resp = V1_6::default_response("RemoteStopTransaction")
+                        .expect("RemoteStopTransaction is a known action");
+                    (Ok(resp), context)
+                })
             }
             Action16::ClearChargingProfile(req) => {
                 let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
                 let purpose = json["chargingProfilePurpose"].as_str().map(str::to_owned);
-                let mut state = self.state.write().unwrap();
-                // Optional connectorId; absent clears every connector. The purpose criterion (when
-                // given) selects which per-purpose limit is erased; absent clears all of them.
-                match req.connector_id {
-                    Some(id) => {
-                        if let Some(c) = state.connector_mut(id as i64) {
-                            clear_limit_by_purpose(c, purpose.as_deref());
+                self.with_state_mut(|state| {
+                    // Optional connectorId; absent clears every connector. The purpose criterion
+                    // (when given) selects which per-purpose limit is erased; absent clears all.
+                    match req.connector_id {
+                        Some(id) => {
+                            if let Some(c) = state.connector_mut(id as i64) {
+                                clear_limit_by_purpose(c, purpose.as_deref());
+                            }
+                        }
+                        None => {
+                            for c in &mut state.connectors {
+                                clear_limit_by_purpose(c, purpose.as_deref());
+                            }
                         }
                     }
-                    None => {
-                        for c in &mut state.connectors {
-                            clear_limit_by_purpose(c, purpose.as_deref());
-                        }
-                    }
-                }
-                let resp = V1_6::default_response("ClearChargingProfile")
-                    .expect("ClearChargingProfile is a known action");
-                (Ok(resp), "charging profile cleared".to_string())
+                    let resp = V1_6::default_response("ClearChargingProfile")
+                        .expect("ClearChargingProfile is a known action");
+                    (Ok(resp), "charging profile cleared".to_string())
+                })
             }
-            Action16::UnlockConnector(req) => {
-                let mut state = self.state.write().unwrap();
+            Action16::UnlockConnector(req) => self.with_state_mut(|state| {
                 if let Some(c) = state.connector_mut(req.connector_id as i64) {
                     c.status = "Available".to_string();
                 }
                 let resp = V1_6::default_response("UnlockConnector")
                     .expect("UnlockConnector is a known action");
                 (Ok(resp), format!("connector {} unlocked", req.connector_id))
-            }
+            }),
             other => {
                 let name = V1_6::action_name(other);
                 match V1_6::default_response(name) {
@@ -386,9 +398,10 @@ impl CsActionHandler<V1_6> for CsStateHandler {
     ) -> impl Future<Output = Result<Response16, CallError>> + Send {
         let name = V1_6::action_name(&action).to_string();
         let request = V1_6::encode_action(&action).unwrap_or(serde_json::Value::Null);
-        // Reject Calls targeting a connector this station does not have. Scope the read guard so it
-        // is dropped before `respond()` (which takes a write lock) — holding both deadlocks.
-        let unknown = unknown_connector(&request, &self.state.read().unwrap());
+        // Reject Calls targeting a connector this station does not have. `with_state` drops the
+        // read guard before `respond()` runs (which takes its own write lock) — holding both
+        // deadlocks.
+        let unknown = self.with_state(|s| unknown_connector(&request, s));
         let (result, context) = match unknown {
             Some(id) => (
                 Err(CallError::new(
@@ -530,7 +543,7 @@ mod tests {
             json!({ "connectorId": 2, "expiryDate": "2030-01-01T00:00:00Z",
                     "idTag": "TAG1", "reservationId": 42 }),
         );
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         assert_eq!(
             st.connector(2).unwrap().reserved_rfid.as_deref(),
             Some("TAG1")
@@ -550,7 +563,7 @@ mod tests {
             json!({ "connectorId": 0, "expiryDate": "2030-01-01T00:00:00Z",
                     "idTag": "CP", "reservationId": 1 }),
         );
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         assert_eq!(st.reserved_rfid.as_deref(), Some("CP"));
         assert_eq!(st.reservation_id, Some(1));
         assert!(st.connector(1).unwrap().reserved_rfid.is_none());
@@ -566,7 +579,7 @@ mod tests {
                     "idTag": "T", "reservationId": 7 }),
         );
         drive(&h, "CancelReservation", json!({ "reservationId": 7 }));
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         assert!(st.connector(2).unwrap().reserved_rfid.is_none());
         assert!(st.connector(2).unwrap().reservation_id.is_none());
     }
@@ -579,16 +592,13 @@ mod tests {
             "ChangeAvailability",
             json!({ "connectorId": 2, "type": "Inoperative" }),
         );
-        assert_eq!(
-            h.state.read().unwrap().connector(2).unwrap().status,
-            "Unavailable"
-        );
+        assert_eq!(h.state.read().connector(2).unwrap().status, "Unavailable");
         drive(
             &h,
             "ChangeAvailability",
             json!({ "connectorId": 0, "type": "Operative" }),
         );
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         assert!(st.connectors.iter().all(|c| c.status == "Available"));
     }
 
@@ -601,13 +611,13 @@ mod tests {
             json!({ "connectorId": 1, "idTag": "T" }),
         );
         let tx = {
-            let st = h.state.read().unwrap();
+            let st = h.state.read();
             let c = st.connector(1).unwrap();
             assert_eq!(c.status, "Charging");
             c.transaction_id.expect("transaction assigned")
         };
         drive(&h, "RemoteStopTransaction", json!({ "transactionId": tx }));
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         assert!(st.connector(1).unwrap().transaction_id.is_none());
         assert_eq!(st.connector(1).unwrap().status, "Available");
     }
@@ -619,20 +629,9 @@ mod tests {
         s.connector_mut(1).unwrap().status = "Unavailable".to_string();
         let h = handler_with(s);
         drive(&h, "ClearChargingProfile", json!({}));
-        assert!(
-            h.state
-                .read()
-                .unwrap()
-                .connector(1)
-                .unwrap()
-                .limit
-                .is_none()
-        );
+        assert!(h.state.read().connector(1).unwrap().limit.is_none());
         drive(&h, "UnlockConnector", json!({ "connectorId": 1 }));
-        assert_eq!(
-            h.state.read().unwrap().connector(1).unwrap().status,
-            "Available"
-        );
+        assert_eq!(h.state.read().connector(1).unwrap().status, "Available");
     }
 
     #[test]
@@ -652,7 +651,7 @@ mod tests {
             json!({ "chargingProfilePurpose": "TxDefaultProfile" }),
         );
         {
-            let st = h.state.read().unwrap();
+            let st = h.state.read();
             let c = st.connector(1).unwrap();
             assert_eq!(c.limit, Some(16.0));
             assert_eq!(c.default_limit, None);
@@ -660,7 +659,7 @@ mod tests {
         }
         // No purpose criterion clears every per-purpose limit.
         drive(&h, "ClearChargingProfile", json!({}));
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         let c = st.connector(1).unwrap();
         assert_eq!(c.limit, None);
         assert_eq!(c.max_limit, None);
@@ -696,7 +695,7 @@ mod tests {
             other => panic!("unexpected response {other:?}"),
         }
         // Nothing applied to the connector.
-        assert_eq!(h.state.read().unwrap().connector(1).unwrap().limit, None);
+        assert_eq!(h.state.read().connector(1).unwrap().limit, None);
     }
 
     #[test]
@@ -713,7 +712,7 @@ mod tests {
             "SetChargingProfile",
             set_profile("ChargePointMaxProfile", 0, 32.0),
         );
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         let c = st.connector(1).unwrap();
         assert_eq!(c.limit, Some(16.0));
         assert_eq!(c.default_limit, Some(10.0));
@@ -732,7 +731,7 @@ mod tests {
         }
         let h = handler_with(s);
         drive(&h, "RemoteStopTransaction", json!({ "transactionId": 42 }));
-        let st = h.state.read().unwrap();
+        let st = h.state.read();
         let c = st.connector(1).unwrap();
         assert_eq!(c.limit, None, "TxProfile limit cleared on stop");
         assert_eq!(c.default_limit, Some(10.0), "default limit persists");

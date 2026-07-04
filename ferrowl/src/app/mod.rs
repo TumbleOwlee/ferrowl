@@ -264,8 +264,11 @@ impl App {
         // Refresh *every* tab's module, not just the active one: background modules must keep
         // sending/receiving while another tab is shown (e.g. an OCPP CSMS keeps driving its Lua
         // sim so a CS tab sees inbound traffic live, instead of only when the tab is switched).
+        // Poll all refreshes concurrently so tick latency is bounded by the slowest tab, not the
+        // sum of all tabs.
+        let refreshes = self.tabs.iter_mut().map(|tab| tab.view.refresh());
+        futures_util::future::join_all(refreshes).await;
         for tab in self.tabs.iter_mut() {
-            tab.view.refresh().await;
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
             if let Some(new_view) = tab.view.take_replacement() {
                 tab.replace_view(new_view);
