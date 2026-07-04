@@ -8,16 +8,16 @@
 use crate::lang::lua::highlight_line;
 use crate::{LineState, LuaCarry, SyntaxKind};
 
-fn is_opener(text: &str, kind: SyntaxKind) -> bool {
+pub(crate) fn is_opener(text: &str, kind: SyntaxKind) -> bool {
     matches!(text, "function" | "do" | "then" | "repeat")
         || (kind == SyntaxKind::Punct && matches!(text, "{" | "("))
 }
 
-fn is_closer(text: &str, kind: SyntaxKind) -> bool {
+pub(crate) fn is_closer(text: &str, kind: SyntaxKind) -> bool {
     matches!(text, "end" | "until") || (kind == SyntaxKind::Punct && matches!(text, "}" | ")"))
 }
 
-fn is_else(text: &str) -> bool {
+pub(crate) fn is_else(text: &str) -> bool {
     matches!(text, "else" | "elseif")
 }
 
