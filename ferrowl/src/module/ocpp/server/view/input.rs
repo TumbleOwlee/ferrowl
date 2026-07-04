@@ -256,8 +256,10 @@ where
                             V::json_actions().contains(&name.as_str()),
                             "{name} has no spec and is not a registered JSON action"
                         );
-                        let template = V::default_action(&name)
-                            .and_then(|a| V::encode_action(&a).ok())
+                        let template = V::json_template(&name)
+                            .or_else(|| {
+                                V::default_action(&name).and_then(|a| V::encode_action(&a).ok())
+                            })
                             .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
                             .unwrap_or_else(|| "{}".to_string());
                         ActionDialog::json_only(name.clone(), &template)

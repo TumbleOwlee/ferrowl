@@ -164,6 +164,10 @@ pub trait ServerVersion: Version + Sized + 'static {
     /// Dialog-reachable actions that intentionally use the raw JSON editor (no typed form yet).
     fn json_actions() -> &'static [&'static str];
 
+    /// A handcrafted example payload prefilling the raw JSON editor for a [`Self::json_actions`]
+    /// entry (falls back to the serde-`Default` skeleton when `None`).
+    fn json_template(name: &str) -> Option<serde_json::Value>;
+
     /// Inject the target scope's connector/EVSE id into a (Lua-built) payload that does not already
     /// carry it, so e.g. `con:SetChargingProfile()` defaults to the selected connector. No-op for
     /// the CS-level scope or a non-object payload.

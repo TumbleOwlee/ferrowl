@@ -135,6 +135,94 @@ pub fn json_actions() -> &'static [&'static str] {
     })
 }
 
+/// A decode-valid example payload for a [`json_actions`] entry (see
+/// [`super::v2_0_1::json_template`]). 2.1-only actions are spelled out below; the shared
+/// JSON-only actions reuse 2.0.1's templates (2.1 payloads are supersets — additions are
+/// optional, so the 2.0.1 shapes still decode).
+pub fn json_template(name: &str) -> Option<Value> {
+    Some(match name {
+        "BatterySwap" => json!({
+            "eventType": "BatteryIn",
+            "requestId": 1,
+            "idToken": { "idToken": "TAG-1", "type": "ISO14443" },
+            "batteryData": [{
+                "evseId": 1,
+                "serialNumber": "BAT-001",
+                "soC": 80,
+                "soH": 95,
+            }],
+        }),
+        "GetCertificateChainStatus" => json!({
+            "certificateStatusRequests": [{
+                "source": "OCSP",
+                "urls": ["https://ocsp.example.com"],
+                "certificateHashData": {
+                    "hashAlgorithm": "SHA256",
+                    "issuerNameHash": "a1b2c3",
+                    "issuerKeyHash": "d4e5f6",
+                    "serialNumber": "1234",
+                },
+            }],
+        }),
+        "OpenPeriodicEventStream" => json!({
+            "constantStreamData": {
+                "id": 1,
+                "variableMonitoringId": 1,
+                "params": { "interval": 60, "values": 10 },
+            },
+        }),
+        "ReportDERControl" => json!({
+            "requestId": 1,
+            "curve": [{
+                "id": "curve-1",
+                "curveType": "FreqWatt",
+                "isDefault": false,
+                "isSuperseded": false,
+                "curve": {
+                    "priority": 0,
+                    "yUnit": "PctMaxW",
+                    "curveData": [{ "x": 50, "y": 100 }],
+                },
+            }],
+        }),
+        "AdjustPeriodicEventStream" => json!({
+            "id": 1,
+            "params": { "interval": 60, "values": 10 },
+        }),
+        "ChangeTransactionTariff" => json!({
+            "transactionId": "tx-1",
+            "tariff": { "tariffId": "tariff-1", "currency": "EUR" },
+        }),
+        "SetDefaultTariff" => json!({
+            "evseId": 1,
+            "tariff": { "tariffId": "tariff-1", "currency": "EUR" },
+        }),
+        "UpdateDynamicSchedule" => json!({
+            "chargingProfileId": 1,
+            "scheduleUpdate": { "limit": 16 },
+        }),
+        // Shared with 2.0.1, but 2.1's VariableMonitoringType requires eventNotificationType.
+        "NotifyMonitoringReport" => json!({
+            "requestId": 1,
+            "seqNo": 0,
+            "generatedAt": "2026-01-01T00:00:00Z",
+            "monitor": [{
+                "component": { "name": "EVSE", "evse": { "id": 1 } },
+                "variable": { "name": "Power.Active.Import" },
+                "variableMonitoring": [{
+                    "id": 1,
+                    "severity": 5,
+                    "transaction": false,
+                    "type": "UpperThreshold",
+                    "value": 11000,
+                    "eventNotificationType": "PreconfiguredMonitor",
+                }],
+            }],
+        }),
+        _ => return super::v2_0_1::json_template(name),
+    })
+}
+
 /// The action spec for `name`. 2.1-only actions are classified below; everything else (the 64
 /// shared actions) delegates to 2.0.1's specs unchanged.
 pub fn action_spec(name: &str) -> Option<ActionSpec> {
@@ -460,9 +548,23 @@ pub fn action_spec(name: &str) -> Option<ActionSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_spec, json_actions};
+    use super::{action_spec, json_actions, json_template};
     use crate::module::ocpp::action_dialog::ActionDialog;
     use ferrowl_ocpp::{V2_1, Version};
+
+    /// Every JSON-only action (2.1-only and inherited) ships a template that decodes and
+    /// validates against the 2.1 types — this also proves the reused 2.0.1 templates still fit.
+    #[test]
+    fn ut_json_templates_cover_all_json_actions_and_decode() {
+        for name in json_actions() {
+            let template =
+                json_template(name).unwrap_or_else(|| panic!("{name} has no JSON template"));
+            let action = V2_1::decode_call(name, template)
+                .unwrap_or_else(|e| panic!("{name} template does not decode: {e}"));
+            V2_1::validate(&action)
+                .unwrap_or_else(|e| panic!("{name} template fails validation: {e}"));
+        }
+    }
 
     /// CS actions a charging station builds from state (sent without a dialog); mirrors the client
     /// view's `STATE_DRIVEN` (same set as 2.0.1 — 2.1 adds no new state-driven action).

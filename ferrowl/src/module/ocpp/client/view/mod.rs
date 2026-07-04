@@ -135,6 +135,10 @@ pub trait ClientVersion: Version + Sized + 'static {
     /// Dialog-reachable actions that intentionally use the raw JSON editor (no typed form yet).
     fn json_actions() -> &'static [&'static str];
 
+    /// A handcrafted example payload prefilling the raw JSON editor for a [`Self::json_actions`]
+    /// entry (falls back to the serde-`Default` skeleton when `None`).
+    fn json_template(name: &str) -> Option<serde_json::Value>;
+
     /// The scope of the connector at list index `idx` (1.6 `Scope::connector`, 2.0.1 `Scope::evse`).
     fn scope_of(s: &Self::Cs, idx: usize) -> Scope;
 

@@ -423,6 +423,112 @@ pub fn json_actions() -> &'static [&'static str] {
     ]
 }
 
+/// A decode-valid example payload for a [`json_actions`] entry, prefilling the raw JSON editor.
+/// Unlike the serde-`Default` skeleton (which omits every optional and renders required lists as
+/// `[]`), these spell out one representative element per list so the shape is editable in place.
+pub fn json_template(name: &str) -> Option<Value> {
+    const TS: &str = "2026-01-01T00:00:00Z";
+    Some(match name {
+        "SetNetworkProfile" => json!({
+            "configurationSlot": 1,
+            "connectionData": {
+                "ocppVersion": "OCPP20",
+                "ocppTransport": "JSON",
+                "ocppCsmsUrl": "wss://csms.example.com/ocpp",
+                "messageTimeout": 30,
+                "securityProfile": 1,
+                "ocppInterface": "Wired0",
+            },
+        }),
+        "SetVariableMonitoring" => json!({
+            "setMonitoringData": [{
+                "component": { "name": "EVSE", "evse": { "id": 1 } },
+                "variable": { "name": "Power.Active.Import" },
+                "type": "UpperThreshold",
+                "severity": 5,
+                "value": 11000,
+            }],
+        }),
+        "NotifyEVChargingNeeds" => json!({
+            "evseId": 1,
+            "chargingNeeds": {
+                "requestedEnergyTransfer": "AC_three_phase",
+                "acChargingParameters": {
+                    "energyAmount": 20000,
+                    "evMinCurrent": 6,
+                    "evMaxCurrent": 32,
+                    "evMaxVoltage": 400,
+                },
+            },
+        }),
+        "NotifyEVChargingSchedule" => json!({
+            "evseId": 1,
+            "timeBase": TS,
+            "chargingSchedule": {
+                "id": 1,
+                "chargingRateUnit": "A",
+                "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 16 }],
+            },
+        }),
+        "NotifyMonitoringReport" => json!({
+            "requestId": 1,
+            "seqNo": 0,
+            "generatedAt": TS,
+            "monitor": [{
+                "component": { "name": "EVSE", "evse": { "id": 1 } },
+                "variable": { "name": "Power.Active.Import" },
+                "variableMonitoring": [{
+                    "id": 1,
+                    "severity": 5,
+                    "transaction": false,
+                    "type": "UpperThreshold",
+                    "value": 11000,
+                }],
+            }],
+        }),
+        "NotifyReport" => json!({
+            "requestId": 1,
+            "seqNo": 0,
+            "generatedAt": TS,
+            "reportData": [{
+                "component": { "name": "ChargingStation" },
+                "variable": { "name": "Model" },
+                "variableAttribute": [{
+                    "type": "Actual",
+                    "value": "Example",
+                    "mutability": "ReadOnly",
+                }],
+            }],
+        }),
+        "ReportChargingProfiles" => json!({
+            "requestId": 1,
+            "evseId": 1,
+            "chargingLimitSource": "CSO",
+            "chargingProfile": [{
+                "id": 1,
+                "stackLevel": 0,
+                "chargingProfilePurpose": "TxDefaultProfile",
+                "chargingProfileKind": "Absolute",
+                "chargingSchedule": [{
+                    "id": 1,
+                    "chargingRateUnit": "A",
+                    "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 16 }],
+                }],
+            }],
+        }),
+        "TransactionEvent" => json!({
+            "eventType": "Started",
+            "timestamp": TS,
+            "triggerReason": "Authorized",
+            "seqNo": 0,
+            "transactionInfo": { "transactionId": "tx-1", "chargingState": "Charging" },
+            "evse": { "id": 1, "connectorId": 1 },
+            "idToken": { "idToken": "TAG-1", "type": "ISO14443" },
+        }),
+        _ => return None,
+    })
+}
+
 /// The action spec for `name`, or `None` for actions handled by the raw JSON editor
 /// ([`json_actions`]).
 pub fn action_spec(name: &str) -> Option<ActionSpec> {
@@ -1412,9 +1518,22 @@ pub fn action_spec(name: &str) -> Option<ActionSpec> {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_spec, json_actions};
+    use super::{action_spec, json_actions, json_template};
     use crate::module::ocpp::action_dialog::ActionDialog;
     use ferrowl_ocpp::{V2_0_1, Version};
+
+    /// Every JSON-only action ships a handcrafted template that decodes and validates.
+    #[test]
+    fn ut_json_templates_cover_all_json_actions_and_decode() {
+        for name in json_actions() {
+            let template =
+                json_template(name).unwrap_or_else(|| panic!("{name} has no JSON template"));
+            let action = V2_0_1::decode_call(name, template)
+                .unwrap_or_else(|e| panic!("{name} template does not decode: {e}"));
+            V2_0_1::validate(&action)
+                .unwrap_or_else(|e| panic!("{name} template fails validation: {e}"));
+        }
+    }
 
     /// CS actions a charging station builds from state (sent without a dialog); mirrors the client
     /// view's `STATE_DRIVEN`.
