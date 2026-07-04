@@ -35,17 +35,17 @@ pub struct ColorScheme {
     pub success: Color,
 }
 
-/// The fixed color scheme used by all widgets (Material 3 dark with warm taupe
-/// surfaces and a fresh coral highlight).
+/// The fixed color scheme used by all widgets (dark theme with plum-tinted
+/// surfaces and a wine-red highlight).
 pub const COLOR_SCHEME: ColorScheme = ColorScheme {
-    text: Color::Rgb(240, 235, 229),    // warm white   #F0EBE5
-    text_hi: Color::Rgb(240, 235, 229), // near-black   #1A1815
-    hi: Color::Rgb(255, 138, 101),      // coral accent   #FF8A65 (deep orange 300)
-    hi_bg: Color::Rgb(93, 64, 55),      // warm brown   #5D4037 (brown 700)
-    bg: Color::Rgb(13, 13, 13),         // dark   #0d0d0d
-    border: Color::Rgb(124, 109, 95),   // warm taupe   #7C6D5F
-    row: [Color::Rgb(35, 32, 28), Color::Rgb(48, 44, 39)], // warm elevations
-    placeholder: Color::Rgb(141, 126, 112), // muted clay   #8D7E70
-    error: Color::Rgb(229, 115, 115),   // soft red   #E57373 (red 300)
+    text: Color::Rgb(237, 232, 234),    // soft white   #EDE8EA
+    text_hi: Color::Rgb(245, 237, 239), // rosy white   #F5EDEF
+    hi: Color::Rgb(195, 79, 99),        // wine red   #C34F63
+    hi_bg: Color::Rgb(92, 36, 48),      // deep bordeaux   #5C2430
+    bg: Color::Rgb(18, 13, 15),         // plum black   #120D0F
+    border: Color::Rgb(125, 106, 112),  // muted mauve   #7D6A70
+    row: [Color::Rgb(35, 29, 31), Color::Rgb(47, 40, 43)], // plum elevations
+    placeholder: Color::Rgb(140, 120, 126), // rose gray   #8C787E
+    error: Color::Rgb(224, 108, 91),    // soft vermilion   #E06C5B
     success: Color::Rgb(129, 199, 132), // fresh green   #81C784 (green 300)
 };
