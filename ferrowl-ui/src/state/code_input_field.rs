@@ -151,10 +151,21 @@ impl HandleEvents for CodeInputFieldState {
                 let chars: Vec<char> = line.chars().collect();
                 let before: String = chars[..self.cursor_col].iter().collect();
                 let after: String = chars[self.cursor_col..].iter().collect();
+                // Auto-indent: inherit the split line's leading whitespace, one level
+                // deeper/shallower per its net block balance (format-on-blur trues it up).
+                let indent = match self.language {
+                    Some(lang) => {
+                        let lead = before.chars().take_while(|c| *c == ' ').count() as i32;
+                        let delta = ferrowl_syntax::indent_delta(lang, &before);
+                        (lead + 4 * delta).max(0) as usize
+                    }
+                    None => 0,
+                };
                 self.lines[self.active_line] = before;
                 self.active_line += 1;
-                self.lines.insert(self.active_line, after);
-                self.cursor_col = 0;
+                self.lines
+                    .insert(self.active_line, format!("{}{}", " ".repeat(indent), after));
+                self.cursor_col = indent;
                 EventResult::Consumed
             }
             (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
@@ -553,6 +564,65 @@ mod tests {
         s.set_content(r#"{"b":1,"a":2}"#);
         s.set_focused(true);
         assert_eq!(s.content(), r#"{"b":1,"a":2}"#);
+    }
+
+    #[test]
+    fn enter_auto_indents_after_lua_opener() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .language(Some(ferrowl_syntax::Language::Lua))
+            .build()
+            .unwrap();
+        s.set_content("function foo()");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "function foo()\n    ");
+        assert_eq!(s.cursor_col(), 4);
+    }
+
+    #[test]
+    fn enter_inherits_indent_on_plain_line() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .language(Some(ferrowl_syntax::Language::Lua))
+            .build()
+            .unwrap();
+        s.set_content("function foo()\n    print(1)");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "function foo()\n    print(1)\n    ");
+        assert_eq!(s.cursor_col(), 4);
+    }
+
+    #[test]
+    fn enter_does_not_indent_after_closing_line() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .language(Some(ferrowl_syntax::Language::Lua))
+            .build()
+            .unwrap();
+        s.set_content("end");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "end\n");
+        assert_eq!(s.cursor_col(), 0);
+    }
+
+    #[test]
+    fn enter_auto_indents_json_and_carries_tail() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .language(Some(ferrowl_syntax::Language::Json))
+            .build()
+            .unwrap();
+        // Cursor between `{` and `}`: the tail moves to the new, indented line.
+        s.set_content("{}");
+        s.set_cursor_col(1);
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "{\n    }");
+        assert_eq!(s.cursor_col(), 4);
+    }
+
+    #[test]
+    fn enter_without_language_does_not_indent() {
+        let mut s = state();
+        s.set_content("    x {");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "    x {\n");
+        assert_eq!(s.cursor_col(), 0);
     }
 
     #[test]

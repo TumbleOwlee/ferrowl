@@ -3,7 +3,7 @@
 //! on `None` — this module never mangles content it can't fully understand.
 
 mod json;
-mod lua;
+pub(crate) mod lua;
 
 use crate::Language;
 

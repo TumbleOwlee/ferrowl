@@ -6,9 +6,11 @@
 //! TUI editor widget) own the mapping from [`SyntaxKind`] to actual colors/styles.
 
 mod format;
+mod indent;
 mod lang;
 
 pub use format::format;
+pub use indent::indent_delta;
 pub use lang::Language;
 
 /// Classification of a highlighted span.
