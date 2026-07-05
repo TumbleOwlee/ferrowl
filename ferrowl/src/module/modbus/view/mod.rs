@@ -591,6 +591,10 @@ impl ModuleView for ModbusModuleView {
         &MODBUS_COMMANDS
     }
 
+    fn keybinds(&self) -> &[CommandDescriptor] {
+        &MODBUS_KEYBINDS
+    }
+
     fn log(&self) -> SharedLog {
         self.module.log()
     }
@@ -612,6 +616,29 @@ impl ModuleView for ModbusModuleView {
         true
     }
 }
+
+static MODBUS_KEYBINDS: [CommandDescriptor; 5] = [
+    CommandDescriptor {
+        name: "Enter",
+        description: "edit selected register",
+    },
+    CommandDescriptor {
+        name: "Enter (dialog)",
+        description: "confirm edit",
+    },
+    CommandDescriptor {
+        name: "Space (dialog)",
+        description: "press button / toggle",
+    },
+    CommandDescriptor {
+        name: "z (dialog)",
+        description: "toggle compact table",
+    },
+    CommandDescriptor {
+        name: "Esc (dialog)",
+        description: "close dialog",
+    },
+];
 
 static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
     CommandDescriptor {

@@ -651,6 +651,10 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         &OCPP_CLIENT_COMMANDS
     }
 
+    fn keybinds(&self) -> &[CommandDescriptor] {
+        &OCPP_CLIENT_KEYBINDS
+    }
+
     fn log(&self) -> SharedLog {
         self.log.clone()
     }
@@ -679,6 +683,25 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         true
     }
 }
+
+static OCPP_CLIENT_KEYBINDS: [CommandDescriptor; 4] = [
+    CommandDescriptor {
+        name: "Tab / Shift+Tab",
+        description: "next / previous pane",
+    },
+    CommandDescriptor {
+        name: "Enter",
+        description: "activate focused pane (edit/add/trigger)",
+    },
+    CommandDescriptor {
+        name: "Space",
+        description: "activate focused table/button",
+    },
+    CommandDescriptor {
+        name: "d",
+        description: "delete selected connector / config key",
+    },
+];
 
 static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 7] = [
     CommandDescriptor {

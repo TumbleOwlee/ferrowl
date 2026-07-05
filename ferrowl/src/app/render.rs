@@ -14,8 +14,9 @@ use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
 use crate::view::tabs::render_tabs;
 
-use super::{Focus, Overlay, Tab};
+use super::{Focus, Overlay, Tab, help};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     frame: &mut Frame,
     tabs: &mut [Tab],
@@ -23,6 +24,8 @@ pub(super) fn render(
     focus: Focus,
     command: &mut CommandLine,
     overlay: Option<&mut Overlay>,
+    help_open: bool,
+    help_scroll: &mut u16,
 ) {
     let area = frame.area();
     let [tabs_area, view_area, log_area, cmd_area] = Layout::vertical([
@@ -78,7 +81,93 @@ pub(super) fn render(
         if let Some(dialog) = overlay {
             dialog.render(area, buf);
         }
+        // 4. Keybind help dialog, always topmost.
+        if help_open {
+            let module = tabs
+                .get(active)
+                .map(|t| (t.name.as_str(), t.view.keybinds()));
+            render_help(area, buf, module, help_scroll);
+        }
     }
+}
+
+fn render_help(
+    area: Rect,
+    buf: &mut Buffer,
+    module: Option<(&str, &[CommandDescriptor])>,
+    scroll: &mut u16,
+) {
+    let make_line = |(key, desc): (&str, &str)| {
+        Line::from(vec![
+            Span::styled(
+                format!("  {key:<22}"),
+                Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg)
+                    .bold(),
+            ),
+            Span::styled(
+                desc.to_string(),
+                Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
+            ),
+        ])
+    };
+    let section_title = |title: &str| {
+        Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(COLOR_SCHEME.text)
+                .bg(COLOR_SCHEME.bg)
+                .bold(),
+        ))
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+    for section in help::GLOBAL_SECTIONS {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(section_title(section.title));
+        lines.extend(section.keys.iter().map(|&kd| make_line(kd)));
+    }
+    if let Some((name, keys)) = module
+        && !keys.is_empty()
+    {
+        lines.push(Line::default());
+        lines.push(section_title(name));
+        lines.extend(keys.iter().map(|k| make_line((k.name, k.description))));
+    }
+
+    let popup_w = 64.min(area.width);
+    let popup_h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+    let [_, mid, _] = Layout::horizontal([
+        Constraint::Min(1),
+        Constraint::Length(popup_w),
+        Constraint::Min(1),
+    ])
+    .areas(area);
+    let [_, popup, _] = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(popup_h),
+        Constraint::Min(1),
+    ])
+    .areas(mid);
+
+    ratatui::prelude::Widget::render(Clear, popup, buf);
+    let block = Block::bordered()
+        .title(" Keybinds (Esc/q/? to close) ")
+        .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg));
+    let inner = block.inner(popup);
+    ratatui::prelude::Widget::render(block, popup, buf);
+
+    *scroll = (*scroll).min((lines.len() as u16).saturating_sub(inner.height));
+    ratatui::prelude::Widget::render(
+        Paragraph::new(lines)
+            .scroll((*scroll, 0))
+            .style(Style::default().bg(COLOR_SCHEME.bg)),
+        inner,
+        buf,
+    );
 }
 
 fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandDescriptor]) {
@@ -158,7 +247,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    |    C-w+j C-w+k  table/log    |    C-t+h C-t+l  tabs",
+            "  :  command    |    C-w+j C-w+k  table/log    |    C-t+h C-t+l  tabs    |    ?  help",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }
