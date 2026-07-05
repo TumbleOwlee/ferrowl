@@ -71,6 +71,11 @@ pub trait ModuleView: SetFocus + IsFocus {
     /// Module-specific commands shown in the help popup.
     fn commands(&self) -> &[CommandDescriptor];
 
+    /// Module-specific keybinds shown in the `?` help dialog.
+    fn keybinds(&self) -> &[CommandDescriptor] {
+        &[]
+    }
+
     /// The log channel written by this view's backend.
     fn log(&self) -> SharedLog;
 

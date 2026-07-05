@@ -512,6 +512,10 @@ where
         &OCPP_SERVER_COMMANDS
     }
 
+    fn keybinds(&self) -> &[CommandDescriptor] {
+        &OCPP_SERVER_KEYBINDS
+    }
+
     fn log(&self) -> SharedLog {
         self.log.clone()
     }
@@ -537,6 +541,21 @@ where
         true
     }
 }
+
+static OCPP_SERVER_KEYBINDS: [CommandDescriptor; 3] = [
+    CommandDescriptor {
+        name: "Tab / Shift+Tab",
+        description: "next / previous pane",
+    },
+    CommandDescriptor {
+        name: "Enter",
+        description: "open detail / scripts / trigger action",
+    },
+    CommandDescriptor {
+        name: "d",
+        description: "delete selected charging station",
+    },
+];
 
 static OCPP_SERVER_COMMANDS: [CommandDescriptor; 9] = [
     CommandDescriptor {

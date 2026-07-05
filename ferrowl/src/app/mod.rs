@@ -5,6 +5,7 @@
 //! ([`mod@render`]).
 
 mod commands;
+mod help;
 mod keys;
 mod overlay;
 mod render;
@@ -207,6 +208,9 @@ pub struct App {
     command: CommandLine,
     overlay: Option<Overlay>,
     keymode: Option<KeyMode>,
+    /// The `?` keybind help dialog: whether it is open and its scroll offset.
+    help_open: bool,
+    help_scroll: u16,
 }
 
 impl App {
@@ -227,6 +231,8 @@ impl App {
             command: new_command_line(),
             overlay,
             keymode: None,
+            help_open: false,
+            help_scroll: 0,
         };
         // Give the starting tab keyboard focus (unless a creation dialog is up).
         app.set_content_focus(app.focus == Focus::Content);
@@ -330,7 +336,9 @@ impl App {
         let overlay = self.overlay.as_mut();
         let active = self.active;
         let focus = self.focus;
-        screen.draw(|f| render(f, tabs, active, focus, command, overlay))?;
+        let help_open = self.help_open;
+        let help_scroll = &mut self.help_scroll;
+        screen.draw(|f| render(f, tabs, active, focus, command, overlay, help_open, help_scroll))?;
         Ok(())
     }
 

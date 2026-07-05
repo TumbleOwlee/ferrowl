@@ -64,6 +64,26 @@ impl App {
 
     // Returns true if has to quit
     pub(super) fn handle_nav_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
+        // The help dialog is modal: it eats every key so nothing leaks to the view beneath it.
+        if self.help_open {
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                    self.help_open = false;
+                    self.help_scroll = 0;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.help_scroll = self.help_scroll.saturating_add(1)
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1)
+                }
+                KeyCode::Char('g') => self.help_scroll = 0,
+                // Clamped to the last line at render time, which knows the viewport height.
+                KeyCode::Char('G') => self.help_scroll = u16::MAX,
+                _ => {}
+            }
+            return false;
+        }
         match (&self.keymode, modifiers, code) {
             // Window switch
             (None, KeyModifiers::CONTROL, KeyCode::Char('w')) => {
@@ -124,6 +144,16 @@ impl App {
                     .unwrap_or(false) =>
             {
                 self.enter_command()
+            }
+            // Keybind help, guarded like `:` so `?` still types into module edit fields.
+            (None, _, KeyCode::Char('?'))
+                if !self
+                    .tabs
+                    .get_mut(self.active)
+                    .map(|t| t.view.is_overlay_active())
+                    .unwrap_or(false) =>
+            {
+                self.help_open = true
             }
             (_, _, _) => {
                 // A pending single-digit jump that never got a second digit still commits before
