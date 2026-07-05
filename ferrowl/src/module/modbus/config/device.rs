@@ -42,7 +42,7 @@ pub struct DeviceConfig {
     pub read_ranges: ReadRanges,
     pub definitions: BTreeMap<String, RegisterDef>,
     /// Global Lua simulation scripts (named, toggleable; run on the sim thread). Managed via
-    /// the `:scripts` dialog; replaces the legacy per-register `update` snippets.
+    /// the `:script` dialog; replaces the legacy per-register `update` snippets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptDef>,
 }

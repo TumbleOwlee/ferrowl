@@ -89,6 +89,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         (":l | :load [path]", "load device config"),
         (":s | :save | :w | :write [path]", "save session"),
         (":log clear", "clear log view"),
+        (":script copy <tab>", "replace scripts with tab <tab>'s"),
     ];
     let popup_w: u16 = 62;
     let popup_h: u16 = (COLS.len() + module_cmds.len()) as u16 + 2;

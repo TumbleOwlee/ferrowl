@@ -8,6 +8,27 @@ use crate::module::view::CommandResult;
 
 use super::App;
 
+/// Pure validation: usable index or error text. Unit-testable without an App.
+fn validate_copy_index(
+    idx: Option<usize>,
+    tab_count: usize,
+    active: usize,
+) -> Result<usize, String> {
+    let idx = idx.ok_or_else(|| "usage: :script copy <tab-index>".to_string())?;
+    if idx >= tab_count {
+        // `tab_count == 0` can't happen in practice (App always has a tab), but guard against
+        // the `tab_count - 1` underflow anyway.
+        return Err(match tab_count.checked_sub(1) {
+            Some(max) => format!("no tab [{idx}] (0..={max})"),
+            None => format!("no tab [{idx}] (no tabs open)"),
+        });
+    }
+    if idx == active {
+        return Err("cannot copy from the active tab".to_string());
+    }
+    Ok(idx)
+}
+
 impl App {
     /// Execute a parsed `:` command. Returns `true` when the app should quit.
     pub(super) async fn run_command(&mut self, input: &str) -> bool {
@@ -43,6 +64,10 @@ impl App {
                 // Any other `:log ...` arg (e.g. a file path) is module-specific.
                 _ => self.forward_to_view(input).await,
             },
+            Cmd::ScriptCopy(idx) => {
+                let msg = self.copy_scripts(idx);
+                self.log_active(msg).await;
+            }
             // Everything not recognised at the app level is forwarded to the active view.
             Cmd::Unknown(_) => {
                 let result = if let Some(tab) = self.tabs.get_mut(self.active) {
@@ -94,5 +119,48 @@ impl App {
             modules,
         };
         Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))
+    }
+
+    /// `:script copy <idx>` — replace the active tab's script list with tab `<idx>`'s.
+    fn copy_scripts(&mut self, idx: Option<usize>) -> String {
+        let src = match validate_copy_index(idx, self.tabs.len(), self.active) {
+            Ok(i) => i,
+            Err(e) => return e,
+        };
+        // Clone source list first; avoids a split borrow across tabs.
+        let Some(scripts) = self.tabs[src].view.scripts().map(<[_]>::to_vec) else {
+            return format!("tab [{src}] has no script support");
+        };
+        let n = scripts.len();
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return "active module has no script support".to_string();
+        };
+        if tab.view.set_scripts(scripts) {
+            format!("Replaced scripts with {n} script(s) from tab [{src}]")
+        } else {
+            "active module has no script support".to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_validate_copy_index() {
+        assert_eq!(
+            validate_copy_index(None, 3, 0),
+            Err("usage: :script copy <tab-index>".to_string())
+        );
+        assert_eq!(
+            validate_copy_index(Some(5), 3, 0),
+            Err("no tab [5] (0..=2)".to_string())
+        );
+        assert_eq!(
+            validate_copy_index(Some(1), 3, 1),
+            Err("cannot copy from the active tab".to_string())
+        );
+        assert_eq!(validate_copy_index(Some(2), 3, 0), Ok(2));
     }
 }

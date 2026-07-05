@@ -11,6 +11,8 @@ pub enum Cmd {
     Load(Option<String>),
     Write(Option<String>),
     Log(Option<String>),
+    /// `script copy <index>`; `None` = missing/unparseable index.
+    ScriptCopy(Option<usize>),
     Unknown(String),
 }
 
@@ -29,6 +31,10 @@ pub fn parse(input: &str) -> Cmd {
         "l" | "load" => Cmd::Load(first()),
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "log" => Cmd::Log(first()),
+        "script" => match parts.next() {
+            Some("copy") => Cmd::ScriptCopy(parts.next().and_then(|s| s.parse().ok())),
+            _ => Cmd::Unknown("script".to_string()), // bare `:script` is view-specific (dialog)
+        },
         other => Cmd::Unknown(other.to_string()),
     }
 }
@@ -91,5 +97,14 @@ mod tests {
     #[test]
     fn ut_unknown() {
         assert_eq!(parse("bogus"), Cmd::Unknown("bogus".to_string()));
+    }
+
+    #[test]
+    fn ut_script_copy() {
+        assert_eq!(parse("script copy 3"), Cmd::ScriptCopy(Some(3)));
+        assert_eq!(parse("script copy"), Cmd::ScriptCopy(None));
+        assert_eq!(parse("script copy x"), Cmd::ScriptCopy(None));
+        // Bare `:script` stays Unknown so the view opens its script dialog.
+        assert_eq!(parse("script"), Cmd::Unknown("script".to_string()));
     }
 }
