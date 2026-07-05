@@ -12,16 +12,16 @@ use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
-    SelectionStateBuilder, TableStateBuilder,
+    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder,
 };
 use ferrowl_ui::style::{
-    ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SyntaxTheme, TableStyle,
-    TextStyle,
+    ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SuggestInputStyle,
+    SyntaxTheme, TableStyle, TextStyle,
 };
-use ferrowl_ui::traits::{Init, ToLabel};
+use ferrowl_ui::traits::{Init, Suggestion, SuggestionProvider, ToLabel};
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
-    SelectionBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
+    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
 };
 
 fn buffer(w: u16, h: u16) -> Buffer {
@@ -52,6 +52,7 @@ fn style_defaults_build() {
     let _ = InputFieldStyle::default();
     let _ = ScrollingTabsStyle::default();
     let _ = SelectionStyle::default();
+    let _ = SuggestInputStyle::default();
     let _ = TableStyle::default();
     let _ = TextStyle::default();
 }
@@ -226,8 +227,11 @@ fn code_input_field_lua_syntax_highlighting() {
     assert_eq!(b[(content_x, 0)].fg, theme.keyword().fg.unwrap());
 
     // "-- hi" comment: find its start via the syntax crate directly.
-    let (spans, _) =
-        ferrowl_syntax::highlight_line(Language::Lua, content, ferrowl_syntax::LineState::default());
+    let (spans, _) = ferrowl_syntax::highlight_line(
+        Language::Lua,
+        content,
+        ferrowl_syntax::LineState::default(),
+    );
     let comment_start = spans
         .iter()
         .find(|(_, _, kind)| *kind == SyntaxKind::Comment)
@@ -284,13 +288,19 @@ fn code_input_field_json_key_and_string_styles() {
 fn code_input_field_h_scroll_clips_mid_span() {
     let theme = SyntaxTheme::default();
     let content = r#"local s = "abcdefghijklmnopqrstuvwxyz""#;
-    let (spans, _) =
-        ferrowl_syntax::highlight_line(Language::Lua, content, ferrowl_syntax::LineState::default());
+    let (spans, _) = ferrowl_syntax::highlight_line(
+        Language::Lua,
+        content,
+        ferrowl_syntax::LineState::default(),
+    );
     let (string_start, string_end, _) = spans
         .into_iter()
         .find(|(_, _, kind)| *kind == SyntaxKind::String)
         .expect("expected a string span");
-    assert!(string_end - string_start >= 6, "string span too short for test");
+    assert!(
+        string_end - string_start >= 6,
+        "string span too short for test"
+    );
     let h_scroll = string_start + 2;
 
     let w = CodeInputFieldBuilder::default().build().unwrap();
@@ -379,6 +389,104 @@ fn selection_render_variants() {
         .unwrap();
     let mut b = buffer(20, 6);
     StatefulWidget::render(&w, Rect::new(0, 0, 20, 6), &mut b, &mut st);
+}
+
+// ---- SuggestInput ----
+
+#[derive(Debug, Clone)]
+struct FixedProvider(Vec<&'static str>);
+
+impl SuggestionProvider for FixedProvider {
+    fn suggest(&self, input: &str) -> Vec<Suggestion> {
+        if input.is_empty() {
+            return vec![];
+        }
+        self.0
+            .iter()
+            .filter(|w| w.starts_with(input))
+            .map(|w| Suggestion {
+                value: w.to_string(),
+                label: w.to_string(),
+                partial: false,
+            })
+            .collect()
+    }
+}
+
+fn opened_suggest_state(input: &str) -> ferrowl_ui::state::SuggestInputState<FixedProvider> {
+    use ferrowl_ui::traits::HandleEvents;
+    let mut st = SuggestInputStateBuilder::default()
+        .provider(FixedProvider(vec!["apple", "apricot", "avocado"]))
+        .build()
+        .unwrap();
+    for c in input.chars() {
+        st.handle_events(
+            ratatui::crossterm::event::KeyModifiers::NONE,
+            ratatui::crossterm::event::KeyCode::Char(c),
+        );
+    }
+    st
+}
+
+#[test]
+fn suggest_input_popup_renders_below_anchor() {
+    let w = SuggestInputBuilder::<String, FixedProvider>::default()
+        .build()
+        .unwrap();
+    let mut st = opened_suggest_state("a");
+    assert!(st.suggestions_open());
+
+    let mut b = buffer(20, 10);
+    let area = Rect::new(2, 2, 10, 1);
+    StatefulWidget::render(&w, area, &mut b, &mut st);
+    w.render_overlay(Rect::new(0, 0, 20, 10), &mut b, &mut st);
+
+    assert_eq!(st.anchor(), Some(area));
+    // Plenty of room below -> the popup's top border lands right under the
+    // anchor row (area.y + area.height == 3), not above it.
+    assert_ne!(b[(area.x, area.y + area.height)].symbol(), " ");
+    assert_eq!(b[(area.x, 0)].symbol(), " ");
+}
+
+#[test]
+fn suggest_input_popup_flips_above_when_no_room_below() {
+    let w = SuggestInputBuilder::<String, FixedProvider>::default()
+        .build()
+        .unwrap();
+    let mut st = opened_suggest_state("a");
+
+    // Anchor near the bottom of a small buffer leaves no room below.
+    let mut b = buffer(20, 6);
+    let area = Rect::new(2, 5, 10, 1);
+    StatefulWidget::render(&w, area, &mut b, &mut st);
+    w.render_overlay(Rect::new(0, 0, 20, 6), &mut b, &mut st);
+
+    // 3 matches -> popup height 5 (3 rows + border); with no room below the
+    // anchor (row 5 of a 6-row buffer) it must flip above, landing at row 0
+    // where its top border is drawn.
+    assert_ne!(b[(area.x, 0)].symbol(), " ");
+}
+
+#[test]
+fn suggest_input_popup_no_panic_on_tiny_buffer() {
+    let w = SuggestInputBuilder::<String, FixedProvider>::default()
+        .build()
+        .unwrap();
+    let mut st = opened_suggest_state("a");
+
+    let mut b = buffer(1, 1);
+    let area = Rect::new(0, 0, 1, 1);
+    StatefulWidget::render(&w, area, &mut b, &mut st);
+    w.render_overlay(Rect::new(0, 0, 1, 1), &mut b, &mut st);
+
+    // Closed popup / empty suggestions must also be a no-op, not a panic.
+    let mut closed = SuggestInputStateBuilder::default()
+        .provider(FixedProvider(vec!["apple"]))
+        .build()
+        .unwrap();
+    let mut b = buffer(10, 10);
+    StatefulWidget::render(&w, Rect::new(0, 0, 10, 1), &mut b, &mut closed);
+    w.render_overlay(Rect::new(0, 0, 10, 10), &mut b, &mut closed);
 }
 
 // ---- Title conversions + Widget<S, W> pair forwarding ----

@@ -129,7 +129,7 @@ impl Overlay {
         }
     }
 
-    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> ferrowl_ui::EventResult {
         match self {
             Overlay::TypeSelect(d) => d.handle_events(modifiers, code),
             Overlay::Creation(sv) => sv.handle_events(modifiers, code),

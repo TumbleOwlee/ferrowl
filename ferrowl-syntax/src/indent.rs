@@ -91,7 +91,10 @@ mod tests {
 
     #[test]
     fn ut_lua_keywords_in_strings_do_not_count() {
-        assert_eq!(indent_delta(Language::Lua, "local s = \"function do then\""), 0);
+        assert_eq!(
+            indent_delta(Language::Lua, "local s = \"function do then\""),
+            0
+        );
         assert_eq!(indent_delta(Language::Lua, "-- if x then"), 0);
     }
 

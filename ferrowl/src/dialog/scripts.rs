@@ -5,6 +5,7 @@
 //! compact rows, Enter in the name input creates a new (enabled) script, Esc closes.
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_syntax::Language;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
@@ -18,7 +19,6 @@ use ferrowl_ui::{
         Widget,
     },
 };
-use ferrowl_syntax::Language;
 use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
@@ -27,8 +27,8 @@ use ratatui::{
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
 
-use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::config::script::ScriptDef;
+use crate::module::modbus::dialog::ConfirmDeleteDialog;
 
 // --- Script table ----------------------------------------------------------
 

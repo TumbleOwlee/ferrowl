@@ -7,12 +7,15 @@
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
+    state::{
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
+        SuggestInputState, SuggestInputStateBuilder,
+    },
     style::{InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Validate, ValidateResult, Widget,
+        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -25,6 +28,7 @@ use ratatui::{
 
 use crate::config::device::ReadRanges;
 use crate::config::{DeviceConfig, Endpoint, Role};
+use crate::dialog::path_suggest::FsPathProvider;
 
 /// Edit an existing instance, or create a new module (with an optional config path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,7 +168,8 @@ pub struct SetupDialog {
     #[focus]
     pub name: Widget<InputFieldState, InputField<String>>,
     #[focus]
-    pub config_path: Widget<InputFieldState, InputField<ConfigPath>>,
+    pub config_path:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
     #[focus]
@@ -174,7 +179,7 @@ pub struct SetupDialog {
     #[focus(when = {self.transport.get_value() == Transport::Tcp})]
     pub port: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub path: Widget<InputFieldState, InputField<String>>,
+    pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub baud: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
@@ -232,7 +237,7 @@ impl SetupDialog {
                 stop_bits,
             } => {
                 dialog.transport.state.set_selection(1);
-                set_input(&mut dialog.path, path);
+                set_suggest_input(&mut dialog.path, path);
                 set_input(&mut dialog.baud, &baud_rate.to_string());
                 dialog
                     .parity
@@ -268,14 +273,15 @@ impl SetupDialog {
 
         let mut name_field = input("Name", None, "module name", &input_style, true);
         set_input(&mut name_field, name);
-        let mut config_path_field = input(
+        let mut config_path_field = suggest_input(
             "Config Path [TOML/JSON] (optional)",
             None,
             "device.toml",
             &input_style,
             false,
+            FsPathProvider::with_extensions(&["toml", "json"]),
         );
-        set_input(&mut config_path_field, config_path);
+        set_suggest_input(&mut config_path_field, config_path);
 
         let mut dialog = SetupDialogBuilder::default()
             .name(name_field)
@@ -300,12 +306,13 @@ impl SetupDialog {
                 &input_style,
                 false,
             ))
-            .path(input(
+            .path(suggest_input(
                 "Serial Path",
                 None,
                 "/dev/ttyUSB0",
                 &input_style,
                 false,
+                FsPathProvider::default(),
             ))
             .baud(input(
                 "Baud",
@@ -591,7 +598,11 @@ impl SetupDialog {
                 Constraint::Length(3),
             ])
             .areas(endpoint_area);
-            render_pair(&mut self.path, &mut self.baud, row0, buf);
+            let [path_area, baud_area] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas(row0);
+            StatefulWidget::render(&self.path.widget, path_area, buf, &mut self.path.state);
+            StatefulWidget::render(&self.baud.widget, baud_area, buf, &mut self.baud.state);
             let [parity_area, data_area] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(row1);
@@ -665,6 +676,15 @@ impl SetupDialog {
             buf,
             &mut self.keybinds.state,
         );
+
+        // Suggestion popups draw last, over everything else in the dialog (and may overflow
+        // the dialog box itself), so both must be rendered after all sibling widgets above.
+        self.config_path
+            .widget
+            .render_overlay(area, buf, &mut self.config_path.state);
+        self.path
+            .widget
+            .render_overlay(area, buf, &mut self.path.state);
     }
 }
 
@@ -719,6 +739,49 @@ fn input<T: Validate + Clone>(
     }
 }
 
+/// Build a [`SuggestInput`] field with the same title/border/margin/style defaults as
+/// [`input`], backed by `provider` for the completion popup.
+fn suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider + Clone>(
+    title: &str,
+    title_alignment: Option<HorizontalAlignment>,
+    placeholder: &str,
+    style: &InputFieldStyle,
+    focused: bool,
+    provider: P,
+) -> Widget<SuggestInputState<P>, SuggestInput<T, P>> {
+    Widget {
+        state: SuggestInputStateBuilder::default()
+            .field(
+                InputFieldStateBuilder::default()
+                    .focused(focused)
+                    .disabled(false)
+                    .placeholder(Some(placeholder.to_string()))
+                    .build()
+                    .unwrap(),
+            )
+            .provider(provider)
+            .build()
+            .unwrap(),
+        widget: SuggestInputBuilder::default()
+            .input_field(
+                InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some(
+                        (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
+                    ))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(style.clone())
+                    .build()
+                    .unwrap(),
+            )
+            .build()
+            .unwrap(),
+    }
+}
+
 fn selection<T: ToLabel + Clone>(
     title: &str,
     title_alignment: Option<HorizontalAlignment>,
@@ -752,4 +815,49 @@ fn set_input<T: Validate + Clone>(
 ) {
     widget.state.set_input(value.to_string());
     widget.state.set_cursor(value.chars().count());
+}
+
+fn set_suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider + Clone>(
+    widget: &mut Widget<SuggestInputState<P>, SuggestInput<T, P>>,
+    value: &str,
+) {
+    widget.state.set_input(value.to_string());
+    widget.state.set_cursor(value.chars().count());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::{HandleEvents, SetFocus};
+
+    fn buffer_text(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Typing into the config-path field opens the filesystem suggestion popup, and the
+    /// popup is drawn on top of the dialog by the trailing `render_overlay` calls in `render`.
+    #[test]
+    fn ut_render_config_path_field_shows_suggestion_popup() {
+        let mut dialog = SetupDialog::create((0, 0, 0));
+        dialog.config_path.state.set_focused(true);
+        dialog
+            .config_path
+            .state
+            .handle_events(KeyModifiers::NONE, KeyCode::Char('s'));
+        assert!(dialog.config_path.state.suggestions_open());
+
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(text.contains("src"), "missing suggestion popup:\n{text}");
+    }
 }

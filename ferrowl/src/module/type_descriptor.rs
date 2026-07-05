@@ -2,6 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::EventResult;
 
 use crate::module::view::ModuleView;
 
@@ -15,7 +16,9 @@ pub type ModuleViewFactory = Box<dyn FnOnce() -> Box<dyn ModuleView>>;
 /// opaque to `App`.
 pub trait SetupView {
     fn render(&mut self, area: Rect, buf: &mut Buffer);
-    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode);
+    /// Offers the key to the dialog's focused widget; the caller falls back to its own default
+    /// handling (Esc/Enter/Tab) only when this returns `Unhandled`.
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult;
     fn focus_next(&mut self);
     fn focus_previous(&mut self);
     /// On confirm: return `(tab_name, factory)` or `None` if validation fails.

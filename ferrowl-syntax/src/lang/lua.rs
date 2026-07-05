@@ -5,8 +5,8 @@
 use crate::{LineState, LuaCarry, SyntaxKind};
 
 const KEYWORDS: &[&str] = &[
-    "and", "break", "do", "else", "elseif", "end", "for", "function", "goto", "if", "in",
-    "local", "not", "or", "repeat", "return", "then", "until", "while",
+    "and", "break", "do", "else", "elseif", "end", "for", "function", "goto", "if", "in", "local",
+    "not", "or", "repeat", "return", "then", "until", "while",
 ];
 const LITERALS: &[&str] = &["true", "false", "nil"];
 
@@ -75,7 +75,9 @@ pub(crate) fn highlight_line(
             continue;
         }
 
-        if c == '[' && let Some((level, open_end)) = match_long_open(&chars, i) {
+        if c == '['
+            && let Some((level, open_end)) = match_long_open(&chars, i)
+        {
             match find_long_close(&chars, open_end, level) {
                 Some(end) => {
                     spans.push((i, end, SyntaxKind::String));
@@ -166,8 +168,7 @@ fn contextual_pass(chars: &[char], spans: &mut [(usize, usize, SyntaxKind)]) {
             .get(k + 1)
             .zip(spans.get(k + 2))
             .is_some_and(|(n, n2)| {
-                (is_punct(chars, *n, ".") || is_punct(chars, *n, ":"))
-                    && n2.2 == SyntaxKind::Ident
+                (is_punct(chars, *n, ".") || is_punct(chars, *n, ":")) && n2.2 == SyntaxKind::Ident
             });
         if method_pos || call_pos {
             spans[k].2 = SyntaxKind::Function;
@@ -308,11 +309,8 @@ mod tests {
 
     #[test]
     fn ut_long_string_carries_across_lines() {
-        let (spans1, state1) = top_highlight_line(
-            Language::Lua,
-            "local s = [==[",
-            LineState::default(),
-        );
+        let (spans1, state1) =
+            top_highlight_line(Language::Lua, "local s = [==[", LineState::default());
         assert_eq!(state1.0, LuaCarry::LongString(2));
         assert!(spans1.iter().any(|s| s.2 == SyntaxKind::String));
 

@@ -61,6 +61,26 @@ pub trait Margins {
     fn margins(&self) -> Margin;
 }
 
+/// A single entry offered by a [`SuggestionProvider`] for a
+/// [`SuggestInput`](crate::widgets::SuggestInput)'s popup.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Suggestion {
+    /// Full text the input is replaced with when this suggestion is accepted.
+    pub value: String,
+    /// Text shown for this entry in the popup list.
+    pub label: String,
+    /// If `true`, accepting this suggestion re-queries the provider with the
+    /// new input and keeps the popup open (e.g. a directory to descend
+    /// into); if `false`, accepting it closes the popup.
+    pub partial: bool,
+}
+
+/// Supplies the candidate [`Suggestion`]s for a
+/// [`SuggestInput`](crate::widgets::SuggestInput) given its current text.
+pub trait SuggestionProvider {
+    fn suggest(&self, input: &str) -> Vec<Suggestion>;
+}
+
 /// Common focus cycling for an overlay payload, routed from a
 /// `#[derive(Overlay)]` enum's generated `Tab`/`BackTab` handling.
 ///

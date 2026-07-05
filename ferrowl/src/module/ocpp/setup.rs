@@ -3,6 +3,7 @@
 //! placeholder).
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -32,8 +33,8 @@ impl SetupView for OcppSetupView {
         self.dialog.render(area, buf);
     }
 
-    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        let _ = self.dialog.handle_events(modifiers, code);
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        self.dialog.handle_events(modifiers, code)
     }
 
     fn focus_next(&mut self) {

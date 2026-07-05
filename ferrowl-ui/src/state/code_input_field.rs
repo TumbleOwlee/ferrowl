@@ -109,7 +109,10 @@ impl HandleEvents for CodeInputFieldState {
         // The space-chord path manages `last_space` itself; every other
         // handled key clears it so a stray keypress between two spaces
         // cancels the pending double-space-indent expansion.
-        if !matches!((modifiers, code), (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(' '))) {
+        if !matches!(
+            (modifiers, code),
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(' '))
+        ) {
             self.last_space = None;
         }
         match (modifiers, code) {

@@ -326,25 +326,27 @@ impl ModuleView for ModbusModuleView {
             return EventResult::Consumed;
         }
         if let Some(ref mut setup) = self.setup_overlay {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => {
-                    self.setup_overlay = None;
-                }
-                (KeyModifiers::NONE, KeyCode::Enter) => {
-                    if let Ok(resolved) = setup.resolve() {
-                        let values = resolved.values;
+            // Offer the key to the dialog first; only run the default Esc/Enter/Tab/BackTab
+            // handling below when the dialog leaves it unhandled.
+            if let EventResult::Unhandled(modifiers, code) = setup.handle_events(modifiers, code) {
+                match (modifiers, code) {
+                    (KeyModifiers::NONE, KeyCode::Esc) => {
                         self.setup_overlay = None;
-                        self.pending = Some(PendingAction::ApplySetup(values));
                     }
-                }
-                (KeyModifiers::NONE, KeyCode::Tab) => {
-                    setup.focus_next();
-                }
-                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    setup.focus_previous();
-                }
-                _ => {
-                    let _ = setup.handle_events(modifiers, code);
+                    (KeyModifiers::NONE, KeyCode::Enter) => {
+                        if let Ok(resolved) = setup.resolve() {
+                            let values = resolved.values;
+                            self.setup_overlay = None;
+                            self.pending = Some(PendingAction::ApplySetup(values));
+                        }
+                    }
+                    (KeyModifiers::NONE, KeyCode::Tab) => {
+                        setup.focus_next();
+                    }
+                    (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                        setup.focus_previous();
+                    }
+                    _ => {}
                 }
             }
             return EventResult::Consumed;
@@ -734,7 +736,7 @@ fn parse_set_args(rest: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModbusModuleView, decode_definition, parse_set_args, raw_hex};
+    use super::{ModbusModuleView, PendingAction, decode_definition, parse_set_args, raw_hex};
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::table::Definition;
     use crate::module::view::ModuleView;
@@ -943,6 +945,20 @@ mod tests {
         let mut view = new_view();
         drop(view.handle_command("edit"));
         assert!(view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_enter_still_confirms_edit_dialog_after_offer_first_routing() {
+        // Regression for the offer-first key-routing refactor: the setup dialog is now offered
+        // every key before the default Esc/Enter/Tab/BackTab handling runs, but Enter must still
+        // confirm the dialog and apply the edit exactly as before.
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        assert!(view.is_overlay_active());
+        let result = view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(matches!(result, EventResult::Consumed));
+        assert!(!view.is_overlay_active());
+        assert!(matches!(view.pending, Some(PendingAction::ApplySetup(_))));
     }
 
     #[test]

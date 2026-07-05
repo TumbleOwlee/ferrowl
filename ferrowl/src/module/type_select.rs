@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border, COLOR_SCHEME, EventResult,
     state::{SelectionState, SelectionStateBuilder},
     style::{SelectionStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
@@ -105,8 +105,8 @@ impl TypeSelectDialog {
         self.selection.state.selection()
     }
 
-    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        let _ = self.selection.state.handle_events(modifiers, code);
+    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        self.selection.state.handle_events(modifiers, code)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
