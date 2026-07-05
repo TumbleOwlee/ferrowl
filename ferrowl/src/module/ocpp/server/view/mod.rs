@@ -35,11 +35,11 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::csms::{ConnectionId, CsmsActionHandler};
 
 use crate::app::LogRing;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::OcppMessage;
 use crate::module::ocpp::client::lua_sim::OcppFields;
-use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::config::device::{ConnectorRfids, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppSpec};
 use crate::module::ocpp::lock::{with_state, with_state_mut};

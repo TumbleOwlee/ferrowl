@@ -16,15 +16,12 @@ use ferrowl_codec::{Access, Kind};
 use ferrowl_ui::state::ButtonState;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{
-        InputFieldState, InputFieldStateBuilder,
-        SelectionState, SelectionStateBuilder,
-    },
+    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
     widgets::{
-        Button, InputField, InputFieldBuilder, Selection,
-        SelectionBuilder, Text, TextBuilder, Title, Validate, Widget,
+        Button, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
+        Title, Validate, Widget,
     },
 };
 use ratatui::layout::{HorizontalAlignment, Margin};
@@ -125,7 +122,6 @@ pub(super) fn selection<T: ToLabel + Clone>(
 pub(super) fn button(label: &str, horizontal: u16) -> Widget<ButtonState, Button> {
     ferrowl_ui::widgets::button(label, ButtonStyle::default(), horizontal)
 }
-
 
 /// A bordered, titled static text box showing `content`.
 pub(super) fn text_boxed(

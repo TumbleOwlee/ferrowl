@@ -158,7 +158,14 @@ mod tests {
 
     #[test]
     fn ut_garbage_input_does_not_panic() {
-        let cases = ["\"abc", "]", "]=]", "", "{\"a\": ", "garbage ] , : trailing"];
+        let cases = [
+            "\"abc",
+            "]",
+            "]=]",
+            "",
+            "{\"a\": ",
+            "garbage ] , : trailing",
+        ];
         for case in cases {
             let (spans, _state) = top_highlight_line(Language::Json, case, LineState::default());
             let len = case.chars().count();

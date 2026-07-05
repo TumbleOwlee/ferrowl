@@ -52,7 +52,11 @@ pub(super) fn format(source: &str) -> String {
                         // immediately — its body is still one level deeper.
                         let dedented = depth.saturating_sub(1);
                         print_depth = Some(dedented);
-                        depth = if text == "else" { dedented + 1 } else { dedented };
+                        depth = if text == "else" {
+                            dedented + 1
+                        } else {
+                            dedented
+                        };
                         leading = false;
                         continue;
                     } else {
@@ -91,8 +95,7 @@ mod tests {
     #[test]
     fn ut_elseif_and_else_sit_at_parent_depth() {
         let src = "if x then\na()\nelseif y then\nb()\nelse\nc()\nend";
-        let expected =
-            "if x then\n    a()\nelseif y then\n    b()\nelse\n    c()\nend";
+        let expected = "if x then\n    a()\nelseif y then\n    b()\nelse\n    c()\nend";
         assert_eq!(format(src), expected);
     }
 

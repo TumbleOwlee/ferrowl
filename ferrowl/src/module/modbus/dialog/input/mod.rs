@@ -10,10 +10,7 @@ use ferrowl_codec::format::{
 use ferrowl_codec::{Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
-    widgets::{
-        Button, GetValue, InputField, Selection, Text, Validate, ValidateResult,
-        Widget,
-    },
+    widgets::{Button, GetValue, InputField, Selection, Text, Validate, ValidateResult, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{buffer::Buffer, layout::Rect};
@@ -518,10 +515,9 @@ mod apply_tests {
             7,
             RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0), BitField::default())),
         );
-        let edited =
-            EditInputDialog::from_register("temp", "a sensor", &original, "42", None)
-                .apply()
-                .expect("valid register should apply");
+        let edited = EditInputDialog::from_register("temp", "a sensor", &original, "42", None)
+            .apply()
+            .expect("valid register should apply");
 
         assert_eq!(edited.name, "temp");
         assert_eq!(edited.description, "a sensor");

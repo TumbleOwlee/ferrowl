@@ -46,7 +46,11 @@ impl Parser {
         if end > self.chars.len() || self.chars[self.pos..end] != word_chars[..] {
             return None;
         }
-        if self.chars.get(end).is_some_and(|c| c.is_alphanumeric() || *c == '_') {
+        if self
+            .chars
+            .get(end)
+            .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+        {
             return None;
         }
         self.pos = end;
