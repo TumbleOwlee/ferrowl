@@ -16,7 +16,7 @@ use ferrowl_ui::traits::SetFocus;
 use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
@@ -28,6 +28,10 @@ use render::render;
 
 /// How often the UI redraws when no input arrives (drives live value updates).
 const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How long to wait for a second digit after `Ctrl+t` + first digit before jumping to the tab
+/// indexed by the first digit alone.
+const DIGIT_CHORD_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// Ring-log dimensions for the on-screen log pane.
 pub const LOG_MAX_LINE: usize = 256;
@@ -181,9 +185,16 @@ impl Tab {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum KeyMode {
     CtrlWin,
     CtrlTab,
+    /// `Ctrl+t` followed by one digit, waiting to see if a second digit forms a two-digit tab
+    /// index before `deadline` elapses.
+    TabDigit {
+        first: usize,
+        deadline: Instant,
+    },
 }
 
 /// Top-level application: owns the terminal and all module tabs, and runs the async
@@ -243,6 +254,14 @@ impl App {
         });
 
         loop {
+            // A pending single-digit tab jump expires on its own if no second digit arrives.
+            if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
+                && Instant::now() >= deadline
+            {
+                self.keymode = None;
+                self.switch_tab(first);
+            }
+
             self.refresh_snapshot().await;
             self.draw()?;
 
