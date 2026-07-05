@@ -17,3 +17,14 @@ members = [
 
 [workspace.dependencies]
 parking_lot = "0.12"
+
+# Speed up repeated release builds during development.
+[profile.release]
+incremental = true
+
+# Fast iteration profile: optimized enough to be usable, much quicker to build.
+# Usage: cargo build --profile fastrel
+[profile.fastrel]
+inherits = "release"
+opt-level = 1
+debug = false

@@ -1,7 +1,7 @@
 use crate::COLOR_SCHEME;
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 
 /// Styles for [`Table`](crate::widgets::Table): selected row (focused and
 /// unfocused), border, header, and alternating rows.
@@ -26,7 +26,7 @@ pub struct TableStyle {
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.row[1]).bold()")]
     pub header: Style,
     #[getset(get = "pub")]
-    #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(Color::Rgb(34, 28, 18))")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.hi_bg_unfocused)")]
     pub unfocused_selected: Style,
 }
 
