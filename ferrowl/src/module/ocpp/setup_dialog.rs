@@ -4,12 +4,15 @@
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
-    style::{InputFieldStyle, SelectionStyle, TextStyle},
+    state::{
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
+        SuggestInputState, SuggestInputStateBuilder,
+    },
+    style::{InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
     traits::ToLabel,
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Validate, ValidateResult, Widget,
+        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -20,6 +23,7 @@ use ratatui::{
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
 
+use crate::dialog::path_suggest::FsPathProvider;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
 /// Live validator for the device-config path field: empty is allowed (a fresh empty config),
@@ -57,7 +61,8 @@ pub struct OcppSetupDialog {
     pub name: Widget<InputFieldState, InputField<String>>,
     /// Path to the OCPP device-config file (empty = a fresh, empty device config).
     #[focus]
-    pub config_path: Widget<InputFieldState, InputField<ConfigPath>>,
+    pub config_path:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
     #[focus]
     pub version: Widget<SelectionState<OcppVersion>, Selection<OcppVersion>>,
     #[focus]
@@ -82,7 +87,12 @@ impl OcppSetupDialog {
 
         OcppSetupDialogBuilder::default()
             .name(input("Name", "cs-1", &input_style, true))
-            .config_path(input("Config", "device.toml", &input_style, false))
+            .config_path(suggest_input(
+                "Config",
+                "device.toml",
+                &input_style,
+                FsPathProvider::with_extensions(&["toml", "json"]),
+            ))
             .version(selection(
                 "Version",
                 vec![OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1],
@@ -116,7 +126,7 @@ impl OcppSetupDialog {
     pub fn edit(spec: &OcppSpec, device_path: &str) -> Self {
         let mut d = Self::new();
         set_text(&mut d.name, &spec.name);
-        set_text(&mut d.config_path, device_path);
+        set_suggest_text(&mut d.config_path, device_path);
         d.version.state.set_selection(match spec.version {
             OcppVersion::V1_6 => 0,
             OcppVersion::V2_0_1 => 1,
@@ -304,6 +314,12 @@ impl OcppSetupDialog {
             buf,
             &mut self.keybinds.state,
         );
+
+        // Must be called after every sibling widget above has been rendered, so the popup
+        // paints on top rather than being overwritten (painter's-algorithm buffer model).
+        self.config_path
+            .widget
+            .render_overlay(area, buf, &mut self.config_path.state);
     }
 }
 
@@ -334,6 +350,47 @@ fn input<T: Validate + Clone>(
 }
 
 fn set_text<T: Validate + Clone>(w: &mut Widget<InputFieldState, InputField<T>>, value: &str) {
+    w.state.set_input(value.to_string());
+    w.state.set_cursor(value.chars().count());
+}
+
+fn suggest_input<T: Validate + Clone>(
+    title: &str,
+    placeholder: &str,
+    style: &InputFieldStyle,
+    provider: FsPathProvider,
+) -> Widget<SuggestInputState<FsPathProvider>, SuggestInput<T, FsPathProvider>> {
+    let mut state = SuggestInputStateBuilder::default()
+        .provider(provider)
+        .build()
+        .unwrap();
+    state.set_placeholder(Some(placeholder.to_string()));
+
+    Widget {
+        state,
+        widget: SuggestInputBuilder::default()
+            .input_field(
+                InputFieldBuilder::default()
+                    .border(Border::Full(Margin::new(1, 0)))
+                    .title(Some((title, HorizontalAlignment::Left).into()))
+                    .margin(Margin {
+                        vertical: 0,
+                        horizontal: 1,
+                    })
+                    .style(style.clone())
+                    .build()
+                    .unwrap(),
+            )
+            .popup_style(SuggestInputStyle::default())
+            .build()
+            .unwrap(),
+    }
+}
+
+fn set_suggest_text(
+    w: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
+    value: &str,
+) {
     w.state.set_input(value.to_string());
     w.state.set_cursor(value.chars().count());
 }

@@ -1,5 +1,6 @@
 //! Modal dialogs: module setup and shared register-edit data types.
 
+pub mod path_suggest;
 pub mod scripts;
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};

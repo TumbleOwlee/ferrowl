@@ -1,6 +1,7 @@
 //! Overlay (modal dialog) lifecycle: creation dialog (`:new`/`:load`), tab creation.
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_ui::EventResult;
 
 use crate::module::MODULE_TYPES;
 use crate::module::modbus::setup::ModbusSetupView;
@@ -15,23 +16,29 @@ impl App {
         modifiers: KeyModifiers,
         code: KeyCode,
     ) -> bool {
-        match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Esc) => self.close_overlay(),
-            (KeyModifiers::NONE, KeyCode::Enter) => self.confirm_overlay().await,
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                if let Some(o) = self.overlay.as_mut() {
-                    o.focus_previous();
+        // Offer the key to the active dialog first; only fall back to the default Esc/Enter/
+        // Tab/BackTab handling when the dialog leaves it unhandled. This is behavior-preserving
+        // today (no widget state consumes those keys) and lets a future popup widget intercept
+        // them while open.
+        let result = match self.overlay.as_mut() {
+            Some(o) => o.handle_events(modifiers, code),
+            None => EventResult::Unhandled(modifiers, code),
+        };
+        if let EventResult::Unhandled(modifiers, code) = result {
+            match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) => self.close_overlay(),
+                (KeyModifiers::NONE, KeyCode::Enter) => self.confirm_overlay().await,
+                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                    if let Some(o) = self.overlay.as_mut() {
+                        o.focus_previous();
+                    }
                 }
-            }
-            (KeyModifiers::NONE, KeyCode::Tab) => {
-                if let Some(o) = self.overlay.as_mut() {
-                    o.focus_next();
+                (KeyModifiers::NONE, KeyCode::Tab) => {
+                    if let Some(o) = self.overlay.as_mut() {
+                        o.focus_next();
+                    }
                 }
-            }
-            _ => {
-                if let Some(o) = self.overlay.as_mut() {
-                    o.handle_events(modifiers, code);
-                }
+                _ => {}
             }
         }
         false

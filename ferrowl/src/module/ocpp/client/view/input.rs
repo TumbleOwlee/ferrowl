@@ -4,10 +4,10 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{EventResult, traits::HandleEvents, widgets::GetValue};
 
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::ClientFields;
-use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::lock::{HasState, with_state};
 use crate::module::ocpp::scope::Scope;
 
@@ -23,6 +23,14 @@ impl<V: ClientVersion> ClientView<V> {
         code: KeyCode,
     ) -> EventResult {
         if self.overlay.is_active() {
+            // Setup dialog: offer the key to the dialog before common routing, so a future
+            // dialog-owned popup can consume Esc/Enter/Tab/BackTab while it is open.
+            if let ClientOverlay::Setup(setup) = &mut self.overlay
+                && let EventResult::Consumed = setup.handle_events(modifiers, code)
+            {
+                return EventResult::Consumed;
+            }
+
             // Common keys first: `Esc` closes `esc_close` variants, `Tab`/`BackTab` cycle focus on
             // `focus_cycle` variants. Anything else falls through to per-variant `Enter`/inner keys.
             match self.overlay.route_keys(modifiers, code) {

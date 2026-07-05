@@ -7,6 +7,7 @@ mod code_input_field;
 mod input_field;
 mod scrolling_tabs;
 mod selection;
+mod suggest_input;
 mod table;
 mod text;
 
@@ -48,6 +49,7 @@ pub fn render_border(
     }
 }
 pub use selection::*;
+pub use suggest_input::*;
 pub use table::*;
 pub use text::*;
 

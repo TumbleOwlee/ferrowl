@@ -6,9 +6,9 @@ use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::{HandleEvents, OverlayRoute};
 use ferrowl_ui::widgets::GetValue;
 
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
-use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::server::backend::{Scope, with_rfids_mut};
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
 
@@ -24,6 +24,14 @@ where
         code: KeyCode,
     ) -> EventResult {
         if self.overlay.is_active() {
+            // Setup dialog: offer the key to the dialog before common routing, so a future
+            // dialog-owned popup can consume Esc/Enter/Tab/BackTab while it is open.
+            if let ServerOverlay::Setup(setup) = &mut self.overlay
+                && let EventResult::Consumed = setup.handle_events(modifiers, code)
+            {
+                return EventResult::Consumed;
+            }
+
             // Common keys first: `Esc` closes `esc_close` variants, `Tab`/`BackTab` cycle focus on
             // `focus_cycle` variants. Anything else falls through to per-variant `Enter`/inner keys.
             match self.overlay.route_keys(modifiers, code) {
