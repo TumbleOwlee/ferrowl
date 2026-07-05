@@ -287,11 +287,7 @@ impl ModuleView for ModbusModuleView {
                         } else {
                             COLOR_SCHEME.error
                         })
-                        .fg(if online {
-                            COLOR_SCHEME.text_hi
-                        } else {
-                            COLOR_SCHEME.text
-                        })
+                        .fg(COLOR_SCHEME.text_status)
                         .bold(),
                 })
                 .build()
