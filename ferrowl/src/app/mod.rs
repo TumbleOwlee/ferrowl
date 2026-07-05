@@ -61,12 +61,21 @@ impl LogRing {
             .as_millis() as u64;
         let line: String = msg.chars().take(LOG_MAX_LINE).collect();
         // Persist to the file sink first (unbounded history), then push into the bounded ring.
+        // Lines are buffered; `flush` runs once per UI tick (and on sink teardown via drop).
         if let Some(writer) = self.sink.as_mut() {
             use std::io::Write;
             let _ = writeln!(writer, "[{}] {line}", format_timestamp(ts));
-            let _ = writer.flush();
         }
         self.ring.push((ts, line));
+    }
+
+    /// Flush buffered file-sink lines to disk. Called once per UI tick so a burst of log
+    /// lines costs one syscall instead of one per line.
+    pub fn flush(&mut self) {
+        if let Some(writer) = self.sink.as_mut() {
+            use std::io::Write;
+            let _ = writer.flush();
+        }
     }
 
     /// Point the log at a file (append): `base` resolves to `<stem>.<name>.<ext>` next to it via
@@ -293,6 +302,10 @@ impl App {
         // sum of all tabs.
         let refreshes = self.tabs.iter_mut().map(|tab| tab.view.refresh());
         futures_util::future::join_all(refreshes).await;
+        // One flush per tick amortizes the file sink instead of flushing per log line.
+        for tab in self.tabs.iter() {
+            tab.log.write().await.flush();
+        }
         for tab in self.tabs.iter_mut() {
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
             if let Some(new_view) = tab.view.take_replacement() {
@@ -382,6 +395,14 @@ mod tests {
         ring.set_log_file(Some(base), name);
         ring.write("first line");
         ring.write("second line");
+        // Writes are buffered until the per-tick flush.
+        ring.flush();
+        let mut buffered = String::new();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut buffered)
+            .unwrap();
+        assert!(buffered.contains("first line"));
         // Disabling the sink flushes/drops the writer.
         ring.set_log_file(None, name);
 
