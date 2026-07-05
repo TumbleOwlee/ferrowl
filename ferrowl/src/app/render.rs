@@ -38,7 +38,11 @@ pub(super) fn render(
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
 
-        let names: Vec<String> = tabs.iter().map(|t| format!(" {} ", t.name)).collect();
+        let names: Vec<String> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!(" [{i}] {} ", t.name))
+            .collect();
         render_tabs(&names, active, tabs_area, buf);
     }
 
