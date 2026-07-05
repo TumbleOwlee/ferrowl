@@ -1,4 +1,4 @@
-use crate::{Error, Result, Script, module::Module};
+use crate::{Error, Result, Script, module::LogSink, module::Module};
 use mlua::{Lua, StdLib, UserData};
 use std::{collections::HashMap, hash::Hash};
 
@@ -35,6 +35,24 @@ where
         self.lua.load_std_libs(StdLib::TABLE)?;
         self.lua.load_std_libs(StdLib::ALL_SAFE)?;
         Ok(())
+    }
+
+    /// Override the global `print` so output goes to the host log instead of stdout
+    /// (stdout would corrupt the TUI alternate screen). Mirrors real print semantics:
+    /// arguments are converted with tostring semantics and joined by tabs.
+    pub fn redirect_print<S: LogSink + 'static>(&mut self, sink: S) -> Result<()> {
+        let f = self
+            .lua
+            .create_function(move |_, args: mlua::Variadic<mlua::Value>| {
+                let line = args
+                    .iter()
+                    .map(|v| v.to_string()) // tostring semantics, honors __tostring
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    .join("\t");
+                sink.print(&line);
+                Ok(())
+            })?;
+        self.lua.globals().set("print", f)
     }
 
     /// Retrieve iterator over all loaded scripts

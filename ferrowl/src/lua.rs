@@ -192,7 +192,11 @@ pub fn run_sim(
             .with_module(LogModule::init(LuaLogSink {
                 log: log.clone(),
                 sink: sink.clone(),
-            }));
+            }))
+            .with_print_sink(LuaLogSink {
+                log: log.clone(),
+                sink: sink.clone(),
+            });
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
