@@ -215,7 +215,8 @@ where
             .with_stdlib()
             .with_module(OcppClient::init(bridge))
             .with_module(TimeModule::default())
-            .with_module(LogModule::init(LuaLogSink(log.clone())));
+            .with_module(LogModule::init(LuaLogSink(log.clone())))
+            .with_print_sink(LuaLogSink(log.clone()));
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }

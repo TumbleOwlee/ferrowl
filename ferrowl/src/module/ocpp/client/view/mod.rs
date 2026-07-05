@@ -41,6 +41,7 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::cs::CsActionHandler;
 
 use crate::app::LogRing;
+use crate::config::script::ScriptDef;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{Messages, OcppClient, OcppMessage};
@@ -666,6 +667,16 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
 
     fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
         self.deferred.replacement.take()
+    }
+
+    fn scripts(&self) -> Option<&[ScriptDef]> {
+        Some(&self.device.scripts)
+    }
+
+    fn set_scripts(&mut self, scripts: Vec<ScriptDef>) -> bool {
+        self.device.scripts = scripts;
+        self.start_sim();
+        true
     }
 }
 

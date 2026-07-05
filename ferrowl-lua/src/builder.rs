@@ -1,4 +1,4 @@
-use crate::{Context, Result, module::Module};
+use crate::{Context, Result, module::LogSink, module::Module};
 use mlua::UserData;
 use std::hash::Hash;
 
@@ -49,6 +49,22 @@ where
     pub fn with_stdlib(mut self) -> Self {
         if let Ok(ref mut ctx) = self.context
             && let Err(e) = ctx.enable_stdlib()
+        {
+            self.context = Err(e);
+        }
+        self
+    }
+
+    /// Redirect the global `print` to a host log sink. Order relative to `with_stdlib()` does not
+    /// matter in practice (enabling the standard libraries does not reload `base`/`print`), but
+    /// call this after `with_stdlib()` to keep the builder chain reading top-to-bottom as setup
+    /// followed by overrides.
+    pub fn with_print_sink<S>(mut self, sink: S) -> Self
+    where
+        S: LogSink + 'static,
+    {
+        if let Ok(ref mut ctx) = self.context
+            && let Err(e) = ctx.redirect_print(sink)
         {
             self.context = Err(e);
         }

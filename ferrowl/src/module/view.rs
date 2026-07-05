@@ -5,6 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::app::LogRing;
+use crate::config::script::ScriptDef;
 
 /// Generic log channel shared between a [`ModuleView`] and the owning [`Tab`].
 pub type SharedLog = std::sync::Arc<tokio::sync::RwLock<LogRing>>;
@@ -85,6 +86,17 @@ pub trait ModuleView: SetFocus + IsFocus {
     /// Polled by `App` once per tick after [`refresh`]. Default: never replaced.
     fn take_replacement(&mut self) -> Option<Box<dyn ModuleView>> {
         None
+    }
+
+    /// The module's Lua script list, or `None` when the module has no script support.
+    fn scripts(&self) -> Option<&[ScriptDef]> {
+        None
+    }
+
+    /// Replace the module's script list and apply it to any running sim the same way
+    /// the script dialog does. Returns `false` when unsupported.
+    fn set_scripts(&mut self, _scripts: Vec<ScriptDef>) -> bool {
+        false
     }
 }
 

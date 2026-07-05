@@ -9,6 +9,7 @@ use ferrowl_ui::traits::HandleEvents;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+use crate::config::script::ScriptDef;
 use crate::config::{DeviceConfig, ModuleSpec};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
@@ -491,7 +492,7 @@ impl ModuleView for ModbusModuleView {
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
-        if trimmed == "scripts" {
+        if trimmed == "script" {
             self.scripts_overlay = Some(ScriptDialog::new(&self.device.scripts));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
@@ -603,6 +604,17 @@ impl ModuleView for ModbusModuleView {
         v.as_object_mut()?.insert("type".into(), "modbus".into());
         Some(v)
     }
+
+    fn scripts(&self) -> Option<&[ScriptDef]> {
+        Some(&self.device.scripts)
+    }
+
+    fn set_scripts(&mut self, scripts: Vec<ScriptDef>) -> bool {
+        self.device.scripts = scripts;
+        self.module
+            .reload_scripts(super::registers::collect_scripts(&self.device));
+        true
+    }
 }
 
 static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
@@ -651,7 +663,7 @@ static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
         description: "lua simulation",
     },
     CommandDescriptor {
-        name: ":scripts",
+        name: ":script",
         description: "manage lua scripts",
     },
     CommandDescriptor {
@@ -924,7 +936,7 @@ mod tests {
     #[test]
     fn ut_scripts_command_opens_overlay_and_close_applies() {
         let mut view = new_view();
-        drop(view.handle_command("scripts"));
+        drop(view.handle_command("script"));
         assert!(view.is_overlay_active());
         // Create a script through the dialog: Tab to the name input (the code editor is
         // skipped while nothing is selected), type a name, Enter creates it, Esc closes.
