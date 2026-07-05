@@ -480,6 +480,7 @@ where
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
         device.log_file = self.device.log_file.clone();
+        device.security = self.device.security.clone();
         with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
@@ -493,6 +494,7 @@ where
             if let Some((spec, path)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
+                device.security = self.device.security.clone();
                 with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,

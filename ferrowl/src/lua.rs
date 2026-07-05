@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ferrowl_codec::{Address, Register, Value};
+use ferrowl_codec::{Address, Format, Register, Value};
 use ferrowl_lua::module::{LogModule, LogSink, Read, RegisterModule, TimeModule, ValueType, Write};
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
@@ -81,27 +81,28 @@ impl Read for RegisterBridge {
 
 impl Write for RegisterBridge {
     fn write(&self, name: String, value: ValueType) -> Result<()> {
-        // The register codec (`encode`/`str_to_value`) is string-based and shared with the
-        // `:set` user-input path, so render the typed value to its canonical string once here.
-        let value = match value {
-            ValueType::Int(v) => v.to_string(),
-            ValueType::Float(v) => v.to_string(),
-            ValueType::String(s) => s,
-            ValueType::Bool(b) => (b as u8).to_string(),
-            ValueType::Nil => "nil".to_string(),
-        };
         let register = self.register(&name)?;
         let addr = match register.address() {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
-                let value = crate::module::modbus::str_to_value(&value, register);
+                let value = virtual_value_from_type(value, register)?;
                 self.virtual_store.blocking_write().insert(name, value);
                 return Ok(());
             }
         };
-        let raw = register
-            .encode(&value)
-            .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?;
+        let raw = match value {
+            // A Lua string is already a string — no round-trip to avoid, so this still goes
+            // through the shared `encode`/`:set` string path.
+            ValueType::String(s) => register
+                .encode(&s)
+                .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?,
+            _ => {
+                let typed = typed_value_from_type(value, register.format())?;
+                register
+                    .encode_value(&typed)
+                    .map_err(|e| Error::RuntimeError(format!("encode '{name}': {e}")))?
+            }
+        };
         let key = Key {
             id: SlaveKey {
                 slave_id: *register.slave_id(),
@@ -120,6 +121,113 @@ impl Write for RegisterBridge {
                 "write to '{name}' rejected (not writable)"
             )))
         }
+    }
+}
+
+/// Converts a Lua `ValueType` into a codec [`Value`] for a virtual register, mirroring
+/// `str_to_value`'s `Scalar`-based semantics (an `Int`/`Float`/`Bool` is stored as `I64`/`F64`
+/// regardless of the register's declared format — virtual registers ignore it) without the
+/// string round-trip `str_to_value` requires for genuinely string input.
+fn virtual_value_from_type(value: ValueType, register: &Register) -> Result<Value> {
+    let res = register.format().resolution().unwrap_or_default();
+    match value {
+        ValueType::Nil => Err(Error::RuntimeError("cannot Set nil value".to_string())),
+        ValueType::String(s) => Ok(crate::module::modbus::str_to_value(&s, register)),
+        ValueType::Bool(b) => Ok(Value::I64((b as i64, res))),
+        ValueType::Int(v) => Ok(match i64::try_from(v) {
+            Ok(v) => Value::I64((v, res)),
+            // Mirrors `Scalar::from_input`'s fallback for an out-of-i64-range literal: it fails
+            // to parse as `i64` and is retried as `f64`.
+            Err(_) => Value::F64((v as f64, res)),
+        }),
+        ValueType::Float(v) => Ok(Value::F64((v, res))),
+    }
+}
+
+/// Converts a Lua `ValueType` into the codec [`Value`] variant `format` expects, for the
+/// fixed-address `encode_value` path. `Nil` errors cleanly instead of round-tripping through the
+/// literal string `"nil"`; `Int` is range-checked against the target integer width instead of
+/// silently truncating.
+fn typed_value_from_type(value: ValueType, format: &Format) -> Result<Value> {
+    match value {
+        ValueType::Nil => Err(Error::RuntimeError("cannot Set nil value".to_string())),
+        ValueType::String(_) => unreachable!("String is handled by the caller via `encode`"),
+        ValueType::Bool(b) => int_value_for_format(b as i128, format),
+        ValueType::Int(v) => int_value_for_format(v, format),
+        ValueType::Float(v) => float_value_for_format(v, format),
+    }
+}
+
+/// Builds the codec [`Value`] variant `format` expects from an integer, range-checking against
+/// the target width. Mirrors the string path's rule for non-integer formats: any integer is a
+/// valid float (`v as f32/f64`), and stringifies verbatim onto ASCII.
+fn int_value_for_format(v: i128, format: &Format) -> Result<Value> {
+    let res = format.resolution().unwrap_or_default();
+    macro_rules! int_variant {
+        ($variant:ident, $ty:ty) => {
+            <$ty>::try_from(v)
+                .map(|val| Value::$variant((val, res.clone())))
+                .map_err(|_| {
+                    Error::RuntimeError(format!("value {v} out of range for format {format}"))
+                })
+        };
+    }
+    match format {
+        Format::U8(_) => int_variant!(U8, u8),
+        Format::U16(_) => int_variant!(U16, u16),
+        Format::U32(_) => int_variant!(U32, u32),
+        Format::U64(_) => int_variant!(U64, u64),
+        Format::U128(_) => u128::try_from(v)
+            .map(|val| Value::U128((val, res.clone())))
+            .map_err(|_| {
+                Error::RuntimeError(format!("value {v} out of range for format {format}"))
+            }),
+        Format::I8(_) => int_variant!(I8, i8),
+        Format::I16(_) => int_variant!(I16, i16),
+        Format::I32(_) => int_variant!(I32, i32),
+        Format::I64(_) => int_variant!(I64, i64),
+        Format::I128(_) => Ok(Value::I128((v, res))),
+        Format::F32(_) => Ok(Value::F32((v as f32, res))),
+        Format::F64(_) => Ok(Value::F64((v as f64, res))),
+        Format::Ascii(_) => Ok(Value::Ascii(v.to_string())),
+    }
+}
+
+/// Builds the codec [`Value`] variant `format` expects from a float. Mirrors the string path's
+/// rule for integer formats: only a whole number in range converts; a fractional or non-finite
+/// value errors cleanly instead (the string path would have failed the same conversion via a
+/// confusing `ParseIntError`, since `v.to_string()` of e.g. `3.5` isn't valid integer syntax).
+fn float_value_for_format(v: f64, format: &Format) -> Result<Value> {
+    let res = format.resolution().unwrap_or_default();
+    macro_rules! float_int_variant {
+        ($variant:ident, $ty:ty) => {{
+            if !v.is_finite() || v.fract() != 0.0 {
+                Err(Error::RuntimeError(format!(
+                    "value {v} is not a whole number for integer format {format}"
+                )))
+            } else if v < <$ty>::MIN as f64 || v > <$ty>::MAX as f64 {
+                Err(Error::RuntimeError(format!(
+                    "value {v} out of range for format {format}"
+                )))
+            } else {
+                Ok(Value::$variant((v as $ty, res.clone())))
+            }
+        }};
+    }
+    match format {
+        Format::U8(_) => float_int_variant!(U8, u8),
+        Format::U16(_) => float_int_variant!(U16, u16),
+        Format::U32(_) => float_int_variant!(U32, u32),
+        Format::U64(_) => float_int_variant!(U64, u64),
+        Format::U128(_) => float_int_variant!(U128, u128),
+        Format::I8(_) => float_int_variant!(I8, i8),
+        Format::I16(_) => float_int_variant!(I16, i16),
+        Format::I32(_) => float_int_variant!(I32, i32),
+        Format::I64(_) => float_int_variant!(I64, i64),
+        Format::I128(_) => float_int_variant!(I128, i128),
+        Format::F32(_) => Ok(Value::F32((v as f32, res))),
+        Format::F64(_) => Ok(Value::F64((v, res))),
+        Format::Ascii(_) => Ok(Value::Ascii(v.to_string())),
     }
 }
 
@@ -405,5 +513,140 @@ mod tests {
             )
             .expect("read power");
         assert_eq!(power, vec![42]);
+    }
+
+    // --- Typed write path (no string round-trip) ---
+
+    #[test]
+    fn ut_bridge_typed_int_float_bool_roundtrip() {
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+
+        bridge
+            .write("setpoint".to_string(), ValueType::Int(1234))
+            .expect("int write");
+        match bridge.read("setpoint".to_string()).expect("read") {
+            ValueType::Int(v) => assert_eq!(v, 1234),
+            _ => panic!("expected Int"),
+        }
+
+        bridge
+            .write("power".to_string(), ValueType::Bool(true))
+            .expect("bool write");
+        match bridge.read("power".to_string()).expect("read") {
+            ValueType::Int(v) => assert_eq!(v, 1),
+            _ => panic!("expected Int"),
+        }
+    }
+
+    #[test]
+    fn ut_bridge_typed_float_whole_number_onto_int_format() {
+        // Mirrors the string path: a whole-number float parses onto an integer format.
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        bridge
+            .write("setpoint".to_string(), ValueType::Float(42.0))
+            .expect("whole float write");
+        match bridge.read("setpoint".to_string()).expect("read") {
+            ValueType::Int(v) => assert_eq!(v, 42),
+            _ => panic!("expected Int"),
+        }
+    }
+
+    #[test]
+    fn ut_bridge_typed_float_fractional_onto_int_format_errors() {
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        assert!(
+            bridge
+                .write("setpoint".to_string(), ValueType::Float(3.5))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ut_bridge_typed_string_roundtrip() {
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        bridge
+            .write("setpoint".to_string(), ValueType::String("77".to_string()))
+            .expect("string write");
+        match bridge.read("setpoint".to_string()).expect("read") {
+            ValueType::Int(v) => assert_eq!(v, 77),
+            _ => panic!("expected Int"),
+        }
+    }
+
+    #[test]
+    fn ut_bridge_typed_nil_errors_cleanly() {
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let err = bridge
+            .write("setpoint".to_string(), ValueType::Nil)
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot Set nil value"));
+    }
+
+    #[test]
+    fn ut_bridge_typed_int_overflow_errors_cleanly() {
+        // "setpoint" is U16 (max 65535); a too-large Int must error, not silently truncate.
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        assert!(
+            bridge
+                .write("setpoint".to_string(), ValueType::Int(100_000))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ut_bridge_virtual_typed_int_overflow_falls_back_to_float() {
+        // Virtual registers ignore the declared format (mirrors `str_to_value`'s `Scalar`
+        // fallback): an out-of-i64-range `Int` is stored as `F64` rather than erroring.
+        let virtual_store = vstore();
+        let mut registers = evse_registers();
+        registers.insert(
+            "calc".to_string(),
+            RegisterBuilder::default()
+                .slave_id(1u8)
+                .access(Access::ReadWrite)
+                .kind(Kind::HoldingRegister)
+                .address(ferrowl_codec::Address::Virtual)
+                .format(Format::U16((
+                    Endian::Big,
+                    Resolution(1.0),
+                    BitField::default(),
+                )))
+                .build()
+                .unwrap(),
+        );
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store, registers);
+        bridge
+            .write("calc".to_string(), ValueType::Int(i128::MAX))
+            .expect("virtual int overflow falls back to float");
+        match bridge.read("calc".to_string()).expect("read") {
+            ValueType::Float(_) => {}
+            _ => panic!("expected Float fallback"),
+        }
+    }
+
+    #[test]
+    fn ut_bridge_virtual_typed_nil_errors_cleanly() {
+        let virtual_store = vstore();
+        let mut registers = evse_registers();
+        registers.insert(
+            "calc".to_string(),
+            RegisterBuilder::default()
+                .slave_id(1u8)
+                .access(Access::ReadWrite)
+                .kind(Kind::HoldingRegister)
+                .address(ferrowl_codec::Address::Virtual)
+                .format(Format::U16((
+                    Endian::Big,
+                    Resolution(1.0),
+                    BitField::default(),
+                )))
+                .build()
+                .unwrap(),
+        );
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store, registers);
+        let err = bridge
+            .write("calc".to_string(), ValueType::Nil)
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot Set nil value"));
     }
 }

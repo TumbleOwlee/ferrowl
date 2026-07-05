@@ -41,6 +41,27 @@ pub enum WsError {
 #[error("validation failed: {0}")]
 pub struct ValidationError(#[from] pub validator::ValidationErrors);
 
+/// TLS material (certificate/key/CA) failed to load, parse, or configure. Covers Security
+/// Profiles 2 and 3.
+#[derive(Debug, thiserror::Error)]
+pub enum TlsError {
+    #[error("io error reading TLS file {path}: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    #[error("no certificates found in {0}")]
+    NoCertificates(String),
+    #[error("no private key found in {0}")]
+    NoPrivateKey(String),
+    #[error("require_client_cert is set but no client_ca_file was configured")]
+    MissingClientCa,
+    #[error("client certificate verifier configuration failed: {0}")]
+    ClientVerifier(String),
+    #[error("rustls configuration error: {0}")]
+    Rustls(#[from] rustls::Error),
+}
+
 /// OCPP-semantic failure: unknown action, (de)serialization, or request validation.
 #[derive(Debug, thiserror::Error)]
 pub enum OcppError {
@@ -63,6 +84,8 @@ pub enum Error {
     Ws(#[from] WsError),
     #[error("{0}")]
     Ocpp(#[from] OcppError),
+    #[error("{0}")]
+    Tls(#[from] TlsError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("operation not supported by this OCPP version")]

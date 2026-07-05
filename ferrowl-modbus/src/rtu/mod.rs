@@ -47,4 +47,14 @@ pub struct Config {
     /// The interval in milliseconds between successive operations
     #[arg(id = "interval", short('I'), long, default_value_t = 0)]
     pub interval_ms: usize,
+
+    /// Client-only: automatically reconnect (with backoff) on a lost or refused connection
+    /// instead of ending the client task. Ignored by the server.
+    #[serde(default = "default_reconnect")]
+    #[arg(long, default_value_t = true)]
+    pub reconnect: bool,
+}
+
+fn default_reconnect() -> bool {
+    true
 }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
@@ -58,7 +58,18 @@ impl<V: Version> ClientBuilder<V> {
             "Sec-WebSocket-Protocol",
             HeaderValue::from_static(V::subprotocol()),
         );
-        let (ws, _response) = connect_async(request).await.map_err(WsError::from)?;
+        if let Some(auth) = &self.config.basic_auth {
+            request
+                .headers_mut()
+                .insert("Authorization", auth.header_value());
+        }
+        let connector = match &self.config.tls {
+            Some(tls) => Some(tls.build_connector()?),
+            None => None,
+        };
+        let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
+            .await
+            .map_err(WsError::from)?;
 
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
         let handle = tokio::spawn(core::run::<V, H, _, _>(

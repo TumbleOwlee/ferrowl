@@ -239,12 +239,16 @@ fn subtract_spans(start: usize, end: usize, covered: &[(usize, usize)]) -> Vec<R
     gaps
 }
 
-/// Resolved per-instance timing (ms). Built by [`super::ModbusModule::resolve_timing`].
+/// Resolved per-instance timing (ms) plus the client auto-reconnect setting. Built by
+/// [`super::ModbusModule::resolve_timing`].
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
     pub timeout_ms: usize,
     pub delay_ms: usize,
     pub interval_ms: usize,
+    /// Client-only: automatically reconnect (with backoff) instead of ending the client task on
+    /// a lost or refused connection. Ignored by servers.
+    pub reconnect: bool,
 }
 
 pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetConfig {
@@ -255,6 +259,7 @@ pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetCon
             timeout_ms: timing.timeout_ms,
             delay_ms: timing.delay_ms,
             interval_ms: timing.interval_ms,
+            reconnect: timing.reconnect,
         }),
         Endpoint::Rtu {
             path,
@@ -272,6 +277,7 @@ pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetCon
             timeout_ms: timing.timeout_ms,
             delay_ms: timing.delay_ms,
             interval_ms: timing.interval_ms,
+            reconnect: timing.reconnect,
         }),
     }
 }

@@ -792,6 +792,7 @@ mod tests {
             timeout_ms: None,
             delay_ms: None,
             interval_ms: None,
+            reconnect: None,
             log_file: None,
             read_ranges: Default::default(),
             definitions: Default::default(),

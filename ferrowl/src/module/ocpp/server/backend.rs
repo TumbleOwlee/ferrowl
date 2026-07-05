@@ -185,6 +185,8 @@ where
             host: self.spec.ip.clone(),
             port: self.spec.port,
             timeout_ms: self.spec.timeout_ms.unwrap_or(30_000),
+            basic_auth: self.spec.security.basic_auth(),
+            tls: self.spec.security.csms_tls(),
         };
         let server = ServerBuilder::<V>::new(config)
             .spawn(handler, |_s: String| async {})

@@ -373,6 +373,8 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
         timeout_ms: legacy.timeout_ms.map(|v| v as usize),
         delay_ms: legacy.delay_after_connect_ms.map(|v| v as usize),
         interval_ms: legacy.interval_ms.map(|v| v as usize),
+        // The legacy format predates auto-reconnect; `None` falls back to `DEFAULT_RECONNECT`.
+        reconnect: None,
         log_file: None,
         read_ranges,
         definitions,

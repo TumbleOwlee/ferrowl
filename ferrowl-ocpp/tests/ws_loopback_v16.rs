@@ -73,6 +73,8 @@ async fn start_server() -> csms::Server<V1_6> {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        basic_auth: None,
+        tls: None,
     })
     .spawn(TestCsms, sink())
     .await
@@ -99,6 +101,8 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
         url,
         timeout_ms: 2000,
+        basic_auth: None,
+        tls: None,
     })
     .spawn(
         TestCs {

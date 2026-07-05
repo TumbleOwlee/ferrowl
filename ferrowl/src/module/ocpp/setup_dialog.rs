@@ -189,6 +189,12 @@ impl OcppSetupDialog {
             port,
             path,
             timeout_ms: None,
+            // Not settable from the dialog (would need Basic Auth + TLS file-path fields the
+            // current fixed-size layout has no room for); config-file-only for now. An edit save
+            // re-applies the previous device's `security` regardless of what's resolved here (see
+            // `OcppClientView`/`OcppServerView::refresh_impl`), so an existing config's security
+            // section survives round-tripping through this dialog.
+            security: Default::default(),
         })
     }
 

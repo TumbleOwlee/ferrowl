@@ -12,6 +12,93 @@ pub use crate::config::script::ScriptDef;
 
 use super::session::{OcppRole, OcppSpec, OcppVersion};
 
+/// Optional websocket transport security for an OCPP instance: HTTP Basic Auth (Security Profile
+/// one) and TLS/mTLS (Security Profiles two and three). Fields are named by which role uses them;
+/// a field irrelevant to the instance's [`OcppRole`] is simply left `None` (same convention as
+/// the role-specific fields elsewhere in [`OcppDeviceConfig`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OcppSecurityConfig {
+    /// Basic Auth username. Client role: sent on connect. Server role: required to accept a
+    /// connection (together with `password`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    /// Basic Auth password. Never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// Client role only: extra trust anchor (PEM file) for a self-signed CSMS certificate, added
+    /// on top of the system/webpki root store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_file: Option<String>,
+    /// Server role only: certificate chain (PEM file) presented to connecting clients. Setting
+    /// this (together with `key_file`) is what turns on TLS for the listener.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_file: Option<String>,
+    /// Server role only: private key (PEM file) matching `cert_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_file: Option<String>,
+    /// Client role: client certificate (PEM file) presented for mutual TLS. Server role: ignored
+    /// (see `client_ca_file` for verifying the peer's certificate instead).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_cert_file: Option<String>,
+    /// Client role only: private key (PEM file) matching `client_cert_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key_file: Option<String>,
+    /// Server role only: CA (PEM file) used to verify client certificates when
+    /// `require_client_cert` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_ca_file: Option<String>,
+    /// Server role only: reject clients that fail to present a certificate signed by
+    /// `client_ca_file` (Security Profile 3).
+    #[serde(default)]
+    pub require_client_cert: bool,
+}
+
+impl OcppSecurityConfig {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    /// Basic Auth credentials, if both `username` and `password` are set.
+    pub fn basic_auth(&self) -> Option<ferrowl_ocpp::BasicAuth> {
+        match (&self.username, &self.password) {
+            (Some(username), Some(password)) => Some(ferrowl_ocpp::BasicAuth {
+                username: username.clone(),
+                password: password.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// CS-side TLS config, if any of `ca_file`/`client_cert_file`/`client_key_file` is set.
+    pub fn cs_tls(&self) -> Option<ferrowl_ocpp::CsTlsConfig> {
+        if self.ca_file.is_none()
+            && self.client_cert_file.is_none()
+            && self.client_key_file.is_none()
+        {
+            return None;
+        }
+        Some(ferrowl_ocpp::CsTlsConfig {
+            ca_file: self.ca_file.clone(),
+            client_cert_file: self.client_cert_file.clone(),
+            client_key_file: self.client_key_file.clone(),
+        })
+    }
+
+    /// CSMS-side TLS config, if `cert_file`/`key_file` are set (both required to enable TLS on
+    /// the listener).
+    pub fn csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
+        match (&self.cert_file, &self.key_file) {
+            (Some(cert_file), Some(key_file)) => Some(ferrowl_ocpp::CsmsTlsConfig {
+                cert_file: cert_file.clone(),
+                key_file: key_file.clone(),
+                client_ca_file: self.client_ca_file.clone(),
+                require_client_cert: self.require_client_cert,
+            }),
+            _ => None,
+        }
+    }
+}
+
 /// A persisted connector entry for a charging-station (client) device type. `evse` is `None` for
 /// OCPP 1.6 (connector-only) and `Some` for 2.0.1; `connector` is the connector id. The CS-level
 /// entry is implicit (always present in the view) and is not stored here. Maps to a runtime
@@ -89,6 +176,10 @@ pub struct OcppDeviceConfig {
     /// role (CSMS config is per-connected-station and transient).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<ConfigKeyDef>,
+    /// Websocket transport security: Basic Auth and/or TLS/mTLS. Default (all `None`/`false`) is
+    /// the pre-existing plain `ws://` behaviour.
+    #[serde(default, skip_serializing_if = "OcppSecurityConfig::is_empty")]
+    pub security: OcppSecurityConfig,
 }
 
 impl OcppDeviceConfig {
@@ -106,6 +197,7 @@ impl OcppDeviceConfig {
             connector_rfids: Vec::new(),
             connectors: Vec::new(),
             config: Vec::new(),
+            security: OcppSecurityConfig::default(),
         }
     }
 }
@@ -163,6 +255,17 @@ mod tests {
                     readonly: true,
                 },
             ],
+            security: OcppSecurityConfig {
+                username: Some("cp001".into()),
+                password: Some("s3cret".into()),
+                ca_file: Some("/tmp/ca.pem".into()),
+                cert_file: None,
+                key_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                client_ca_file: None,
+                require_client_cert: false,
+            },
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = std::env::temp_dir().join(format!("ferrowl_ocpp_device_test.{ext}"));
@@ -171,6 +274,23 @@ mod tests {
             let back: OcppDeviceConfig = Converter::load(path, ty).expect("load");
             assert_eq!(cfg, back);
         }
+    }
+
+    #[test]
+    fn ut_device_config_without_security_section_still_parses() {
+        // Pre-existing config files (written before Security Profiles were added) have no
+        // `security` table/key at all; `#[serde(default)]` must fill it in as the all-`None`
+        // default rather than failing to parse.
+        let json = serde_json::json!({
+            "ocpp_version": "1.6",
+            "role": "client",
+            "timeout_ms": 5000,
+        });
+        let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
+        assert_eq!(cfg.security, OcppSecurityConfig::default());
+        assert!(cfg.security.basic_auth().is_none());
+        assert!(cfg.security.cs_tls().is_none());
+        assert!(cfg.security.csms_tls().is_none());
     }
 
     #[test]
@@ -184,6 +304,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: Some(1000),
+            security: OcppSecurityConfig::default(),
         };
         let scripts = vec![ScriptDef {
             name: "s".into(),

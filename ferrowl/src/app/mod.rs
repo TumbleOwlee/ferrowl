@@ -351,7 +351,18 @@ impl App {
         let focus = self.focus;
         let help_open = self.help_open;
         let help_scroll = &mut self.help_scroll;
-        screen.draw(|f| render(f, tabs, active, focus, command, overlay, help_open, help_scroll))?;
+        screen.draw(|f| {
+            render(
+                f,
+                tabs,
+                active,
+                focus,
+                command,
+                overlay,
+                help_open,
+                help_scroll,
+            )
+        })?;
         Ok(())
     }
 

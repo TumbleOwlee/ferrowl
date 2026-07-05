@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use ferrowl_ui::traits::ToLabel;
 
+use super::device::OcppSecurityConfig;
+
 /// OCPP protocol version a charging station speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum OcppVersion {
@@ -101,6 +103,9 @@ pub struct OcppSpec {
     /// Awaited-reply timeout (ms); `None` uses the crate default (30_000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Websocket transport security (Basic Auth / TLS / mTLS); defaults to plain `ws://`.
+    #[serde(default, skip_serializing_if = "OcppSecurityConfig::is_empty")]
+    pub security: OcppSecurityConfig,
 }
 
 impl OcppSpec {
@@ -110,7 +115,7 @@ impl OcppSpec {
     }
 
     /// Build the runtime spec from its persistence halves: the endpoint comes from the session
-    /// [`OcppModuleSpec`], the version/role/timeout from the device config.
+    /// [`OcppModuleSpec`], the version/role/timeout/security from the device config.
     pub fn from_parts(module: &OcppModuleSpec, device: &super::device::OcppDeviceConfig) -> Self {
         Self {
             name: module.name.clone(),
@@ -121,6 +126,7 @@ impl OcppSpec {
             port: module.port,
             path: module.path.clone(),
             timeout_ms: device.timeout_ms,
+            security: device.security.clone(),
         }
     }
 }
@@ -171,6 +177,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: None,
+            security: OcppSecurityConfig::default(),
         };
         assert_eq!(spec.url(), "ws://127.0.0.1:9000");
 
@@ -205,6 +212,7 @@ mod tests {
             port: 8080,
             path: "/ocpp/cp001".into(),
             timeout_ms: Some(5000),
+            security: OcppSecurityConfig::default(),
         };
         let mut v = serde_json::to_value(&spec).unwrap();
         v.as_object_mut()

@@ -112,6 +112,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
         timeout_ms: None,
         delay_ms: None,
         interval_ms: None,
+        reconnect: None,
         log_file: None,
         read_ranges: Default::default(),
         definitions,
@@ -142,6 +143,7 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
         port,
         path: "/ocpp/cp001".into(),
         timeout_ms: None,
+        security: Default::default(),
     };
     let device = OcppDeviceConfig::from_spec(&spec, Vec::new());
     let view = match role {

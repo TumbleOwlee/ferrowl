@@ -39,6 +39,14 @@ fn config(port: u16) -> tcp::Config {
         timeout_ms: 1000,
         delay_ms: 0,
         interval_ms: 0,
+        reconnect: true,
+    }
+}
+
+fn config_no_reconnect(port: u16) -> tcp::Config {
+    tcp::Config {
+        reconnect: false,
+        ..config(port)
     }
 }
 
@@ -316,4 +324,117 @@ async fn tcp_server_bind_conflict_is_error() {
         .spawn(sink())
         .await;
     assert!(res.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_client_reconnect_false_dies_on_refused_connect() {
+    // No listener; with reconnect off the spawned task's join result carries the connect error
+    // instead of retrying forever.
+    let port = free_port();
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: 1,
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 2),
+    }]));
+    let (_tx, rx) = mpsc::channel::<Command>(16);
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config_no_reconnect(port))),
+        operations,
+        client_mem(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn itself always succeeds now; the connect error surfaces from the task");
+
+    let joined = tokio::time::timeout(Duration::from_secs(5), client)
+        .await
+        .expect("client task did not finish in time")
+        .expect("client task panicked");
+    assert!(joined.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
+    // Nothing is listening yet: the client's first connect attempt fails. With reconnect on it
+    // keeps retrying in the background; once a server starts on the port, it should connect and
+    // start reading.
+    let port = free_port();
+    let srv_mem = server_mem();
+    let cli_mem = client_mem();
+
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: 1,
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 4),
+    }]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        cli_mem.clone(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("client failed to connect");
+
+    // Let the first (failing) connect attempt happen before the server exists.
+    sleep(Duration::from_millis(200)).await;
+
+    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+        .spawn(sink())
+        .await
+        .expect("server failed to start");
+
+    // The 1s initial backoff plus poll delay must elapse before the client retries and reads.
+    sleep(Duration::from_millis(2000)).await;
+
+    {
+        let g = cli_mem.read().await;
+        assert_eq!(
+            g.read(
+                key(RegKind::HoldingRegister),
+                &CellType::Register,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
+            vec![10, 20, 30, 40]
+        );
+    }
+
+    tx.send(Command::Terminate).await.unwrap();
+    let joined = tokio::time::timeout(Duration::from_secs(5), client)
+        .await
+        .expect("client did not terminate in time")
+        .expect("client task panicked");
+    assert!(joined.is_ok());
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_client_terminate_during_backoff_exits_promptly() {
+    // No listener, so the client sits in its reconnect backoff (up to 1s initially). Sending
+    // Terminate must abort that wait immediately rather than sleeping it out.
+    let port = free_port();
+    let operations = Arc::new(RwLock::new(vec![]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        client_mem(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn itself always succeeds now");
+
+    // Give the first failed connect attempt time to happen and enter the backoff wait.
+    sleep(Duration::from_millis(100)).await;
+    tx.send(Command::Terminate).await.unwrap();
+
+    // Well under the 1s initial backoff: proves Terminate interrupts the wait rather than
+    // sleeping it out.
+    let joined = tokio::time::timeout(Duration::from_millis(500), client)
+        .await
+        .expect("Terminate did not interrupt the reconnect backoff promptly")
+        .expect("client task panicked");
+    assert!(joined.is_ok());
 }

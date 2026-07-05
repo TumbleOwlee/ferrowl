@@ -76,37 +76,30 @@ pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
     }
 }
 
-/// Parses a user-entered string into raw register words according to `format`.
+/// Parses a user-entered string into the logical [`Value`] `format` describes.
 ///
 /// Numeric input accepts decimal or `0x`-prefixed hex (`-0x` for negative
 /// signed values; a plain `0x` literal on a signed/float format is taken as
-/// the bit pattern). ASCII input is zero-padded or truncated to the format
-/// width according to its alignment. Note that resolution is *not* applied —
-/// the string is the raw value. For an integer format the value is placed
-/// according to the [`BitField`] (`raw = (value << shift) & mask`) with all
-/// other bits left zero.
-pub fn encode(format: &Format, s: &str) -> Result<Vec<u16>, CodecError> {
-    // Multi-byte unsigned: parse decimal or `0x` hex, position per the bit-field,
-    // then split to register words.
-    macro_rules! encode_uint {
-        ($ty:ty, $e:expr, $s:expr, $bf:expr) => {{
+/// the bit pattern). ASCII input is stored verbatim (padding/truncation is
+/// applied by [`encode_value`]). The parsed value is the logical field —
+/// resolution and bit-field placement are applied later by [`encode_value`],
+/// mirroring the value [`decode`] would hand back.
+fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
+    // Multi-byte unsigned: parse decimal or `0x` hex.
+    macro_rules! parse_uint {
+        ($variant:ident, $ty:ty, $r:expr, $s:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("0x") {
                 <$ty>::from_str_radix(s, 16)?
             } else {
                 $s.parse()?
             };
-            let val = (((val as u128) << $bf.shift()) & $bf.mask) as $ty;
-            Ok(match $e {
-                Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_le_bytes().iter().into_vec()?,
-            })
+            Ok(Value::$variant((val, $r.clone())))
         }};
     }
     // Multi-byte signed: also accept `-0x` hex; `$uty` is the same-width unsigned type
-    // used both to reinterpret a `0x` literal as a bit pattern and to apply the
-    // bit-field in the unsigned domain.
-    macro_rules! encode_int {
-        ($ty:ty, $uty:ty, $e:expr, $s:expr, $bf:expr) => {{
+    // used to reinterpret a `0x` literal as a bit pattern.
+    macro_rules! parse_int {
+        ($variant:ident, $ty:ty, $uty:ty, $r:expr, $s:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
                 -<$ty>::from_str_radix(s, 16)?
             } else if let Some(s) = $s.strip_prefix("0x") {
@@ -114,66 +107,40 @@ pub fn encode(format: &Format, s: &str) -> Result<Vec<u16>, CodecError> {
             } else {
                 $s.parse()?
             };
-            let val = (((((val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
-            Ok(match $e {
-                Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_le_bytes().iter().into_vec()?,
-            })
+            Ok(Value::$variant((val, $r.clone())))
         }};
     }
     match format {
-        Format::F32((e, _)) => {
+        Format::F32((_, r)) => {
             let val: f32 = if let Some(s) = s.strip_prefix("0x") {
                 u32::from_str_radix(s, 16).map(f32::from_bits)?
             } else {
                 s.parse()?
             };
-            Ok(match e {
-                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-            })
+            Ok(Value::F32((val, r.clone())))
         }
-        Format::F64((e, _)) => {
+        Format::F64((_, r)) => {
             let val: f64 = if let Some(s) = s.strip_prefix("0x") {
                 u64::from_str_radix(s, 16).map(f64::from_bits)?
             } else {
                 s.parse()?
             };
-            Ok(match e {
-                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-            })
+            Ok(Value::F64((val, r.clone())))
         }
-        Format::Ascii((a, w)) => {
-            let length = 2 * w.0;
-
-            let mut zeroes = itertools::repeat_n(0, 0);
-            if s.len() < length {
-                zeroes = itertools::repeat_n(0u8, length - s.len());
-            }
-
-            match a {
-                Alignment::Left => Ok(s.bytes().chain(zeroes).take(length).into_vec()?),
-                Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
-            }
-        }
-        Format::U8((e, _, bf)) => {
+        Format::Ascii(_) => Ok(Value::Ascii(s.to_string())),
+        Format::U8((_, r, _)) => {
             let val: u8 = if let Some(s) = s.strip_prefix("0x") {
                 u8::from_str_radix(s, 16)?
             } else {
                 s.parse()?
             };
-            let val = (((val as u128) << bf.shift()) & bf.mask) as u8;
-            Ok(match e {
-                Endian::Big => vec![val as u16],
-                Endian::Little => vec![(val as u16) << 8],
-            })
+            Ok(Value::U8((val, r.clone())))
         }
-        Format::U16((e, _, bf)) => encode_uint!(u16, e, s, bf),
-        Format::U32((e, _, bf)) => encode_uint!(u32, e, s, bf),
-        Format::U64((e, _, bf)) => encode_uint!(u64, e, s, bf),
-        Format::U128((e, _, bf)) => encode_uint!(u128, e, s, bf),
-        Format::I8((e, _, bf)) => {
+        Format::U16((_, r, _)) => parse_uint!(U16, u16, r, s),
+        Format::U32((_, r, _)) => parse_uint!(U32, u32, r, s),
+        Format::U64((_, r, _)) => parse_uint!(U64, u64, r, s),
+        Format::U128((_, r, _)) => parse_uint!(U128, u128, r, s),
+        Format::I8((_, r, _)) => {
             let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
                 -i8::from_str_radix(s, 16)?
             } else if let Some(s) = s.strip_prefix("0x") {
@@ -181,16 +148,123 @@ pub fn encode(format: &Format, s: &str) -> Result<Vec<u16>, CodecError> {
             } else {
                 s.parse()?
             };
-            let val = (((((val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
-            Ok(match e {
-                Endian::Big => vec![val as u16],
-                Endian::Little => vec![(val as u16) << 8],
-            })
+            Ok(Value::I8((val, r.clone())))
         }
-        Format::I16((e, _, bf)) => encode_int!(i16, u16, e, s, bf),
-        Format::I32((e, _, bf)) => encode_int!(i32, u32, e, s, bf),
-        Format::I64((e, _, bf)) => encode_int!(i64, u64, e, s, bf),
-        Format::I128((e, _, bf)) => encode_int!(i128, u128, e, s, bf),
+        Format::I16((_, r, _)) => parse_int!(I16, i16, u16, r, s),
+        Format::I32((_, r, _)) => parse_int!(I32, i32, u32, r, s),
+        Format::I64((_, r, _)) => parse_int!(I64, i64, u64, r, s),
+        Format::I128((_, r, _)) => parse_int!(I128, i128, u128, r, s),
+    }
+}
+
+/// Parses a user-entered string into raw register words according to `format`.
+///
+/// Parses the string into the logical [`Value`] the format describes, then
+/// encodes it with [`encode_value`]. See [`parse_value`] for the accepted
+/// numeric/ASCII input forms.
+pub fn encode(format: &Format, s: &str) -> Result<Vec<u16>, CodecError> {
+    encode_value(format, &parse_value(format, s)?)
+}
+
+/// Encodes a typed logical [`Value`] into raw register words according to
+/// `format`. Errors with [`CodecError::ValueFormatMismatch`] if `value`'s
+/// variant does not match `format`'s. For an integer format the value is
+/// placed according to the [`BitField`] (`raw = (value << shift) & mask`)
+/// with all other bits left zero; resolution is *not* applied — `value` is
+/// the raw field, as returned by [`decode`].
+pub fn encode_value(format: &Format, value: &Value) -> Result<Vec<u16>, CodecError> {
+    let mismatch = || CodecError::ValueFormatMismatch(format.clone());
+    // Multi-byte unsigned: position the field per the bit-field, then split to register words.
+    macro_rules! encode_uint {
+        ($variant:ident, $ty:ty, $e:expr, $bf:expr) => {{
+            match value {
+                Value::$variant((val, _)) => {
+                    let val = (((*val as u128) << $bf.shift()) & $bf.mask) as $ty;
+                    Ok(match $e {
+                        Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                        Endian::Little => val.to_le_bytes().iter().into_vec()?,
+                    })
+                }
+                _ => Err(mismatch()),
+            }
+        }};
+    }
+    // Multi-byte signed: `$uty` is the same-width unsigned type used to apply the
+    // bit-field in the unsigned domain.
+    macro_rules! encode_int {
+        ($variant:ident, $ty:ty, $uty:ty, $e:expr, $bf:expr) => {{
+            match value {
+                Value::$variant((val, _)) => {
+                    let val =
+                        (((((*val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
+                    Ok(match $e {
+                        Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                        Endian::Little => val.to_le_bytes().iter().into_vec()?,
+                    })
+                }
+                _ => Err(mismatch()),
+            }
+        }};
+    }
+    match format {
+        Format::F32((e, _)) => match value {
+            Value::F32((val, _)) => Ok(match e {
+                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+            }),
+            _ => Err(mismatch()),
+        },
+        Format::F64((e, _)) => match value {
+            Value::F64((val, _)) => Ok(match e {
+                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+            }),
+            _ => Err(mismatch()),
+        },
+        Format::Ascii((a, w)) => match value {
+            Value::Ascii(s) => {
+                let length = 2 * w.0;
+
+                let mut zeroes = itertools::repeat_n(0, 0);
+                if s.len() < length {
+                    zeroes = itertools::repeat_n(0u8, length - s.len());
+                }
+
+                match a {
+                    Alignment::Left => Ok(s.bytes().chain(zeroes).take(length).into_vec()?),
+                    Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
+                }
+            }
+            _ => Err(mismatch()),
+        },
+        Format::U8((e, _, bf)) => match value {
+            Value::U8((val, _)) => {
+                let val = (((*val as u128) << bf.shift()) & bf.mask) as u8;
+                Ok(match e {
+                    Endian::Big => vec![val as u16],
+                    Endian::Little => vec![(val as u16) << 8],
+                })
+            }
+            _ => Err(mismatch()),
+        },
+        Format::U16((e, _, bf)) => encode_uint!(U16, u16, e, bf),
+        Format::U32((e, _, bf)) => encode_uint!(U32, u32, e, bf),
+        Format::U64((e, _, bf)) => encode_uint!(U64, u64, e, bf),
+        Format::U128((e, _, bf)) => encode_uint!(U128, u128, e, bf),
+        Format::I8((e, _, bf)) => match value {
+            Value::I8((val, _)) => {
+                let val = (((((*val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
+                Ok(match e {
+                    Endian::Big => vec![val as u16],
+                    Endian::Little => vec![(val as u16) << 8],
+                })
+            }
+            _ => Err(mismatch()),
+        },
+        Format::I16((e, _, bf)) => encode_int!(I16, i16, u16, e, bf),
+        Format::I32((e, _, bf)) => encode_int!(I32, i32, u32, e, bf),
+        Format::I64((e, _, bf)) => encode_int!(I64, i64, u64, e, bf),
+        Format::I128((e, _, bf)) => encode_int!(I128, i128, u128, e, bf),
     }
 }
 
@@ -226,9 +300,10 @@ pub fn mask_words(format: &Format) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
+    use crate::codec::{encode, encode_value};
     use crate::format::{Alignment, BitField, Endian, Format, Resolution, Width};
     use crate::value::Value;
-    use crate::{Register, RegisterBuilder};
+    use crate::{CodecError, Register, RegisterBuilder};
 
     fn reg(fmt: Format) -> Register {
         RegisterBuilder::default().format(fmt).build().unwrap()
@@ -784,5 +859,123 @@ mod tests {
             Value::U16((v, _)) => assert_eq!(v, 0x34),
             _ => panic!("Wrong variant"),
         }
+    }
+
+    // --- Typed encode_value: equivalence with the string path ---
+
+    #[test]
+    fn ut_encode_value_matches_string_path_all_variants() {
+        let e = [Endian::Big, Endian::Little];
+        for endian in e {
+            let cases: Vec<(Format, Value, &str)> = vec![
+                (
+                    Format::U8((endian.clone(), res(), bf())),
+                    Value::U8((200, res())),
+                    "200",
+                ),
+                (
+                    Format::I8((endian.clone(), res(), bf())),
+                    Value::I8((-1, res())),
+                    "-1",
+                ),
+                (
+                    Format::U16((endian.clone(), res(), bf())),
+                    Value::U16((1234, res())),
+                    "1234",
+                ),
+                (
+                    Format::I16((endian.clone(), res(), bf())),
+                    Value::I16((-1234, res())),
+                    "-1234",
+                ),
+                (
+                    Format::U32((endian.clone(), res(), bf())),
+                    Value::U32((123456789, res())),
+                    "123456789",
+                ),
+                (
+                    Format::I32((endian.clone(), res(), bf())),
+                    Value::I32((-123456789, res())),
+                    "-123456789",
+                ),
+                (
+                    Format::U64((endian.clone(), res(), bf())),
+                    Value::U64((1234567890123, res())),
+                    "1234567890123",
+                ),
+                (
+                    Format::I64((endian.clone(), res(), bf())),
+                    Value::I64((-1234567890123, res())),
+                    "-1234567890123",
+                ),
+                (
+                    Format::U128((endian.clone(), res(), bf())),
+                    Value::U128((123456789012345, res())),
+                    "123456789012345",
+                ),
+                (
+                    Format::I128((endian.clone(), res(), bf())),
+                    Value::I128((-123456789012345, res())),
+                    "-123456789012345",
+                ),
+                (
+                    Format::F32((endian.clone(), res())),
+                    Value::F32((1.5, res())),
+                    "1.5",
+                ),
+                (
+                    Format::F64((endian.clone(), res())),
+                    Value::F64((2.25, res())),
+                    "2.25",
+                ),
+            ];
+            for (format, value, s) in cases {
+                let via_string = encode(&format, s).unwrap();
+                let via_typed = encode_value(&format, &value).unwrap();
+                assert_eq!(via_string, via_typed, "format={:?}", format);
+            }
+        }
+        // ASCII
+        let ascii = Format::Ascii((Alignment::Left, Width(2)));
+        assert_eq!(
+            encode(&ascii, "AB").unwrap(),
+            encode_value(&ascii, &Value::Ascii("AB".to_string())).unwrap()
+        );
+    }
+
+    #[test]
+    fn ut_encode_value_bitfield_and_resolution() {
+        // Bit-field placement applies identically via the typed path.
+        let format = u16_be_mask(0x0FF0);
+        let words = encode_value(&format, &Value::U16((0xAB, res()))).unwrap();
+        assert_eq!(words, vec![0x0AB0u16]);
+
+        // Resolution is not applied by encode_value, same as the string path.
+        let format = Format::U16((Endian::Big, Resolution(0.5), bf()));
+        let words = encode_value(&format, &Value::U16((2048, Resolution(0.5)))).unwrap();
+        assert_eq!(words, encode(&format, "2048").unwrap());
+    }
+
+    #[test]
+    fn ut_encode_value_roundtrip_via_decode() {
+        let r = reg(i32_le());
+        for val in [-2147483648i32, -1, 0, 1, 2147483647] {
+            let words = r.encode_value(&Value::I32((val, res()))).unwrap();
+            match r.decode(&words).unwrap() {
+                Value::I32((v, _)) => assert_eq!(v, val),
+                _ => panic!("Wrong variant"),
+            }
+        }
+    }
+
+    #[test]
+    fn ut_encode_value_mismatch_errors() {
+        let format = u32_be();
+        let err = encode_value(&format, &Value::U16((1, res()))).unwrap_err();
+        assert!(matches!(err, CodecError::ValueFormatMismatch(_)));
+
+        let ascii = Format::Ascii((Alignment::Left, Width(2)));
+        let err = encode_value(&ascii, &Value::U8((1, res()))).unwrap_err();
+        assert!(matches!(err, CodecError::ValueFormatMismatch(_)));
     }
 }

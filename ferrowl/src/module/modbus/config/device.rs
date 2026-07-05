@@ -17,6 +17,8 @@ use crate::config::script::ScriptDef;
 pub const DEFAULT_TIMEOUT_MS: usize = 3000;
 pub const DEFAULT_DELAY_MS: usize = 1000;
 pub const DEFAULT_INTERVAL_MS: usize = 1000;
+/// Fallback client auto-reconnect setting when the device config doesn't set one.
+pub const DEFAULT_RECONNECT: bool = true;
 
 /// A device-type configuration file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -33,6 +35,11 @@ pub struct DeviceConfig {
     pub delay_ms: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<usize>,
+    /// Client-only: automatically reconnect (with backoff) on a lost or refused connection
+    /// instead of ending the client. `None` falls back to `DEFAULT_RECONNECT`. Ignored by
+    /// servers. See `ModbusModule::resolve_timing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<bool>,
     /// Base path for per-module log files (tab name appended as suffix). `None` disables.
     #[serde(skip)]
     pub log_file: Option<String>,
@@ -531,6 +538,7 @@ mod tests {
             timeout_ms: Some(2000),
             delay_ms: None,
             interval_ms: Some(800),
+            reconnect: Some(false),
             // `log_file` is `#[serde(skip)]` (runtime-only), so it never survives a
             // config roundtrip — leave it None to match the loaded value.
             log_file: None,
@@ -585,6 +593,18 @@ mod tests {
     #[test]
     fn ut_device_roundtrip_json() {
         roundtrip(FileType::Json, "json");
+    }
+
+    /// A device config file saved before `reconnect` existed (no such key at all) must still
+    /// load, falling back to `None` (which `ModbusModule::resolve_timing` then maps to
+    /// `DEFAULT_RECONNECT`).
+    #[test]
+    fn ut_device_config_loads_without_reconnect_field() {
+        let path = std::env::temp_dir().join("ferrowl_device_no_reconnect.toml");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "definitions = {}\n").unwrap();
+        let cfg: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
+        assert_eq!(cfg.reconnect, None);
     }
 
     #[test]

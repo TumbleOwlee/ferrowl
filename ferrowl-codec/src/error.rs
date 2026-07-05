@@ -18,4 +18,8 @@ pub enum CodecError {
     /// A numeric literal failed to parse as a float.
     #[error("{0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+    /// [`encode_value`](crate::codec::encode_value) was called with a [`Value`](crate::value::Value)
+    /// variant that does not match the target `Format`'s variant.
+    #[error("Value does not match format {0:?}")]
+    ValueFormatMismatch(Format),
 }

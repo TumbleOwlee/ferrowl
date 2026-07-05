@@ -22,7 +22,7 @@ use tokio_modbus::SlaveId;
 
 pub use crate::access::Access;
 pub use crate::address::Address;
-pub use crate::codec::{decode, encode};
+pub use crate::codec::{decode, encode, encode_value};
 pub use crate::error::CodecError;
 pub use crate::format::{Alignment, BitField, Endian, Format};
 pub use crate::kind::Kind;
@@ -68,6 +68,13 @@ impl Register {
     /// per its mask/shift with all other bits left zero.
     pub fn encode(&self, s: &str) -> Result<Vec<u16>, CodecError> {
         encode(&self.format, s)
+    }
+
+    /// Encodes a typed [`Value`] into raw register words using this
+    /// register's [`Format`]. Errors with [`CodecError::ValueFormatMismatch`]
+    /// if `value`'s variant does not match the format's.
+    pub fn encode_value(&self, value: &Value) -> Result<Vec<u16>, CodecError> {
+        encode_value(&self.format, value)
     }
 
     /// Per-word mask selecting the bits this register owns (all `0xFFFF` for a

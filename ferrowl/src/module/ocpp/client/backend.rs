@@ -213,6 +213,8 @@ impl<V: Version> OcppClient<V> {
         let config = Config {
             url: self.spec.url(),
             timeout_ms: self.spec.timeout_ms.unwrap_or(30_000),
+            basic_auth: self.spec.security.basic_auth(),
+            tls: self.spec.security.cs_tls(),
         };
         let log = log_fn(self.messages.clone());
         let client = ClientBuilder::<V>::new(config).spawn(handler, log).await?;

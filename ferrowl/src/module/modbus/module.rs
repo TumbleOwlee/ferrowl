@@ -13,7 +13,10 @@ use tokio::sync::RwLock;
 use crate::app::LogRing;
 use crate::config::{
     DeviceConfig, Endpoint, ModuleSpec, Role,
-    device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS, NamedValue, ReadRanges},
+    device::{
+        DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_RECONNECT, DEFAULT_TIMEOUT_MS, NamedValue,
+        ReadRanges,
+    },
 };
 use crate::instance::Instance;
 use crate::instance::error::Error;
@@ -145,6 +148,7 @@ impl ModbusModule {
             timeout_ms: device.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
             delay_ms: device.delay_ms.unwrap_or(DEFAULT_DELAY_MS),
             interval_ms: device.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS),
+            reconnect: device.reconnect.unwrap_or(DEFAULT_RECONNECT),
         }
     }
 
@@ -359,7 +363,9 @@ mod tests {
     fn ut_resolve_timing_fallback() {
         use super::ModbusModule;
         use crate::config::DeviceConfig;
-        use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
+        use crate::config::device::{
+            DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_RECONNECT, DEFAULT_TIMEOUT_MS,
+        };
 
         let mut device = DeviceConfig::default();
 
@@ -368,13 +374,16 @@ mod tests {
         assert_eq!(timing.timeout_ms, DEFAULT_TIMEOUT_MS);
         assert_eq!(timing.delay_ms, DEFAULT_DELAY_MS);
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
+        assert_eq!(timing.reconnect, DEFAULT_RECONNECT);
 
         // Device values beat the defaults.
         device.timeout_ms = Some(2000);
         device.delay_ms = Some(500);
+        device.reconnect = Some(false);
         let timing = ModbusModule::resolve_timing(&device);
         assert_eq!(timing.timeout_ms, 2000);
         assert_eq!(timing.delay_ms, 500);
+        assert!(!timing.reconnect);
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
     }
 
@@ -421,6 +430,7 @@ mod tests {
             timeout_ms: Some(1000),
             delay_ms: None,
             interval_ms: Some(500),
+            reconnect: None,
             log_file: Some(
                 std::env::temp_dir()
                     .join("ferrowl_module_test.log")

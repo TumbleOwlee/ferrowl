@@ -1,4 +1,4 @@
-use crate::client_core::ClientCore;
+use crate::client_core::{ClientCore, INITIAL_BACKOFF, MAX_BACKOFF};
 use crate::tcp::Config;
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, TcpError};
 
@@ -31,35 +31,94 @@ impl<T: KeyParams> ClientBuilder<T> {
         }
     }
 
-    /// Connects to the configured endpoint and spawns the client loop as a
-    /// tokio task. `log` receives log lines, `status` receives connection
-    /// status updates, and `receiver` delivers write/terminate [`Command`]s.
+    /// Connects to the configured endpoint and spawns the client loop as a tokio task. `log`
+    /// receives log lines, `status` receives connection status updates, and `receiver` delivers
+    /// write/terminate [`Command`]s.
+    ///
+    /// With `config.reconnect` set (the default), a lost or refused connection does not end the
+    /// task: it logs, waits an exponential backoff (capped, reset after a run that got at least
+    /// one read through), and reconnects. `Command::Terminate` (or the channel closing) aborts a
+    /// backoff wait immediately. With `config.reconnect` unset, a transport error ends the task
+    /// exactly as before this behavior was added.
     pub async fn spawn<L, S>(
         &self,
-        receiver: Receiver<Command>,
+        mut receiver: Receiver<Command>,
         log: L,
         status: S,
     ) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
-        L: LogFn,
-        S: LogFn,
+        L: LogFn + Clone,
+        S: LogFn + Clone,
     {
-        let guard = self.config.read().await;
-        let client = Client::connect(&guard).await?;
+        let config = self.config.clone();
         let operations = self.operations.clone();
         let memory = self.memory.clone();
-        let config = RunConfig {
-            log,
-            status,
-            timeout_ms: guard.timeout_ms,
-            delay_ms: guard.delay_ms,
-            interval_ms: guard.interval_ms,
-        };
         Ok(tokio::task::spawn(async move {
-            client
-                .core
-                .run::<T, _, _>(operations, memory, receiver, config)
-                .await
+            let mut backoff = INITIAL_BACKOFF;
+            loop {
+                let guard = config.read().await;
+                let reconnect = guard.reconnect;
+                let run_config = RunConfig {
+                    log: log.clone(),
+                    status: status.clone(),
+                    timeout_ms: guard.timeout_ms,
+                    delay_ms: guard.delay_ms,
+                    interval_ms: guard.interval_ms,
+                };
+                let connected = Client::connect(&guard).await;
+                drop(guard);
+
+                let client = match connected {
+                    Ok(client) => client,
+                    Err(e) => {
+                        if !reconnect {
+                            log.invoke(format!("{e} Reconnect disabled; client stopping."))
+                                .await;
+                            status.invoke("Client disconnected".to_string()).await;
+                            return Err(e);
+                        }
+                        log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
+                            .await;
+                        if ClientCore::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                            status.invoke("Client disconnected".to_string()).await;
+                            return Ok(());
+                        }
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                        continue;
+                    }
+                };
+
+                let (had_success, result) = client
+                    .core
+                    .run::<T, _, _>(
+                        operations.clone(),
+                        memory.clone(),
+                        &mut receiver,
+                        run_config,
+                    )
+                    .await;
+                match result {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        if !reconnect {
+                            // run() already logged the underlying disconnect; just surface the
+                            // status change before the task ends.
+                            status.invoke("Client disconnected".to_string()).await;
+                            return Err(e);
+                        }
+                        if had_success {
+                            backoff = INITIAL_BACKOFF;
+                        }
+                        log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
+                            .await;
+                        if ClientCore::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                            status.invoke("Client disconnected".to_string()).await;
+                            return Ok(());
+                        }
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                    }
+                }
+            }
         }))
     }
 }

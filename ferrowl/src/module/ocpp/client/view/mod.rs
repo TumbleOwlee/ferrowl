@@ -782,6 +782,7 @@ mod tests {
             port: 0,
             path: String::new(),
             timeout_ms: None,
+            security: Default::default(),
         };
         ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
     }

@@ -8,7 +8,7 @@ use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunCo
 
 use ferrowl_store::Memory;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::sleep;
@@ -19,6 +19,11 @@ use tokio_modbus::prelude::{Client as ModbusClient, Reader, Slave, SlaveContext,
 /// Number of consecutive Modbus exceptions tolerated before the client skips the operation.
 pub(crate) const MAX_RETRIES: u32 = 3;
 
+/// Starting (and post-success reset) reconnect backoff.
+pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Reconnect backoff cap; doubles from [`INITIAL_BACKOFF`] up to this.
+pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
 /// Owns a connected Modbus client context and drives the read/command loop. Transport-neutral:
 /// the TCP and RTU `Client` types each construct the `Context` then hand it here.
 pub(crate) struct ClientCore {
@@ -26,6 +31,43 @@ pub(crate) struct ClientCore {
 }
 
 impl ClientCore {
+    /// Logs the "about to read" intent line shared by every read function code.
+    async fn log_read_intent<L>(
+        log: &L,
+        name: &str,
+        slave_id: tokio_modbus::SlaveId,
+        start: usize,
+        end: usize,
+    ) where
+        L: LogFn,
+    {
+        log.invoke(format!(
+            "Perform {name} request for slave ID {slave_id} and range [{start}, {end})."
+        ))
+        .await;
+    }
+
+    /// Converts a coil/discrete-input bit vector to the `u16` shape the shared memory store uses.
+    fn bits_to_words(bits: Vec<bool>) -> Vec<u16> {
+        bits.into_iter().map(|b| if b { 1 } else { 0 }).collect()
+    }
+
+    /// Classifies a completed timeout+request result into the single `ModbusError` shape shared
+    /// by every read and write outcome.
+    fn classify<V>(
+        result: Result<
+            Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
+            tokio::time::error::Elapsed,
+        >,
+    ) -> Result<V, ModbusError> {
+        match result {
+            Ok(Ok(Ok(v))) => Ok(v),
+            Ok(Ok(Err(e))) => Err(ModbusError::Exception(e)),
+            Ok(Err(e)) => Err(ModbusError::Error(e)),
+            Err(e) => Err(ModbusError::Timeout(e)),
+        }
+    }
+
     async fn read<L>(
         &mut self,
         op: &Operation,
@@ -35,120 +77,219 @@ impl ClientCore {
     where
         L: LogFn,
     {
-        let result = match op.fn_code {
+        let start = op.range.start;
+        let end = op.range.end;
+        let count = (end - start) as u16;
+        match op.fn_code {
             FunctionCode::ReadCoils => {
-                log.invoke(format!(
-                    "Perform ReadCoils request for slave ID {} and range [{}, {}).",
-                    op.slave_id, op.range.start, op.range.end,
-                ))
-                .await;
+                Self::log_read_intent(log, "ReadCoils", op.slave_id, start, end).await;
                 self.context.set_slave(Slave(op.slave_id));
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_coils(
-                        op.range.start as u16,
-                        (op.range.end - op.range.start) as u16,
-                    ),
+                    self.context.read_coils(start as u16, count),
                 )
-                .await
-                .map(|r| {
-                    r.map(|v| v.map(|b| b.into_iter().map(|e| if e { 1 } else { 0 }).collect()))
-                });
-                ("ReadCoils", res)
+                .await;
+                ("ReadCoils", Self::classify(res).map(Self::bits_to_words))
             }
             FunctionCode::ReadDiscreteInputs => {
-                log.invoke(format!(
-                    "Perform ReadDiscreteInputs request for slave ID {} and range [{}, {}).",
-                    op.slave_id, op.range.start, op.range.end,
-                ))
-                .await;
+                Self::log_read_intent(log, "ReadDiscreteInputs", op.slave_id, start, end).await;
                 self.context.set_slave(Slave(op.slave_id));
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_discrete_inputs(
-                        op.range.start as u16,
-                        (op.range.end - op.range.start) as u16,
-                    ),
+                    self.context.read_discrete_inputs(start as u16, count),
                 )
-                .await
-                .map(|r| {
-                    r.map(|v| v.map(|b| b.into_iter().map(|e| if e { 1 } else { 0 }).collect()))
-                });
-                ("ReadDiscreteInputs", res)
+                .await;
+                (
+                    "ReadDiscreteInputs",
+                    Self::classify(res).map(Self::bits_to_words),
+                )
             }
             FunctionCode::ReadInputRegisters => {
-                log.invoke(format!(
-                    "Perform ReadInputRegisters request for slave ID {} and range [{}, {}).",
-                    op.slave_id, op.range.start, op.range.end,
-                ))
-                .await;
+                Self::log_read_intent(log, "ReadInputRegisters", op.slave_id, start, end).await;
                 self.context.set_slave(Slave(op.slave_id));
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_input_registers(
-                        op.range.start as u16,
-                        (op.range.end - op.range.start) as u16,
-                    ),
+                    self.context.read_input_registers(start as u16, count),
                 )
                 .await;
-                ("ReadInputRegisters", res)
+                ("ReadInputRegisters", Self::classify(res))
             }
             FunctionCode::ReadHoldingRegisters => {
-                log.invoke(format!(
-                    "Perform ReadHoldingRegisters request for slave ID {} and range [{}, {}).",
-                    op.slave_id, op.range.start, op.range.end,
-                ))
-                .await;
+                Self::log_read_intent(log, "ReadHoldingRegisters", op.slave_id, start, end).await;
                 self.context.set_slave(Slave(op.slave_id));
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_holding_registers(
-                        op.range.start as u16,
-                        (op.range.end - op.range.start) as u16,
-                    ),
+                    self.context.read_holding_registers(start as u16, count),
                 )
                 .await;
-                ("ReadHoldingRegisters", res)
+                ("ReadHoldingRegisters", Self::classify(res))
             }
             _ => (
                 "Unknown",
-                Ok(Ok(Err(tokio_modbus::ExceptionCode::IllegalFunction))),
+                Self::classify(Ok(Ok(Err(tokio_modbus::ExceptionCode::IllegalFunction)))),
             ),
-        };
-        match result {
-            (s, Ok(Ok(Ok(v)))) => (s, Ok(v)),
-            (s, Ok(Ok(Err(e)))) => (s, Err(ModbusError::Exception(e))),
-            (s, Ok(Err(e))) => (s, Err(ModbusError::Error(e))),
-            (s, Err(e)) => (s, Err(ModbusError::Timeout(e))),
         }
     }
 
-    pub(crate) fn interval_elapsed(&self, since: &mut Option<Instant>, interval_ms: usize) -> bool {
-        let now = Instant::now();
-        match since {
-            Some(time) => {
-                let duration = now.duration_since(*time);
-                if duration.as_millis() > interval_ms as u128 {
-                    *since = Some(now);
-                    true
-                } else {
-                    false
+    /// Classifies a completed write result and logs the outcome with the same four-way shape
+    /// (timeout / io error / exception / success) shared by every write command. Disconnects and
+    /// returns an error on timeout or io error; logs and continues (`Ok(())`) otherwise.
+    /// `invalid_word` covers the one wording inconsistency between commands ("invalid" vs.
+    /// "failed" for the exception case).
+    async fn handle_write_result<V, L>(
+        &mut self,
+        result: Result<
+            Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
+            tokio::time::error::Elapsed,
+        >,
+        label: &str,
+        detail: &str,
+        invalid_word: &str,
+        log: &L,
+    ) -> Result<(), Error>
+    where
+        L: LogFn,
+    {
+        match Self::classify(result) {
+            Ok(_) => {
+                log.invoke(format!(
+                    "{label} request to {detail} successfully executed."
+                ))
+                .await;
+                Ok(())
+            }
+            Err(ModbusError::Exception(e)) => {
+                log.invoke(format!(
+                    "{label} request to {detail} {invalid_word}. [{e:?}]"
+                ))
+                .await;
+                Ok(())
+            }
+            Err(ModbusError::Error(e)) => {
+                let _ = self.context.disconnect().await;
+                log.invoke(format!(
+                    "{label} request to {detail} failed. Disconnecting client. [{e:?}]"
+                ))
+                .await;
+                Err(ModbusError::Error(e).into())
+            }
+            Err(ModbusError::Timeout(e)) => {
+                let _ = self.context.disconnect().await;
+                log.invoke(format!(
+                    "{label} request to {detail} timed out. Disconnecting client. [{e:?}]"
+                ))
+                .await;
+                Err(ModbusError::Timeout(e).into())
+            }
+        }
+    }
+
+    /// Runs one poll cycle: reads the next operation in rotation and writes the result into
+    /// `memory`, advancing (or retrying) the round-robin index. Broken out of `run` so the tick
+    /// arm of its `select!` stays a single call. Sets `*had_success` on a successful read, so the
+    /// caller's reconnect backoff can tell a live-then-dropped connection from a connection that
+    /// never got a single read through.
+    #[allow(clippy::too_many_arguments)]
+    async fn poll_once<T, L>(
+        &mut self,
+        operations: &Arc<RwLock<Vec<Operation>>>,
+        memory: &Arc<RwLock<Memory<Key<T>>>>,
+        timeout_ms: usize,
+        log: &L,
+        index: &mut usize,
+        retries: &mut u32,
+        had_success: &mut bool,
+    ) -> Result<(), Error>
+    where
+        T: KeyParams,
+        L: LogFn,
+    {
+        let operations = operations.read().await;
+        let count = operations.len();
+        if *index >= count {
+            *index = 0;
+        }
+        let operation = operations.get(*index).map(|v| (*v).clone());
+
+        if let Some(operation) = operation {
+            let fc = operation.fn_code;
+            let range = operation.range.clone();
+            let start = range.start;
+            let end = range.end;
+            match self.read(&operation, timeout_ms, log).await {
+                (s, Ok(values)) => {
+                    *had_success = true;
+                    let mut guard = memory.write().await;
+                    let key = Key {
+                        id: T::from_slave_fn(operation.slave_id, fc),
+                    };
+                    if !guard.write_unchecked(key, &range, &values) {
+                        log.invoke(format!(
+                            "{s} Failed because of failing memory update for [{start}, {end})."
+                        ))
+                        .await;
+                    } else {
+                        let mut hex_str = String::with_capacity(values.len() * 3 + 4);
+                        hex_str += "[";
+                        let mut first = true;
+                        for v in values.iter() {
+                            if !first {
+                                hex_str += &format!(" {:04x}", *v);
+                            } else {
+                                hex_str += &format!("{:04x}", *v);
+                            }
+                            first = false;
+                        }
+                        hex_str += "]";
+                        log.invoke(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
+                            .await;
+                    }
+                    *index = (*index + 1) % count;
+                    *retries = 0;
+                }
+                (s, Err(ModbusError::Timeout(e))) => {
+                    let _ = self.context.disconnect().await;
+                    log.invoke(format!(
+                            "{s} request to read [{start}, {end}) timed out. Disconnecting client. [{e:?}]"
+                        )).await;
+                    return Err(ModbusError::Timeout(e).into());
+                }
+                (s, Err(ModbusError::Error(e))) => {
+                    let _ = self.context.disconnect().await;
+                    log.invoke(format!(
+                        "{s} request to read [{start}, {end}) failed. Disconnecting client. [{e:?}]"
+                    ))
+                    .await;
+                    return Err(ModbusError::Error(e).into());
+                }
+                (s, Err(ModbusError::Exception(e))) => {
+                    *retries += 1;
+                    if *retries >= MAX_RETRIES {
+                        log.invoke(format!(
+                            "{s} request to read [{start}, {end}) invalid. [{e}]"
+                        ))
+                        .await;
+                        *index = (*index + 1) % count;
+                        *retries = 0;
+                    }
                 }
             }
-            None => {
-                *since = Some(now);
-                true
-            }
         }
+        Ok(())
     }
 
+    /// Runs the read/command loop against the connected `context` until a graceful
+    /// `Command::Terminate` (or the command channel closing) or a transport error. Returns
+    /// whether at least one read succeeded during this run alongside the outcome, so the
+    /// caller's reconnect backoff can reset after a connection that was live for a while rather
+    /// than one that never got a read through.
     pub(crate) async fn run<T, L, S>(
         mut self,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<RwLock<Memory<Key<T>>>>,
-        mut receiver: Receiver<Command>,
+        receiver: &mut Receiver<Command>,
         config: RunConfig<L, S>,
-    ) -> Result<(), Error>
+    ) -> (bool, Result<(), Error>)
     where
         T: KeyParams,
         L: LogFn,
@@ -161,236 +302,126 @@ impl ClientCore {
             delay_ms,
             interval_ms,
         } = config;
-        let mut time: Option<Instant> = None;
 
         // Wait timeout until first operation
         sleep(Duration::from_millis(delay_ms as u64)).await;
 
+        // `interval_ms` of 0 means "as fast as possible"; tokio's interval requires a non-zero
+        // period, and firing every 1ms is indistinguishable from that in practice.
+        let mut ticker = tokio::time::interval(Duration::from_millis(interval_ms.max(1) as u64));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         let mut index = 0;
         let mut retries = 0;
+        let mut had_success = false;
         loop {
-            // Perform next read of registers
-            if self.interval_elapsed(&mut time, interval_ms) {
-                let operations = operations.read().await;
-                let count = operations.len();
-                if index >= count {
-                    index = 0;
-                }
-                let operation = operations.get(index).map(|v| (*v).clone());
-
-                if let Some(operation) = operation {
-                    let fc = operation.fn_code;
-                    let range = operation.range.clone();
-                    let start = range.start;
-                    let end = range.end;
-                    match self.read(&operation, timeout_ms, &log).await {
-                        (s, Ok(values)) => {
-                            let mut guard = memory.write().await;
-                            let key = Key {
-                                id: T::from_slave_fn(operation.slave_id, fc),
-                            };
-                            if !guard.write_unchecked(key, &range, &values) {
-                                log.invoke(format!("{s} Failed because of failing memory update for [{start}, {end})."))
-                                    .await;
-                            } else {
-                                let mut hex_str = String::with_capacity(values.len() * 3 + 4);
-                                hex_str += "[";
-                                let mut first = true;
-                                for v in values.iter() {
-                                    if !first {
-                                        hex_str += &format!(" {:04x}", *v);
-                                    } else {
-                                        hex_str += &format!("{:04x}", *v);
-                                    }
-                                    first = false;
-                                }
-                                hex_str += "]";
-                                log.invoke(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
-                                    .await;
-                            }
-                            index = (index + 1) % count;
-                            retries = 0;
-                        }
-                        (s, Err(ModbusError::Timeout(e))) => {
-                            let _ = self.context.disconnect().await;
-                            log.invoke(format!(
-                                    "{s} request to read [{start}, {end}) timed out. Disconnecting client. [{e:?}]"
-                                )).await;
-                            return Err(ModbusError::Timeout(e).into());
-                        }
-                        (s, Err(ModbusError::Error(e))) => {
-                            let _ = self.context.disconnect().await;
-                            log.invoke(format!(
-                                    "{s} request to read [{start}, {end}) failed. Disconnecting client. [{e:?}]"
-                                )).await;
-                            return Err(ModbusError::Error(e).into());
-                        }
-                        (s, Err(ModbusError::Exception(e))) => {
-                            retries += 1;
-                            if retries >= MAX_RETRIES {
-                                log.invoke(format!(
-                                    "{s} request to read [{start}, {end}) invalid. [{e}]"
-                                ))
-                                .await;
-                                index = (index + 1) % count;
-                                retries = 0;
-                            }
-                        }
+            tokio::select! {
+                // Perform next read of registers
+                _ = ticker.tick() => {
+                    if let Err(e) = self
+                        .poll_once(&operations, &memory, timeout_ms, &log, &mut index, &mut retries, &mut had_success)
+                        .await
+                    {
+                        return (had_success, Err(e));
                     }
                 }
-            }
-
-            // Execute next command if available
-            if let Ok(cmd) = receiver.try_recv() {
-                match cmd {
+                // Execute next command if available. `None` means every sender was dropped
+                // (e.g. the owning instance was torn down without sending `Terminate`); treat
+                // that the same as an explicit `Terminate`.
+                cmd = receiver.recv() => match cmd.unwrap_or(Command::Terminate) {
                     Command::Terminate => {
                         let _ = self.context.disconnect().await;
                         log.invoke("Client gracefully terminated.".to_string())
                             .await;
                         status.invoke("Client disconnected".to_string()).await;
-                        return Ok(());
+                        return (had_success, Ok(()));
                     }
                     Command::WriteSingleCoil(slave, addr, coil) => {
                         self.context.set_slave(Slave(slave));
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(timeout_ms as u64),
+                        let result = tokio::time::timeout(
+                            Duration::from_millis(timeout_ms as u64),
                             self.context.write_single_coil(addr, coil),
                         )
-                        .await
+                        .await;
+                        if let Err(e) = self
+                            .handle_write_result(result, "WriteSingleCoil", &format!("{addr} with {coil}"), "invalid", &log)
+                            .await
                         {
-                            Err(e) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteSingleCoil request to {addr} with {coil} timed out. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Timeout(e).into());
-                            }
-                            Ok(Err(e)) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteSingleCoil request to {addr} with {coil} failed. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Error(e).into());
-                            }
-                            Ok(Ok(Err(e))) => {
-                                log.invoke(format!(
-                                    "WriteSingleCoil request to {addr} with {coil} invalid. [{e:?}]"
-                                ))
-                                .await;
-                            }
-                            Ok(Ok(Ok(_))) => {
-                                log.invoke(format!(
-                                    "WriteSingleCoil request to {addr} with {coil} successfully executed."
-                                )).await;
-                            }
+                            return (had_success, Err(e));
                         }
                     }
                     Command::WriteMultipleCoils(slave, addr, coils) => {
                         self.context.set_slave(Slave(slave));
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(timeout_ms as u64),
+                        let result = tokio::time::timeout(
+                            Duration::from_millis(timeout_ms as u64),
                             self.context.write_multiple_coils(addr, &coils),
                         )
-                        .await
+                        .await;
+                        if let Err(e) = self
+                            .handle_write_result(result, "WriteMultipleCoils", &format!("{addr} with {coils:?}"), "failed", &log)
+                            .await
                         {
-                            Err(e) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteMultipleCoils request to {addr} with {coils:?} timed out. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Timeout(e).into());
-                            }
-                            Ok(Err(e)) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteMultipleCoils request to {addr} with {coils:?} failed. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Error(e).into());
-                            }
-                            Ok(Ok(Err(e))) => {
-                                log.invoke(format!(
-                                    "WriteMultipleCoils request to {addr} with {coils:?} failed. [{e:?}]"
-                                )).await;
-                            }
-                            Ok(_) => {
-                                log.invoke(format!(
-                                    "WriteMultipleCoils request to {addr} with {coils:?} successfully executed."
-                                )).await;
-                            }
+                            return (had_success, Err(e));
                         }
                     }
                     Command::WriteSingleRegister(slave, addr, value) => {
                         self.context.set_slave(Slave(slave));
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(timeout_ms as u64),
+                        let result = tokio::time::timeout(
+                            Duration::from_millis(timeout_ms as u64),
                             self.context.write_single_register(addr, value),
                         )
-                        .await
+                        .await;
+                        if let Err(e) = self
+                            .handle_write_result(result, "WriteSingleRegister", &format!("{addr} with {value}"), "invalid", &log)
+                            .await
                         {
-                            Err(e) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteSingleRegister request to {addr} with {value} timed out. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Timeout(e).into());
-                            }
-                            Ok(Err(e)) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteSingleRegister request to {addr} with {value} failed. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Error(e).into());
-                            }
-                            Ok(Ok(Err(e))) => {
-                                log.invoke(format!(
-                                    "WriteSingleRegister request to {addr} with {value} invalid. [{e:?}]"
-                                )).await;
-                            }
-                            Ok(_) => {
-                                log.invoke(format!(
-                                    "WriteSingleRegister request to {addr} with {value} successfully executed."
-                                )).await;
-                            }
+                            return (had_success, Err(e));
                         }
                     }
                     Command::WriteMultipleRegister(slave, addr, values) => {
                         self.context.set_slave(Slave(slave));
-                        match tokio::time::timeout(
-                            std::time::Duration::from_millis(timeout_ms as u64),
+                        let result = tokio::time::timeout(
+                            Duration::from_millis(timeout_ms as u64),
                             self.context.write_multiple_registers(addr, &values),
                         )
-                        .await
+                        .await;
+                        if let Err(e) = self
+                            .handle_write_result(result, "WriteMultipleRegister", &format!("{addr} with {values:?}"), "invalid", &log)
+                            .await
                         {
-                            Err(e) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteMultipleRegister request to {addr} with {values:?} timed out. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Timeout(e).into());
-                            }
-                            Ok(Err(e)) => {
-                                let _ = self.context.disconnect().await;
-                                log.invoke(format!(
-                                    "WriteMultipleRegister request to {addr} with {values:?} failed. Disconnecting client. [{e:?}]"
-                                )).await;
-                                return Err(ModbusError::Error(e).into());
-                            }
-                            Ok(Ok(Err(e))) => {
-                                log.invoke(format!(
-                                    "WriteMultipleRegister request to {addr} with {values:?} invalid. [{e:?}]"
-                                )).await;
-                            }
-                            Ok(_) => {
-                                log.invoke(format!(
-                                    "WriteMultipleRegister request to {addr} with {values:?} successfully executed."
-                                )).await;
-                            }
+                            return (had_success, Err(e));
                         }
                     }
                 }
             }
+        }
+    }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    /// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command
+    /// channel closing (returns `true`). Any other command received while disconnected is
+    /// dropped with a log line rather than queued for after reconnect.
+    pub(crate) async fn wait_reconnect_backoff<L>(
+        receiver: &mut Receiver<Command>,
+        backoff: Duration,
+        log: &L,
+    ) -> bool
+    where
+        L: LogFn,
+    {
+        let deadline = tokio::time::Instant::now() + backoff;
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => return false,
+                cmd = receiver.recv() => match cmd {
+                    None | Some(Command::Terminate) => return true,
+                    Some(_) => {
+                        log.invoke(
+                            "Command dropped: client is disconnected and reconnecting.".to_string(),
+                        )
+                        .await;
+                    }
+                },
+            }
         }
     }
 }

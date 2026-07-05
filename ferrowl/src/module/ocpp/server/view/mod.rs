@@ -646,6 +646,7 @@ mod tests {
             port: 0,
             path: String::new(),
             timeout_ms: None,
+            security: Default::default(),
         };
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
     }

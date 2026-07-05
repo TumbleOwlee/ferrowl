@@ -5,6 +5,7 @@ mod command;
 mod config;
 mod core;
 mod registry;
+mod tls_stream;
 
 use std::marker::PhantomData;
 use std::net::SocketAddr;
@@ -18,10 +19,12 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, 
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 
 use self::command::ConnCommand;
+use self::tls_stream::ServerStream;
 use crate::action::Version;
 use crate::error::{CallError, Error};
 use crate::log::LogFn;
 use crate::ocppj::CallErrorCode;
+use crate::security::BasicAuth;
 
 pub use action_handler::CsmsActionHandler;
 pub use command::Command;
@@ -58,6 +61,13 @@ where
         let listener = TcpListener::bind((self.config.host.as_str(), self.config.port)).await?;
         let local_addr = listener.local_addr()?;
 
+        let tls = self
+            .config
+            .tls
+            .as_ref()
+            .map(|tls| tls.build_server_config())
+            .transpose()?;
+
         let handler = Arc::new(handler);
         let registry = ConnectionRegistry::<V>::new();
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
@@ -69,6 +79,8 @@ where
             cmd_rx,
             log,
             self.config.timeout(),
+            self.config.basic_auth.clone(),
+            tls,
         ));
 
         Ok(Server {
@@ -149,6 +161,7 @@ fn identity_from_path(path: &str) -> Option<String> {
 }
 
 /// The accept loop: hand-shakes new sockets and routes server-level commands.
+#[allow(clippy::too_many_arguments)]
 async fn accept_loop<V, H, L>(
     listener: TcpListener,
     handler: Arc<H>,
@@ -156,6 +169,8 @@ async fn accept_loop<V, H, L>(
     mut commands: mpsc::Receiver<Command<V>>,
     log: L,
     timeout: std::time::Duration,
+    basic_auth: Option<BasicAuth>,
+    tls: Option<Arc<rustls::ServerConfig>>,
 ) where
     V: Version,
     V::Action: Clone,
@@ -169,11 +184,31 @@ async fn accept_loop<V, H, L>(
                     let handler = handler.clone();
                     let registry = registry.clone();
                     let log = log.clone();
+                    let basic_auth = basic_auth.clone();
+                    let tls = tls.clone();
                     tokio::spawn(async move {
+                        let stream = match tls {
+                            Some(tls_config) => {
+                                let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
+                                match acceptor.accept(stream).await {
+                                    Ok(tls_stream) => ServerStream::Tls(Box::new(tls_stream)),
+                                    Err(e) => {
+                                        log.invoke(format!("CSMS TLS handshake failed from {peer}: {e}")).await;
+                                        return;
+                                    }
+                                }
+                            }
+                            None => ServerStream::Plain(stream),
+                        };
                         let identity_cell = Arc::new(Mutex::new(None));
                         let cell = identity_cell.clone();
                         let callback = move |req: &Request, mut resp: Response| {
                             *cell.lock().unwrap() = identity_from_path(req.uri().path());
+                            if let Some(auth) = &basic_auth
+                                && !auth.matches(req.headers().get("authorization"))
+                            {
+                                return Err(reject_unauthorized());
+                            }
                             if !subprotocol_matches(req, V::subprotocol()) {
                                 return Err(reject_subprotocol());
                             }
@@ -254,5 +289,13 @@ fn subprotocol_matches(req: &Request, expected: &str) -> bool {
 fn reject_subprotocol() -> ErrorResponse {
     let mut resp = ErrorResponse::new(Some("unsupported OCPP subprotocol".to_owned()));
     *resp.status_mut() = StatusCode::BAD_REQUEST;
+    resp
+}
+
+/// Build the 401 response used to reject a missing or mismatched Basic Auth credential
+/// (Security Profile 1). Never includes the expected credential in the response body.
+fn reject_unauthorized() -> ErrorResponse {
+    let mut resp = ErrorResponse::new(Some("authentication required".to_owned()));
+    *resp.status_mut() = StatusCode::UNAUTHORIZED;
     resp
 }
