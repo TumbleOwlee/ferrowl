@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ferrowl_codec::{Address, Format, Register, Value};
-use ferrowl_lua::module::{LogModule, LogSink, Read, RegisterModule, TimeModule, ValueType, Write};
+use ferrowl_lua::module::{
+    LogModule, LogSink, Read, RegisterModule, TestModule, TimeModule, ValueType, Write,
+};
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
@@ -297,6 +299,7 @@ pub fn run_sim(
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
             .with_module(TimeModule::default())
+            .with_module(TestModule)
             .with_module(LogModule::init(LuaLogSink {
                 log: log.clone(),
                 sink: sink.clone(),
@@ -514,6 +517,34 @@ mod tests {
             )
             .expect("read power");
         assert_eq!(power, vec![42]);
+    }
+
+    // A failing `C_Test` assertion surfaces through the same `call_all` error path the sim loop
+    // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
+    #[test]
+    fn ut_sim_script_test_assertion_failure_surfaces() {
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let mut context = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(RegisterModule::init(bridge))
+            .with_module(TimeModule::default())
+            .with_module(TestModule)
+            .with_script(
+                "check".to_string(),
+                "C_Test:Assert(C_Register:Get(\"setpoint\") == 1, \"setpoint must be 1\")",
+            )
+            .build()
+            .expect("build context");
+
+        let errors = context
+            .call_all(Duration::ZERO)
+            .expect_err("assertion should fail");
+        assert!(
+            errors.iter().any(|e| e
+                .to_string()
+                .contains("assertion failed: setpoint must be 1")),
+            "expected assertion failure in {errors:?}"
+        );
     }
 
     // --- Typed write path (no string round-trip) ---

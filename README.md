@@ -414,6 +414,8 @@ description = "EVSE charge point"
 timeout_ms = 2000      # per-request timeout
 delay_ms = 1000        # delay before the first read
 interval_ms = 1000     # poll interval
+reconnect = true       # client role: reconnect with backoff after a lost/refused
+                       # connection (default true; false = stop on the first error)
 
 # Client read batching per function code. Each value is a comma-separated list of inclusive
 # address ranges (a bare "5" is the single address 5). When unset, contiguous registers are
@@ -440,11 +442,27 @@ timeout_ms = 30000       # awaited-reply timeout
 name = "ramp"
 enabled = true
 code = "C_OCPP:Set(\"Power\", C_OCPP:Get(\"Power\") + 100)"
+
+# Optional OCPP security profiles. All fields are optional and the whole
+# section may be omitted (plain ws, no auth).
+[security]
+username = "cp001"            # profile 1: HTTP Basic Auth on the upgrade request
+password = "secret"           #   (CS sends; a CSMS with credentials rejects mismatches with 401)
+ca_file = "certs/ca.pem"      # profile 2, CS: extra trust anchor for a self-signed CSMS cert
+cert_file = "certs/csms.pem"  # profile 2, CSMS: TLS listener certificate chain
+key_file = "certs/csms.key"   # profile 2, CSMS: TLS private key
+client_cert_file = "certs/cs.pem"  # profile 3, CS: client certificate for mutual TLS
+client_key_file = "certs/cs.key"   # profile 3, CS: matching private key
+client_ca_file = "certs/ca.pem"    # profile 3, CSMS: CA that client certs must chain to
+require_client_cert = false        # profile 3, CSMS: reject connections without a valid client cert
 ```
+
+Use `protocol = "wss"` in the session entry together with the TLS fields; `wss` without
+certificates still dials/binds plain TCP.
 
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); all enabled scripts run each simulation cycle, interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time` and `C_Log` (both), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); all enabled scripts run each simulation cycle, interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time`, `C_Log` and `C_Test` (all module types), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
 
 ### Module C_Time
 
@@ -475,6 +493,38 @@ Arguments:
                      pane, and the file sink when `:log <file>` is active).
 
 Return: nil
+```
+
+### Module C_Test
+
+Assertion helpers for scripted checks, mainly with the headless mode's
+`--exit-on-error` (a failed assertion raises a Lua error, which the sim loop logs
+with the `[sim]` prefix the headless runner watches for).
+
+```
+Method:   C_Test:Assert(cond, msg)
+
+Arguments:
+               Name: cond
+               Type: Any
+        Description: The condition to check; `nil` and `false` fail, everything
+                     else passes (Lua truthiness).
+
+               Name: msg
+               Type: String
+        Description: Message logged as "assertion failed: <msg>" when cond fails.
+
+Return: nil (raises a Lua error on failure)
+```
+```
+Method:   C_Test:Fail(msg)
+
+Arguments:
+               Name: msg
+               Type: String
+        Description: Message logged as "assertion failed: <msg>".
+
+Return: never returns normally (always raises)
 ```
 
 ### Module C_Register

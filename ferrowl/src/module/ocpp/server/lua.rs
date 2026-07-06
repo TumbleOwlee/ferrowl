@@ -13,7 +13,8 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
-    LogModule, OcppActions, OcppServer, OcppServerHost, Read, TimeModule, ValueType, Write,
+    LogModule, OcppActions, OcppServer, OcppServerHost, Read, TestModule, TimeModule, ValueType,
+    Write,
 };
 use ferrowl_lua::{ContextBuilder, Error};
 
@@ -227,6 +228,7 @@ pub fn run_server_sim<V: ServerVersion>(
             .with_stdlib()
             .with_module(OcppServer::init(host))
             .with_module(TimeModule::default())
+            .with_module(TestModule)
             .with_module(LogModule::init(LuaLogSink(log.clone())))
             .with_print_sink(LuaLogSink(log.clone()));
         for (name, code) in &scripts {

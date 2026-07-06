@@ -13,7 +13,8 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
-    LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TimeModule, ValueType, Write,
+    LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TestModule, TimeModule,
+    ValueType, Write,
 };
 use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
@@ -215,6 +216,7 @@ where
             .with_stdlib()
             .with_module(OcppClient::init(bridge))
             .with_module(TimeModule::default())
+            .with_module(TestModule)
             .with_module(LogModule::init(LuaLogSink(log.clone())))
             .with_print_sink(LuaLogSink(log.clone()));
         for (name, code) in &scripts {
