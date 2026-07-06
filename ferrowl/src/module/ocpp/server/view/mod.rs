@@ -651,6 +651,22 @@ mod tests {
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
     }
 
+    // Regression: applying a resolved `:edit` must rebuild the backend — it holds its own
+    // construction-time copy of the spec, so without the rebuild a restart rebinds with the
+    // pre-edit listener config (e.g. plain ws without Basic Auth after switching to wss+auth).
+    #[tokio::test]
+    async fn ut_edit_apply_rebuilds_backend_with_new_spec() {
+        let mut v = server_view();
+        let mut edited = v.spec.clone();
+        edited.protocol = OcppProtocol::Wss;
+        edited.security.username = Some("username".into());
+        edited.security.password = Some("password".into());
+        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.refresh_impl().await;
+        assert_eq!(v.backend.spec(), &edited);
+        assert!(v.backend.spec().csms_self_signed_fallback());
+    }
+
     #[test]
     fn focus_cycle_includes_payload_pane() {
         let mut v = server_view();

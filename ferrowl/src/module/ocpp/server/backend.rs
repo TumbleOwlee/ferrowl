@@ -175,6 +175,13 @@ where
         self.online.load(Ordering::Relaxed)
     }
 
+    /// The spec this backend builds its listener config from (construction-time copy; the view's
+    /// edit path replaces the whole backend to change it). Test-only observation point.
+    #[cfg(test)]
+    pub fn spec(&self) -> &OcppSpec {
+        &self.spec
+    }
+
     /// Bind the listening socket and spawn the accept loop with the caller-supplied inbound handler.
     /// Idempotent: a no-op if already bound.
     pub async fn start<H: CsmsActionHandler<V>>(&mut self, handler: H) -> Result<(), Error> {

@@ -521,11 +521,15 @@ where
                     self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
+                // Rebind on the (possibly changed) endpoint. Stop first, then rebuild the
+                // backend: it holds its own copy of the spec from construction, so the listener
+                // config (endpoint, Basic Auth, TLS) would otherwise keep the pre-edit settings
+                // forever (mirrors the client view's edit path).
+                let _ = self.backend.stop().await;
+                self.backend = crate::module::ocpp::server::backend::OcppServer::new(spec.clone());
                 self.spec = spec;
                 self.device = device;
                 self.device_path = path;
-                // Rebind on the (possibly changed) endpoint.
-                let _ = self.backend.stop().await;
                 self.entries.clear();
                 self.conn_identity.clear();
                 self.cs_configs.clear();
