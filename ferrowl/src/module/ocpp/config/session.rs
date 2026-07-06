@@ -114,6 +114,29 @@ impl OcppSpec {
         format!("{}{}:{}{}", self.protocol, self.ip, self.port, self.path)
     }
 
+    /// TLS config a CSMS (server role) should run with: the configured material, or — when the
+    /// endpoint is `wss://` but the security section provides neither certificate files nor
+    /// `self_signed` — an ephemeral self-signed fallback. A wss-labeled server must never
+    /// silently bind plain TCP; this mirrors the setup dialog's semantics for configs that
+    /// bypass the dialog (hand-written files, `--ocpp` flags, pre-existing sessions).
+    pub fn effective_csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
+        self.security.csms_tls().or_else(|| {
+            self.csms_self_signed_fallback()
+                .then_some(ferrowl_ocpp::CsmsTlsConfig {
+                    mode: ferrowl_ocpp::CsmsTlsMode::SelfSigned,
+                    client_ca_file: None,
+                    require_client_cert: false,
+                })
+        })
+    }
+
+    /// True when [`effective_csms_tls`](Self::effective_csms_tls) falls back to an ephemeral
+    /// self-signed certificate (wss endpoint without configured TLS material) — callers use
+    /// this to surface the fallback in the module log.
+    pub fn csms_self_signed_fallback(&self) -> bool {
+        self.protocol == OcppProtocol::Wss && self.security.csms_tls().is_none()
+    }
+
     /// Build the runtime spec from its persistence halves: the endpoint comes from the session
     /// [`OcppModuleSpec`], the version/role/timeout/security from the device config.
     pub fn from_parts(module: &OcppModuleSpec, device: &super::device::OcppDeviceConfig) -> Self {
@@ -220,5 +243,53 @@ mod tests {
             .insert("type".into(), "ocpp".into());
         let back: OcppSpec = serde_json::from_value(v).unwrap();
         assert_eq!(spec, back);
+    }
+
+    fn spec_with(
+        protocol: OcppProtocol,
+        security: crate::config::ocpp::OcppSecurityConfig,
+    ) -> OcppSpec {
+        OcppSpec {
+            name: "csms".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Server,
+            protocol,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            security,
+        }
+    }
+
+    // A wss endpoint without TLS material must never yield `None` (would bind plain TCP):
+    // it falls back to the ephemeral self-signed mode.
+    #[test]
+    fn ut_effective_csms_tls_wss_without_material_falls_back_to_self_signed() {
+        let spec = spec_with(OcppProtocol::Wss, Default::default());
+        assert!(spec.csms_self_signed_fallback());
+        let tls = spec.effective_csms_tls().expect("fallback TLS");
+        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::SelfSigned));
+        assert!(!tls.require_client_cert);
+    }
+
+    #[test]
+    fn ut_effective_csms_tls_ws_stays_plain() {
+        let spec = spec_with(OcppProtocol::Ws, Default::default());
+        assert!(!spec.csms_self_signed_fallback());
+        assert!(spec.effective_csms_tls().is_none());
+    }
+
+    #[test]
+    fn ut_effective_csms_tls_explicit_files_win_over_fallback() {
+        let security = crate::config::ocpp::OcppSecurityConfig {
+            cert_file: Some("certs/csms.pem".into()),
+            key_file: Some("certs/csms.key".into()),
+            ..Default::default()
+        };
+        let spec = spec_with(OcppProtocol::Wss, security);
+        assert!(!spec.csms_self_signed_fallback());
+        let tls = spec.effective_csms_tls().expect("configured TLS");
+        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::Files { .. }));
     }
 }

@@ -12,7 +12,7 @@ use ferrowl_ocpp::csms::ConnectionId;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::merge_overrides;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
-use crate::module::ocpp::config::session::OcppRole;
+use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::server::backend::{
     Scope, ServerEvent, inbound_messages, with_rfids, with_rfids_mut,
@@ -26,6 +26,18 @@ use super::{
 };
 
 /// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
+/// The start/restart log line, noting the ephemeral self-signed fallback when the wss endpoint
+/// runs without configured TLS material (see [`OcppSpec::effective_csms_tls`]).
+fn started_message(spec: &OcppSpec, verb: &str) -> String {
+    if spec.csms_self_signed_fallback() {
+        format!(
+            "CSMS server {verb} (wss without certificates: using an ephemeral self-signed certificate)"
+        )
+    } else {
+        format!("CSMS server {verb}")
+    }
+}
+
 fn entry_sort_key<V: ServerVersion>(e: &Entry<V>) -> (String, bool, i64, i64) {
     (
         e.identity.clone(),
@@ -575,7 +587,9 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
-                        Ok(()) => CommandResult::Handled(Some("CSMS server started".into())),
+                        Ok(()) => {
+                            CommandResult::Handled(Some(started_message(&self.spec, "started")))
+                        }
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
                     }
                 }
@@ -597,7 +611,9 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(handler).await {
-                        Ok(()) => CommandResult::Handled(Some("CSMS server restarted".into())),
+                        Ok(()) => {
+                            CommandResult::Handled(Some(started_message(&self.spec, "restarted")))
+                        }
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
                     }
                 }
