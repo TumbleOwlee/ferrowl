@@ -8,6 +8,7 @@ use std::time::Duration;
 use ferrowl_codec::{Address, Kind, Register};
 use ferrowl_modbus::{Key, Operation, SlaveKey};
 use ferrowl_store::{CellKind as MemKind, Memory, Range};
+use parking_lot::RwLock as MemLock;
 use tokio::sync::RwLock;
 
 use crate::app::LogRing;
@@ -28,7 +29,7 @@ use super::build::{
 };
 use super::log::{FileSink, append, open_sink};
 
-pub type ModuleMemory = Arc<RwLock<Memory<Key<SlaveKey>>>>;
+pub type ModuleMemory = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Shared store of virtual-register values (no Modbus address), keyed by register name. Shared
 /// with the Lua sim thread so scripts can drive virtual registers and the table shows them.
@@ -114,7 +115,7 @@ impl ModbusModule {
         }
         let operations = build_read_operations(&registers, &device.read_ranges);
 
-        let memory: ModuleMemory = Arc::new(RwLock::new(memory));
+        let memory: ModuleMemory = Arc::new(MemLock::new(memory));
         let operations = Arc::new(RwLock::new(operations));
         let log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
 
@@ -335,7 +336,6 @@ impl ModbusModule {
         for (key, mem_kind, range) in explicit_read_coverage(&self.registers, &self.read_ranges) {
             self.memory
                 .write()
-                .await
                 .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
         }
         self.rebuild_operations().await;

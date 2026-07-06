@@ -4,6 +4,7 @@ mod log;
 mod ocpp;
 mod register;
 mod statics;
+mod test;
 mod time;
 mod value_type;
 
@@ -13,6 +14,7 @@ pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppServer};
 pub use register::Register as RegisterModule;
 pub use register::traits::{Read, Write};
 pub use statics::Statics as StaticsModule;
+pub use test::Test as TestModule;
 pub use time::Time as TimeModule;
 pub use value_type::ValueType;
 

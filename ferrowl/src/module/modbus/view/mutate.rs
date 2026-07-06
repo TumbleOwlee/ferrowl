@@ -78,7 +78,6 @@ impl ModbusModuleView {
             self.module
                 .memory()
                 .write()
-                .await
                 .add_ranges(key, &kind, &[range]);
         }
 
@@ -182,7 +181,7 @@ impl ModbusModuleView {
         self.table.set_definitions(defs);
 
         if let Some((memory, key, kind, range)) = mem_update {
-            memory.write().await.add_ranges(key, &kind, &[range]);
+            memory.write().add_ranges(key, &kind, &[range]);
         }
 
         self.module.rebuild_operations().await;
@@ -318,7 +317,7 @@ impl ModbusModuleView {
                 };
                 let range = Range::new(addr as usize, raw.len());
                 let ok = {
-                    let mut guard = memory.write().await;
+                    let mut guard = memory.write();
                     let old = guard
                         .read_unchecked(key.clone(), &range)
                         .unwrap_or_default();
@@ -345,7 +344,6 @@ impl ModbusModuleView {
                     let memory = self.module.memory();
                     let old = memory
                         .read()
-                        .await
                         .read_unchecked(key.clone(), &range)
                         .unwrap_or_default();
                     register.merge_write(&old, &raw)
@@ -356,7 +354,7 @@ impl ModbusModuleView {
                     Ok(()) => {
                         if *register.access() == Access::WriteOnly {
                             let memory = self.module.memory();
-                            memory.write().await.write_unchecked(key, &range, &merged);
+                            memory.write().write_unchecked(key, &range, &merged);
                         }
                         CommandResult::Handled(Some(format!(
                             "set {register_name} = {value} (sent)"

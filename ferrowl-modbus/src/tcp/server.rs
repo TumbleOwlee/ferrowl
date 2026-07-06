@@ -7,6 +7,7 @@ use crate::{Error, Key, KeyParams, LogFn, TcpError};
 use ferrowl_store::Memory;
 
 // External
+use parking_lot::RwLock as MemLock;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -18,11 +19,11 @@ use tokio_modbus::server::tcp::{Server as TcpServer, accept_tcp_connection};
 /// shared `memory`.
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
-    memory: Arc<RwLock<Memory<Key<T>>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
 }
 
 impl<T: KeyParams> ServerBuilder<T> {
-    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<RwLock<Memory<Key<T>>>>) -> Self {
+    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<MemLock<Memory<Key<T>>>>) -> Self {
         Self { config, memory }
     }
 
@@ -41,7 +42,7 @@ impl<T: KeyParams> ServerBuilder<T> {
 /// the shared `memory` via a [`Server`] (verbose logging on).
 async fn run<T, L>(
     config: &Config,
-    memory: Arc<RwLock<Memory<Key<T>>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
     log: L,
 ) -> Result<JoinHandle<Result<(), Error>>, Error>
 where
@@ -64,14 +65,16 @@ where
                     accept_tcp_connection(stream, socket_addr, new_request_handler)
                 };
                 let on_process_log = log.clone();
+                // `on_process_error` is a sync callback (not awaited by `tokio_modbus`), so the
+                // log line is emitted on a detached task instead of blocking a worker thread to
+                // await it inline.
                 let on_process_error = move |err| {
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            on_process_log
-                                .invoke(format!("Server processing failed. [{}]", err))
-                                .await;
-                        })
-                    })
+                    let on_process_log = on_process_log.clone();
+                    tokio::task::spawn(async move {
+                        on_process_log
+                            .invoke(format!("Server processing failed. [{}]", err))
+                            .await;
+                    });
                 };
                 server
                     .serve(&on_connected, on_process_error)

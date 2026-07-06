@@ -3,9 +3,11 @@
 use crate::{Key, KeyParams, LogFn, SlaveId};
 
 use ferrowl_store::{CellType, Memory, Range};
+use parking_lot::RwLock;
 use std::fmt::Display;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio_modbus::FunctionCode;
 use tokio_modbus::Request;
 use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
@@ -38,8 +40,12 @@ where
     let key = Key {
         id: T::from_slave_fn(slave, fc),
     };
-    let guard = memory.read().await;
-    match guard.read(key, &cell, &Range::new(addr as usize, cnt as usize)) {
+    // Scoped so the (sync) guard is dropped before any log `.await` below.
+    let result = {
+        let guard = memory.read();
+        guard.read(key, &cell, &Range::new(addr as usize, cnt as usize))
+    };
+    match result {
         Ok(v) => {
             if verbose {
                 log.invoke(format!(
@@ -93,8 +99,12 @@ where
     let key = Key {
         id: T::from_slave_fn(slave, fc),
     };
-    let mut guard = memory.write().await;
-    match guard.write(key, &cell, &Range::new(addr as usize, values.len()), values) {
+    // Scoped so the (sync) guard is dropped before any log `.await` below.
+    let result = {
+        let mut guard = memory.write();
+        guard.write(key, &cell, &Range::new(addr as usize, values.len()), values)
+    };
+    match result {
         Ok(()) => {
             if verbose {
                 log.invoke(format!(
@@ -148,8 +158,12 @@ where
     let key = Key {
         id: T::from_slave_fn(slave, fc),
     };
-    let mut guard = memory.write().await;
-    match guard.write(key, &cell, &Range::new(addr as usize, 1), &[stored]) {
+    // Scoped so the (sync) guard is dropped before any log `.await` below.
+    let result = {
+        let mut guard = memory.write();
+        guard.write(key, &cell, &Range::new(addr as usize, 1), &[stored])
+    };
+    match result {
         Ok(()) => {
             if verbose {
                 log.invoke(format!(
@@ -337,42 +351,48 @@ where
             let key = Key {
                 id: T::from_slave_fn(slave, FunctionCode::ReadWriteMultipleRegisters),
             };
-            let mut guard = memory.write().await;
-            if let Err(e) = guard.readable(
-                &key,
-                &CellType::Register,
-                &Range::new(read_addr as usize, cnt as usize),
-            ) {
-                if verbose {
-                    log.invoke(format!(
-                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
-                        slave, read_addr, cnt, write_addr, values
-                    ))
-                    .await;
-                }
-                return Err(ExceptionCode::IllegalDataAddress);
+            // The four checks/ops below must be atomic against concurrent requests, so they all
+            // run under one scoped (sync) guard; it's dropped before any log `.await`.
+            enum Outcome {
+                NotAddressable(ferrowl_store::MemoryError),
+                Rejected(ferrowl_store::MemoryError),
+                Ok(Vec<u16>),
             }
-            if let Err(e) = guard.writable(
-                &key,
-                &CellType::Register,
-                &Range::new(write_addr as usize, values.len()),
-            ) {
-                if verbose {
-                    log.invoke(format!(
-                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
-                        slave, read_addr, cnt, write_addr, values
-                    ))
-                    .await;
+            let outcome = {
+                let mut guard = memory.write();
+                match guard.readable(
+                    &key,
+                    &CellType::Register,
+                    &Range::new(read_addr as usize, cnt as usize),
+                ) {
+                    Err(e) => Outcome::NotAddressable(e),
+                    Ok(()) => match guard.writable(
+                        &key,
+                        &CellType::Register,
+                        &Range::new(write_addr as usize, values.len()),
+                    ) {
+                        Err(e) => Outcome::NotAddressable(e),
+                        Ok(()) => match guard.read(
+                            key.clone(),
+                            &CellType::Register,
+                            &Range::new(read_addr as usize, cnt as usize),
+                        ) {
+                            Err(e) => Outcome::Rejected(e),
+                            Ok(v) => match guard.write(
+                                key,
+                                &CellType::Register,
+                                &Range::new(write_addr as usize, values.len()),
+                                &values,
+                            ) {
+                                Err(e) => Outcome::Rejected(e),
+                                Ok(()) => Outcome::Ok(v),
+                            },
+                        },
+                    },
                 }
-                return Err(ExceptionCode::IllegalDataAddress);
-            }
-            let v = match guard.read(
-                key.clone(),
-                &CellType::Register,
-                &Range::new(read_addr as usize, cnt as usize),
-            ) {
-                Ok(v) => v,
-                Err(e) => {
+            };
+            match outcome {
+                Outcome::NotAddressable(e) => {
                     if verbose {
                         log.invoke(format!(
                             "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
@@ -380,32 +400,29 @@ where
                         ))
                         .await;
                     }
-                    return Err(ExceptionCode::IllegalFunction);
+                    Err(ExceptionCode::IllegalDataAddress)
                 }
-            };
-            if let Err(e) = guard.write(
-                key,
-                &CellType::Register,
-                &Range::new(write_addr as usize, values.len()),
-                &values,
-            ) {
-                if verbose {
-                    log.invoke(format!(
-                        "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
-                        slave, read_addr, cnt, write_addr, values
-                    ))
-                    .await;
+                Outcome::Rejected(e) => {
+                    if verbose {
+                        log.invoke(format!(
+                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
+                            slave, read_addr, cnt, write_addr, values
+                        ))
+                        .await;
+                    }
+                    Err(ExceptionCode::IllegalFunction)
                 }
-                return Err(ExceptionCode::IllegalFunction);
+                Outcome::Ok(v) => {
+                    if verbose {
+                        log.invoke(format!(
+                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} successful.",
+                            slave, read_addr, cnt, write_addr, values
+                        ))
+                        .await;
+                    }
+                    Ok(Response::ReadWriteMultipleRegisters(v))
+                }
             }
-            if verbose {
-                log.invoke(format!(
-                    "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} successful.",
-                    slave, read_addr, cnt, write_addr, values
-                ))
-                .await;
-            }
-            Ok(Response::ReadWriteMultipleRegisters(v))
         }
         Request::ReadDeviceIdentification(_, _) => {
             log.invoke(format!(
@@ -462,16 +479,17 @@ where
     type Request = SlaveRequest<'static>;
     type Exception = ExceptionCode;
     type Response = Response;
-    type Future = std::future::Ready<Result<Response, ExceptionCode>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, ExceptionCode>> + Send>>;
 
+    // `tokio_modbus`'s `process()` loop (TCP and RTU alike) already `.await`s this future from
+    // inside its own per-connection tokio task, so there is no need to bridge into async here —
+    // returning the future directly lets it suspend normally instead of blocking a worker thread.
     fn call(&self, request: Self::Request) -> Self::Future {
         let SlaveRequest { slave, request } = request;
-        let response = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                handle_request(slave, request, &self.memory, &self.log, self.verbose).await
-            })
-        });
-        std::future::ready(response)
+        let memory = self.memory.clone();
+        let log = self.log.clone();
+        let verbose = self.verbose;
+        Box::pin(async move { handle_request(slave, request, &memory, &log, verbose).await })
     }
 }
 
@@ -516,6 +534,30 @@ mod tests {
             }
         };
         (log, buf)
+    }
+
+    // Regression: `Server::call` used to bridge into async via `block_in_place` +
+    // `Handle::block_on` purely to lock `memory`, which panics ("can call blocking only when
+    // running on the multi-threaded runtime") on the default current-thread flavor below. Now
+    // that the lock is synchronous (`parking_lot`) and `call` returns a real future that
+    // `tokio_modbus`'s `process()` loop just `.await`s, this must succeed on a current-thread
+    // runtime with no dedicated worker threads to bridge onto.
+    #[tokio::test]
+    async fn ut_server_call_works_on_current_thread_runtime() {
+        use tokio_modbus::server::Service;
+
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let server = Server::new(mem, log, true);
+
+        let resp = server
+            .call(SlaveRequest {
+                slave: 1,
+                request: Request::ReadHoldingRegisters(0, 2),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![10, 20]));
     }
 
     #[tokio::test]

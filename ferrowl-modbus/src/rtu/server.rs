@@ -8,6 +8,7 @@ use crate::{Error, Key, KeyParams, LogFn, SerialError};
 use ferrowl_store::Memory;
 
 // External
+use parking_lot::RwLock as MemLock;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -18,11 +19,11 @@ use tokio_serial::SerialStream;
 /// shared `memory`.
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
-    memory: Arc<RwLock<Memory<Key<T>>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
 }
 
 impl<T: KeyParams> ServerBuilder<T> {
-    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<RwLock<Memory<Key<T>>>>) -> Self {
+    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<MemLock<Memory<Key<T>>>>) -> Self {
         Self { config, memory }
     }
 
@@ -41,7 +42,7 @@ impl<T: KeyParams> ServerBuilder<T> {
 /// via a [`Server`] (verbose logging off).
 async fn run<T, L>(
     config: &Config,
-    memory: Arc<RwLock<Memory<Key<T>>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
     log: L,
 ) -> Result<JoinHandle<Result<(), Error>>, Error>
 where

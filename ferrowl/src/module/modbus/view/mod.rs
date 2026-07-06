@@ -375,10 +375,12 @@ impl ModuleView for ModbusModuleView {
                 }
             }
 
-            let memory_arc = self.module.memory();
-            let memory = memory_arc.read().await;
+            // Acquire the (async) virtual-store guard first so the (sync) memory guard below is
+            // never held across an `.await`.
             let vs_arc = self.module.virtual_store();
             let virtual_values = vs_arc.read().await;
+            let memory_arc = self.module.memory();
+            let memory = memory_arc.read();
 
             let mut updated: Vec<Definition> = self
                 .table

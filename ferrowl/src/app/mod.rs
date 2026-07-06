@@ -44,6 +44,10 @@ pub struct LogRing {
     ring: Ring<(u64, String), LOG_SIZE>,
     /// Append-mode file sink set by `:log <file>`; when present, every line is also persisted.
     sink: Option<std::io::BufWriter<std::fs::File>>,
+    /// Total number of lines ever pushed (never reset, never wraps in practice). Lets a consumer
+    /// that only holds `peek_n` snapshots (e.g. the headless runner) tell exactly how many lines
+    /// are new since its last look, even across ring eviction.
+    written: u64,
 }
 
 impl LogRing {
@@ -51,6 +55,7 @@ impl LogRing {
         Self {
             ring: Ring::new(),
             sink: None,
+            written: 0,
         }
     }
 
@@ -67,6 +72,13 @@ impl LogRing {
             let _ = writeln!(writer, "[{}] {line}", format_timestamp(ts));
         }
         self.ring.push((ts, line));
+        self.written += 1;
+    }
+
+    /// Total number of lines ever pushed. Monotonic; use the delta between two reads to count
+    /// new lines since the last one, independent of ring eviction.
+    pub fn written(&self) -> u64 {
+        self.written
     }
 
     /// Flush buffered file-sink lines to disk. Called once per UI tick so a burst of log

@@ -9,10 +9,11 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, SlaveKey};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
 
-type Mem = Arc<RwLock<Memory<Key<SlaveKey>>>>;
+type Mem = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 
 fn key(kind: RegKind) -> Key<SlaveKey> {
     Key::new(SlaveKey { slave_id: 1, kind })
@@ -101,7 +102,7 @@ fn server_mem() -> Mem {
         &[10, 20, 30, 40],
     )
     .unwrap();
-    Arc::new(RwLock::new(mem))
+    Arc::new(MemLock::new(mem))
 }
 
 /// Client memory with the same regions declared but no values (the client fills them from reads).
@@ -127,7 +128,7 @@ fn client_mem() -> Mem {
         &MemKind::ReadWrite(CellType::Register),
         &[Range::new(0, 8)],
     );
-    Arc::new(RwLock::new(mem))
+    Arc::new(MemLock::new(mem))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -180,7 +181,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
     sleep(Duration::from_millis(800)).await;
 
     {
-        let g = cli_mem.read().await;
+        let g = cli_mem.read();
         assert_eq!(
             g.read(
                 key(RegKind::HoldingRegister),
@@ -229,7 +230,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
     sleep(Duration::from_millis(600)).await;
 
     {
-        let g = srv_mem.read().await;
+        let g = srv_mem.read();
         assert_eq!(
             g.read(
                 key(RegKind::HoldingRegister),
@@ -261,7 +262,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
 async fn tcp_client_handles_server_rejections() {
     let port = free_port();
     // Server with no registered regions: every request for slave 1 is rejected.
-    let srv_mem: Mem = Arc::new(RwLock::new(Memory::<Key<SlaveKey>>::default()));
+    let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
         .spawn(sink())
         .await
@@ -319,7 +320,7 @@ async fn tcp_server_bind_conflict_is_error() {
     let port = free_port();
     // Occupy the port so the server's bind fails.
     let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
-    let mem: Mem = Arc::new(RwLock::new(Memory::<Key<SlaveKey>>::default()));
+    let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let res = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), mem)
         .spawn(sink())
         .await;
@@ -389,7 +390,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     sleep(Duration::from_millis(2000)).await;
 
     {
-        let g = cli_mem.read().await;
+        let g = cli_mem.read();
         assert_eq!(
             g.read(
                 key(RegKind::HoldingRegister),

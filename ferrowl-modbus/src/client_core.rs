@@ -7,6 +7,7 @@
 use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunConfig};
 
 use ferrowl_store::Memory;
+use parking_lot::RwLock as MemLock;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -193,7 +194,7 @@ impl ClientCore {
     async fn poll_once<T, L>(
         &mut self,
         operations: &Arc<RwLock<Vec<Operation>>>,
-        memory: &Arc<RwLock<Memory<Key<T>>>>,
+        memory: &Arc<MemLock<Memory<Key<T>>>>,
         timeout_ms: usize,
         log: &L,
         index: &mut usize,
@@ -219,11 +220,15 @@ impl ClientCore {
             match self.read(&operation, timeout_ms, log).await {
                 (s, Ok(values)) => {
                     *had_success = true;
-                    let mut guard = memory.write().await;
                     let key = Key {
                         id: T::from_slave_fn(operation.slave_id, fc),
                     };
-                    if !guard.write_unchecked(key, &range, &values) {
+                    // Scoped so the (sync) guard is dropped before the log `.await`s below.
+                    let ok = {
+                        let mut guard = memory.write();
+                        guard.write_unchecked(key, &range, &values)
+                    };
+                    if !ok {
                         log.invoke(format!(
                             "{s} Failed because of failing memory update for [{start}, {end})."
                         ))
@@ -286,7 +291,7 @@ impl ClientCore {
     pub(crate) async fn run<T, L, S>(
         mut self,
         operations: Arc<RwLock<Vec<Operation>>>,
-        memory: Arc<RwLock<Memory<Key<T>>>>,
+        memory: Arc<MemLock<Memory<Key<T>>>>,
         receiver: &mut Receiver<Command>,
         config: RunConfig<L, S>,
     ) -> (bool, Result<(), Error>)

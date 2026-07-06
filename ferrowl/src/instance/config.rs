@@ -4,6 +4,7 @@
 use ferrowl_modbus::KeyParams;
 use ferrowl_store::Memory;
 
+use parking_lot::RwLock as MemLock;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -13,7 +14,7 @@ use tokio::sync::RwLock;
 pub struct ClientConfig<T: KeyParams, Config> {
     pub config: Arc<RwLock<Config>>,
     pub operations: Arc<RwLock<Vec<ferrowl_modbus::Operation>>>,
-    pub memory: Arc<RwLock<Memory<ferrowl_modbus::Key<T>>>>,
+    pub memory: Arc<MemLock<Memory<ferrowl_modbus::Key<T>>>>,
 }
 
 /// Shared state for a server instance: transport `Config` and the register
@@ -21,5 +22,5 @@ pub struct ClientConfig<T: KeyParams, Config> {
 #[derive(Clone)]
 pub struct ServerConfig<T: KeyParams, Config> {
     pub config: Arc<RwLock<Config>>,
-    pub memory: Arc<RwLock<Memory<ferrowl_modbus::Key<T>>>>,
+    pub memory: Arc<MemLock<Memory<ferrowl_modbus::Key<T>>>>,
 }

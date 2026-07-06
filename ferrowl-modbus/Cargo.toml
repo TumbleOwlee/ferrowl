@@ -12,6 +12,7 @@ anyhow = "1.0.100"
 thiserror = "2.0"
 itertools = "0.14.0"
 serde = { version = "1.0.228", features = ["derive"] }
+parking_lot = { workspace = true }
 tokio = { version = "1.48.0", features = ["time"] }
 tokio-modbus = { version = "0.17.0", features = [
     "futures-util",
@@ -23,8 +24,10 @@ clap = { version = "4.5.51", features = ["derive"] }
 
 [dev-dependencies]
 # Async test harness for the `handle_request` server logic (the crate's own tokio dep is
-# `time`-only since the library never spins up a runtime itself). `rt-multi-thread` is required by
-# the TCP loopback integration test: the server's `block_in_place` needs a multi-threaded runtime.
+# `time`-only since the library never spins up a runtime itself). `rt-multi-thread` lets the TCP
+# loopback integration test run its client and server tasks as true background work while the
+# test body sleeps between assertions (no longer required for any blocking bridge — the server's
+# request path is synchronous end-to-end and also passes on a current-thread runtime).
 # `ferrowl-store`/`ferrowl-codec` let that test build and seed memory directly.
 tokio = { version = "1.48.0", features = [
     "rt",

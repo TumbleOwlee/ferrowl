@@ -4,6 +4,7 @@ use crate::rtu::Config;
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, SerialError};
 
 use ferrowl_store::Memory;
+use parking_lot::RwLock as MemLock;
 use tokio::task::JoinHandle;
 
 use std::sync::Arc;
@@ -17,14 +18,14 @@ use tokio_serial::SerialStream;
 pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
-    memory: Arc<RwLock<Memory<Key<T>>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
 }
 
 impl<T: KeyParams> ClientBuilder<T> {
     pub fn new(
         config: Arc<RwLock<Config>>,
         operations: Arc<RwLock<Vec<Operation>>>,
-        memory: Arc<RwLock<Memory<Key<T>>>>,
+        memory: Arc<MemLock<Memory<Key<T>>>>,
     ) -> Self {
         Self {
             config,

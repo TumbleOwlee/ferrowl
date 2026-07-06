@@ -16,8 +16,9 @@ use ferrowl_store::Range;
 use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
 /// Bridges Lua register access (`C_Register`) to the module's shared `Memory` (fixed-address
-/// registers) and `VirtualStore` (virtual registers). Runs on the dedicated simulation thread, so
-/// the tokio `RwLock`s are locked with their `blocking_*` ops (safe off a runtime worker thread).
+/// registers) and `VirtualStore` (virtual registers). Runs on the dedicated simulation thread.
+/// `memory` is a synchronous (`parking_lot`) lock, locked directly; `virtual_store` is still a
+/// tokio `RwLock`, locked with its `blocking_*` ops (safe off a runtime worker thread).
 pub struct RegisterBridge {
     memory: ModuleMemory,
     virtual_store: VirtualStore,
@@ -69,7 +70,7 @@ impl Read for RegisterBridge {
         };
         let raw = self
             .memory
-            .blocking_read()
+            .read()
             .read_unchecked(key, &Range::new(addr as usize, width))
             .ok_or_else(|| Error::RuntimeError(format!("register '{name}' not readable")))?;
         let value = register
@@ -109,11 +110,10 @@ impl Write for RegisterBridge {
                 kind: register.kind().clone(),
             },
         };
-        let ok = self.memory.blocking_write().write_unchecked(
-            key,
-            &Range::new(addr as usize, raw.len()),
-            &raw,
-        );
+        let ok =
+            self.memory
+                .write()
+                .write_unchecked(key, &Range::new(addr as usize, raw.len()), &raw);
         if ok {
             Ok(())
         } else {
@@ -374,6 +374,7 @@ mod tests {
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::SlaveKey;
     use ferrowl_store::{CellKind as MemKind, CellType, Memory};
+    use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
 
     fn holding(addr: u16) -> Register {
@@ -405,7 +406,7 @@ mod tests {
             &MemKind::ReadWrite(CellType::Register),
             &[Range::new(0, 2)],
         );
-        Arc::new(RwLock::new(memory))
+        Arc::new(MemLock::new(memory))
     }
 
     fn evse_registers() -> HashMap<String, Register> {
@@ -500,7 +501,7 @@ mod tests {
         context.call_all(Duration::ZERO).expect("run script");
 
         let power = memory
-            .blocking_read()
+            .read()
             .read(
                 Key {
                     id: SlaveKey {

@@ -98,6 +98,34 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
 > [!IMPORTANT]
 > You can use *VIM*-like table navigation or alternatively the arrow keys. You can exit using the `:qa` command. Typing `:` will automatically switch to command mode. See the shown overlay for all available commands.
 
+## Headless / CI mode
+
+`ferrowl run` starts the same modules the TUI would, without ever drawing a screen — useful for
+CI pipelines and scripted smoke tests. It accepts the same `--session`/`--module` specs as the
+TUI, plus an ad-hoc `--ocpp` flag, and streams every module's log to stdout as
+`[<timestamp>] <module-name> | <line>`.
+
+```bash
+# Run a session file for 30 seconds, mirroring the log to a file too
+ferrowl run --session session.toml --duration 30 --log-file run.log
+
+# Run an ad-hoc Modbus server until Ctrl-C
+ferrowl run --module name=evse-1,device=configs/evse.toml,transport=tcp,ip=0.0.0.0,port=502,role=server
+
+# Fail fast if a Lua sim script raises during the run
+ferrowl run --session session.toml --duration 30 --exit-on-error
+```
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Ran clean — `--duration` elapsed, or Ctrl-C was received, with no `--exit-on-error` hit. |
+| `1` | Startup failure — a module's device config failed to load, or `start` reported an error. |
+| `2` | `--exit-on-error` was set and a drained log line looked like a Lua script error (matched the `[sim]` prefix those errors are logged under). |
+
+On any exit, every module that started is stopped first (best-effort).
+
 ## Commands
 
 | Command | Description |

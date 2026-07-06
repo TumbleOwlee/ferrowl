@@ -10,6 +10,7 @@ mod cli;
 mod command;
 mod config;
 mod dialog;
+mod headless;
 mod instance;
 mod lua;
 mod migrate;
@@ -262,8 +263,13 @@ fn main() {
         return;
     }
 
-    // Multi-threaded runtime so background modbus tasks can use `block_in_place`.
+    // Multi-threaded runtime: background modbus/OCPP tasks run concurrently with the UI loop.
     let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{}]", e));
+
+    if let Some(SubCommand::Run(ref run_args)) = args.command {
+        let code = runtime.block_on(headless::run(run_args));
+        std::process::exit(code);
+    }
 
     // Release the terminal on panic so the error message is visible.
     let handler = std::panic::take_hook();
