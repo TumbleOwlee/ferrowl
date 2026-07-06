@@ -4,10 +4,13 @@ use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::config::device::{DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_TIMEOUT_MS};
+use crate::config::device::{
+    DEFAULT_DELAY_MS, DEFAULT_INTERVAL_MS, DEFAULT_RECONNECT, DEFAULT_TIMEOUT_MS,
+};
 use crate::config::{DeviceConfig, ModuleSpec};
 use crate::dialog::SetupDialog;
 use crate::module::modbus::ModbusModule as Module;
+use crate::module::modbus::build::Timing;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 
@@ -19,11 +22,12 @@ pub struct ModbusSetupView {
 impl ModbusSetupView {
     pub fn new_create() -> Self {
         Self {
-            dialog: SetupDialog::create((
-                DEFAULT_TIMEOUT_MS,
-                DEFAULT_DELAY_MS,
-                DEFAULT_INTERVAL_MS,
-            )),
+            dialog: SetupDialog::create(Timing {
+                timeout_ms: DEFAULT_TIMEOUT_MS,
+                delay_ms: DEFAULT_DELAY_MS,
+                interval_ms: DEFAULT_INTERVAL_MS,
+                reconnect: DEFAULT_RECONNECT,
+            }),
         }
     }
 
@@ -60,6 +64,9 @@ impl SetupView for ModbusSetupView {
         device.timeout_ms = values.timeout_ms;
         device.delay_ms = values.delay_ms;
         device.interval_ms = values.interval_ms;
+        if let Some(reconnect) = values.reconnect {
+            device.reconnect = Some(reconnect);
+        }
         device.read_ranges = values.read_ranges.clone();
 
         let spec = ModuleSpec {

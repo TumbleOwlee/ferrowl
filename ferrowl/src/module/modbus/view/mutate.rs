@@ -222,6 +222,9 @@ impl ModbusModuleView {
         self.device.timeout_ms = values.timeout_ms;
         self.device.delay_ms = values.delay_ms;
         self.device.interval_ms = values.interval_ms;
+        if let Some(reconnect) = values.reconnect {
+            self.device.reconnect = Some(reconnect);
+        }
         self.device.read_ranges = values.read_ranges.clone();
 
         let timing = ModbusModule::resolve_timing(&self.device);

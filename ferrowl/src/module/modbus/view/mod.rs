@@ -478,7 +478,7 @@ impl ModuleView for ModbusModuleView {
                 &self.spec.device,
                 self.spec.role,
                 &self.spec.endpoint,
-                (timing.timeout_ms, timing.delay_ms, timing.interval_ms),
+                timing,
                 &self.device.read_ranges,
             );
             self.setup_overlay = Some(dialog);
@@ -775,6 +775,7 @@ fn parse_set_args(rest: &str) -> (String, String) {
 mod tests {
     use super::{ModbusModuleView, PendingAction, decode_definition, parse_set_args, raw_hex};
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+    use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
     use crate::module::view::ModuleView;
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -1170,5 +1171,29 @@ mod tests {
             parse_set_args("\"my reg\""),
             ("my reg".into(), String::new())
         );
+    }
+
+    #[tokio::test]
+    async fn ut_apply_setup_server_role_preserves_existing_reconnect() {
+        // Reconnect is hidden/unset (None) for Server-role dialog saves; applying it must not
+        // clobber whatever the device config already had for a setting the user never saw.
+        let mut view = new_view();
+        view.device.reconnect = Some(false);
+        let values = SetupValues {
+            name: "test module".into(),
+            config_path: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+        };
+        view.apply_setup(values).await;
+        assert_eq!(view.device.reconnect, Some(false));
     }
 }

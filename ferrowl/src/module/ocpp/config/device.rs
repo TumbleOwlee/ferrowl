@@ -197,7 +197,7 @@ impl OcppDeviceConfig {
             connector_rfids: Vec::new(),
             connectors: Vec::new(),
             config: Vec::new(),
-            security: OcppSecurityConfig::default(),
+            security: spec.security.clone(),
         }
     }
 }

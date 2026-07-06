@@ -30,6 +30,8 @@ use crate::config::device::ReadRanges;
 use crate::config::{DeviceConfig, Endpoint, Role};
 use crate::dialog::path_suggest::FsPathProvider;
 
+use super::build::Timing;
+
 /// Edit an existing instance, or create a new module (with an optional config path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogMode {
@@ -106,6 +108,23 @@ impl Parity {
     }
 }
 
+/// Client-only auto-reconnect toggle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectChoice {
+    On,
+    Off,
+}
+
+impl ToLabel for ReconnectChoice {
+    fn to_label(&self) -> String {
+        match self {
+            ReconnectChoice::On => "On",
+            ReconnectChoice::Off => "Off",
+        }
+        .to_string()
+    }
+}
+
 /// A numeric serial choice (data/stop bits) rendered as a selection label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct U8Choice(pub u8);
@@ -126,6 +145,8 @@ pub struct SetupValues {
     pub timeout_ms: Option<usize>,
     pub delay_ms: Option<usize>,
     pub interval_ms: Option<usize>,
+    /// Client-only auto-reconnect setting; always explicit after a dialog save.
+    pub reconnect: Option<bool>,
     /// Explicit per-function-code read ranges (client only), applied to the device config.
     pub read_ranges: ReadRanges,
 }
@@ -194,6 +215,8 @@ pub struct SetupDialog {
     pub delay: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub interval: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = {self.role.get_value() == Role::Client})]
+    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     #[focus]
     pub holding_ranges: Widget<InputFieldState, InputField<String>>,
     #[focus]
@@ -209,13 +232,13 @@ pub struct SetupDialog {
 
 impl SetupDialog {
     /// Edit an existing instance (`:e`). `timing` is the effective (resolved) timeout/delay/
-    /// interval in ms used to prefill the inputs (shown only for clients).
+    /// interval/reconnect settings used to prefill the inputs.
     pub fn edit(
         name: &str,
         config_path: &str,
         role: Role,
         endpoint: &Endpoint,
-        timing: (usize, usize, usize),
+        timing: Timing,
         ranges: &ReadRanges,
     ) -> Self {
         let mut dialog = Self::build(name, config_path, DialogMode::Edit, timing, ranges);
@@ -251,8 +274,8 @@ impl SetupDialog {
     }
 
     /// Create a new module (`:n`/`:new`), with an optional device-config path. `timing` prefills
-    /// the (client-only) timeout/delay/interval inputs with the global app defaults.
-    pub fn create(timing: (usize, usize, usize)) -> Self {
+    /// the timeout/delay/interval/reconnect inputs with the global app defaults.
+    pub fn create(timing: Timing) -> Self {
         Self::build("", "", DialogMode::New, timing, &ReadRanges::default())
     }
 
@@ -260,7 +283,7 @@ impl SetupDialog {
         name: &str,
         config_path: &str,
         mode: DialogMode,
-        timing: (usize, usize, usize),
+        timing: Timing,
         ranges: &ReadRanges,
     ) -> Self {
         let selection_style = SelectionStyle::default();
@@ -342,6 +365,12 @@ impl SetupDialog {
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
             .interval(input("Interval ms", None, "", &input_style, false))
+            .reconnect(selection(
+                "Reconnect",
+                None,
+                vec![ReconnectChoice::On, ReconnectChoice::Off],
+                &selection_style,
+            ))
             .holding_ranges(input(
                 "Holding ranges",
                 None,
@@ -384,10 +413,13 @@ impl SetupDialog {
             .unwrap();
 
         // Prefill timing inputs with the resolved defaults so clients always show a value.
-        let (timeout_ms, delay_ms, interval_ms) = timing;
-        set_input(&mut dialog.timeout, &timeout_ms.to_string());
-        set_input(&mut dialog.delay, &delay_ms.to_string());
-        set_input(&mut dialog.interval, &interval_ms.to_string());
+        set_input(&mut dialog.timeout, &timing.timeout_ms.to_string());
+        set_input(&mut dialog.delay, &timing.delay_ms.to_string());
+        set_input(&mut dialog.interval, &timing.interval_ms.to_string());
+        dialog
+            .reconnect
+            .state
+            .set_selection(if timing.reconnect { 0 } else { 1 });
 
         // Prefill explicit read ranges from the device config.
         for (field, value) in [
@@ -491,6 +523,10 @@ impl SetupDialog {
         let timeout_ms = parse_ms(self.timeout.state.input(), "Timeout")?;
         let delay_ms = parse_ms(self.delay.state.input(), "Delay")?;
         let interval_ms = parse_ms(self.interval.state.input(), "Interval")?;
+        // Reconnect is client-only and hidden for servers; don't report a value for a setting
+        // the user never saw, so a server-role save can't clobber it in the device config.
+        let reconnect =
+            (role == Role::Client).then(|| self.reconnect.state.get_value() == ReconnectChoice::On);
         let read_ranges = ReadRanges {
             holding: opt(self.holding_ranges.state.input()),
             input: opt(self.input_ranges.state.input()),
@@ -506,6 +542,7 @@ impl SetupDialog {
             timeout_ms,
             delay_ms,
             interval_ms,
+            reconnect,
             read_ranges,
         })
     }
@@ -627,10 +664,11 @@ impl SetupDialog {
         }
 
         {
-            let [timeout_area, delay_area, interval_area] = Layout::horizontal([
-                Constraint::Percentage(34),
-                Constraint::Percentage(33),
-                Constraint::Percentage(33),
+            let [timeout_area, delay_area, interval_area, reconnect_area] = Layout::horizontal([
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
             ])
             .areas(rows[idx]);
             idx += 1;
@@ -647,6 +685,14 @@ impl SetupDialog {
                 buf,
                 &mut self.interval.state,
             );
+            if self.role.state.get_value() == Role::Client {
+                StatefulWidget::render(
+                    &self.reconnect.widget,
+                    reconnect_area,
+                    buf,
+                    &mut self.reconnect.state,
+                );
+            }
 
             render_pair(
                 &mut self.holding_ranges,
@@ -829,7 +875,7 @@ fn set_suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvi
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_ui::traits::{HandleEvents, SetFocus};
+    use ferrowl_ui::traits::{HandleEvents, IsFocus, SetFocus};
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
@@ -846,7 +892,12 @@ mod tests {
     /// popup is drawn on top of the dialog by the trailing `render_overlay` calls in `render`.
     #[test]
     fn ut_render_config_path_field_shows_suggestion_popup() {
-        let mut dialog = SetupDialog::create((0, 0, 0));
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
         dialog.config_path.state.set_focused(true);
         dialog
             .config_path
@@ -859,5 +910,77 @@ mod tests {
         dialog.render(area, &mut buf);
         let text = buffer_text(&buf);
         assert!(text.contains("src"), "missing suggestion popup:\n{text}");
+    }
+
+    #[test]
+    fn ut_resolve_reconnect_off_maps_to_some_false() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(1); // Client
+        dialog.reconnect.state.set_selection(1); // Off
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.reconnect, Some(false));
+    }
+
+    #[test]
+    fn ut_resolve_server_role_reports_no_reconnect() {
+        // Reconnect is hidden for servers; resolving must not report a value for a setting the
+        // user never saw, so applying it can't clobber the device config's existing setting.
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        // Default role is Server; reconnect selection is irrelevant/unseen.
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.reconnect, None);
+    }
+
+    #[test]
+    fn ut_edit_prefills_reconnect_off() {
+        let timing = Timing {
+            timeout_ms: 100,
+            delay_ms: 10,
+            interval_ms: 50,
+            reconnect: false,
+        };
+        let endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let dialog = SetupDialog::edit(
+            "dev",
+            "",
+            Role::Client,
+            &endpoint,
+            timing,
+            &ReadRanges::default(),
+        );
+        assert_eq!(dialog.reconnect.state.get_value(), ReconnectChoice::Off);
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.reconnect, Some(false));
+    }
+
+    #[test]
+    fn ut_focus_next_skips_reconnect_for_server_role() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        // Default role is Server, so reconnect is gated off and traversal must skip it.
+        dialog.focus = SetupDialogFocus::Interval;
+        dialog.interval.state.set_focused(true);
+        dialog.focus_next();
+        assert!(dialog.holding_ranges.state.is_focused());
+        assert!(!dialog.reconnect.state.is_focused());
     }
 }

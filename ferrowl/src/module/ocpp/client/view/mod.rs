@@ -375,7 +375,11 @@ impl OverlayKeys for ConfigEditDialog {
 
 impl OverlayKeys for OcppSetupDialog {
     fn focus_cycle(&mut self, forward: bool) {
-        self.focus_step(forward);
+        if forward {
+            self.focus_next();
+        } else {
+            self.focus_previous();
+        }
     }
 }
 

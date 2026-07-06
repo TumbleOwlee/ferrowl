@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
-use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
+use crate::module::ocpp::config::session::{OcppModuleSpec, OcppProtocol, OcppRole, OcppSpec};
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
@@ -38,11 +38,11 @@ impl SetupView for OcppSetupView {
     }
 
     fn focus_next(&mut self) {
-        self.dialog.focus_step(true);
+        self.dialog.focus_next();
     }
 
     fn focus_previous(&mut self) {
-        self.dialog.focus_step(false);
+        self.dialog.focus_previous();
     }
 
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
@@ -56,8 +56,13 @@ impl SetupView for OcppSetupView {
         let device = if path.is_empty() {
             OcppDeviceConfig::from_spec(&spec, Vec::new())
         } else {
-            crate::config::load_ocpp_device(&path)
-                .unwrap_or_else(|_| OcppDeviceConfig::from_spec(&spec, Vec::new()))
+            match crate::config::load_ocpp_device(&path) {
+                Ok(mut loaded) => {
+                    apply_security_precedence(&mut loaded, &spec);
+                    loaded
+                }
+                Err(_) => OcppDeviceConfig::from_spec(&spec, Vec::new()),
+            }
         };
         // Reconcile the runtime spec with the (possibly file-sourced) device fields + endpoint.
         let module = OcppModuleSpec::from_spec(&spec, &path);
@@ -68,5 +73,68 @@ impl SetupView for OcppSetupView {
             OcppRole::Server => Box::new(move || build_server_view(spec, path, device)),
         };
         Some((name, factory))
+    }
+}
+
+/// Decide which security section wins when merging a loaded device config with the dialog's
+/// resolved spec. The dialog only exposes security controls for `wss://`, so a `ws://` selection
+/// must not silently wipe out a security section already present in the loaded file: the file's
+/// section is left untouched. For `wss://` the dialog is authoritative and overwrites it.
+fn apply_security_precedence(loaded: &mut OcppDeviceConfig, spec: &OcppSpec) {
+    if spec.protocol == OcppProtocol::Wss {
+        loaded.security = spec.security.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::module::ocpp::config::device::OcppSecurityConfig;
+    use crate::module::ocpp::config::session::OcppVersion;
+
+    fn base_spec(protocol: OcppProtocol) -> OcppSpec {
+        OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            security: OcppSecurityConfig {
+                username: Some("dialog-user".into()),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn ut_ws_preserves_loaded_security() {
+        let mut loaded = OcppDeviceConfig {
+            security: OcppSecurityConfig {
+                ca_file: Some("existing-ca.pem".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let spec = base_spec(OcppProtocol::Ws);
+        apply_security_precedence(&mut loaded, &spec);
+        assert_eq!(loaded.security.ca_file.as_deref(), Some("existing-ca.pem"));
+        assert_eq!(loaded.security.username, None);
+    }
+
+    #[test]
+    fn ut_wss_overwrites_loaded_security_with_dialog() {
+        let mut loaded = OcppDeviceConfig {
+            security: OcppSecurityConfig {
+                ca_file: Some("existing-ca.pem".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let spec = base_spec(OcppProtocol::Wss);
+        apply_security_precedence(&mut loaded, &spec);
+        assert_eq!(loaded.security, spec.security);
     }
 }

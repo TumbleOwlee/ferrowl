@@ -73,7 +73,6 @@ impl<V: ClientVersion> ClientView<V> {
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
         device.log_file = self.device.log_file.clone();
-        device.security = self.device.security.clone();
         device.connectors = self.with_state(|s| {
             (0..s.connector_count())
                 .map(|i| V::connector_ref(s, i))
@@ -170,7 +169,6 @@ impl<V: ClientVersion> ClientView<V> {
             if let Some((spec, path)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
-                device.security = self.device.security.clone();
                 device.connectors = self.device.connectors.clone();
                 device.config = self.device.config.clone();
                 if spec.role == OcppRole::Server {
