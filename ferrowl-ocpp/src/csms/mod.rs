@@ -65,7 +65,7 @@ where
             .config
             .tls
             .as_ref()
-            .map(|tls| tls.build_server_config())
+            .map(|tls| tls.build_server_config(&self.config.host))
             .transpose()?;
 
         let handler = Arc::new(handler);

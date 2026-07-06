@@ -455,10 +455,20 @@ client_cert_file = "certs/cs.pem"  # profile 3, CS: client certificate for mutua
 client_key_file = "certs/cs.key"   # profile 3, CS: matching private key
 client_ca_file = "certs/ca.pem"    # profile 3, CSMS: CA that client certs must chain to
 require_client_cert = false        # profile 3, CSMS: reject connections without a valid client cert
+self_signed = true            # server: ephemeral self-signed TLS below the TLS level
+insecure_skip_verify = true   # client: accept any server certificate (testing only)
 ```
 
-Use `protocol = "wss"` in the session entry together with the TLS fields; `wss` without
-certificates still dials/binds plain TCP.
+Use `protocol = "wss"` in the session entry together with the TLS fields. A CSMS (server role)
+`wss` instance below the TLS level (`None`/Basic Auth) does *not* fall back to plain TCP: it
+generates an **ephemeral self-signed certificate in memory at each start** (never written to
+disk) and terminates TLS with it — set `self_signed = true`, or just pick anything below TLS in
+the `:new`/`:edit` setup dialog, which sets it for you. Because the identity changes on every
+start, a connecting CS cannot pin it via `ca_file` in advance; either supply real `cert_file`/
+`key_file` (the TLS/mTLS levels) or have the CS set `insecure_skip_verify = true`, which accepts
+any server certificate without authenticating it. The connection is still TLS-encrypted, but the
+peer's identity is not checked at all — **this is a test-rig convenience only; never enable it
+against a production CSMS**, since it makes the connection vulnerable to a man-in-the-middle.
 
 ## Lua Support
 

@@ -20,7 +20,7 @@ pub use action::{ConnectorScope, Version};
 pub use error::{CallError, Error, FramingError, OcppError, TlsError, ValidationError, WsError};
 pub use log::LogFn;
 pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};
-pub use security::{BasicAuth, CsTlsConfig, CsmsTlsConfig};
+pub use security::{BasicAuth, CsTlsConfig, CsmsTlsConfig, CsmsTlsMode};
 
 #[cfg(feature = "v1_6")]
 pub use rust_ocpp::v1_6;

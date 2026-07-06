@@ -52,6 +52,25 @@ impl ToLabel for SecurityLevel {
     }
 }
 
+/// Client-only "accept any server certificate" toggle, offered whenever `wss://` is selected
+/// (orthogonal to the security level — even a Basic-Auth-only connection may need it against a
+/// self-signed CSMS). Mirrors `ReconnectChoice` in the Modbus dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipVerifyChoice {
+    Off,
+    On,
+}
+
+impl ToLabel for SkipVerifyChoice {
+    fn to_label(&self) -> String {
+        match self {
+            SkipVerifyChoice::Off => "Off",
+            SkipVerifyChoice::On => "On",
+        }
+        .to_string()
+    }
+}
+
 impl SecurityLevel {
     /// Infer the level an existing [`OcppSecurityConfig`] represents, by role. Precedence (highest
     /// first): client cert (client) / require-client-cert or client CA (server) → `MutualTls`;
@@ -138,6 +157,11 @@ impl SecurityLevel {
                 None
             },
             require_client_cert: mtls && is_server,
+            // Set by the caller (`resolve`), which knows the role/level rule for `self_signed`
+            // and reads the dialog's `skip_verify` toggle for `insecure_skip_verify` — neither is
+            // derivable from the raw field text this function works from.
+            self_signed: false,
+            insecure_skip_verify: false,
         }
     }
 
@@ -212,6 +236,11 @@ pub struct OcppSetupDialog {
     /// `username`; the field is not obscured on screen.
     #[focus(when = {self.wss() && self.level() >= SecurityLevel::BasicAuth})]
     pub password: Widget<InputFieldState, InputField<String>>,
+    /// Client role only: accept any server certificate without authenticating it. Orthogonal to
+    /// `security` (shown at every level once `wss://` + client are selected) — needed to talk to
+    /// a server-role CSMS whose certificate is regenerated (and thus unpinnable) at each start.
+    #[focus(when = {self.wss() && self.role.get_value() == OcppRole::Client})]
+    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
     /// Client role only: extra trust anchor for a self-signed CSMS certificate.
     #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Client})]
     pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
@@ -236,6 +265,9 @@ pub struct OcppSetupDialog {
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     pub error: Widget<String, Text>,
+    /// One-line info hint shown when a server-role `wss://` instance is below the TLS level (an
+    /// ephemeral self-signed certificate will be generated at each start). Not a focusable field.
+    pub hint: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
 }
 
@@ -283,6 +315,11 @@ impl OcppSetupDialog {
             ))
             .username(input("Username", "cp001", &input_style, false))
             .password(input("Password", "", &input_style, false))
+            .skip_verify(selection(
+                "Skip Verify",
+                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
+                &selection_style,
+            ))
             .ca_file(suggest_input(
                 "CA File",
                 "ca.pem",
@@ -324,6 +361,7 @@ impl OcppSetupDialog {
                     .fg(COLOR_SCHEME.error)
                     .bg(COLOR_SCHEME.bg),
             }))
+            .hint(hint_text())
             .keybinds(keybinds_text())
             .focus(OcppSetupDialogFocus::Name)
             .build()
@@ -354,6 +392,13 @@ impl OcppSetupDialog {
 
         let level = SecurityLevel::from_config(&spec.security, spec.role);
         d.security.state.set_selection(level.index());
+        d.skip_verify
+            .state
+            .set_selection(if spec.security.insecure_skip_verify {
+                1
+            } else {
+                0
+            });
         set_text(
             &mut d.username,
             spec.security.username.as_deref().unwrap_or(""),
@@ -427,11 +472,7 @@ impl OcppSetupDialog {
         let protocol = self.protocol.get_value();
         let security = if protocol == OcppProtocol::Wss {
             let level = self.security.get_value();
-            // A wss server without at least TLS would silently bind plain TCP; refuse instead.
-            if role == OcppRole::Server && level < SecurityLevel::Tls {
-                return Err("wss requires TLS certificates (choose TLS or mTLS)".into());
-            }
-            let cfg = level.build_config(
+            let mut cfg = level.build_config(
                 role,
                 self.username.state.input(),
                 self.password.state.input(),
@@ -442,6 +483,15 @@ impl OcppSetupDialog {
                 self.client_key_file.state.input(),
                 self.client_ca_file.state.input(),
             );
+            // Below TLS, a wss server generates an ephemeral self-signed certificate at each
+            // start rather than binding plain TCP; Tls/mTLS still require real cert/key files
+            // (checked below).
+            if role == OcppRole::Server && level < SecurityLevel::Tls {
+                cfg.self_signed = true;
+            }
+            if role == OcppRole::Client {
+                cfg.insecure_skip_verify = self.skip_verify.get_value() == SkipVerifyChoice::On;
+            }
             validate_security(&cfg, role, level)?;
             cfg
         } else {
@@ -495,15 +545,19 @@ impl OcppSetupDialog {
         let show_security_row = wss;
         let show_cert_a = wss && level >= SecurityLevel::Tls;
         let show_cert_b = wss && level == SecurityLevel::MutualTls;
+        // Server + wss below TLS: an ephemeral self-signed certificate is generated at each
+        // start instead of refusing to bind — surface that as a one-line hint.
+        let show_hint = wss && role == OcppRole::Server && level < SecurityLevel::Tls;
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
-        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3) and the security rows
-        // (3 each), only when applicable.
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
+        // (3 each), and the hint line (1), only when applicable.
         let box_height = 17
             + if has_error { 3 } else { 0 }
             + if show_security_row { 3 } else { 0 }
             + if show_cert_a { 3 } else { 0 }
-            + if show_cert_b { 3 } else { 0 };
+            + if show_cert_b { 3 } else { 0 }
+            + if show_hint { 1 } else { 0 };
         let box_width = 80;
 
         let [_, hcenter, _] = Layout::horizontal([
@@ -535,12 +589,14 @@ impl OcppSetupDialog {
         let security_height = if show_security_row { 3 } else { 0 };
         let cert_a_height = if show_cert_a { 3 } else { 0 };
         let cert_b_height = if show_cert_b { 3 } else { 0 };
+        let hint_height = if show_hint { 1 } else { 0 };
         let rows = Layout::vertical([
             Constraint::Length(3),               // name
             Constraint::Length(3),               // config path
             Constraint::Length(3),               // version | role
             Constraint::Length(3),               // protocol | ip | port | path
-            Constraint::Length(security_height), // security | username | password
+            Constraint::Length(security_height), // security | username | password | skip-verify
+            Constraint::Length(hint_height),     // self-signed hint (server, below TLS)
             Constraint::Length(cert_a_height),   // cert_file|key_file or ca_file
             Constraint::Length(cert_b_height),   // client_cert|client_key or client_ca_file
             Constraint::Length(error_height),    // error (hidden when empty)
@@ -586,23 +642,89 @@ impl OcppSetupDialog {
             StatefulWidget::render(&self.path.widget, path, buf, &mut self.path.state);
         }
 
+        let is_client = role == OcppRole::Client;
         if show_security_row {
             if level >= SecurityLevel::BasicAuth {
-                let [sec, user, pass] = Layout::horizontal([
-                    Constraint::Percentage(34),
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(33),
-                ])
-                .areas(rows[4]);
+                if is_client {
+                    let [sec, user, pass, skip] = Layout::horizontal([
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                    ])
+                    .areas(rows[4]);
+                    StatefulWidget::render(
+                        &self.security.widget,
+                        sec,
+                        buf,
+                        &mut self.security.state,
+                    );
+                    StatefulWidget::render(
+                        &self.username.widget,
+                        user,
+                        buf,
+                        &mut self.username.state,
+                    );
+                    StatefulWidget::render(
+                        &self.password.widget,
+                        pass,
+                        buf,
+                        &mut self.password.state,
+                    );
+                    StatefulWidget::render(
+                        &self.skip_verify.widget,
+                        skip,
+                        buf,
+                        &mut self.skip_verify.state,
+                    );
+                } else {
+                    let [sec, user, pass] = Layout::horizontal([
+                        Constraint::Percentage(34),
+                        Constraint::Percentage(33),
+                        Constraint::Percentage(33),
+                    ])
+                    .areas(rows[4]);
+                    StatefulWidget::render(
+                        &self.security.widget,
+                        sec,
+                        buf,
+                        &mut self.security.state,
+                    );
+                    StatefulWidget::render(
+                        &self.username.widget,
+                        user,
+                        buf,
+                        &mut self.username.state,
+                    );
+                    StatefulWidget::render(
+                        &self.password.widget,
+                        pass,
+                        buf,
+                        &mut self.password.state,
+                    );
+                }
+            } else if is_client {
+                let [sec, skip] =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .areas(rows[4]);
                 StatefulWidget::render(&self.security.widget, sec, buf, &mut self.security.state);
-                StatefulWidget::render(&self.username.widget, user, buf, &mut self.username.state);
-                StatefulWidget::render(&self.password.widget, pass, buf, &mut self.password.state);
+                StatefulWidget::render(
+                    &self.skip_verify.widget,
+                    skip,
+                    buf,
+                    &mut self.skip_verify.state,
+                );
             } else {
                 let [sec, _] =
                     Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)])
                         .areas(rows[4]);
                 StatefulWidget::render(&self.security.widget, sec, buf, &mut self.security.state);
             }
+        }
+
+        if show_hint {
+            self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
+            StatefulWidget::render(&self.hint.widget, rows[5], buf, &mut self.hint.state);
         }
 
         if show_cert_a {
@@ -612,7 +734,7 @@ impl OcppSetupDialog {
                         Constraint::Percentage(50),
                         Constraint::Percentage(50),
                     ])
-                    .areas(rows[5]);
+                    .areas(rows[6]);
                     StatefulWidget::render(
                         &self.cert_file.widget,
                         left,
@@ -629,7 +751,7 @@ impl OcppSetupDialog {
                 OcppRole::Client => {
                     StatefulWidget::render(
                         &self.ca_file.widget,
-                        rows[5],
+                        rows[6],
                         buf,
                         &mut self.ca_file.state,
                     );
@@ -644,7 +766,7 @@ impl OcppSetupDialog {
                         Constraint::Percentage(50),
                         Constraint::Percentage(50),
                     ])
-                    .areas(rows[6]);
+                    .areas(rows[7]);
                     StatefulWidget::render(
                         &self.client_cert_file.widget,
                         left,
@@ -661,7 +783,7 @@ impl OcppSetupDialog {
                 OcppRole::Server => {
                     StatefulWidget::render(
                         &self.client_ca_file.widget,
-                        rows[6],
+                        rows[7],
                         buf,
                         &mut self.client_ca_file.state,
                     );
@@ -670,11 +792,11 @@ impl OcppSetupDialog {
         }
 
         if has_error {
-            StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
+            StatefulWidget::render(&self.error.widget, rows[8], buf, &mut self.error.state);
         }
         StatefulWidget::render(
             &self.keybinds.widget,
-            rows[8],
+            rows[9],
             buf,
             &mut self.keybinds.state,
         );
@@ -878,6 +1000,23 @@ fn text(style: TextStyle) -> Widget<String, Text> {
             })
             .horizontal_alignment(HorizontalAlignment::Center)
             .style(style)
+            .build()
+            .unwrap(),
+    }
+}
+
+/// One-line info hint (normal text style, no border) shown when a server-role `wss://` instance
+/// is below the TLS level. Content is filled in at render time (see [`OcppSetupDialog::render`]).
+fn hint_text() -> Widget<String, Text> {
+    Widget {
+        state: String::new(),
+        widget: TextBuilder::default()
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 1,
+            })
+            .horizontal_alignment(HorizontalAlignment::Left)
+            .style(TextStyle::default())
             .build()
             .unwrap(),
     }
@@ -1102,13 +1241,29 @@ mod tests {
     }
 
     #[test]
-    fn ut_server_wss_below_tls_is_rejected() {
+    fn ut_server_wss_none_resolves_self_signed_no_cert_error() {
         let d = wss_dialog(1); // Server, security level defaults to None
-        let err = d.resolve().unwrap_err();
-        assert!(
-            err.contains("wss requires TLS certificates"),
-            "unexpected error: {err}"
-        );
+        let spec = d
+            .resolve()
+            .expect("below-TLS server should self-sign, not error");
+        assert!(spec.security.self_signed);
+        assert_eq!(spec.security.cert_file, None);
+        assert_eq!(spec.security.key_file, None);
+    }
+
+    #[test]
+    fn ut_server_wss_basic_auth_resolves_self_signed_no_cert_error() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::BasicAuth.index());
+        set_text(&mut d.username, "cp001");
+        set_text(&mut d.password, "s3cret");
+        let spec = d
+            .resolve()
+            .expect("below-TLS server should self-sign, not error");
+        assert!(spec.security.self_signed);
+        assert_eq!(spec.security.username.as_deref(), Some("cp001"));
     }
 
     #[test]
@@ -1216,6 +1371,67 @@ mod tests {
         assert_eq!(resolved.security, spec.security);
     }
 
+    #[test]
+    fn ut_edit_resolve_roundtrip_client_skip_verify() {
+        let spec = OcppSpec {
+            name: "cp-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Wss,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: "/ocpp/cp001".into(),
+            timeout_ms: None,
+            security: OcppSecurityConfig {
+                insecure_skip_verify: true,
+                ..Default::default()
+            },
+        };
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml");
+        assert_eq!(dialog.skip_verify.state.get_value(), SkipVerifyChoice::On);
+        let resolved = dialog.resolve().expect("valid client config");
+        assert!(resolved.security.insecure_skip_verify);
+    }
+
+    // --- render height -----------------------------------------------------------------------
+
+    #[test]
+    fn ut_render_hint_row_only_for_server_below_tls() {
+        let area = Rect::new(0, 0, 80, 60);
+
+        // Server, wss, below TLS: hint row present.
+        let mut with_hint = wss_dialog(1);
+        let mut buf = Buffer::empty(area);
+        with_hint.render(area, &mut buf);
+        let with_hint_text = buffer_text(&buf);
+        assert!(
+            with_hint_text.contains("Self-signed certificate is generated at each start"),
+            "missing hint line:\n{with_hint_text}"
+        );
+
+        // Server, wss, Tls: no hint row (real cert/key required instead).
+        let cert = tmp_file("hint_cert.crt");
+        let key = tmp_file("hint_key.key");
+        let mut without_hint = wss_dialog(1);
+        without_hint
+            .security
+            .state
+            .set_selection(SecurityLevel::Tls.index());
+        set_suggest_text(&mut without_hint.cert_file, &cert);
+        set_suggest_text(&mut without_hint.key_file, &key);
+        let mut buf2 = Buffer::empty(area);
+        without_hint.render(area, &mut buf2);
+        let without_hint_text = buffer_text(&buf2);
+        assert!(!without_hint_text.contains("Self-signed certificate is generated"));
+
+        // Client, wss, below TLS: no hint row (hint is server-only).
+        let mut client = wss_dialog(0);
+        let mut buf3 = Buffer::empty(area);
+        client.render(area, &mut buf3);
+        let client_text = buffer_text(&buf3);
+        assert!(!client_text.contains("Self-signed certificate is generated"));
+    }
+
     // --- focus traversal ------------------------------------------------------------------------
 
     #[test]
@@ -1231,6 +1447,7 @@ mod tests {
                 OcppSetupDialogFocus::Security
                     | OcppSetupDialogFocus::Username
                     | OcppSetupDialogFocus::Password
+                    | OcppSetupDialogFocus::SkipVerify
                     | OcppSetupDialogFocus::CaFile
                     | OcppSetupDialogFocus::CertFile
                     | OcppSetupDialogFocus::KeyFile
@@ -1242,7 +1459,7 @@ mod tests {
     }
 
     #[test]
-    fn ut_focus_wss_none_shows_only_security_selection() {
+    fn ut_focus_wss_none_shows_security_selection_and_skip_verify_for_client() {
         let mut d = wss_dialog(0); // Client, wss, level None
         d.set_focused(true);
         let mut visited = Vec::new();
@@ -1251,8 +1468,22 @@ mod tests {
             visited.push(d.focus);
         }
         assert!(visited.contains(&OcppSetupDialogFocus::Security));
+        assert!(visited.contains(&OcppSetupDialogFocus::SkipVerify));
         assert!(!visited.contains(&OcppSetupDialogFocus::Username));
         assert!(!visited.contains(&OcppSetupDialogFocus::CaFile));
+    }
+
+    #[test]
+    fn ut_focus_wss_none_server_has_no_skip_verify() {
+        let mut d = wss_dialog(1); // Server, wss, level None
+        d.set_focused(true);
+        let mut visited = Vec::new();
+        for _ in 0..20 {
+            d.focus_next();
+            visited.push(d.focus);
+        }
+        assert!(visited.contains(&OcppSetupDialogFocus::Security));
+        assert!(!visited.contains(&OcppSetupDialogFocus::SkipVerify));
     }
 
     #[test]
