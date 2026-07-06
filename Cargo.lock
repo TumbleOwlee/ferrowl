@@ -819,7 +819,7 @@ checksum = "dd2e7510819d6fbf51a5545c8f922716ecfb14df168a3242f7d33e0239efe6a1"
 
 [[package]]
 name = "ferrowl"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-codec"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "derive-getters",
  "derive_builder",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-lua"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "ferrowl-lua-derive",
  "mlua",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-lua-derive"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "ferrowl-lua",
  "proc-macro2",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-modbus"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ocpp"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "base64",
  "futures-util",
@@ -916,11 +916,11 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ring"
-version = "0.4.10"
+version = "0.4.11"
 
 [[package]]
 name = "ferrowl-store"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "itertools",
  "serde",
@@ -929,11 +929,11 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-syntax"
-version = "0.4.10"
+version = "0.4.11"
 
 [[package]]
 name = "ferrowl-ui"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "crossterm",
  "derive_builder",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ui-derive"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "convert_case 0.11.0",
  "crossterm",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-util"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "async-trait",
  "clap",
