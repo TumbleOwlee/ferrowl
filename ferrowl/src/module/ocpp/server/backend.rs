@@ -152,8 +152,11 @@ pub fn scope_authorized(store: &RfidLists, scope: Scope, id_tag: &str) -> bool {
 }
 
 /// The version-generic CSMS backend owned by a server view.
+///
+/// Deliberately holds no copy of the module spec: the listener config is built from the spec the
+/// view passes into each [`start`](Self::start) call, so an edited endpoint/security section can
+/// never drift from what the listener actually binds with.
 pub struct OcppServer<V: Version> {
-    spec: OcppSpec,
     server: Option<Server<V>>,
     /// Server bound state (drives the ONLINE/OFFLINE status line).
     online: Arc<AtomicBool>,
@@ -163,9 +166,8 @@ impl<V: Version> OcppServer<V>
 where
     V::Action: Clone,
 {
-    pub fn new(spec: OcppSpec) -> Self {
+    pub fn new() -> Self {
         Self {
-            spec,
             server: None,
             online: Arc::new(AtomicBool::new(false)),
         }
@@ -175,27 +177,24 @@ where
         self.online.load(Ordering::Relaxed)
     }
 
-    /// The spec this backend builds its listener config from (construction-time copy; the view's
-    /// edit path replaces the whole backend to change it). Test-only observation point.
-    #[cfg(test)]
-    pub fn spec(&self) -> &OcppSpec {
-        &self.spec
-    }
-
     /// Bind the listening socket and spawn the accept loop with the caller-supplied inbound handler.
     /// Idempotent: a no-op if already bound.
-    pub async fn start<H: CsmsActionHandler<V>>(&mut self, handler: H) -> Result<(), Error> {
+    pub async fn start<H: CsmsActionHandler<V>>(
+        &mut self,
+        spec: &OcppSpec,
+        handler: H,
+    ) -> Result<(), Error> {
         if self.server.is_some() {
             return Ok(());
         }
         let config = Config {
-            host: self.spec.ip.clone(),
-            port: self.spec.port,
-            timeout_ms: self.spec.timeout_ms.unwrap_or(30_000),
-            basic_auth: self.spec.security.basic_auth(),
+            host: spec.ip.clone(),
+            port: spec.port,
+            timeout_ms: spec.timeout_ms.unwrap_or(30_000),
+            basic_auth: spec.security.basic_auth(),
             // A wss endpoint without configured TLS material falls back to an ephemeral
             // self-signed certificate instead of silently binding plain TCP.
-            tls: self.spec.effective_csms_tls(),
+            tls: spec.effective_csms_tls(),
         };
         let server = ServerBuilder::<V>::new(config)
             .spawn(handler, |_s: String| async {})

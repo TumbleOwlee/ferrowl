@@ -434,7 +434,7 @@ where
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
         let rfids: RfidLists = Arc::new(parking_lot::RwLock::new(rfid_store_from_device(&device)));
         let mut view = Self {
-            backend: OcppServer::new(spec.clone()),
+            backend: OcppServer::new(),
             spec,
             device_path,
             device,
@@ -651,11 +651,12 @@ mod tests {
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
     }
 
-    // Regression: applying a resolved `:edit` must rebuild the backend — it holds its own
-    // construction-time copy of the spec, so without the rebuild a restart rebinds with the
-    // pre-edit listener config (e.g. plain ws without Basic Auth after switching to wss+auth).
+    // Regression (structural since the backend stopped owning a spec copy): applying a resolved
+    // `:edit` updates the view's spec — the single source the backend binds from on every
+    // `start(&spec, ..)` — and stops the old listener so the next start rebinds with the edited
+    // endpoint/security (e.g. wss + Basic Auth no longer leaves a plain unauthenticated listener).
     #[tokio::test]
-    async fn ut_edit_apply_rebuilds_backend_with_new_spec() {
+    async fn ut_edit_apply_updates_spec_and_stops_listener() {
         let mut v = server_view();
         let mut edited = v.spec.clone();
         edited.protocol = OcppProtocol::Wss;
@@ -663,8 +664,11 @@ mod tests {
         edited.security.password = Some("password".into());
         v.deferred.setup = Some((edited.clone(), String::new()));
         v.refresh_impl().await;
-        assert_eq!(v.backend.spec(), &edited);
-        assert!(v.backend.spec().csms_self_signed_fallback());
+        assert_eq!(v.spec, edited);
+        assert!(v.spec.csms_self_signed_fallback());
+        // The same tick stops the old listener and rebinds from the edited spec (want_running
+        // is on by default), so the backend ends the tick online with the new settings.
+        assert!(v.backend.is_online(), "edit must rebind the listener");
     }
 
     #[test]

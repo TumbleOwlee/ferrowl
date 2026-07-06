@@ -188,14 +188,13 @@ impl<V: ClientVersion> ClientView<V> {
                 } else {
                     let was_online = self.backend.is_online();
                     let _ = self.backend.stop().await;
-                    self.spec = spec.clone();
+                    self.spec = spec;
                     self.device = device;
                     self.device_path = path;
-                    self.backend = crate::module::ocpp::client::backend::OcppClient::new(spec);
                     self.log.write().await.write("Settings updated");
                     if was_online {
                         let handler = self.make_handler();
-                        let _ = self.backend.start(handler).await;
+                        let _ = self.backend.start(&self.spec, handler).await;
                     }
                 }
             }
@@ -324,7 +323,7 @@ impl<V: ClientVersion> ClientView<V> {
         match cmd.trim() {
             "start" => Box::pin(async move {
                 let handler = self.make_handler();
-                match self.backend.start(handler).await {
+                match self.backend.start(&self.spec, handler).await {
                     Ok(()) => {
                         CommandResult::Handled(Some(format!("Connecting to {}", self.spec.url())))
                     }
@@ -340,7 +339,7 @@ impl<V: ClientVersion> ClientView<V> {
             "restart" => Box::pin(async move {
                 let _ = self.backend.stop().await;
                 let handler = self.make_handler();
-                match self.backend.start(handler).await {
+                match self.backend.start(&self.spec, handler).await {
                     Ok(()) => CommandResult::Handled(Some("Reconnecting".into())),
                     Err(e) => CommandResult::Handled(Some(format!("Reconnect failed: {e}"))),
                 }

@@ -25,7 +25,6 @@ use super::{
     Entry, EntryState, EntryStateT, ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
 };
 
-/// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
 /// The start/restart log line, noting the ephemeral self-signed fallback when the wss endpoint
 /// runs without configured TLS material (see [`OcppSpec::effective_csms_tls`]).
 fn started_message(spec: &OcppSpec, verb: &str) -> String {
@@ -38,6 +37,7 @@ fn started_message(spec: &OcppSpec, verb: &str) -> String {
     }
 }
 
+/// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
 fn entry_sort_key<V: ServerVersion>(e: &Entry<V>) -> (String, bool, i64, i64) {
     (
         e.identity.clone(),
@@ -521,12 +521,10 @@ where
                     self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
-                // Rebind on the (possibly changed) endpoint. Stop first, then rebuild the
-                // backend: it holds its own copy of the spec from construction, so the listener
-                // config (endpoint, Basic Auth, TLS) would otherwise keep the pre-edit settings
-                // forever (mirrors the client view's edit path).
+                // Rebind on the (possibly changed) endpoint: the backend builds its listener
+                // config from the spec passed into `start`, so updating `self.spec` is all an
+                // edit needs.
                 let _ = self.backend.stop().await;
-                self.backend = crate::module::ocpp::server::backend::OcppServer::new(spec.clone());
                 self.spec = spec;
                 self.device = device;
                 self.device_path = path;
@@ -540,7 +538,7 @@ where
             // Auto-bind / honour `:start`.
             if self.want_running && !self.backend.is_online() {
                 let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
-                if let Err(e) = self.backend.start(handler).await {
+                if let Err(e) = self.backend.start(&self.spec, handler).await {
                     self.log.write().await.write(&format!("listen failed: {e}"));
                     self.want_running = false;
                 }
@@ -590,7 +588,7 @@ where
                 "start" => {
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
-                    match self.backend.start(handler).await {
+                    match self.backend.start(&self.spec, handler).await {
                         Ok(()) => {
                             CommandResult::Handled(Some(started_message(&self.spec, "started")))
                         }
@@ -614,7 +612,7 @@ where
                     self.clear_lua_states();
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
-                    match self.backend.start(handler).await {
+                    match self.backend.start(&self.spec, handler).await {
                         Ok(()) => {
                             CommandResult::Handled(Some(started_message(&self.spec, "restarted")))
                         }

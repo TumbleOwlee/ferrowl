@@ -154,17 +154,17 @@ pub(crate) fn now_ms() -> u64 {
 }
 
 /// The version-generic charging-station backend owned by a client view.
+/// Deliberately holds no copy of the module spec: the connection config is built from the spec
+/// the view passes into each [`start`](Self::start) call (see the CSMS backend for the rationale).
 pub struct OcppClient<V: Version> {
-    spec: OcppSpec,
     client: Option<Client<V>>,
     online: Arc<AtomicBool>,
     messages: Messages,
 }
 
 impl<V: Version> OcppClient<V> {
-    pub fn new(spec: OcppSpec) -> Self {
+    pub fn new() -> Self {
         Self {
-            spec,
             client: None,
             online: Arc::new(AtomicBool::new(false)),
             messages: Arc::new(RwLock::new(Vec::new())),
@@ -200,7 +200,13 @@ impl<V: Version> OcppClient<V> {
     }
 
     /// Dial the CSMS and spawn the client task, using the caller-supplied inbound handler.
-    pub async fn start<H: CsActionHandler<V>>(&mut self, handler: H) -> Result<(), Error> {
+    /// The connection config is built from the caller's `spec` on every call — the backend holds
+    /// no copy, so an edited endpoint/security section always takes effect on the next start.
+    pub async fn start<H: CsActionHandler<V>>(
+        &mut self,
+        spec: &OcppSpec,
+        handler: H,
+    ) -> Result<(), Error> {
         if self.client.is_some() {
             // Already connected: nothing to do. But if the websocket dropped without an explicit
             // `stop` the handle is stale (task dead, `online` already false) — tear it down so we
@@ -211,10 +217,10 @@ impl<V: Version> OcppClient<V> {
             let _ = self.stop().await;
         }
         let config = Config {
-            url: self.spec.url(),
-            timeout_ms: self.spec.timeout_ms.unwrap_or(30_000),
-            basic_auth: self.spec.security.basic_auth(),
-            tls: self.spec.security.cs_tls(),
+            url: spec.url(),
+            timeout_ms: spec.timeout_ms.unwrap_or(30_000),
+            basic_auth: spec.security.basic_auth(),
+            tls: spec.security.cs_tls(),
         };
         let log = log_fn(self.messages.clone());
         let client = ClientBuilder::<V>::new(config).spawn(handler, log).await?;

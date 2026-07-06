@@ -561,7 +561,7 @@ impl<V: ClientVersion> ClientView<V> {
         let mut view = Self {
             device_path,
             device,
-            backend: OcppClient::new(spec.clone()),
+            backend: OcppClient::new(),
             state,
             log: Arc::new(AsyncRwLock::new(LogRing::init())),
             conn_table: render::conn_table(conn_rows),
