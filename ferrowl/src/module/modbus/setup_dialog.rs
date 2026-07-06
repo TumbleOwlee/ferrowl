@@ -28,6 +28,7 @@ use ratatui::{
 
 use crate::config::device::ReadRanges;
 use crate::config::{DeviceConfig, Endpoint, Role};
+use crate::dialog::NonEmpty;
 use crate::dialog::path_suggest::FsPathProvider;
 
 use super::build::Timing;
@@ -187,7 +188,7 @@ impl Validate for ConfigPath {
 #[derive(Builder, Focus)]
 pub struct SetupDialog {
     #[focus]
-    pub name: Widget<InputFieldState, InputField<String>>,
+    pub name: Widget<InputFieldState, InputField<NonEmpty>>,
     #[focus]
     pub config_path:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,

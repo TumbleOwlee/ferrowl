@@ -24,6 +24,7 @@ use ratatui::{
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
 
+use crate::dialog::NonEmpty;
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
@@ -183,7 +184,7 @@ impl Validate for ConfigPath {
 #[derive(Builder, Focus)]
 pub struct OcppSetupDialog {
     #[focus]
-    pub name: Widget<InputFieldState, InputField<String>>,
+    pub name: Widget<InputFieldState, InputField<NonEmpty>>,
     /// Path to the OCPP device-config file (empty = a fresh, empty device config).
     #[focus]
     pub config_path:
@@ -216,23 +217,24 @@ pub struct OcppSetupDialog {
     pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     /// Server role only: certificate chain presented to connecting clients.
     #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Server})]
-    pub cert_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    pub cert_file:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Server role only: private key matching `cert_file`.
     #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Server})]
-    pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Client role only: client certificate presented for mutual TLS.
     #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Client})]
     pub client_cert_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Client role only: private key matching `client_cert_file`.
     #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Client})]
     pub client_key_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Server role only: CA used to verify client certificates (selecting mTLS as server implies
     /// `require_client_cert = true` in the resolved config).
     #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Server})]
     pub client_ca_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
 }
