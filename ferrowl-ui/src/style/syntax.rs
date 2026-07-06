@@ -1,7 +1,7 @@
+use crate::COLOR_SCHEME;
 use derive_builder::Builder;
 use ferrowl_syntax::SyntaxKind;
 use getset::{CopyGetters, Getters, Setters};
-use crate::COLOR_SCHEME;
 use ratatui::style::Style;
 
 /// Styles mapping [`SyntaxKind`] to colors for [`CodeInputField`](crate::widgets::CodeInputField) syntax highlighting.
