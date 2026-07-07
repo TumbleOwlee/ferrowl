@@ -665,13 +665,27 @@ impl SetupDialog {
         }
 
         {
-            let [timeout_area, delay_area, interval_area, reconnect_area] = Layout::horizontal([
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-            ])
-            .areas(rows[idx]);
+            // Client: timeout | delay | interval | reconnect. Server hides reconnect, so the
+            // remaining three widen to thirds instead of leaving a blank quarter.
+            let is_client = self.role.state.get_value() == Role::Client;
+            let (timeout_area, delay_area, interval_area, reconnect_area) = if is_client {
+                let [t, d, i, r] = Layout::horizontal([
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                ])
+                .areas(rows[idx]);
+                (t, d, i, Some(r))
+            } else {
+                let [t, d, i] = Layout::horizontal([
+                    Constraint::Percentage(34),
+                    Constraint::Percentage(33),
+                    Constraint::Percentage(33),
+                ])
+                .areas(rows[idx]);
+                (t, d, i, None)
+            };
             idx += 1;
             StatefulWidget::render(
                 &self.timeout.widget,
@@ -686,7 +700,7 @@ impl SetupDialog {
                 buf,
                 &mut self.interval.state,
             );
-            if self.role.state.get_value() == Role::Client {
+            if let Some(reconnect_area) = reconnect_area {
                 StatefulWidget::render(
                     &self.reconnect.widget,
                     reconnect_area,

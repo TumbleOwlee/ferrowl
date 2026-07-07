@@ -822,10 +822,14 @@ impl OcppSetupDialog {
                     &mut self.skip_verify.state,
                 );
             } else {
-                let [sec, _] =
-                    Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)])
-                        .areas(rows[4]);
-                StatefulWidget::render(&self.security.widget, sec, buf, &mut self.security.state);
+                // Server without credential fields: the selection is the row's only widget,
+                // so it takes the full width instead of leaving two thirds blank.
+                StatefulWidget::render(
+                    &self.security.widget,
+                    rows[4],
+                    buf,
+                    &mut self.security.state,
+                );
             }
         }
 
