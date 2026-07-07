@@ -15,7 +15,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
 use ferrowl_syntax::Language;
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    COLOR_SCHEME, EventResult,
     state::{
         ButtonState, CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState,
         SelectionState, SelectionStateBuilder, TableState,
@@ -421,6 +421,16 @@ impl ActionDialog {
             return None;
         }
 
+        // The vim-modal JSON editor must see keys before the dialog: in Insert mode it
+        // consumes Esc (back to Normal), Enter (newline), and Tab/BackTab (indent/dedent);
+        // only keys it leaves unhandled fall through to dialog handling below.
+        if self.json_mode
+            && self.focus == Focus::Fields
+            && let EventResult::Consumed = self.json.state.handle_events(modifiers, code)
+        {
+            return None;
+        }
+
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => return Some(ActionResult::Close),
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
@@ -428,9 +438,6 @@ impl ActionDialog {
             (KeyModifiers::NONE, KeyCode::Enter) => match self.focus {
                 Focus::Toggle => self.toggle_mode(),
                 Focus::Send => return Some(ActionResult::Send(self.payload())),
-                Focus::Fields if self.json_mode => {
-                    let _ = self.json.state.handle_events(modifiers, code);
-                }
                 Focus::Fields => self.open_editor(),
             },
             // `c` toggles compact rows while the property table is focused (JSON mode keeps `c` as
@@ -440,13 +447,11 @@ impl ActionDialog {
             {
                 self.toggle_compact()
             }
+            // JSON-mode field keys were already offered to the editor above; anything
+            // reaching this arm was left unhandled by it.
             _ => {
-                if self.focus == Focus::Fields {
-                    if self.json_mode {
-                        let _ = self.json.state.handle_events(modifiers, code);
-                    } else {
-                        let _ = self.table.state.handle_events(modifiers, code);
-                    }
+                if self.focus == Focus::Fields && !self.json_mode {
+                    let _ = self.table.state.handle_events(modifiers, code);
                 }
             }
         }

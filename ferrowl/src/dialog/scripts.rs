@@ -177,6 +177,17 @@ impl ScriptDialog {
             return false;
         }
 
+        // The vim-modal code editor must see keys before the dialog: in Insert mode it
+        // consumes Esc (back to Normal) and Tab/BackTab (indent/dedent); only keys it
+        // leaves unhandled (e.g. Esc/Tab in Normal mode) fall through to dialog handling.
+        if self.focus == ScriptDialogFocus::Code
+            && let ferrowl_ui::EventResult::Consumed =
+                self.code.state.handle_events(modifiers, code)
+        {
+            self.flush_code_to_selection();
+            return false;
+        }
+
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => return true,
             (KeyModifiers::NONE, KeyCode::Tab) => {
@@ -211,10 +222,9 @@ impl ScriptDialog {
                         let _ = self.name_input.state.handle_events(modifiers, code);
                     }
                 },
-                ScriptDialogFocus::Code => {
-                    let _ = self.code.state.handle_events(modifiers, code);
-                    self.flush_code_to_selection();
-                }
+                // Code-focus keys were already offered to the editor above; anything
+                // reaching this arm was left unhandled by it.
+                ScriptDialogFocus::Code => {}
             },
         }
         false

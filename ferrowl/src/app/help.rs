@@ -33,6 +33,19 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
+        title: "Code editor (vim)",
+        keys: &[
+            ("Esc", "Normal mode (again: close dialog)"),
+            ("i a I A o O", "enter Insert mode"),
+            ("h j k l, w b e, 0 $, gg G", "move"),
+            ("v / V", "Visual / Visual-Line mode"),
+            ("y / d", "yank / delete (line: yy dd, char: x)"),
+            ("p / P", "paste after / before"),
+            ("u", "undo last change"),
+            ("Tab / Shift+Tab", "indent / dedent (Insert mode)"),
+        ],
+    },
+    HelpSection {
         title: "Tables",
         keys: &[
             ("j/k or Up/Down", "row up / down"),
