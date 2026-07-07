@@ -100,7 +100,7 @@ fn render_help(
     let make_line = |(key, desc): (&str, &str)| {
         Line::from(vec![
             Span::styled(
-                format!("  {key:<22}"),
+                format!("  {key:<30}"),
                 Style::default()
                     .fg(COLOR_SCHEME.hi)
                     .bg(COLOR_SCHEME.bg)
@@ -138,7 +138,7 @@ fn render_help(
         lines.extend(keys.iter().map(|k| make_line((k.name, k.description))));
     }
 
-    let popup_w = 64.min(area.width);
+    let popup_w = 75.min(area.width);
     let popup_h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
     let [_, mid, _] = Layout::horizontal([
         Constraint::Min(1),
