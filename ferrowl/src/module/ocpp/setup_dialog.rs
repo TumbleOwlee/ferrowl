@@ -71,6 +71,20 @@ impl ToLabel for SkipVerifyChoice {
     }
 }
 
+/// Raw text of every security input field, passed by name so the many look-alike path fields
+/// cannot be transposed at a call site (a swapped positional pair would compile and only fail at
+/// TLS-handshake time).
+pub struct SecurityInputs<'a> {
+    pub username: &'a str,
+    pub password: &'a str,
+    pub ca_file: &'a str,
+    pub cert_file: &'a str,
+    pub key_file: &'a str,
+    pub client_cert_file: &'a str,
+    pub client_key_file: &'a str,
+    pub client_ca_file: &'a str,
+}
+
 impl SecurityLevel {
     /// Infer the level an existing [`OcppSecurityConfig`] represents, by role. Precedence (highest
     /// first): client cert (client) / require-client-cert or client CA (server) → `MutualTls`;
@@ -105,19 +119,17 @@ impl SecurityLevel {
     /// Build the resolved [`OcppSecurityConfig`] for this level/role from raw field text, so a
     /// field not visible at this level/role (e.g. `client_cert_file` at `Tls`) is dropped rather
     /// than smuggled through from a stale input.
-    #[allow(clippy::too_many_arguments)]
-    pub fn build_config(
-        self,
-        role: OcppRole,
-        username: &str,
-        password: &str,
-        ca_file: &str,
-        cert_file: &str,
-        key_file: &str,
-        client_cert_file: &str,
-        client_key_file: &str,
-        client_ca_file: &str,
-    ) -> OcppSecurityConfig {
+    pub fn build_config(self, role: OcppRole, inputs: SecurityInputs<'_>) -> OcppSecurityConfig {
+        let SecurityInputs {
+            username,
+            password,
+            ca_file,
+            cert_file,
+            key_file,
+            client_cert_file,
+            client_key_file,
+            client_ca_file,
+        } = inputs;
         let opt = |s: &str| {
             let t = s.trim();
             (!t.is_empty()).then(|| t.to_string())
@@ -227,43 +239,51 @@ pub struct OcppSetupDialog {
     #[focus(when = {self.role.get_value() == OcppRole::Client})]
     pub path: Widget<InputFieldState, InputField<String>>,
     /// Transport security level, offered only for `wss://`.
-    #[focus(when = {self.wss()})]
+    #[focus(when = {self.show_security()})]
     pub security: Widget<SelectionState<SecurityLevel>, Selection<SecurityLevel>>,
     /// Basic Auth username. Note: rendered as plain text — no masked-input widget exists yet.
-    #[focus(when = {self.wss() && self.level() >= SecurityLevel::BasicAuth})]
+    #[focus(when = {self.show_credentials()})]
     pub username: Widget<InputFieldState, InputField<String>>,
     /// Basic Auth password. Note: rendered as plain text (no masking) — same limitation as
     /// `username`; the field is not obscured on screen.
-    #[focus(when = {self.wss() && self.level() >= SecurityLevel::BasicAuth})]
+    #[focus(when = {self.show_credentials()})]
     pub password: Widget<InputFieldState, InputField<String>>,
     /// Client role only: accept any server certificate without authenticating it. Orthogonal to
     /// `security` (shown at every level once `wss://` + client are selected) — needed to talk to
     /// a server-role CSMS whose certificate is regenerated (and thus unpinnable) at each start.
-    #[focus(when = {self.wss() && self.role.get_value() == OcppRole::Client})]
+    #[focus(when = {self.show_skip_verify()})]
     pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
     /// Client role only: extra trust anchor for a self-signed CSMS certificate.
-    #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Client})]
+    #[focus(when = {self.show_ca_file()})]
     pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     /// Server role only: certificate chain presented to connecting clients.
-    #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Server})]
+    #[focus(when = {self.show_server_cert()})]
     pub cert_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Server role only: private key matching `cert_file`.
-    #[focus(when = {self.wss() && self.level() >= SecurityLevel::Tls && self.role.get_value() == OcppRole::Server})]
+    #[focus(when = {self.show_server_cert()})]
     pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Client role only: client certificate presented for mutual TLS.
-    #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Client})]
+    #[focus(when = {self.show_client_cert()})]
     pub client_cert_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Client role only: private key matching `client_cert_file`.
-    #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Client})]
+    #[focus(when = {self.show_client_cert()})]
     pub client_key_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     /// Server role only: CA used to verify client certificates (selecting mTLS as server implies
     /// `require_client_cert = true` in the resolved config).
-    #[focus(when = {self.wss() && self.level() == SecurityLevel::MutualTls && self.role.get_value() == OcppRole::Server})]
+    #[focus(when = {self.show_client_ca()})]
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
+    /// Security section the dialog was opened with (`edit`; `Default` for a fresh dialog).
+    /// [`resolve`](Self::resolve) returns it untouched while the protocol is `ws`: the security
+    /// UI is hidden then, and a hidden section must never clobber a config-file-only setup
+    /// (Basic Auth over plain ws is valid and file-only).
+    pub preserved_security: OcppSecurityConfig,
+    /// `Path::exists` results with a timestamp, so the per-tick live validation does not stat
+    /// the filesystem on every redraw (see [`path_exists`](Self::path_exists)).
+    pub fs_cache: std::cell::RefCell<std::collections::HashMap<String, (bool, std::time::Instant)>>,
     pub error: Widget<String, Text>,
     /// One-line info hint shown when a server-role `wss://` instance is below the TLS level (an
     /// ephemeral self-signed certificate will be generated at each start). Not a focusable field.
@@ -356,6 +376,8 @@ impl OcppSetupDialog {
                 &input_style,
                 cert_provider(),
             ))
+            .preserved_security(OcppSecurityConfig::default())
+            .fs_cache(Default::default())
             .error(text(TextStyle {
                 general: ratatui::prelude::Style::default()
                     .fg(COLOR_SCHEME.error)
@@ -431,6 +453,7 @@ impl OcppSetupDialog {
             &mut d.client_ca_file,
             spec.security.client_ca_file.as_deref().unwrap_or(""),
         );
+        d.preserved_security = spec.security.clone();
         d
     }
 
@@ -474,14 +497,16 @@ impl OcppSetupDialog {
             let level = self.security.get_value();
             let mut cfg = level.build_config(
                 role,
-                self.username.state.input(),
-                self.password.state.input(),
-                self.ca_file.state.input(),
-                self.cert_file.state.input(),
-                self.key_file.state.input(),
-                self.client_cert_file.state.input(),
-                self.client_key_file.state.input(),
-                self.client_ca_file.state.input(),
+                SecurityInputs {
+                    username: self.username.state.input(),
+                    password: self.password.state.input(),
+                    ca_file: self.ca_file.state.input(),
+                    cert_file: self.cert_file.state.input(),
+                    key_file: self.key_file.state.input(),
+                    client_cert_file: self.client_cert_file.state.input(),
+                    client_key_file: self.client_key_file.state.input(),
+                    client_ca_file: self.client_ca_file.state.input(),
+                },
             );
             // Below TLS, a wss server generates an ephemeral self-signed certificate at each
             // start rather than binding plain TCP; Tls/mTLS still require real cert/key files
@@ -492,10 +517,12 @@ impl OcppSetupDialog {
             if role == OcppRole::Client {
                 cfg.insecure_skip_verify = self.skip_verify.get_value() == SkipVerifyChoice::On;
             }
-            validate_security(&cfg, role, level)?;
+            validate_security(&cfg, role, level, &|p| self.path_exists(p))?;
             cfg
         } else {
-            OcppSecurityConfig::default()
+            // The security UI is hidden for ws, so hand back whatever the dialog was opened
+            // with: an edit round-trip must not wipe a config-file-only security section.
+            self.preserved_security.clone()
         };
 
         Ok(OcppSpec {
@@ -532,6 +559,87 @@ impl OcppSetupDialog {
         self.security.get_value()
     }
 
+    // --- Security-field visibility -----------------------------------------------------------
+    // Single source of truth consumed by the `#[focus(when)]` gates, the render branches and the
+    // dialog-height computation, so keyboard focus, painting and layout can never disagree about
+    // which fields exist.
+
+    /// The security-level selection row (any wss endpoint).
+    fn show_security(&self) -> bool {
+        self.wss()
+    }
+
+    /// Basic Auth credential inputs (wss at Basic Auth level or above).
+    fn show_credentials(&self) -> bool {
+        self.wss() && self.level() >= SecurityLevel::BasicAuth
+    }
+
+    /// The client-side skip-verify toggle (any wss client, orthogonal to the level).
+    fn show_skip_verify(&self) -> bool {
+        self.wss() && self.role.get_value() == OcppRole::Client
+    }
+
+    /// Client trust-anchor input (wss client at TLS level or above).
+    fn show_ca_file(&self) -> bool {
+        self.wss()
+            && self.level() >= SecurityLevel::Tls
+            && self.role.get_value() == OcppRole::Client
+    }
+
+    /// Server certificate/key inputs (wss server at TLS level or above).
+    fn show_server_cert(&self) -> bool {
+        self.wss()
+            && self.level() >= SecurityLevel::Tls
+            && self.role.get_value() == OcppRole::Server
+    }
+
+    /// Client mTLS certificate/key inputs.
+    fn show_client_cert(&self) -> bool {
+        self.wss()
+            && self.level() == SecurityLevel::MutualTls
+            && self.role.get_value() == OcppRole::Client
+    }
+
+    /// Server mTLS client-CA input.
+    fn show_client_ca(&self) -> bool {
+        self.wss()
+            && self.level() == SecurityLevel::MutualTls
+            && self.role.get_value() == OcppRole::Server
+    }
+
+    /// First certificate row: server cert/key, or the client trust anchor.
+    fn show_cert_row_a(&self) -> bool {
+        self.show_ca_file() || self.show_server_cert()
+    }
+
+    /// Second certificate row: client mTLS cert/key, or the server client-CA.
+    fn show_cert_row_b(&self) -> bool {
+        self.show_client_cert() || self.show_client_ca()
+    }
+
+    /// Cached `Path::exists` with a short TTL: `render` re-runs `resolve` (and so the security
+    /// validation) on every 100ms tick, and stat-ing configured certificate paths each tick is
+    /// wasted I/O — and visibly laggy on network filesystems. One second of staleness is
+    /// imperceptible next to typing latency.
+    fn path_exists(&self, path: &str) -> bool {
+        const TTL: std::time::Duration = std::time::Duration::from_secs(1);
+        let now = std::time::Instant::now();
+        let mut cache = self.fs_cache.borrow_mut();
+        if let Some((hit, at)) = cache.get(path)
+            && now.duration_since(*at) < TTL
+        {
+            return *hit;
+        }
+        let exists = std::path::Path::new(path).exists();
+        cache.insert(path.to_string(), (exists, now));
+        exists
+    }
+
+    /// The self-signed hint line (wss server below TLS level).
+    fn show_hint(&self) -> bool {
+        self.wss() && self.role.get_value() == OcppRole::Server && self.level() < SecurityLevel::Tls
+    }
+
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self.resolve() {
             Ok(_) => self.error.state.clear(),
@@ -540,14 +648,13 @@ impl OcppSetupDialog {
 
         let has_error = !self.error.state.is_empty();
         let role = self.role.get_value();
-        let wss = self.wss();
-        let level = self.level();
-        let show_security_row = wss;
-        let show_cert_a = wss && level >= SecurityLevel::Tls;
-        let show_cert_b = wss && level == SecurityLevel::MutualTls;
-        // Server + wss below TLS: an ephemeral self-signed certificate is generated at each
-        // start instead of refusing to bind — surface that as a one-line hint.
-        let show_hint = wss && role == OcppRole::Server && level < SecurityLevel::Tls;
+        let show_security_row = self.show_security();
+        let show_credentials = self.show_credentials();
+        let show_server_cert = self.show_server_cert();
+        let show_client_ca = self.show_client_ca();
+        let show_cert_a = self.show_cert_row_a();
+        let show_cert_b = self.show_cert_row_b();
+        let show_hint = self.show_hint();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
         // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
@@ -644,7 +751,7 @@ impl OcppSetupDialog {
 
         let is_client = role == OcppRole::Client;
         if show_security_row {
-            if level >= SecurityLevel::BasicAuth {
+            if show_credentials {
                 if is_client {
                     let [sec, user, pass, skip] = Layout::horizontal([
                         Constraint::Percentage(25),
@@ -728,66 +835,46 @@ impl OcppSetupDialog {
         }
 
         if show_cert_a {
-            match role {
-                OcppRole::Server => {
-                    let [left, right] = Layout::horizontal([
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(50),
-                    ])
-                    .areas(rows[6]);
-                    StatefulWidget::render(
-                        &self.cert_file.widget,
-                        left,
-                        buf,
-                        &mut self.cert_file.state,
-                    );
-                    StatefulWidget::render(
-                        &self.key_file.widget,
-                        right,
-                        buf,
-                        &mut self.key_file.state,
-                    );
-                }
-                OcppRole::Client => {
-                    StatefulWidget::render(
-                        &self.ca_file.widget,
-                        rows[6],
-                        buf,
-                        &mut self.ca_file.state,
-                    );
-                }
+            if show_server_cert {
+                let [left, right] =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .areas(rows[6]);
+                StatefulWidget::render(
+                    &self.cert_file.widget,
+                    left,
+                    buf,
+                    &mut self.cert_file.state,
+                );
+                StatefulWidget::render(&self.key_file.widget, right, buf, &mut self.key_file.state);
+            } else {
+                StatefulWidget::render(&self.ca_file.widget, rows[6], buf, &mut self.ca_file.state);
             }
         }
 
         if show_cert_b {
-            match role {
-                OcppRole::Client => {
-                    let [left, right] = Layout::horizontal([
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(50),
-                    ])
-                    .areas(rows[7]);
-                    StatefulWidget::render(
-                        &self.client_cert_file.widget,
-                        left,
-                        buf,
-                        &mut self.client_cert_file.state,
-                    );
-                    StatefulWidget::render(
-                        &self.client_key_file.widget,
-                        right,
-                        buf,
-                        &mut self.client_key_file.state,
-                    );
-                }
-                OcppRole::Server => {
-                    StatefulWidget::render(
-                        &self.client_ca_file.widget,
-                        rows[7],
-                        buf,
-                        &mut self.client_ca_file.state,
-                    );
-                }
+            if show_client_ca {
+                StatefulWidget::render(
+                    &self.client_ca_file.widget,
+                    rows[7],
+                    buf,
+                    &mut self.client_ca_file.state,
+                );
+            } else {
+                let [left, right] =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .areas(rows[7]);
+                StatefulWidget::render(
+                    &self.client_cert_file.widget,
+                    left,
+                    buf,
+                    &mut self.client_cert_file.state,
+                );
+                StatefulWidget::render(
+                    &self.client_key_file.widget,
+                    right,
+                    buf,
+                    &mut self.client_key_file.state,
+                );
             }
         }
 
@@ -833,9 +920,10 @@ fn validate_security(
     cfg: &OcppSecurityConfig,
     role: OcppRole,
     level: SecurityLevel,
+    file_exists: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     let exists = |label: &str, path: &str| -> Result<(), String> {
-        if !std::path::Path::new(path).exists() {
+        if !file_exists(path) {
             return Err(format!("{label} not found: {path}"));
         }
         Ok(())
@@ -1156,14 +1244,16 @@ mod tests {
     fn ut_build_config_drops_fields_not_visible_at_level() {
         let cfg = SecurityLevel::BasicAuth.build_config(
             OcppRole::Server,
-            "u",
-            "p",
-            "ca",
-            "cert",
-            "key",
-            "ccert",
-            "ckey",
-            "cca",
+            SecurityInputs {
+                username: "u",
+                password: "p",
+                ca_file: "ca",
+                cert_file: "cert",
+                key_file: "key",
+                client_cert_file: "ccert",
+                client_key_file: "ckey",
+                client_ca_file: "cca",
+            },
         );
         assert_eq!(cfg.username.as_deref(), Some("u"));
         assert_eq!(cfg.password.as_deref(), Some("p"));
@@ -1177,14 +1267,16 @@ mod tests {
     fn ut_build_config_tls_server_keeps_cert_key_not_client_fields() {
         let cfg = SecurityLevel::Tls.build_config(
             OcppRole::Server,
-            "",
-            "",
-            "ca",
-            "cert",
-            "key",
-            "ccert",
-            "ckey",
-            "cca",
+            SecurityInputs {
+                username: "",
+                password: "",
+                ca_file: "ca",
+                cert_file: "cert",
+                key_file: "key",
+                client_cert_file: "ccert",
+                client_key_file: "ckey",
+                client_ca_file: "cca",
+            },
         );
         assert_eq!(cfg.cert_file.as_deref(), Some("cert"));
         assert_eq!(cfg.key_file.as_deref(), Some("key"));
@@ -1196,14 +1288,16 @@ mod tests {
     fn ut_build_config_mutual_tls_server_sets_require_client_cert() {
         let cfg = SecurityLevel::MutualTls.build_config(
             OcppRole::Server,
-            "",
-            "",
-            "",
-            "cert",
-            "key",
-            "",
-            "",
-            "cca",
+            SecurityInputs {
+                username: "",
+                password: "",
+                ca_file: "",
+                cert_file: "cert",
+                key_file: "key",
+                client_cert_file: "",
+                client_key_file: "",
+                client_ca_file: "cca",
+            },
         );
         assert_eq!(cfg.client_ca_file.as_deref(), Some("cca"));
         assert!(cfg.require_client_cert);
@@ -1214,20 +1308,48 @@ mod tests {
     fn ut_build_config_mutual_tls_client_keeps_client_cert_key() {
         let cfg = SecurityLevel::MutualTls.build_config(
             OcppRole::Client,
-            "",
-            "",
-            "ca",
-            "",
-            "",
-            "ccert",
-            "ckey",
-            "",
+            SecurityInputs {
+                username: "",
+                password: "",
+                ca_file: "ca",
+                cert_file: "",
+                key_file: "",
+                client_cert_file: "ccert",
+                client_key_file: "ckey",
+                client_ca_file: "",
+            },
         );
         assert_eq!(cfg.ca_file.as_deref(), Some("ca"));
         assert_eq!(cfg.client_cert_file.as_deref(), Some("ccert"));
         assert_eq!(cfg.client_key_file.as_deref(), Some("ckey"));
         assert_eq!(cfg.client_ca_file, None); // server-only field
         assert!(!cfg.require_client_cert);
+    }
+
+    // Regression: editing a ws module whose device file carries a security section (Basic Auth
+    // over plain ws is valid, config-file-only) must hand that section back unchanged — the
+    // security UI is hidden for ws, and a hidden section must never clobber the file.
+    #[test]
+    fn ut_resolve_ws_preserves_prefilled_security() {
+        let security = OcppSecurityConfig {
+            username: Some("cp001".into()),
+            password: Some("secret".into()),
+            ..Default::default()
+        };
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            security: security.clone(),
+        };
+        let d = OcppSetupDialog::edit(&spec, "");
+        let resolved = d.resolve().expect("ws edit resolves");
+        assert_eq!(resolved.security, security);
     }
 
     // --- dialog-level validation ---------------------------------------------------------------

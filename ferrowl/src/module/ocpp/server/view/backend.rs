@@ -12,10 +12,10 @@ use ferrowl_ocpp::csms::ConnectionId;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::merge_overrides;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
-use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
+use crate::module::ocpp::config::session::OcppRole;
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::server::backend::{
-    Scope, ServerEvent, inbound_messages, with_rfids, with_rfids_mut,
+    Scope, ServerEvent, TlsBinding, inbound_messages, with_rfids, with_rfids_mut,
 };
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::lua::run_server_sim;
@@ -25,15 +25,14 @@ use super::{
     Entry, EntryState, EntryStateT, ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
 };
 
-/// The start/restart log line, noting the ephemeral self-signed fallback when the wss endpoint
-/// runs without configured TLS material (see [`OcppSpec::effective_csms_tls`]).
-fn started_message(spec: &OcppSpec, verb: &str) -> String {
-    if spec.csms_self_signed_fallback() {
-        format!(
+/// The start/restart log line, built from the TLS mode the backend reports it actually bound
+/// with — no re-derivation from the spec that could drift out of sync with the listener.
+fn started_message(binding: TlsBinding, verb: &str) -> String {
+    match binding {
+        TlsBinding::SelfSigned => format!(
             "CSMS server {verb} (wss without certificates: using an ephemeral self-signed certificate)"
-        )
-    } else {
-        format!("CSMS server {verb}")
+        ),
+        TlsBinding::Plain | TlsBinding::Certificates => format!("CSMS server {verb}"),
     }
 }
 
@@ -589,8 +588,8 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
-                        Ok(()) => {
-                            CommandResult::Handled(Some(started_message(&self.spec, "started")))
+                        Ok(binding) => {
+                            CommandResult::Handled(Some(started_message(binding, "started")))
                         }
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
                     }
@@ -613,8 +612,8 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
-                        Ok(()) => {
-                            CommandResult::Handled(Some(started_message(&self.spec, "restarted")))
+                        Ok(binding) => {
+                            CommandResult::Handled(Some(started_message(binding, "restarted")))
                         }
                         Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
                     }

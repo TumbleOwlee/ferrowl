@@ -151,6 +151,16 @@ pub fn scope_authorized(store: &RfidLists, scope: Scope, id_tag: &str) -> bool {
     })
 }
 
+/// Which TLS mode a [`OcppServer::start`] actually bound with — returned so the caller's log
+/// line reports the listener's real state instead of re-deriving (and possibly mispredicting)
+/// it from the spec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TlsBinding {
+    Plain,
+    SelfSigned,
+    Certificates,
+}
+
 /// The version-generic CSMS backend owned by a server view.
 ///
 /// Deliberately holds no copy of the module spec: the listener config is built from the spec the
@@ -183,25 +193,33 @@ where
         &mut self,
         spec: &OcppSpec,
         handler: H,
-    ) -> Result<(), Error> {
+    ) -> Result<TlsBinding, Error> {
+        // A wss endpoint without configured TLS material falls back to an ephemeral
+        // self-signed certificate instead of silently binding plain TCP.
+        let tls = spec.effective_csms_tls();
+        let binding = match &tls {
+            None => TlsBinding::Plain,
+            Some(cfg) => match cfg.mode {
+                ferrowl_ocpp::CsmsTlsMode::SelfSigned => TlsBinding::SelfSigned,
+                ferrowl_ocpp::CsmsTlsMode::Files { .. } => TlsBinding::Certificates,
+            },
+        };
         if self.server.is_some() {
-            return Ok(());
+            return Ok(binding);
         }
         let config = Config {
             host: spec.ip.clone(),
             port: spec.port,
             timeout_ms: spec.timeout_ms.unwrap_or(30_000),
             basic_auth: spec.security.basic_auth(),
-            // A wss endpoint without configured TLS material falls back to an ephemeral
-            // self-signed certificate instead of silently binding plain TCP.
-            tls: spec.effective_csms_tls(),
+            tls,
         };
         let server = ServerBuilder::<V>::new(config)
             .spawn(handler, |_s: String| async {})
             .await?;
         self.server = Some(server);
         self.online.store(true, Ordering::Relaxed);
-        Ok(())
+        Ok(binding)
     }
 
     /// Terminate the server task and every connection, if running.
