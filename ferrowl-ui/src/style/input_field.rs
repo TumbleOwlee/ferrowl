@@ -31,6 +31,9 @@ pub struct InputFieldStyle {
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.success).bg(COLOR_SCHEME.bg)")]
     pub success: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.text_hi).bg(COLOR_SCHEME.hi_bg)")]
+    pub selection: Style,
 }
 
 impl Default for InputFieldStyle {

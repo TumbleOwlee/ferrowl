@@ -89,8 +89,19 @@ impl StatefulWidget for &CodeInputField {
                 self.style.border
             };
             let mut block = Block::bordered().style(border_style);
-            if let Some(t) = self.title.as_ref() {
-                block = block.title(t.name.as_str()).title_alignment(t.alignment);
+            match (self.title.as_ref(), state.mode_label()) {
+                (Some(t), Some(label)) => {
+                    block = block
+                        .title(format!("{} [{}]", t.name, label))
+                        .title_alignment(t.alignment);
+                }
+                (Some(t), None) => {
+                    block = block.title(t.name.as_str()).title_alignment(t.alignment);
+                }
+                (None, Some(label)) => {
+                    block = block.title(format!("[{label}]"));
+                }
+                (None, None) => {}
             }
             let inner = block.inner(area);
             block.render(area, buf);
@@ -163,6 +174,8 @@ impl StatefulWidget for &CodeInputField {
                 spans
             });
 
+        let selection = state.selection_range();
+
         for (row, line_idx) in (scroll..scroll + visible_height).enumerate() {
             let y = area.y + row as u16;
             if line_idx >= line_count {
@@ -224,6 +237,20 @@ impl StatefulWidget for &CodeInputField {
                     .render(content_rect, buf);
             }
 
+            if let Some(((sl, sc), (el, ec))) = selection
+                && line_idx >= sl
+                && line_idx <= el
+            {
+                let line_start = if line_idx == sl { sc } else { 0 };
+                let line_end = if line_idx == el { ec + 1 } else { chars.len() };
+                let start = line_start.max(h_scroll);
+                let end = line_end.min(h_scroll + content_width).min(chars.len());
+                for col in start..end {
+                    let x = content_x + (col - h_scroll) as u16;
+                    buf[(x, y)].set_style(self.style.selection);
+                }
+            }
+
             if state.focused() && !state.disabled() && line_idx == active {
                 let cursor_in_view = cursor_col.saturating_sub(h_scroll) as u16;
                 if (cursor_in_view as usize) < content_width {
@@ -239,5 +266,139 @@ impl StatefulWidget for CodeInputField {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         StatefulWidget::render(&self, area, buf, state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::CodeInputFieldStateBuilder;
+    use crate::traits::HandleEvents;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn full_border() -> Border {
+        Border::Full(Margin::new(0, 0))
+    }
+
+    fn buffer(w: u16, h: u16) -> Buffer {
+        Buffer::empty(Rect::new(0, 0, w, h))
+    }
+
+    fn title_row(b: &Buffer, w: u16) -> String {
+        (0..w)
+            .map(|x| b[(x, 0)].symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    fn focused_vim_field_appends_mode_tag_to_title() {
+        let w = CodeInputFieldBuilder::default()
+            .border(full_border())
+            .title(Some("code".into()))
+            .build()
+            .unwrap();
+        let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert!(title_row(&b, 20).contains("code [NORMAL]"));
+    }
+
+    #[test]
+    fn unfocused_field_has_no_mode_tag() {
+        let w = CodeInputFieldBuilder::default()
+            .border(full_border())
+            .title(Some("code".into()))
+            .build()
+            .unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .focused(false)
+            .build()
+            .unwrap();
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        let row = title_row(&b, 20);
+        assert!(row.contains("code"));
+        assert!(!row.contains('['));
+    }
+
+    #[test]
+    fn mode_tag_tracks_insert_and_visual_after_events() {
+        // No configured title -> bare "[LABEL]" title.
+        let w = CodeInputFieldBuilder::default()
+            .border(full_border())
+            .build()
+            .unwrap();
+        let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+
+        st.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert!(title_row(&b, 20).contains("[INSERT]"));
+
+        st.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        st.handle_events(KeyModifiers::NONE, KeyCode::Char('v'));
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert!(title_row(&b, 20).contains("[VISUAL]"));
+    }
+
+    #[test]
+    fn selection_highlights_charwise_span_two_lines() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+        st.set_content("abcdef\nghijkl");
+        st.set_active_line(0);
+        st.set_cursor_col(2);
+        st.handle_events(KeyModifiers::NONE, KeyCode::Char('v'));
+        st.set_active_line(1);
+        st.set_cursor_col(3);
+
+        let mut b = buffer(20, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b, &mut st);
+
+        // gutter_width = "2".len() + 1 = 2.
+        let content_x = 2u16;
+        let sel = w.style().selection();
+        // Line 0: selection runs from col 2 to the end of the line.
+        for col in 2..6u16 {
+            assert_eq!(b[(content_x + col, 0)].fg, sel.fg.unwrap());
+            assert_eq!(b[(content_x + col, 0)].bg, sel.bg.unwrap());
+        }
+        assert_ne!(b[(content_x, 0)].fg, sel.fg.unwrap());
+        // Line 1: selection runs from col 0 up to (but not overwriting) the cursor at col 3.
+        for col in 0..3u16 {
+            assert_eq!(b[(content_x + col, 1)].fg, sel.fg.unwrap());
+        }
+        // The cursor cell wins over the selection highlight.
+        let cursor = w.style().cursor();
+        assert_eq!(b[(content_x + 3, 1)].fg, cursor.fg.unwrap());
+        assert_eq!(b[(content_x + 3, 1)].bg, cursor.bg.unwrap());
+    }
+
+    #[test]
+    fn selection_clips_to_h_scroll_window() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
+        st.set_content("abcdefghijklmnop");
+        st.set_cursor_col(2);
+        st.handle_events(KeyModifiers::NONE, KeyCode::Char('v'));
+        st.set_cursor_col(9);
+        st.set_h_scroll(5);
+
+        let mut b = buffer(10, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 10, 1), &mut b, &mut st);
+
+        // gutter_width = "1".len() + 1 = 2; content window covers cols [5, 13).
+        let content_x = 2u16;
+        let sel = w.style().selection();
+        // Selection cols 2..=9 clipped on the left to the h_scroll window: cols 5..9 show up.
+        for col in 5..9u16 {
+            let x = content_x + (col - 5);
+            assert_eq!(b[(x, 0)].fg, sel.fg.unwrap());
+        }
+        // The cursor sits at col 9 (last selected col) and wins over the selection style.
+        let cursor = w.style().cursor();
+        let cursor_x = content_x + (9 - 5);
+        assert_eq!(b[(cursor_x, 0)].fg, cursor.fg.unwrap());
     }
 }
