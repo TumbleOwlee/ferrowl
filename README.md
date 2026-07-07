@@ -174,6 +174,10 @@ On any exit, every module that started is stopped first (best-effort).
 
 ## Impressions
 
+All screenshots below are generated automatically by [`scripts/screenshots.py`](./scripts/screenshots.py),
+which drives `ferrowl --demo` headlessly in tmux, walks each view/dialog by keystroke, and renders the
+captured terminal content to PNG — run it after UI changes to refresh them.
+
 ### General
 
 #### Command Help
