@@ -1,6 +1,6 @@
 [package]
 name = "ferrowl-modbus"
-version = "0.4.11"
+version = "0.4.12"
 edition = "2024"
 authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
 
