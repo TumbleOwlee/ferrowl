@@ -266,6 +266,16 @@ impl SimHandle {
             let _ = handle.join();
         }
     }
+
+    /// Construct a handle from its stop flag and join handle (for sibling sim runners, e.g.
+    /// `session_sim`'s session-level runner).
+    #[allow(dead_code)]
+    pub(crate) fn from_parts(stop: Arc<AtomicBool>, handle: std::thread::JoinHandle<()>) -> Self {
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
 }
 
 impl Drop for SimHandle {

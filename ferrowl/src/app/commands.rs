@@ -118,6 +118,8 @@ impl App {
         let session = Session {
             version: Some(crate::config::VERSION.to_string()),
             modules,
+            scripts: vec![],
+            interval: 1.0,
         };
         Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))
     }

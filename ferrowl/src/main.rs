@@ -16,6 +16,7 @@ mod lua;
 mod migrate;
 mod module;
 mod registry;
+mod session_sim;
 mod view;
 
 use std::collections::BTreeMap;

@@ -2,10 +2,11 @@
 //! endpoint/role/name). Used by `--session <file>`; a single instance is also built from
 //! `--module key=val` on the CLI.
 
+use crate::config::script::ScriptDef;
 use serde::{Deserialize, Serialize};
 
 /// A pre-configured set of module instances.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     /// Ferrowl version that wrote this file, stamped on save. Enables future compatibility
     /// shims when loading configs produced by older releases.
@@ -16,6 +17,44 @@ pub struct Session {
     /// files without a `"type"` field are assumed to be `"modbus"` for compatibility.
     #[serde(default)]
     pub modules: Vec<serde_json::Value>,
+    /// Session-level Lua scripts, run in their own Lua state with `C_Module` access to every
+    /// module in the session. Older session files without this field load as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<ScriptDef>,
+    /// Session sim cycle interval in seconds. Older session files without this field load as
+    /// the default (1.0s).
+    #[serde(default = "default_interval")]
+    pub interval: f64,
+}
+
+fn default_interval() -> f64 {
+    1.0
+}
+
+impl Session {
+    /// The sim cycle interval as a `Duration`. A hand-edited file can carry a non-finite or
+    /// non-positive `interval`; those fall back to the 1.0s default instead of panicking in
+    /// `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
+    #[allow(dead_code)] // Wired up by the session-sim UI/headless integration.
+    pub fn interval_duration(&self) -> std::time::Duration {
+        let secs = if self.interval.is_finite() && self.interval > 0.0 {
+            self.interval
+        } else {
+            default_interval()
+        };
+        std::time::Duration::from_secs_f64(secs)
+    }
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self {
+            version: None,
+            modules: Vec::new(),
+            scripts: Vec::new(),
+            interval: default_interval(),
+        }
+    }
 }
 
 /// One module instance: which device type, named, with a role and an endpoint. Timing
@@ -114,6 +153,7 @@ fn default_baud() -> u32 {
 mod tests {
     use super::*;
     use ferrowl_util::convert::{Converter, FileType};
+    use std::time::Duration;
 
     fn sample_spec(name: &str, device: &str, role: Role, endpoint: Endpoint) -> serde_json::Value {
         let spec = ModuleSpec {
@@ -162,6 +202,12 @@ mod tests {
                     v
                 },
             ],
+            scripts: vec![ScriptDef {
+                name: "s1".into(),
+                code: "C_Time:Sleep(1)".into(),
+                enabled: true,
+            }],
+            interval: 2.5,
         }
     }
 
@@ -174,6 +220,30 @@ mod tests {
             Converter::save(&original, path, ty).expect("save");
             let back: Session = Converter::load(path, ty).expect("load");
             assert_eq!(original, back);
+        }
+    }
+
+    // An old-format session file (predating `scripts`/`interval`) must still load, with
+    // `scripts` defaulting to empty and `interval` to 1.0.
+    #[test]
+    fn ut_session_old_format_compat() {
+        let json = r#"{"modules":[]}"#;
+        let session: Session = serde_json::from_str(json).unwrap();
+        assert!(session.scripts.is_empty());
+        assert_eq!(session.interval, 1.0);
+    }
+
+    // A hand-edited `interval` that is NaN, negative, or zero must fall back to the 1.0s
+    // default instead of panicking or busy-waiting; a valid value converts as-is.
+    #[test]
+    fn ut_session_interval_duration_sanitized() {
+        let mut session = Session::default();
+        assert_eq!(session.interval_duration(), Duration::from_secs(1));
+        session.interval = 0.25;
+        assert_eq!(session.interval_duration(), Duration::from_millis(250));
+        for bad in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            session.interval = bad;
+            assert_eq!(session.interval_duration(), Duration::from_secs(1));
         }
     }
 

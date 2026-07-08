@@ -386,6 +386,8 @@ mod tests {
                 serde_json::to_value(create_module_spec_by_device("S".into(), "s.toml".into()))
                     .unwrap(),
             ],
+            scripts: vec![],
+            interval: 1.0,
         };
         let path = std::env::temp_dir().join("ferrowl_cli_session.toml");
         let path = path.to_str().unwrap().to_string();
@@ -428,6 +430,8 @@ mod tests {
         let session = config::Session {
             version: None,
             modules: vec![modbus, ocpp],
+            scripts: vec![],
+            interval: 1.0,
         };
         let path = std::env::temp_dir().join("ferrowl_cli_mixed_session.json");
         let path = path.to_str().unwrap().to_string();
