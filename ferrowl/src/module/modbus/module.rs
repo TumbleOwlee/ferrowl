@@ -53,7 +53,8 @@ pub struct ModbusModule {
     read_ranges: ReadRanges,
     /// Simulation cycle period, derived from the resolved `interval_ms`.
     sim_interval: Duration,
-    /// The running simulation thread, if any (started in `start`, stopped in `stop`).
+    /// The running simulation thread, if any. Runs iff at least one script is enabled
+    /// (see `ensure_sim`), independent of the network instance's start/stop state.
     sim: Option<SimHandle>,
     /// Shared values for virtual registers (no Modbus address), keyed by register name.
     virtual_values: VirtualStore,
@@ -126,7 +127,7 @@ impl ModbusModule {
         let net_config = endpoint_to_config(&spec.endpoint, &timing);
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
-        Self {
+        let mut module = Self {
             name: spec.name.clone(),
             instance,
             registers,
@@ -139,7 +140,9 @@ impl ModbusModule {
             sim_interval: Duration::from_millis(timing.interval_ms.max(1000) as u64),
             sim: None,
             virtual_values: Arc::new(RwLock::new(virtual_init)),
-        }
+        };
+        module.ensure_sim();
+        module
     }
 
     /// Resolve effective timing for an instance from the device config, falling back to the
@@ -222,14 +225,14 @@ impl ModbusModule {
     }
 
     /// Start the underlying client/server, routing its log + status into the ring log and (if
-    /// configured) the per-module log file. Also (re)starts the Lua simulation thread.
+    /// configured) the per-module log file. The Lua simulation thread is independent of network
+    /// start/stop — it runs whenever there are enabled scripts, regardless.
     pub async fn start(&mut self) -> Result<(), Error> {
         let log = self.log.clone();
         let log_sink = self.file_sink.clone();
         let status = self.log.clone();
         let status_sink = self.file_sink.clone();
-        let result = self
-            .instance
+        self.instance
             .start(
                 move |s: String| {
                     let log = log.clone();
@@ -249,19 +252,18 @@ impl ModbusModule {
                     }
                 },
             )
-            .await;
-        self.start_sim();
-        result
+            .await
     }
 
     pub async fn stop(&mut self) -> Result<(), Error> {
-        self.stop_sim();
         self.instance.stop().await
     }
 
-    /// Spawn the Lua simulation thread (no-op if there are no scripts). Any previously
-    /// running thread is stopped first so this is safe to call on restart.
-    fn start_sim(&mut self) {
+    /// (Re)start the simulation thread from a fresh register snapshot if there is at least one
+    /// enabled script; stop it otherwise. Any previously running thread is stopped first, so this
+    /// is safe to call whenever the enabled-script set may have changed (construction, script
+    /// edits) — it is the single source of truth for whether the sim runs.
+    fn ensure_sim(&mut self) {
         self.stop_sim();
         let registers: HashMap<String, Register> = self
             .registers
@@ -286,28 +288,18 @@ impl ModbusModule {
         }
     }
 
-    /// Start the Lua simulation thread (`:lua start`). No-op when there are no scripts.
-    pub fn start_lua(&mut self) {
-        self.start_sim();
-    }
-
-    /// Stop the Lua simulation thread (`:lua stop`).
-    pub fn stop_lua(&mut self) {
-        self.stop_sim();
-    }
-
-    /// Whether the Lua simulation thread is currently running.
-    pub fn lua_running(&self) -> bool {
+    /// Whether the Lua simulation thread is currently running. Test-only: no production caller
+    /// remains once the manual `:lua start|stop|status` command was removed (Stage 1b).
+    #[cfg(test)]
+    pub(crate) fn lua_running(&self) -> bool {
         self.sim.is_some()
     }
 
     /// Replace the module's script list and restart the simulation thread so the new scripts take
-    /// effect. Any previously running sim thread is stopped first.
+    /// effect (fresh Lua state — stopped if none remain enabled).
     pub fn reload_scripts(&mut self, scripts: Vec<(String, String)>) {
         self.scripts = scripts;
-        if self.sim.take().is_some() {
-            self.start_sim();
-        }
+        self.ensure_sim();
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).
@@ -318,7 +310,8 @@ impl ModbusModule {
     /// Rebuild the underlying instance for a new endpoint/role (e.g. switching client↔server),
     /// reusing the existing memory + registers. Stops the current instance first; the caller is
     /// expected to `start()` afterwards. This keeps the instance in sync with the spec so writes
-    /// dispatch correctly.
+    /// dispatch correctly. The simulation thread is left running (it's decoupled from the network
+    /// instance) but is restarted at the end so a changed sim interval takes effect.
     pub async fn reconfigure(
         &mut self,
         endpoint: &Endpoint,
@@ -326,9 +319,7 @@ impl ModbusModule {
         timing: Timing,
         read_ranges: ReadRanges,
     ) -> Result<(), Error> {
-        // Best-effort stop of any running instance and its simulation thread; the caller is
-        // expected to `start()` afterwards, which restarts the sim.
-        self.stop_sim();
+        // Best-effort stop of any running instance; the caller is expected to `start()` afterwards.
         let _ = self.instance.stop().await;
 
         // Adopt new explicit read ranges: cover their gaps in memory, then rebuild operations.
@@ -347,6 +338,7 @@ impl ModbusModule {
             self.operations.clone(),
             self.memory.clone(),
         );
+        self.ensure_sim();
         Ok(())
     }
 
@@ -506,5 +498,200 @@ mod tests {
         let module = ModbusModule::new(&spec, &device);
         assert_eq!(module.registers().len(), 2);
         assert!(!module.is_instance_active());
+    }
+
+    // --- Sim lifecycle: decoupled from network start/stop, driven only by enabled scripts. ---
+
+    /// One fixed U16 "marker" register (address 0) plus `scripts` (global Lua scripts, as loaded
+    /// from a device config's `scripts` list).
+    fn device_with_script(
+        scripts: Vec<crate::config::script::ScriptDef>,
+    ) -> crate::config::DeviceConfig {
+        use crate::config::DeviceConfig;
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
+            ValueType,
+        };
+        use std::collections::BTreeMap;
+
+        let mut definitions = BTreeMap::new();
+        definitions.insert(
+            "marker".to_string(),
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(0),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: ValueType::U16,
+                endian: EndianCfg::Big,
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![NamedValue {
+                    name: "a".into(),
+                    value: Scalar::Int(1),
+                }],
+                update: None,
+                description: "desc".into(),
+                default: Some(Scalar::Int(0)),
+            },
+        );
+
+        DeviceConfig {
+            version: None,
+            timeout_ms: Some(1000),
+            delay_ms: None,
+            // Fast sim cycle so tests don't have to wait long for a tick.
+            interval_ms: Some(50),
+            reconnect: None,
+            log_file: None,
+            read_ranges: ReadRanges {
+                holding: Some("0-10".into()),
+                ..Default::default()
+            },
+            definitions,
+            scripts,
+        }
+    }
+
+    fn script(code: &str, enabled: bool) -> crate::config::script::ScriptDef {
+        crate::config::script::ScriptDef {
+            name: "sim".to_string(),
+            code: code.to_string(),
+            enabled,
+        }
+    }
+
+    fn test_spec(name: &str, port: u16) -> crate::config::ModuleSpec {
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        ModuleSpec {
+            name: name.to_string(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+        }
+    }
+
+    /// Read the "marker" register (holding, addr 0, U16) from `module`'s memory.
+    fn read_marker(module: &super::ModbusModule) -> u16 {
+        use ferrowl_modbus::{Key, SlaveKey};
+        use ferrowl_store::{CellType, Range};
+
+        let raw = module
+            .memory()
+            .read()
+            .read(
+                Key {
+                    id: SlaveKey {
+                        slave_id: 1,
+                        kind: Kind::HoldingRegister,
+                    },
+                },
+                &CellType::Register,
+                &Range::new(0, 1),
+            )
+            .unwrap_or_default();
+        raw.first().copied().unwrap_or(0)
+    }
+
+    /// Poll `read_marker` for up to ~2s (well beyond the test device's 50ms sim interval) until it
+    /// equals `want`, to bound the wait for the sim thread's next cycle.
+    fn wait_for_marker(module: &super::ModbusModule, want: u16) -> bool {
+        for _ in 0..200 {
+            if read_marker(module) == want {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    }
+
+    #[test]
+    fn ut_sim_starts_at_construction_without_network_start() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, true)]);
+        let module = ModbusModule::new(&test_spec("sim1", 15201), &device);
+
+        // No `start()` call anywhere — the sim runs solely because a script is enabled.
+        assert!(module.lua_running());
+        assert!(wait_for_marker(&module, 7));
+    }
+
+    #[test]
+    fn ut_sim_not_started_when_no_enabled_scripts() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![]);
+        let module = ModbusModule::new(&test_spec("sim2", 15202), &device);
+        assert!(!module.lua_running());
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, false)]);
+        let module = ModbusModule::new(&test_spec("sim2b", 15203), &device);
+        assert!(!module.lua_running());
+    }
+
+    #[test]
+    fn ut_reload_scripts_all_disabled_stops_sim() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, true)]);
+        let mut module = ModbusModule::new(&test_spec("sim3", 15204), &device);
+        assert!(module.lua_running());
+
+        module.reload_scripts(vec![]); // no enabled scripts left
+        assert!(!module.lua_running());
+    }
+
+    #[test]
+    fn ut_reload_scripts_toggle_on_starts_sim() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, false)]);
+        let mut module = ModbusModule::new(&test_spec("sim4", 15205), &device);
+        assert!(!module.lua_running());
+
+        module.reload_scripts(vec![(
+            "sim".to_string(),
+            r#"C_Register:Set("marker", 7)"#.to_string(),
+        )]);
+        assert!(module.lua_running());
+        assert!(wait_for_marker(&module, 7));
+    }
+
+    #[test]
+    fn ut_reload_scripts_changed_code_takes_effect() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 1)"#, true)]);
+        let mut module = ModbusModule::new(&test_spec("sim5", 15206), &device);
+        assert!(wait_for_marker(&module, 1));
+
+        // Fresh Lua state on restart: new code takes over immediately (proves a restart, not the
+        // old thread still running the old script).
+        module.reload_scripts(vec![(
+            "sim".to_string(),
+            r#"C_Register:Set("marker", 2)"#.to_string(),
+        )]);
+        assert!(wait_for_marker(&module, 2));
+    }
+
+    #[tokio::test]
+    async fn ut_network_stop_leaves_sim_running() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, true)]);
+        let mut module = ModbusModule::new(&test_spec("sim6", 15207), &device);
+        assert!(module.lua_running());
+
+        module.start().await.expect("start");
+        assert!(module.lua_running());
+        module.stop().await.expect("stop");
+        assert!(module.lua_running());
     }
 }

@@ -543,34 +543,9 @@ impl ModuleView for ModbusModuleView {
             });
         }
 
-        // Sync commands routed via App (lua, order) — delegate to the sync inner handler.
+        // Sync commands routed via App (order) — delegate to the sync inner handler.
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         let sync_result = match parts.as_slice() {
-            ["lua", action] => {
-                let msg = match *action {
-                    "start" => {
-                        self.module.start_lua();
-                        if self.module.lua_running() {
-                            "Lua simulation started"
-                        } else {
-                            "No Lua scripts to run"
-                        }
-                    }
-                    "stop" => {
-                        self.module.stop_lua();
-                        "Lua simulation stopped"
-                    }
-                    "status" => {
-                        if self.module.lua_running() {
-                            "Lua simulation is running"
-                        } else {
-                            "Lua simulation is stopped"
-                        }
-                    }
-                    _ => return Box::pin(std::future::ready(CommandResult::Unhandled)),
-                };
-                CommandResult::Handled(Some(msg.to_string()))
-            }
             ["order"] => {
                 let original = self
                     .module
@@ -642,7 +617,7 @@ static MODBUS_KEYBINDS: [CommandDescriptor; 5] = [
     },
 ];
 
-static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
+static MODBUS_COMMANDS: [CommandDescriptor; 12] = [
     CommandDescriptor {
         name: ":e | :edit",
         description: "edit module setup",
@@ -682,10 +657,6 @@ static MODBUS_COMMANDS: [CommandDescriptor; 13] = [
     CommandDescriptor {
         name: ":log <file>",
         description: "set log file",
-    },
-    CommandDescriptor {
-        name: ":lua start|stop|status",
-        description: "lua simulation",
     },
     CommandDescriptor {
         name: ":script",
