@@ -836,6 +836,7 @@ dependencies = [
  "ferrowl-ui-derive",
  "ferrowl-util",
  "futures-util",
+ "mlua",
  "parking_lot",
  "ratatui",
  "serde",

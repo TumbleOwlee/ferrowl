@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::{ModuleView, SharedLog};
+use crate::registry::ModuleRegistry;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 
@@ -232,6 +233,9 @@ pub struct App {
     /// The `?` keybind help dialog: whether it is open and its scroll offset.
     help_open: bool,
     help_scroll: u16,
+    /// Live `C_Module` session registry, rebuilt from `tabs` whenever the tab set or a view
+    /// changes (see [`Self::rebuild_registry`]).
+    registry: ModuleRegistry,
 }
 
 impl App {
@@ -254,10 +258,31 @@ impl App {
             keymode: None,
             help_open: false,
             help_scroll: 0,
+            registry: ModuleRegistry::new(),
         };
         // Give the starting tab keyboard focus (unless a creation dialog is up).
         app.set_content_focus(app.focus == Focus::Content);
+        app.rebuild_registry();
         Ok(app)
+    }
+
+    /// Snapshot the session-level `C_Module` registry from the current tab set: `Tab::name` ->
+    /// `ModuleView::module_host`, skipping tabs whose view doesn't participate. Call whenever the
+    /// tab set or a view's identity changes (create/close/rename, session load, a `take_replacement`
+    /// swap) so `C_Module` scripts see the current modules.
+    pub(crate) fn rebuild_registry(&mut self) {
+        let modules = self
+            .tabs
+            .iter()
+            .filter_map(|tab| Some((tab.name.clone(), tab.view.module_host()?)))
+            .collect();
+        self.registry.replace_all(modules);
+    }
+
+    /// The session-level module registry, for wiring into session-level Lua sims (a later stage).
+    #[allow(dead_code)]
+    pub(crate) fn registry(&self) -> ModuleRegistry {
+        self.registry.clone()
     }
 
     /// Focus (or unfocus) the active tab's content/log panes. The single choke point for the
@@ -318,12 +343,22 @@ impl App {
         for tab in self.tabs.iter() {
             tab.log.write().await.flush();
         }
+        let mut registry_stale = false;
         for tab in self.tabs.iter_mut() {
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
             if let Some(new_view) = tab.view.take_replacement() {
                 tab.replace_view(new_view);
+                registry_stale = true;
             }
-            tab.name = tab.view.name();
+            let name = tab.view.name();
+            if name != tab.name {
+                tab.name = name;
+                registry_stale = true;
+            }
+        }
+        if registry_stale {
+            self.rebuild_registry();
+            self.warn_duplicate_tab_names().await;
         }
 
         if self.active >= self.tabs.len() {
@@ -351,6 +386,25 @@ impl App {
         tab.log_view.state.set_values(entries);
         if follow {
             tab.log_view.state.move_to_bottom();
+        }
+    }
+
+    /// Warn (into the offending tab's own log) about any tab name now shared with another tab —
+    /// e.g. after a `:edit` rename. There is no way to reject the rename after the fact (the
+    /// module already applied it), so this is a best-effort nudge rather than the hard rejection
+    /// `:new` gets in `overlay::confirm_overlay`.
+    async fn warn_duplicate_tab_names(&self) {
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for tab in &self.tabs {
+            *counts.entry(tab.name.as_str()).or_default() += 1;
+        }
+        for tab in &self.tabs {
+            if counts.get(tab.name.as_str()).copied().unwrap_or(0) > 1 {
+                tab.log
+                    .write()
+                    .await
+                    .write(&format!("Warning: tab name '{}' is shared by another tab (C_Module lookups by name will be ambiguous)", tab.name));
+            }
         }
     }
 

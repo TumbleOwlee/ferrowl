@@ -103,6 +103,13 @@ pub trait ModuleView: SetFocus + IsFocus {
     fn set_scripts(&mut self, _scripts: Vec<ScriptDef>) -> bool {
         false
     }
+
+    /// A snapshot of this module's session-level `C_Module` Lua surface, or `None` when the
+    /// module type doesn't participate (none currently opt out, but the default keeps the trait
+    /// extensible). Polled by `App::rebuild_registry` whenever the tab set changes.
+    fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
+        None
+    }
 }
 
 // Forwarding impls so a boxed module view is itself a focusable, event-handling node — lets the

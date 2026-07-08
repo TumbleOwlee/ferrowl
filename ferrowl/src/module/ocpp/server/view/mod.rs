@@ -540,6 +540,13 @@ where
         self.start_sim();
         true
     }
+
+    fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
+        Some(std::sync::Arc::new(crate::registry::OcppServerEntry {
+            states: self.lua_states.clone(),
+            queue: self.runtime.lua_queue.clone(),
+        }))
+    }
 }
 
 static OCPP_SERVER_KEYBINDS: [CommandDescriptor; 3] = [

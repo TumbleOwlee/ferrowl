@@ -63,9 +63,17 @@ pub trait ClientFields {
 
 /// Host handle for the CS level of one client module: shared state + the scoped queue. Bare
 /// `Get`/`Set`/`<Action>` route here; `Connector(id)` produces a [`ClientConnHandle`].
-struct ClientCsHandle<S: ClientFields> {
+pub(crate) struct ClientCsHandle<S: ClientFields> {
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,
+}
+
+impl<S: ClientFields> ClientCsHandle<S> {
+    /// Builds a CS-level handle over shared state and its action queue (used by both the running
+    /// sim thread and the session-level [`crate::registry::OcppClientEntry`] `C_Module` bridge).
+    pub(crate) fn new(state: Arc<RwLock<S>>, queue: ScopedActionQueue) -> Self {
+        Self { state, queue }
+    }
 }
 
 impl<S: ClientFields + 'static> Read for ClientCsHandle<S> {
@@ -104,7 +112,7 @@ impl<S: ClientFields + 'static> OcppClientHost for ClientCsHandle<S> {
 }
 
 /// Host handle for one connector of a client module, addressing it by id.
-struct ClientConnHandle<S: ClientFields> {
+pub(crate) struct ClientConnHandle<S: ClientFields> {
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,
     id: i64,

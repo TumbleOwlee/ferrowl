@@ -44,6 +44,7 @@ impl App {
                 }
                 self.tabs.remove(self.active);
                 self.active = self.active.min(self.tabs.len() - 1);
+                self.rebuild_registry();
             }
             Cmd::QuitAll => return true,
             Cmd::New => self.enter_new(),

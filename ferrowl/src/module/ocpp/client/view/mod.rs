@@ -686,6 +686,13 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         self.start_sim();
         true
     }
+
+    fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
+        Some(std::sync::Arc::new(crate::registry::OcppClientEntry {
+            state: self.state.clone(),
+            queue: self.runtime.action_queue.clone(),
+        }))
+    }
 }
 
 static OCPP_CLIENT_KEYBINDS: [CommandDescriptor; 4] = [

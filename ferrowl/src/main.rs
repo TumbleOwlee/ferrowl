@@ -15,6 +15,7 @@ mod instance;
 mod lua;
 mod migrate;
 mod module;
+mod registry;
 mod view;
 
 use std::collections::BTreeMap;
@@ -209,8 +210,16 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         return Ok(tabs);
     }
 
+    // Resolve every tab's final name up front (across both module types, in creation order) so a
+    // session with duplicate module names still gets distinct tabs instead of silently colliding
+    // in the `C_Module` registry: repeats are auto-suffixed " (2)", " (3)", ...
+    let ocpp_specs = args.ocpp_specs()?;
+    let mut names: Vec<String> = specs.iter().map(|s| s.name.clone()).collect();
+    names.extend(ocpp_specs.iter().map(|s| s.name.clone()));
+    let resolved = crate::registry::dedupe_names(&names);
+
     let mut tabs = Vec::new();
-    for spec in &specs {
+    for (spec, resolved_name) in specs.iter().zip(&resolved) {
         let device = match config::load_device(&spec.device) {
             Ok(device) => device,
             Err(e) => {
@@ -221,18 +230,37 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
                 continue;
             }
         };
-        let module = Module::new(spec, &device);
+        let mut spec = spec.clone();
+        let renamed = *resolved_name != spec.name;
+        spec.name = resolved_name.clone();
+        let module = Module::new(&spec, &device);
         let view: Box<dyn ModuleView> =
             Box::new(ModbusModuleView::new(module, spec.clone(), device));
         let mut tab = Tab::new_from_view(spec.name.clone(), view);
+        if renamed {
+            tab.log.write().await.write(&format!(
+                "Warning: duplicate module name — renamed to '{}'",
+                spec.name
+            ));
+        }
         if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
             tab.log.write().await.write(&msg);
         }
         tabs.push(tab);
     }
 
-    for spec in args.ocpp_specs()? {
-        tabs.push(build_ocpp_tab(spec).await);
+    for (spec, resolved_name) in ocpp_specs.into_iter().zip(&resolved[specs.len()..]) {
+        let renamed = *resolved_name != spec.name;
+        let mut spec = spec;
+        spec.name = resolved_name.clone();
+        let tab = build_ocpp_tab(spec).await;
+        if renamed {
+            tab.log.write().await.write(&format!(
+                "Warning: duplicate module name — renamed to '{}'",
+                tab.name
+            ));
+        }
+        tabs.push(tab);
     }
     Ok(tabs)
 }

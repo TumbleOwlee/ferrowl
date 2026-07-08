@@ -62,6 +62,14 @@ impl App {
             _ => None,
         };
         if let Some((name, view)) = action {
+            if self.tabs.iter().any(|t| t.name == name) {
+                // No error slot on `SetupView` to surface this in-dialog (the field-level
+                // red-border validation is purely static, see `dialog::NonEmpty`); leave the
+                // dialog open and nudge via the active tab's log instead.
+                self.log_active(format!("Name '{name}' already in use by another tab"))
+                    .await;
+                return;
+            }
             self.create_tab(name, view).await;
         }
     }
@@ -96,6 +104,7 @@ impl App {
     async fn create_tab(&mut self, name: String, view: Box<dyn ModuleView>) {
         self.tabs.push(Tab::new_from_view(name, view));
         self.active = self.tabs.len() - 1;
+        self.rebuild_registry();
         let result = self.tabs[self.active].view.handle_command("start").await;
         if let crate::module::view::CommandResult::Handled(Some(msg)) = result {
             self.log_active(msg).await;

@@ -155,6 +155,15 @@ pub struct ServerHost<V: ServerVersion> {
     queue: ServerActionQueue,
 }
 
+impl<V: ServerVersion> ServerHost<V> {
+    /// Builds a host over the shared state registry and its action queue (used by both the
+    /// running sim thread and the session-level [`crate::registry::OcppServerEntry`] `C_Module`
+    /// bridge).
+    pub(crate) fn new(states: SharedServerStates<V>, queue: ServerActionQueue) -> Self {
+        Self { states, queue }
+    }
+}
+
 impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
     type Station = CsHandle<V>;
     type Conn = ConnHandle<V>;

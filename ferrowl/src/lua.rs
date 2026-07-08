@@ -24,14 +24,14 @@ use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, app
 pub struct RegisterBridge {
     memory: ModuleMemory,
     virtual_store: VirtualStore,
-    registers: HashMap<String, Register>,
+    registers: Arc<HashMap<String, Register>>,
 }
 
 impl RegisterBridge {
     pub fn new(
         memory: ModuleMemory,
         virtual_store: VirtualStore,
-        registers: HashMap<String, Register>,
+        registers: Arc<HashMap<String, Register>>,
     ) -> Self {
         Self {
             memory,
@@ -294,7 +294,7 @@ pub fn run_sim(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, registers);
+        let bridge = RegisterBridge::new(memory, virtual_store, Arc::new(registers));
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -442,7 +442,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store.clone(), registers);
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store.clone(), Arc::new(registers));
 
         // Reading before any write errors; after a write the value round-trips via the store.
         assert!(bridge.read("calc".to_string()).is_err());
@@ -464,7 +464,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_write_then_read() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
             .write("setpoint".to_string(), ValueType::Int(100))
             .expect("write");
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_unknown_register_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), ValueType::Int(1)).is_err());
     }
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
-        let bridge = RegisterBridge::new(memory.clone(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(memory.clone(), vstore(), Arc::new(evse_registers()));
         bridge
             .write("setpoint".to_string(), ValueType::Int(42))
             .expect("seed setpoint");
@@ -523,7 +523,7 @@ mod tests {
     // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
     #[test]
     fn ut_sim_script_test_assertion_failure_surfaces() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         let mut context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_int_float_bool_roundtrip() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
 
         bridge
             .write("setpoint".to_string(), ValueType::Int(1234))
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn ut_bridge_typed_float_whole_number_onto_int_format() {
         // Mirrors the string path: a whole-number float parses onto an integer format.
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
             .write("setpoint".to_string(), ValueType::Float(42.0))
             .expect("whole float write");
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_float_fractional_onto_int_format_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         assert!(
             bridge
                 .write("setpoint".to_string(), ValueType::Float(3.5))
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_string_roundtrip() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
             .write("setpoint".to_string(), ValueType::String("77".to_string()))
             .expect("string write");
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_nil_errors_cleanly() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         let err = bridge
             .write("setpoint".to_string(), ValueType::Nil)
             .unwrap_err();
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn ut_bridge_typed_int_overflow_errors_cleanly() {
         // "setpoint" is U16 (max 65535); a too-large Int must error, not silently truncate.
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), evse_registers());
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         assert!(
             bridge
                 .write("setpoint".to_string(), ValueType::Int(100_000))
@@ -646,7 +646,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store, registers);
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store, Arc::new(registers));
         bridge
             .write("calc".to_string(), ValueType::Int(i128::MAX))
             .expect("virtual int overflow falls back to float");
@@ -675,7 +675,7 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store, registers);
+        let bridge = RegisterBridge::new(evse_memory(), virtual_store, Arc::new(registers));
         let err = bridge
             .write("calc".to_string(), ValueType::Nil)
             .unwrap_err();

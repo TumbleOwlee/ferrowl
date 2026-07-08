@@ -35,5 +35,6 @@ tokio = { version = "1.49.0", features = ["sync", "time", "rt", "signal"] }
 derive_builder = "0.20.2"
 parking_lot = { workspace = true }
 futures-util = "0.3.31"
+mlua = { version = "0.11.4", default-features = false }
 
 [dev-dependencies]
