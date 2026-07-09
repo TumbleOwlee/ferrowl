@@ -28,6 +28,13 @@ pub enum ValidateResult {
 pub trait Validate {
     /// Returns `Err` with a message if `input` is not a valid value.
     fn validate(input: &str) -> ValidateResult;
+
+    /// Whether `c` may be typed into the field. Char-level only: cannot
+    /// guarantee overall validity (e.g. "1.2.3" for a float); `validate`
+    /// still styles invalid text. Default allows every character.
+    fn allowed_char(_c: char) -> bool {
+        true
+    }
 }
 
 impl Validate for String {
@@ -36,8 +43,10 @@ impl Validate for String {
     }
 }
 
+// `allowed_char` is char-level filtering only, so "inf"/"NaN"/leading '+' for
+// ints become untypeable even though `parse` accepts them — deliberate.
 macro_rules! generate_validate {
-    ($v:ty) => {
+    ($v:ty, $allowed:expr) => {
         impl Validate for $v {
             fn validate(input: &str) -> ValidateResult {
                 let result = input.parse::<$v>();
@@ -46,23 +55,30 @@ macro_rules! generate_validate {
                     Err(e) => ValidateResult::Error(format!("{}", e)),
                 }
             }
+
+            fn allowed_char(c: char) -> bool {
+                let f: fn(char) -> bool = $allowed;
+                f(c)
+            }
         }
     };
 }
 
-generate_validate!(usize);
-generate_validate!(u8);
-generate_validate!(u16);
-generate_validate!(u32);
-generate_validate!(u64);
-generate_validate!(u128);
-generate_validate!(i8);
-generate_validate!(i16);
-generate_validate!(i32);
-generate_validate!(i64);
-generate_validate!(i128);
-generate_validate!(f32);
-generate_validate!(f64);
+generate_validate!(usize, |c: char| c.is_ascii_digit());
+generate_validate!(u8, |c: char| c.is_ascii_digit());
+generate_validate!(u16, |c: char| c.is_ascii_digit());
+generate_validate!(u32, |c: char| c.is_ascii_digit());
+generate_validate!(u64, |c: char| c.is_ascii_digit());
+generate_validate!(u128, |c: char| c.is_ascii_digit());
+generate_validate!(i8, |c: char| c.is_ascii_digit() || c == '-');
+generate_validate!(i16, |c: char| c.is_ascii_digit() || c == '-');
+generate_validate!(i32, |c: char| c.is_ascii_digit() || c == '-');
+generate_validate!(i64, |c: char| c.is_ascii_digit() || c == '-');
+generate_validate!(i128, |c: char| c.is_ascii_digit() || c == '-');
+generate_validate!(f32, |c: char| c.is_ascii_digit()
+    || matches!(c, '.' | '-' | '+' | 'e' | 'E'));
+generate_validate!(f64, |c: char| c.is_ascii_digit()
+    || matches!(c, '.' | '-' | '+' | 'e' | 'E'));
 
 /// A single-line text input rendered from an
 /// [`InputFieldState`](crate::state::InputFieldState), typed by the
@@ -290,5 +306,39 @@ where
                 buf[(area.x + pos_x, area.y + pos_y)].set_style(self.style.cursor);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn u32_allowed_char_accepts_digits_rejects_others() {
+        assert!(u32::allowed_char('0'));
+        assert!(u32::allowed_char('9'));
+        assert!(!u32::allowed_char('a'));
+        assert!(!u32::allowed_char('-'));
+    }
+
+    #[test]
+    fn i32_allowed_char_accepts_minus() {
+        assert!(i32::allowed_char('-'));
+        assert!(i32::allowed_char('5'));
+        assert!(!i32::allowed_char('a'));
+    }
+
+    #[test]
+    fn f64_allowed_char_accepts_float_chars() {
+        assert!(f64::allowed_char('.'));
+        assert!(f64::allowed_char('e'));
+        assert!(f64::allowed_char('+'));
+        assert!(!f64::allowed_char('a'));
+    }
+
+    #[test]
+    fn string_allowed_char_accepts_anything() {
+        assert!(String::allowed_char('a'));
+        assert!(String::allowed_char('!'));
     }
 }

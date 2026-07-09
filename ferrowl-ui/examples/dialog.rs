@@ -36,6 +36,10 @@ impl Validate for Day {
             ValidateResult::Error("Input is not numerical".into())
         }
     }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_digit()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +53,10 @@ impl Validate for Year {
         } else {
             ValidateResult::Error("Input is not numerical".into())
         }
+    }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_digit()
     }
 }
 
@@ -274,6 +282,7 @@ fn main() -> ExitCode {
                 .focused(false)
                 .disabled(false)
                 .placeholder(Some("1".to_string()))
+                .allowed_for::<Day>()
                 .build()
                 .unwrap(),
             widget: InputFieldBuilder::default()
@@ -322,6 +331,7 @@ fn main() -> ExitCode {
                 .focused(false)
                 .disabled(false)
                 .placeholder(Some("1990".to_string()))
+                .allowed_for::<Year>()
                 .build()
                 .unwrap(),
             widget: InputFieldBuilder::default()
