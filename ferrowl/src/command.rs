@@ -11,6 +11,8 @@ pub enum Cmd {
     Load(Option<String>),
     Write(Option<String>),
     Log(Option<String>),
+    /// Open the session-level scripts/interval dialog.
+    Session,
     /// `script copy <index>`; `None` = missing/unparseable index.
     ScriptCopy(Option<usize>),
     Unknown(String),
@@ -31,6 +33,7 @@ pub fn parse(input: &str) -> Cmd {
         "l" | "load" => Cmd::Load(first()),
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "log" => Cmd::Log(first()),
+        "session" => Cmd::Session,
         "script" => match parts.next() {
             Some("copy") => Cmd::ScriptCopy(parts.next().and_then(|s| s.parse().ok())),
             _ => Cmd::Unknown("script".to_string()), // bare `:script` is view-specific (dialog)
@@ -97,6 +100,11 @@ mod tests {
     #[test]
     fn ut_unknown() {
         assert_eq!(parse("bogus"), Cmd::Unknown("bogus".to_string()));
+    }
+
+    #[test]
+    fn ut_session() {
+        assert_eq!(parse("session"), Cmd::Session);
     }
 
     #[test]

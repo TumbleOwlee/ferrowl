@@ -11,6 +11,7 @@ mod overlay;
 mod render;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ferrowl_lua::module::ModuleDirectory;
 use ferrowl_ring::Ring;
 use ferrowl_ui::AlternateScreen;
 use ferrowl_ui::traits::SetFocus;
@@ -19,10 +20,13 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::{Duration, Instant};
 
+use crate::config::script::ScriptDef;
+use crate::dialog::session::SessionDialog;
 use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::{ModuleView, SharedLog};
-use crate::registry::ModuleRegistry;
+use crate::registry::{ModuleRegistry, dedupe_names};
+use crate::session_sim::SessionSim;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 
@@ -236,10 +240,26 @@ pub struct App {
     /// Live `C_Module` session registry, rebuilt from `tabs` whenever the tab set or a view
     /// changes (see [`Self::rebuild_registry`]).
     registry: ModuleRegistry,
+    /// The `:session` dialog, if open.
+    session_dialog: Option<Box<SessionDialog>>,
+    /// Current session-level Lua scripts and sim-cycle interval, applied to `session_sim` and
+    /// written by `:session` (edited) and `save_session` (persisted). Loaded at startup from the
+    /// session file(s) passed on the command line, if any.
+    session_scripts: Vec<ScriptDef>,
+    session_interval: Duration,
+    /// Log the session sim writes to, shown at the bottom of the `:session` dialog.
+    session_log: SharedLog,
+    /// Runs `session_scripts` against `registry` on `session_interval`, restarting whenever
+    /// either changes; stopped while no script is enabled.
+    session_sim: SessionSim,
 }
 
 impl App {
-    pub fn new(tabs: Vec<Tab>) -> std::io::Result<Self> {
+    pub fn new(
+        tabs: Vec<Tab>,
+        session_scripts: Vec<ScriptDef>,
+        session_interval: Duration,
+    ) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {
             (
                 Some(Overlay::TypeSelect(Box::new(TypeSelectDialog::new()))),
@@ -248,6 +268,14 @@ impl App {
         } else {
             (None, Focus::Content)
         };
+        let registry = ModuleRegistry::new();
+        let session_log: SharedLog = std::sync::Arc::new(tokio::sync::RwLock::new(LogRing::init()));
+        let mut session_sim = SessionSim::new(
+            std::sync::Arc::new(registry.clone()) as std::sync::Arc<dyn ModuleDirectory>,
+            session_log.clone(),
+        );
+        session_sim.set_interval(session_interval);
+        session_sim.set_scripts(session_scripts.clone());
         let mut app = Self {
             screen: AlternateScreen::new()?,
             tabs,
@@ -258,7 +286,12 @@ impl App {
             keymode: None,
             help_open: false,
             help_scroll: 0,
-            registry: ModuleRegistry::new(),
+            registry,
+            session_dialog: None,
+            session_scripts,
+            session_interval,
+            session_log,
+            session_sim,
         };
         // Give the starting tab keyboard focus (unless a creation dialog is up).
         app.set_content_focus(app.focus == Focus::Content);
@@ -277,12 +310,6 @@ impl App {
             .filter_map(|tab| Some((tab.name.clone(), tab.view.module_host()?)))
             .collect();
         self.registry.replace_all(modules);
-    }
-
-    /// The session-level module registry, for wiring into session-level Lua sims (a later stage).
-    #[allow(dead_code)]
-    pub(crate) fn registry(&self) -> ModuleRegistry {
-        self.registry.clone()
     }
 
     /// Focus (or unfocus) the active tab's content/log panes. The single choke point for the
@@ -343,6 +370,7 @@ impl App {
         for tab in self.tabs.iter() {
             tab.log.write().await.flush();
         }
+        self.session_log.write().await.flush();
         let mut registry_stale = false;
         for tab in self.tabs.iter_mut() {
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
@@ -357,8 +385,13 @@ impl App {
             }
         }
         if registry_stale {
+            self.resolve_duplicate_tab_names().await;
             self.rebuild_registry();
-            self.warn_duplicate_tab_names().await;
+        }
+
+        if let Some(dialog) = self.session_dialog.as_mut() {
+            let entries = crate::dialog::session::snapshot_log(&self.session_log, LOG_SIZE).await;
+            dialog.set_log_entries(entries);
         }
 
         if self.active >= self.tabs.len() {
@@ -389,21 +422,21 @@ impl App {
         }
     }
 
-    /// Warn (into the offending tab's own log) about any tab name now shared with another tab —
-    /// e.g. after a `:edit` rename. There is no way to reject the rename after the fact (the
-    /// module already applied it), so this is a best-effort nudge rather than the hard rejection
-    /// `:new` gets in `overlay::confirm_overlay`.
-    async fn warn_duplicate_tab_names(&self) {
-        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for tab in &self.tabs {
-            *counts.entry(tab.name.as_str()).or_default() += 1;
-        }
-        for tab in &self.tabs {
-            if counts.get(tab.name.as_str()).copied().unwrap_or(0) > 1 {
-                tab.log
-                    .write()
-                    .await
-                    .write(&format!("Warning: tab name '{}' is shared by another tab (C_Module lookups by name will be ambiguous)", tab.name));
+    /// Resolve any tab name now shared with another tab — e.g. after a `:edit` rename — by
+    /// auto-suffixing the later duplicate(s) the same way session load does (`dedupe_names`), then
+    /// warns into the renamed tab's own log. Keeps `Tab::name` unique at all times so `C_Module`
+    /// lookups by name are never ambiguous.
+    async fn resolve_duplicate_tab_names(&mut self) {
+        let names: Vec<String> = self.tabs.iter().map(|t| t.name.clone()).collect();
+        let resolved = dedupe_names(&names);
+        for (tab, (original, resolved)) in
+            self.tabs.iter_mut().zip(names.iter().zip(resolved.iter()))
+        {
+            if resolved != original {
+                tab.name = resolved.clone();
+                tab.log.write().await.write(&format!(
+                    "Warning: tab name '{original}' collided with another tab — renamed to '{resolved}'"
+                ));
             }
         }
     }
@@ -413,6 +446,7 @@ impl App {
         let tabs = &mut self.tabs;
         let command = &mut self.command;
         let overlay = self.overlay.as_mut();
+        let session_dialog = self.session_dialog.as_deref_mut();
         let active = self.active;
         let focus = self.focus;
         let help_open = self.help_open;
@@ -425,6 +459,7 @@ impl App {
                 focus,
                 command,
                 overlay,
+                session_dialog,
                 help_open,
                 help_scroll,
             )
@@ -436,9 +471,33 @@ impl App {
     async fn handle_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         match self.focus {
             Focus::Command => self.handle_command_key(modifiers, code).await,
+            Focus::Dialog if self.session_dialog.is_some() => {
+                self.handle_session_dialog_key(modifiers, code)
+            }
             Focus::Dialog => self.handle_dialog_key(modifiers, code).await,
             Focus::Content => self.handle_nav_key(modifiers, code),
         }
+    }
+
+    /// Route a key to the open `:session` dialog. Returns `true` when it signals close (Esc on
+    /// the interval field), which applies the working copy to `session_sim`.
+    fn handle_session_dialog_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
+        let Some(dialog) = self.session_dialog.as_mut() else {
+            return false;
+        };
+        if dialog.handle_events(modifiers, code) {
+            let dialog = self.session_dialog.take().expect("checked above");
+            let (scripts, interval) = dialog.resolve();
+            self.session_scripts = scripts.clone();
+            self.session_interval = interval;
+            // Interval first, then scripts — same order as construction, so the restart
+            // triggered by `set_scripts` already runs on the new interval.
+            self.session_sim.set_interval(interval);
+            self.session_sim.set_scripts(scripts);
+            self.focus = Focus::Content;
+            self.set_content_focus(true);
+        }
+        false
     }
 
     fn close_overlay(&mut self) {

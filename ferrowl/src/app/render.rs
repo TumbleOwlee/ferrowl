@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
 
+use crate::dialog::session::SessionDialog;
 use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
 use crate::view::tabs::render_tabs;
@@ -24,6 +25,7 @@ pub(super) fn render(
     focus: Focus,
     command: &mut CommandLine,
     overlay: Option<&mut Overlay>,
+    session_dialog: Option<&mut SessionDialog>,
     help_open: bool,
     help_scroll: &mut u16,
 ) {
@@ -79,6 +81,9 @@ pub(super) fn render(
             render_command_help(cmd_area, buf, module_cmds);
         }
         if let Some(dialog) = overlay {
+            dialog.render(area, buf);
+        }
+        if let Some(dialog) = session_dialog {
             dialog.render(area, buf);
         }
         // 4. Keybind help dialog, always topmost.
@@ -179,6 +184,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         (":s | :save | :w | :write [path]", "save session"),
         (":log clear", "clear log view"),
         (":script copy <tab>", "replace scripts with tab <tab>'s"),
+        (":session", "session scripts + sim interval"),
     ];
     let popup_w: u16 = 62;
     let popup_h: u16 = (COLS.len() + module_cmds.len()) as u16 + 2;

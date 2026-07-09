@@ -81,6 +81,16 @@ impl App {
         self.focus = Focus::Dialog;
     }
 
+    /// Open the session-level scripts/interval dialog (`:session`).
+    pub(super) fn enter_session(&mut self) {
+        self.set_content_focus(false);
+        self.session_dialog = Some(Box::new(crate::dialog::session::SessionDialog::new(
+            &self.session_scripts,
+            self.session_interval,
+        )));
+        self.focus = Focus::Dialog;
+    }
+
     /// Open the creation dialog pre-filled with an optional device-config path (`:l`).
     pub(super) fn enter_load(&mut self, path: Option<&str>) {
         let mut sv = ModbusSetupView::new_create();

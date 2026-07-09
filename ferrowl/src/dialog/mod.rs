@@ -2,6 +2,7 @@
 
 pub mod path_suggest;
 pub mod scripts;
+pub mod session;
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
 pub use crate::module::modbus::setup_dialog::SetupDialog;

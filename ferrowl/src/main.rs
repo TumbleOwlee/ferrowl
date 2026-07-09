@@ -156,6 +156,27 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
     Tab::new_from_view(spec.name.clone(), view)
 }
 
+/// Resolves the session-level Lua scripts + sim interval from every `--session <file>` passed on
+/// the command line: scripts concatenate across files (in order), and the interval is the last
+/// file's (matching how later `--session` files already win module-spec conflicts nowhere in
+/// particular — there's no real precedent here, so "last wins" is the simplest rule). A file that
+/// fails to load is silently skipped: `build_tabs` already validated every session file's
+/// loadability before this runs, so a failure here only happens if the file vanished mid-startup,
+/// in which case falling back to the 1s default is preferable to aborting startup a second time.
+fn session_sim_config(
+    paths: &[String],
+) -> (Vec<crate::config::script::ScriptDef>, std::time::Duration) {
+    let mut scripts = Vec::new();
+    let mut interval = std::time::Duration::from_secs_f64(1.0);
+    for path in paths {
+        if let Ok(session) = config::load_session(path) {
+            interval = session.interval_duration();
+            scripts.extend(session.scripts);
+        }
+    }
+    (scripts, interval)
+}
+
 /// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
 /// Start failures are written to the module's log. Modules whose device config fails to load
 /// are skipped with a warning on stderr.
@@ -315,8 +336,9 @@ fn main() {
                 return;
             }
         };
+        let (session_scripts, session_interval) = session_sim_config(&args.sessions);
 
-        let mut app = match App::new(tabs) {
+        let mut app = match App::new(tabs, session_scripts, session_interval) {
             Ok(app) => app,
             Err(e) => {
                 eprintln!("Failed to set up screen: {e}");

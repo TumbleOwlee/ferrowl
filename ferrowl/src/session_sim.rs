@@ -18,10 +18,6 @@ use crate::module::view::SharedLog;
 
 /// Owns the session-level Lua sim thread, restarting it whenever the script list or interval
 /// changes (globals reset on restart — intended). Stopped whenever no script is enabled.
-///
-/// Not yet wired into `App`/headless (later stage) — `#[allow(dead_code)]` covers the gap until
-/// then.
-#[allow(dead_code)]
 pub struct SessionSim {
     scripts: Vec<ScriptDef>,
     interval: Duration,
@@ -30,7 +26,6 @@ pub struct SessionSim {
     handle: Option<SimHandle>,
 }
 
-#[allow(dead_code)]
 impl SessionSim {
     /// Builds the sim around a live module directory and the session's shared log. No scripts
     /// are configured yet, so the thread starts stopped.

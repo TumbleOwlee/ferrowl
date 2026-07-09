@@ -49,6 +49,7 @@ impl App {
             Cmd::QuitAll => return true,
             Cmd::New => self.enter_new(),
             Cmd::Load(path) => self.enter_load(path.as_deref()),
+            Cmd::Session => self.enter_session(),
             Cmd::Write(path) => {
                 let path = path.unwrap_or_else(|| "session.toml".to_string());
                 match self.save_session(&path) {
@@ -118,8 +119,8 @@ impl App {
         let session = Session {
             version: Some(crate::config::VERSION.to_string()),
             modules,
-            scripts: vec![],
-            interval: 1.0,
+            scripts: self.session_scripts.clone(),
+            interval: self.session_interval.as_secs_f64(),
         };
         Converter::save(&session, path, ty).map_err(|e| format!("{e:?}"))
     }

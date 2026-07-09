@@ -35,7 +35,6 @@ impl Session {
     /// The sim cycle interval as a `Duration`. A hand-edited file can carry a non-finite or
     /// non-positive `interval`; those fall back to the 1.0s default instead of panicking in
     /// `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
-    #[allow(dead_code)] // Wired up by the session-sim UI/headless integration.
     pub fn interval_duration(&self) -> std::time::Duration {
         let secs = if self.interval.is_finite() && self.interval > 0.0 {
             self.interval
