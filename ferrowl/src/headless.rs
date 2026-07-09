@@ -9,18 +9,30 @@
 //! failed to load or `start` reported an error, `2` `--exit-on-error` was set and a drained log
 //! line looked like a Lua script error.
 
+use std::collections::HashMap;
 use std::io::Write as _;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ferrowl_lua::module::{ModuleDirectory, ModuleHost};
+
+use crate::app::LogRing;
 use crate::cli::RunArgs;
 use crate::config::ocpp::OcppRole;
+use crate::config::script::ScriptDef;
 use crate::config::{self, OcppModuleSpec, OcppSpec};
 use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView, SharedLog};
+use crate::registry::{ModuleRegistry, dedupe_names};
+use crate::session_sim::SessionSim;
 use crate::view::log::format_timestamp;
+
+/// Log source name the session-level Lua sim's drained lines are prefixed with, alongside every
+/// module's own name.
+const SESSION_SOURCE: &str = "session";
 
 /// How often the loop wakes to refresh modules and drain logs (mirrors `App`'s redraw tick).
 const TICK: Duration = Duration::from_millis(100);
@@ -152,6 +164,49 @@ async fn drain_log(
     (lines, hit_error)
 }
 
+/// Build the session-level `C_Module` registry from every running module's
+/// [`ModuleView::module_host`], keyed by name deduped the same way [`crate::registry::dedupe_names`]
+/// dedupes tab names in the TUI (headless has no tab set of its own, but reuses the same helper so
+/// a repeated `--module`/`--ocpp` name, or a session file listing the same name twice, doesn't
+/// silently drop one module's host from `C_Module`).
+fn build_registry(modules: &[RunModule]) -> ModuleRegistry {
+    let names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+    let deduped = dedupe_names(&names);
+
+    let mut hosts: HashMap<String, Arc<dyn ModuleHost>> = HashMap::new();
+    for (module, name) in modules.iter().zip(deduped.iter()) {
+        if let Some(host) = module.view.module_host() {
+            hosts.insert(name.clone(), host);
+        }
+    }
+
+    let registry = ModuleRegistry::new();
+    registry.replace_all(hosts);
+    registry
+}
+
+/// Aggregate every `--session` file's session-level Lua scripts and cycle interval into one
+/// config, or `None` when no session file carries any script (including the single-module
+/// `--module`/`--ocpp` path, which has no session file at all). Scripts from multiple session
+/// files are concatenated in file order; the interval is the last session file's, matching the
+/// TUI's `session_sim_config` rule so both entry points resolve multi-file sessions identically.
+fn load_session_scripts(args: &RunArgs) -> Result<Option<(Vec<ScriptDef>, Duration)>, String> {
+    let mut scripts = Vec::new();
+    let mut interval = None;
+    for path in &args.sessions {
+        let session = config::load_session(path).map_err(|e| e.to_string())?;
+        interval = Some(session.interval_duration());
+        scripts.extend(session.scripts);
+    }
+    if scripts.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((
+        scripts,
+        interval.unwrap_or(Duration::from_secs_f64(1.0)),
+    )))
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -196,6 +251,24 @@ pub async fn run(args: &RunArgs) -> i32 {
         None => None,
     };
 
+    let registry = build_registry(&modules);
+    let mut session_sim = match load_session_scripts(args) {
+        Ok(Some((scripts, interval))) => {
+            let log: SharedLog = Arc::new(tokio::sync::RwLock::new(LogRing::init()));
+            let directory: Arc<dyn ModuleDirectory> = Arc::new(registry);
+            let mut sim = SessionSim::new(directory, log.clone());
+            sim.set_interval(interval);
+            sim.set_scripts(scripts);
+            Some((sim, log, 0u64))
+        }
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            stop_all(&mut modules).await;
+            return 1;
+        }
+    };
+
     let deadline = args
         .duration
         .map(|secs| Instant::now() + Duration::from_secs(secs));
@@ -234,6 +307,21 @@ pub async fn run(args: &RunArgs) -> i32 {
             }
         }
 
+        if let Some((_, log, last_written)) = session_sim.as_mut() {
+            let (lines, hit_error) =
+                drain_log(log, SESSION_SOURCE, last_written, args.exit_on_error).await;
+            for line in &lines {
+                println!("{line}");
+                if let Some(f) = log_file.as_mut() {
+                    let _ = writeln!(f, "{line}");
+                }
+            }
+            if hit_error {
+                exit_code = 2;
+                should_stop = true;
+            }
+        }
+
         if should_stop {
             break;
         }
@@ -244,6 +332,9 @@ pub async fn run(args: &RunArgs) -> i32 {
         }
     }
 
+    if let Some((sim, ..)) = session_sim.as_mut() {
+        sim.stop();
+    }
     stop_all(&mut modules).await;
     exit_code
 }
@@ -322,5 +413,222 @@ mod tests {
         let mut last_written = 0;
         let (_, hit) = drain_log(&log, "mod", &mut last_written, true).await;
         assert!(hit);
+    }
+
+    #[tokio::test]
+    async fn ut_drain_log_session_source_uses_session_prefix() {
+        let log = new_log();
+        log.write().await.write("hello");
+        let mut last_written = 0;
+        let (lines, hit) = drain_log(&log, SESSION_SOURCE, &mut last_written, false).await;
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].contains("session | hello"),
+            "unexpected line: {}",
+            lines[0]
+        );
+        assert!(!hit);
+    }
+
+    #[tokio::test]
+    async fn ut_drain_log_session_sim_error_flags_exit_on_error() {
+        let log = new_log();
+        log.write().await.write("[sim] boom");
+        let mut last_written = 0;
+        let (lines, hit) = drain_log(&log, SESSION_SOURCE, &mut last_written, true).await;
+        assert!(hit);
+        assert!(
+            lines[0].contains("session | [sim] boom"),
+            "unexpected line: {}",
+            lines[0]
+        );
+    }
+
+    fn empty_run_args(sessions: Vec<String>) -> RunArgs {
+        RunArgs {
+            sessions,
+            modules: vec![],
+            ocpp: vec![],
+            duration: None,
+            log_file: None,
+            exit_on_error: false,
+        }
+    }
+
+    #[test]
+    fn ut_load_session_scripts_none_without_session_files() {
+        // Mirrors the single-module `--module key=val` headless path (point 5 of the task):
+        // no `--session` file means no `Session`, so no session sim is even considered.
+        let args = empty_run_args(vec![]);
+        assert!(load_session_scripts(&args).unwrap().is_none());
+    }
+
+    #[test]
+    fn ut_load_session_scripts_aggregates_across_files_last_interval_wins() {
+        use crate::config::Session as SessionConfig;
+        use ferrowl_util::convert::{Converter, FileType};
+
+        let s1 = SessionConfig {
+            version: None,
+            modules: vec![],
+            scripts: vec![ScriptDef {
+                name: "a".into(),
+                code: String::new(),
+                enabled: true,
+            }],
+            interval: 2.0,
+        };
+        let s2 = SessionConfig {
+            version: None,
+            modules: vec![],
+            scripts: vec![ScriptDef {
+                name: "b".into(),
+                code: String::new(),
+                enabled: false,
+            }],
+            interval: 9.0,
+        };
+        let p1 = std::env::temp_dir().join("ferrowl_headless_session1.toml");
+        let p2 = std::env::temp_dir().join("ferrowl_headless_session2.toml");
+        Converter::save(&s1, p1.to_str().unwrap(), FileType::Toml).unwrap();
+        Converter::save(&s2, p2.to_str().unwrap(), FileType::Toml).unwrap();
+
+        let args = empty_run_args(vec![
+            p1.to_str().unwrap().to_string(),
+            p2.to_str().unwrap().to_string(),
+        ]);
+        let (scripts, interval) = load_session_scripts(&args).unwrap().unwrap();
+        assert_eq!(scripts.len(), 2, "scripts from both files are concatenated");
+        assert_eq!(
+            interval,
+            Duration::from_secs_f64(9.0),
+            "interval comes from the last session file, matching the TUI rule"
+        );
+    }
+
+    // --- Integration: a real modbus module + a session-level script talking to it ------------
+
+    fn holding_device_config() -> config::DeviceConfig {
+        use crate::module::modbus::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType,
+        };
+        use ferrowl_codec::Kind;
+
+        let mut definitions = std::collections::BTreeMap::new();
+        definitions.insert(
+            "value".to_string(),
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(0),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: ValueType::U16,
+                endian: EndianCfg::Big,
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![],
+                update: None,
+                description: String::new(),
+                default: None,
+            },
+        );
+        config::DeviceConfig {
+            definitions,
+            ..Default::default()
+        }
+    }
+
+    /// Writes a temp device config + a session file with one modbus module and one session
+    /// script, returns a [`RunArgs`] pointing at it. `script_enabled` toggles whether the
+    /// session script is enabled, so both the "sim runs" and "zero enabled scripts spawns
+    /// nothing" cases share one fixture.
+    fn session_run_args(tag: &str, script_enabled: bool) -> RunArgs {
+        use ferrowl_util::convert::{Converter, FileType};
+
+        let device_path = std::env::temp_dir().join(format!("ferrowl_headless_{tag}_device.toml"));
+        Converter::save(
+            &holding_device_config(),
+            device_path.to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+
+        let mut module_value = serde_json::to_value(config::ModuleSpec {
+            name: "m".to_string(),
+            device: device_path.to_str().unwrap().to_string(),
+            role: config::Role::Server,
+            endpoint: config::Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+            },
+        })
+        .unwrap();
+        module_value
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+
+        let session = config::Session {
+            version: None,
+            modules: vec![module_value],
+            scripts: vec![ScriptDef {
+                name: "s".to_string(),
+                code: r#"C_Module:Get("m"):Register():Set("value", 42); C_Log:Print("session-script-ran")"#
+                    .to_string(),
+                enabled: script_enabled,
+            }],
+            interval: 0.05,
+        };
+        let session_path =
+            std::env::temp_dir().join(format!("ferrowl_headless_{tag}_session.toml"));
+        Converter::save(&session, session_path.to_str().unwrap(), FileType::Toml).unwrap();
+
+        RunArgs {
+            sessions: vec![session_path.to_str().unwrap().to_string()],
+            modules: vec![],
+            ocpp: vec![],
+            duration: Some(1),
+            log_file: Some(
+                std::env::temp_dir()
+                    .join(format!("ferrowl_headless_{tag}.log"))
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            ),
+            exit_on_error: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn ut_run_wires_session_sim_and_drains_its_log() {
+        let args = session_run_args("enabled", true);
+        let log_file = args.log_file.clone().unwrap();
+
+        let exit_code = run(&args).await;
+        assert_eq!(exit_code, 0);
+
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.contains("session | session-script-ran"),
+            "expected a session-prefixed log line, got:\n{contents}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ut_run_with_zero_enabled_scripts_spawns_no_session_sim() {
+        let args = session_run_args("disabled", false);
+        let log_file = args.log_file.clone().unwrap();
+
+        let exit_code = run(&args).await;
+        assert_eq!(exit_code, 0);
+
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            !contents.contains("session |"),
+            "no session source should appear in the log when no script is enabled, got:\n{contents}"
+        );
     }
 }
