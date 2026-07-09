@@ -403,6 +403,7 @@ pub fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
     let mut state = InputFieldStateBuilder::default()
         .focused(true)
         .disabled(false)
+        .allowed_for::<f64>()
         .build()
         .unwrap();
     let text = format!("{current}");

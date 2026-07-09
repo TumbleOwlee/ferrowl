@@ -59,6 +59,10 @@ impl Validate for Interval {
             Err(e) => ValidateResult::Error(e.to_string()),
         }
     }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_digit() || c == '.'
+    }
 }
 
 // --- Script table -----------------------------------------------------------
@@ -439,6 +443,7 @@ fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
             .focused(false)
             .disabled(false)
             .placeholder(Some("1.0".to_string()))
+            .allowed_for::<Interval>()
             .build()
             .unwrap(),
         widget: InputFieldBuilder::default()
@@ -589,6 +594,16 @@ mod tests {
             Interval::validate("abc"),
             ValidateResult::Error(_)
         ));
+    }
+
+    #[test]
+    fn ut_interval_allowed_char() {
+        assert!(Interval::allowed_char('5'));
+        assert!(Interval::allowed_char('.'));
+        assert!(!Interval::allowed_char('-'));
+        assert!(!Interval::allowed_char('e'));
+        assert!(!Interval::allowed_char(' '));
+        assert!(!Interval::allowed_char('a'));
     }
 
     #[test]

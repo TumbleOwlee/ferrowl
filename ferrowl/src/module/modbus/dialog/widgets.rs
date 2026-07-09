@@ -44,6 +44,7 @@ pub(super) fn input<T: Validate + Clone>(
             .focused(false)
             .disabled(false)
             .placeholder(Some(placeholder.to_string()))
+            .allowed_for::<T>()
             .build()
             .expect("static input-field state"),
         widget: input_widget(title, false),
@@ -60,6 +61,7 @@ pub(super) fn input_multiline<T: Validate + Clone>(
             .focused(false)
             .disabled(false)
             .placeholder(Some(placeholder.to_string()))
+            .allowed_for::<T>()
             .build()
             .expect("static input-field state"),
         widget: input_widget(title, true),
@@ -77,6 +79,7 @@ pub(super) fn input_filled<T: Validate + Clone>(
             .input(content.to_string())
             .cursor(content.len())
             .disabled(false)
+            .allowed_for::<T>()
             .build()
             .expect("static input-field state"),
         widget: input_widget(title, false),

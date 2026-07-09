@@ -34,6 +34,10 @@ impl Validate for Address {
             ValidateResult::None
         }
     }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_digit() || c == '-' || "virtual".contains(c)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +66,10 @@ impl Validate for Bitmask {
         } else {
             ValidateResult::None
         }
+    }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_hexdigit() || matches!(c, 'x' | 'X')
     }
 }
 
@@ -123,6 +131,15 @@ mod tests {
         assert!(matches!(Address::validate(""), ValidateResult::Error(_)));
     }
 
+    #[test]
+    fn address_allowed_char() {
+        for c in "virtual1-".chars() {
+            assert!(Address::allowed_char(c), "expected {c:?} to be allowed");
+        }
+        assert!(!Address::allowed_char('z'));
+        assert!(!Address::allowed_char(' '));
+    }
+
     // ---- Bitmask ----
 
     #[test]
@@ -169,5 +186,14 @@ mod tests {
     fn bitmask_invalid_decimal() {
         assert!(matches!(Bitmask::validate("abc"), ValidateResult::Error(_)));
         assert!(matches!(Bitmask::validate("-1"), ValidateResult::Error(_)));
+    }
+
+    #[test]
+    fn bitmask_allowed_char() {
+        for c in ['F', 'x', 'X', '9', 'a'] {
+            assert!(Bitmask::allowed_char(c), "expected {c:?} to be allowed");
+        }
+        assert!(!Bitmask::allowed_char('g'));
+        assert!(!Bitmask::allowed_char(' '));
     }
 }

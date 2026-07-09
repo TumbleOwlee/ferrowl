@@ -994,6 +994,7 @@ fn input<T: Validate + Clone>(
             .focused(focused)
             .disabled(false)
             .placeholder(Some(placeholder.to_string()))
+            .allowed_for::<T>()
             .build()
             .unwrap(),
         widget: InputFieldBuilder::default()
