@@ -158,6 +158,42 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
     Tab::new_from_view(spec.name.clone(), view)
 }
 
+/// The demo session's example script: uses `C_Module` to read the `Power` value of every modbus
+/// server instance and every OCPP connector (client-side connector 1, server-side all connectors
+/// of every connected station), printing them to the session log once per cycle. Reads are
+/// `pcall`-guarded so a scope without the field (e.g. a client whose connection is down) logs
+/// nothing instead of erroring every cycle.
+fn demo_session_script() -> crate::config::script::ScriptDef {
+    crate::config::script::ScriptDef {
+        name: "power-report".to_string(),
+        code: r#"-- Demo: read `Power` from every modbus server and OCPP connector via C_Module.
+for _, name in ipairs(C_Module:List()) do
+    local m = C_Module:Get(name)
+    if m:Type() == "modbus" and m:Role() == "server" then
+        local ok, power = pcall(function() return m:Register():Get("Power") end)
+        if ok then C_Log:Print(name .. ": Power = " .. tostring(power)) end
+    elseif m:Type() == "ocpp" then
+        local o = m:OCPP()
+        if m:Role() == "client" then
+            local ok, power = pcall(function() return o:Connector(1):Get("Power") end)
+            if ok then C_Log:Print(name .. "/1: Power = " .. tostring(power)) end
+        else
+            for _, cs in ipairs(o:GetChargingStations()) do
+                for _, id in ipairs(o:GetConnectors(cs)) do
+                    local ok, power = pcall(function() return o:Connector(cs, id):Get("Power") end)
+                    if ok then
+                        C_Log:Print(name .. "/" .. cs .. "/" .. id .. ": Power = " .. tostring(power))
+                    end
+                end
+            end
+        end
+    end
+end"#
+        .to_string(),
+        enabled: true,
+    }
+}
+
 /// Resolves the session-level Lua scripts + sim interval from every `--session <file>` passed on
 /// the command line: scripts concatenate across files (in order), and the interval is the last
 /// file's (matching how later `--session` files already win module-spec conflicts nowhere in
@@ -338,7 +374,15 @@ fn main() {
                 return;
             }
         };
-        let (session_scripts, session_interval) = session_sim_config(&args.sessions);
+        let (session_scripts, session_interval) = if args.demo {
+            // The demo session ships an example session script showcasing `C_Module`.
+            (
+                vec![demo_session_script()],
+                std::time::Duration::from_secs_f64(1.0),
+            )
+        } else {
+            session_sim_config(&args.sessions)
+        };
 
         let mut app = match App::new(tabs, session_scripts, session_interval) {
             Ok(app) => app,
@@ -352,4 +396,30 @@ fn main() {
             eprintln!("UI error: {}", e);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::demo_session_script;
+    use crate::registry::ModuleRegistry;
+    use ferrowl_lua::ContextBuilder;
+    use ferrowl_lua::module::ModuleDirModule;
+    use std::sync::Arc;
+
+    // The demo session script must at least parse and run cleanly against an empty module
+    // registry (no modules -> the loop body never executes, so C_Log is never touched).
+    #[test]
+    fn ut_demo_session_script_runs_on_empty_registry() {
+        let script = demo_session_script();
+        assert!(script.enabled);
+        let registry = ModuleRegistry::new();
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(ModuleDirModule::init(Arc::new(registry)))
+            .with_script(script.name.clone(), &script.code)
+            .build()
+            .expect("demo session script must parse");
+        ctx.call_all(std::time::Duration::ZERO)
+            .expect("demo session script must run on an empty registry");
+    }
 }
