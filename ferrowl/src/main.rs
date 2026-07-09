@@ -16,6 +16,8 @@ mod lua;
 mod migrate;
 mod module;
 mod registry;
+#[cfg(test)]
+mod session_e2e_tests;
 mod session_sim;
 mod view;
 
