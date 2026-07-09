@@ -58,11 +58,6 @@ pub struct ScriptDialog {
     confirm: Option<ConfirmDeleteDialog>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
-    /// Whether this dialog currently owns keyboard focus. Standalone callers (the module views)
-    /// leave this `true` (the whole screen is theirs); a caller that embeds this dialog as one
-    /// pane among others (the session dialog) toggles it off while its own focus is elsewhere, so
-    /// the sub-widget that `render` would otherwise mark focused shows unfocused instead.
-    embedded_focused: bool,
 }
 
 impl ScriptDialog {
@@ -76,17 +71,10 @@ impl ScriptDialog {
             view_focused: true,
             confirm: None,
             compact: false,
-            embedded_focused: true,
             scripts,
         };
         dialog.sync_code_from_selection();
         dialog
-    }
-
-    /// Set whether an embedding caller currently gives this dialog focus (see
-    /// `embedded_focused`). No-op for standalone callers, which never call this.
-    pub fn set_embedded_focused(&mut self, focused: bool) {
-        self.embedded_focused = focused;
     }
 
     /// Apply the working copy back to the caller. Flushes the open editor into the selected script
@@ -280,13 +268,13 @@ impl ScriptDialog {
 
         self.table
             .state
-            .set_focused(self.embedded_focused && self.focus == ScriptDialogFocus::Table);
+            .set_focused(self.focus == ScriptDialogFocus::Table);
         self.name_input
             .state
-            .set_focused(self.embedded_focused && self.focus == ScriptDialogFocus::NameInput);
+            .set_focused(self.focus == ScriptDialogFocus::NameInput);
         self.code
             .state
-            .set_focused(self.embedded_focused && self.focus == ScriptDialogFocus::Code);
+            .set_focused(self.focus == ScriptDialogFocus::Code);
 
         StatefulWidget::render(&self.table.widget, list_area, buf, &mut self.table.state);
         StatefulWidget::render(

@@ -1,23 +1,39 @@
-//! Session-level dialog (`:session`): the session's Lua scripts (reusing [`ScriptDialog`] as an
-//! embedded pane), a sim-cycle interval field, and a read-only tail of the session sim's log.
+//! Session-level dialog (`:session`): the session's Lua scripts, a sim-cycle interval field, and
+//! a read-only tail of the session sim's log — one overlay owning all of its widgets.
 //!
-//! Focus is two-level: [`SessionDialogFocus::Interval`] and [`SessionDialogFocus::Scripts`].
-//! `Tab`/`Shift+Tab` on the interval field move into the scripts pane; inside the scripts pane
-//! `Tab`/`Shift+Tab` cycle its own fields (table/name input/code editor) exactly as they do in a
-//! standalone [`ScriptDialog`], and `Esc` there steps back out to the interval field rather than
-//! closing the whole dialog. `Esc` on the interval field closes the dialog, applying the working
-//! copy — the same "no separate save, edits are live" convention [`ScriptDialog`] itself uses.
+//! Layout: the interval field on top, the script manager in the middle (script table with an
+//! On/Off status over a "New Script" name input on the left, the code editor for the selected
+//! script on the right — the same surface as the per-module [`ScriptDialog`]), and the session
+//! log pane at the bottom.
+//!
+//! One flat Tab order: Interval → script table → name input → code editor → log → Interval
+//! (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t` toggles a
+//! script, `d` deletes (with confirmation), `c` toggles compact rows, Enter in the name input
+//! creates a new (enabled) script. Edits are live on a working copy and `Esc` closes the dialog
+//! from any field, applying it — the same "no separate save" convention the module
+//! [`ScriptDialog`] uses.
+//!
+//! [`ScriptDialog`]: crate::dialog::scripts::ScriptDialog
 
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
+use ferrowl_syntax::Language;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder},
-    style::InputFieldStyleBuilder,
-    traits::HandleEvents,
-    widgets::{InputField, InputFieldBuilder, Validate, ValidateResult, Widget},
+    state::{
+        CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
+        TableState, TableStateBuilder,
+    },
+    style::{InputFieldStyleBuilder, TableStyleBuilder},
+    traits::{HandleEvents, SetFocus},
+    widgets::{
+        CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
+        Validate, ValidateResult, Widget,
+    },
 };
+use ferrowl_ui_derive::TableEntry;
+use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -25,7 +41,7 @@ use ratatui::{
 };
 
 use crate::config::script::ScriptDef;
-use crate::dialog::scripts::ScriptDialog;
+use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::view::SharedLog;
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 
@@ -45,91 +61,282 @@ impl Validate for Interval {
     }
 }
 
+// --- Script table -----------------------------------------------------------
+
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = ScriptHeader)]
+struct ScriptRow {
+    #[column(name = "Name", min = 10, max = 40)]
+    name: String,
+    #[column(name = "Status", min = 6, max = 6)]
+    status: String,
+}
+
+type ScriptTable = Widget<TableState<ScriptRow, 2>, Table<ScriptRow, ScriptHeader, 2>>;
+
+/// The dialog-wide focus rotation, in Tab order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SessionDialogFocus {
     Interval,
     Scripts,
+    NewScript,
+    Code,
+    Log,
+}
+
+impl SessionDialogFocus {
+    fn next(self) -> Self {
+        match self {
+            Self::Interval => Self::Scripts,
+            Self::Scripts => Self::NewScript,
+            Self::NewScript => Self::Code,
+            Self::Code => Self::Log,
+            Self::Log => Self::Interval,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::Interval => Self::Log,
+            Self::Scripts => Self::Interval,
+            Self::NewScript => Self::Scripts,
+            Self::Code => Self::NewScript,
+            Self::Log => Self::Code,
+        }
+    }
 }
 
 /// The `:session` dialog. Works on a private copy of the scripts/interval; the caller applies the
 /// result via [`SessionDialog::resolve`] on close.
 pub struct SessionDialog {
     interval: Widget<InputFieldState, InputField<Interval>>,
-    scripts: ScriptDialog,
+    scripts: Vec<ScriptDef>,
+    table: ScriptTable,
+    name_input: Widget<InputFieldState, InputField<String>>,
+    code: Widget<CodeInputFieldState, CodeInputField>,
     log: LogView,
+    confirm: Option<ConfirmDeleteDialog>,
+    /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
+    compact: bool,
     focus: SessionDialogFocus,
 }
 
 impl SessionDialog {
     pub fn new(scripts: &[ScriptDef], interval: Duration) -> Self {
+        let scripts = scripts.to_vec();
         let mut interval_field = interval_input();
         set_input(&mut interval_field, &format_interval(interval));
-        let mut scripts = ScriptDialog::new(scripts);
-        scripts.set_embedded_focused(false);
         let mut dialog = Self {
             interval: interval_field,
-            scripts,
+            table: script_table(rows(&scripts)),
+            name_input: name_input(),
+            code: code_editor(),
             log: new_log_view(),
+            confirm: None,
+            compact: false,
             focus: SessionDialogFocus::Interval,
+            scripts,
         };
-        dialog.interval.state.set_focused(true);
+        dialog.sync_code_from_selection();
+        dialog.apply_focus();
         dialog
     }
 
     /// Apply the working copy back to the caller: the validated interval (falling back to the
-    /// previous value if the field is currently invalid — the caller only reaches here via the
-    /// Esc-from-Interval close path, but an invalid field must never propagate a bogus duration)
-    /// and the scripts list.
-    pub fn resolve(self) -> (Vec<ScriptDef>, Duration) {
+    /// 1s default if the field is currently invalid — an invalid field must never propagate a
+    /// bogus duration) and the scripts list, with the open editor flushed into the selected
+    /// script first so unsaved keystrokes aren't lost.
+    pub fn resolve(mut self) -> (Vec<ScriptDef>, Duration) {
+        self.flush_code_to_selection();
         let interval = parse_interval(self.interval.state.input())
             .unwrap_or_else(|| Duration::from_secs_f64(1.0));
-        (self.scripts.resolve(), interval)
+        (self.scripts, interval)
     }
 
     /// Refresh the read-only log pane from a snapshot of the session sim's log ring. Called by
-    /// the owner once per tick while the dialog is open.
+    /// the owner once per tick while the dialog is open. Follows the tail only while the pane is
+    /// unfocused, so a user scrolling through the log isn't yanked back down every tick.
     pub fn set_log_entries(&mut self, entries: Vec<LogEntry>) {
         self.log.state.set_values(entries);
-        self.log.state.move_to_bottom();
+        if self.focus != SessionDialogFocus::Log {
+            self.log.state.move_to_bottom();
+        }
     }
 
-    fn move_to_scripts(&mut self) {
-        self.focus = SessionDialogFocus::Scripts;
-        self.interval.state.set_focused(false);
-        self.scripts.set_embedded_focused(true);
+    fn selected(&self) -> Option<usize> {
+        let sel = self.table.state.table_state().selected()?;
+        (sel < self.scripts.len()).then_some(sel)
     }
 
-    fn move_to_interval(&mut self) {
-        self.focus = SessionDialogFocus::Interval;
-        self.scripts.set_embedded_focused(false);
-        self.interval.state.set_focused(true);
+    /// Load the selected script's code into the editor. Without a selection the editor is
+    /// disabled: it shows only its placeholder and there is nothing edits could apply to.
+    fn sync_code_from_selection(&mut self) {
+        let content = self
+            .selected()
+            .map(|i| self.scripts[i].code.clone())
+            .unwrap_or_default();
+        self.code.state.set_content(&content);
+        self.code.state.set_disabled(self.selected().is_none());
     }
 
-    /// Handle a key. Returns `true` when the dialog should close (Esc on the interval field).
+    /// Write the editor's content back into the selected script.
+    fn flush_code_to_selection(&mut self) {
+        if let Some(i) = self.selected() {
+            self.scripts[i].code = self.code.state.content();
+        }
+    }
+
+    fn refresh_rows(&mut self) {
+        self.table.state.set_values(rows(&self.scripts));
+    }
+
+    /// Create a new enabled script from the name input (rejecting empty / duplicate names).
+    fn create_script(&mut self) {
+        let name = self.name_input.state.input().trim().to_string();
+        if name.is_empty() || self.scripts.iter().any(|s| s.name == name) {
+            return;
+        }
+        self.scripts.push(ScriptDef {
+            name,
+            code: String::new(),
+            enabled: true,
+        });
+        self.refresh_rows();
+        self.table.state.move_to_bottom();
+        self.name_input.state.set_input(String::new());
+        self.name_input.state.set_cursor(0);
+        self.sync_code_from_selection();
+    }
+
+    fn toggle_compact(&mut self) {
+        self.compact = !self.compact;
+        self.table.widget.set_row_margin(Margin {
+            vertical: if self.compact { 0 } else { 1 },
+            horizontal: 0,
+        });
+    }
+
+    fn toggle_selected(&mut self) {
+        if let Some(i) = self.selected() {
+            self.scripts[i].enabled = !self.scripts[i].enabled;
+            self.refresh_rows();
+        }
+    }
+
+    fn delete_selected(&mut self) {
+        if let Some(i) = self.selected() {
+            self.scripts.remove(i);
+            self.refresh_rows();
+            self.table.state.move_up();
+            self.sync_code_from_selection();
+        }
+    }
+
+    /// Mirror `self.focus` onto every widget's own focused flag.
+    fn apply_focus(&mut self) {
+        self.interval
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Interval);
+        self.table
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Scripts);
+        self.name_input
+            .state
+            .set_focused(self.focus == SessionDialogFocus::NewScript);
+        self.code
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Code);
+        self.log
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Log);
+    }
+
+    /// Move focus one stop along the rotation, skipping the code editor while it is disabled
+    /// (no script selected).
+    fn focus_step(&mut self, forward: bool) {
+        let step = |f: SessionDialogFocus| if forward { f.next() } else { f.previous() };
+        self.focus = step(self.focus);
+        if self.focus == SessionDialogFocus::Code && self.selected().is_none() {
+            self.focus = step(self.focus);
+        }
+        self.apply_focus();
+    }
+
+    /// Handle a key. Returns `true` when the dialog should close (Esc).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        match self.focus {
-            SessionDialogFocus::Interval => match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => return true,
-                (KeyModifiers::NONE, KeyCode::Tab)
-                | (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    self.move_to_scripts()
+        // Delete-confirmation sub-dialog takes precedence.
+        if let Some(confirm) = self.confirm.as_mut() {
+            match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) => self.confirm = None,
+                (KeyModifiers::NONE, KeyCode::Tab) => confirm.focus_next(),
+                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                    confirm.focus_previous()
+                }
+                (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) => {
+                    let confirmed = confirm.is_confirm_focused();
+                    self.confirm = None;
+                    if confirmed {
+                        self.delete_selected();
+                    }
                 }
                 _ => {
-                    let _ = self.interval.state.handle_events(modifiers, code);
-                }
-            },
-            SessionDialogFocus::Scripts => {
-                if self.scripts.handle_events(modifiers, code) {
-                    // The embedded dialog's own Esc-at-top-level: step back out to the interval
-                    // field instead of closing the whole session dialog.
-                    self.move_to_interval();
+                    let _ = confirm.handle_events(modifiers, code);
                 }
             }
+            return false;
+        }
+
+        // The vim-modal code editor must see keys before the dialog: in Insert mode it
+        // consumes Esc (back to Normal) and Tab/BackTab (indent/dedent); only keys it
+        // leaves unhandled (e.g. Esc/Tab in Normal mode) fall through to dialog handling.
+        if self.focus == SessionDialogFocus::Code
+            && let ferrowl_ui::EventResult::Consumed =
+                self.code.state.handle_events(modifiers, code)
+        {
+            self.flush_code_to_selection();
+            return false;
+        }
+
+        match (modifiers, code) {
+            (KeyModifiers::NONE, KeyCode::Esc) => return true,
+            (KeyModifiers::NONE, KeyCode::Tab) => self.focus_step(true),
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_step(false),
+            _ => match self.focus {
+                SessionDialogFocus::Interval => {
+                    let _ = self.interval.state.handle_events(modifiers, code);
+                }
+                SessionDialogFocus::Scripts => match (modifiers, code) {
+                    (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
+                    (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
+                    (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                        if let Some(i) = self.selected() {
+                            self.confirm = Some(ConfirmDeleteDialog::new(&self.scripts[i].name));
+                        }
+                    }
+                    _ => {
+                        let _ = self.table.state.handle_events(modifiers, code);
+                        self.sync_code_from_selection();
+                    }
+                },
+                SessionDialogFocus::NewScript => match (modifiers, code) {
+                    (KeyModifiers::NONE, KeyCode::Enter) => self.create_script(),
+                    _ => {
+                        let _ = self.name_input.state.handle_events(modifiers, code);
+                    }
+                },
+                // Code-focus keys were already offered to the editor above; anything
+                // reaching this arm was left unhandled by it.
+                SessionDialogFocus::Code => {}
+                SessionDialogFocus::Log => {
+                    let _ = self.log.state.handle_events(modifiers, code);
+                }
+            },
         }
         false
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        // Centered box covering most of the screen.
         let [_, hc, _] = Layout::horizontal([
             Constraint::Percentage(10),
             Constraint::Percentage(80),
@@ -166,14 +373,31 @@ impl SessionDialog {
         ])
         .areas(inner);
 
+        // Script manager pane: table over the name input on the left, code editor right.
+        let [left, right] = Layout::horizontal([Constraint::Percentage(40), Constraint::Min(1)])
+            .areas(scripts_area);
+        let [list_area, input_area] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
+
         StatefulWidget::render(
             &self.interval.widget,
             interval_area,
             buf,
             &mut self.interval.state,
         );
-        self.scripts.render(scripts_area, buf);
+        StatefulWidget::render(&self.table.widget, list_area, buf, &mut self.table.state);
+        StatefulWidget::render(
+            &self.name_input.widget,
+            input_area,
+            buf,
+            &mut self.name_input.state,
+        );
+        StatefulWidget::render(&self.code.widget, right, buf, &mut self.code.state);
         StatefulWidget::render(&self.log.widget, log_area, buf, &mut self.log.state);
+
+        if let Some(confirm) = self.confirm.as_mut() {
+            confirm.render(vc, buf);
+        }
     }
 }
 
@@ -194,6 +418,21 @@ fn set_input(widget: &mut Widget<InputFieldState, InputField<Interval>>, value: 
     widget.state.set_cursor(value.chars().count());
 }
 
+/// Theme border color for unfocused fields, matching the table/selection borders.
+fn border_style() -> Style {
+    Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
+}
+
+fn rows(scripts: &[ScriptDef]) -> Vec<ScriptRow> {
+    scripts
+        .iter()
+        .map(|s| ScriptRow {
+            name: s.name.clone(),
+            status: if s.enabled { "On" } else { "Off" }.to_string(),
+        })
+        .collect()
+}
+
 fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
     Widget {
         state: InputFieldStateBuilder::default()
@@ -208,6 +447,75 @@ fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
                 ("Interval (seconds)", HorizontalAlignment::Left).into(),
             ))
             .style(InputFieldStyleBuilder::default().build().unwrap())
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
+    Widget {
+        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        widget: TableBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some("Scripts (t: toggle, d: delete, c: compact)".into()))
+            .style(TableStyleBuilder::default().build().unwrap())
+            .row_margin(Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn name_input() -> Widget<InputFieldState, InputField<String>> {
+    Widget {
+        state: InputFieldStateBuilder::default()
+            .focused(false)
+            .disabled(false)
+            .placeholder(Some("New Script".to_string()))
+            .build()
+            .unwrap(),
+        widget: InputFieldBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some(("New Script", HorizontalAlignment::Left).into()))
+            .style(
+                InputFieldStyleBuilder::default()
+                    .border(border_style())
+                    .build()
+                    .unwrap(),
+            )
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
+    Widget {
+        state: CodeInputFieldStateBuilder::default()
+            .focused(false)
+            .disabled(false)
+            .placeholder(Some("-- select or create a script".to_string()))
+            .language(Some(Language::Lua))
+            .build()
+            .unwrap(),
+        widget: CodeInputFieldBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some("Code".into()))
+            .style(
+                InputFieldStyleBuilder::default()
+                    .border(border_style())
+                    .build()
+                    .unwrap(),
+            )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
@@ -255,7 +563,8 @@ mod tests {
     fn ut_new_prefills_interval_and_scripts() {
         let d = dialog();
         assert_eq!(d.interval.state.input(), "2.5");
-        assert_eq!(d.scripts.resolve().len(), 1);
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 1);
     }
 
     #[test]
@@ -299,21 +608,57 @@ mod tests {
         assert_eq!(interval, Duration::from_secs_f64(1.0));
     }
 
+    // The dialog-wide Tab rotation: Interval → table → name input → code editor → log →
+    // Interval. The fixture has one script, so the code editor is reachable.
     #[test]
-    fn ut_tab_from_interval_moves_to_scripts_and_back_on_esc() {
+    fn ut_tab_rotates_through_all_fields() {
         let mut d = dialog();
         assert_eq!(d.focus, SessionDialogFocus::Interval);
-        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Tab));
-        assert_eq!(d.focus, SessionDialogFocus::Scripts);
-        // Esc while the scripts pane's own focus sits on its Table (top level) steps back out
-        // instead of closing the whole dialog.
-        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
-        assert_eq!(d.focus, SessionDialogFocus::Interval);
+        let expected = [
+            SessionDialogFocus::Scripts,
+            SessionDialogFocus::NewScript,
+            SessionDialogFocus::Code,
+            SessionDialogFocus::Log,
+            SessionDialogFocus::Interval,
+        ];
+        for focus in expected {
+            assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Tab));
+            assert_eq!(d.focus, focus);
+        }
     }
 
     #[test]
-    fn ut_esc_from_interval_closes() {
+    fn ut_backtab_rotates_in_reverse() {
         let mut d = dialog();
+        let expected = [
+            SessionDialogFocus::Log,
+            SessionDialogFocus::Code,
+            SessionDialogFocus::NewScript,
+            SessionDialogFocus::Scripts,
+            SessionDialogFocus::Interval,
+        ];
+        for focus in expected {
+            assert!(!d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab));
+            assert_eq!(d.focus, focus);
+        }
+    }
+
+    // Without a selected script the code editor is disabled and both rotations skip it.
+    #[test]
+    fn ut_rotation_skips_disabled_code_editor() {
+        let mut d = SessionDialog::new(&[], Duration::from_secs(1));
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // code skipped -> log
+        assert_eq!(d.focus, SessionDialogFocus::Log);
+        d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab); // code skipped -> name input
+        assert_eq!(d.focus, SessionDialogFocus::NewScript);
+    }
+
+    #[test]
+    fn ut_esc_closes_from_any_field() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
     }
 
@@ -322,6 +667,22 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('9'));
         assert!(d.interval.state.input().contains('9'));
+    }
+
+    #[test]
+    fn ut_create_toggle_delete_script() {
+        let mut d = SessionDialog::new(&[], Duration::from_secs(1));
+        // Tab to the name input, type a name, Enter creates an enabled script.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        for c in "sim".chars() {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].name, "sim");
+        assert!(scripts[0].enabled);
     }
 
     #[test]
