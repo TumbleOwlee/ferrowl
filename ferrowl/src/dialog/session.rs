@@ -378,8 +378,8 @@ impl SessionDialog {
         .areas(inner);
 
         // Script manager pane: table over the name input on the left, code editor right.
-        let [left, right] = Layout::horizontal([Constraint::Percentage(40), Constraint::Min(1)])
-            .areas(scripts_area);
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(scripts_area);
         let [list_area, input_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
 
@@ -710,5 +710,33 @@ mod tests {
     fn ut_format_interval_trims_trailing_zeros() {
         assert_eq!(format_interval(Duration::from_secs_f64(1.0)), "1");
         assert_eq!(format_interval(Duration::from_secs_f64(0.25)), "0.25");
+    }
+
+    #[test]
+    fn ut_layout_session_scripts_table_wide_screen() {
+        let wide_area = Rect {
+            x: 0,
+            y: 0,
+            width: 220,
+            height: 30,
+        };
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(wide_area);
+        assert_eq!(left.width, 50);
+        assert!(right.width >= 1);
+    }
+
+    #[test]
+    fn ut_layout_session_scripts_table_narrow_screen() {
+        let narrow_area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 30,
+        };
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(narrow_area);
+        assert!(left.width < 50);
+        assert!(right.width >= 1);
     }
 }

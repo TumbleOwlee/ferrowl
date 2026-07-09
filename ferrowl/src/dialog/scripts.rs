@@ -262,7 +262,7 @@ impl ScriptDialog {
         });
 
         let [left, right] =
-            Layout::horizontal([Constraint::Percentage(40), Constraint::Min(1)]).areas(inner);
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(inner);
         let [list_area, input_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
 
@@ -444,5 +444,33 @@ mod tests {
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(!d.compact);
         assert_eq!(d.name_input.state.input(), "c");
+    }
+
+    #[test]
+    fn layout_scripts_table_wide_screen() {
+        let wide_area = Rect {
+            x: 0,
+            y: 0,
+            width: 220,
+            height: 30,
+        };
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(wide_area);
+        assert_eq!(left.width, 50);
+        assert!(right.width >= 1);
+    }
+
+    #[test]
+    fn layout_scripts_table_narrow_screen() {
+        let narrow_area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 30,
+        };
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(narrow_area);
+        assert!(left.width < 50);
+        assert!(right.width >= 1);
     }
 }
