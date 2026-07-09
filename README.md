@@ -143,8 +143,8 @@ On any exit, every module that started is stopped first (best-effort).
 | `:s \| :save \| :w \| :write [PATH]` | Save session |
 | `:wd \| :write-device [PATH]` | Save device configuration |
 | `:log <FILE>\|clear` | Set log output file for the active tab (`:log clear` clears the ring log) |
-| `:lua start\|stop` | Start/Stop lua execution |
 | `:script` | Manage Lua scripts (create, edit, toggle, delete) |
+| `:session` | Session scripts + sim interval |
 | `:reload` | Reload device configuration |
 | `:compact` | Toggle compact table mode |
 | `:order [col] [asc\|desc]` | Sort table by column |
@@ -477,6 +477,58 @@ against a production CSMS**, since it makes the connection vulnerable to a man-i
 ## Lua Support
 
 As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); all enabled scripts run each simulation cycle, interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time`, `C_Log` and `C_Test` (all module types), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
+
+### Session Scripts
+
+Session-level Lua scripts run in their own context with access to every module in the session via the `C_Module` API, allowing cross-module simulation and orchestration. Edited in the `:session` dialog (script list + sim interval pane + live log tail), they are stored in the session file under `[[scripts]]` (array of `{name, code, enabled}`) and `interval` (float seconds, default 1.0). Like module-level scripts, session scripts run if and only if at least one script is enabled — the Lua runtime starts when toggling any script on, stops when disabling all, and restarts (globals reset) on any code edit.
+
+All module names in a session are auto-deduplicated on load or rename (duplicates get suffixed like "name (2)"), ensuring `C_Module` can reliably address each one by name.
+
+In headless mode (`ferrowl run`), session scripts execute the same way; their output appears prefixed with the `session` log source, and `[sim]` errors trigger `--exit-on-error` (exit code 2).
+
+#### Module C_Module
+
+```
+Method:   C_Module:List()
+
+Return: Sorted array of current module names.
+```
+
+```
+Method:   C_Module:Get(name)
+
+Arguments:
+               Name: name
+               Type: String
+        Description: Module name.
+
+Return: ModuleHandle for the named module, or raises if the module is unknown.
+```
+
+A `ModuleHandle` re-resolves its target by name on every method call. If a module is removed after `Get`, subsequent calls raise "unknown module" instead of returning stale data.
+
+```
+Method:   ModuleHandle:Type()
+Return:   "modbus" or "ocpp".
+
+Method:   ModuleHandle:Role()
+Return:   "client" or "server".
+
+Method:   ModuleHandle:Register()
+Return:   `C_Register`-shaped accessor for modbus modules; raises for others.
+
+Method:   ModuleHandle:OCPP()
+Return:   Role-specific `C_OCPP`-shaped accessor for ocpp modules; raises for others.
+```
+
+#### Example: mirror a register between two modbus modules
+
+```lua
+local src = C_Module:Get("meter")
+local dst = C_Module:Get("charger")
+local val = src:Register():Get("voltage")
+dst:Register():Set("voltage", val)
+```
 
 ### Module C_Time
 
