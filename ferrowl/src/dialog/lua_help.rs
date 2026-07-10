@@ -96,20 +96,42 @@ static MODULE_SECTION: BindingSection = BindingSection {
             "resolve a module by name to a handle (raises if unknown)",
         ),
         (
-            "<handle>:Type()",
+            "<module>:Type()",
             "module kind, e.g. \"modbus\" or \"ocpp\"",
         ),
         (
-            "<handle>:Role()",
+            "<module>:Role()",
             "module role, e.g. \"client\" or \"server\"",
         ),
         (
-            "<handle>:Register()",
+            "<module>:Register()",
             "C_Register-shaped accessor (modbus modules only)",
         ),
+        ("<register>:Get(name)", "read a register's value"),
+        ("<register>:Set(name, value)", "write a register's value"),
         (
-            "<handle>:OCPP()",
+            "<module>:OCPP()",
             "C_OCPP-shaped accessor (ocpp modules only)",
+        ),
+        (
+            "<ocpp>:GetChargingStations()",
+            "list known charging station ids",
+        ),
+        (
+            "<ocpp>:GetConnectors(cs)",
+            "list connector ids for a station",
+        ),
+        (
+            "<ocpp>:ChargingStation(cs)",
+            "accessor scoped to one station, with its own Get/Set/<Action>",
+        ),
+        (
+            "<ocpp>:Connector(cs, id)",
+            "accessor scoped to one connector, with its own Get/Set/<Action>",
+        ),
+        (
+            "<ocpp-accessor>:<Action>(json?)",
+            "one method per OCPP action, e.g. StatusNotification(), MeterValues({ energy = 100 })",
         ),
     ],
 };
