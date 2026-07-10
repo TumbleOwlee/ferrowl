@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::COLOR_SCHEME;
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph},
@@ -187,6 +187,50 @@ pub fn sections(ctx: ScriptContext) -> &'static [&'static BindingSection] {
     }
 }
 
+/// Builds the popup's logical lines for `ctx`, word-wrapping each entry's description to
+/// `desc_budget` columns with a 34-col indent (2-space indent + `{sig:<32}`) on continuation
+/// lines.
+fn build_lines(ctx: ScriptContext, desc_budget: usize) -> Vec<Line<'static>> {
+    let desc_style = Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg);
+    let make_lines = |(sig, desc): &(&str, &str)| -> Vec<Line<'static>> {
+        let mut segments = crate::view::text::wrap(desc, desc_budget).into_iter();
+        let first = segments.next().unwrap_or_default();
+        let mut out = vec![Line::from(vec![
+            Span::styled(
+                format!("  {sig:<32}"),
+                Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg)
+                    .bold(),
+            ),
+            Span::styled(first, desc_style),
+        ])];
+        out.extend(
+            segments.map(|seg| Line::from(Span::styled(format!("{:34}{seg}", ""), desc_style))),
+        );
+        out
+    };
+    let section_title = |title: &str| {
+        Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(COLOR_SCHEME.text)
+                .bg(COLOR_SCHEME.bg)
+                .bold(),
+        ))
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+    for section in sections(ctx) {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(section_title(section.title));
+        lines.extend(section.entries.iter().flat_map(make_lines));
+    }
+    lines
+}
+
 /// Scrollable `?` overlay listing the Lua bindings available in a script dialog's context.
 pub struct LuaHelpOverlay {
     scroll: u16,
@@ -224,42 +268,13 @@ impl LuaHelpOverlay {
 
     /// Renders the overlay as a centered popup over `area`.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: ScriptContext) {
-        let make_line = |(sig, desc): &(&str, &str)| {
-            Line::from(vec![
-                Span::styled(
-                    format!("  {sig:<32}"),
-                    Style::default()
-                        .fg(COLOR_SCHEME.hi)
-                        .bg(COLOR_SCHEME.bg)
-                        .bold(),
-                ),
-                Span::styled(
-                    desc.to_string(),
-                    Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
-                ),
-            ])
-        };
-        let section_title = |title: &str| {
-            Line::from(Span::styled(
-                title.to_string(),
-                Style::default()
-                    .fg(COLOR_SCHEME.text)
-                    .bg(COLOR_SCHEME.bg)
-                    .bold(),
-            ))
-        };
-
-        let mut lines: Vec<Line> = Vec::new();
-        for section in sections(ctx) {
-            if !lines.is_empty() {
-                lines.push(Line::default());
-            }
-            lines.push(section_title(section.title));
-            lines.extend(section.entries.iter().map(make_line));
-        }
-
         let popup_w = 75.min(area.width);
-        let popup_h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+        let inner_width = popup_w.saturating_sub(4) as usize;
+        let desc_budget = inner_width.saturating_sub(36);
+
+        let lines = build_lines(ctx, desc_budget);
+
+        let popup_h = (lines.len() as u16 + 4).min(area.height.saturating_sub(4));
         let [_, mid, _] = Layout::horizontal([
             Constraint::Min(1),
             Constraint::Length(popup_w),
@@ -277,7 +292,7 @@ impl LuaHelpOverlay {
         let block = Block::bordered()
             .title(" Lua Bindings (Esc/q/? to close) ")
             .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg));
-        let inner = block.inner(popup);
+        let inner = block.inner(popup).inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(block, popup, buf);
 
         self.scroll = self
@@ -388,6 +403,40 @@ mod tests {
         assert_eq!(overlay.scroll, 0);
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('G')));
         assert_eq!(overlay.scroll, u16::MAX);
+    }
+
+    #[test]
+    fn ut_build_lines_fit_popup_width() {
+        // popup_w = 75, inner_width = 73, desc_budget = 73 - 34 = 39.
+        let lines = build_lines(ScriptContext::OcppClient, 39);
+        for line in &lines {
+            let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            assert!(total <= 73, "line too wide ({total} chars): {line:?}");
+        }
+    }
+
+    #[test]
+    fn ut_build_lines_wraps_long_action_desc() {
+        let secs = sections(ScriptContext::OcppClient);
+        let ocpp = secs.iter().find(|s| s.title == "C_OCPP").unwrap();
+        let (_, action_desc) = ocpp
+            .entries
+            .iter()
+            .find(|(sig, _)| sig.contains("<Action>"))
+            .unwrap();
+        assert!(action_desc.chars().count() > 39);
+        let wrapped_segments = crate::view::text::wrap(action_desc, 39).len();
+        assert!(
+            wrapped_segments >= 2,
+            "expected the long <Action> description to wrap into >= 2 segments, got {wrapped_segments}"
+        );
+
+        // build_lines must emit exactly that many physical lines for this entry: one entry-count
+        // increase per section beyond the un-wrapped baseline.
+        let lines = build_lines(ScriptContext::OcppClient, 39);
+        let baseline: usize = 1 // section title
+            + ocpp.entries.len();
+        assert!(lines.len() >= baseline + (wrapped_segments - 1));
     }
 
     #[test]

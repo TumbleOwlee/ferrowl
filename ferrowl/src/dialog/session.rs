@@ -412,18 +412,18 @@ impl SessionDialog {
             horizontal: 2,
         });
 
-        let [interval_area, scripts_area, log_area] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Min(10),
-            Constraint::Length(10),
-        ])
-        .areas(inner);
+        let [scripts_area, log_area] =
+            Layout::vertical([Constraint::Min(10), Constraint::Length(10)]).areas(inner);
 
         // Script manager pane: table over the name input on the left, code editor right.
         let [left, right] =
             Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(scripts_area);
-        let [list_area, input_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
+        let [interval_area, list_area, input_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .areas(left);
 
         StatefulWidget::render(
             &self.interval.widget,

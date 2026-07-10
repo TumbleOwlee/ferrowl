@@ -4,7 +4,7 @@ use ferrowl_ui::COLOR_SCHEME;
 use ratatui::{
     Frame,
     buffer::Buffer,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph, StatefulWidget},
@@ -102,8 +102,15 @@ fn render_help(
     module: Option<(&str, &[CommandDescriptor])>,
     scroll: &mut u16,
 ) {
-    let make_line = |(key, desc): (&str, &str)| {
-        Line::from(vec![
+    let popup_w = 75.min(area.width);
+    let inner_width = popup_w.saturating_sub(4) as usize;
+    let desc_budget = inner_width.saturating_sub(36);
+
+    let desc_style = Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg);
+    let make_lines = |(key, desc): (&str, &str)| -> Vec<Line<'static>> {
+        let mut segments = crate::view::text::wrap(desc, desc_budget).into_iter();
+        let first = segments.next().unwrap_or_default();
+        let mut out = vec![Line::from(vec![
             Span::styled(
                 format!("  {key:<30}"),
                 Style::default()
@@ -111,11 +118,12 @@ fn render_help(
                     .bg(COLOR_SCHEME.bg)
                     .bold(),
             ),
-            Span::styled(
-                desc.to_string(),
-                Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
-            ),
-        ])
+            Span::styled(first, desc_style),
+        ])];
+        out.extend(
+            segments.map(|seg| Line::from(Span::styled(format!("{:32}{seg}", ""), desc_style))),
+        );
+        out
     };
     let section_title = |title: &str| {
         Line::from(Span::styled(
@@ -133,18 +141,20 @@ fn render_help(
             lines.push(Line::default());
         }
         lines.push(section_title(section.title));
-        lines.extend(section.keys.iter().map(|&kd| make_line(kd)));
+        lines.extend(section.keys.iter().flat_map(|&kd| make_lines(kd)));
     }
     if let Some((name, keys)) = module
         && !keys.is_empty()
     {
         lines.push(Line::default());
         lines.push(section_title(name));
-        lines.extend(keys.iter().map(|k| make_line((k.name, k.description))));
+        lines.extend(
+            keys.iter()
+                .flat_map(|k| make_lines((k.name, k.description))),
+        );
     }
 
-    let popup_w = 75.min(area.width);
-    let popup_h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+    let popup_h = (lines.len() as u16 + 4).min(area.height.saturating_sub(4));
     let [_, mid, _] = Layout::horizontal([
         Constraint::Min(1),
         Constraint::Length(popup_w),
@@ -162,7 +172,7 @@ fn render_help(
     let block = Block::bordered()
         .title(" Keybinds (Esc/q/? to close) ")
         .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg));
-    let inner = block.inner(popup);
+    let inner = block.inner(popup).inner(Margin::new(2, 1));
     ratatui::prelude::Widget::render(block, popup, buf);
 
     *scroll = (*scroll).min((lines.len() as u16).saturating_sub(inner.height));
@@ -187,7 +197,39 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         (":session", "session scripts + sim interval"),
     ];
     let popup_w: u16 = 62;
-    let popup_h: u16 = (COLS.len() + module_cmds.len()) as u16 + 2;
+    let inner_width = (popup_w.min(cmd_area.width)).saturating_sub(2) as usize;
+    let desc_budget = inner_width.saturating_sub(34);
+
+    let desc_style = Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg);
+    let make_lines = |(cmd, desc): (&str, &str)| -> Vec<Line<'static>> {
+        let mut segments = crate::view::text::wrap(desc, desc_budget).into_iter();
+        let first = segments.next().unwrap_or_default();
+        let mut out = vec![Line::from(vec![
+            Span::styled(
+                format!("{cmd:<34}"),
+                Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg)
+                    .bold(),
+            ),
+            Span::styled(first, desc_style),
+        ])];
+        out.extend(
+            segments.map(|seg| Line::from(Span::styled(format!("{:34}{seg}", ""), desc_style))),
+        );
+        out
+    };
+    let lines: Vec<Line> = COLS
+        .iter()
+        .flat_map(|&(cmd, desc)| make_lines((cmd, desc)))
+        .chain(
+            module_cmds
+                .iter()
+                .flat_map(|c| make_lines((c.name, c.description))),
+        )
+        .collect();
+
+    let popup_h: u16 = lines.len() as u16 + 2;
     let x = cmd_area.x;
     let y = cmd_area.y.saturating_sub(popup_h);
     let popup = Rect {
@@ -202,30 +244,6 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
     let inner = block.inner(popup);
     ratatui::prelude::Widget::render(block, popup, buf);
 
-    let make_line = |(cmd, desc): (&str, &str)| {
-        Line::from(vec![
-            Span::styled(
-                format!("{cmd:<34}"),
-                Style::default()
-                    .fg(COLOR_SCHEME.hi)
-                    .bg(COLOR_SCHEME.bg)
-                    .bold(),
-            ),
-            Span::styled(
-                desc.to_string(),
-                Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
-            ),
-        ])
-    };
-    let lines: Vec<Line> = COLS
-        .iter()
-        .map(|(cmd, desc)| make_line((cmd, desc)))
-        .chain(
-            module_cmds
-                .iter()
-                .map(|c| make_line((c.name, c.description))),
-        )
-        .collect();
     ratatui::prelude::Widget::render(
         Paragraph::new(lines).style(Style::default().bg(COLOR_SCHEME.bg)),
         inner,
