@@ -237,6 +237,9 @@ mod tests {
                 scope: format!("c{id}"),
             }
         }
+        fn connectors(&self) -> Vec<i64> {
+            self.conns.lock().unwrap().keys().map(|k| *k).collect()
+        }
     }
 
     /// A minimal ocpp-shaped host: kind `"ocpp"`, no register accessor.

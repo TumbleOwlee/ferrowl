@@ -317,6 +317,9 @@ mod tests {
                 dispatched: self.dispatched.clone(),
             }
         }
+        fn connectors(&self) -> Vec<i64> {
+            self.conns.borrow().keys().map(|k| *k).collect()
+        }
     }
 
     #[test]
