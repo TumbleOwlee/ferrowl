@@ -107,6 +107,7 @@ impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
         methods.add_method("Connector", |_, this, id: i64| {
             Ok(Accessor::new(this.handle.connector(id)))
         });
+        methods.add_method("GetConnectors", |_, this, ()| Ok(this.handle.connectors()));
     }
 }
 

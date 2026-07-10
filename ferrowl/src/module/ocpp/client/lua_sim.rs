@@ -55,6 +55,8 @@ pub trait ClientFields {
         Self: Sized;
     fn cs_get(&self, name: &str) -> Option<ValueType>;
     fn cs_set(&mut self, name: &str, value: ValueType) -> bool;
+
+    fn conns(&self) -> Vec<i64>;
     fn conn_get(&self, id: i64, name: &str) -> Option<ValueType>;
     fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool;
     /// The dispatch scope for `Connector(id)` actions (version-specific: 1.6 connector / 2.0.1 evse).
@@ -108,6 +110,11 @@ impl<S: ClientFields + 'static> OcppClientHost for ClientCsHandle<S> {
             queue: self.queue.clone(),
             id,
         }
+    }
+    fn connectors(&self) -> Vec<i64> {
+        let mut ids: Vec<i64> = with_state(&self.state, |s| s.conns());
+        ids.sort();
+        ids
     }
 }
 
@@ -187,6 +194,9 @@ impl ClientFields for crate::module::ocpp::client::v1_6::state::CsState {
     }
     fn cs_set(&mut self, name: &str, value: ValueType) -> bool {
         self.cs_set_field(name, value)
+    }
+    fn conns(&self) -> Vec<i64> {
+        self.connectors.iter().map(|c| c.connector_id).collect()
     }
     fn conn_get(&self, id: i64, name: &str) -> Option<ValueType> {
         self.connector(id).and_then(|c| c.get_field(name))
@@ -280,6 +290,9 @@ impl ClientFields for crate::module::ocpp::client::v2_0_1::state::CsState {
     }
     fn cs_set(&mut self, name: &str, value: ValueType) -> bool {
         self.cs_set_field(name, value)
+    }
+    fn conns(&self) -> Vec<i64> {
+        self.connectors.iter().map(|c| c.connector_id).collect()
     }
     fn conn_get(&self, id: i64, name: &str) -> Option<ValueType> {
         self.connector(id).and_then(|c| c.get_field(name))

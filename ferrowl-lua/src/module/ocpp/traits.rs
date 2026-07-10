@@ -33,6 +33,9 @@ pub trait OcppClientHost {
     /// state and dispatches connector-scoped actions; an unknown id yields a handle whose reads
     /// surface as errors (returned to Lua as such).
     fn connector(&self, id: i64) -> Self::Conn;
+
+    /// Connector ids known for the client station
+    fn connectors(&self) -> Vec<i64>;
 }
 
 /// Host backing the **server** `C_OCPP` module: one Lua sim spans every connected charging
