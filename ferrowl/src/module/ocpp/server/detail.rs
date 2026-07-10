@@ -17,9 +17,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::dialog::close_confirm::{
-    CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm,
-};
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::widgets;
 use ferrowl_ui::{
@@ -629,21 +627,25 @@ fn rfid_table() -> RfidTable {
 }
 
 fn rfid_input() -> Widget<InputFieldState, InputField<String>> {
-    widgets::input(
+    let mut widget = widgets::input(
         ("Add RFID", HorizontalAlignment::Left),
         "rfid tag (Enter to add)",
         false,
         widgets::bordered_input_style(),
-    )
+    );
+    widget.widget.set_margin(Margin::new(0, 0));
+    widget
 }
 
 fn key_input() -> Widget<InputFieldState, InputField<String>> {
-    widgets::input(
+    let mut widget = widgets::input(
         ("Fetch key", HorizontalAlignment::Left),
         "config key (Enter to fetch)",
         false,
         widgets::bordered_input_style(),
-    )
+    );
+    widget.widget.set_margin(Margin::new(0, 0));
+    widget
 }
 
 fn value_input(key: &str) -> Widget<InputFieldState, InputField<String>> {

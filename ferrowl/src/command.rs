@@ -11,6 +11,7 @@ pub enum Cmd {
     Load(Option<String>),
     Write(Option<String>),
     Log(Option<String>),
+    Swap(usize, usize),
     /// Open the session-level scripts/interval dialog.
     Session,
     /// `script copy <index>`; `None` = missing/unparseable index.
@@ -33,6 +34,17 @@ pub fn parse(input: &str) -> Cmd {
         "l" | "load" => Cmd::Load(first()),
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "log" => Cmd::Log(first()),
+        "swap" => {
+            let from = match parts.next().map(|v| v.parse()) {
+                Some(Ok(v)) => v,
+                _ => return Cmd::Unknown("swap".to_string()),
+            };
+            let to = match parts.next().map(|v| v.parse()) {
+                Some(Ok(v)) => v,
+                _ => return Cmd::Unknown("swap".to_string()),
+            };
+            Cmd::Swap(from, to)
+        }
         "session" => Cmd::Session,
         "script" => match parts.next() {
             Some("copy") => Cmd::ScriptCopy(parts.next().and_then(|s| s.parse().ok())),

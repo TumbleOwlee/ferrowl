@@ -70,6 +70,12 @@ impl App {
                 let msg = self.copy_scripts(idx);
                 self.log_active(msg).await;
             }
+            Cmd::Swap(from, to) => {
+                let len = self.tabs.len();
+                if from != to && from < len && to < len {
+                    self.tabs.swap(from, to);
+                }
+            }
             // Everything not recognised at the app level is forwarded to the active view.
             Cmd::Unknown(_) => {
                 let result = if let Some(tab) = self.tabs.get_mut(self.active) {
