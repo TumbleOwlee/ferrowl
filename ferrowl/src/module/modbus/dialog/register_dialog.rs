@@ -9,6 +9,8 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect};
 
+use crate::dialog::close_confirm::CloseConfirmEvent;
+
 use super::{EditedRegister, SubDialogs};
 
 /// Everything `ModbusOverlay` needs from the open edit dialog, on top of [`SubDialogs`].
@@ -23,4 +25,11 @@ pub trait RegisterDialog: SubDialogs {
     fn is_delete_register_button_focused(&self) -> bool;
     /// Validate the dialog and produce the edited register (or a user-facing error string).
     fn apply(&self) -> Result<EditedRegister, String>;
+    fn close_confirm_is_active(&self) -> bool;
+    fn close_confirm_open(&mut self);
+    fn close_confirm_handle_key(
+        &mut self,
+        modifiers: KeyModifiers,
+        code: KeyCode,
+    ) -> CloseConfirmEvent;
 }

@@ -23,6 +23,11 @@ pub trait SetupView {
     fn focus_previous(&mut self);
     /// On confirm: return `(tab_name, factory)` or `None` if validation fails.
     fn confirm(&self) -> Option<(String, ModuleViewFactory)>;
+    /// Whether the dialog requested a close (confirmed close popup) since the last call.
+    /// Default `false` for dialogs with no embedded commandline.
+    fn close_requested(&mut self) -> bool {
+        false
+    }
 }
 
 /// Describes one module type available in the static registry.

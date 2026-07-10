@@ -10,6 +10,7 @@
 //! Actions with no spec open straight in JSON mode (transitional, removed once every action has a
 //! spec). Nested/abstracted actions supply a custom [`Assembler`] (see Stage 2).
 
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use crate::module::ocpp::widgets;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
@@ -181,6 +182,8 @@ pub struct ActionDialog {
     focus: Focus,
     /// Compact rows (vertical row margin 0); `c` toggles it. Default is roomy (margin 1).
     compact: bool,
+    /// Close-confirm popup, opened by Esc.
+    close_confirm: Option<CloseConfirmDialog>,
 }
 
 impl ActionDialog {
@@ -272,6 +275,7 @@ impl ActionDialog {
             send: button("Send"),
             focus: Focus::Fields,
             compact: false,
+            close_confirm: None,
         }
     }
 
@@ -423,18 +427,36 @@ impl ActionDialog {
             return None;
         }
 
+        // The close-confirm popup captures all keys while open.
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => {
+                    self.close_confirm = None;
+                    Some(ActionResult::Close)
+                }
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    None
+                }
+                CloseConfirmEvent::Consumed => None,
+            };
+        }
+
+        let json_editor_focused = self.json_mode && self.focus == Focus::Fields;
+
         // The vim-modal JSON editor must see keys before the dialog: in Insert mode it
         // consumes Esc (back to Normal), Enter (newline), and Tab/BackTab (indent/dedent);
         // only keys it leaves unhandled fall through to dialog handling below.
-        if self.json_mode
-            && self.focus == Focus::Fields
+        if json_editor_focused
             && let EventResult::Consumed = self.json.state.handle_events(modifiers, code)
         {
             return None;
         }
 
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Esc) => return Some(ActionResult::Close),
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                self.close_confirm = Some(CloseConfirmDialog::new());
+            }
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             (KeyModifiers::NONE, KeyCode::Enter) => match self.focus {
@@ -544,6 +566,10 @@ impl ActionDialog {
                 }
             }
         }
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(vc, buf);
+        }
     }
 }
 
@@ -644,6 +670,7 @@ mod tests {
     use super::*;
     use crossterm::event::KeyCode;
     use ferrowl_ocpp::{V1_6, Version};
+    use ferrowl_ui::state::VimMode;
 
     const PROPS: &[PropSpec] = &[
         PropSpec {
@@ -856,6 +883,26 @@ mod tests {
     }
 
     #[test]
+    fn esc_returns_none() {
+        let mut d = dialog();
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_some());
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn esc_then_enter_returns_close() {
+        let mut d = dialog();
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_some());
+        assert!(matches!(
+            d.input(KeyModifiers::NONE, KeyCode::Enter),
+            Some(ActionResult::Close)
+        ));
+    }
+
+    #[test]
     fn space_on_send_returns_send_keep() {
         let mut d = dialog();
         while d.focus != Focus::Send {
@@ -872,5 +919,66 @@ mod tests {
         let mut d = dialog();
         assert!(d.focus == Focus::Fields);
         assert!(d.input(KeyModifiers::NONE, KeyCode::Char(' ')).is_none());
+    }
+
+    #[test]
+    fn value_editor_esc_still_cancels_editor_only() {
+        let mut d = dialog();
+        d.input(KeyModifiers::NONE, KeyCode::Enter); // open value editor for selected row
+        assert!(d.editor.is_some());
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.editor.is_none());
+    }
+
+    #[test]
+    fn json_insert_colon_inserts() {
+        let mut d = dialog();
+        d.toggle_mode();
+        assert!(d.json_mode);
+        d.input(KeyModifiers::NONE, KeyCode::Char('i')); // enter Insert mode
+        assert_eq!(d.json.state.vim_mode(), VimMode::Insert);
+        d.input(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert!(
+            d.close_confirm.is_none(),
+            "colon in Insert mode must not open the close-confirm popup"
+        );
+        assert!(d.json.state.content().contains(':'));
+    }
+
+    #[test]
+    fn json_insert_esc_goes_normal_no_confirm() {
+        let mut d = dialog();
+        d.toggle_mode();
+        assert!(d.json_mode);
+        d.input(KeyModifiers::NONE, KeyCode::Char('i')); // enter Insert mode
+        assert_eq!(d.json.state.vim_mode(), VimMode::Insert);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert_eq!(d.json.state.vim_mode(), VimMode::Normal);
+        assert!(
+            d.close_confirm.is_none(),
+            "Insert-mode Esc must return to Normal without opening the close-confirm popup"
+        );
+        // A second Esc (Normal mode) bubbles to the dialog and opens the confirm.
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_some());
+    }
+
+    #[test]
+    fn json_normal_colon_consumed_by_editor() {
+        let mut d = dialog();
+        d.toggle_mode();
+        assert!(d.json_mode);
+        assert_eq!(d.json.state.vim_mode(), VimMode::Normal);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Char(':')).is_none());
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn esc_in_confirm_keeps_dialog() {
+        let mut d = dialog();
+        d.input(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(d.close_confirm.is_some());
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_none());
     }
 }

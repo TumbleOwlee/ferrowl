@@ -1,6 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -53,6 +52,10 @@ impl SetupView for ModbusSetupView {
         self.dialog.focus_previous();
     }
 
+    fn close_requested(&mut self) -> bool {
+        self.dialog.take_close_request()
+    }
+
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
         let outcome = self.dialog.resolve().ok()?;
         let (device_path, mut device) = outcome
@@ -85,5 +88,24 @@ impl SetupView for ModbusSetupView {
         });
 
         Some((name, factory))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression: the `SetupView::close_requested` default trait method must be overridden here
+    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
+    // silently do nothing for a Modbus module setup.
+    #[test]
+    fn ut_close_requested_delegates_to_dialog_take_close_request() {
+        let mut sv = ModbusSetupView::new_create();
+        assert!(!sv.close_requested());
+        // Esc opens the close-confirm popup; Enter confirms it.
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(sv.close_requested());
+        assert!(!sv.close_requested(), "flag must clear after take");
     }
 }

@@ -6,6 +6,7 @@ use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::{HandleEvents, OverlayRoute};
 use ferrowl_ui::widgets::GetValue;
 
+use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
@@ -24,11 +25,14 @@ where
         code: KeyCode,
     ) -> EventResult {
         if self.overlay.is_active() {
-            // Setup dialog: offer the key to the dialog before common routing, so a future
-            // dialog-owned popup can consume Esc/Enter/Tab/BackTab while it is open.
+            // Setup dialog: offer the key to the dialog before common routing, so its embedded
+            // close-confirm popup can consume Esc/Enter/Tab/BackTab while it is open.
             if let ServerOverlay::Setup(setup) = &mut self.overlay
                 && let EventResult::Consumed = setup.handle_events(modifiers, code)
             {
+                if setup.take_close_request() {
+                    self.overlay.close();
+                }
                 return EventResult::Consumed;
             }
 
@@ -106,7 +110,8 @@ where
                     }
                 }
 
-                // Setup dialog: `Esc`/`Tab` already routed; `Enter` resolves, other keys forwarded.
+                // Setup dialog: the key was already offered to the dialog above and `Tab`
+                // routed; only `Enter` (resolve) is left to handle here.
                 ServerOverlay::Setup(_) => {
                     if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
                         let resolved = if let ServerOverlay::Setup(setup) = &self.overlay {
@@ -118,8 +123,6 @@ where
                             self.deferred.setup = Some((spec, path));
                             self.overlay.close();
                         }
-                    } else if let ServerOverlay::Setup(setup) = &mut self.overlay {
-                        let _ = setup.handle_events(modifiers, code);
                     }
                 }
 
@@ -242,7 +245,10 @@ where
     }
 
     fn open_scripts(&mut self) {
-        self.overlay = ServerOverlay::Scripts(Box::new(ScriptDialog::new(&self.device.scripts)));
+        self.overlay = ServerOverlay::Scripts(Box::new(ScriptDialog::new(
+            &self.device.scripts,
+            ScriptContext::OcppServer,
+        )));
     }
 
     /// Trigger the focused action against the selected entry.

@@ -3,6 +3,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::dialog::close_confirm::CloseConfirmEvent;
 use crate::module::modbus::dialog::{
     EditInputDialog, EditSelectionDialog, EditedRegister, RegisterDialog,
 };
@@ -132,6 +133,22 @@ impl ModbusOverlay {
 
     pub(super) fn apply(&self) -> Option<EditedRegister> {
         self.inner().apply().ok()
+    }
+
+    pub(super) fn close_confirm_is_active(&self) -> bool {
+        self.inner().close_confirm_is_active()
+    }
+
+    pub(super) fn close_confirm_open(&mut self) {
+        self.inner_mut().close_confirm_open()
+    }
+
+    pub(super) fn close_confirm_handle_key(
+        &mut self,
+        modifiers: KeyModifiers,
+        code: KeyCode,
+    ) -> CloseConfirmEvent {
+        self.inner_mut().close_confirm_handle_key(modifiers, code)
     }
 
     pub(super) fn is_add(&self) -> bool {

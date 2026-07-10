@@ -479,8 +479,8 @@ impl App {
         }
     }
 
-    /// Route a key to the open `:session` dialog. Returns `true` when it signals close (Esc on
-    /// the interval field), which applies the working copy to `session_sim`.
+    /// Route a key to the open `:session` dialog. Returns `true` when it signals close (its
+    /// close-confirm popup was confirmed), which applies the working copy to `session_sim`.
     fn handle_session_dialog_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let Some(dialog) = self.session_dialog.as_mut() else {
             return false;

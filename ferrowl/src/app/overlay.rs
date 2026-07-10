@@ -26,7 +26,6 @@ impl App {
         };
         if let EventResult::Unhandled(modifiers, code) = result {
             match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.close_overlay(),
                 (KeyModifiers::NONE, KeyCode::Enter) => self.confirm_overlay().await,
                 (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
                     if let Some(o) = self.overlay.as_mut() {
@@ -40,6 +39,15 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        // A confirmed close popup in the type-selector or the active creation dialog requests a close.
+        let close_requested = match self.overlay.as_mut() {
+            Some(Overlay::TypeSelect(d)) => d.take_close_request(),
+            Some(Overlay::Creation(sv)) => sv.close_requested(),
+            None => false,
+        };
+        if close_requested {
+            self.close_overlay();
         }
         false
     }

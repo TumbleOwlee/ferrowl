@@ -2,7 +2,9 @@
 //! On/Off status over a "New Script" name input; right: a code editor for the selected script.
 //! Edits are live on a working copy; the view reads it back via [`ScriptDialog::resolve`] on close
 //! and reloads the simulation. `t` toggles a script, `d` deletes (with confirmation), `c` toggles
-//! compact rows, Enter in the name input creates a new (enabled) script, Esc closes.
+//! compact rows, Enter in the name input creates a new (enabled) script. `Esc` opens a close
+//! confirmation popup (Enter/Space confirms, Esc dismisses it); `?` from the code editor's Normal
+//! mode opens the Lua bindings overlay.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_syntax::Language;
@@ -10,7 +12,7 @@ use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
         CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
-        TableState, TableStateBuilder,
+        TableState, TableStateBuilder, VimMode,
     },
     style::{InputFieldStyleBuilder, TableStyleBuilder},
     traits::{HandleEvents, SetFocus},
@@ -28,6 +30,8 @@ use ratatui::{
 };
 
 use crate::config::script::ScriptDef;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::lua_help::{LuaHelpOverlay, ScriptContext};
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 
 // --- Script table ----------------------------------------------------------
@@ -58,10 +62,13 @@ pub struct ScriptDialog {
     confirm: Option<ConfirmDeleteDialog>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
+    close_confirm: Option<CloseConfirmDialog>,
+    context: ScriptContext,
+    lua_help: Option<LuaHelpOverlay>,
 }
 
 impl ScriptDialog {
-    pub fn new(scripts: &[ScriptDef]) -> Self {
+    pub fn new(scripts: &[ScriptDef], context: ScriptContext) -> Self {
         let scripts = scripts.to_vec();
         let mut dialog = Self {
             table: script_table(rows(&scripts)),
@@ -71,6 +78,9 @@ impl ScriptDialog {
             view_focused: true,
             confirm: None,
             compact: false,
+            close_confirm: None,
+            context,
+            lua_help: None,
             scripts,
         };
         dialog.sync_code_from_selection();
@@ -153,8 +163,29 @@ impl ScriptDialog {
         }
     }
 
-    /// Handle a key. Returns `true` when the dialog should close (Esc at the top level).
+    /// Handle a key. Returns `true` when the dialog should close (confirmed via the close-confirm
+    /// popup).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
+        // The Lua bindings overlay takes precedence over everything else while open.
+        if let Some(help) = self.lua_help.as_mut() {
+            if help.handle_key(modifiers, code) {
+                self.lua_help = None;
+            }
+            return false;
+        }
+
+        // The close-confirm popup takes precedence once open.
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => true,
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    false
+                }
+                CloseConfirmEvent::Consumed => false,
+            };
+        }
+
         // Delete-confirmation sub-dialog takes precedence.
         if let Some(confirm) = self.confirm.as_mut() {
             match (modifiers, code) {
@@ -177,6 +208,18 @@ impl ScriptDialog {
             return false;
         }
 
+        // Intercept `?` before offering the key to the editor, but only in the code editor's
+        // Normal mode: in Insert/Visual mode it is valid Lua text and must fall through
+        // unchanged.
+        if self.focus == ScriptDialogFocus::Code
+            && self.code.state.vim_mode() == VimMode::Normal
+            && let (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?')) =
+                (modifiers, code)
+        {
+            self.lua_help = Some(LuaHelpOverlay::new());
+            return false;
+        }
+
         // The vim-modal code editor must see keys before the dialog: in Insert mode it
         // consumes Esc (back to Normal) and Tab/BackTab (indent/dedent); only keys it
         // leaves unhandled (e.g. Esc/Tab in Normal mode) fall through to dialog handling.
@@ -189,7 +232,6 @@ impl ScriptDialog {
         }
 
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Esc) => return true,
             (KeyModifiers::NONE, KeyCode::Tab) => {
                 self.focus_next();
                 if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
@@ -201,6 +243,9 @@ impl ScriptDialog {
                 if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
                     self.focus_previous();
                 }
+            }
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                self.close_confirm = Some(CloseConfirmDialog::new());
             }
             _ => match self.focus {
                 ScriptDialogFocus::Table => match (modifiers, code) {
@@ -254,9 +299,9 @@ impl ScriptDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title("Lua Scripts");
-        let inner = block.inner(vc);
+        let block_inner = block.inner(vc);
         block.render(vc, buf);
-        let inner = inner.inner(Margin {
+        let inner = block_inner.inner(Margin {
             vertical: 1,
             horizontal: 2,
         });
@@ -286,6 +331,14 @@ impl ScriptDialog {
         StatefulWidget::render(&self.code.widget, right, buf, &mut self.code.state);
 
         if let Some(confirm) = self.confirm.as_mut() {
+            confirm.render(area, buf);
+        }
+
+        if let Some(help) = self.lua_help.as_mut() {
+            help.render(area, buf, self.context);
+        }
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
             confirm.render(area, buf);
         }
     }
@@ -380,16 +433,19 @@ mod tests {
     use super::*;
 
     fn dialog() -> ScriptDialog {
-        ScriptDialog::new(&[ScriptDef {
-            name: "boot".into(),
-            code: String::new(),
-            enabled: true,
-        }])
+        ScriptDialog::new(
+            &[ScriptDef {
+                name: "boot".into(),
+                code: String::new(),
+                enabled: true,
+            }],
+            ScriptContext::Modbus,
+        )
     }
 
     #[test]
     fn code_editor_disabled_and_skipped_without_selection() {
-        let mut d = ScriptDialog::new(&[]);
+        let mut d = ScriptDialog::new(&[], ScriptContext::Modbus);
         assert!(d.code.state.disabled());
         // Tab cycles Table -> NameInput -> Table, never landing on Code.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
@@ -420,7 +476,7 @@ mod tests {
 
     #[test]
     fn creating_first_script_enables_code_editor() {
-        let mut d = ScriptDialog::new(&[]);
+        let mut d = ScriptDialog::new(&[], ScriptContext::Modbus);
         assert!(d.code.state.disabled());
         d.focus = ScriptDialogFocus::NameInput;
         for c in "boot".chars() {
@@ -472,5 +528,148 @@ mod tests {
             Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(narrow_area);
         assert!(left.width < 50);
         assert!(right.width >= 1);
+    }
+
+    // --- close-confirm / lua-help integration -------------------------------
+
+    #[test]
+    fn esc_then_enter_closes() {
+        let mut d = dialog();
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+        assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
+    }
+
+    #[test]
+    fn esc_does_not_close() {
+        let mut d = dialog();
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+        assert_eq!(d.focus, ScriptDialogFocus::Table);
+        d.close_confirm = None;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+    }
+
+    #[test]
+    fn esc_in_confirm_keeps_dialog() {
+        let mut d = dialog();
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn space_in_confirm_closes() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(d.close_confirm.is_some());
+        assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Char(' ')));
+    }
+
+    #[test]
+    fn esc_from_code_normal_opens_confirm() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+    }
+
+    #[test]
+    fn insert_esc_goes_normal_no_confirm() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn colon_in_name_input_types() {
+        let mut d = dialog();
+        d.focus = ScriptDialogFocus::NameInput;
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
+        assert_eq!(d.name_input.state.input(), ":");
+    }
+
+    #[test]
+    fn colon_in_code_insert_inserts() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert!(d.code.state.content().contains(':'));
+    }
+
+    #[test]
+    fn colon_in_code_normal_no_overlay() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
+        assert!(d.close_confirm.is_none());
+        assert!(d.lua_help.is_none());
+    }
+
+    #[test]
+    fn confirm_esc_still_cancels() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('d'));
+        assert!(d.confirm.is_some());
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.confirm.is_none());
+    }
+
+    #[test]
+    fn question_opens_bindings_only_code_normal() {
+        let mut d = dialog();
+        // From Table: no overlay opens; `?` is not bound there.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.lua_help.is_none());
+
+        // From Code Insert mode: `?` is text.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.code.state.content().contains('?'));
+        assert!(d.lua_help.is_none());
+
+        // From Code Normal mode: `?` opens the overlay.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.lua_help.is_some());
+    }
+
+    #[test]
+    fn bindings_close_keys() {
+        for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
+            let mut d = dialog();
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+            assert!(d.lua_help.is_some());
+            assert!(!d.handle_events(KeyModifiers::NONE, close_key));
+            assert!(d.lua_help.is_none());
+        }
     }
 }

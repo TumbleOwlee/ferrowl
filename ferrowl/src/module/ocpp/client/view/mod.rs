@@ -352,12 +352,12 @@ enum ClientOverlay {
     #[overlay(esc_close)]
     Edit(Box<EditOverlay>),
     /// Config-key editor.
-    #[overlay(esc_close, focus_cycle)]
+    #[overlay(focus_cycle)]
     Config(Box<ConfigEditDialog>),
     /// Action send dialog (routes all keys via its own `input()`).
     Action(Box<ActionDialog>),
     /// Module re-setup dialog.
-    #[overlay(esc_close, focus_cycle)]
+    #[overlay(focus_cycle)]
     Setup(Box<OcppSetupDialog>),
     /// Lua scripts editor (routes all keys via its own `handle_events()`).
     Scripts(Box<ScriptDialog>),
@@ -906,5 +906,46 @@ mod tests {
     fn edit_field_cs_rows_align_v2_0_1() {
         let s = crate::module::ocpp::client::v2_0_1::state::CsState::default();
         assert_cs_rows_align(&s.cs_state_rows());
+    }
+
+    // --- Esc-confirm migration: Setup / Config overlays --------------------------------------
+
+    #[test]
+    fn setup_overlay_esc_opens_confirm_enter_closes() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        v.overlay = ClientOverlay::Setup(Box::new(OcppSetupDialog::new()));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            v.overlay.is_active(),
+            "Esc must not close the setup dialog outright (opens close-confirm)"
+        );
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            !v.overlay.is_active(),
+            "Enter in close-confirm must close the setup dialog"
+        );
+    }
+
+    #[test]
+    fn config_overlay_esc_opens_confirm_enter_closes() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        v.overlay = ClientOverlay::Config(Box::new(ConfigEditDialog::new(
+            0,
+            &ConfigKey {
+                key: "k".into(),
+                value: "v".into(),
+                readonly: false,
+            },
+        )));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            v.overlay.is_active(),
+            "Esc must not close the config-key editor outright (opens close-confirm)"
+        );
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            !v.overlay.is_active(),
+            "Enter in close-confirm must close the config-key editor"
+        );
     }
 }

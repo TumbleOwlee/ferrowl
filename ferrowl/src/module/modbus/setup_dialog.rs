@@ -4,15 +4,16 @@
 //! validated live and must point at a loadable config. While any field is invalid the dialog
 //! cannot be confirmed (only cancelled with Esc).
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border, COLOR_SCHEME, EventResult,
     state::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
         SuggestInputState, SuggestInputStateBuilder,
     },
     style::{InputFieldStyle, SelectionStyle, TextStyle},
-    traits::ToLabel,
+    traits::{HandleEvents, ToLabel},
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
@@ -29,6 +30,7 @@ use ratatui::{
 use crate::config::device::ReadRanges;
 use crate::config::{DeviceConfig, Endpoint, Role};
 use crate::dialog::NonEmpty;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use crate::dialog::path_suggest::FsPathProvider;
 
 use super::build::Timing;
@@ -229,6 +231,13 @@ pub struct SetupDialog {
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
+    /// Confirm-close popup, opened with Esc.
+    #[builder(default)]
+    pub close_confirm: Option<CloseConfirmDialog>,
+    /// Set once the close-confirm popup is confirmed; the host checks this via
+    /// `take_close_request` and closes the dialog.
+    #[builder(default)]
+    close_requested: bool,
 }
 
 impl SetupDialog {
@@ -436,6 +445,37 @@ impl SetupDialog {
         dialog
     }
 
+    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it;
+    /// everything else falls through to the derived per-field routing.
+    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => {
+                    self.close_requested = true;
+                    self.close_confirm = None;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Consumed => EventResult::Consumed,
+            };
+        }
+
+        if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+            self.close_confirm = Some(CloseConfirmDialog::new());
+            return EventResult::Consumed;
+        }
+
+        <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
+    }
+
     /// Validate everything and produce the outcome. In New mode the (optional) config path is
     /// loaded/validated here, so an invalid path is reported as an error.
     pub fn resolve(&self) -> Result<SetupOutcome, String> {
@@ -586,7 +626,8 @@ impl SetupDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title(title);
-        let inner = block.inner(vcenter).inner(Margin::new(2, 1));
+        let block_inner = block.inner(vcenter);
+        let inner = block_inner.inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vcenter, buf);
         block.render(vcenter, buf);
 
@@ -746,6 +787,10 @@ impl SetupDialog {
         self.path
             .widget
             .render_overlay(area, buf, &mut self.path.state);
+
+        if let Some(d) = self.close_confirm.as_mut() {
+            d.render(vcenter, buf);
+        }
     }
 }
 
@@ -999,5 +1044,52 @@ mod tests {
         dialog.focus_next();
         assert!(dialog.holding_ranges.state.is_focused());
         assert!(!dialog.reconnect.state.is_focused());
+    }
+
+    fn default_timing() -> Timing {
+        Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        }
+    }
+
+    #[test]
+    fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
+        let mut dialog = SetupDialog::create(default_timing());
+        assert!(!dialog.take_close_request());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.take_close_request());
+        assert!(!dialog.take_close_request(), "flag must clear after take");
+    }
+
+    #[test]
+    fn ut_colon_in_text_input_types() {
+        let mut dialog = SetupDialog::create(default_timing());
+        // Default focus is Name, a free-text field; `:` is typed as ordinary text.
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert_eq!(dialog.name.state.input(), ":");
+    }
+
+    #[test]
+    fn ut_esc_in_confirm_keeps_setup_open() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_none());
+        assert!(!dialog.take_close_request());
+    }
+
+    #[test]
+    fn ut_space_in_confirm_closes() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert!(dialog.take_close_request());
     }
 }

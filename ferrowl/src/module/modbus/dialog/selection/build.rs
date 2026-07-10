@@ -75,7 +75,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             .success(widgets::success_text())
             .keybinds([
                 widgets::keybind("<Tab>: next | <Space>: press button"),
-                widgets::keybind("<Esc>: cancel | <Enter>: confirm / newline"),
+                widgets::keybind("<Esc>: close | <Enter>: confirm / newline"),
             ])
             .focus(EditSelectionDialogFocus::Value)
             .build()

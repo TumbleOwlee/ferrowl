@@ -9,9 +9,10 @@
 //! One flat Tab order: Interval → script table → name input → code editor → log → Interval
 //! (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t` toggles a
 //! script, `d` deletes (with confirmation), `c` toggles compact rows, Enter in the name input
-//! creates a new (enabled) script. Edits are live on a working copy and `Esc` closes the dialog
-//! from any field, applying it — the same "no separate save" convention the module
-//! [`ScriptDialog`] uses.
+//! creates a new (enabled) script. Edits are live on a working copy, applied when the dialog
+//! closes — the same "no separate save" convention the module [`ScriptDialog`] uses. `Esc` opens
+//! a close confirmation popup (Enter/Space confirms, Esc dismisses it); `?` from the code
+//! editor's Normal mode opens the Lua bindings overlay.
 //!
 //! [`ScriptDialog`]: crate::dialog::scripts::ScriptDialog
 
@@ -23,7 +24,7 @@ use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{
         CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
-        TableState, TableStateBuilder,
+        TableState, TableStateBuilder, VimMode,
     },
     style::{InputFieldStyleBuilder, TableStyleBuilder},
     traits::{HandleEvents, SetFocus},
@@ -41,6 +42,8 @@ use ratatui::{
 };
 
 use crate::config::script::ScriptDef;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::lua_help::{LuaHelpOverlay, ScriptContext};
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::view::SharedLog;
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
@@ -123,6 +126,8 @@ pub struct SessionDialog {
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
     focus: SessionDialogFocus,
+    close_confirm: Option<CloseConfirmDialog>,
+    lua_help: Option<LuaHelpOverlay>,
 }
 
 impl SessionDialog {
@@ -139,6 +144,8 @@ impl SessionDialog {
             confirm: None,
             compact: false,
             focus: SessionDialogFocus::Interval,
+            close_confirm: None,
+            lua_help: None,
             scripts,
         };
         dialog.sync_code_from_selection();
@@ -266,8 +273,29 @@ impl SessionDialog {
         self.apply_focus();
     }
 
-    /// Handle a key. Returns `true` when the dialog should close (Esc).
+    /// Handle a key. Returns `true` when the dialog should close (confirmed via the close-confirm
+    /// popup).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
+        // The Lua bindings overlay takes precedence over everything else while open.
+        if let Some(help) = self.lua_help.as_mut() {
+            if help.handle_key(modifiers, code) {
+                self.lua_help = None;
+            }
+            return false;
+        }
+
+        // The close-confirm popup takes precedence once open.
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => true,
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    false
+                }
+                CloseConfirmEvent::Consumed => false,
+            };
+        }
+
         // Delete-confirmation sub-dialog takes precedence.
         if let Some(confirm) = self.confirm.as_mut() {
             match (modifiers, code) {
@@ -290,6 +318,18 @@ impl SessionDialog {
             return false;
         }
 
+        // Intercept `?` before offering the key to the editor, but only in the code editor's
+        // Normal mode: in Insert/Visual mode it is valid Lua text and must fall through
+        // unchanged.
+        if self.focus == SessionDialogFocus::Code
+            && self.code.state.vim_mode() == VimMode::Normal
+            && let (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?')) =
+                (modifiers, code)
+        {
+            self.lua_help = Some(LuaHelpOverlay::new());
+            return false;
+        }
+
         // The vim-modal code editor must see keys before the dialog: in Insert mode it
         // consumes Esc (back to Normal) and Tab/BackTab (indent/dedent); only keys it
         // leaves unhandled (e.g. Esc/Tab in Normal mode) fall through to dialog handling.
@@ -302,9 +342,11 @@ impl SessionDialog {
         }
 
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Esc) => return true,
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_step(true),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_step(false),
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                self.close_confirm = Some(CloseConfirmDialog::new());
+            }
             _ => match self.focus {
                 SessionDialogFocus::Interval => {
                     let _ = self.interval.state.handle_events(modifiers, code);
@@ -363,9 +405,9 @@ impl SessionDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title("Session");
-        let inner = block.inner(vc);
+        let block_inner = block.inner(vc);
         block.render(vc, buf);
-        let inner = inner.inner(Margin {
+        let inner = block_inner.inner(Margin {
             vertical: 1,
             horizontal: 2,
         });
@@ -401,6 +443,14 @@ impl SessionDialog {
 
         if let Some(confirm) = self.confirm.as_mut() {
             confirm.render(vc, buf);
+        }
+
+        if let Some(help) = self.lua_help.as_mut() {
+            help.render(area, buf, ScriptContext::Session);
+        }
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(area, buf);
         }
     }
 }
@@ -671,10 +721,12 @@ mod tests {
     }
 
     #[test]
-    fn ut_esc_closes_from_any_field() {
+    fn ut_esc_does_not_close() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
-        assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert_eq!(d.focus, SessionDialogFocus::Scripts);
+        assert!(d.close_confirm.is_some());
     }
 
     #[test]
@@ -738,5 +790,144 @@ mod tests {
             Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(narrow_area);
         assert!(left.width < 50);
         assert!(right.width >= 1);
+    }
+
+    // --- close-confirm / lua-help integration -------------------------------
+
+    #[test]
+    fn ut_esc_then_enter_closes() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+        assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
+    }
+
+    #[test]
+    fn ut_esc_in_confirm_keeps_dialog() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn ut_space_in_confirm_closes() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(d.close_confirm.is_some());
+        assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Char(' ')));
+    }
+
+    #[test]
+    fn ut_esc_from_code_normal_opens_confirm() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+        assert_eq!(d.focus, SessionDialogFocus::Code);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.close_confirm.is_some());
+    }
+
+    #[test]
+    fn ut_insert_esc_goes_normal_no_confirm() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+        assert_eq!(d.focus, SessionDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn ut_colon_in_name_input_types() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        assert_eq!(d.focus, SessionDialogFocus::NewScript);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
+        assert_eq!(d.name_input.state.input(), ":");
+    }
+
+    #[test]
+    fn ut_colon_in_code_insert_inserts() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+        assert_eq!(d.focus, SessionDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert!(d.code.state.content().contains(':'));
+    }
+
+    #[test]
+    fn ut_colon_in_code_normal_no_overlay() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+        assert_eq!(d.focus, SessionDialogFocus::Code);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
+        assert!(d.close_confirm.is_none());
+        assert!(d.lua_help.is_none());
+    }
+
+    #[test]
+    fn ut_confirm_esc_still_cancels() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('d'));
+        assert!(d.confirm.is_some());
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.confirm.is_none());
+    }
+
+    #[test]
+    fn ut_question_opens_bindings_only_code_normal() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        // From Scripts focus: `?` is not bound there, no overlay.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.lua_help.is_none());
+
+        // From Code Insert mode: `?` is text.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+        assert_eq!(d.focus, SessionDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.code.state.content().contains('?'));
+        assert!(d.lua_help.is_none());
+
+        // From Code Normal mode: `?` opens the overlay.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(d.lua_help.is_some());
+    }
+
+    #[test]
+    fn ut_bindings_close_keys() {
+        for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
+            let mut d = dialog();
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+            assert!(d.lua_help.is_some());
+            assert!(!d.handle_events(KeyModifiers::NONE, close_key));
+            assert!(d.lua_help.is_none());
+        }
     }
 }

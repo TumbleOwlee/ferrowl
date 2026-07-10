@@ -4,7 +4,6 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::HandleEvents;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -43,6 +42,10 @@ impl SetupView for OcppSetupView {
 
     fn focus_previous(&mut self) {
         self.dialog.focus_previous();
+    }
+
+    fn close_requested(&mut self) -> bool {
+        self.dialog.take_close_request()
     }
 
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
@@ -91,6 +94,20 @@ mod tests {
     use super::*;
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppVersion;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    // Regression: the `SetupView::close_requested` default trait method must be overridden here
+    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc→confirm
+    // flow would silently do nothing for an OCPP module setup.
+    #[test]
+    fn ut_close_requested_delegates_to_dialog_take_close_request() {
+        let mut sv = OcppSetupView::new();
+        assert!(!sv.close_requested());
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(sv.close_requested());
+        assert!(!sv.close_requested(), "flag must clear after take");
+    }
 
     fn base_spec(protocol: OcppProtocol) -> OcppSpec {
         OcppSpec {

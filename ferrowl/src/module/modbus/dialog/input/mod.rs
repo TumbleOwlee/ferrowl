@@ -3,6 +3,7 @@
 use super::{AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address};
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::NonEmpty;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use derive_builder::Builder;
 use ferrowl_codec::format::{
     BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution, Width,
@@ -100,6 +101,9 @@ pub struct EditInputDialog {
     // refresh (which can't see other registers) until the user edits the dialog again.
     #[builder(default)]
     pub name_error: Option<String>,
+    // Confirm-close popup, opened with Esc.
+    #[builder(default)]
+    pub close_confirm: Option<CloseConfirmDialog>,
 }
 
 /// The result of confirming the edit dialog: updated register metadata + an optional value to
@@ -467,6 +471,26 @@ impl super::RegisterDialog for EditInputDialog {
     }
     fn apply(&self) -> Result<EditedRegister, String> {
         self.apply()
+    }
+    fn close_confirm_is_active(&self) -> bool {
+        self.close_confirm.is_some()
+    }
+    fn close_confirm_open(&mut self) {
+        self.close_confirm = Some(CloseConfirmDialog::new());
+    }
+    fn close_confirm_handle_key(
+        &mut self,
+        modifiers: KeyModifiers,
+        code: KeyCode,
+    ) -> CloseConfirmEvent {
+        let Some(confirm) = self.close_confirm.as_mut() else {
+            return CloseConfirmEvent::Dismiss;
+        };
+        let event = confirm.handle_key(modifiers, code);
+        if !matches!(event, CloseConfirmEvent::Consumed) {
+            self.close_confirm = None;
+        }
+        event
     }
 }
 

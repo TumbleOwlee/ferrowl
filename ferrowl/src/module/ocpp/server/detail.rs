@@ -17,6 +17,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::widgets;
 use ferrowl_ui::{
@@ -160,6 +161,8 @@ pub struct DetailOverlay {
     compact: bool,
     /// An open value-input dialog for the selected config key: (key, input widget).
     set_dialog: Option<(String, Widget<InputFieldState, InputField<String>>)>,
+    /// Close-confirm popup, opened by Esc.
+    close_confirm: Option<CloseConfirmDialog>,
 }
 
 impl DetailOverlay {
@@ -182,6 +185,7 @@ impl DetailOverlay {
             focus: Focus::State,
             compact: false,
             set_dialog: None,
+            close_confirm: None,
         }
     }
 
@@ -399,8 +403,25 @@ impl DetailOverlay {
             return None;
         }
 
+        // The close-confirm popup captures all keys while open.
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => {
+                    self.close_confirm = None;
+                    Some(DetailRequest::Close)
+                }
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    None
+                }
+                CloseConfirmEvent::Consumed => None,
+            };
+        }
+
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Esc) => return Some(DetailRequest::Close),
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                self.close_confirm = Some(CloseConfirmDialog::new());
+            }
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             // `c` toggles compact rows when a table is focused (the inputs keep `c` as text).
@@ -582,6 +603,10 @@ impl DetailOverlay {
             UiWidget::render(&Clear, mid, buf);
             field.state.set_focused(true);
             StatefulWidget::render(&field.widget, mid, buf, &mut field.state);
+        }
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(vc, buf);
         }
     }
 }
@@ -829,11 +854,42 @@ mod tests {
     }
 
     #[test]
-    fn esc_requests_close() {
+    fn esc_returns_none() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_some());
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_none());
+    }
+
+    #[test]
+    fn esc_then_enter_returns_close() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.close_confirm.is_some());
         assert!(matches!(
-            d.input(KeyModifiers::NONE, KeyCode::Esc),
+            d.input(KeyModifiers::NONE, KeyCode::Enter),
             Some(DetailRequest::Close)
         ));
+    }
+
+    #[test]
+    fn set_value_dialog_esc_cancels() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        d.merge_config("HeartbeatInterval".into(), "30".into(), false);
+        d.focus = Focus::Side;
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Enter).is_none());
+        assert!(d.set_dialog.is_some());
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
+        assert!(d.set_dialog.is_none());
+    }
+
+    #[test]
+    fn colon_in_rfid_input_types() {
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
+        d.focus = Focus::RfidInput;
+        d.input(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert!(d.close_confirm.is_none());
+        assert_eq!(d.rfid_input.state.get_value(), ":");
     }
 }

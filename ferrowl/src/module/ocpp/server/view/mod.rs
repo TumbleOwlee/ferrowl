@@ -360,7 +360,7 @@ enum ServerOverlay {
     #[overlay(esc_close, focus_cycle)]
     Confirm(Box<ConfirmDeleteDialog>),
     /// Module re-setup dialog.
-    #[overlay(esc_close, focus_cycle)]
+    #[overlay(focus_cycle)]
     Setup(Box<OcppSetupDialog>),
     /// Lua scripts editor (routes every key through its own `handle_events()`).
     Scripts(Box<ScriptDialog>),
@@ -862,9 +862,10 @@ mod tests {
             panic!("detail overlay open")
         };
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
-        // Close the overlay (Esc) — keep rows in memory, not discard.
+        // Close the overlay (Esc, confirm with Enter) — keep rows in memory, not discard.
         // Qualified: ServerView now also derives `HandleEvents` via `#[derive(Focus)]`.
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
         assert!(!v.overlay.is_active());
         assert_eq!(
             v.cs_configs.get("CP1").unwrap(),
@@ -883,6 +884,37 @@ mod tests {
         // Deleting the CS drops its stored config.
         v.delete_selected();
         assert!(!v.cs_configs.contains_key("CP1"));
+    }
+
+    // --- Esc-confirm migration: Setup overlay; Confirm keeps Esc ----------------------------
+
+    #[test]
+    fn setup_overlay_esc_opens_confirm_enter_closes() {
+        let mut v = server_view();
+        v.overlay = ServerOverlay::Setup(Box::new(
+            crate::module::ocpp::setup_dialog::OcppSetupDialog::new(),
+        ));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            v.overlay.is_active(),
+            "Esc must not close the setup dialog outright (opens close-confirm)"
+        );
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            !v.overlay.is_active(),
+            "Enter in close-confirm must close the setup dialog"
+        );
+    }
+
+    #[test]
+    fn confirm_overlay_still_closes_on_esc() {
+        let mut v = server_view();
+        v.overlay = ServerOverlay::Confirm(Box::new(ConfirmDeleteDialog::new("CP1")));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            !v.overlay.is_active(),
+            "Esc must still close the delete-confirmation dialog"
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{EventResult, traits::HandleEvents, widgets::GetValue};
 
+use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
@@ -23,11 +24,14 @@ impl<V: ClientVersion> ClientView<V> {
         code: KeyCode,
     ) -> EventResult {
         if self.overlay.is_active() {
-            // Setup dialog: offer the key to the dialog before common routing, so a future
-            // dialog-owned popup can consume Esc/Enter/Tab/BackTab while it is open.
+            // Setup dialog: offer the key to the dialog before common routing, so its embedded
+            // close-confirm popup can consume Esc/Enter/Tab/BackTab while it is open.
             if let ClientOverlay::Setup(setup) = &mut self.overlay
                 && let EventResult::Consumed = setup.handle_events(modifiers, code)
             {
+                if setup.take_close_request() {
+                    self.overlay.close();
+                }
                 return EventResult::Consumed;
             }
 
@@ -58,8 +62,8 @@ impl<V: ClientVersion> ClientView<V> {
                     }
                 }
 
-                // Setup dialog: `Esc`/`Tab` already routed; `Enter` resolves, other keys are
-                // forwarded.
+                // Setup dialog: the key was already offered to the dialog above and `Tab`
+                // routed; only `Enter` (resolve) is left to handle here.
                 ClientOverlay::Setup(_) => {
                     if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
                         let resolved = if let ClientOverlay::Setup(setup) = &self.overlay {
@@ -71,8 +75,6 @@ impl<V: ClientVersion> ClientView<V> {
                             self.deferred.setup = Some((spec, path));
                             self.overlay.close();
                         }
-                    } else if let ClientOverlay::Setup(setup) = &mut self.overlay {
-                        let _ = setup.handle_events(modifiers, code);
                     }
                 }
 
@@ -130,13 +132,18 @@ impl<V: ClientVersion> ClientView<V> {
                     }
                 }
 
-                // Config-key editor: `Esc`/`Tab` already routed; `Enter` applies, other keys
-                // forwarded.
+                // Config-key editor: `Tab` already routed; `Enter` applies, other keys (including
+                // the close-confirm popup) forwarded.
                 ClientOverlay::Config(_) => {
                     if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
                         self.apply_config_edit();
                     } else if let ClientOverlay::Config(dialog) = &mut self.overlay {
                         dialog.handle_events(modifiers, code);
+                    }
+                    if let ClientOverlay::Config(dialog) = &mut self.overlay
+                        && dialog.take_close_request()
+                    {
+                        self.overlay.close();
                     }
                 }
 
@@ -240,7 +247,10 @@ impl<V: ClientVersion> ClientView<V> {
     }
 
     pub(super) fn open_scripts(&mut self) {
-        self.overlay = ClientOverlay::Scripts(Box::new(ScriptDialog::new(&self.device.scripts)));
+        self.overlay = ClientOverlay::Scripts(Box::new(ScriptDialog::new(
+            &self.device.scripts,
+            ScriptContext::OcppClient,
+        )));
     }
 
     /// Rebuild the action list for the selected level (CS vs connector), preserving the selection

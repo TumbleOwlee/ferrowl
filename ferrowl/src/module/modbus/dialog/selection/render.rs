@@ -43,7 +43,8 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             .title_alignment(HorizontalAlignment::Center)
             .title(if self.deletable { "Edit" } else { "Add" });
         let dialog_box = vertical_layout[1]; // preserved for sub-dialog rendering
-        let area = block.inner(dialog_box).inner(Margin::new(2, 1));
+        let block_inner = block.inner(dialog_box);
+        let area = block_inner.inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
         block.render(dialog_box, buf);
 
@@ -309,6 +310,11 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         // Render the delete-confirmation box on top if open.
         if let Some(d) = self.confirm_delete.as_mut() {
+            d.render(dialog_box, buf);
+        }
+
+        // Render the close-confirmation popup topmost if open.
+        if let Some(d) = self.close_confirm.as_mut() {
             d.render(dialog_box, buf);
         }
     }

@@ -2,10 +2,12 @@
 //! 1.6 config store (GetConfiguration) and the 2.0.1 variable store (GetVariables). A "key" is a
 //! name/value pair with a readonly flag.
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border, COLOR_SCHEME, EventResult,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle},
+    traits::HandleEvents,
     widgets::{GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -14,6 +16,8 @@ use ratatui::{
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
     widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
 };
+
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 
 /// One configuration key / variable: a name, a value, and whether it is read-only.
 #[derive(Clone, Debug)]
@@ -36,6 +40,10 @@ pub struct ConfigEditDialog {
     value: Widget<InputFieldState, InputField<String>>,
     #[focus]
     readonly: Widget<SelectionState<String>, Selection<String>>,
+    /// Close-confirm popup, opened by Esc.
+    close_confirm: Option<CloseConfirmDialog>,
+    /// Set on confirmed close; the host checks this via `take_close_request` and closes the dialog.
+    close_requested: bool,
 }
 
 impl ConfigEditDialog {
@@ -47,11 +55,44 @@ impl ConfigEditDialog {
             readonly: readonly_select(current.readonly),
             focus: ConfigEditDialogFocus::Key,
             view_focused: true,
+            close_confirm: None,
+            close_requested: false,
         }
     }
 
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it; everything
+    /// else falls through to the derived per-field routing.
+    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => {
+                    self.close_confirm = None;
+                    self.close_requested = true;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Consumed => EventResult::Consumed,
+            };
+        }
+
+        if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+            self.close_confirm = Some(CloseConfirmDialog::new());
+            return EventResult::Consumed;
+        }
+
+        <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Whether close was confirmed since the last call; clears the flag.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
     }
 
     /// The edited key. Returns `None` when the key field is empty.
@@ -91,7 +132,8 @@ impl ConfigEditDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title("Edit Config Key");
-        let inner = block.inner(vc).inner(Margin::new(1, 0));
+        let block_inner = block.inner(vc);
+        let inner = block_inner.inner(Margin::new(1, 0));
         UiWidget::render(&Clear, vc, buf);
         block.render(vc, buf);
 
@@ -120,6 +162,10 @@ impl ConfigEditDialog {
             buf,
             &mut self.readonly.state,
         );
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(vc, buf);
+        }
     }
 }
 
@@ -166,5 +212,53 @@ fn readonly_select(current: bool) -> Widget<SelectionState<String>, Selection<St
             })
             .build()
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ui::traits::SetFocus;
+
+    fn dialog() -> ConfigEditDialog {
+        ConfigEditDialog::new(
+            0,
+            &ConfigKey {
+                key: "k".into(),
+                value: "v".into(),
+                readonly: false,
+            },
+        )
+    }
+
+    #[test]
+    fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
+        let mut dialog = dialog();
+        assert!(!dialog.take_close_request());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.take_close_request());
+        assert!(!dialog.take_close_request(), "flag must clear after take");
+    }
+
+    #[test]
+    fn ut_esc_in_confirm_keeps_open() {
+        let mut dialog = dialog();
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_none());
+        assert!(!dialog.take_close_request());
+    }
+
+    #[test]
+    fn ut_colon_in_text_input_types() {
+        let mut dialog = dialog();
+        // Default focus is Key, a free-text field; `:` must be typed as ordinary text.
+        dialog.set_focused(true);
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert_eq!(dialog.key.state.input(), "k:");
+        assert!(dialog.close_confirm.is_none());
     }
 }

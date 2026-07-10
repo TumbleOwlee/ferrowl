@@ -27,7 +27,7 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
     HelpSection {
         title: "Dialogs",
         keys: &[
-            ("Esc", "close"),
+            ("Esc", "close (opens confirm)"),
             ("Enter", "confirm"),
             ("Tab / Shift+Tab", "next / previous field"),
         ],
@@ -35,7 +35,7 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
     HelpSection {
         title: "Code editor (vim)",
         keys: &[
-            ("Esc", "Normal mode (again: close dialog)"),
+            ("Esc", "Normal mode (again: close dialog via confirm)"),
             ("i a I A o O", "enter Insert mode"),
             ("h j k l, w b e, 0 $, gg G", "move"),
             ("v / V", "Visual / Visual-Line mode"),
@@ -43,6 +43,7 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
             ("p / P", "paste after / before"),
             ("u", "undo last change"),
             ("Tab / Shift+Tab", "indent / dedent (Insert mode)"),
+            ("?", "show Lua bindings (script dialogs, Normal mode)"),
         ],
     },
     HelpSection {

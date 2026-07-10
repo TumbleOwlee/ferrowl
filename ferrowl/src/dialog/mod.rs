@@ -1,5 +1,7 @@
 //! Modal dialogs: module setup and shared register-edit data types.
 
+pub mod close_confirm;
+pub mod lua_help;
 pub mod path_suggest;
 pub mod scripts;
 pub mod session;

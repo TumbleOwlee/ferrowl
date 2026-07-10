@@ -36,6 +36,9 @@ impl ToLabel for TypeChoice {
 pub struct TypeSelectDialog {
     selection: Widget<SelectionState<TypeChoice>, Selection<TypeChoice>>,
     keybinds: [Widget<String, Text>; 2],
+    /// Set by Esc (this plain selector closes without a confirm popup); the host checks this
+    /// via `take_close_request` and closes the dialog.
+    close_requested: bool,
 }
 
 impl TypeSelectDialog {
@@ -97,6 +100,7 @@ impl TypeSelectDialog {
         Self {
             selection,
             keybinds,
+            close_requested: false,
         }
     }
 
@@ -105,8 +109,20 @@ impl TypeSelectDialog {
         self.selection.state.selection()
     }
 
+    /// Route a key: Esc requests an immediate close (this selector is plain enough to skip the
+    /// confirm popup); everything else falls through to the selection widget.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+            self.close_requested = true;
+            return EventResult::Consumed;
+        }
+
         self.selection.state.handle_events(modifiers, code)
+    }
+
+    /// Whether Esc requested a close since the last call; clears the flag.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -165,5 +181,30 @@ impl TypeSelectDialog {
             buf,
             &mut self.keybinds[1].state,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_esc_requests_close_immediately() {
+        let mut dialog = TypeSelectDialog::new();
+        assert!(!dialog.take_close_request());
+        assert!(matches!(
+            dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc),
+            EventResult::Consumed
+        ));
+        assert!(dialog.take_close_request());
+        assert!(!dialog.take_close_request(), "flag must clear after take");
+    }
+
+    #[test]
+    fn ut_other_keys_do_not_request_close() {
+        let mut dialog = TypeSelectDialog::new();
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        assert!(!dialog.take_close_request());
     }
 }

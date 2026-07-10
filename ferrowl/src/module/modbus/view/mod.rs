@@ -11,6 +11,8 @@ use ratatui::layout::Rect;
 
 use crate::config::script::ScriptDef;
 use crate::config::{DeviceConfig, ModuleSpec};
+use crate::dialog::close_confirm::CloseConfirmEvent;
+use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
 use crate::module::modbus::setup_dialog::SetupDialog;
@@ -146,6 +148,20 @@ impl ModbusModuleView {
             return;
         }
 
+        // The close-confirm popup takes precedence once open.
+        if self.overlay.as_ref().unwrap().close_confirm_is_active() {
+            match self
+                .overlay
+                .as_mut()
+                .unwrap()
+                .close_confirm_handle_key(modifiers, code)
+            {
+                CloseConfirmEvent::Close => self.overlay = None,
+                CloseConfirmEvent::Dismiss | CloseConfirmEvent::Consumed => {}
+            }
+            return;
+        }
+
         self.overlay.as_mut().unwrap().clear_name_error();
 
         let confirm_button_focused = self.overlay.as_ref().unwrap().is_confirm_button_focused();
@@ -157,7 +173,7 @@ impl ModbusModuleView {
 
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => {
-                self.overlay = None;
+                self.overlay.as_mut().unwrap().close_confirm_open();
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if delete_button_focused {
@@ -322,19 +338,15 @@ impl ModuleView for ModbusModuleView {
             }
             return EventResult::Consumed;
         }
-        if let Some(ref mut setup) = self.setup_overlay {
-            // Offer the key to the dialog first; only run the default Esc/Enter/Tab/BackTab
-            // handling below when the dialog leaves it unhandled.
+        if let Some(mut setup) = self.setup_overlay.take() {
+            // Offer the key to the dialog first; only run the default Enter/Tab/BackTab handling
+            // below when the dialog leaves it unhandled (close-confirm is handled inside the dialog).
+            let mut resolved_values = None;
             if let EventResult::Unhandled(modifiers, code) = setup.handle_events(modifiers, code) {
                 match (modifiers, code) {
-                    (KeyModifiers::NONE, KeyCode::Esc) => {
-                        self.setup_overlay = None;
-                    }
                     (KeyModifiers::NONE, KeyCode::Enter) => {
                         if let Ok(resolved) = setup.resolve() {
-                            let values = resolved.values;
-                            self.setup_overlay = None;
-                            self.pending = Some(PendingAction::ApplySetup(values));
+                            resolved_values = Some(resolved.values);
                         }
                     }
                     (KeyModifiers::NONE, KeyCode::Tab) => {
@@ -345,6 +357,11 @@ impl ModuleView for ModbusModuleView {
                     }
                     _ => {}
                 }
+            }
+            if let Some(values) = resolved_values {
+                self.pending = Some(PendingAction::ApplySetup(values));
+            } else if !setup.take_close_request() {
+                self.setup_overlay = Some(setup);
             }
             return EventResult::Consumed;
         }
@@ -491,7 +508,10 @@ impl ModuleView for ModbusModuleView {
         }
 
         if trimmed == "script" {
-            self.scripts_overlay = Some(ScriptDialog::new(&self.device.scripts));
+            self.scripts_overlay = Some(ScriptDialog::new(
+                &self.device.scripts,
+                ScriptContext::Modbus,
+            ));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
@@ -956,13 +976,15 @@ mod tests {
         drop(view.handle_command("script"));
         assert!(view.is_overlay_active());
         // Create a script through the dialog: Tab to the name input (the code editor is
-        // skipped while nothing is selected), type a name, Enter creates it, Esc closes.
+        // skipped while nothing is selected), type a name, Enter creates it, Esc + Enter
+        // (confirm-close) closes.
         view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         for c in "sim".chars() {
             view.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
         }
         view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(!view.is_overlay_active());
         assert_eq!(view.device.scripts.len(), 1);
         assert_eq!(view.device.scripts[0].name, "sim");
@@ -991,12 +1013,39 @@ mod tests {
     }
 
     #[test]
+    fn ut_esc_does_not_close_setup_overlay() {
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        assert!(view.is_overlay_active());
+        // First Esc opens the close-confirm popup instead of closing the overlay outright.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        // A second Esc dismisses the confirm popup, leaving the overlay open.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_esc_then_enter_closes_setup_overlay() {
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(!view.is_overlay_active());
+    }
+
+    #[test]
     fn ut_add_command_opens_add_overlay() {
         let mut view = new_view();
         drop(view.handle_command("add"));
         assert!(view.is_overlay_active());
-        // Esc closes the overlay again.
+        // First Esc opens the close-confirm popup; overlay stays open.
         view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        // Enter confirms the close-confirm popup, closing the overlay.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(!view.is_overlay_active());
     }
 
@@ -1068,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn ut_enter_on_plain_register_opens_edit_overlay_and_esc_closes() {
+    fn ut_esc_does_not_close_register_overlay() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
         // Definitions are BTreeMap-ordered: "hold" (no named values) comes first.
@@ -1076,8 +1125,67 @@ mod tests {
         let result = view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(matches!(result, EventResult::Consumed));
         assert!(view.is_overlay_active());
+        // First Esc opens the close-confirm popup; overlay stays open.
         view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        assert!(view.overlay.as_ref().unwrap().close_confirm_is_active());
+        // A second Esc dismisses the confirm popup, leaving the overlay open.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        assert!(!view.overlay.as_ref().unwrap().close_confirm_is_active());
+    }
+
+    #[test]
+    fn ut_esc_then_enter_closes_register_overlay() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(!view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_colon_in_value_input_types() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        // Focus starts on the free-text Value field; `:` must be typed as ordinary text.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert!(!view.overlay.as_ref().unwrap().close_confirm_is_active());
+        assert!(view.is_overlay_active());
+    }
+
+    #[test]
+    fn ut_confirm_delete_esc_still_cancels() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        // Value -> DefaultValue -> AddButton -> ConfirmButton -> DeleteRegisterButton.
+        for _ in 0..4 {
+            view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        }
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open confirm-delete
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc); // cancels the sub-dialog only
+        assert!(view.is_overlay_active());
+        assert!(view.pending.is_none());
+    }
+
+    #[test]
+    fn ut_named_value_subdialog_esc_still_cancels() {
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Down); // "named"
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open selection overlay
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab); // Value -> AddButton
+        view.handle_events(KeyModifiers::NONE, KeyCode::Char(' ')); // open add-named-value sub-dialog
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc); // cancels the sub-dialog only
+        assert!(view.is_overlay_active());
     }
 
     #[test]

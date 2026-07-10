@@ -80,7 +80,7 @@ impl EditInputDialog {
             .success(widgets::success_text())
             .keybinds([
                 widgets::keybind("<Space>: press button | <C-f>: fill value | <Tab>: next"),
-                widgets::keybind("<Esc>: cancel | <Enter>: confirm / newline"),
+                widgets::keybind("<Esc>: close | <Enter>: confirm / newline"),
             ])
             .focus(EditInputDialogFocus::Label)
             .build()

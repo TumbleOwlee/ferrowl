@@ -2,15 +2,16 @@
 //! endpoint (ip/port), and — for `wss://` — a security level (Basic Auth / TLS / mTLS) with its
 //! credential/certificate fields, validating live like the Modbus dialog.
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border, COLOR_SCHEME, EventResult,
     state::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
         SuggestInputState, SuggestInputStateBuilder,
     },
     style::{InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
-    traits::ToLabel,
+    traits::{HandleEvents, ToLabel},
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
@@ -25,6 +26,7 @@ use ratatui::{
 };
 
 use crate::dialog::NonEmpty;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
@@ -289,6 +291,12 @@ pub struct OcppSetupDialog {
     /// ephemeral self-signed certificate will be generated at each start). Not a focusable field.
     pub hint: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
+    /// Close-confirm popup, opened by Esc.
+    #[builder(default)]
+    pub close_confirm: Option<CloseConfirmDialog>,
+    /// Set on confirmed close; the host checks this via `take_close_request` and closes the dialog.
+    #[builder(default)]
+    close_requested: bool,
 }
 
 impl OcppSetupDialog {
@@ -543,6 +551,37 @@ impl OcppSetupDialog {
         self.config_path.state.input().trim().to_string()
     }
 
+    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it; everything
+    /// else falls through to the derived per-field routing.
+    pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            return match confirm.handle_key(modifiers, code) {
+                CloseConfirmEvent::Close => {
+                    self.close_confirm = None;
+                    self.close_requested = true;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Dismiss => {
+                    self.close_confirm = None;
+                    EventResult::Consumed
+                }
+                CloseConfirmEvent::Consumed => EventResult::Consumed,
+            };
+        }
+
+        if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+            self.close_confirm = Some(CloseConfirmDialog::new());
+            return EventResult::Consumed;
+        }
+
+        <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
+    }
+
     /// The URL `path` field is only meaningful for the client (CS) role — the CSMS server binds a
     /// host:port and ignores it — so it is hidden (and skipped by focus) when the role is Server.
     fn path_hidden(&self) -> bool {
@@ -688,7 +727,8 @@ impl OcppSetupDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title("New OCPP Module");
-        let inner = block.inner(vcenter).inner(Margin::new(2, 1));
+        let block_inner = block.inner(vcenter);
+        let inner = block_inner.inner(Margin::new(2, 1));
         UiWidget::render(&Clear, vcenter, buf);
         block.render(vcenter, buf);
 
@@ -915,6 +955,10 @@ impl OcppSetupDialog {
         self.client_ca_file
             .widget
             .render_overlay(area, buf, &mut self.client_ca_file.state);
+
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(vcenter, buf);
+        }
     }
 }
 
@@ -1648,5 +1692,37 @@ mod tests {
         dialog.render(area, &mut buf);
         let text = buffer_text(&buf);
         assert!(text.contains("src"), "missing suggestion popup:\n{text}");
+    }
+
+    // --- close-confirm --------------------------------------------------------------------------
+
+    #[test]
+    fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
+        let mut dialog = OcppSetupDialog::new();
+        assert!(!dialog.take_close_request());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.take_close_request());
+        assert!(!dialog.take_close_request(), "flag must clear after take");
+    }
+
+    #[test]
+    fn ut_esc_in_confirm_keeps_open() {
+        let mut dialog = OcppSetupDialog::new();
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_none());
+        assert!(!dialog.take_close_request());
+    }
+
+    #[test]
+    fn ut_colon_in_text_input_types() {
+        let mut dialog = OcppSetupDialog::new();
+        // Default focus is Name, a free-text field; `:` must be typed as ordinary text.
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
+        assert_eq!(dialog.name.state.input(), ":");
+        assert!(dialog.close_confirm.is_none());
     }
 }
