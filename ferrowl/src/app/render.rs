@@ -192,6 +192,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         (":n | :new", "new module tab"),
         (":l | :load [path]", "load device config"),
         (":s | :save | :w | :write [path]", "save session"),
+        (":swap <id> <id>", "swap tabs"),
         (":log clear", "clear log view"),
         (":script copy <tab>", "replace scripts with tab <tab>'s"),
         (":session", "session scripts + sim interval"),
