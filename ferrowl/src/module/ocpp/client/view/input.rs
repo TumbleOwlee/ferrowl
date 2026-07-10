@@ -96,6 +96,16 @@ impl<V: ClientVersion> ClientView<V> {
                                 self.overlay.close();
                             }
                         }
+                        Some(ActionResult::SendKeep(payload)) => {
+                            let name = match &self.overlay {
+                                ClientOverlay::Action(dlg) => dlg.name.clone(),
+                                _ => unreachable!(),
+                            };
+                            if V::decode_call(&name, payload.clone()).is_ok() {
+                                let scope = self.selected_scope();
+                                self.deferred.send = Some((name, payload, scope));
+                            }
+                        }
                         None => {}
                     }
                 }

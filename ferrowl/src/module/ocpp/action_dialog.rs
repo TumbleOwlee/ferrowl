@@ -130,6 +130,8 @@ pub enum ActionResult {
     Close,
     /// Assemble succeeded; send this payload (the view validates via `decode_call`).
     Send(Value),
+    /// Like [`Self::Send`], but keep the dialog open (Space on the Send button).
+    SendKeep(Value),
 }
 
 // --- Property table --------------------------------------------------------
@@ -440,6 +442,13 @@ impl ActionDialog {
                 Focus::Send => return Some(ActionResult::Send(self.payload())),
                 Focus::Fields => self.open_editor(),
             },
+            // Space clicks the focused button; on Send it transmits without closing the dialog.
+            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == Focus::Send => {
+                return Some(ActionResult::SendKeep(self.payload()));
+            }
+            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == Focus::Toggle => {
+                self.toggle_mode()
+            }
             // `c` toggles compact rows while the property table is focused (JSON mode keeps `c` as
             // text input).
             (KeyModifiers::NONE, KeyCode::Char('c'))
@@ -844,5 +853,24 @@ mod tests {
             16
         );
         assert!(V2_0_1::decode_call("SetChargingProfile", payload).is_ok());
+    }
+
+    #[test]
+    fn space_on_send_returns_send_keep() {
+        let mut d = dialog();
+        while d.focus != Focus::Send {
+            d.input(KeyModifiers::NONE, KeyCode::Tab);
+        }
+        assert!(matches!(
+            d.input(KeyModifiers::NONE, KeyCode::Char(' ')),
+            Some(ActionResult::SendKeep(_))
+        ));
+    }
+
+    #[test]
+    fn space_elsewhere_does_not_send() {
+        let mut d = dialog();
+        assert!(d.focus == Focus::Fields);
+        assert!(d.input(KeyModifiers::NONE, KeyCode::Char(' ')).is_none());
     }
 }

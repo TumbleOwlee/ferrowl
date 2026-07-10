@@ -161,6 +161,17 @@ where
                                 self.send_to(conn, scope, &name, payload);
                             }
                         }
+                        Some(ActionResult::SendKeep(payload)) => {
+                            let (conn, scope, name) =
+                                if let ServerOverlay::Action(boxed) = &self.overlay {
+                                    (boxed.0, boxed.1, boxed.2.name.clone())
+                                } else {
+                                    unreachable!()
+                                };
+                            if V::decode_call(&name, payload.clone()).is_ok() {
+                                self.send_to(conn, scope, &name, payload);
+                            }
+                        }
                         None => {}
                     }
                 }
