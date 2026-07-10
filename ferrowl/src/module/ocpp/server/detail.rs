@@ -17,7 +17,9 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::close_confirm::{
+    CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm,
+};
 use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::widgets;
 use ferrowl_ui::{
@@ -27,7 +29,7 @@ use ferrowl_ui::{
     traits::HandleEvents,
     widgets::{GetValue, InputField, Table, Widget},
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -118,18 +120,9 @@ fn split_component(key: &str) -> (String, String) {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Focus {
-    State,
-    Side,
-    Key,
-    /// The RFID accept-list table.
-    Rfid,
-    /// The "add RFID" input below the RFID table.
-    RfidInput,
-}
-
 /// The detail overlay for one entry (CS-level or connector).
+#[focusable]
+#[derive(Focus)]
 pub struct DetailOverlay {
     /// Charge-point identity of the target entry.
     pub identity: String,
@@ -137,26 +130,32 @@ pub struct DetailOverlay {
     pub scope: Scope,
     /// Whether this is a CS-level entry (config table + key input) or a connector (metering table).
     pub is_cs: bool,
+    #[focus]
     state: KvTable,
     /// Connector "Metering" table (connector entries only).
+    #[focus(when = !self.is_cs)]
     side: KvTable,
     /// CS-level "Configuration" table (key/value/readonly), used when `component_col` is false.
+    #[focus(when = self.is_cs && !self.component_col)]
     cfg: CfgTable,
     /// CS-level "Configuration" table with a Component column (2.0.1), used when `component_col`.
+    #[focus(when = self.is_cs && self.component_col)]
     cfg4: CfgTableC,
     /// Whether the config table carries a Component column (2.0.1) vs a flat key (1.6).
     component_col: bool,
+    #[focus(when = self.is_cs)]
     key_input: Widget<InputFieldState, InputField<String>>,
     /// Config rows (key, value, readonly) from `GetConfiguration`/`GetVariables` (CS-level only).
     config: Vec<(String, String, bool)>,
     /// RFID accept-list table: this entry's own tags plus, for a connector, the inherited CS tags.
+    #[focus]
     rfid: RfidTable,
     /// The "add RFID" input below the RFID table.
+    #[focus]
     rfid_input: Widget<InputFieldState, InputField<String>>,
     /// `(tag, inherited)` rows backing the RFID table; inherited rows are read-only (the CS tags
     /// shown for reference in a connector overlay).
     rfid_rows: Vec<(String, bool)>,
-    focus: Focus,
     /// Compact (no vertical row margin) tables; toggled with `c`. Default off (margin 1).
     compact: bool,
     /// An open value-input dialog for the selected config key: (key, input widget).
@@ -182,7 +181,8 @@ impl DetailOverlay {
             rfid: rfid_table(),
             rfid_input: rfid_input(),
             rfid_rows: Vec::new(),
-            focus: Focus::State,
+            focus: DetailOverlayFocus::State,
+            view_focused: true,
             compact: false,
             set_dialog: None,
             close_confirm: None,
@@ -300,37 +300,10 @@ impl DetailOverlay {
         self.key_input.state.get_value()
     }
 
-    /// Whether the key input is focused.
+    /// Whether the key input is focused. Guard on the variant already implies `is_cs` (the
+    /// `KeyInput` field is only eligible when `is_cs`).
     pub fn key_focused(&self) -> bool {
-        self.is_cs && self.focus == Focus::Key
-    }
-
-    /// Focus order for Tab cycling. CS: State → Configuration → Fetch-key → RFIDs → Add-RFID.
-    /// Connector: State → Metering → RFIDs → Add-RFID.
-    fn focus_order(&self) -> &'static [Focus] {
-        if self.is_cs {
-            &[
-                Focus::State,
-                Focus::Side,
-                Focus::Key,
-                Focus::Rfid,
-                Focus::RfidInput,
-            ]
-        } else {
-            &[Focus::State, Focus::Side, Focus::Rfid, Focus::RfidInput]
-        }
-    }
-
-    pub fn focus_next(&mut self) {
-        let order = self.focus_order();
-        let i = order.iter().position(|f| *f == self.focus).unwrap_or(0);
-        self.focus = order[(i + 1) % order.len()];
-    }
-
-    pub fn focus_previous(&mut self) {
-        let order = self.focus_order();
-        let i = order.iter().position(|f| *f == self.focus).unwrap_or(0);
-        self.focus = order[(i + order.len() - 1) % order.len()];
+        self.focus == DetailOverlayFocus::KeyInput
     }
 
     fn toggle_compact(&mut self) {
@@ -404,18 +377,10 @@ impl DetailOverlay {
         }
 
         // The close-confirm popup captures all keys while open.
-        if let Some(confirm) = self.close_confirm.as_mut() {
-            return match confirm.handle_key(modifiers, code) {
-                CloseConfirmEvent::Close => {
-                    self.close_confirm = None;
-                    Some(DetailRequest::Close)
-                }
-                CloseConfirmEvent::Dismiss => {
-                    self.close_confirm = None;
-                    None
-                }
-                CloseConfirmEvent::Consumed => None,
-            };
+        match route_close_confirm(&mut self.close_confirm, modifiers, code) {
+            CloseConfirmOutcome::NotActive => {}
+            CloseConfirmOutcome::Close => return Some(DetailRequest::Close),
+            CloseConfirmOutcome::Consumed => return None,
         }
 
         match (modifiers, code) {
@@ -426,18 +391,21 @@ impl DetailOverlay {
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             // `c` toggles compact rows when a table is focused (the inputs keep `c` as text).
             (KeyModifiers::NONE, KeyCode::Char('c'))
-                if !matches!(self.focus, Focus::Key | Focus::RfidInput) =>
+                if !matches!(
+                    self.focus,
+                    DetailOverlayFocus::KeyInput | DetailOverlayFocus::RfidInput
+                ) =>
             {
                 self.toggle_compact()
             }
             // `d` on the RFID table removes the selected own (non-inherited) tag.
-            (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == Focus::Rfid => {
+            (KeyModifiers::NONE, KeyCode::Char('d')) if self.focus == DetailOverlayFocus::Rfid => {
                 if let Some(tag) = self.selected_own_rfid() {
                     return Some(DetailRequest::DelRfid(tag));
                 }
             }
             // Enter in the add-RFID input adds the typed tag (cleared for the next entry).
-            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == Focus::RfidInput => {
+            (KeyModifiers::NONE, KeyCode::Enter) if self.focus == DetailOverlayFocus::RfidInput => {
                 let tag = self.rfid_input.state.get_value().trim().to_string();
                 self.rfid_input.state.set_input(String::new());
                 self.rfid_input.state.set_cursor(0);
@@ -445,15 +413,30 @@ impl DetailOverlay {
                     return Some(DetailRequest::AddRfid(tag));
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Char('d')) if self.is_cs && self.focus == Focus::Side => {
+            (KeyModifiers::NONE, KeyCode::Char('d'))
+                if matches!(
+                    self.focus,
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                ) =>
+            {
                 self.delete_selected_config()
             }
-            (KeyModifiers::NONE, KeyCode::Char('u')) if self.is_cs && self.focus == Focus::Side => {
+            (KeyModifiers::NONE, KeyCode::Char('u'))
+                if matches!(
+                    self.focus,
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                ) =>
+            {
                 if let Some(key) = self.selected_config_key() {
                     return Some(DetailRequest::Fetch(key));
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Enter) if self.is_cs && self.focus == Focus::Side => {
+            (KeyModifiers::NONE, KeyCode::Enter)
+                if matches!(
+                    self.focus,
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                ) =>
+            {
                 if let Some(key) = self.selected_config_key() {
                     self.open_set_dialog(key);
                 }
@@ -473,25 +456,25 @@ impl DetailOverlay {
     /// Route a key event to the focused pane (table scroll or key-input editing).
     fn route(&mut self, modifiers: KeyModifiers, code: KeyCode) {
         match self.focus {
-            Focus::State => {
+            DetailOverlayFocus::State => {
                 let _ = self.state.state.handle_events(modifiers, code);
             }
-            Focus::Side if self.is_cs && self.component_col => {
+            DetailOverlayFocus::Cfg4 => {
                 let _ = self.cfg4.state.handle_events(modifiers, code);
             }
-            Focus::Side if self.is_cs => {
+            DetailOverlayFocus::Cfg => {
                 let _ = self.cfg.state.handle_events(modifiers, code);
             }
-            Focus::Side => {
+            DetailOverlayFocus::Side => {
                 let _ = self.side.state.handle_events(modifiers, code);
             }
-            Focus::Key => {
+            DetailOverlayFocus::KeyInput => {
                 let _ = self.key_input.state.handle_events(modifiers, code);
             }
-            Focus::Rfid => {
+            DetailOverlayFocus::Rfid => {
                 let _ = self.rfid.state.handle_events(modifiers, code);
             }
-            Focus::RfidInput => {
+            DetailOverlayFocus::RfidInput => {
                 let _ = self.rfid_input.state.handle_events(modifiers, code);
             }
         }
@@ -528,14 +511,24 @@ impl DetailOverlay {
             horizontal: 2,
         });
 
-        self.state.state.set_focused(self.focus == Focus::State);
-        self.side.state.set_focused(self.focus == Focus::Side);
-        self.cfg.state.set_focused(self.focus == Focus::Side);
-        self.cfg4.state.set_focused(self.focus == Focus::Side);
-        self.rfid.state.set_focused(self.focus == Focus::Rfid);
+        self.state
+            .state
+            .set_focused(self.focus == DetailOverlayFocus::State);
+        self.side
+            .state
+            .set_focused(self.focus == DetailOverlayFocus::Side);
+        self.cfg
+            .state
+            .set_focused(self.focus == DetailOverlayFocus::Cfg);
+        self.cfg4
+            .state
+            .set_focused(self.focus == DetailOverlayFocus::Cfg4);
+        self.rfid
+            .state
+            .set_focused(self.focus == DetailOverlayFocus::Rfid);
         self.rfid_input
             .state
-            .set_focused(self.focus == Focus::RfidInput);
+            .set_focused(self.focus == DetailOverlayFocus::RfidInput);
 
         if self.is_cs {
             // State on top; below it the Configuration (+ fetch input) beside the RFID list
@@ -549,7 +542,9 @@ impl DetailOverlay {
                 Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
             let [rfid_area, rfid_input_area] =
                 Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(right);
-            self.key_input.state.set_focused(self.focus == Focus::Key);
+            self.key_input
+                .state
+                .set_focused(self.focus == DetailOverlayFocus::KeyInput);
             StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
             if self.component_col {
                 StatefulWidget::render(&self.cfg4.widget, config_area, buf, &mut self.cfg4.state);
@@ -707,7 +702,7 @@ mod tests {
         // `c` on a focused table toggles; on the key input it is text.
         assert!(d.input(KeyModifiers::NONE, KeyCode::Char('c')).is_none());
         assert!(d.compact);
-        d.focus = Focus::Key;
+        d.focus = DetailOverlayFocus::KeyInput;
         d.input(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(
             d.compact,
@@ -729,7 +724,7 @@ mod tests {
         assert_eq!(rows[1].component, "");
         assert_eq!(rows[1].key, "Bare");
         // The selected key fed to fetch/set is the full combined `Component/Variable`.
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg4;
         let req = d.input(KeyModifiers::NONE, KeyCode::Char('u'));
         assert!(
             matches!(req, Some(DetailRequest::Fetch(k)) if k == "OCPPCommCtrlr/HeartbeatInterval")
@@ -739,7 +734,7 @@ mod tests {
     #[test]
     fn rfid_input_enter_emits_add_request() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
-        d.focus = Focus::RfidInput;
+        d.focus = DetailOverlayFocus::RfidInput;
         d.rfid_input.state.set_input("DEADBEEF".to_string());
         let req = d.input(KeyModifiers::NONE, KeyCode::Enter);
         assert!(matches!(req, Some(DetailRequest::AddRfid(t)) if t == "DEADBEEF"));
@@ -755,7 +750,7 @@ mod tests {
         let rows = d.rfid.state.values();
         assert_eq!(rows[0].source, "connector");
         assert_eq!(rows[1].source, "CS (inherited)");
-        d.focus = Focus::Rfid;
+        d.focus = DetailOverlayFocus::Rfid;
         // Row 0 (own) is deletable.
         let req = d.input(KeyModifiers::NONE, KeyCode::Char('d'));
         assert!(matches!(req, Some(DetailRequest::DelRfid(t)) if t == "OWN"));
@@ -766,23 +761,55 @@ mod tests {
 
     #[test]
     fn focus_cycle_includes_rfid_panes() {
-        // CS: State -> Side -> Key -> Rfid -> RfidInput -> wrap.
+        // CS flat (component_col=false): State -> Cfg -> KeyInput -> Rfid -> RfidInput -> wrap.
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         for expected in [
-            Focus::Side,
-            Focus::Key,
-            Focus::Rfid,
-            Focus::RfidInput,
-            Focus::State,
+            DetailOverlayFocus::Cfg,
+            DetailOverlayFocus::KeyInput,
+            DetailOverlayFocus::Rfid,
+            DetailOverlayFocus::RfidInput,
+            DetailOverlayFocus::State,
         ] {
             d.focus_next();
             assert!(d.focus == expected);
         }
-        // Connector: State -> Side -> Rfid -> RfidInput -> wrap (no Key pane).
+        // Connector: State -> Side -> Rfid -> RfidInput -> wrap (no KeyInput pane).
         let mut c = DetailOverlay::new("CP".into(), Scope::connector(1), false);
-        for expected in [Focus::Side, Focus::Rfid, Focus::RfidInput, Focus::State] {
+        for expected in [
+            DetailOverlayFocus::Side,
+            DetailOverlayFocus::Rfid,
+            DetailOverlayFocus::RfidInput,
+            DetailOverlayFocus::State,
+        ] {
             c.focus_next();
             assert!(c.focus == expected);
+        }
+    }
+
+    #[test]
+    fn focus_cycle_cs_component_col() {
+        // CS with a Component column: State -> Cfg4 -> KeyInput -> Rfid -> RfidInput -> wrap.
+        let mut d = DetailOverlay::new("CP".into(), Scope::CS, true);
+        for expected in [
+            DetailOverlayFocus::Cfg4,
+            DetailOverlayFocus::KeyInput,
+            DetailOverlayFocus::Rfid,
+            DetailOverlayFocus::RfidInput,
+            DetailOverlayFocus::State,
+        ] {
+            d.focus_next();
+            assert!(d.focus == expected);
+        }
+        // And backward.
+        for expected in [
+            DetailOverlayFocus::RfidInput,
+            DetailOverlayFocus::Rfid,
+            DetailOverlayFocus::KeyInput,
+            DetailOverlayFocus::Cfg4,
+            DetailOverlayFocus::State,
+        ] {
+            d.focus_previous();
+            assert!(d.focus == expected);
         }
     }
 
@@ -795,7 +822,7 @@ mod tests {
         assert_eq!(rows[0].readonly, "yes");
         assert_eq!(rows[1].readonly, "no");
         // A value written via the set dialog is marked writable (not read-only).
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg;
         d.input(KeyModifiers::NONE, KeyCode::Enter); // open set dialog for row 0 (A)
         d.input(KeyModifiers::NONE, KeyCode::Enter); // confirm (keeps prefilled value)
         assert_eq!(d.config[0], ("A".into(), "1".into(), false));
@@ -806,7 +833,7 @@ mod tests {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("A".into(), "1".into(), false);
         d.merge_config("B".into(), "2".into(), false);
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg;
         // Selection defaults to row 0 (A).
         d.input(KeyModifiers::NONE, KeyCode::Char('d'));
         assert_eq!(d.config, vec![("B".into(), "2".into(), false)]);
@@ -816,7 +843,7 @@ mod tests {
     fn refetch_selected_config_key_requests_fetch() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg;
         let req = d.input(KeyModifiers::NONE, KeyCode::Char('u'));
         assert!(matches!(req, Some(DetailRequest::Fetch(k)) if k == "HeartbeatInterval"));
     }
@@ -825,7 +852,7 @@ mod tests {
     fn enter_on_config_opens_value_dialog_then_set_request() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg;
         // Enter opens the value dialog (no request yet).
         assert!(d.input(KeyModifiers::NONE, KeyCode::Enter).is_none());
         assert!(d.set_dialog.is_some());
@@ -844,7 +871,7 @@ mod tests {
     #[test]
     fn fetch_clears_key_input() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
-        d.focus = Focus::Key;
+        d.focus = DetailOverlayFocus::KeyInput;
         for c in "Foo".chars() {
             d.input(KeyModifiers::NONE, KeyCode::Char(c));
         }
@@ -877,7 +904,7 @@ mod tests {
     fn set_value_dialog_esc_cancels() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
-        d.focus = Focus::Side;
+        d.focus = DetailOverlayFocus::Cfg;
         assert!(d.input(KeyModifiers::NONE, KeyCode::Enter).is_none());
         assert!(d.set_dialog.is_some());
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -887,7 +914,7 @@ mod tests {
     #[test]
     fn colon_in_rfid_input_types() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
-        d.focus = Focus::RfidInput;
+        d.focus = DetailOverlayFocus::RfidInput;
         d.input(KeyModifiers::NONE, KeyCode::Char(':'));
         assert!(d.close_confirm.is_none());
         assert_eq!(d.rfid_input.state.get_value(), ":");

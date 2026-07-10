@@ -8,7 +8,7 @@
 
 use ferrowl_ui::state::ButtonState;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME,
+    Border,
     state::{InputFieldState, InputFieldStateBuilder, TableState, TableStateBuilder},
     style::{ButtonStyle, InputFieldStyle, InputFieldStyleBuilder, TableStyleBuilder},
     widgets::{
@@ -18,14 +18,9 @@ use ferrowl_ui::{
 };
 use ratatui::layout::Margin;
 
-/// The border color shared by the styled inputs and tables in these overlays.
-pub(super) fn border_style() -> ratatui::style::Style {
-    ratatui::style::Style::default()
-        .fg(COLOR_SCHEME.border)
-        .bg(COLOR_SCHEME.bg)
-}
+use crate::view::border_style;
 
-/// The input-field style with [`border_style`] applied to the border.
+/// The input-field style with [`crate::view::border_style`] applied to the border.
 pub(super) fn bordered_input_style() -> InputFieldStyle {
     InputFieldStyleBuilder::default()
         .border(border_style())

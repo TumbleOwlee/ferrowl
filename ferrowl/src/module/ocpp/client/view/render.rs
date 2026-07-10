@@ -30,6 +30,7 @@ use super::{
     ClientOverlay, ClientVersion, ClientView, ConfigRow, ConfigTable, ConnRow, ConnTable, EditKind,
     MsgTable, NvRow, StateTable,
 };
+use crate::view::border_style;
 
 impl<V: ClientVersion> ClientView<V> {
     /// The left-column vertical split of the content area:
@@ -225,12 +226,6 @@ pub(super) fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(
             .selected()
             .map(|s| s + 1 >= len)
             .unwrap_or(true)
-}
-
-fn border_style() -> ratatui::prelude::Style {
-    ratatui::prelude::Style::default()
-        .fg(COLOR_SCHEME.border)
-        .bg(COLOR_SCHEME.bg)
 }
 
 fn boxed(title: &str) -> Block<'_> {

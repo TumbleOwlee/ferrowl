@@ -234,11 +234,18 @@ fn build_lines(ctx: ScriptContext, desc_budget: usize) -> Vec<Line<'static>> {
 /// Scrollable `?` overlay listing the Lua bindings available in a script dialog's context.
 pub struct LuaHelpOverlay {
     scroll: u16,
+    /// Highest valid `scroll` value, refreshed on every `render` call from the content length and
+    /// viewport height. Used to clamp `handle_key`'s `j`/`G` so `scroll` never runs past the last
+    /// visible line.
+    max_scroll: u16,
 }
 
 impl LuaHelpOverlay {
     pub fn new() -> Self {
-        Self { scroll: 0 }
+        Self {
+            scroll: 0,
+            max_scroll: 0,
+        }
     }
 
     /// Handles one key while the overlay is open. Returns `true` if the overlay should close.
@@ -247,7 +254,7 @@ impl LuaHelpOverlay {
         match code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => true,
             KeyCode::Char('j') | KeyCode::Down => {
-                self.scroll = self.scroll.saturating_add(1);
+                self.scroll = self.scroll.saturating_add(1).min(self.max_scroll);
                 false
             }
             KeyCode::Char('k') | KeyCode::Up => {
@@ -259,7 +266,7 @@ impl LuaHelpOverlay {
                 false
             }
             KeyCode::Char('G') => {
-                self.scroll = u16::MAX;
+                self.scroll = self.max_scroll;
                 false
             }
             _ => false,
@@ -295,9 +302,8 @@ impl LuaHelpOverlay {
         let inner = block.inner(popup).inner(Margin::new(2, 1));
         ratatui::prelude::Widget::render(block, popup, buf);
 
-        self.scroll = self
-            .scroll
-            .min((lines.len() as u16).saturating_sub(inner.height));
+        self.max_scroll = (lines.len() as u16).saturating_sub(inner.height);
+        self.scroll = self.scroll.min(self.max_scroll);
         ratatui::prelude::Widget::render(
             Paragraph::new(lines)
                 .scroll((self.scroll, 0))
@@ -382,6 +388,7 @@ mod tests {
     #[test]
     fn ut_handle_key_scroll() {
         let mut overlay = LuaHelpOverlay::new();
+        overlay.max_scroll = 100;
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('j')));
         assert_eq!(overlay.scroll, 1);
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Down));
@@ -398,11 +405,42 @@ mod tests {
     #[test]
     fn ut_handle_key_top_bottom() {
         let mut overlay = LuaHelpOverlay::new();
+        overlay.max_scroll = 20;
         overlay.scroll = 5;
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('g')));
         assert_eq!(overlay.scroll, 0);
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('G')));
-        assert_eq!(overlay.scroll, u16::MAX);
+        assert_eq!(overlay.scroll, 20);
+    }
+
+    #[test]
+    fn ut_handle_key_g_then_j_stays_at_max_no_overflow() {
+        // Regression: `G` used to jump to `u16::MAX`, and `j` at the bottom used to keep
+        // incrementing unboundedly. Both must clamp to `max_scroll`.
+        let mut overlay = LuaHelpOverlay::new();
+        overlay.max_scroll = 7;
+        assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('G')));
+        assert_eq!(overlay.scroll, 7);
+        for _ in 0..5 {
+            assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('j')));
+        }
+        assert_eq!(overlay.scroll, 7);
+    }
+
+    #[test]
+    fn ut_render_sets_max_scroll_and_handle_key_respects_it_after() {
+        // A render with a tall content and small viewport should compute a finite max_scroll;
+        // subsequent `G`/`j` must not exceed it.
+        let mut overlay = LuaHelpOverlay::new();
+        let area = Rect::new(0, 0, 80, 10);
+        let mut buf = Buffer::empty(area);
+        overlay.render(area, &mut buf, ScriptContext::Session);
+        assert!(overlay.max_scroll < u16::MAX);
+        let max = overlay.max_scroll;
+        assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('G')));
+        assert_eq!(overlay.scroll, max);
+        assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('j')));
+        assert_eq!(overlay.scroll, max);
     }
 
     #[test]

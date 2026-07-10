@@ -36,6 +36,22 @@ fn started_message(binding: TlsBinding, verb: &str) -> String {
     }
 }
 
+/// Encodes `V::default_action(name)` to JSON, for a Lua-queued action with no observed entry state
+/// to derive its payload from. An encode failure here would otherwise silently degrade to an empty
+/// payload with no trace; this logs it to stderr (the crate's existing error-reporting channel, see
+/// `main.rs`/`headless.rs`) before falling back to `{}` so callers keep their existing behavior.
+fn default_action_payload<V: ServerVersion>(name: &str) -> serde_json::Value {
+    V::default_action(name)
+        .and_then(|a| match V::encode_action(&a) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("ocpp: failed to encode default action '{name}': {e}");
+                None
+            }
+        })
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
 /// Sort key ordering entries by station, then CS-level before its connectors, then EVSE/connector.
 fn entry_sort_key<V: ServerVersion>(e: &Entry<V>) -> (String, bool, i64, i64) {
     (
@@ -421,11 +437,7 @@ where
                 .iter()
                 .find(|e| e.identity == identity && e.scope == scope)
                 .and_then(|e| e.derive_payload(&name))
-                .unwrap_or_else(|| {
-                    V::default_action(&name)
-                        .and_then(|a| V::encode_action(&a).ok())
-                        .unwrap_or_else(|| serde_json::json!({}))
-                });
+                .unwrap_or_else(|| default_action_payload::<V>(&name));
             // Default any connector/EVSE id from the entry's scope before user overrides win.
             V::inject_scope(&mut payload, scope);
             merge_overrides(&mut payload, overrides);
@@ -696,5 +708,28 @@ where
                 _ => CommandResult::Unhandled,
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ocpp::V1_6;
+
+    #[test]
+    fn ut_default_action_payload_unknown_name_falls_back_to_empty_object() {
+        assert_eq!(
+            default_action_payload::<V1_6>("NotARealAction"),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn ut_default_action_payload_known_name_encodes_default_action() {
+        // "Reset" is a real CSMS-originated V1_6 action; its Default-derived skeleton must encode
+        // to a non-null JSON object, exercising the success path through `V::encode_action` rather
+        // than the `unwrap_or_else` fallback.
+        let payload = default_action_payload::<V1_6>("Reset");
+        assert!(payload.is_object());
     }
 }

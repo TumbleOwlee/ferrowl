@@ -3,6 +3,7 @@
 pub mod close_confirm;
 pub mod lua_help;
 pub mod path_suggest;
+mod script_manager;
 pub mod scripts;
 pub mod session;
 

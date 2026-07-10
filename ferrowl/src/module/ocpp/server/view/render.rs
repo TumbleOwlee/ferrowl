@@ -25,6 +25,7 @@ use ratatui::{
 };
 
 use super::{CsRow, CsTable, MsgRow, MsgTable, ServerOverlay, ServerVersion, ServerView, msg_row};
+use crate::view::border_style;
 
 impl<V: ServerVersion> ServerView<V>
 where
@@ -159,10 +160,6 @@ where
             ServerOverlay::None => {}
         }
     }
-}
-
-fn border_style() -> Style {
-    Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
 }
 
 /// Whether a message table's selection is on (or past) the last row — i.e. the user is tailing it.

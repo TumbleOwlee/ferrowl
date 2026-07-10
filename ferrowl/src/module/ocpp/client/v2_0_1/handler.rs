@@ -28,7 +28,9 @@ use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1, Ver
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
-use crate::module::ocpp::client::v2_common::{clear_limit_by_purpose, inbound_scope, unknown_evse};
+use crate::module::ocpp::client::v2_common::{
+    clear_limit_by_purpose, encode_action_or_log, inbound_scope, unknown_evse,
+};
 use crate::module::ocpp::lock::HasState;
 
 /// Inbound handler for an OCPP 2.0.1 charging station, backed by shared [`CsState`].
@@ -142,7 +144,7 @@ impl CsStateHandler {
                 )
             }),
             Action201::SetChargingProfile(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 let profile = &json["chargingProfile"];
                 let stack = profile["stackLevel"].as_i64().unwrap_or(0);
                 let purpose = profile["chargingProfilePurpose"]
@@ -216,7 +218,7 @@ impl CsStateHandler {
                 })
             }
             Action201::ReserveNow(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 let tag = json["idToken"]["idToken"]
                     .as_str()
                     .unwrap_or_default()
@@ -247,7 +249,7 @@ impl CsStateHandler {
                 })
             }
             Action201::CancelReservation(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 self.with_state_mut(|state| {
                     // Clear whichever level holds the matching reservationId.
                     let context = match json["reservationId"].as_i64() {
@@ -276,7 +278,7 @@ impl CsStateHandler {
                 })
             }
             Action201::ChangeAvailability(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 let status = match json["operationalStatus"].as_str() {
                     Some("Inoperative") => "Unavailable",
                     _ => "Available",
@@ -303,7 +305,7 @@ impl CsStateHandler {
                 })
             }
             Action201::RequestStartTransaction(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 self.with_state_mut(|state| {
                     // Optional evseId; fall back to the first connector. Mint a transaction and charge.
                     let idx = json["evseId"]
@@ -325,7 +327,7 @@ impl CsStateHandler {
                 })
             }
             Action201::RequestStopTransaction(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 let tx = json["transactionId"]
                     .as_str()
                     .unwrap_or_default()
@@ -350,7 +352,7 @@ impl CsStateHandler {
                 })
             }
             Action201::ClearChargingProfile(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 let criteria = &json["chargingProfileCriteria"];
                 let purpose = criteria["chargingProfilePurpose"]
                     .as_str()
@@ -377,7 +379,7 @@ impl CsStateHandler {
                 })
             }
             Action201::UnlockConnector(_) => {
-                let json = V2_0_1::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V2_0_1>(action);
                 self.with_state_mut(|state| {
                     let context = match json["evseId"].as_i64().filter(|&e| e != 0) {
                         Some(e) => {

@@ -23,6 +23,27 @@ use crate::module::ocpp::client::view::{
 use crate::module::ocpp::config::device::ConnectorRef;
 use crate::module::ocpp::scope::{Scope, evse_id};
 use ferrowl_lua::module::ValueType;
+use ferrowl_ocpp::Version;
+
+/// Encodes an inbound `action` to JSON for `respond()`'s decision logic (e.g. reading fields out of
+/// a `SetChargingProfile`). An encode failure here would otherwise silently degrade to an empty
+/// payload with no trace; this logs it to stderr (the crate's existing error-reporting channel, see
+/// `main.rs`/`headless.rs`) before falling back to `Value::Null` so callers keep their existing
+/// "missing field" behavior.
+pub(crate) fn encode_action_or_log<V: Version>(action: &V::Action) -> serde_json::Value {
+    V::encode_action(action).unwrap_or_else(|e| {
+        eprintln!("ocpp: failed to encode action to JSON: {e}");
+        serde_json::Value::Null
+    })
+}
+
+/// [`encode_action_or_log`]'s twin for responses.
+pub(crate) fn encode_response_or_log<V: Version>(response: &V::Response) -> serde_json::Value {
+    V::encode_response(response).unwrap_or_else(|e| {
+        eprintln!("ocpp: failed to encode response to JSON: {e}");
+        serde_json::Value::Null
+    })
+}
 
 /// Clear the per-purpose charge limit a ClearChargingProfile targets: the field matching `purpose`,
 /// or every per-purpose limit when no purpose criterion is given. An unknown purpose clears nothing.
@@ -432,4 +453,65 @@ pub(crate) fn active_meter_scopes(s: &CsState) -> Vec<Scope> {
         .filter(|c| c.transaction_id.is_some() && c.tx_confirmed)
         .map(|c| Scope::evse(c.evse_id, None))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ocpp::{ConnectorScope, OcppError, ValidationError};
+
+    /// Minimal [`Version`] mock whose `encode_action` always fails, to exercise
+    /// `encode_action_or_log`'s fallback path without depending on a real action type ever failing
+    /// to serialize.
+    struct FailingVersion;
+
+    impl Version for FailingVersion {
+        type Action = ();
+        type Response = ();
+
+        fn action_name(_action: &()) -> &'static str {
+            "Failing"
+        }
+        fn action_names() -> &'static [&'static str] {
+            &[]
+        }
+        fn cs_actions() -> &'static [&'static str] {
+            &[]
+        }
+        fn csms_actions() -> &'static [(&'static str, ConnectorScope)] {
+            &[]
+        }
+        fn default_action(_name: &str) -> Option<()> {
+            None
+        }
+        fn default_response(_name: &str) -> Option<()> {
+            None
+        }
+        fn subprotocol() -> &'static str {
+            "failing"
+        }
+        fn decode_call(_action_name: &str, _payload: serde_json::Value) -> Result<(), OcppError> {
+            unimplemented!("not exercised by this test")
+        }
+        fn validate(_action: &()) -> Result<(), ValidationError> {
+            Ok(())
+        }
+        fn encode_response(_response: &()) -> Result<serde_json::Value, OcppError> {
+            unimplemented!("not exercised by this test")
+        }
+        fn encode_action(_action: &()) -> Result<serde_json::Value, OcppError> {
+            Err(OcppError::UnknownAction("Failing".to_string()))
+        }
+        fn decode_result(_action: &(), _payload: serde_json::Value) -> Result<(), OcppError> {
+            unimplemented!("not exercised by this test")
+        }
+    }
+
+    #[test]
+    fn ut_encode_action_or_log_returns_null_on_encode_failure() {
+        assert_eq!(
+            encode_action_or_log::<FailingVersion>(&()),
+            serde_json::Value::Null
+        );
+    }
 }

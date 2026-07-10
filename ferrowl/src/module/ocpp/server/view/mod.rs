@@ -25,7 +25,6 @@ use parking_lot::RwLock;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::state::{ButtonState, CodeInputFieldState, SelectionState, TableState};
-use ferrowl_ui::traits::OverlayKeys;
 use ferrowl_ui::widgets::{Button, CodeInputField, Selection, Table, Widget};
 use ferrowl_ui::{COLOR_SCHEME, EventResult};
 use ferrowl_ui_derive::{Focus, Overlay, TableEntry, focusable};
@@ -39,7 +38,7 @@ use crate::config::script::ScriptDef;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
-use crate::module::ocpp::client::backend::OcppMessage;
+use crate::module::ocpp::client::backend::{MsgHeader, MsgRow, OcppMessage, msg_row};
 use crate::module::ocpp::client::lua_sim::OcppFields;
 use crate::module::ocpp::config::device::{ConnectorRfids, OcppDeviceConfig};
 use crate::module::ocpp::config::session::{OcppModuleSpec, OcppSpec};
@@ -51,7 +50,6 @@ use crate::module::ocpp::server::detail::DetailOverlay;
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedServerStates};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{CommandDescriptor, ModuleView, SharedLog};
-use crate::view::log::format_timestamp;
 
 /// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
 fn rfid_store_from_device(device: &OcppDeviceConfig) -> RfidStore {
@@ -210,47 +208,6 @@ fn cs_cell_styles(row: &CsRow) -> [Option<Style>; 3] {
     [None, None, style]
 }
 
-// --- Message table ---------------------------------------------------------
-
-#[derive(Clone, Debug, TableEntry)]
-#[table_entry(header = MsgHeader, styles = msg_cell_styles)]
-struct MsgRow {
-    #[column(name = "Timestamp", min = 23, max = 23)]
-    timestamp: String,
-    #[column(name = "Direction", min = 8, max = 10)]
-    direction: String,
-    #[column(name = "Message", min = 14, max = 30)]
-    name: String,
-    #[column(name = "Status", min = 7, max = 8)]
-    status: String,
-    #[column(name = "Context", min = 6, max = 40)]
-    context: String,
-}
-
-fn msg_cell_styles(row: &MsgRow) -> [Option<Style>; 5] {
-    let status_style = match row.status.as_str() {
-        "Success" => Some(Style::default().fg(COLOR_SCHEME.success)),
-        "Error" => Some(Style::default().fg(COLOR_SCHEME.error)),
-        _ => None,
-    };
-    [None, None, None, status_style, None]
-}
-
-fn msg_row(m: &OcppMessage) -> MsgRow {
-    let status = match m.ok {
-        Some(true) => "Success",
-        Some(false) => "Error",
-        None => "",
-    };
-    MsgRow {
-        timestamp: format_timestamp(m.ts),
-        direction: m.direction.label().to_string(),
-        name: m.name.clone(),
-        status: status.to_string(),
-        context: m.context.clone(),
-    }
-}
-
 // --- Entries ---------------------------------------------------------------
 
 /// Shared observed state of one entry — a CS-level entry or a connector entry.
@@ -368,15 +325,7 @@ enum ServerOverlay {
     Action(Box<(ConnectionId, Scope, ActionDialog)>),
 }
 
-impl OverlayKeys for ConfirmDeleteDialog {
-    fn focus_cycle(&mut self, forward: bool) {
-        if forward {
-            self.focus_next();
-        } else {
-            self.focus_previous();
-        }
-    }
-}
+ferrowl_ui::impl_overlay_keys!(ConfirmDeleteDialog);
 
 #[focusable]
 #[derive(Focus)]

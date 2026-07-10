@@ -100,6 +100,26 @@ where
     }
 }
 
+/// Implements [`OverlayKeys`] for one or more types by forwarding `forward` to the
+/// `focus_next`/`focus_previous` inherent methods `#[derive(Focus)]` gives them — the common case
+/// for an overlay payload that opts into `#[overlay(focus_cycle)]` with no bespoke stepping logic.
+#[macro_export]
+macro_rules! impl_overlay_keys {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $crate::traits::OverlayKeys for $t {
+                fn focus_cycle(&mut self, forward: bool) {
+                    if forward {
+                        self.focus_next();
+                    } else {
+                        self.focus_previous();
+                    }
+                }
+            }
+        )+
+    };
+}
+
 /// Outcome of a `#[derive(Overlay)]` enum's common-key router (`route_keys`):
 /// whether the key closed the overlay, cycled its focus, or was left for the
 /// view's own `Enter`/custom handling.

@@ -153,6 +153,50 @@ pub(crate) fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+// --- Message table -----------------------------------------------------------
+//
+// Shared between the client and server views' message-log tables (identical row shape, styling,
+// and construction from an `OcppMessage` in both), kept here next to `OcppMessage` itself.
+
+#[derive(Clone, Debug, ferrowl_ui_derive::TableEntry)]
+#[table_entry(header = MsgHeader, styles = msg_cell_styles)]
+pub(crate) struct MsgRow {
+    #[column(name = "Timestamp", min = 23, max = 23)]
+    timestamp: String,
+    #[column(name = "Direction", min = 8, max = 10)]
+    direction: String,
+    #[column(name = "Message", min = 14, max = 30)]
+    name: String,
+    #[column(name = "Status", min = 7, max = 8)]
+    status: String,
+    #[column(name = "Context", min = 6, max = 40)]
+    context: String,
+}
+
+pub(crate) fn msg_cell_styles(row: &MsgRow) -> [Option<ratatui::style::Style>; 5] {
+    let status_style = match row.status.as_str() {
+        "Success" => Some(ratatui::style::Style::default().fg(ferrowl_ui::COLOR_SCHEME.success)),
+        "Error" => Some(ratatui::style::Style::default().fg(ferrowl_ui::COLOR_SCHEME.error)),
+        _ => None,
+    };
+    [None, None, None, status_style, None]
+}
+
+pub(crate) fn msg_row(m: &OcppMessage) -> MsgRow {
+    let status = match m.ok {
+        Some(true) => "Success",
+        Some(false) => "Error",
+        None => "",
+    };
+    MsgRow {
+        timestamp: crate::view::log::format_timestamp(m.ts),
+        direction: m.direction.label().to_string(),
+        name: m.name.clone(),
+        status: status.to_string(),
+        context: m.context.clone(),
+    }
+}
+
 /// The version-generic charging-station backend owned by a client view.
 /// Deliberately holds no copy of the module spec: the connection config is built from the spec
 /// the view passes into each [`start`](Self::start) call (see the CSMS backend for the rationale).

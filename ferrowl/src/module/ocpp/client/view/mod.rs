@@ -28,13 +28,11 @@ use parking_lot::RwLock;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
-    COLOR_SCHEME, EventResult,
+    EventResult,
     state::{ButtonState, CodeInputFieldState, InputFieldState, SelectionState, TableState},
-    traits::OverlayKeys,
     widgets::{Button, CodeInputField, InputField, Selection, Table, Widget},
 };
 use ferrowl_ui_derive::{Focus, Overlay, TableEntry, focusable};
-use ratatui::style::Style;
 use tokio::sync::RwLock as AsyncRwLock;
 
 use ferrowl_ocpp::Version;
@@ -44,7 +42,9 @@ use crate::app::LogRing;
 use crate::config::script::ScriptDef;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
-use crate::module::ocpp::client::backend::{Messages, OcppClient, OcppMessage};
+use crate::module::ocpp::client::backend::{
+    Messages, MsgHeader, MsgRow, OcppClient, OcppMessage, msg_row,
+};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::{ClientFields, OcppSimHandle, ScopedActionQueue};
 use crate::module::ocpp::config::device::{ConnectorRef, OcppDeviceConfig};
@@ -53,7 +53,6 @@ use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{CommandDescriptor, ModuleView, SharedLog};
-use crate::view::log::format_timestamp;
 
 pub use render::{choice, number, text_input};
 
@@ -363,25 +362,7 @@ enum ClientOverlay {
     Scripts(Box<ScriptDialog>),
 }
 
-impl OverlayKeys for ConfigEditDialog {
-    fn focus_cycle(&mut self, forward: bool) {
-        if forward {
-            self.focus_next();
-        } else {
-            self.focus_previous();
-        }
-    }
-}
-
-impl OverlayKeys for OcppSetupDialog {
-    fn focus_cycle(&mut self, forward: bool) {
-        if forward {
-            self.focus_next();
-        } else {
-            self.focus_previous();
-        }
-    }
-}
+ferrowl_ui::impl_overlay_keys!(ConfigEditDialog, OcppSetupDialog);
 
 /// A state-row edit overlay: which field, the scope it targets (`Scope::CS` = CS-level), and the
 /// input widget.
@@ -389,47 +370,6 @@ pub struct EditOverlay {
     pub field: EditField,
     pub scope: Scope,
     kind: EditKind,
-}
-
-// --- Message table ---------------------------------------------------------
-
-#[derive(Clone, Debug, TableEntry)]
-#[table_entry(header = MsgHeader, styles = msg_cell_styles)]
-struct MsgRow {
-    #[column(name = "Timestamp", min = 23, max = 23)]
-    timestamp: String,
-    #[column(name = "Direction", min = 8, max = 10)]
-    direction: String,
-    #[column(name = "Message", min = 14, max = 30)]
-    name: String,
-    #[column(name = "Status", min = 7, max = 8)]
-    status: String,
-    #[column(name = "Context", min = 6, max = 40)]
-    context: String,
-}
-
-fn msg_cell_styles(row: &MsgRow) -> [Option<Style>; 5] {
-    let status_style = match row.status.as_str() {
-        "Success" => Some(Style::default().fg(COLOR_SCHEME.success)),
-        "Error" => Some(Style::default().fg(COLOR_SCHEME.error)),
-        _ => None,
-    };
-    [None, None, None, status_style, None]
-}
-
-fn msg_row(m: &OcppMessage) -> MsgRow {
-    let status = match m.ok {
-        Some(true) => "Success",
-        Some(false) => "Error",
-        None => "",
-    };
-    MsgRow {
-        timestamp: format_timestamp(m.ts),
-        direction: m.direction.label().to_string(),
-        name: m.name.clone(),
-        status: status.to_string(),
-        context: m.context.clone(),
-    }
 }
 
 // --- View ------------------------------------------------------------------

@@ -19,22 +19,14 @@
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_syntax::Language;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{
-        CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
-        TableState, TableStateBuilder, VimMode,
-    },
-    style::{InputFieldStyleBuilder, TableStyleBuilder},
+    state::{CodeInputFieldState, InputFieldState, InputFieldStateBuilder, VimMode},
+    style::InputFieldStyleBuilder,
     traits::{HandleEvents, SetFocus},
-    widgets::{
-        CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
-        Validate, ValidateResult, Widget,
-    },
+    widgets::{CodeInputField, InputField, InputFieldBuilder, Validate, ValidateResult, Widget},
 };
-use ferrowl_ui_derive::TableEntry;
-use ratatui::style::Style;
+use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -42,10 +34,12 @@ use ratatui::{
 };
 
 use crate::config::script::ScriptDef;
-use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::lua_help::{LuaHelpOverlay, ScriptContext};
+use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::view::SharedLog;
+use crate::view::border_style;
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 
 /// Sim-cycle interval input validator: must parse as a finite, positive number of seconds
@@ -68,64 +62,28 @@ impl Validate for Interval {
     }
 }
 
-// --- Script table -----------------------------------------------------------
-
-#[derive(Clone, Debug, Default, TableEntry)]
-#[table_entry(header = ScriptHeader)]
-struct ScriptRow {
-    #[column(name = "Name", min = 10, max = 40)]
-    name: String,
-    #[column(name = "Status", min = 6, max = 6)]
-    status: String,
-}
-
-type ScriptTable = Widget<TableState<ScriptRow, 2>, Table<ScriptRow, ScriptHeader, 2>>;
-
-/// The dialog-wide focus rotation, in Tab order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SessionDialogFocus {
-    Interval,
-    Scripts,
-    NewScript,
-    Code,
-    Log,
-}
-
-impl SessionDialogFocus {
-    fn next(self) -> Self {
-        match self {
-            Self::Interval => Self::Scripts,
-            Self::Scripts => Self::NewScript,
-            Self::NewScript => Self::Code,
-            Self::Code => Self::Log,
-            Self::Log => Self::Interval,
-        }
-    }
-
-    fn previous(self) -> Self {
-        match self {
-            Self::Interval => Self::Log,
-            Self::Scripts => Self::Interval,
-            Self::NewScript => Self::Scripts,
-            Self::Code => Self::NewScript,
-            Self::Log => Self::Code,
-        }
-    }
-}
-
 /// The `:session` dialog. Works on a private copy of the scripts/interval; the caller applies the
 /// result via [`SessionDialog::resolve`] on close.
+///
+/// Tab order (declaration order below): interval → script table → name input → code editor
+/// (skipped while no script is selected) → log.
+#[focusable]
+#[derive(Focus)]
 pub struct SessionDialog {
+    #[focus]
     interval: Widget<InputFieldState, InputField<Interval>>,
     scripts: Vec<ScriptDef>,
+    #[focus]
     table: ScriptTable,
+    #[focus]
     name_input: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = self.selected().is_some())]
     code: Widget<CodeInputFieldState, CodeInputField>,
+    #[focus]
     log: LogView,
     confirm: Option<ConfirmDeleteDialog>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
-    focus: SessionDialogFocus,
     close_confirm: Option<CloseConfirmDialog>,
     lua_help: Option<LuaHelpOverlay>,
 }
@@ -137,19 +95,19 @@ impl SessionDialog {
         set_input(&mut interval_field, &format_interval(interval));
         let mut dialog = Self {
             interval: interval_field,
-            table: script_table(rows(&scripts)),
-            name_input: name_input(),
-            code: code_editor(),
+            table: script_manager::script_table(script_manager::rows(&scripts)),
+            name_input: script_manager::name_input(border_style()),
+            code: script_manager::code_editor(border_style()),
             log: new_log_view(),
             confirm: None,
             compact: false,
             focus: SessionDialogFocus::Interval,
+            view_focused: true,
             close_confirm: None,
             lua_help: None,
             scripts,
         };
         dialog.sync_code_from_selection();
-        dialog.apply_focus();
         dialog
     }
 
@@ -174,103 +132,46 @@ impl SessionDialog {
         }
     }
 
+    fn manager(&mut self) -> ScriptManagerRef<'_> {
+        ScriptManagerRef {
+            scripts: &mut self.scripts,
+            table: &mut self.table,
+            name_input: &mut self.name_input,
+            code: &mut self.code,
+            compact: &mut self.compact,
+        }
+    }
+
     fn selected(&self) -> Option<usize> {
-        let sel = self.table.state.table_state().selected()?;
-        (sel < self.scripts.len()).then_some(sel)
+        script_manager::selected(&self.scripts, &self.table)
     }
 
     /// Load the selected script's code into the editor. Without a selection the editor is
     /// disabled: it shows only its placeholder and there is nothing edits could apply to.
     fn sync_code_from_selection(&mut self) {
-        let content = self
-            .selected()
-            .map(|i| self.scripts[i].code.clone())
-            .unwrap_or_default();
-        self.code.state.set_content(&content);
-        self.code.state.set_disabled(self.selected().is_none());
+        self.manager().sync_code_from_selection();
     }
 
     /// Write the editor's content back into the selected script.
     fn flush_code_to_selection(&mut self) {
-        if let Some(i) = self.selected() {
-            self.scripts[i].code = self.code.state.content();
-        }
-    }
-
-    fn refresh_rows(&mut self) {
-        self.table.state.set_values(rows(&self.scripts));
+        self.manager().flush_code_to_selection();
     }
 
     /// Create a new enabled script from the name input (rejecting empty / duplicate names).
     fn create_script(&mut self) {
-        let name = self.name_input.state.input().trim().to_string();
-        if name.is_empty() || self.scripts.iter().any(|s| s.name == name) {
-            return;
-        }
-        self.scripts.push(ScriptDef {
-            name,
-            code: String::new(),
-            enabled: true,
-        });
-        self.refresh_rows();
-        self.table.state.move_to_bottom();
-        self.name_input.state.set_input(String::new());
-        self.name_input.state.set_cursor(0);
-        self.sync_code_from_selection();
+        self.manager().create_script();
     }
 
     fn toggle_compact(&mut self) {
-        self.compact = !self.compact;
-        self.table.widget.set_row_margin(Margin {
-            vertical: if self.compact { 0 } else { 1 },
-            horizontal: 0,
-        });
+        self.manager().toggle_compact();
     }
 
     fn toggle_selected(&mut self) {
-        if let Some(i) = self.selected() {
-            self.scripts[i].enabled = !self.scripts[i].enabled;
-            self.refresh_rows();
-        }
+        self.manager().toggle_selected();
     }
 
     fn delete_selected(&mut self) {
-        if let Some(i) = self.selected() {
-            self.scripts.remove(i);
-            self.refresh_rows();
-            self.table.state.move_up();
-            self.sync_code_from_selection();
-        }
-    }
-
-    /// Mirror `self.focus` onto every widget's own focused flag.
-    fn apply_focus(&mut self) {
-        self.interval
-            .state
-            .set_focused(self.focus == SessionDialogFocus::Interval);
-        self.table
-            .state
-            .set_focused(self.focus == SessionDialogFocus::Scripts);
-        self.name_input
-            .state
-            .set_focused(self.focus == SessionDialogFocus::NewScript);
-        self.code
-            .state
-            .set_focused(self.focus == SessionDialogFocus::Code);
-        self.log
-            .state
-            .set_focused(self.focus == SessionDialogFocus::Log);
-    }
-
-    /// Move focus one stop along the rotation, skipping the code editor while it is disabled
-    /// (no script selected).
-    fn focus_step(&mut self, forward: bool) {
-        let step = |f: SessionDialogFocus| if forward { f.next() } else { f.previous() };
-        self.focus = step(self.focus);
-        if self.focus == SessionDialogFocus::Code && self.selected().is_none() {
-            self.focus = step(self.focus);
-        }
-        self.apply_focus();
+        self.manager().delete_selected();
     }
 
     /// Handle a key. Returns `true` when the dialog should close (confirmed via the close-confirm
@@ -285,15 +186,10 @@ impl SessionDialog {
         }
 
         // The close-confirm popup takes precedence once open.
-        if let Some(confirm) = self.close_confirm.as_mut() {
-            return match confirm.handle_key(modifiers, code) {
-                CloseConfirmEvent::Close => true,
-                CloseConfirmEvent::Dismiss => {
-                    self.close_confirm = None;
-                    false
-                }
-                CloseConfirmEvent::Consumed => false,
-            };
+        match route_close_confirm(&mut self.close_confirm, modifiers, code) {
+            CloseConfirmOutcome::NotActive => {}
+            CloseConfirmOutcome::Close => return true,
+            CloseConfirmOutcome::Consumed => return false,
         }
 
         // Delete-confirmation sub-dialog takes precedence.
@@ -342,8 +238,8 @@ impl SessionDialog {
         }
 
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Tab) => self.focus_step(true),
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_step(false),
+            (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 self.close_confirm = Some(CloseConfirmDialog::new());
             }
@@ -351,7 +247,7 @@ impl SessionDialog {
                 SessionDialogFocus::Interval => {
                     let _ = self.interval.state.handle_events(modifiers, code);
                 }
-                SessionDialogFocus::Scripts => match (modifiers, code) {
+                SessionDialogFocus::Table => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
                     (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
                     (KeyModifiers::NONE, KeyCode::Char('d')) => {
@@ -364,7 +260,7 @@ impl SessionDialog {
                         self.sync_code_from_selection();
                     }
                 },
-                SessionDialogFocus::NewScript => match (modifiers, code) {
+                SessionDialogFocus::NameInput => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Enter) => self.create_script(),
                     _ => {
                         let _ = self.name_input.state.handle_events(modifiers, code);
@@ -425,6 +321,22 @@ impl SessionDialog {
         ])
         .areas(left);
 
+        self.interval
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Interval);
+        self.table
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Table);
+        self.name_input
+            .state
+            .set_focused(self.focus == SessionDialogFocus::NameInput);
+        self.code
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Code);
+        self.log
+            .state
+            .set_focused(self.focus == SessionDialogFocus::Log);
+
         StatefulWidget::render(
             &self.interval.widget,
             interval_area,
@@ -472,21 +384,6 @@ fn set_input(widget: &mut Widget<InputFieldState, InputField<Interval>>, value: 
     widget.state.set_cursor(value.chars().count());
 }
 
-/// Theme border color for unfocused fields, matching the table/selection borders.
-fn border_style() -> Style {
-    Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg)
-}
-
-fn rows(scripts: &[ScriptDef]) -> Vec<ScriptRow> {
-    scripts
-        .iter()
-        .map(|s| ScriptRow {
-            name: s.name.clone(),
-            status: if s.enabled { "On" } else { "Off" }.to_string(),
-        })
-        .collect()
-}
-
 fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
     Widget {
         state: InputFieldStateBuilder::default()
@@ -502,75 +399,6 @@ fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
                 ("Interval (seconds)", HorizontalAlignment::Left).into(),
             ))
             .style(InputFieldStyleBuilder::default().build().unwrap())
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
-}
-
-fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
-    Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
-        widget: TableBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Scripts (t: toggle, d: delete, c: compact)".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
-            .row_margin(Margin {
-                vertical: 1,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
-}
-
-fn name_input() -> Widget<InputFieldState, InputField<String>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some("New Script".to_string()))
-            .build()
-            .unwrap(),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(("New Script", HorizontalAlignment::Left).into()))
-            .style(
-                InputFieldStyleBuilder::default()
-                    .border(border_style())
-                    .build()
-                    .unwrap(),
-            )
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 0,
-            })
-            .build()
-            .unwrap(),
-    }
-}
-
-fn code_editor() -> Widget<CodeInputFieldState, CodeInputField> {
-    Widget {
-        state: CodeInputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some("-- select or create a script".to_string()))
-            .language(Some(Language::Lua))
-            .build()
-            .unwrap(),
-        widget: CodeInputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Code".into()))
-            .style(
-                InputFieldStyleBuilder::default()
-                    .border(border_style())
-                    .build()
-                    .unwrap(),
-            )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
@@ -680,8 +508,8 @@ mod tests {
         let mut d = dialog();
         assert_eq!(d.focus, SessionDialogFocus::Interval);
         let expected = [
-            SessionDialogFocus::Scripts,
-            SessionDialogFocus::NewScript,
+            SessionDialogFocus::Table,
+            SessionDialogFocus::NameInput,
             SessionDialogFocus::Code,
             SessionDialogFocus::Log,
             SessionDialogFocus::Interval,
@@ -698,8 +526,8 @@ mod tests {
         let expected = [
             SessionDialogFocus::Log,
             SessionDialogFocus::Code,
-            SessionDialogFocus::NewScript,
-            SessionDialogFocus::Scripts,
+            SessionDialogFocus::NameInput,
+            SessionDialogFocus::Table,
             SessionDialogFocus::Interval,
         ];
         for focus in expected {
@@ -717,7 +545,7 @@ mod tests {
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // code skipped -> log
         assert_eq!(d.focus, SessionDialogFocus::Log);
         d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab); // code skipped -> name input
-        assert_eq!(d.focus, SessionDialogFocus::NewScript);
+        assert_eq!(d.focus, SessionDialogFocus::NameInput);
     }
 
     #[test]
@@ -725,7 +553,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
-        assert_eq!(d.focus, SessionDialogFocus::Scripts);
+        assert_eq!(d.focus, SessionDialogFocus::Table);
         assert!(d.close_confirm.is_some());
     }
 
@@ -852,7 +680,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
-        assert_eq!(d.focus, SessionDialogFocus::NewScript);
+        assert_eq!(d.focus, SessionDialogFocus::NameInput);
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
         assert_eq!(d.name_input.state.input(), ":");
     }

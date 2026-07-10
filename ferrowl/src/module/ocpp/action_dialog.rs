@@ -10,7 +10,7 @@
 //! Actions with no spec open straight in JSON mode (transitional, removed once every action has a
 //! spec). Nested/abstracted actions supply a custom [`Assembler`] (see Stage 2).
 
-use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::module::ocpp::widgets;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
@@ -28,7 +28,7 @@ use ferrowl_ui::{
         SelectionBuilder, Table, Widget,
     },
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::style::Style;
 use ratatui::{
     buffer::Buffer,
@@ -156,30 +156,28 @@ enum ValueEditor {
     Choice(Widget<SelectionState<String>, Selection<String>>),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Focus {
-    /// The property table (table mode) or the JSON editor (JSON mode).
-    Fields,
-    /// The mode-toggle button.
-    Toggle,
-    /// The send button.
-    Send,
-}
-
 /// One in-progress action send. `kinds` is parallel to the table rows (for coercion).
+///
+/// Tab order (declaration order below): property table (table mode) / JSON editor (JSON mode) →
+/// mode-toggle button (skipped for JSON-only dialogs) → send button.
+#[focusable]
+#[derive(Focus)]
 pub struct ActionDialog {
     pub name: String,
     /// `None` for spec-less actions (JSON-only).
     assemble: Option<Assembler>,
     /// Per-row (wire name, kind, optional) used for coercion/assembly.
     props: Vec<(&'static str, PropKind, bool)>,
+    #[focus(when = !self.json_mode)]
     table: PropTable,
+    #[focus(when = self.json_mode)]
     json: Widget<CodeInputFieldState, CodeInputField>,
     json_mode: bool,
     editor: Option<ValueEditor>,
+    #[focus(when = self.assemble.is_some())]
     toggle: Widget<ButtonState, Button>,
+    #[focus]
     send: Widget<ButtonState, Button>,
-    focus: Focus,
     /// Compact rows (vertical row margin 0); `c` toggles it. Default is roomy (margin 1).
     compact: bool,
     /// Close-confirm popup, opened by Esc.
@@ -222,6 +220,7 @@ impl ActionDialog {
         let mut dlg = Self::scaffold(name, None, Vec::new());
         dlg.json.state.set_content(template);
         dlg.json_mode = true;
+        dlg.focus = ActionDialogFocus::Json;
         dlg.toggle = button("Table");
         dlg
     }
@@ -273,7 +272,8 @@ impl ActionDialog {
             editor: None,
             toggle: button("JSON"),
             send: button("Send"),
-            focus: Focus::Fields,
+            focus: ActionDialogFocus::Table,
+            view_focused: true,
             compact: false,
             close_confirm: None,
         }
@@ -386,26 +386,8 @@ impl ActionDialog {
             self.json_mode = true;
             self.toggle = button("Table");
         }
-        self.focus = Focus::Fields;
-    }
-
-    fn focus_next(&mut self) {
-        // The Toggle button is hidden for JSON-only dialogs (no spec to switch back to).
-        self.focus = match self.focus {
-            Focus::Fields if self.assemble.is_none() => Focus::Send,
-            Focus::Fields => Focus::Toggle,
-            Focus::Toggle => Focus::Send,
-            Focus::Send => Focus::Fields,
-        };
-    }
-
-    fn focus_previous(&mut self) {
-        self.focus = match self.focus {
-            Focus::Fields => Focus::Send,
-            Focus::Send if self.assemble.is_none() => Focus::Fields,
-            Focus::Send => Focus::Toggle,
-            Focus::Toggle => Focus::Fields,
-        };
+        // Sanctioned deviation from the old hand-rolled Focus: focus stays on the toggle
+        // button after switching modes (previously it jumped back to the fields).
     }
 
     /// Handle a key. Returns an [`ActionResult`] when the host view must act.
@@ -428,21 +410,13 @@ impl ActionDialog {
         }
 
         // The close-confirm popup captures all keys while open.
-        if let Some(confirm) = self.close_confirm.as_mut() {
-            return match confirm.handle_key(modifiers, code) {
-                CloseConfirmEvent::Close => {
-                    self.close_confirm = None;
-                    Some(ActionResult::Close)
-                }
-                CloseConfirmEvent::Dismiss => {
-                    self.close_confirm = None;
-                    None
-                }
-                CloseConfirmEvent::Consumed => None,
-            };
+        match route_close_confirm(&mut self.close_confirm, modifiers, code) {
+            CloseConfirmOutcome::NotActive => {}
+            CloseConfirmOutcome::Close => return Some(ActionResult::Close),
+            CloseConfirmOutcome::Consumed => return None,
         }
 
-        let json_editor_focused = self.json_mode && self.focus == Focus::Fields;
+        let json_editor_focused = self.focus == ActionDialogFocus::Json;
 
         // The vim-modal JSON editor must see keys before the dialog: in Insert mode it
         // consumes Esc (back to Normal), Enter (newline), and Tab/BackTab (indent/dedent);
@@ -460,28 +434,26 @@ impl ActionDialog {
             (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             (KeyModifiers::NONE, KeyCode::Enter) => match self.focus {
-                Focus::Toggle => self.toggle_mode(),
-                Focus::Send => return Some(ActionResult::Send(self.payload())),
-                Focus::Fields => self.open_editor(),
+                ActionDialogFocus::Toggle => self.toggle_mode(),
+                ActionDialogFocus::Send => return Some(ActionResult::Send(self.payload())),
+                ActionDialogFocus::Table | ActionDialogFocus::Json => self.open_editor(),
             },
             // Space clicks the focused button; on Send it transmits without closing the dialog.
-            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == Focus::Send => {
+            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == ActionDialogFocus::Send => {
                 return Some(ActionResult::SendKeep(self.payload()));
             }
-            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == Focus::Toggle => {
+            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == ActionDialogFocus::Toggle => {
                 self.toggle_mode()
             }
             // `c` toggles compact rows while the property table is focused (JSON mode keeps `c` as
             // text input).
-            (KeyModifiers::NONE, KeyCode::Char('c'))
-                if !self.json_mode && self.focus == Focus::Fields =>
-            {
+            (KeyModifiers::NONE, KeyCode::Char('c')) if self.focus == ActionDialogFocus::Table => {
                 self.toggle_compact()
             }
             // JSON-mode field keys were already offered to the editor above; anything
             // reaching this arm was left unhandled by it.
             _ => {
-                if self.focus == Focus::Fields && !self.json_mode {
+                if self.focus == ActionDialogFocus::Table {
                     let _ = self.table.state.handle_events(modifiers, code);
                 }
             }
@@ -522,10 +494,14 @@ impl ActionDialog {
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(inner);
 
         if self.json_mode {
-            self.json.state.set_focused(self.focus == Focus::Fields);
+            self.json
+                .state
+                .set_focused(self.focus == ActionDialogFocus::Json);
             StatefulWidget::render(&self.json.widget, body, buf, &mut self.json.state);
         } else {
-            self.table.state.set_focused(self.focus == Focus::Fields);
+            self.table
+                .state
+                .set_focused(self.focus == ActionDialogFocus::Table);
             StatefulWidget::render(&self.table.widget, body, buf, &mut self.table.state);
         }
 
@@ -535,12 +511,18 @@ impl ActionDialog {
             let [tb, sb] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(buttons);
-            self.toggle.state.set_focused(self.focus == Focus::Toggle);
-            self.send.state.set_focused(self.focus == Focus::Send);
+            self.toggle
+                .state
+                .set_focused(self.focus == ActionDialogFocus::Toggle);
+            self.send
+                .state
+                .set_focused(self.focus == ActionDialogFocus::Send);
             StatefulWidget::render(&self.toggle.widget, tb, buf, &mut self.toggle.state);
             StatefulWidget::render(&self.send.widget, sb, buf, &mut self.send.state);
         } else {
-            self.send.state.set_focused(self.focus == Focus::Send);
+            self.send
+                .state
+                .set_focused(self.focus == ActionDialogFocus::Send);
             StatefulWidget::render(&self.send.widget, buttons, buf, &mut self.send.state);
         }
 
@@ -642,7 +624,7 @@ fn choice_editor(variants: &[&str], current: &str) -> ValueEditor {
             .title(Some(("Value", HorizontalAlignment::Left).into()))
             .style(
                 SelectionStyleBuilder::default()
-                    .general(widgets::border_style())
+                    .general(crate::view::border_style())
                     .focused(
                         Style::default()
                             .fg(COLOR_SCHEME.bg)
@@ -723,8 +705,10 @@ mod tests {
         assert!(!d.compact);
         d.input(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(d.compact, "c toggles compact while the table is focused");
-        // In JSON mode `c` is text input, not a compact toggle.
+        // In JSON mode `c` is text input, not a compact toggle. `toggle_mode` no longer moves
+        // focus itself (sanctioned change), so point focus at the JSON editor directly.
         d.toggle_mode();
+        d.focus = ActionDialogFocus::Json;
         let before = d.compact;
         d.input(KeyModifiers::NONE, KeyCode::Char('c'));
         assert_eq!(d.compact, before, "c must not toggle compact in JSON mode");
@@ -905,7 +889,7 @@ mod tests {
     #[test]
     fn space_on_send_returns_send_keep() {
         let mut d = dialog();
-        while d.focus != Focus::Send {
+        while d.focus != ActionDialogFocus::Send {
             d.input(KeyModifiers::NONE, KeyCode::Tab);
         }
         assert!(matches!(
@@ -917,7 +901,7 @@ mod tests {
     #[test]
     fn space_elsewhere_does_not_send() {
         let mut d = dialog();
-        assert!(d.focus == Focus::Fields);
+        assert!(d.focus == ActionDialogFocus::Table);
         assert!(d.input(KeyModifiers::NONE, KeyCode::Char(' ')).is_none());
     }
 
@@ -934,6 +918,9 @@ mod tests {
     fn json_insert_colon_inserts() {
         let mut d = dialog();
         d.toggle_mode();
+        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // JSON editor directly so the input below reaches it.
+        d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
         d.input(KeyModifiers::NONE, KeyCode::Char('i')); // enter Insert mode
         assert_eq!(d.json.state.vim_mode(), VimMode::Insert);
@@ -949,6 +936,9 @@ mod tests {
     fn json_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
         d.toggle_mode();
+        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // JSON editor directly so the input below reaches it.
+        d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
         d.input(KeyModifiers::NONE, KeyCode::Char('i')); // enter Insert mode
         assert_eq!(d.json.state.vim_mode(), VimMode::Insert);
@@ -967,6 +957,9 @@ mod tests {
     fn json_normal_colon_consumed_by_editor() {
         let mut d = dialog();
         d.toggle_mode();
+        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // JSON editor directly so the input below reaches it.
+        d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
         assert_eq!(d.json.state.vim_mode(), VimMode::Normal);
         assert!(d.input(KeyModifiers::NONE, KeyCode::Char(':')).is_none());
@@ -980,5 +973,57 @@ mod tests {
         assert!(d.close_confirm.is_some());
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
         assert!(d.close_confirm.is_none());
+    }
+
+    // --- #[derive(Focus)] cycle characterization --------------------------
+
+    #[test]
+    fn tab_cycles_table_toggle_send_in_table_mode() {
+        let mut d = dialog();
+        assert_eq!(d.focus, ActionDialogFocus::Table);
+        let expected = [
+            ActionDialogFocus::Toggle,
+            ActionDialogFocus::Send,
+            ActionDialogFocus::Table,
+        ];
+        for focus in expected {
+            d.input(KeyModifiers::NONE, KeyCode::Tab);
+            assert_eq!(d.focus, focus);
+        }
+    }
+
+    #[test]
+    fn tab_cycles_json_send_skipping_toggle_in_json_only_mode() {
+        let mut d = ActionDialog::json_only("Custom".into(), "{}");
+        assert_eq!(d.focus, ActionDialogFocus::Json);
+        let expected = [ActionDialogFocus::Send, ActionDialogFocus::Json];
+        for focus in expected {
+            d.input(KeyModifiers::NONE, KeyCode::Tab);
+            assert_eq!(d.focus, focus);
+        }
+    }
+
+    // Sanctioned behavior change: pressing Toggle no longer jumps focus back to the fields;
+    // it stays on the Toggle button, and the next Tab now routes through Json instead of Table.
+    #[test]
+    fn toggle_keeps_focus_then_tab_routes_through_json() {
+        let mut d = dialog();
+        d.input(KeyModifiers::NONE, KeyCode::Tab); // Table -> Toggle
+        assert_eq!(d.focus, ActionDialogFocus::Toggle);
+        d.input(KeyModifiers::NONE, KeyCode::Enter); // activate Toggle -> JSON mode
+        assert!(d.json_mode);
+        assert_eq!(
+            d.focus,
+            ActionDialogFocus::Toggle,
+            "focus stays on Toggle after switching modes"
+        );
+        d.input(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(d.focus, ActionDialogFocus::Send);
+        d.input(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(
+            d.focus,
+            ActionDialogFocus::Json,
+            "cycle now routes through Json instead of Table"
+        );
     }
 }

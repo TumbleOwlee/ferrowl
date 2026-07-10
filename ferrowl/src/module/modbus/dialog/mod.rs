@@ -179,6 +179,13 @@ pub(super) fn endian_index(endian: &RegisterEndian) -> usize {
 }
 
 /// Index into the `number_format` selection (order matches dialog `new()`).
+///
+/// `RegisterFormat::Ascii` has no slot in `number_format` (ASCII is a distinct `value_type`, not a
+/// number format). In this codebase both callers already match `Ascii` out separately before
+/// falling through to the numeric arm that calls `format_index`, so this function is never
+/// actually invoked with `Ascii` in practice. It still maps `Ascii` to `0` (same as `U8`) as a
+/// well-defined, documented fallback rather than an unreachable/panic path, so a future caller
+/// that forgets to gate on value type first degrades gracefully instead of panicking.
 pub(super) fn format_index(format: &RegisterFormat) -> usize {
     match format {
         RegisterFormat::U8(_) => 0,

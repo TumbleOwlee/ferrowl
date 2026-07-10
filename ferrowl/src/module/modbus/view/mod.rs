@@ -5,7 +5,8 @@ use ferrowl_codec::{Address, Value};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Memory, Range};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::HandleEvents;
+use ferrowl_ui::traits::{HandleEvents, OverlayRoute};
+use ferrowl_ui_derive::Overlay;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -27,15 +28,35 @@ mod mutate;
 mod overlay;
 use overlay::{ModbusOverlay, PendingAction};
 
+/// The single modal overlay over the module view (mutually exclusive by construction). The
+/// derive supplies `is_active`/`close`/`take`/`route_keys`; only the setup dialog carries a
+/// common-key tag (`focus_cycle`) — its `Esc`/close-confirm handling lives inside the dialog
+/// itself, offered to it before `route_keys` runs (see `handle_events`). The register overlay
+/// (`ModbusOverlay`, itself a nested Edit/EditSelection/Add dispatch with its own close-confirm
+/// and sub-dialog precedence) and the scripts overlay route every key through their own bespoke
+/// handling instead, so they carry no tags.
+#[derive(Overlay)]
+enum ModbusViewOverlay {
+    #[overlay(none)]
+    None,
+    /// Register edit/add overlay (routes every key through `handle_overlay_key`).
+    Register(Box<ModbusOverlay>),
+    /// Module re-setup dialog.
+    #[overlay(focus_cycle)]
+    Setup(Box<SetupDialog>),
+    /// Lua scripts editor (routes every key through its own `handle_events`).
+    Scripts(Box<ScriptDialog>),
+}
+
+ferrowl_ui::impl_overlay_keys!(SetupDialog);
+
 pub struct ModbusModuleView {
     module: ModbusModule,
     spec: ModuleSpec,
     device: DeviceConfig,
     table: TableView,
     sort: Option<(usize, bool)>,
-    overlay: Option<ModbusOverlay>,
-    setup_overlay: Option<SetupDialog>,
-    scripts_overlay: Option<ScriptDialog>,
+    overlay: ModbusViewOverlay,
     pending: Option<PendingAction>,
     /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
     view_focused: bool,
@@ -61,9 +82,7 @@ impl ModbusModuleView {
             spec,
             device,
             sort: None,
-            overlay: None,
-            setup_overlay: None,
-            scripts_overlay: None,
+            overlay: ModbusViewOverlay::None,
             pending: None,
             view_focused: false,
         }
@@ -80,15 +99,17 @@ impl ModbusModuleView {
             .and_then(|d| d.default.as_ref());
         let unscaled = def.value.clone().unscaled().to_string();
         if def.named_values.is_empty() {
-            self.overlay = Some(ModbusOverlay::Edit(EditInputDialog::from_register(
-                &def.name,
-                &def.description,
-                &def.register,
-                &unscaled,
-                current_default,
+            self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Edit(
+                EditInputDialog::from_register(
+                    &def.name,
+                    &def.description,
+                    &def.register,
+                    &unscaled,
+                    current_default,
+                ),
             )));
         } else {
-            self.overlay = Some(ModbusOverlay::EditSelection(
+            self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::EditSelection(
                 EditSelectionDialog::from_register(
                     &def.name,
                     &def.description,
@@ -98,34 +119,58 @@ impl ModbusModuleView {
                     &def.raw_value,
                     current_default,
                 ),
-            ));
+            )));
+        }
+    }
+
+    /// The register-edit/add overlay as a shared reference, if that's the currently active
+    /// overlay variant.
+    fn register_overlay(&self) -> Option<&ModbusOverlay> {
+        match &self.overlay {
+            ModbusViewOverlay::Register(o) => Some(o.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// The register-edit/add overlay as a mutable reference, if that's the currently active
+    /// overlay variant.
+    fn register_overlay_mut(&mut self) -> Option<&mut ModbusOverlay> {
+        match &mut self.overlay {
+            ModbusViewOverlay::Register(o) => Some(o.as_mut()),
+            _ => None,
         }
     }
 
     fn handle_overlay_key(&mut self, modifiers: KeyModifiers, code: KeyCode) {
-        let overlay = match &self.overlay {
+        let overlay = match self.register_overlay() {
             Some(o) => o,
             None => return,
         };
 
         if overlay.has_confirm_delete() {
             match code {
-                KeyCode::Esc => self.overlay.as_mut().unwrap().close_confirm_delete(),
-                KeyCode::Tab => self.overlay.as_mut().unwrap().confirm_delete_focus_next(),
+                KeyCode::Esc => self.register_overlay_mut().unwrap().close_confirm_delete(),
+                KeyCode::Tab => self
+                    .register_overlay_mut()
+                    .unwrap()
+                    .confirm_delete_focus_next(),
                 KeyCode::BackTab => self
-                    .overlay
-                    .as_mut()
+                    .register_overlay_mut()
                     .unwrap()
                     .confirm_delete_focus_previous(),
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    if self.overlay.as_ref().unwrap().confirm_delete_is_confirmed() {
+                    if self
+                        .register_overlay()
+                        .unwrap()
+                        .confirm_delete_is_confirmed()
+                    {
                         let name = self.table.selected().map(|d| d.name.clone());
-                        self.overlay = None;
+                        self.overlay.close();
                         if let Some(name) = name {
                             self.pending = Some(PendingAction::Delete(name));
                         }
                     } else {
-                        self.overlay.as_mut().unwrap().close_confirm_delete();
+                        self.register_overlay_mut().unwrap().close_confirm_delete();
                     }
                 }
                 _ => {}
@@ -135,13 +180,15 @@ impl ModbusModuleView {
 
         if overlay.has_sub_dialog() {
             match code {
-                KeyCode::Esc => self.overlay.as_mut().unwrap().close_add_dialog(),
-                KeyCode::Enter => self.overlay.as_mut().unwrap().confirm_add_dialog(),
-                KeyCode::Tab => self.overlay.as_mut().unwrap().add_dialog_focus_next(),
-                KeyCode::BackTab => self.overlay.as_mut().unwrap().add_dialog_focus_previous(),
+                KeyCode::Esc => self.register_overlay_mut().unwrap().close_add_dialog(),
+                KeyCode::Enter => self.register_overlay_mut().unwrap().confirm_add_dialog(),
+                KeyCode::Tab => self.register_overlay_mut().unwrap().add_dialog_focus_next(),
+                KeyCode::BackTab => self
+                    .register_overlay_mut()
+                    .unwrap()
+                    .add_dialog_focus_previous(),
                 _ => self
-                    .overlay
-                    .as_mut()
+                    .register_overlay_mut()
                     .unwrap()
                     .add_dialog_handle_events(modifiers, code),
             }
@@ -149,35 +196,33 @@ impl ModbusModuleView {
         }
 
         // The close-confirm popup takes precedence once open.
-        if self.overlay.as_ref().unwrap().close_confirm_is_active() {
+        if self.register_overlay().unwrap().close_confirm_is_active() {
             match self
-                .overlay
-                .as_mut()
+                .register_overlay_mut()
                 .unwrap()
                 .close_confirm_handle_key(modifiers, code)
             {
-                CloseConfirmEvent::Close => self.overlay = None,
+                CloseConfirmEvent::Close => self.overlay.close(),
                 CloseConfirmEvent::Dismiss | CloseConfirmEvent::Consumed => {}
             }
             return;
         }
 
-        self.overlay.as_mut().unwrap().clear_name_error();
+        self.register_overlay_mut().unwrap().clear_name_error();
 
-        let confirm_button_focused = self.overlay.as_ref().unwrap().is_confirm_button_focused();
+        let confirm_button_focused = self.register_overlay().unwrap().is_confirm_button_focused();
         let delete_button_focused = self
-            .overlay
-            .as_ref()
+            .register_overlay()
             .unwrap()
             .is_delete_register_button_focused();
 
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => {
-                self.overlay.as_mut().unwrap().close_confirm_open();
+                self.register_overlay_mut().unwrap().close_confirm_open();
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if delete_button_focused {
-                    self.overlay.as_mut().unwrap().open_confirm_delete();
+                    self.register_overlay_mut().unwrap().open_confirm_delete();
                 } else {
                     self.confirm_overlay();
                 }
@@ -186,37 +231,38 @@ impl ModbusModuleView {
                 if confirm_button_focused {
                     self.confirm_overlay();
                 } else {
-                    self.overlay.as_mut().unwrap().handle_space();
+                    self.register_overlay_mut().unwrap().handle_space();
                 }
             }
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                self.overlay.as_mut().unwrap().focus_previous();
+                self.register_overlay_mut().unwrap().focus_previous();
             }
             (KeyModifiers::NONE, KeyCode::Tab) => {
-                self.overlay.as_mut().unwrap().focus_next();
+                self.register_overlay_mut().unwrap().focus_next();
             }
             (KeyModifiers::NONE, KeyCode::Char('z')) => {
                 self.table.set_compact(!self.table.compact);
             }
             _ => {
-                self.overlay
-                    .as_mut()
+                self.register_overlay_mut()
                     .unwrap()
                     .handle_events(modifiers, code);
             }
         }
 
-        let new_overlay = self.overlay.as_ref().and_then(|o| {
+        let new_overlay = self.register_overlay().and_then(|o| {
             o.maybe_switch_to_selection()
                 .or_else(|| o.maybe_switch_to_input())
         });
         if let Some(o) = new_overlay {
-            self.overlay = Some(o);
+            self.overlay = ModbusViewOverlay::Register(Box::new(o));
         }
     }
 
     fn confirm_overlay(&mut self) {
-        let Some(overlay) = &self.overlay else { return };
+        let Some(overlay) = self.register_overlay() else {
+            return;
+        };
         let is_add = overlay.is_add();
         if let Some(edited) = overlay.apply() {
             let current_name = self.table.selected().map(|d| d.name.clone());
@@ -226,15 +272,15 @@ impl ModbusModuleView {
                     && self.device.definitions.contains_key(&edited.name)
                 {
                     let msg = format!("Name '{}' already in use", edited.name);
-                    self.overlay.as_mut().unwrap().set_name_error(msg);
+                    self.register_overlay_mut().unwrap().set_name_error(msg);
                     return;
                 }
             } else if self.device.definitions.contains_key(&edited.name) {
                 let msg = format!("Name '{}' already in use", edited.name);
-                self.overlay.as_mut().unwrap().set_name_error(msg);
+                self.register_overlay_mut().unwrap().set_name_error(msg);
                 return;
             }
-            self.overlay = None;
+            self.overlay.close();
             if is_add {
                 self.pending = Some(PendingAction::Add(edited));
             } else {
@@ -270,7 +316,7 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn is_overlay_active(&self) -> bool {
-        self.overlay.is_some() || self.setup_overlay.is_some() || self.scripts_overlay.is_some()
+        self.overlay.is_active()
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -283,12 +329,10 @@ impl ModuleView for ModbusModuleView {
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        self.table.table.state.set_focused(
-            self.view_focused
-                && self.overlay.is_none()
-                && self.setup_overlay.is_none()
-                && self.scripts_overlay.is_none(),
-        );
+        self.table
+            .table
+            .state
+            .set_focused(self.view_focused && !self.overlay.is_active());
         self.table.render(content_area, frame.buffer_mut());
 
         let online = self.module.is_instance_active();
@@ -319,62 +363,68 @@ impl ModuleView for ModbusModuleView {
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
         let full_area = frame.area();
-        if let Some(scripts) = &mut self.scripts_overlay {
-            scripts.render(full_area, frame.buffer_mut());
-        } else if let Some(setup) = &mut self.setup_overlay {
-            setup.render(full_area, frame.buffer_mut());
-        } else if let Some(overlay) = &mut self.overlay {
-            overlay.render(full_area, frame.buffer_mut());
+        match &mut self.overlay {
+            ModbusViewOverlay::Scripts(scripts) => scripts.render(full_area, frame.buffer_mut()),
+            ModbusViewOverlay::Setup(setup) => setup.render(full_area, frame.buffer_mut()),
+            ModbusViewOverlay::Register(overlay) => overlay.render(full_area, frame.buffer_mut()),
+            ModbusViewOverlay::None => {}
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
-        if let Some(ref mut scripts) = self.scripts_overlay {
-            if scripts.handle_events(modifiers, code) {
-                let dialog = self.scripts_overlay.take().expect("checked above");
-                self.device.scripts = dialog.resolve();
-                self.module
-                    .reload_scripts(super::registers::collect_scripts(&self.device));
-            }
-            return EventResult::Consumed;
+        if !self.overlay.is_active() {
+            return if modifiers == KeyModifiers::NONE && code == KeyCode::Enter {
+                self.open_edit();
+                EventResult::Consumed
+            } else {
+                self.table.handle_events(modifiers, code)
+            };
         }
-        if let Some(mut setup) = self.setup_overlay.take() {
-            // Offer the key to the dialog first; only run the default Enter/Tab/BackTab handling
-            // below when the dialog leaves it unhandled (close-confirm is handled inside the dialog).
-            let mut resolved_values = None;
-            if let EventResult::Unhandled(modifiers, code) = setup.handle_events(modifiers, code) {
-                match (modifiers, code) {
-                    (KeyModifiers::NONE, KeyCode::Enter) => {
-                        if let Ok(resolved) = setup.resolve() {
-                            resolved_values = Some(resolved.values);
-                        }
-                    }
-                    (KeyModifiers::NONE, KeyCode::Tab) => {
-                        setup.focus_next();
-                    }
-                    (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                        setup.focus_previous();
-                    }
-                    _ => {}
-                }
-            }
-            if let Some(values) = resolved_values {
-                self.pending = Some(PendingAction::ApplySetup(values));
-            } else if !setup.take_close_request() {
-                self.setup_overlay = Some(setup);
+
+        // Setup dialog: offer the key to the dialog first, so its embedded close-confirm popup
+        // can consume Esc/Enter/Tab/BackTab while it is open. Only run the default Enter handling
+        // below (via the `route_keys`/per-variant match) when the dialog leaves it unhandled.
+        if let ModbusViewOverlay::Setup(setup) = &mut self.overlay
+            && let EventResult::Consumed = setup.handle_events(modifiers, code)
+        {
+            if setup.take_close_request() {
+                self.overlay.close();
             }
             return EventResult::Consumed;
         }
 
-        if self.overlay.is_some() {
-            self.handle_overlay_key(modifiers, code);
-            EventResult::Consumed
-        } else if modifiers == KeyModifiers::NONE && code == KeyCode::Enter {
-            self.open_edit();
-            EventResult::Consumed
-        } else {
-            self.table.handle_events(modifiers, code)
+        // Common keys: `Tab`/`BackTab` cycle focus on the setup dialog (`focus_cycle`). The
+        // register/scripts overlays have no common tags — their close/focus handling is bespoke
+        // (register: close-confirm precedes Esc; scripts: every key routes through its own
+        // handler) — so `route_keys` always returns `Unhandled` for them.
+        match self.overlay.route_keys(modifiers, code) {
+            OverlayRoute::Closed | OverlayRoute::Cycled => return EventResult::Consumed,
+            OverlayRoute::Unhandled => {}
         }
+
+        match &mut self.overlay {
+            ModbusViewOverlay::Setup(setup) => {
+                if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code)
+                    && let Ok(resolved) = setup.resolve()
+                {
+                    self.pending = Some(PendingAction::ApplySetup(resolved.values));
+                    self.overlay.close();
+                }
+            }
+            ModbusViewOverlay::Scripts(dialog) => {
+                if dialog.handle_events(modifiers, code) {
+                    let ModbusViewOverlay::Scripts(dialog) = self.overlay.take() else {
+                        unreachable!("just matched Scripts above")
+                    };
+                    self.device.scripts = dialog.resolve();
+                    self.module
+                        .reload_scripts(super::registers::collect_scripts(&self.device));
+                }
+            }
+            ModbusViewOverlay::Register(_) => self.handle_overlay_key(modifiers, code),
+            ModbusViewOverlay::None => {}
+        }
+        EventResult::Consumed
     }
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
@@ -498,20 +548,21 @@ impl ModuleView for ModbusModuleView {
                 timing,
                 &self.device.read_ranges,
             );
-            self.setup_overlay = Some(dialog);
+            self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
         if trimmed == "add" || trimmed == "a" {
-            self.overlay = Some(ModbusOverlay::Add(EditInputDialog::new()));
+            self.overlay =
+                ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(EditInputDialog::new())));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
         if trimmed == "script" {
-            self.scripts_overlay = Some(ScriptDialog::new(
+            self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
                 &self.device.scripts,
                 ScriptContext::Modbus,
-            ));
+            )));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
         }
 
@@ -783,7 +834,10 @@ fn parse_set_args(rest: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModbusModuleView, PendingAction, decode_definition, parse_set_args, raw_hex};
+    use super::{
+        ModbusModuleView, ModbusViewOverlay, PendingAction, decode_definition, parse_set_args,
+        raw_hex,
+    };
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
@@ -999,6 +1053,60 @@ mod tests {
     }
 
     #[test]
+    fn ut_setup_overlay_tab_cycles_focus_via_derive() {
+        // Regression for the `#[derive(Overlay)]` port: `Setup` is tagged `focus_cycle`, so Tab
+        // must still advance the dialog's own focus once the dialog itself leaves the key
+        // unhandled (no close-confirm open).
+        use ferrowl_ui::traits::IsFocus;
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        let ModbusViewOverlay::Setup(setup) = &view.overlay else {
+            panic!("expected Setup overlay");
+        };
+        assert!(setup.name.state.is_focused());
+        assert!(!setup.config_path.state.is_focused());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let ModbusViewOverlay::Setup(setup) = &view.overlay else {
+            panic!("expected Setup overlay");
+        };
+        assert!(!setup.name.state.is_focused());
+        assert!(setup.config_path.state.is_focused());
+    }
+
+    #[test]
+    fn ut_setup_overlay_backtab_cycles_focus_reverse() {
+        use ferrowl_ui::traits::IsFocus;
+        let mut view = new_view();
+        drop(view.handle_command("edit"));
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        view.handle_events(KeyModifiers::NONE, KeyCode::BackTab);
+        let ModbusViewOverlay::Setup(setup) = &view.overlay else {
+            panic!("expected Setup overlay");
+        };
+        // BackTab after one Tab lands back on the first field.
+        assert!(setup.name.state.is_focused());
+        assert!(!setup.config_path.state.is_focused());
+    }
+
+    #[test]
+    fn ut_register_overlay_swallows_table_navigation_key() {
+        // Regression: while the register overlay is open, `Down` must be consumed by the
+        // overlay's own dispatch (untagged -> bespoke `handle_overlay_key`), not fall through to
+        // the underlying table's selection movement.
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        let before = view.table.selected().map(|d| d.name.clone());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        let after = view.table.selected().map(|d| d.name.clone());
+        assert_eq!(
+            before, after,
+            "table selection must not move while overlay is open"
+        );
+    }
+
+    #[test]
     fn ut_enter_still_confirms_edit_dialog_after_offer_first_routing() {
         // Regression for the offer-first key-routing refactor: the setup dialog is now offered
         // every key before the default Esc/Enter/Tab/BackTab handling runs, but Enter must still
@@ -1128,11 +1236,11 @@ mod tests {
         // First Esc opens the close-confirm popup; overlay stays open.
         view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(view.is_overlay_active());
-        assert!(view.overlay.as_ref().unwrap().close_confirm_is_active());
+        assert!(view.register_overlay().unwrap().close_confirm_is_active());
         // A second Esc dismisses the confirm popup, leaving the overlay open.
         view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(view.is_overlay_active());
-        assert!(!view.overlay.as_ref().unwrap().close_confirm_is_active());
+        assert!(!view.register_overlay().unwrap().close_confirm_is_active());
     }
 
     #[test]
@@ -1155,7 +1263,7 @@ mod tests {
         assert!(view.is_overlay_active());
         // Focus starts on the free-text Value field; `:` must be typed as ordinary text.
         view.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
-        assert!(!view.overlay.as_ref().unwrap().close_confirm_is_active());
+        assert!(!view.register_overlay().unwrap().close_confirm_is_active());
         assert!(view.is_overlay_active());
     }
 

@@ -23,6 +23,7 @@ use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
+use crate::module::ocpp::client::v2_common::{encode_action_or_log, encode_response_or_log};
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::scope::Scope;
 
@@ -152,7 +153,7 @@ impl CsStateHandler {
                 )
             }),
             Action16::SetChargingProfile(req) => {
-                let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V1_6>(action);
                 let profile = &json["csChargingProfiles"];
                 let stack = profile["stackLevel"].as_i64().unwrap_or(0);
                 let purpose = profile["chargingProfilePurpose"]
@@ -344,7 +345,7 @@ impl CsStateHandler {
                 })
             }
             Action16::ClearChargingProfile(req) => {
-                let json = V1_6::encode_action(action).unwrap_or(serde_json::Value::Null);
+                let json = encode_action_or_log::<V1_6>(action);
                 let purpose = json["chargingProfilePurpose"].as_str().map(str::to_owned);
                 self.with_state_mut(|state| {
                     // Optional connectorId; absent clears every connector. The purpose criterion
@@ -397,7 +398,7 @@ impl CsActionHandler<V1_6> for CsStateHandler {
         action: Action16,
     ) -> impl Future<Output = Result<Response16, CallError>> + Send {
         let name = V1_6::action_name(&action).to_string();
-        let request = V1_6::encode_action(&action).unwrap_or(serde_json::Value::Null);
+        let request = encode_action_or_log::<V1_6>(&action);
         // Reject Calls targeting a connector this station does not have. `with_state` drops the
         // read guard before `respond()` runs (which takes its own write lock) — holding both
         // deadlocks.
@@ -413,7 +414,7 @@ impl CsActionHandler<V1_6> for CsStateHandler {
             None => self.respond(&action),
         };
         let reply_payload = match &result {
-            Ok(resp) => V1_6::encode_response(resp).unwrap_or(serde_json::Value::Null),
+            Ok(resp) => encode_response_or_log::<V1_6>(resp),
             Err(_) => serde_json::Value::Null,
         };
         let ok = result.is_ok();

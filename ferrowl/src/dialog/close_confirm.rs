@@ -1,6 +1,5 @@
 //! Reusable confirm-close popup: small dialog asking whether to close the underlying dialog.
 //! Confirm-close popup opened by Esc on a top-level dialog.
-#![allow(dead_code)]
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
@@ -25,6 +24,45 @@ pub enum CloseConfirmEvent {
     Close,
     /// Esc: host should drop the confirm; the underlying dialog stays open.
     Dismiss,
+}
+
+/// Outcome of [`route_close_confirm`]: whether a confirm popup was open, and if so, what the host
+/// dialog should do about it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CloseConfirmOutcome {
+    /// No confirm popup was open; the key wasn't touched, the caller should route it itself.
+    NotActive,
+    /// The popup captured the key (or was just dismissed) and stays closed/open as appropriate;
+    /// the caller should stop routing this key further.
+    Consumed,
+    /// The user confirmed: the caller's own dialog should close.
+    Close,
+}
+
+/// Feed one key through `confirm`, if a close-confirm popup is currently open. Clears `*confirm`
+/// on both [`CloseConfirmEvent::Close`] and [`CloseConfirmEvent::Dismiss`] (the popup itself is
+/// single-use); the caller only needs to react to [`CloseConfirmOutcome::Close`] (e.g. set its own
+/// close-requested flag or propagate a close result) and stop routing the key on anything but
+/// `NotActive`.
+pub fn route_close_confirm(
+    confirm: &mut Option<CloseConfirmDialog>,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+) -> CloseConfirmOutcome {
+    let Some(c) = confirm.as_mut() else {
+        return CloseConfirmOutcome::NotActive;
+    };
+    match c.handle_key(modifiers, code) {
+        CloseConfirmEvent::Close => {
+            *confirm = None;
+            CloseConfirmOutcome::Close
+        }
+        CloseConfirmEvent::Dismiss => {
+            *confirm = None;
+            CloseConfirmOutcome::Consumed
+        }
+        CloseConfirmEvent::Consumed => CloseConfirmOutcome::Consumed,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +261,51 @@ mod tests {
         assert_eq!(
             d.handle_key(KeyModifiers::NONE, KeyCode::Down),
             CloseConfirmEvent::Consumed
+        );
+    }
+
+    // --- route_close_confirm -------------------------------------------------
+
+    #[test]
+    fn ut_route_not_active_when_none() {
+        let mut confirm: Option<CloseConfirmDialog> = None;
+        assert_eq!(
+            route_close_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Enter),
+            CloseConfirmOutcome::NotActive
+        );
+        assert!(confirm.is_none());
+    }
+
+    #[test]
+    fn ut_route_close_clears_popup() {
+        let mut confirm = Some(CloseConfirmDialog::new());
+        assert_eq!(
+            route_close_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Enter),
+            CloseConfirmOutcome::Close
+        );
+        assert!(confirm.is_none(), "Close must clear the popup");
+    }
+
+    #[test]
+    fn ut_route_dismiss_clears_popup_and_reports_consumed() {
+        let mut confirm = Some(CloseConfirmDialog::new());
+        assert_eq!(
+            route_close_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Esc),
+            CloseConfirmOutcome::Consumed
+        );
+        assert!(confirm.is_none(), "Dismiss must clear the popup");
+    }
+
+    #[test]
+    fn ut_route_other_key_stays_open_and_consumed() {
+        let mut confirm = Some(CloseConfirmDialog::new());
+        assert_eq!(
+            route_close_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Char('x')),
+            CloseConfirmOutcome::Consumed
+        );
+        assert!(
+            confirm.is_some(),
+            "an unrelated key must not close the popup"
         );
     }
 }

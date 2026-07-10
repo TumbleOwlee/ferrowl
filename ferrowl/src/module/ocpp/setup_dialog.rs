@@ -26,7 +26,7 @@ use ratatui::{
 };
 
 use crate::dialog::NonEmpty;
-use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
@@ -554,19 +554,13 @@ impl OcppSetupDialog {
     /// Route a key: the close-confirm popup captures all keys while open; Esc opens it; everything
     /// else falls through to the derived per-field routing.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
-        if let Some(confirm) = self.close_confirm.as_mut() {
-            return match confirm.handle_key(modifiers, code) {
-                CloseConfirmEvent::Close => {
-                    self.close_confirm = None;
-                    self.close_requested = true;
-                    EventResult::Consumed
-                }
-                CloseConfirmEvent::Dismiss => {
-                    self.close_confirm = None;
-                    EventResult::Consumed
-                }
-                CloseConfirmEvent::Consumed => EventResult::Consumed,
-            };
+        match route_close_confirm(&mut self.close_confirm, modifiers, code) {
+            CloseConfirmOutcome::NotActive => {}
+            CloseConfirmOutcome::Close => {
+                self.close_requested = true;
+                return EventResult::Consumed;
+            }
+            CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
