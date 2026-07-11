@@ -1,7 +1,7 @@
-//! Shared script-table logic for [`ScriptDialog`](crate::dialog::scripts::ScriptDialog) and
-//! [`SessionDialog`](crate::dialog::session::SessionDialog): both dialogs embed the same
-//! script-table + name-input + code-editor surface (table of scripts with an On/Off status over a
-//! "New Script" name input on the left, a code editor for the selected script on the right).
+//! Shared script-table logic for [`ScriptDialog`](crate::dialog::scripts::ScriptDialog), the one
+//! dialog type used both for the session (`:session`) and the OCPP/Modbus module views: it embeds
+//! a script-table + name-input + code-editor surface (table of scripts with an On/Off status over
+//! a "New Script" name input on the left, a code editor for the selected script on the right).
 //!
 //! The widget *fields* stay on each dialog struct (so `#[derive(Focus)]`'s `#[focus]` tags keep
 //! working — a shared owning struct can't be tagged piecemeal from the outer dialog); this module

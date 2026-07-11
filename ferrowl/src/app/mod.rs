@@ -21,7 +21,7 @@ use std::io::Stdout;
 use std::time::{Duration, Instant};
 
 use crate::config::script::ScriptDef;
-use crate::dialog::session::SessionDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::{ModuleView, SharedLog};
@@ -272,7 +272,7 @@ pub struct App {
     /// changes (see [`Self::rebuild_registry`]).
     registry: ModuleRegistry,
     /// The `:session` dialog, if open.
-    session_dialog: Option<Box<SessionDialog>>,
+    session_dialog: Option<Box<ScriptDialog>>,
     /// Current session-level Lua scripts and sim-cycle interval, applied to `session_sim` and
     /// written by `:session` (edited) and `save_session` (persisted). Loaded at startup from the
     /// session file(s) passed on the command line, if any.
@@ -421,7 +421,7 @@ impl App {
         }
 
         if let Some(dialog) = self.session_dialog.as_mut() {
-            let entries = crate::dialog::session::snapshot_log(&self.session_log, LOG_SIZE).await;
+            let entries = crate::dialog::scripts::snapshot_log(&self.session_log, LOG_SIZE).await;
             dialog.set_log_entries(entries);
         }
 

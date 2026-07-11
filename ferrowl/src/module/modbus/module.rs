@@ -200,6 +200,12 @@ impl ModbusModule {
         self.log.clone()
     }
 
+    /// The dedicated log fed by the script sim's `print()`/`C_Log:*` output, distinct from `log`
+    /// (connection/status/traffic lines) — shown at the bottom of the scripts dialog.
+    pub fn script_log(&self) -> ModuleLog {
+        self.script_log.clone()
+    }
+
     pub fn registers(&self) -> &[(String, String, Register, Vec<NamedValue>)] {
         &self.registers
     }
@@ -330,6 +336,13 @@ impl ModbusModule {
     pub fn reload_scripts(&mut self, scripts: Vec<(String, String)>) {
         self.scripts = scripts;
         self.ensure_sim();
+    }
+
+    /// Update the script sim cycle period. Takes effect on the next `reload_scripts` restart (does
+    /// not itself restart a running sim), mirroring how a scripts edit is what actually triggers
+    /// the restart.
+    pub fn set_script_interval(&mut self, interval: Duration) {
+        self.script_interval = interval;
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).

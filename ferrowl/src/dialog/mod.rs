@@ -5,7 +5,6 @@ pub mod lua_help;
 pub mod path_suggest;
 mod script_manager;
 pub mod scripts;
-pub mod session;
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
 pub use crate::module::modbus::setup_dialog::SetupDialog;

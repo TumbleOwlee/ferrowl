@@ -1,17 +1,25 @@
-//! Lua script manager dialog, shared by the OCPP views and the Modbus view. Left: a table of scripts with an
-//! On/Off status over a "New Script" name input; right: a code editor for the selected script.
-//! Edits are live on a working copy; the view reads it back via [`ScriptDialog::resolve`] on close
-//! and reloads the simulation. `t` toggles a script, `d` deletes (with confirmation), `c` toggles
-//! compact rows, Enter in the name input creates a new (enabled) script. `Esc` opens a close
-//! confirmation popup (Enter/Space confirms, Esc dismisses it); `?` from the code editor's Normal
-//! mode opens the Lua bindings overlay.
+//! Lua script manager dialog, shared by the session (`:session`) and the OCPP/Modbus module views.
+//! Layout: an interval field on top, the script table (an On/Off status over a "New Script" name
+//! input) on the left, the code editor for the selected script on the right, and a read-only tail
+//! of the owner's script log at the bottom.
+//!
+//! One flat Tab order: Interval → script table → name input → code editor → log → Interval
+//! (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t` toggles a
+//! script, `d` deletes (with confirmation), `c` toggles compact rows, Enter in the name input
+//! creates a new (enabled) script. Edits are live on a working copy, applied when the dialog
+//! closes via [`ScriptDialog::resolve`]. `Esc` opens a close confirmation popup (Enter/Space
+//! confirms, Esc dismisses it); `?` from the code editor's Normal mode opens the Lua bindings
+//! overlay, routed to the right reference page by `context`.
+
+use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
-    COLOR_SCHEME,
-    state::{CodeInputFieldState, InputFieldState, VimMode},
+    Border, COLOR_SCHEME,
+    state::{CodeInputFieldState, InputFieldState, InputFieldStateBuilder, VimMode},
+    style::InputFieldStyleBuilder,
     traits::{HandleEvents, SetFocus},
-    widgets::{CodeInputField, InputField, Widget},
+    widgets::{CodeInputField, InputField, InputFieldBuilder, Validate, ValidateResult, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
@@ -27,20 +35,49 @@ use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
 use crate::module::modbus::dialog::{
     ConfirmDeleteDialog, DeleteConfirmOutcome, route_delete_confirm,
 };
+use crate::module::view::SharedLog;
 use crate::view::border_style;
+use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 
-/// The script manager dialog. Works on a private copy of the script list; the view applies the
-/// result on close.
+/// Sim-cycle interval input validator: must parse as a finite, positive number of seconds
+/// (mirrors `Session::interval_duration`'s sanitization, but rejected at the field instead of
+/// silently falling back).
+#[derive(Clone, Debug)]
+pub struct Interval();
+
+impl Validate for Interval {
+    fn validate(input: &str) -> ValidateResult {
+        match input.trim().parse::<f64>() {
+            Ok(v) if v.is_finite() && v > 0.0 => ValidateResult::None,
+            Ok(_) => ValidateResult::Error("Interval must be a positive number".to_string()),
+            Err(e) => ValidateResult::Error(e.to_string()),
+        }
+    }
+
+    fn allowed_char(c: char) -> bool {
+        c.is_ascii_digit() || c == '.'
+    }
+}
+
+/// The script manager dialog. Works on a private copy of the scripts/interval; the caller applies
+/// the result via [`ScriptDialog::resolve`] on close.
+///
+/// Tab order (declaration order below): interval → script table → name input → code editor
+/// (skipped while no script is selected) → log.
 #[focusable]
 #[derive(Focus)]
 pub struct ScriptDialog {
+    #[focus]
+    interval: Widget<InputFieldState, InputField<Interval>>,
     scripts: Vec<ScriptDef>,
     #[focus]
     table: ScriptTable,
     #[focus]
     name_input: Widget<InputFieldState, InputField<String>>,
-    #[focus]
+    #[focus(when = self.selected().is_some())]
     code: Widget<CodeInputFieldState, CodeInputField>,
+    #[focus]
+    log: LogView,
     confirm: Option<ConfirmDeleteDialog>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
@@ -50,13 +87,17 @@ pub struct ScriptDialog {
 }
 
 impl ScriptDialog {
-    pub fn new(scripts: &[ScriptDef], context: ScriptContext) -> Self {
+    pub fn new(scripts: &[ScriptDef], interval: Duration, context: ScriptContext) -> Self {
         let scripts = scripts.to_vec();
+        let mut interval_field = interval_input();
+        set_input(&mut interval_field, &format_interval(interval));
         let mut dialog = Self {
+            interval: interval_field,
             table: script_manager::script_table(script_manager::rows(&scripts)),
             name_input: script_manager::name_input(border_style()),
             code: script_manager::code_editor(border_style()),
-            focus: ScriptDialogFocus::Table,
+            log: new_log_view(),
+            focus: ScriptDialogFocus::Interval,
             view_focused: true,
             confirm: None,
             compact: false,
@@ -69,11 +110,25 @@ impl ScriptDialog {
         dialog
     }
 
-    /// Apply the working copy back to the caller. Flushes the open editor into the selected script
-    /// first so unsaved keystrokes aren't lost.
-    pub fn resolve(mut self) -> Vec<ScriptDef> {
+    /// Apply the working copy back to the caller: the validated interval (falling back to the 1s
+    /// default if the field is currently invalid — an invalid field must never propagate a bogus
+    /// duration) and the scripts list, with the open editor flushed into the selected script first
+    /// so unsaved keystrokes aren't lost.
+    pub fn resolve(mut self) -> (Vec<ScriptDef>, Duration) {
         self.flush_code_to_selection();
-        self.scripts
+        let interval = parse_interval(self.interval.state.input())
+            .unwrap_or_else(|| Duration::from_secs_f64(1.0));
+        (self.scripts, interval)
+    }
+
+    /// Refresh the read-only log pane from a snapshot of the owner's script log ring. Called by
+    /// the owner once per tick while the dialog is open. Follows the tail only while the pane is
+    /// unfocused, so a user scrolling through the log isn't yanked back down every tick.
+    pub fn set_log_entries(&mut self, entries: Vec<LogEntry>) {
+        self.log.state.set_values(entries);
+        if self.focus != ScriptDialogFocus::Log {
+            self.log.state.move_to_bottom();
+        }
     }
 
     fn manager(&mut self) -> ScriptManagerRef<'_> {
@@ -168,22 +223,15 @@ impl ScriptDialog {
         }
 
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Tab) => {
-                self.focus_next();
-                if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
-                    self.focus_next();
-                }
-            }
-            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                self.focus_previous();
-                if self.focus == ScriptDialogFocus::Code && self.selected().is_none() {
-                    self.focus_previous();
-                }
-            }
+            (KeyModifiers::NONE, KeyCode::Tab) => self.focus_next(),
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 self.close_confirm = Some(CloseConfirmDialog::new());
             }
             _ => match self.focus {
+                ScriptDialogFocus::Interval => {
+                    let _ = self.interval.state.handle_events(modifiers, code);
+                }
                 ScriptDialogFocus::Table => match (modifiers, code) {
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
                     (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
@@ -206,6 +254,9 @@ impl ScriptDialog {
                 // Code-focus keys were already offered to the editor above; anything
                 // reaching this arm was left unhandled by it.
                 ScriptDialogFocus::Code => {}
+                ScriptDialogFocus::Log => {
+                    let _ = self.log.state.handle_events(modifiers, code);
+                }
             },
         }
         false
@@ -220,9 +271,9 @@ impl ScriptDialog {
         ])
         .areas(area);
         let [_, vc, _] = Layout::vertical([
-            Constraint::Percentage(10),
-            Constraint::Percentage(80),
-            Constraint::Percentage(10),
+            Constraint::Percentage(5),
+            Constraint::Percentage(90),
+            Constraint::Percentage(5),
         ])
         .areas(hc);
 
@@ -242,11 +293,23 @@ impl ScriptDialog {
             horizontal: 2,
         });
 
-        let [left, right] =
-            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(inner);
-        let [list_area, input_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
+        let [scripts_area, log_area] =
+            Layout::vertical([Constraint::Min(10), Constraint::Length(10)]).areas(inner);
 
+        // Script manager pane: interval over the table over the name input on the left, code
+        // editor right.
+        let [left, right] =
+            Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(scripts_area);
+        let [interval_area, list_area, input_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .areas(left);
+
+        self.interval
+            .state
+            .set_focused(self.focus == ScriptDialogFocus::Interval);
         self.table
             .state
             .set_focused(self.focus == ScriptDialogFocus::Table);
@@ -256,7 +319,16 @@ impl ScriptDialog {
         self.code
             .state
             .set_focused(self.focus == ScriptDialogFocus::Code);
+        self.log
+            .state
+            .set_focused(self.focus == ScriptDialogFocus::Log);
 
+        StatefulWidget::render(
+            &self.interval.widget,
+            interval_area,
+            buf,
+            &mut self.interval.state,
+        );
         StatefulWidget::render(&self.table.widget, list_area, buf, &mut self.table.state);
         StatefulWidget::render(
             &self.name_input.widget,
@@ -265,9 +337,10 @@ impl ScriptDialog {
             &mut self.name_input.state,
         );
         StatefulWidget::render(&self.code.widget, right, buf, &mut self.code.state);
+        StatefulWidget::render(&self.log.widget, log_area, buf, &mut self.log.state);
 
         if let Some(confirm) = self.confirm.as_mut() {
-            confirm.render(area, buf);
+            confirm.render(vc, buf);
         }
 
         if let Some(help) = self.lua_help.as_mut() {
@@ -278,6 +351,67 @@ impl ScriptDialog {
             confirm.render(area, buf);
         }
     }
+}
+
+fn parse_interval(input: &str) -> Option<Duration> {
+    let v = input.trim().parse::<f64>().ok()?;
+    (v.is_finite() && v > 0.0).then(|| Duration::from_secs_f64(v))
+}
+
+fn format_interval(interval: Duration) -> String {
+    let secs = interval.as_secs_f64();
+    // Trim a trailing ".0" so a whole-second interval reads as "1", not "1.0000..".
+    let text = format!("{secs:.4}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn set_input(widget: &mut Widget<InputFieldState, InputField<Interval>>, value: &str) {
+    widget.state.set_input(value.to_string());
+    widget.state.set_cursor(value.chars().count());
+}
+
+fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
+    Widget {
+        state: InputFieldStateBuilder::default()
+            .focused(false)
+            .disabled(false)
+            .placeholder(Some("1.0".to_string()))
+            .allowed_for::<Interval>()
+            .build()
+            .unwrap(),
+        widget: InputFieldBuilder::default()
+            .border(Border::Full(Margin::new(1, 0)))
+            .title(Some(
+                ("Interval (seconds)", HorizontalAlignment::Left).into(),
+            ))
+            .style(InputFieldStyleBuilder::default().build().unwrap())
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
+            .build()
+            .unwrap(),
+    }
+}
+
+/// Build `LogEntry` rows from a raw `(timestamp_ms, level, message)` ring snapshot, matching the
+/// formatting `App::refresh_snapshot` applies to tab logs.
+pub fn entries_from_ring(lines: Vec<(u64, crate::app::Level, String)>) -> Vec<LogEntry> {
+    lines
+        .into_iter()
+        .map(|(ts, level, msg)| LogEntry {
+            timestamp: format_timestamp(ts),
+            level,
+            message: msg.trim_end_matches('\u{0}').to_string(),
+        })
+        .collect()
+}
+
+/// Snapshot `log`'s current lines as render-ready entries. Async because the log is behind a
+/// `tokio::sync::RwLock`.
+pub async fn snapshot_log(log: &SharedLog, max: usize) -> Vec<LogEntry> {
+    let lines = log.read().await.peek_n(max);
+    entries_from_ring(lines)
 }
 
 #[cfg(test)]
@@ -291,71 +425,167 @@ mod tests {
                 code: String::new(),
                 enabled: true,
             }],
+            Duration::from_secs_f64(2.5),
             ScriptContext::Modbus,
         )
     }
 
     #[test]
-    fn code_editor_disabled_and_skipped_without_selection() {
-        let mut d = ScriptDialog::new(&[], ScriptContext::Modbus);
-        assert!(d.code.state.disabled());
-        // Tab cycles Table -> NameInput -> Table, never landing on Code.
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+    fn ut_new_prefills_interval_and_scripts() {
+        let d = dialog();
+        assert_eq!(d.interval.state.input(), "2.5");
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 1);
+    }
+
+    #[test]
+    fn ut_interval_validate_accepts_positive_finite() {
+        assert!(matches!(Interval::validate("2.5"), ValidateResult::None));
+        assert!(matches!(Interval::validate("1"), ValidateResult::None));
+    }
+
+    #[test]
+    fn ut_interval_validate_rejects_bad_values() {
+        assert!(matches!(Interval::validate("0"), ValidateResult::Error(_)));
+        assert!(matches!(Interval::validate("-1"), ValidateResult::Error(_)));
+        assert!(matches!(
+            Interval::validate("nan"),
+            ValidateResult::Error(_)
+        ));
+        assert!(matches!(
+            Interval::validate("inf"),
+            ValidateResult::Error(_)
+        ));
+        assert!(matches!(
+            Interval::validate("abc"),
+            ValidateResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn ut_interval_allowed_char() {
+        assert!(Interval::allowed_char('5'));
+        assert!(Interval::allowed_char('.'));
+        assert!(!Interval::allowed_char('-'));
+        assert!(!Interval::allowed_char('e'));
+        assert!(!Interval::allowed_char(' '));
+        assert!(!Interval::allowed_char('a'));
+    }
+
+    #[test]
+    fn ut_resolve_round_trips_scripts_and_interval() {
+        let d = dialog();
+        let (scripts, interval) = d.resolve();
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].name, "boot");
+        assert_eq!(interval, Duration::from_secs_f64(2.5));
+    }
+
+    #[test]
+    fn ut_resolve_falls_back_on_invalid_interval() {
+        let mut d = dialog();
+        set_input(&mut d.interval, "not-a-number");
+        let (_, interval) = d.resolve();
+        assert_eq!(interval, Duration::from_secs_f64(1.0));
+    }
+
+    // The dialog-wide Tab rotation: Interval → table → name input → code editor → log →
+    // Interval. The fixture has one script, so the code editor is reachable.
+    #[test]
+    fn ut_tab_rotates_through_all_fields() {
+        let mut d = dialog();
+        assert_eq!(d.focus, ScriptDialogFocus::Interval);
+        let expected = [
+            ScriptDialogFocus::Table,
+            ScriptDialogFocus::NameInput,
+            ScriptDialogFocus::Code,
+            ScriptDialogFocus::Log,
+            ScriptDialogFocus::Interval,
+        ];
+        for focus in expected {
+            assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Tab));
+            assert_eq!(d.focus, focus);
+        }
+    }
+
+    #[test]
+    fn ut_backtab_rotates_in_reverse() {
+        let mut d = dialog();
+        let expected = [
+            ScriptDialogFocus::Log,
+            ScriptDialogFocus::Code,
+            ScriptDialogFocus::NameInput,
+            ScriptDialogFocus::Table,
+            ScriptDialogFocus::Interval,
+        ];
+        for focus in expected {
+            assert!(!d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab));
+            assert_eq!(d.focus, focus);
+        }
+    }
+
+    // Without a selected script the code editor is disabled and both rotations skip it.
+    #[test]
+    fn ut_rotation_skips_disabled_code_editor() {
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // code skipped -> log
+        assert_eq!(d.focus, ScriptDialogFocus::Log);
+        d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab); // code skipped -> name input
         assert_eq!(d.focus, ScriptDialogFocus::NameInput);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+    }
+
+    #[test]
+    fn ut_esc_does_not_close() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
         assert_eq!(d.focus, ScriptDialogFocus::Table);
-        // BackTab from Table skips Code in the other direction.
-        d.handle_events(KeyModifiers::NONE, KeyCode::BackTab);
-        assert_eq!(d.focus, ScriptDialogFocus::NameInput);
+        assert!(d.close_confirm.is_some());
     }
 
     #[test]
-    fn code_editor_reachable_with_selection() {
+    fn ut_typing_in_interval_updates_input() {
         let mut d = dialog();
-        assert!(!d.code.state.disabled());
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('9'));
+        assert!(d.interval.state.input().contains('9'));
     }
 
     #[test]
-    fn deleting_last_script_disables_code_editor() {
-        let mut d = dialog();
-        assert!(!d.code.state.disabled());
-        d.delete_selected();
-        assert!(d.code.state.disabled());
-    }
-
-    #[test]
-    fn creating_first_script_enables_code_editor() {
-        let mut d = ScriptDialog::new(&[], ScriptContext::Modbus);
-        assert!(d.code.state.disabled());
-        d.focus = ScriptDialogFocus::NameInput;
-        for c in "boot".chars() {
+    fn ut_create_toggle_delete_script() {
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        // Tab to the name input, type a name, Enter creates an enabled script.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        for c in "sim".chars() {
             d.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
         }
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(!d.code.state.disabled());
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(scripts[0].name, "sim");
+        assert!(scripts[0].enabled);
     }
 
     #[test]
-    fn c_toggles_compact_in_list_not_in_name_input() {
-        let mut d = dialog();
-        assert!(!d.compact);
-        // `c` on the focused script list toggles compact.
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
-        assert!(d.compact);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
-        assert!(!d.compact);
-        // `c` in the name input is text, not a compact toggle.
-        d.focus = ScriptDialogFocus::NameInput;
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char('c'));
-        assert!(!d.compact);
-        assert_eq!(d.name_input.state.input(), "c");
+    fn ut_entries_from_ring_trims_nul_padding() {
+        let entries = entries_from_ring(vec![(
+            0,
+            crate::app::Level::Info,
+            "hello\u{0}\u{0}".to_string(),
+        )]);
+        assert_eq!(entries[0].message, "hello");
     }
 
     #[test]
-    fn layout_scripts_table_wide_screen() {
+    fn ut_format_interval_trims_trailing_zeros() {
+        assert_eq!(format_interval(Duration::from_secs_f64(1.0)), "1");
+        assert_eq!(format_interval(Duration::from_secs_f64(0.25)), "0.25");
+    }
+
+    #[test]
+    fn ut_layout_scripts_table_wide_screen() {
         let wide_area = Rect {
             x: 0,
             y: 0,
@@ -369,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_scripts_table_narrow_screen() {
+    fn ut_layout_scripts_table_narrow_screen() {
         let narrow_area = Rect {
             x: 0,
             y: 0,
@@ -385,31 +615,18 @@ mod tests {
     // --- close-confirm / lua-help integration -------------------------------
 
     #[test]
-    fn esc_then_enter_closes() {
+    fn ut_esc_then_enter_closes() {
         let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
         assert!(d.close_confirm.is_some());
         assert!(d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
     }
 
     #[test]
-    fn esc_does_not_close() {
+    fn ut_esc_in_confirm_keeps_dialog() {
         let mut d = dialog();
-        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
-        assert!(d.close_confirm.is_some());
-        assert_eq!(d.focus, ScriptDialogFocus::Table);
-        d.close_confirm = None;
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(d.focus, ScriptDialogFocus::Code);
-        assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
-        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
-        assert!(d.close_confirm.is_some());
-    }
-
-    #[test]
-    fn esc_in_confirm_keeps_dialog() {
-        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
         assert!(d.close_confirm.is_some());
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
@@ -417,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn space_in_confirm_closes() {
+    fn ut_space_in_confirm_closes() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(d.close_confirm.is_some());
@@ -425,10 +642,11 @@ mod tests {
     }
 
     #[test]
-    fn esc_from_code_normal_opens_confirm() {
+    fn ut_esc_from_code_normal_opens_confirm() {
         let mut d = dialog();
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
@@ -436,10 +654,11 @@ mod tests {
     }
 
     #[test]
-    fn insert_esc_goes_normal_no_confirm() {
+    fn ut_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
         assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
@@ -449,18 +668,21 @@ mod tests {
     }
 
     #[test]
-    fn colon_in_name_input_types() {
+    fn ut_colon_in_name_input_types() {
         let mut d = dialog();
-        d.focus = ScriptDialogFocus::NameInput;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        assert_eq!(d.focus, ScriptDialogFocus::NameInput);
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
         assert_eq!(d.name_input.state.input(), ":");
     }
 
     #[test]
-    fn colon_in_code_insert_inserts() {
+    fn ut_colon_in_code_insert_inserts() {
         let mut d = dialog();
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
         assert_eq!(d.code.state.vim_mode(), VimMode::Insert);
@@ -469,10 +691,11 @@ mod tests {
     }
 
     #[test]
-    fn colon_in_code_normal_no_overlay() {
+    fn ut_colon_in_code_normal_no_overlay() {
         let mut d = dialog();
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
@@ -481,8 +704,9 @@ mod tests {
     }
 
     #[test]
-    fn confirm_esc_still_cancels() {
+    fn ut_confirm_esc_still_cancels() {
         let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('d'));
         assert!(d.confirm.is_some());
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
@@ -490,15 +714,16 @@ mod tests {
     }
 
     #[test]
-    fn question_opens_bindings_only_code_normal() {
+    fn ut_question_opens_bindings_only_code_normal() {
         let mut d = dialog();
-        // From Table: no overlay opens; `?` is not bound there.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        // From Scripts focus: `?` is not bound there, no overlay.
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
         assert!(d.lua_help.is_none());
 
         // From Code Insert mode: `?` is text.
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
@@ -513,11 +738,12 @@ mod tests {
     }
 
     #[test]
-    fn bindings_close_keys() {
+    fn ut_bindings_close_keys() {
         for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
             let mut d = dialog();
-            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
             d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
             assert!(d.lua_help.is_some());
             assert!(!d.handle_events(KeyModifiers::NONE, close_key));

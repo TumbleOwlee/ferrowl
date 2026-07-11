@@ -57,7 +57,9 @@ impl<V: ClientVersion> ClientView<V> {
                         let ClientOverlay::Scripts(dialog) = self.overlay.take() else {
                             unreachable!()
                         };
-                        self.device.scripts = dialog.resolve();
+                        let (scripts, interval) = dialog.resolve();
+                        self.device.scripts = scripts;
+                        self.device.script_interval = interval.as_secs_f64();
                         self.start_sim();
                     }
                 }
@@ -249,6 +251,7 @@ impl<V: ClientVersion> ClientView<V> {
     pub(super) fn open_scripts(&mut self) {
         self.overlay = ClientOverlay::Scripts(Box::new(ScriptDialog::new(
             &self.device.scripts,
+            self.device.script_interval_duration(),
             ScriptContext::OcppClient,
         )));
     }

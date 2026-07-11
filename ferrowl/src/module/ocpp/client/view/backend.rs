@@ -324,6 +324,13 @@ impl<V: ClientVersion> ClientView<V> {
             self.state_table.state.set_values(state_rows);
             self.config_table.state.set_values(config_rows);
             self.sync_code();
+
+            if let super::ClientOverlay::Scripts(dialog) = &mut self.overlay {
+                let entries =
+                    crate::dialog::scripts::snapshot_log(&self.script_log, crate::app::LOG_SIZE)
+                        .await;
+                dialog.set_log_entries(entries);
+            }
         })
     }
 
