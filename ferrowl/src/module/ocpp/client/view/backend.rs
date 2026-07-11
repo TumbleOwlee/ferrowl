@@ -22,6 +22,7 @@ impl<V: ClientVersion> ClientView<V> {
             self.state.clone(),
             self.runtime.action_queue.clone(),
             self.enabled_scripts(),
+            self.device.script_interval_duration(),
             self.log.clone(),
         );
     }

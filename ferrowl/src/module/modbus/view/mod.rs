@@ -867,6 +867,7 @@ mod tests {
             log_file: None,
             read_ranges: Default::default(),
             definitions: Default::default(),
+            script_interval: 1.0,
             scripts: Default::default(),
         }
     }

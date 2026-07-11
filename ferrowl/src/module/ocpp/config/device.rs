@@ -171,6 +171,10 @@ pub struct OcppDeviceConfig {
     /// Lua simulation scripts (run every ~100ms while enabled; client role only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptDef>,
+    /// Script sim cycle interval in seconds — the period `refresh_all` is called on the sim
+    /// thread. Older device config files without this field load as the default (1.0s).
+    #[serde(default = "default_script_interval")]
+    pub script_interval: f64,
     /// Persistent log-file base set via `:log <file>`; `None` disables file logging. The actual
     /// file is `<stem>.<tab-name>.<ext>` next to this path (see `module_log_path`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +204,10 @@ pub struct OcppDeviceConfig {
     pub security: OcppSecurityConfig,
 }
 
+fn default_script_interval() -> f64 {
+    1.0
+}
+
 impl OcppDeviceConfig {
     /// Assemble a device config from a runtime spec, carrying the given scripts. Used when a
     /// setup/edit dialog supplies version/role/timeout and the scripts are preserved separately.
@@ -210,6 +218,7 @@ impl OcppDeviceConfig {
             role: spec.role,
             timeout_ms: spec.timeout_ms,
             scripts,
+            script_interval: default_script_interval(),
             log_file: None,
             rfids: Vec::new(),
             connector_rfids: Vec::new(),
@@ -217,6 +226,18 @@ impl OcppDeviceConfig {
             config: Vec::new(),
             security: spec.security.clone(),
         }
+    }
+
+    /// The script sim cycle interval as a `Duration`. A hand-edited file can carry a
+    /// non-finite or non-positive `script_interval`; those fall back to the 1.0s default
+    /// instead of panicking in `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
+    pub fn script_interval_duration(&self) -> std::time::Duration {
+        let secs = if self.script_interval.is_finite() && self.script_interval > 0.0 {
+            self.script_interval
+        } else {
+            default_script_interval()
+        };
+        std::time::Duration::from_secs_f64(secs)
     }
 }
 
@@ -244,6 +265,7 @@ mod tests {
                 code: "C_OCPP:Set(\"Power\", 11000)".into(),
                 enabled: false,
             }],
+            script_interval: 2.5,
             log_file: Some("/tmp/ferrowl.log".into()),
             rfids: vec!["DEADBEEF".into(), "CAFE1234".into()],
             connector_rfids: vec![ConnectorRfids {
@@ -313,6 +335,35 @@ mod tests {
         assert!(cfg.security.csms_tls().is_none());
         assert!(!cfg.security.self_signed);
         assert!(!cfg.security.insecure_skip_verify);
+    }
+
+    // An old-format device config file (predating `script_interval`) must still load, with
+    // `script_interval` defaulting to 1.0.
+    #[test]
+    fn ut_device_config_loads_without_script_interval_field() {
+        let json = serde_json::json!({
+            "ocpp_version": "1.6",
+            "role": "client",
+        });
+        let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
+        assert_eq!(cfg.script_interval, 1.0);
+    }
+
+    // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
+    // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
+    #[test]
+    fn ut_device_config_script_interval_duration_sanitized() {
+        let mut cfg = OcppDeviceConfig::default();
+        assert_eq!(cfg.script_interval_duration(), std::time::Duration::from_secs(1));
+        cfg.script_interval = 0.25;
+        assert_eq!(
+            cfg.script_interval_duration(),
+            std::time::Duration::from_millis(250)
+        );
+        for bad in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            cfg.script_interval = bad;
+            assert_eq!(cfg.script_interval_duration(), std::time::Duration::from_secs(1));
+        }
     }
 
     #[test]

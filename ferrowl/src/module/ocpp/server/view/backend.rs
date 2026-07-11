@@ -76,6 +76,7 @@ where
             self.lua_states.clone(),
             self.runtime.lua_queue.clone(),
             self.enabled_scripts(),
+            self.device.script_interval_duration(),
             self.log.clone(),
         );
     }
