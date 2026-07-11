@@ -18,6 +18,7 @@ use ferrowl_lua::module::{
 };
 use ferrowl_lua::{ContextBuilder, Error};
 
+use crate::app::Level;
 use crate::module::ocpp::client::lua_sim::{
     LuaLogSink, OcppFields, OcppSimHandle, emit, sleep_responsive, vt_to_json,
 };
@@ -246,14 +247,18 @@ pub fn run_server_sim<V: ServerVersion>(
         let mut context = match builder.build() {
             Ok(context) => context,
             Err(e) => {
-                emit(&log, &format!("[lua] failed to build context: {e}"));
+                emit(
+                    &log,
+                    Level::Error,
+                    &format!("[lua] failed to build context: {e}"),
+                );
                 return;
             }
         };
         while !thread_stop.load(Ordering::Relaxed) {
             if let Err(errors) = context.refresh_all(Duration::from_secs(1)) {
                 for e in errors {
-                    emit(&log, &format!("[lua] {e}"));
+                    emit(&log, Level::Error, &format!("[lua] {e}"));
                 }
             }
             sleep_responsive(Duration::from_millis(50), &thread_stop);

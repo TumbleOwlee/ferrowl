@@ -11,7 +11,7 @@ use ferrowl_store::{CellKind as MemKind, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::RwLock;
 
-use crate::app::LogRing;
+use crate::app::{Level, LogRing};
 use crate::config::{
     DeviceConfig, Endpoint, ModuleSpec, Role,
     device::{
@@ -34,6 +34,28 @@ pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// Shared store of virtual-register values (no Modbus address), keyed by register name. Shared
 /// with the Lua sim thread so scripts can drive virtual registers and the table shows them.
 pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_codec::Value>>>;
+
+/// Classifies a network/status line from the client/server instance for the log ring: outright
+/// disconnects and transport errors are `Error`, degraded-but-recovering states (lost connection,
+/// backoff, retried exceptions) are `Warning`, everything else (request intent, success) is `Info`.
+fn network_log_level(s: &str) -> Level {
+    let lower = s.to_lowercase();
+    if lower.contains("disconnecting")
+        || lower.contains("reconnect disabled")
+        || lower.contains("timed out")
+    {
+        Level::Error
+    } else if lower.contains("disconnected")
+        || lower.contains("reconnecting")
+        || lower.contains("invalid")
+        || lower.contains("dropped")
+        || lower.contains("failed")
+    {
+        Level::Warning
+    } else {
+        Level::Info
+    }
+}
 
 /// One module instance: a modbus client (reads an external server) or server (simulates a
 /// device), plus its register set, shared memory and ring log.
@@ -239,7 +261,7 @@ impl ModbusModule {
                     let log = log.clone();
                     let log_sink = log_sink.clone();
                     async move {
-                        log.write().await.write(&s);
+                        log.write().await.write(network_log_level(&s), &s);
                         append(&log_sink, &s);
                     }
                 },
@@ -248,7 +270,7 @@ impl ModbusModule {
                     let status_sink = status_sink.clone();
                     async move {
                         let line = format!("[status] {s}");
-                        status.write().await.write(&line);
+                        status.write().await.write(network_log_level(&line), &line);
                         append(&status_sink, &line);
                     }
                 },

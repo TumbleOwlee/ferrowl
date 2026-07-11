@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use ferrowl_ocpp::ConnectorScope;
 use ferrowl_ocpp::csms::ConnectionId;
 
+use crate::app::Level;
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::merge_overrides;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
@@ -543,14 +544,20 @@ where
                 self.conn_identity.clear();
                 self.cs_configs.clear();
                 self.clear_lua_states();
-                self.log.write().await.write("Settings updated");
+                self.log
+                    .write()
+                    .await
+                    .write(Level::Info, "Settings updated");
             }
 
             // Auto-bind / honour `:start`.
             if self.want_running && !self.backend.is_online() {
                 let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                 if let Err(e) = self.backend.start(&self.spec, handler).await {
-                    self.log.write().await.write(&format!("listen failed: {e}"));
+                    self.log
+                        .write()
+                        .await
+                        .write(Level::Error, &format!("listen failed: {e}"));
                     self.want_running = false;
                 }
             }
@@ -586,7 +593,7 @@ where
                 new.sort_by_key(|(seq, _)| *seq);
                 let mut log = self.log.write().await;
                 for (_, line) in new {
-                    log.write(&line);
+                    log.write(Level::Info, &line);
                 }
                 self.runtime.logged_seq = max_seq;
             }

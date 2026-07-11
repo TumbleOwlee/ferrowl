@@ -2,6 +2,7 @@
 //! Lua-queued actions, auto-Heartbeat/MeterValues, message log sync), `:` command execution, and
 //! payload send/dispatch.
 
+use crate::app::Level;
 use crate::module::ocpp::client::backend::{DEFAULT_HEARTBEAT_SECS, TICKS_PER_SEC};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{merge_overrides, run_client_sim};
@@ -153,13 +154,15 @@ impl<V: ClientVersion> ClientView<V> {
                         with_state_mut(&state, |s| {
                             V::rollback_tx(s, scope, started_tx.as_deref());
                         });
-                        log.write().await.write(&format!("{name} failed: {e}"));
+                        log.write()
+                            .await
+                            .write(Level::Error, &format!("{name} failed: {e}"));
                     }
                 },
                 Err(e) => log
                     .write()
                     .await
-                    .write(&format!("{name} invalid payload: {e}")),
+                    .write(Level::Error, &format!("{name} invalid payload: {e}")),
             }
         });
     }
@@ -180,6 +183,7 @@ impl<V: ClientVersion> ClientView<V> {
                     let _ = self.backend.stop().await;
                     if !device.scripts.is_empty() {
                         self.log.write().await.write(
+                            Level::Warning,
                             "Version switched: scripts kept but may call actions the new version lacks",
                         );
                     }
@@ -191,7 +195,10 @@ impl<V: ClientVersion> ClientView<V> {
                     self.spec = spec;
                     self.device = device;
                     self.device_path = path;
-                    self.log.write().await.write("Settings updated");
+                    self.log
+                        .write()
+                        .await
+                        .write(Level::Info, "Settings updated");
                     if was_online {
                         let handler = self.make_handler();
                         let _ = self.backend.start(&self.spec, handler).await;
@@ -215,7 +222,7 @@ impl<V: ClientVersion> ClientView<V> {
                 self.log
                     .write()
                     .await
-                    .write("Connection lost — auto-transmit halted");
+                    .write(Level::Warning, "Connection lost — auto-transmit halted");
                 self.runtime.heartbeat_tick = 0;
             }
             self.runtime.was_online = online;
@@ -277,7 +284,7 @@ impl<V: ClientVersion> ClientView<V> {
             if !new_lines.is_empty() {
                 let mut log = self.log.write().await;
                 for line in new_lines {
-                    log.write(&line);
+                    log.write(Level::Info, &line);
                 }
                 self.runtime.logged_seq = max_seq;
             }

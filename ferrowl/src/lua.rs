@@ -15,6 +15,7 @@ use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
 
+use crate::app::Level;
 use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
 
 /// Bridges Lua register access (`C_Register`) to the module's shared `Memory` (fixed-address
@@ -333,6 +334,7 @@ pub fn run_sim(
                 emit(
                     &log,
                     &sink,
+                    Level::Error,
                     &format!("[sim] failed to build Lua context: {e}"),
                 );
                 return;
@@ -342,12 +344,12 @@ pub fn run_sim(
         while !thread_stop.load(Ordering::Relaxed) {
             if let Err(errors) = context.call_all() {
                 for e in errors {
-                    emit(&log, &sink, &format!("[sim] {e}"));
+                    emit(&log, &sink, Level::Error, &format!("[sim] {e}"));
                 }
             }
             sleep_responsive(interval, &thread_stop);
         }
-        emit(&log, &sink, "[sim] stopped completely ");
+        emit(&log, &sink, Level::Info, "[sim] stopped completely ");
     });
 
     Some(SimHandle {
@@ -357,8 +359,8 @@ pub fn run_sim(
 }
 
 /// Append a line to the module's ring log and file sink from the (non-runtime) sim thread.
-fn emit(log: &ModuleLog, sink: &FileSink, line: &str) {
-    log.blocking_write().write(line);
+fn emit(log: &ModuleLog, sink: &FileSink, level: Level, line: &str) {
+    log.blocking_write().write(level, line);
     append(sink, line);
 }
 
@@ -371,7 +373,7 @@ struct LuaLogSink {
 
 impl LogSink for LuaLogSink {
     fn print(&self, line: &str) {
-        emit(&self.log, &self.sink, line);
+        emit(&self.log, &self.sink, Level::Info, line);
     }
 }
 
