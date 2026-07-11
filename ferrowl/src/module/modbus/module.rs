@@ -68,6 +68,9 @@ pub struct ModbusModule {
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
     log: ModuleLog,
+    /// Dedicated ring for Lua sim output (`C_Log:*`/`print()`) and sim lifecycle messages,
+    /// separate from `log`'s connection/status/traffic lines.
+    script_log: ModuleLog,
     file_sink: FileSink,
     /// Enabled global Lua scripts (name → code), run on the sim thread.
     scripts: Vec<(String, String)>,
@@ -143,6 +146,7 @@ impl ModbusModule {
         let memory: ModuleMemory = Arc::new(MemLock::new(memory));
         let operations = Arc::new(RwLock::new(operations));
         let log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
+        let script_log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
 
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
@@ -158,6 +162,7 @@ impl ModbusModule {
             operations,
             memory,
             log,
+            script_log,
             file_sink,
             scripts,
             read_ranges: device.read_ranges.clone(),
@@ -301,7 +306,7 @@ impl ModbusModule {
             registers,
             self.scripts.clone(),
             self.script_interval,
-            self.log.clone(),
+            self.script_log.clone(),
             self.file_sink.clone(),
         );
     }
@@ -719,5 +724,50 @@ mod tests {
         assert!(module.lua_running());
         module.stop().await.expect("stop");
         assert!(module.lua_running());
+    }
+
+    // Confirms the log-ring split (stage 5): Lua `print()`/`C_Log` output lands only in
+    // `script_log`, never in the module's general `log` (connection/status/traffic lines).
+    #[test]
+    fn ut_lua_output_lands_in_script_log_not_general_log() {
+        use super::ModbusModule;
+
+        let device = device_with_script(vec![script(
+            r#"print("hello"); C_Log:Info("info-line")"#,
+            true,
+        )]);
+        let module = ModbusModule::new(&test_spec("sim7", 15208), &device);
+
+        let script_lines = |module: &ModbusModule| -> Vec<String> {
+            module
+                .script_log
+                .blocking_read()
+                .peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .map(|(_, _, l)| l)
+                .collect()
+        };
+        let mut found = false;
+        for _ in 0..200 {
+            let lines = script_lines(&module);
+            if lines.iter().any(|l| l == "hello") && lines.iter().any(|l| l == "info-line") {
+                found = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(found, "Lua print/C_Log output should reach script_log");
+
+        let general_lines: Vec<String> = module
+            .log
+            .blocking_read()
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect();
+        assert!(
+            !general_lines.iter().any(|l| l == "hello" || l == "info-line"),
+            "Lua output must not leak into the general log: {general_lines:?}"
+        );
     }
 }

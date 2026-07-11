@@ -334,6 +334,9 @@ pub struct ServerView<V: ServerVersion> {
     device_path: String,
     device: OcppDeviceConfig,
     log: SharedLog,
+    /// Dedicated ring for Lua sim output (`C_Log:*`/`print()`) and sim lifecycle messages,
+    /// separate from `log`'s connection/status/traffic lines.
+    script_log: SharedLog,
     backend: OcppServer<V>,
     events_tx: EventTx,
     events_rx: EventRx,
@@ -388,6 +391,7 @@ where
             device_path,
             device,
             log: Arc::new(tokio::sync::RwLock::new(LogRing::init())),
+            script_log: Arc::new(tokio::sync::RwLock::new(LogRing::init())),
             events_tx,
             events_rx,
             entries: Vec::new(),
