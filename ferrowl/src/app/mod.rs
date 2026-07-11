@@ -466,9 +466,12 @@ impl App {
         {
             if resolved != original {
                 tab.name = resolved.clone();
-                tab.log.write().await.write(&format!(
-                    "Warning: tab name '{original}' collided with another tab — renamed to '{resolved}'"
-                ));
+                tab.log.write().await.write(
+                    Level::Warning,
+                    &format!(
+                        "Warning: tab name '{original}' collided with another tab — renamed to '{resolved}'"
+                    ),
+                );
             }
         }
     }
@@ -538,10 +541,20 @@ impl App {
         self.set_content_focus(true);
     }
 
-    async fn log_active(&self, message: String) {
+    async fn log_active(&self, level: Level, message: String) {
         if let Some(tab) = self.tabs.get(self.active) {
-            tab.log.write().await.write(&message);
+            tab.log.write().await.write(level, &message);
         }
+    }
+}
+
+/// Classifies a `handle_command`-style status message for the log ring: "... failed: {e}"-shaped
+/// text is `Error`, everything else (success, plain status) is `Info`.
+pub(super) fn classify_command_result(msg: &str) -> Level {
+    if msg.contains("failed") {
+        Level::Error
+    } else {
+        Level::Info
     }
 }
 
@@ -561,8 +574,8 @@ mod tests {
 
         let mut ring = LogRing::init();
         ring.set_log_file(Some(base), name);
-        ring.write("first line");
-        ring.write("second line");
+        ring.write(Level::Info, "first line");
+        ring.write(Level::Info, "second line");
         // Writes are buffered until the per-tick flush.
         ring.flush();
         let mut buffered = String::new();

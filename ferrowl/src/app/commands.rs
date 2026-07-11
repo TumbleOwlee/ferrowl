@@ -6,7 +6,7 @@ use ferrowl_util::convert::{Converter, FileType};
 use crate::config::Session;
 use crate::module::view::CommandResult;
 
-use super::App;
+use super::{App, Level, classify_command_result};
 
 /// Pure validation: usable index or error text. Unit-testable without an App.
 fn validate_copy_index(
@@ -53,8 +53,14 @@ impl App {
             Cmd::Write(path) => {
                 let path = path.unwrap_or_else(|| "session.toml".to_string());
                 match self.save_session(&path) {
-                    Ok(()) => self.log_active(format!("Saved session to {path}")).await,
-                    Err(e) => self.log_active(format!("Save failed: {e}")).await,
+                    Ok(()) => {
+                        self.log_active(Level::Info, format!("Saved session to {path}"))
+                            .await
+                    }
+                    Err(e) => {
+                        self.log_active(Level::Error, format!("Save failed: {e}"))
+                            .await
+                    }
                 }
             }
             Cmd::Log(file) => match file.as_deref() {
@@ -68,7 +74,12 @@ impl App {
             },
             Cmd::ScriptCopy(idx) => {
                 let msg = self.copy_scripts(idx);
-                self.log_active(msg).await;
+                let level = if msg.starts_with("Replaced") {
+                    Level::Info
+                } else {
+                    Level::Warning
+                };
+                self.log_active(level, msg).await;
             }
             Cmd::Swap(from, to) => {
                 let len = self.tabs.len();
@@ -86,14 +97,15 @@ impl App {
                 match result {
                     CommandResult::Handled(msg) => {
                         if let Some(m) = msg {
-                            self.log_active(m).await;
+                            self.log_active(classify_command_result(&m), m).await;
                         }
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             tab.log = tab.view.log();
                         }
                     }
                     CommandResult::Unhandled => {
-                        self.log_active(format!("Unknown command ':{input}'")).await;
+                        self.log_active(Level::Warning, format!("Unknown command ':{input}'"))
+                            .await;
                     }
                 }
             }
@@ -109,7 +121,7 @@ impl App {
             CommandResult::Unhandled
         };
         if let CommandResult::Handled(Some(msg)) = result {
-            self.log_active(msg).await;
+            self.log_active(classify_command_result(&msg), msg).await;
         }
     }
 

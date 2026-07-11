@@ -19,6 +19,7 @@ use ferrowl_lua::module::{
 use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
 
+use crate::app::Level;
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::view::SharedLog;
@@ -243,14 +244,18 @@ where
         let mut context = match builder.build() {
             Ok(context) => context,
             Err(e) => {
-                emit(&log, &format!("[lua] failed to build context: {e}"));
+                emit(
+                    &log,
+                    Level::Error,
+                    &format!("[lua] failed to build context: {e}"),
+                );
                 return;
             }
         };
         while !thread_stop.load(Ordering::Relaxed) {
             if let Err(errors) = context.refresh_all(Duration::from_secs(1)) {
                 for e in errors {
-                    emit(&log, &format!("[lua] {e}"));
+                    emit(&log, Level::Error, &format!("[lua] {e}"));
                 }
             }
             sleep_responsive(Duration::from_millis(50), &thread_stop);
@@ -363,8 +368,8 @@ impl Drop for OcppSimHandle {
 }
 
 /// Append a line to the module's ring log from the (non-runtime) sim thread.
-pub(crate) fn emit(log: &SharedLog, line: &str) {
-    log.blocking_write().write(line);
+pub(crate) fn emit(log: &SharedLog, level: Level, line: &str) {
+    log.blocking_write().write(level, line);
 }
 
 /// Routes `C_Log:Print(..)` lines from a Lua sim into the module's ring log. Used to build the
@@ -373,7 +378,7 @@ pub(crate) struct LuaLogSink(pub SharedLog);
 
 impl LogSink for LuaLogSink {
     fn print(&self, line: &str) {
-        emit(&self.0, line);
+        emit(&self.0, Level::Info, line);
     }
 }
 

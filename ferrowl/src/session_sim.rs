@@ -11,6 +11,7 @@ use std::time::Duration;
 use ferrowl_lua::ContextBuilder;
 use ferrowl_lua::module::{LogModule, ModuleDirModule, ModuleDirectory, TestModule, TimeModule};
 
+use crate::app::Level;
 use crate::config::script::ScriptDef;
 use crate::lua::SimHandle;
 use crate::module::ocpp::client::lua_sim::{LuaLogSink, emit, sleep_responsive};
@@ -90,7 +91,11 @@ impl SessionSim {
             let mut context = match builder.build() {
                 Ok(context) => context,
                 Err(e) => {
-                    emit(&log, &format!("[sim] failed to build Lua context: {e}"));
+                    emit(
+                        &log,
+                        Level::Error,
+                        &format!("[sim] failed to build Lua context: {e}"),
+                    );
                     return;
                 }
             };
@@ -98,12 +103,12 @@ impl SessionSim {
             while !thread_stop.load(Ordering::Relaxed) {
                 if let Err(errors) = context.call_all() {
                     for e in errors {
-                        emit(&log, &format!("[sim] {e}"));
+                        emit(&log, Level::Error, &format!("[sim] {e}"));
                     }
                 }
                 sleep_responsive(interval, &thread_stop);
             }
-            emit(&log, "[sim] stopped completely ");
+            emit(&log, Level::Info, "[sim] stopped completely ");
         });
 
         self.handle = Some(SimHandle::from_parts(stop, handle));
@@ -321,7 +326,7 @@ mod tests {
                 .blocking_read()
                 .peek_n(LOG_SIZE)
                 .into_iter()
-                .map(|(_, l)| l)
+                .map(|(_, _, l)| l)
                 .collect();
             lines.iter().any(|l| l.contains("[sim]")) && lines.iter().any(|l| l == "x")
         }));

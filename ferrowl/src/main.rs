@@ -30,7 +30,7 @@ use ferrowl_ui::AlternateScreen;
 use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
 
-use crate::app::{App, Tab};
+use crate::app::{App, Level, Tab};
 use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
@@ -234,6 +234,16 @@ fn session_sim_config(
 /// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
 /// Start failures are written to the module's log. Modules whose device config fails to load
 /// are skipped with a warning on stderr.
+/// Classifies a `handle_command("start")` status message for the log ring: "... failed: {e}" is
+/// `Error`, a successful "Started ..." line is `Info`.
+fn start_result_level(msg: &str) -> Level {
+    if msg.contains("failed") {
+        Level::Error
+    } else {
+        Level::Info
+    }
+}
+
 async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 
@@ -280,7 +290,7 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         ];
         for tab in tabs.iter_mut() {
             if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-                tab.log.write().await.write(&msg);
+                tab.log.write().await.write(start_result_level(&msg), &msg);
             }
         }
         return Ok(tabs);
@@ -314,13 +324,13 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
             Box::new(ModbusModuleView::new(module, spec.clone(), device));
         let mut tab = Tab::new_from_view(spec.name.clone(), view);
         if renamed {
-            tab.log.write().await.write(&format!(
-                "Warning: duplicate module name — renamed to '{}'",
-                spec.name
-            ));
+            tab.log.write().await.write(
+                Level::Warning,
+                &format!("Warning: duplicate module name — renamed to '{}'", spec.name),
+            );
         }
         if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-            tab.log.write().await.write(&msg);
+            tab.log.write().await.write(start_result_level(&msg), &msg);
         }
         tabs.push(tab);
     }
@@ -331,10 +341,10 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         spec.name = resolved_name.clone();
         let tab = build_ocpp_tab(spec).await;
         if renamed {
-            tab.log.write().await.write(&format!(
-                "Warning: duplicate module name — renamed to '{}'",
-                tab.name
-            ));
+            tab.log.write().await.write(
+                Level::Warning,
+                &format!("Warning: duplicate module name — renamed to '{}'", tab.name),
+            );
         }
         tabs.push(tab);
     }
@@ -354,7 +364,7 @@ async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
     };
     let mut tab = Tab::new_from_view(name, view);
     if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-        tab.log.write().await.write(&msg);
+        tab.log.write().await.write(start_result_level(&msg), &msg);
     }
     tab
 }

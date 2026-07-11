@@ -8,7 +8,7 @@ use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::ModuleView;
 
-use super::{App, Focus, Overlay, Tab};
+use super::{App, Focus, Level, Overlay, Tab, classify_command_result};
 
 impl App {
     pub(super) async fn handle_dialog_key(
@@ -74,8 +74,11 @@ impl App {
                 // No error slot on `SetupView` to surface this in-dialog (the field-level
                 // red-border validation is purely static, see `dialog::NonEmpty`); leave the
                 // dialog open and nudge via the active tab's log instead.
-                self.log_active(format!("Name '{name}' already in use by another tab"))
-                    .await;
+                self.log_active(
+                    Level::Warning,
+                    format!("Name '{name}' already in use by another tab"),
+                )
+                .await;
                 return;
             }
             self.create_tab(name, view).await;
@@ -125,7 +128,7 @@ impl App {
         self.rebuild_registry();
         let result = self.tabs[self.active].view.handle_command("start").await;
         if let crate::module::view::CommandResult::Handled(Some(msg)) = result {
-            self.log_active(msg).await;
+            self.log_active(classify_command_result(&msg), msg).await;
         }
         self.close_overlay();
     }

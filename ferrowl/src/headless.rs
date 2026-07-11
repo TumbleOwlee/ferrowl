@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use ferrowl_lua::module::{ModuleDirectory, ModuleHost};
 
-use crate::app::LogRing;
+use crate::app::{Level, LogRing};
 use crate::cli::RunArgs;
 use crate::config::ocpp::OcppRole;
 use crate::config::script::ScriptDef;
@@ -104,7 +104,7 @@ async fn start_module(name: String, mut view: Box<dyn ModuleView>) -> Result<Run
         if msg.to_lowercase().contains("failed") {
             return Err(format!("'{name}': {msg}"));
         }
-        log.write().await.write(&msg);
+        log.write().await.write(Level::Info, &msg);
     }
     Ok(RunModule {
         name,
@@ -154,7 +154,7 @@ async fn drain_log(
 
     let take = (new_count as usize).min(window.len());
     let start = window.len() - take;
-    for (ts, msg) in &window[start..] {
+    for (ts, _level, msg) in &window[start..] {
         lines.push(format!("[{}] {name} | {msg}", format_timestamp(*ts)));
         if exit_on_error && msg.starts_with(SIM_ERROR_PREFIX) {
             hit_error = true;
@@ -219,7 +219,12 @@ fn now_ms() -> u64 {
 async fn stop_all(modules: &mut [RunModule]) {
     for module in modules.iter_mut() {
         if let CommandResult::Handled(Some(msg)) = module.view.handle_command("stop").await {
-            module.log.write().await.write(&msg);
+            let level = if msg.to_lowercase().contains("failed") {
+                Level::Error
+            } else {
+                Level::Info
+            };
+            module.log.write().await.write(level, &msg);
         }
     }
 }
@@ -355,9 +360,9 @@ mod tests {
         let log = new_log();
         {
             let mut g = log.write().await;
-            g.write("dup");
-            g.write("dup");
-            g.write("dup");
+            g.write(Level::Info, "dup");
+            g.write(Level::Info, "dup");
+            g.write(Level::Info, "dup");
         }
         let mut last_written = 0;
         let (lines, hit) = drain_log(&log, "mod", &mut last_written, false).await;
@@ -376,8 +381,8 @@ mod tests {
         // Two more duplicates land; only those two are new.
         {
             let mut g = log.write().await;
-            g.write("dup");
-            g.write("dup");
+            g.write(Level::Info, "dup");
+            g.write(Level::Info, "dup");
         }
         let (lines, _) = drain_log(&log, "mod", &mut last_written, false).await;
         assert_eq!(lines.len(), 2);
@@ -391,7 +396,7 @@ mod tests {
         {
             let mut g = log.write().await;
             for i in 0..(LOG_PEEK + overflow_by) {
-                g.write(&format!("line {i}"));
+                g.write(Level::Info, &format!("line {i}"));
             }
         }
         let mut last_written = 0;
@@ -405,7 +410,7 @@ mod tests {
     #[tokio::test]
     async fn ut_drain_log_flags_sim_error_prefix_only_when_requested() {
         let log = new_log();
-        log.write().await.write("[sim] boom");
+        log.write().await.write(Level::Error, "[sim] boom");
         let mut last_written = 0;
         let (_, hit) = drain_log(&log, "mod", &mut last_written, false).await;
         assert!(!hit, "not flagged when --exit-on-error is off");
@@ -418,7 +423,7 @@ mod tests {
     #[tokio::test]
     async fn ut_drain_log_session_source_uses_session_prefix() {
         let log = new_log();
-        log.write().await.write("hello");
+        log.write().await.write(Level::Info, "hello");
         let mut last_written = 0;
         let (lines, hit) = drain_log(&log, SESSION_SOURCE, &mut last_written, false).await;
         assert_eq!(lines.len(), 1);
@@ -433,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn ut_drain_log_session_sim_error_flags_exit_on_error() {
         let log = new_log();
-        log.write().await.write("[sim] boom");
+        log.write().await.write(Level::Error, "[sim] boom");
         let mut last_written = 0;
         let (lines, hit) = drain_log(&log, SESSION_SOURCE, &mut last_written, true).await;
         assert!(hit);

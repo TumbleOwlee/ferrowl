@@ -40,7 +40,7 @@ fn log_lines(log: &SharedLog) -> Vec<String> {
     log.blocking_read()
         .peek_n(LOG_SIZE)
         .into_iter()
-        .map(|(_, l)| l)
+        .map(|(_, _, l)| l)
         .collect()
 }
 

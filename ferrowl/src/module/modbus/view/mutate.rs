@@ -6,6 +6,7 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::Range;
 use ferrowl_ui::widgets::Header;
 
+use crate::app::Level;
 use crate::module::modbus::dialog::EditedRegister;
 use crate::module::modbus::setup_dialog::SetupValues;
 use crate::module::modbus::table::{Definition, TableHeader, column_index};
@@ -14,6 +15,18 @@ use crate::module::view::CommandResult;
 use super::super::ModbusModule;
 use super::super::registers::{register_mem_binding, sync_register_def, write_command};
 use super::ModbusModuleView;
+
+/// Classifies a `:set`-style status message for the log ring: outright failures are `Error`,
+/// rejected/invalid input is `Warning`, and successful sets are `Info`.
+fn set_result_level(msg: &str) -> Level {
+    if msg.contains("failed") || msg.contains("error") {
+        Level::Error
+    } else if msg.starts_with(':') {
+        Level::Warning
+    } else {
+        Level::Info
+    }
+}
 
 impl ModbusModuleView {
     pub(super) fn apply_order(&mut self, col: &str, descending: bool) -> CommandResult {
@@ -104,14 +117,22 @@ impl ModbusModuleView {
                 .set_register_value(&edited.name, &default_scalar.to_string())
                 .await;
             if let CommandResult::Handled(Some(msg)) = result {
-                self.module.log().write().await.write(&msg);
+                self.module
+                    .log()
+                    .write()
+                    .await
+                    .write(set_result_level(&msg), &msg);
             }
         }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;
             if let CommandResult::Handled(Some(msg)) = result {
-                self.module.log().write().await.write(&msg);
+                self.module
+                    .log()
+                    .write()
+                    .await
+                    .write(set_result_level(&msg), &msg);
             }
         }
     }
@@ -191,14 +212,22 @@ impl ModbusModuleView {
         {
             let result = self.set_register_value(&edited.name, &v).await;
             if let CommandResult::Handled(Some(msg)) = result {
-                self.module.log().write().await.write(&msg);
+                self.module
+                    .log()
+                    .write()
+                    .await
+                    .write(set_result_level(&msg), &msg);
             }
         }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;
             if let CommandResult::Handled(Some(msg)) = result {
-                self.module.log().write().await.write(&msg);
+                self.module
+                    .log()
+                    .write()
+                    .await
+                    .write(set_result_level(&msg), &msg);
             }
         }
     }
@@ -240,7 +269,7 @@ impl ModbusModuleView {
                 .log()
                 .write()
                 .await
-                .write(&format!("Reconfigure failed: {e}"));
+                .write(Level::Error, &format!("Reconfigure failed: {e}"));
             return;
         }
         match self.module.start().await {
@@ -249,14 +278,14 @@ impl ModbusModuleView {
                     .log()
                     .write()
                     .await
-                    .write(&format!("Started {role} on {endpoint}"));
+                    .write(Level::Info, &format!("Started {role} on {endpoint}"));
             }
             Err(e) => {
                 self.module
                     .log()
                     .write()
                     .await
-                    .write(&format!("Start {role} failed: {e}"));
+                    .write(Level::Error, &format!("Start {role} failed: {e}"));
             }
         }
     }
