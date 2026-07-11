@@ -396,13 +396,14 @@ fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
     }
 }
 
-/// Build `LogEntry` rows from a raw `(timestamp_ms, message)` ring snapshot, matching the
+/// Build `LogEntry` rows from a raw `(timestamp_ms, level, message)` ring snapshot, matching the
 /// formatting `App::refresh_snapshot` applies to tab logs.
-pub fn entries_from_ring(lines: Vec<(u64, String)>) -> Vec<LogEntry> {
+pub fn entries_from_ring(lines: Vec<(u64, crate::app::Level, String)>) -> Vec<LogEntry> {
     lines
         .into_iter()
-        .map(|(ts, msg)| LogEntry {
+        .map(|(ts, level, msg)| LogEntry {
             timestamp: format_timestamp(ts),
+            level,
             message: msg.trim_end_matches('\u{0}').to_string(),
         })
         .collect()
@@ -570,7 +571,7 @@ mod tests {
 
     #[test]
     fn ut_entries_from_ring_trims_nul_padding() {
-        let entries = entries_from_ring(vec![(0, "hello\u{0}\u{0}".to_string())]);
+        let entries = entries_from_ring(vec![(0, crate::app::Level::Info, "hello\u{0}\u{0}".to_string())]);
         assert_eq!(entries[0].message, "hello");
     }
 

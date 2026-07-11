@@ -48,6 +48,8 @@ pub struct ColorScheme {
     pub placeholder: Color,
     pub error: Color,
     pub success: Color,
+    pub info: Color,
+    pub warning: Color,
     /// Text on bright status backgrounds (e.g. ONLINE/OFFLINE bar on
     /// `success`/`error`); dark for readability.
     pub text_status: Color,
@@ -78,6 +80,8 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     placeholder: Color::Rgb(127, 132, 156),  // overlay1   #7F849C
     error: Color::Rgb(243, 139, 168),        // red   #F38BA8
     success: Color::Rgb(166, 227, 161),      // green   #A6E3A1
+    info: Color::Rgb(137, 180, 250),         // blue   #89B4FA
+    warning: Color::Rgb(250, 179, 135),      // peach   #FAB387
     text_status: Color::Rgb(17, 17, 27),     // crust   #11111B
     syntax: SyntaxColorScheme {
         keyword: Color::Rgb(203, 166, 247),  // mauve   #CBA6F7
@@ -108,6 +112,8 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     placeholder: Color::Rgb(146, 131, 116),  // gray   #928374
     error: Color::Rgb(251, 73, 52),          // bright red   #FB4934
     success: Color::Rgb(142, 192, 124),      // aqua green   #8EC07C
+    info: Color::Rgb(131, 165, 152),         // blue   #83A598
+    warning: Color::Rgb(254, 128, 25),       // orange   #FE8019
     text_status: Color::Rgb(29, 32, 33),     // bg0_h   #1D2021
     syntax: SyntaxColorScheme {
         keyword: Color::Rgb(251, 73, 52),    // red   #FB4934
@@ -141,6 +147,8 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     placeholder: Color::Rgb(128, 128, 128),  // dim gray   #808080
     error: Color::Rgb(241, 76, 76),          // vs red   #F14C4C
     success: Color::Rgb(137, 209, 133),      // vs green   #89D185
+    info: Color::Rgb(86, 156, 214),          // vs blue   #569CD6
+    warning: Color::Rgb(209, 154, 102),      // vs orange   #D19A66
     text_status: Color::Rgb(30, 30, 30),     // editor gray   #1E1E1E
     syntax: SyntaxColorScheme {
         keyword: Color::Rgb(86, 156, 214),   // blue   #569CD6
