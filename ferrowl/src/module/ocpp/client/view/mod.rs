@@ -414,6 +414,9 @@ pub struct ClientView<V: ClientVersion> {
     backend: OcppClient<V>,
     state: Arc<RwLock<V::Cs>>,
     log: SharedLog,
+    /// Dedicated ring for Lua sim output (`C_Log:*`/`print()`) and sim lifecycle messages,
+    /// separate from `log`'s connection/status/traffic lines.
+    script_log: SharedLog,
     // Focus panes, declared in Tab-cycle order (see `#[derive(Focus)]`). The config trio is only
     // reachable for the CS-level entry, gated with `#[focus(when = self.cs_selected())]`.
     #[focus]
@@ -504,6 +507,7 @@ impl<V: ClientVersion> ClientView<V> {
             backend: OcppClient::new(),
             state,
             log: Arc::new(AsyncRwLock::new(LogRing::init())),
+            script_log: Arc::new(AsyncRwLock::new(LogRing::init())),
             conn_table: render::conn_table(conn_rows),
             conn_input: render::panel_input(V::add_connector_placeholder()),
             state_table: render::nv_table(state_rows),
