@@ -5,13 +5,13 @@
 use std::sync::{Arc, Mutex};
 
 use ferrowl_lua::ContextBuilder;
-use ferrowl_lua::module::LogSink;
+use ferrowl_lua::module::{LogLevel, LogSink};
 
 /// A log sink that records printed lines for assertion.
 #[derive(Clone, Default)]
 struct VecSink(Arc<Mutex<Vec<String>>>);
 impl LogSink for VecSink {
-    fn print(&self, line: &str) {
+    fn log(&self, _level: LogLevel, line: &str) {
         self.0.lock().unwrap().push(line.to_string());
     }
 }

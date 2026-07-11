@@ -286,8 +286,8 @@ fn it_ocpp_server_enumeration() {
         local m = C_Module:Get("csms")
         local stations = m:OCPP():GetChargingStations()
         local conns = m:OCPP():GetConnectors("CP1")
-        C_Log:Print("stations=" .. table.concat(stations, ","))
-        C_Log:Print("conns=" .. table.concat(conns, ","))
+        C_Log:Info("stations=" .. table.concat(stations, ","))
+        C_Log:Info("conns=" .. table.concat(conns, ","))
         m:OCPP():ChargingStation("CP1"):Set("Model", "X")
         "#,
     )]);
@@ -434,8 +434,8 @@ fn it_type_role_introspection() {
         r#"
         local m = C_Module:Get("evse")
         local o = C_Module:Get("cs1")
-        C_Log:Print(m:Type() .. "/" .. m:Role())
-        C_Log:Print(o:Type() .. "/" .. o:Role())
+        C_Log:Info(m:Type() .. "/" .. m:Role())
+        C_Log:Info(o:Type() .. "/" .. o:Role())
         "#,
     )]);
 

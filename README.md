@@ -550,13 +550,16 @@ Return: Time in milliseconds since startup.
 ### Module C_Log
 
 ```
-Method:   C_Log:Print(message)
+Method:   C_Log:Info(message)
+Method:   C_Log:Warn(message)
+Method:   C_Log:Error(message)
 
 Arguments:
                Name: message
                Type: String
         Description: A line to append to the module's log (the on-screen log
-                     pane, and the file sink when `:log <file>` is active).
+                     pane, and the file sink when `:log <file>` is active) at
+                     the corresponding level.
 
 Return: nil
 ```

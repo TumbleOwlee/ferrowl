@@ -7,7 +7,8 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use ferrowl_lua::module::{
-    Has, LogModule, LogSink, Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write,
+    Has, LogLevel, LogModule, LogSink, Read, RegisterModule, StaticsModule, TimeModule, ValueType,
+    Write,
 };
 use ferrowl_lua::{Context, ContextBuilder, Error, Result};
 
@@ -155,18 +156,18 @@ fn ut_statics_from_constructor() {
 #[derive(Clone, Default)]
 struct VecSink(Arc<Mutex<Vec<String>>>);
 impl LogSink for VecSink {
-    fn print(&self, line: &str) {
+    fn log(&self, _level: LogLevel, line: &str) {
         self.0.lock().unwrap().push(line.to_string());
     }
 }
 
 #[test]
-fn ut_c_log_print_routes_to_host_sink() {
+fn ut_c_log_info_routes_to_host_sink() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
         .with_module(LogModule::init(sink.clone()))
-        .with_script("log".to_string(), r#"C_Log:Print("hello from lua")"#)
+        .with_script("log".to_string(), r#"C_Log:Info("hello from lua")"#)
         .build()
         .expect("context build failed");
     ctx.call(&"log".to_string()).unwrap();

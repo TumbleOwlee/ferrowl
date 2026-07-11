@@ -318,7 +318,7 @@ mod tests {
         sim.set_interval(Duration::from_millis(20));
         sim.set_scripts(vec![script(
             "s",
-            r#"C_Log:Print("x"); C_Module:Get("nope"):Register()"#,
+            r#"C_Log:Info("x"); C_Module:Get("nope"):Register()"#,
         )]);
 
         assert!(wait_for(Duration::from_millis(500), || {
