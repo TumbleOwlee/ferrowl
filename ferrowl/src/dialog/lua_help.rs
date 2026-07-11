@@ -157,14 +157,24 @@ static TEST_SECTION: BindingSection = BindingSection {
 
 static LOG_SECTION: BindingSection = BindingSection {
     title: "C_Log",
-    entries: &[("C_Log:Print(message)", "append a line to the module log")],
+    entries: &[
+        ("C_Log:Info(message)", "append an info line to the module log"),
+        (
+            "C_Log:Warn(message)",
+            "append a warning line to the module log",
+        ),
+        (
+            "C_Log:Error(message)",
+            "append an error line to the module log",
+        ),
+    ],
 };
 
 static PRINT_SECTION: BindingSection = BindingSection {
     title: "print",
     entries: &[(
         "print(...)",
-        "redirected to the module log, like C_Log:Print",
+        "redirected to the module log, like C_Log:Info",
     )],
 };
 

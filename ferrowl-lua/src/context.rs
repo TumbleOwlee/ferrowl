@@ -1,4 +1,4 @@
-use crate::{Error, Result, Script, module::LogSink, module::Module};
+use crate::{Error, Result, Script, module::LogLevel, module::LogSink, module::Module};
 use mlua::{Lua, StdLib, UserData};
 use std::{collections::HashMap, hash::Hash};
 
@@ -46,7 +46,7 @@ where
                     .map(|v| v.to_string()) // tostring semantics, honors __tostring
                     .collect::<std::result::Result<Vec<_>, _>>()?
                     .join("\t");
-                sink.print(&line);
+                sink.log(LogLevel::Info, &line);
                 Ok(())
             })?;
         self.lua.globals().set("print", f)

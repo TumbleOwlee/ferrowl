@@ -7,13 +7,23 @@
 use ferrowl_lua_derive::Module;
 use mlua::UserData;
 
-/// A host-provided sink for lines printed from Lua via `C_Log:Print(..)`.
-pub trait LogSink {
-    /// Append one line to the host's log. Called from the (non-async) script thread.
-    fn print(&self, line: &str);
+/// Severity of a line logged from Lua. Mirrors the host's own level type; kept local to this
+/// crate since `ferrowl-lua` cannot depend on `ferrowl` (the dependency runs the other way) —
+/// implementors of [`LogSink`] translate this into their own level type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Warning,
+    Error,
 }
 
-/// Lua module `C_Log`: exposes `Print(message)` which appends a line to the host log.
+/// A host-provided sink for lines logged from Lua via `C_Log:Info(..)`/`Warn(..)`/`Error(..)`.
+pub trait LogSink {
+    /// Append one line to the host's log. Called from the (non-async) script thread.
+    fn log(&self, level: LogLevel, line: &str);
+}
+
+/// Lua module `C_Log`: exposes `Info`/`Warn`/`Error` methods which append a line to the host log.
 #[derive(Module)]
 #[module = "C_Log"]
 pub struct Log<S: LogSink> {
@@ -29,8 +39,16 @@ impl<S: LogSink> Log<S> {
 
 impl<S: LogSink + 'static> UserData for Log<S> {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("Print", |_, this, line: String| {
-            this.sink.print(&line);
+        methods.add_method("Info", |_, this, line: String| {
+            this.sink.log(LogLevel::Info, &line);
+            Ok(())
+        });
+        methods.add_method("Warn", |_, this, line: String| {
+            this.sink.log(LogLevel::Warning, &line);
+            Ok(())
+        });
+        methods.add_method("Error", |_, this, line: String| {
+            this.sink.log(LogLevel::Error, &line);
             Ok(())
         });
     }
@@ -43,19 +61,22 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
-    struct VecSink(Arc<Mutex<Vec<String>>>);
+    struct VecSink(Arc<Mutex<Vec<(LogLevel, String)>>>);
     impl LogSink for VecSink {
-        fn print(&self, line: &str) {
-            self.0.lock().unwrap().push(line.to_string());
+        fn log(&self, level: LogLevel, line: &str) {
+            self.0.lock().unwrap().push((level, line.to_string()));
         }
     }
 
     #[test]
-    fn ut_print_routes_to_sink() {
+    fn ut_log_routes_to_sink() {
         let sink = VecSink::default();
         let log = Log::init(sink.clone());
-        log.sink.print("hello");
-        assert_eq!(*sink.0.lock().unwrap(), vec!["hello".to_string()]);
+        log.sink.log(LogLevel::Info, "hello");
+        assert_eq!(
+            *sink.0.lock().unwrap(),
+            vec![(LogLevel::Info, "hello".to_string())]
+        );
         assert_eq!(<Log<VecSink> as Module>::module(), "C_Log");
     }
 }

@@ -9,7 +9,7 @@ mod test;
 mod time;
 mod value_type;
 
-pub use log::{Log as LogModule, LogSink};
+pub use log::{Log as LogModule, LogLevel, LogSink};
 pub use module_dir::{ModuleDir as ModuleDirModule, ModuleDirectory, ModuleHandle, ModuleHost};
 pub use ocpp::traits::{OcppActions, OcppClientHost, OcppHandle, OcppServerHost};
 pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppServer};

@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use ferrowl_codec::{Address, Format, Register, Value};
 use ferrowl_lua::module::{
-    Has, LogModule, LogSink, Read, RegisterModule, TestModule, TimeModule, ValueType, Write,
+    Has, LogLevel, LogModule, LogSink, Read, RegisterModule, TestModule, TimeModule, ValueType,
+    Write,
 };
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
@@ -364,16 +365,25 @@ fn emit(log: &ModuleLog, sink: &FileSink, level: Level, line: &str) {
     append(sink, line);
 }
 
-/// Routes `C_Log:Print(..)` lines from a Modbus sim into the module's ring log and file sink,
-/// mirroring the `emit` path used for sim diagnostics.
+/// Routes `C_Log:Info/Warn/Error(..)` lines from a Modbus sim into the module's ring log and file
+/// sink, mirroring the `emit` path used for sim diagnostics.
 struct LuaLogSink {
     log: ModuleLog,
     sink: FileSink,
 }
 
 impl LogSink for LuaLogSink {
-    fn print(&self, line: &str) {
-        emit(&self.log, &self.sink, Level::Info, line);
+    fn log(&self, level: LogLevel, line: &str) {
+        emit(&self.log, &self.sink, level_from_lua(level), line);
+    }
+}
+
+/// Translate the `ferrowl-lua`-local [`LogLevel`] into the host's [`Level`].
+fn level_from_lua(level: LogLevel) -> Level {
+    match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warning,
+        LogLevel::Error => Level::Error,
     }
 }
 

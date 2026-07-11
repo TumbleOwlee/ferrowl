@@ -13,8 +13,8 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
-    LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TestModule, TimeModule,
-    ValueType, Write,
+    LogLevel, LogModule, LogSink, OcppActions, OcppClient, OcppClientHost, Read, TestModule,
+    TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
@@ -372,13 +372,22 @@ pub(crate) fn emit(log: &SharedLog, level: Level, line: &str) {
     log.blocking_write().write(level, line);
 }
 
-/// Routes `C_Log:Print(..)` lines from a Lua sim into the module's ring log. Used to build the
-/// `C_Log` module for both the client and server sims.
+/// Routes `C_Log:Info/Warn/Error(..)` lines from a Lua sim into the module's ring log. Used to
+/// build the `C_Log` module for both the client and server sims (and `session_sim`).
 pub(crate) struct LuaLogSink(pub SharedLog);
 
 impl LogSink for LuaLogSink {
-    fn print(&self, line: &str) {
-        emit(&self.0, Level::Info, line);
+    fn log(&self, level: LogLevel, line: &str) {
+        emit(&self.0, level_from_lua(level), line);
+    }
+}
+
+/// Translate the `ferrowl-lua`-local [`LogLevel`] into the host's [`Level`].
+fn level_from_lua(level: LogLevel) -> Level {
+    match level {
+        LogLevel::Info => Level::Info,
+        LogLevel::Warning => Level::Warning,
+        LogLevel::Error => Level::Error,
     }
 }
 

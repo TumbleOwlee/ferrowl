@@ -581,7 +581,7 @@ mod tests {
             modules: vec![module_value],
             scripts: vec![ScriptDef {
                 name: "s".to_string(),
-                code: r#"C_Module:Get("m"):Register():Set("value", 42); C_Log:Print("session-script-ran")"#
+                code: r#"C_Module:Get("m"):Register():Set("value", 42); C_Log:Info("session-script-ran")"#
                     .to_string(),
                 enabled: script_enabled,
             }],
