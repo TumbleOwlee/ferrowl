@@ -598,6 +598,13 @@ where
                 }
                 self.runtime.logged_seq = max_seq;
             }
+
+            if let super::ServerOverlay::Scripts(dialog) = &mut self.overlay {
+                let entries =
+                    crate::dialog::scripts::snapshot_log(&self.script_log, crate::app::LOG_SIZE)
+                        .await;
+                dialog.set_log_entries(entries);
+            }
         })
     }
 

@@ -3,6 +3,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
 
+use crate::dialog::lua_help::ScriptContext;
 use crate::module::MODULE_TYPES;
 use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::type_select::TypeSelectDialog;
@@ -95,9 +96,10 @@ impl App {
     /// Open the session-level scripts/interval dialog (`:session`).
     pub(super) fn enter_session(&mut self) {
         self.set_content_focus(false);
-        self.session_dialog = Some(Box::new(crate::dialog::session::SessionDialog::new(
+        self.session_dialog = Some(Box::new(crate::dialog::scripts::ScriptDialog::new(
             &self.session_scripts,
             self.session_interval,
+            ScriptContext::Session,
         )));
         self.focus = Focus::Dialog;
     }

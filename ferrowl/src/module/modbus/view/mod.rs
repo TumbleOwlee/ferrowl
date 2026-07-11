@@ -416,7 +416,10 @@ impl ModuleView for ModbusModuleView {
                     let ModbusViewOverlay::Scripts(dialog) = self.overlay.take() else {
                         unreachable!("just matched Scripts above")
                     };
-                    self.device.scripts = dialog.resolve();
+                    let (scripts, interval) = dialog.resolve();
+                    self.device.scripts = scripts;
+                    self.device.script_interval = interval.as_secs_f64();
+                    self.module.set_script_interval(interval);
                     self.module
                         .reload_scripts(super::registers::collect_scripts(&self.device));
                 }
@@ -443,25 +446,37 @@ impl ModuleView for ModbusModuleView {
             }
 
             // Acquire the (async) virtual-store guard first so the (sync) memory guard below is
-            // never held across an `.await`.
-            let vs_arc = self.module.virtual_store();
-            let virtual_values = vs_arc.read().await;
-            let memory_arc = self.module.memory();
-            let memory = memory_arc.read();
+            // never held across an `.await`. Scoped so both guards are dropped before the
+            // `.await` further down (script-log snapshot).
+            {
+                let vs_arc = self.module.virtual_store();
+                let virtual_values = vs_arc.read().await;
+                let memory_arc = self.module.memory();
+                let memory = memory_arc.read();
 
-            let mut updated: Vec<Definition> = self
-                .table
-                .definitions()
-                .iter()
-                .cloned()
-                .map(|d| decode_definition(d, &memory, &virtual_values))
-                .collect();
+                let mut updated: Vec<Definition> = self
+                    .table
+                    .definitions()
+                    .iter()
+                    .cloned()
+                    .map(|d| decode_definition(d, &memory, &virtual_values))
+                    .collect();
 
-            if let Some((column, descending)) = self.sort {
-                updated.sort_by(|a, b| cmp_definitions(a, b, column, descending));
+                if let Some((column, descending)) = self.sort {
+                    updated.sort_by(|a, b| cmp_definitions(a, b, column, descending));
+                }
+
+                self.table.set_definitions(updated);
             }
 
-            self.table.set_definitions(updated);
+            if let ModbusViewOverlay::Scripts(dialog) = &mut self.overlay {
+                let entries = crate::dialog::scripts::snapshot_log(
+                    &self.module.script_log(),
+                    crate::app::LOG_SIZE,
+                )
+                .await;
+                dialog.set_log_entries(entries);
+            }
         })
     }
 
@@ -561,6 +576,7 @@ impl ModuleView for ModbusModuleView {
         if trimmed == "script" {
             self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
                 &self.device.scripts,
+                self.device.script_interval_duration(),
                 ScriptContext::Modbus,
             )));
             return Box::pin(std::future::ready(CommandResult::Handled(None)));
@@ -1034,9 +1050,10 @@ mod tests {
         let mut view = new_view();
         drop(view.handle_command("script"));
         assert!(view.is_overlay_active());
-        // Create a script through the dialog: Tab to the name input (the code editor is
-        // skipped while nothing is selected), type a name, Enter creates it, Esc + Enter
-        // (confirm-close) closes.
+        // Create a script through the dialog: Tab past the interval field to the table, then to
+        // the name input (the code editor is skipped while nothing is selected), type a name,
+        // Enter creates it, Esc + Enter (confirm-close) closes.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         for c in "sim".chars() {
             view.handle_events(KeyModifiers::NONE, KeyCode::Char(c));

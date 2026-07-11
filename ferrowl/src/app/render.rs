@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
 
-use crate::dialog::session::SessionDialog;
+use crate::dialog::scripts::ScriptDialog;
 use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
 use crate::view::tabs::render_tabs;
@@ -25,7 +25,7 @@ pub(super) fn render(
     focus: Focus,
     command: &mut CommandLine,
     overlay: Option<&mut Overlay>,
-    session_dialog: Option<&mut SessionDialog>,
+    session_dialog: Option<&mut ScriptDialog>,
     help_open: bool,
     help_scroll: &mut u16,
 ) {
