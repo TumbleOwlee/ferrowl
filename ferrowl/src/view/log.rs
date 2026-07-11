@@ -9,18 +9,32 @@ use ferrowl_ui::{
 use ferrowl_ui_derive::TableEntry;
 use ratatui::layout::Margin;
 
-/// One log line with a formatted timestamp and message text.
+use crate::app::Level;
+
+/// One log line with a formatted timestamp, severity level and message text.
 #[derive(Clone, Debug, TableEntry)]
-#[table_entry(header = LogHeader)]
+#[table_entry(header = LogHeader, styles = log_cell_styles)]
 pub struct LogEntry {
     #[column(name = "Timestamp", min = 23, max = 23)]
     pub timestamp: String,
+    #[column(name = "Level", min = 7, max = 7)]
+    pub level: Level,
     #[column(name = "Message", min = 0, max = 100_000)]
     pub message: String,
 }
 
+/// Colorize the `Level` column (INFO/WARNING/ERROR); Timestamp and Message stay unstyled.
+fn log_cell_styles(row: &LogEntry) -> [Option<ratatui::style::Style>; 3] {
+    let level_style = match row.level {
+        Level::Info => Some(ratatui::style::Style::default().fg(COLOR_SCHEME.info)),
+        Level::Warning => Some(ratatui::style::Style::default().fg(COLOR_SCHEME.warning)),
+        Level::Error => Some(ratatui::style::Style::default().fg(COLOR_SCHEME.error)),
+    };
+    [None, level_style, None]
+}
+
 /// The composed log widget: a `Table` plus its scroll/selection state.
-pub type LogView = Widget<TableState<LogEntry, 2>, Table<LogEntry, LogHeader, 2>>;
+pub type LogView = Widget<TableState<LogEntry, 3>, Table<LogEntry, LogHeader, 3>>;
 
 /// Format a Unix-millisecond timestamp as `YYYY-MM-DD HH:MM:SS.mmm` (UTC).
 pub fn format_timestamp(ms: u64) -> String {
@@ -143,17 +157,41 @@ mod tests {
     fn ut_log_entry_and_header_traits() {
         let e = LogEntry {
             timestamp: "ts".into(),
+            level: Level::Info,
             message: "hello".into(),
         };
-        assert_eq!(e.values(), ["ts".to_string(), "hello".to_string()]);
+        assert_eq!(
+            e.values(),
+            ["ts".to_string(), "INFO".to_string(), "hello".to_string()]
+        );
         assert_eq!(e.height(), 1);
         assert_eq!(
             LogHeader::header(),
-            ["Timestamp".to_string(), "Message".to_string()]
+            [
+                "Timestamp".to_string(),
+                "Level".to_string(),
+                "Message".to_string()
+            ]
         );
         let w = LogHeader::widths();
         assert_eq!(w[0].min, 23);
         assert_eq!(w[0].max, 23);
+    }
+
+    #[test]
+    fn ut_log_cell_styles_colorizes_level_only() {
+        let e = LogEntry {
+            timestamp: "ts".into(),
+            level: Level::Warning,
+            message: "hello".into(),
+        };
+        let styles = e.cell_styles();
+        assert!(styles[0].is_none());
+        assert_eq!(
+            styles[1],
+            Some(ratatui::style::Style::default().fg(COLOR_SCHEME.warning))
+        );
+        assert!(styles[2].is_none());
     }
 
     #[test]

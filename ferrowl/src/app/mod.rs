@@ -43,10 +43,36 @@ const DIGIT_CHORD_TIMEOUT: Duration = Duration::from_millis(800);
 pub const LOG_MAX_LINE: usize = 256;
 pub const LOG_SIZE: usize = 80;
 
+/// Severity of a log line, shown as a colorized column on every log pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Info,
+    Warning,
+    Error,
+}
+
+impl Level {
+    /// Label used both in the on-screen `Level` column (padded to width by the table widget)
+    /// and the file-sink prefix.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Level::Info => "INFO",
+            Level::Warning => "WARNING",
+            Level::Error => "ERROR",
+        }
+    }
+}
+
+impl std::fmt::Display for Level {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// On-screen log: a fixed-capacity ring of timestamped lines, optionally mirrored to a file so the
 /// full history survives the ring's eviction (the `:log <file>` feature).
 pub struct LogRing {
-    ring: Ring<(u64, String), LOG_SIZE>,
+    ring: Ring<(u64, Level, String), LOG_SIZE>,
     /// Append-mode file sink set by `:log <file>`; when present, every line is also persisted.
     sink: Option<std::io::BufWriter<std::fs::File>>,
     /// Total number of lines ever pushed (never reset, never wraps in practice). Lets a consumer
@@ -64,7 +90,7 @@ impl LogRing {
         }
     }
 
-    pub fn write(&mut self, msg: &str) {
+    pub fn write(&mut self, level: Level, msg: &str) {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -74,9 +100,14 @@ impl LogRing {
         // Lines are buffered; `flush` runs once per UI tick (and on sink teardown via drop).
         if let Some(writer) = self.sink.as_mut() {
             use std::io::Write;
-            let _ = writeln!(writer, "[{}] {line}", format_timestamp(ts));
+            let _ = writeln!(
+                writer,
+                "[{}] [{}] {line}",
+                format_timestamp(ts),
+                level.label()
+            );
         }
-        self.ring.push((ts, line));
+        self.ring.push((ts, level, line));
         self.written += 1;
     }
 
@@ -110,7 +141,7 @@ impl LogRing {
         });
     }
 
-    pub fn peek_n(&self, n: usize) -> Vec<(u64, String)> {
+    pub fn peek_n(&self, n: usize) -> Vec<(u64, Level, String)> {
         self.ring.peek_n(n).into_iter().cloned().collect()
     }
 
@@ -409,8 +440,9 @@ impl App {
 
         let entries: Vec<LogEntry> = lines
             .into_iter()
-            .map(|(ts, msg)| LogEntry {
+            .map(|(ts, level, msg)| LogEntry {
                 timestamp: format_timestamp(ts),
+                level,
                 message: msg.trim_end_matches('\u{0}').to_string(),
             })
             .collect();
