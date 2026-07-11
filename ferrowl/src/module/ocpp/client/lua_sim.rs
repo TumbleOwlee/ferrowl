@@ -219,6 +219,7 @@ pub fn run_client_sim<S>(
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,
     scripts: Vec<(String, String)>,
+    interval: Duration,
     log: SharedLog,
 ) -> Option<OcppSimHandle>
 where
@@ -253,7 +254,7 @@ where
             }
         };
         while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.refresh_all(Duration::from_secs(1)) {
+            if let Err(errors) = context.refresh_all(interval) {
                 for e in errors {
                     emit(&log, Level::Error, &format!("[lua] {e}"));
                 }

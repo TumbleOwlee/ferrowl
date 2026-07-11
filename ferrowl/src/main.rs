@@ -122,6 +122,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
         read_ranges: Default::default(),
         definitions,
         scripts: Vec::new(),
+        script_interval: 1.0,
     };
     let spec = ModuleSpec {
         name,

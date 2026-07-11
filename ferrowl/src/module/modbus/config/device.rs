@@ -52,9 +52,29 @@ pub struct DeviceConfig {
     /// the `:script` dialog; replaces the legacy per-register `update` snippets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptDef>,
+    /// Script sim cycle interval in seconds — separate from `interval_ms` (device-polling
+    /// cadence). Older device config files without this field load as the default (1.0s).
+    #[serde(default = "default_script_interval")]
+    pub script_interval: f64,
+}
+
+fn default_script_interval() -> f64 {
+    1.0
 }
 
 impl DeviceConfig {
+    /// The script sim cycle interval as a `Duration`. A hand-edited file can carry a
+    /// non-finite or non-positive `script_interval`; those fall back to the 1.0s default
+    /// instead of panicking in `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
+    pub fn script_interval_duration(&self) -> std::time::Duration {
+        let secs = if self.script_interval.is_finite() && self.script_interval > 0.0 {
+            self.script_interval
+        } else {
+            default_script_interval()
+        };
+        std::time::Duration::from_secs_f64(secs)
+    }
+
     /// Migrate legacy per-register `update` snippets into [`scripts`](Self::scripts): each
     /// non-empty snippet becomes an enabled script named after its register (skipped when a
     /// script of that name already exists). The `update` fields are cleared, so a subsequent
@@ -552,6 +572,7 @@ mod tests {
                 code: "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into(),
                 enabled: true,
             }],
+            script_interval: 2.5,
         }
     }
 
@@ -605,6 +626,36 @@ mod tests {
         std::fs::write(path, "definitions = {}\n").unwrap();
         let cfg: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
         assert_eq!(cfg.reconnect, None);
+    }
+
+    // An old-format device config file (predating `script_interval`) must still load, with
+    // `script_interval` defaulting to 1.0.
+    #[test]
+    fn ut_device_config_loads_without_script_interval_field() {
+        let path = std::env::temp_dir().join("ferrowl_device_no_script_interval.toml");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "definitions = {}\n").unwrap();
+        let cfg: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
+        assert_eq!(cfg.script_interval, 1.0);
+    }
+
+    // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
+    // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
+    #[test]
+    fn ut_device_config_script_interval_duration_sanitized() {
+        let mut cfg = sample();
+        cfg.script_interval = 0.25;
+        assert_eq!(
+            cfg.script_interval_duration(),
+            std::time::Duration::from_millis(250)
+        );
+        for bad in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            cfg.script_interval = bad;
+            assert_eq!(
+                cfg.script_interval_duration(),
+                std::time::Duration::from_secs(1)
+            );
+        }
     }
 
     #[test]

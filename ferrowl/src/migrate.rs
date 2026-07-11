@@ -379,6 +379,7 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
         read_ranges,
         definitions,
         scripts: Vec::new(),
+        script_interval: 1.0,
     };
     let mut device = device;
     device.migrate_update_scripts();

@@ -73,8 +73,10 @@ pub struct ModbusModule {
     scripts: Vec<(String, String)>,
     /// Explicit per-function-code read ranges from the device config (empty = auto-merge).
     read_ranges: ReadRanges,
-    /// Simulation cycle period, derived from the resolved `interval_ms`.
-    sim_interval: Duration,
+    /// Script sim cycle period, from the device config's `script_interval` — separate from
+    /// `interval_ms`, which keeps driving device-polling cadence untouched. Controls the Lua
+    /// sim loop (`run_sim`).
+    script_interval: Duration,
     /// The running simulation thread, if any. Runs iff at least one script is enabled
     /// (see `ensure_sim`), independent of the network instance's start/stop state.
     sim: Option<SimHandle>,
@@ -159,7 +161,7 @@ impl ModbusModule {
             file_sink,
             scripts,
             read_ranges: device.read_ranges.clone(),
-            sim_interval: Duration::from_millis(timing.interval_ms.max(1000) as u64),
+            script_interval: device.script_interval_duration(),
             sim: None,
             virtual_values: Arc::new(RwLock::new(virtual_init)),
         };
@@ -298,7 +300,7 @@ impl ModbusModule {
             self.virtual_values.clone(),
             registers,
             self.scripts.clone(),
-            self.sim_interval,
+            self.script_interval,
             self.log.clone(),
             self.file_sink.clone(),
         );
@@ -353,7 +355,6 @@ impl ModbusModule {
                 .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
         }
         self.rebuild_operations().await;
-        self.sim_interval = Duration::from_millis(timing.interval_ms.max(1000) as u64);
         let net_config = endpoint_to_config(endpoint, &timing);
         self.instance = build_instance(
             role,
@@ -458,6 +459,7 @@ mod tests {
             },
             definitions,
             scripts: Vec::new(),
+            script_interval: 1.0,
         }
     }
 
@@ -566,7 +568,6 @@ mod tests {
             version: None,
             timeout_ms: Some(1000),
             delay_ms: None,
-            // Fast sim cycle so tests don't have to wait long for a tick.
             interval_ms: Some(50),
             reconnect: None,
             log_file: None,
@@ -576,6 +577,8 @@ mod tests {
             },
             definitions,
             scripts,
+            // Fast sim cycle so tests don't have to wait long for a tick.
+            script_interval: 0.05,
         }
     }
 
