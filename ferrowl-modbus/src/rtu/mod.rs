@@ -58,3 +58,29 @@ pub struct Config {
 fn default_reconnect() -> bool {
     true
 }
+
+// NOTE: `Config` doubles as a clap `Args` group, but flattening it into any `clap::Parser`
+// command (as production CLI code must) panics at parse time via clap's debug assertions:
+// short option '-s' is claimed by both `slave` and `stop_bits` (and, by the same auto-derived-
+// from-field-initial rule, '-d' by both `data_bits` and `delay_ms`). This is a pre-existing bug
+// in the `#[arg(short, ...)]` attributes above, outside this test-coverage pass's scope to fix;
+// flagging it here rather than silently working around it. Only the serde (de)serialization
+// path — unaffected by the clap collision — is unit-tested below.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_config_serde_defaults_reconnect_true_when_absent() {
+        let json = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0}"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert!(cfg.reconnect);
+    }
+
+    #[test]
+    fn ut_config_serde_respects_explicit_reconnect_false() {
+        let json = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0,"reconnect":false}"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert!(!cfg.reconnect);
+    }
+}

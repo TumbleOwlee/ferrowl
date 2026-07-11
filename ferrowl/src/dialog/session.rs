@@ -35,9 +35,11 @@ use ratatui::{
 
 use crate::config::script::ScriptDef;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
-use crate::dialog::lua_help::{LuaHelpOverlay, ScriptContext};
+use crate::dialog::lua_help::{LuaHelpOutcome, LuaHelpOverlay, ScriptContext, route_lua_help};
 use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
-use crate::module::modbus::dialog::ConfirmDeleteDialog;
+use crate::module::modbus::dialog::{
+    ConfirmDeleteDialog, DeleteConfirmOutcome, route_delete_confirm,
+};
 use crate::module::view::SharedLog;
 use crate::view::border_style;
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
@@ -178,11 +180,9 @@ impl SessionDialog {
     /// popup).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         // The Lua bindings overlay takes precedence over everything else while open.
-        if let Some(help) = self.lua_help.as_mut() {
-            if help.handle_key(modifiers, code) {
-                self.lua_help = None;
-            }
-            return false;
+        match route_lua_help(&mut self.lua_help, modifiers, code) {
+            LuaHelpOutcome::NotActive => {}
+            LuaHelpOutcome::Consumed => return false,
         }
 
         // The close-confirm popup takes precedence once open.
@@ -193,25 +193,13 @@ impl SessionDialog {
         }
 
         // Delete-confirmation sub-dialog takes precedence.
-        if let Some(confirm) = self.confirm.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => self.confirm = None,
-                (KeyModifiers::NONE, KeyCode::Tab) => confirm.focus_next(),
-                (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                    confirm.focus_previous()
-                }
-                (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) => {
-                    let confirmed = confirm.is_confirm_focused();
-                    self.confirm = None;
-                    if confirmed {
-                        self.delete_selected();
-                    }
-                }
-                _ => {
-                    let _ = confirm.handle_events(modifiers, code);
-                }
+        match route_delete_confirm(&mut self.confirm, modifiers, code) {
+            DeleteConfirmOutcome::NotActive => {}
+            DeleteConfirmOutcome::Confirmed => {
+                self.delete_selected();
+                return false;
             }
-            return false;
+            DeleteConfirmOutcome::Consumed => return false,
         }
 
         // Intercept `?` before offering the key to the editor, but only in the code editor's

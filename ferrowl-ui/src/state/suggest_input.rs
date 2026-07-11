@@ -43,6 +43,26 @@ where
     anchor: Option<Rect>,
 }
 
+impl<P> std::ops::Deref for SuggestInputState<P>
+where
+    P: SuggestionProvider + Clone,
+{
+    type Target = InputFieldState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.field
+    }
+}
+
+impl<P> std::ops::DerefMut for SuggestInputState<P>
+where
+    P: SuggestionProvider + Clone,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.field
+    }
+}
+
 impl<P> SuggestInputState<P>
 where
     P: SuggestionProvider + Clone,
@@ -52,38 +72,6 @@ where
     /// through `InputField`'s own `StatefulWidget` impl.
     pub(crate) fn field_mut(&mut self) -> &mut InputFieldState {
         &mut self.field
-    }
-
-    pub fn input(&self) -> &String {
-        self.field.input()
-    }
-
-    pub fn set_input(&mut self, input: String) {
-        self.field.set_input(input);
-    }
-
-    pub fn cursor(&self) -> usize {
-        self.field.cursor()
-    }
-
-    pub fn set_cursor(&mut self, cursor: usize) {
-        self.field.set_cursor(cursor);
-    }
-
-    pub fn placeholder(&self) -> &Option<String> {
-        self.field.placeholder()
-    }
-
-    pub fn set_placeholder(&mut self, placeholder: Option<String>) {
-        self.field.set_placeholder(placeholder);
-    }
-
-    pub fn autofill(&self) -> &Option<String> {
-        self.field.autofill()
-    }
-
-    pub fn set_autofill(&mut self, autofill: Option<String>) {
-        self.field.set_autofill(autofill);
     }
 
     /// Whether the suggestion popup is currently open.

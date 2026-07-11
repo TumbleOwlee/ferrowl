@@ -60,6 +60,48 @@ impl Cell {
             CellKind::ReadWrite(t) => Cell::ReadWrite(*t, init),
         }
     }
+
+    /// Returns `true` if this cell accepts checked writes of type `ty`.
+    pub fn accepts_write(&self, ty: &CellType) -> bool {
+        matches!(self, Cell::Write(t, _) | Cell::ReadWrite(t, _) if t == ty)
+    }
+
+    /// Returns `true` if this cell accepts checked reads of type `ty`.
+    pub fn accepts_read(&self, ty: &CellType) -> bool {
+        matches!(self, Cell::Read(t, _) | Cell::ReadWrite(t, _) if t == ty)
+    }
+
+    /// Returns the stored value regardless of access rights.
+    pub fn value(&self) -> u16 {
+        match self {
+            Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v,
+        }
+    }
+
+    /// Sets the stored value regardless of access rights.
+    pub fn set_value(&mut self, val: u16) {
+        match self {
+            Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = val,
+        }
+    }
+
+    /// Sets the stored value if this cell accepts writes; leaves read-only
+    /// cells untouched.
+    pub fn try_set_value(&mut self, val: u16) {
+        match self {
+            Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = val,
+            Cell::Read(_, _) => {}
+        }
+    }
+
+    /// Returns the stored value if this cell accepts reads, `None` for
+    /// write-only cells.
+    pub fn try_value(&self) -> Option<u16> {
+        match self {
+            Cell::Read(_, v) | Cell::ReadWrite(_, v) => Some(*v),
+            Cell::Write(_, _) => None,
+        }
+    }
 }
 
 /// A borrowed run of raw `u16` values paired with the address [`Range`]

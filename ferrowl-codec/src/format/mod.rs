@@ -37,22 +37,28 @@ pub enum Format {
 
 impl std::fmt::Display for Format {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Every non-ASCII variant prints as `"<Variant> (<endian>)"`.
+        macro_rules! fmt_variant {
+            ($variant:ident, $e:expr) => {
+                write!(fmt, "{} ({})", stringify!($variant), $e)
+            };
+        }
         match self {
             Format::Ascii((alignment, _)) => {
                 write!(fmt, "ASCII ({})", alignment)
             }
-            Format::U8((e, _, _)) => write!(fmt, "U8 ({})", e),
-            Format::U16((e, _, _)) => write!(fmt, "U16 ({})", e),
-            Format::U32((e, _, _)) => write!(fmt, "U32 ({})", e),
-            Format::U64((e, _, _)) => write!(fmt, "U64 ({})", e),
-            Format::U128((e, _, _)) => write!(fmt, "U128 ({})", e),
-            Format::I8((e, _, _)) => write!(fmt, "I8 ({})", e),
-            Format::I16((e, _, _)) => write!(fmt, "I16 ({})", e),
-            Format::I32((e, _, _)) => write!(fmt, "I32 ({})", e),
-            Format::I64((e, _, _)) => write!(fmt, "I64 ({})", e),
-            Format::I128((e, _, _)) => write!(fmt, "I128 ({})", e),
-            Format::F32((e, _)) => write!(fmt, "F32 ({})", e),
-            Format::F64((e, _)) => write!(fmt, "F64 ({})", e),
+            Format::U8((e, _, _)) => fmt_variant!(U8, e),
+            Format::U16((e, _, _)) => fmt_variant!(U16, e),
+            Format::U32((e, _, _)) => fmt_variant!(U32, e),
+            Format::U64((e, _, _)) => fmt_variant!(U64, e),
+            Format::U128((e, _, _)) => fmt_variant!(U128, e),
+            Format::I8((e, _, _)) => fmt_variant!(I8, e),
+            Format::I16((e, _, _)) => fmt_variant!(I16, e),
+            Format::I32((e, _, _)) => fmt_variant!(I32, e),
+            Format::I64((e, _, _)) => fmt_variant!(I64, e),
+            Format::I128((e, _, _)) => fmt_variant!(I128, e),
+            Format::F32((e, _)) => fmt_variant!(F32, e),
+            Format::F64((e, _)) => fmt_variant!(F64, e),
         }
     }
 }

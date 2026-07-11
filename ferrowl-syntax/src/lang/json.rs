@@ -3,6 +3,8 @@
 
 use crate::{LineState, SyntaxKind};
 
+use super::scan;
+
 pub(crate) fn highlight_line(
     line: &str,
     state: LineState,
@@ -21,18 +23,7 @@ pub(crate) fn highlight_line(
 
         if c == '"' {
             let start = i;
-            i += 1;
-            while i < len {
-                if chars[i] == '\\' && i + 1 < len {
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == '"' {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
+            i = scan::scan_quoted(&chars, i, '"');
             let end = i;
             let mut j = end;
             while j < len && chars[j].is_whitespace() {
@@ -55,21 +46,7 @@ pub(crate) fn highlight_line(
             while i < len && chars[i].is_ascii_digit() {
                 i += 1;
             }
-            if i < len && chars[i] == '.' {
-                i += 1;
-                while i < len && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-            }
-            if i < len && (chars[i] == 'e' || chars[i] == 'E') {
-                i += 1;
-                if i < len && (chars[i] == '+' || chars[i] == '-') {
-                    i += 1;
-                }
-                while i < len && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-            }
+            i = scan::scan_fraction_exponent(&chars, i, false);
             spans.push((start, i, SyntaxKind::Number));
             continue;
         }
@@ -174,5 +151,43 @@ mod tests {
                 assert!(end <= len);
             }
         }
+    }
+
+    #[test]
+    fn ut_non_ascii_string_value() {
+        let line = r#"{"msg": "café"}"#;
+        let spans = spans_for(line);
+        let len = line.chars().count();
+        for (start, end, _) in &spans {
+            assert!(*start <= *end);
+            assert!(*end <= len);
+        }
+        let strings: Vec<_> = spans
+            .iter()
+            .filter(|s| s.2 == SyntaxKind::String || s.2 == SyntaxKind::Key)
+            .collect();
+        assert_eq!(strings.len(), 2);
+        assert_eq!(strings[0].2, SyntaxKind::Key);
+        assert_eq!(strings[1].2, SyntaxKind::String);
+    }
+
+    #[test]
+    fn ut_emoji_in_json_string() {
+        let line = r#"{"emoji": "🚀 🌟"}"#;
+        let spans = spans_for(line);
+        let len = line.chars().count();
+        for (start, end, _) in &spans {
+            assert!(*start <= *end);
+            assert!(*end <= len);
+        }
+        let strings: Vec<_> = spans
+            .iter()
+            .filter(|s| s.2 == SyntaxKind::String || s.2 == SyntaxKind::Key)
+            .collect();
+        assert_eq!(strings.len(), 2);
+        let (s_start, s_end, _) = *strings[1];
+        let string_chars: String = line.chars().skip(s_start).take(s_end - s_start).collect();
+        assert!(string_chars.contains("🚀"));
+        assert!(string_chars.contains("🌟"));
     }
 }

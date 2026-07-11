@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use futures_util::Future;
 use once_cell::sync::Lazy;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use tokio::spawn as tokio_spawn;
@@ -37,7 +36,7 @@ pub static GLOBAL_CONTEXT: &str = "";
 /// Context storage.
 ///
 /// For each named context this structure collects all `JoinHandle` return by `tokio::spawn`
-static CONTEXT: Lazy<Mutex<RefCell<Context>>> = Lazy::new(|| Mutex::new(RefCell::default()));
+static CONTEXT: Lazy<Mutex<Context>> = Lazy::new(|| Mutex::new(Context::default()));
 
 /// Spawn the given future as a tokio task in background in the global context ("")
 ///
@@ -97,7 +96,6 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
     let handle: JoinHandle<<F as Future>::Output> = tokio_spawn(future);
     let mut context = CONTEXT.lock().await;
     context
-        .get_mut()
         .0
         .entry(ctx)
         .or_default()
@@ -137,7 +135,7 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
 pub async fn join_all() {
     loop {
         let mut context = CONTEXT.lock().await;
-        let handles: Vec<_> = context.get_mut().0.drain().flat_map(|(_, v)| v).collect();
+        let handles: Vec<_> = context.0.drain().flat_map(|(_, v)| v).collect();
         drop(context);
 
         if handles.is_empty() {
@@ -185,7 +183,7 @@ pub async fn join_all() {
 pub async fn join_all_of_context(ctx: &'static str) {
     loop {
         let mut context = CONTEXT.lock().await;
-        let handles: Vec<_> = if let Some(v) = context.get_mut().0.get_mut(ctx) {
+        let handles: Vec<_> = if let Some(v) = context.0.get_mut(ctx) {
             std::mem::take(v)
         } else {
             vec![]

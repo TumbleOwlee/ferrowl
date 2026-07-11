@@ -137,3 +137,166 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::expand_table_entry;
+
+    #[test]
+    fn rejects_unknown_table_entry_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            #[table_entry(unknown = "value")]
+            struct TestRow {
+                #[column(name = "col", min = 10, max = 20)]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input).expect_err("expected unknown table_entry key to be rejected");
+        assert!(
+            err.to_string().contains("unknown `table_entry` key"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_row_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            #[row(unknown = 1)]
+            struct TestRow {
+                #[column(name = "col", min = 10, max = 20)]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input).expect_err("expected unknown row key to be rejected");
+        assert!(
+            err.to_string().contains("unknown `row` key"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_struct_without_named_fields() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow(u32);
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected tuple struct to be rejected");
+        assert!(
+            err.to_string().contains("TableEntry requires a struct with named fields"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_non_struct() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestRow {
+                Variant,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected enum to be rejected");
+        assert!(
+            err.to_string().contains("TableEntry can only be derived for structs"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_column_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow {
+                #[column(unknown = "value")]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected unknown column key to be rejected");
+        assert!(
+            err.to_string().contains("unknown `column` key"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_column_missing_name() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow {
+                #[column(min = 10, max = 20)]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected missing name to be rejected");
+        assert!(
+            err.to_string().contains("`column` requires `name`"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_column_missing_min() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow {
+                #[column(name = "col", max = 20)]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected missing min to be rejected");
+        assert!(
+            err.to_string().contains("`column` requires `min`"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_column_missing_max() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow {
+                #[column(name = "col", min = 10)]
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected missing max to be rejected");
+        assert!(
+            err.to_string().contains("`column` requires `max`"),
+            "error message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_struct_without_columns() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestRow {
+                field: u32,
+            }
+        };
+
+        let err = expand_table_entry(input)
+            .expect_err("expected zero-column struct to be rejected");
+        assert!(
+            err.to_string().contains("TableEntry needs at least one"),
+            "error message: {}",
+            err
+        );
+    }
+}
+

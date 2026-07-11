@@ -469,3 +469,142 @@ fn apply_meter_values(state: &mut ConnectorState, request: &serde_json::Value) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_connector_meter_values_update_state() {
+        let mut s = ConnectorState::default();
+        let req = serde_json::json!({
+            "evseId": 2,
+            "meterValue": [{ "timestamp": "t", "sampledValue": [
+                { "value": 230.0, "measurand": "Voltage", "unit": "V" },
+                { "value": 16.0, "measurand": "Current.Import", "phase": "L1", "unit": "A" },
+                { "value": 11000, "measurand": "Power.Active.Import", "unit": "W" },
+                { "value": 5000, "measurand": "Energy.Active.Import.Register", "unit": "Wh" },
+            ]}]
+        });
+        s.apply_inbound("MeterValues", &req, &serde_json::Value::Null);
+        assert_eq!(s.evse_id, 2);
+        assert_eq!(s.voltage, 230.0);
+        assert_eq!(s.current[0], 16.0);
+        assert_eq!(s.power, 11000.0);
+        assert_eq!(s.total_energy, 5.0); // Wh → kWh
+    }
+
+    #[test]
+    fn ut_connector_derive_payload() {
+        let mut s = ConnectorState::default();
+        s.apply_inbound(
+            "TransactionEvent",
+            &serde_json::json!({
+                "evseId": 1,
+                "eventType": "Started",
+                "idToken": { "idToken": "ABC" },
+                "transactionInfo": { "transactionId": "42" },
+            }),
+            &serde_json::Value::Null,
+        );
+        let p = s
+            .derive_payload("RequestStartTransaction", Scope::evse(1, None))
+            .unwrap();
+        assert_eq!(p["evseId"], 1);
+        assert_eq!(p["idToken"]["idToken"], "ABC");
+        // The transactionId minted via TransactionEvent(Started) is recorded, so RequestStop can derive.
+        assert_eq!(s.transaction_id, Some("42".to_string()));
+        assert_eq!(
+            s.derive_payload("RequestStopTransaction", Scope::evse(1, None))
+                .unwrap()["transactionId"],
+            "42"
+        );
+        // Complex action → JSON editor fallback.
+        assert!(
+            s.derive_payload("ReserveNow", Scope::evse(1, None))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ut_apply_outbound_mirrors_accepted_profile_by_purpose() {
+        let mut s = ConnectorState::default();
+        let profile = |purpose: &str, limit: f64| {
+            serde_json::json!({
+                "evseId": 1,
+                "chargingProfile": {
+                    "chargingProfilePurpose": purpose,
+                    "chargingSchedule": [{
+                        "chargingRateUnit": "A",
+                        "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": limit }],
+                    }],
+                },
+            })
+        };
+        let accepted = serde_json::json!({ "status": "Accepted" });
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("TxDefaultProfile", 10.0),
+            &accepted,
+        );
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("ChargingStationMaxProfile", 32.0),
+            &accepted,
+        );
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("ChargingStationExternalConstraints", 20.0),
+            &accepted,
+        );
+        assert_eq!(s.default_limit, Some(10.0));
+        assert_eq!(s.max_limit, Some(32.0));
+        assert_eq!(s.external_limit, Some(20.0));
+        assert_eq!(s.limit, None);
+        // A rejected response is not mirrored.
+        s.apply_outbound(
+            "SetChargingProfile",
+            &profile("TxProfile", 16.0),
+            &serde_json::json!({ "status": "Rejected" }),
+        );
+        assert_eq!(s.limit, None);
+    }
+
+    #[test]
+    fn ut_limit_fields_are_readonly_and_stop_clears_only_tx() {
+        let mut s = ConnectorState::default();
+        // The mirror fields reject writes via the Lua/edit path.
+        assert!(!s.set_field("ChargeLimit", ValueType::Float(16.0)));
+        assert!(!s.set_field("DefaultChargeLimit", ValueType::Float(10.0)));
+        assert_eq!(s.limit, None);
+        // A stop (TransactionEvent Ended) clears only the transaction-scoped limit.
+        s.limit = Some(16.0);
+        s.default_limit = Some(10.0);
+        s.transaction_id = Some("7".to_string());
+        s.apply_inbound(
+            "TransactionEvent",
+            &serde_json::json!({ "eventType": "Ended" }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.transaction_id, None);
+        assert_eq!(s.limit, None);
+        assert_eq!(s.default_limit, Some(10.0));
+    }
+
+    #[test]
+    fn ut_cs_level_boot_and_derive() {
+        let mut s = CsLevelState::default();
+        s.apply_inbound(
+            "BootNotification",
+            &serde_json::json!({ "chargingStation": { "model": "M", "vendorName": "V" } }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.model, "M");
+        assert_eq!(s.vendor, "V");
+        assert_eq!(
+            s.derive_payload("Reset", Scope::CS).unwrap()["type"],
+            "Immediate"
+        );
+        assert!(s.derive_payload("UnlockConnector", Scope::CS).is_none());
+    }
+}

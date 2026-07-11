@@ -173,6 +173,9 @@ pub struct ActionDialog {
     #[focus(when = self.json_mode)]
     json: Widget<CodeInputFieldState, CodeInputField>,
     json_mode: bool,
+    /// Set when the JSON editor's content failed to parse on the last send attempt; cleared on
+    /// the next successful parse. Not part of the focus set — a status message, not a widget.
+    json_error: Option<String>,
     editor: Option<ValueEditor>,
     #[focus(when = self.assemble.is_some())]
     toggle: Widget<ButtonState, Button>,
@@ -251,10 +254,12 @@ impl ActionDialog {
         dlg
     }
 
-    /// Test-only accessor for the assembled payload (the real `payload` is private).
+    /// Test-only accessor for the assembled payload (the real `payload` is private). Panics if
+    /// the dialog holds unparsable JSON — callers exercising that path should call `payload()`
+    /// directly and assert on `None`/`json_error` instead.
     #[cfg(test)]
-    pub(crate) fn payload_for_test(&self) -> Value {
-        self.payload()
+    pub(crate) fn payload_for_test(&mut self) -> Value {
+        self.payload().expect("valid payload in test")
     }
 
     fn scaffold(
@@ -269,6 +274,7 @@ impl ActionDialog {
             table: prop_table(),
             json: json_editor(),
             json_mode: false,
+            json_error: None,
             editor: None,
             toggle: button("JSON"),
             send: button("Send"),
@@ -386,6 +392,9 @@ impl ActionDialog {
             self.json_mode = true;
             self.toggle = button("Table");
         }
+        // Freshly assembled/left content is either valid JSON or irrelevant; a stale parse
+        // error from a previous JSON-mode attempt must not linger across the mode switch.
+        self.json_error = None;
         // Sanctioned deviation from the old hand-rolled Focus: focus stays on the toggle
         // button after switching modes (previously it jumped back to the fields).
     }
@@ -435,12 +444,18 @@ impl ActionDialog {
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => self.focus_previous(),
             (KeyModifiers::NONE, KeyCode::Enter) => match self.focus {
                 ActionDialogFocus::Toggle => self.toggle_mode(),
-                ActionDialogFocus::Send => return Some(ActionResult::Send(self.payload())),
+                ActionDialogFocus::Send => {
+                    if let Some(payload) = self.payload() {
+                        return Some(ActionResult::Send(payload));
+                    }
+                }
                 ActionDialogFocus::Table | ActionDialogFocus::Json => self.open_editor(),
             },
             // Space clicks the focused button; on Send it transmits without closing the dialog.
             (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == ActionDialogFocus::Send => {
-                return Some(ActionResult::SendKeep(self.payload()));
+                if let Some(payload) = self.payload() {
+                    return Some(ActionResult::SendKeep(payload));
+                }
             }
             (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus == ActionDialogFocus::Toggle => {
                 self.toggle_mode()
@@ -461,12 +476,23 @@ impl ActionDialog {
         None
     }
 
-    /// The payload to send: parsed JSON (JSON mode) or assembled rows (table mode).
-    fn payload(&self) -> Value {
+    /// The payload to send: parsed JSON (JSON mode) or assembled rows (table mode). `None` means
+    /// the send must be aborted — JSON mode with unparsable content, which also sets
+    /// `json_error` for display rather than silently substituting `Value::Null`.
+    fn payload(&mut self) -> Option<Value> {
         if self.json_mode {
-            serde_json::from_str(&self.json.state.content()).unwrap_or(Value::Null)
+            match serde_json::from_str(&self.json.state.content()) {
+                Ok(v) => {
+                    self.json_error = None;
+                    Some(v)
+                }
+                Err(e) => {
+                    self.json_error = Some(e.to_string());
+                    None
+                }
+            }
         } else {
-            self.assemble_rows()
+            Some(self.assemble_rows())
         }
     }
 
@@ -494,10 +520,20 @@ impl ActionDialog {
             Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(inner);
 
         if self.json_mode {
+            let json_area = if let Some(err) = &self.json_error {
+                let [msg, rest] =
+                    Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(body);
+                ratatui::widgets::Paragraph::new(format!("Invalid JSON: {err}"))
+                    .style(Style::default().fg(COLOR_SCHEME.error))
+                    .render(msg, buf);
+                rest
+            } else {
+                body
+            };
             self.json
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Json);
-            StatefulWidget::render(&self.json.widget, body, buf, &mut self.json.state);
+            StatefulWidget::render(&self.json.widget, json_area, buf, &mut self.json.state);
         } else {
             self.table
                 .state
@@ -694,9 +730,12 @@ mod tests {
 
     #[test]
     fn assemble_coerces_kinds_and_prefills_state() {
-        let d = dialog();
+        let mut d = dialog();
         // connectorId prefilled from state (number), idTag from constant, optional note omitted.
-        assert_eq!(d.payload(), json!({ "connectorId": 2, "idTag": "ABC" }));
+        assert_eq!(
+            d.payload().unwrap(),
+            json!({ "connectorId": 2, "idTag": "ABC" })
+        );
     }
 
     #[test]
@@ -717,9 +756,9 @@ mod tests {
     #[test]
     fn set_charging_profile_charging_rate_unit_in_table() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
-        let d = ActionDialog::new("SetChargingProfile".into(), &s, |_| None, || "t".into());
+        let mut d = ActionDialog::new("SetChargingProfile".into(), &s, |_| None, || "t".into());
         assert_eq!(
-            d.payload()["csChargingProfiles"]["chargingSchedule"]["chargingRateUnit"],
+            d.payload().unwrap()["csChargingProfiles"]["chargingSchedule"]["chargingRateUnit"],
             "A"
         );
     }
@@ -751,9 +790,9 @@ mod tests {
             assemble: flat_object,
             complex: false,
         };
-        let d = ActionDialog::new("X".into(), &s, |_| None, || "t".into());
+        let mut d = ActionDialog::new("X".into(), &s, |_| None, || "t".into());
         assert!(
-            d.payload()["expiryDate"]
+            d.payload().unwrap()["expiryDate"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty())
         );
@@ -762,10 +801,46 @@ mod tests {
     #[test]
     fn json_toggle_matches_assembled_rows() {
         let mut d = dialog();
-        let assembled = d.payload();
+        let assembled = d.payload().unwrap();
         d.toggle_mode();
         assert!(d.json_mode);
-        assert_eq!(d.payload(), assembled);
+        assert_eq!(d.payload().unwrap(), assembled);
+    }
+
+    #[test]
+    fn malformed_json_aborts_send_and_sets_error() {
+        let mut d = ActionDialog::json_only("Custom".into(), "{}");
+        d.json.state.set_content("{ \"a\": 1, }"); // trailing comma: invalid JSON
+        assert!(d.json_error.is_none(), "no error until a send is attempted");
+
+        d.focus = ActionDialogFocus::Send;
+        let result = d.input(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            result.is_none(),
+            "malformed JSON must abort the send, not emit Send(Null)"
+        );
+        assert!(
+            d.json_error.is_some(),
+            "parse failure must be recorded for display"
+        );
+    }
+
+    #[test]
+    fn valid_json_send_clears_error_and_sends() {
+        let mut d = ActionDialog::json_only("Custom".into(), "{}");
+        d.json_error = Some("stale error from a previous attempt".into());
+        d.json.state.set_content("{ \"a\": 1 }");
+
+        d.focus = ActionDialogFocus::Send;
+        let result = d.input(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            matches!(result, Some(ActionResult::Send(v)) if v == json!({ "a": 1 })),
+            "valid JSON must still send normally"
+        );
+        assert!(
+            d.json_error.is_none(),
+            "a successful parse must clear any stale error"
+        );
     }
 
     #[test]
@@ -780,13 +855,13 @@ mod tests {
     fn send_button_emits_decodable_payload() {
         // Drive a real spec end-to-end: assemble must decode into the typed action.
         let s = crate::module::ocpp::spec::v1_6::action_spec("ChangeAvailability").unwrap();
-        let d = ActionDialog::new(
+        let mut d = ActionDialog::new(
             "ChangeAvailability".into(),
             &s,
             |f| (f == "ConnectorId").then(|| "1".to_string()),
             || "t".into(),
         );
-        let payload = d.payload();
+        let payload = d.payload().unwrap();
         assert_eq!(payload["connectorId"], 1);
         assert_eq!(payload["type"], "Operative");
         assert!(V1_6::decode_call("ChangeAvailability", payload).is_ok());
@@ -795,13 +870,13 @@ mod tests {
     #[test]
     fn nested_set_charging_profile_decodes() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
-        let d = ActionDialog::new(
+        let mut d = ActionDialog::new(
             "SetChargingProfile".into(),
             &s,
             |f| (f == "ConnectorId").then(|| "1".to_string()),
             || "t".into(),
         );
-        let payload = d.payload();
+        let payload = d.payload().unwrap();
         assert_eq!(payload["connectorId"], 1);
         assert_eq!(
             payload["csChargingProfiles"]["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"],
@@ -813,13 +888,13 @@ mod tests {
     #[test]
     fn nested_send_local_list_single_entry_decodes() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SendLocalList").unwrap();
-        let d = ActionDialog::new(
+        let mut d = ActionDialog::new(
             "SendLocalList".into(),
             &s,
             |f| (f == "Rfid").then(|| "TAG1".to_string()),
             || "t".into(),
         );
-        let payload = d.payload();
+        let payload = d.payload().unwrap();
         assert_eq!(payload["localAuthorizationList"][0]["idTag"], "TAG1");
         assert!(V1_6::decode_call("SendLocalList", payload).is_ok());
     }
@@ -828,18 +903,18 @@ mod tests {
     fn nested_json_toggle_round_trips() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
         let mut d = ActionDialog::new("SetChargingProfile".into(), &s, |_| None, || "t".into());
-        let assembled = d.payload();
+        let assembled = d.payload().unwrap();
         d.toggle_mode();
         assert!(d.json_mode);
-        assert_eq!(d.payload(), assembled);
+        assert_eq!(d.payload().unwrap(), assembled);
     }
 
     #[test]
     fn nested_notify_event_single_entry_decodes() {
         use ferrowl_ocpp::V2_0_1;
         let s = crate::module::ocpp::spec::v2_0_1::action_spec("NotifyEvent").unwrap();
-        let d = ActionDialog::new("NotifyEvent".into(), &s, |_| None, || "t".into());
-        let payload = d.payload();
+        let mut d = ActionDialog::new("NotifyEvent".into(), &s, |_| None, || "t".into());
+        let payload = d.payload().unwrap();
         assert!(
             payload["eventData"][0]["component"]["name"]
                 .as_str()
@@ -852,13 +927,13 @@ mod tests {
     fn nested_set_charging_profile_201_decodes() {
         use ferrowl_ocpp::V2_0_1;
         let s = crate::module::ocpp::spec::v2_0_1::action_spec("SetChargingProfile").unwrap();
-        let d = ActionDialog::new(
+        let mut d = ActionDialog::new(
             "SetChargingProfile".into(),
             &s,
             |f| (f == "EvseId").then(|| "1".to_string()),
             || "t".into(),
         );
-        let payload = d.payload();
+        let payload = d.payload().unwrap();
         assert_eq!(
             payload["chargingProfile"]["chargingSchedule"][0]["chargingSchedulePeriod"][0]["limit"],
             16

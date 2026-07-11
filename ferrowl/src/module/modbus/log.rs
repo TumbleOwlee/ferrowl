@@ -13,20 +13,38 @@ use crate::view::log::format_timestamp;
 /// `:log` takes effect on already-running modules.
 pub(crate) type FileSink = Arc<Mutex<Option<BufWriter<std::fs::File>>>>;
 
-/// Open (append) the per-module log file for `base`, or clear the sink when `base` is `None` or
-/// the file can't be opened.
-pub(crate) fn open_sink(sink: &FileSink, base: Option<&str>, name: &str) {
-    let writer = base.and_then(|base| {
+/// Open (append) the per-module log file for `base`, or clear the sink when `base` is `None`.
+/// Returns an error if the file can't be opened (in which case the sink is cleared).
+pub(crate) fn open_sink(
+    sink: &FileSink,
+    base: Option<&str>,
+    name: &str,
+) -> Result<(), std::io::Error> {
+    if let Some(base) = base {
         let path = module_log_path(base, name);
-        OpenOptions::new()
+        match OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
-            .ok()
-            .map(BufWriter::new)
-    });
-    if let Ok(mut guard) = sink.lock() {
-        *guard = writer;
+        {
+            Ok(file) => {
+                if let Ok(mut guard) = sink.lock() {
+                    *guard = Some(BufWriter::new(file));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if let Ok(mut guard) = sink.lock() {
+                    *guard = None;
+                }
+                Err(e)
+            }
+        }
+    } else {
+        if let Ok(mut guard) = sink.lock() {
+            *guard = None;
+        }
+        Ok(())
     }
 }
 
@@ -89,5 +107,49 @@ mod tests {
             module_log_path("out", "m"),
             std::path::PathBuf::from("out.m")
         );
+    }
+
+    #[test]
+    fn ut_open_sink_error_on_nonexistent_dir() {
+        use super::{open_sink, FileSink};
+
+        let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let result = open_sink(&sink, Some("/nonexistent/dir/base.log"), "test");
+        assert!(result.is_err());
+        // Verify sink was cleared on error.
+        let guard = sink.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn ut_open_sink_success_with_valid_dir() {
+        use super::{open_sink, FileSink};
+
+        let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let temp_dir = std::env::temp_dir();
+        let base = temp_dir
+            .join("ferrowl_test.log")
+            .to_string_lossy()
+            .into_owned();
+        let result = open_sink(&sink, Some(&base), "test");
+        assert!(result.is_ok());
+        // Verify sink has a writer.
+        let guard = sink.lock().unwrap();
+        assert!(guard.is_some());
+        drop(guard);
+        // Cleanup.
+        let _ = std::fs::remove_file(temp_dir.join("ferrowl_test.test.log"));
+    }
+
+    #[test]
+    fn ut_open_sink_clears_on_none_base() {
+        use super::{open_sink, FileSink};
+
+        let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let result = open_sink(&sink, None, "test");
+        assert!(result.is_ok());
+        // Verify sink remains None.
+        let guard = sink.lock().unwrap();
+        assert!(guard.is_none());
     }
 }

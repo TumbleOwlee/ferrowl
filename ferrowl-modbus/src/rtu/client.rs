@@ -1,7 +1,7 @@
-use crate::client_core::{ClientCore, INITIAL_BACKOFF, MAX_BACKOFF};
+use crate::client_core::{ClientCore, ConnectAttempt};
 use crate::common::serial_config_from;
 use crate::rtu::Config;
-use crate::{Command, Error, Key, KeyParams, LogFn, Operation, RunConfig, SerialError};
+use crate::{Command, Error, Key, KeyParams, LogFn, Operation, SerialError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
@@ -45,7 +45,7 @@ impl<T: KeyParams> ClientBuilder<T> {
     /// exactly as before this behavior was added.
     pub async fn spawn<L, S>(
         &self,
-        mut receiver: Receiver<Command>,
+        receiver: Receiver<Command>,
         log: L,
         status: S,
     ) -> Result<JoinHandle<Result<(), Error>>, Error>
@@ -57,71 +57,22 @@ impl<T: KeyParams> ClientBuilder<T> {
         let operations = self.operations.clone();
         let memory = self.memory.clone();
         Ok(tokio::task::spawn(async move {
-            let mut backoff = INITIAL_BACKOFF;
-            loop {
-                let guard = config.read().await;
-                let reconnect = guard.reconnect;
-                let run_config = RunConfig {
-                    log: log.clone(),
-                    status: status.clone(),
-                    timeout_ms: guard.timeout_ms,
-                    delay_ms: guard.delay_ms,
-                    interval_ms: guard.interval_ms,
-                };
-                let connected = Client::connect(&guard).await;
-                drop(guard);
-
-                let client = match connected {
-                    Ok(client) => client,
-                    Err(e) => {
-                        if !reconnect {
-                            log.invoke(format!("{e} Reconnect disabled; client stopping."))
-                                .await;
-                            status.invoke("Client disconnected".to_string()).await;
-                            return Err(e);
-                        }
-                        log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
-                            .await;
-                        if ClientCore::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
-                            status.invoke("Client disconnected".to_string()).await;
-                            return Ok(());
-                        }
-                        backoff = (backoff * 2).min(MAX_BACKOFF);
-                        continue;
-                    }
-                };
-
-                let (had_success, result) = client
-                    .core
-                    .run::<T, _, _>(
-                        operations.clone(),
-                        memory.clone(),
-                        &mut receiver,
-                        run_config,
-                    )
-                    .await;
-                match result {
-                    Ok(()) => return Ok(()),
-                    Err(e) => {
-                        if !reconnect {
-                            // run() already logged the underlying disconnect; just surface the
-                            // status change before the task ends.
-                            status.invoke("Client disconnected".to_string()).await;
-                            return Err(e);
-                        }
-                        if had_success {
-                            backoff = INITIAL_BACKOFF;
-                        }
-                        log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
-                            .await;
-                        if ClientCore::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
-                            status.invoke("Client disconnected".to_string()).await;
-                            return Ok(());
-                        }
-                        backoff = (backoff * 2).min(MAX_BACKOFF);
-                    }
+            ClientCore::run_reconnect_loop(receiver, log, status, operations, memory, move || {
+                let config = config.clone();
+                async move {
+                    let guard = config.read().await;
+                    let attempt = ConnectAttempt {
+                        reconnect: guard.reconnect,
+                        timeout_ms: guard.timeout_ms,
+                        delay_ms: guard.delay_ms,
+                        interval_ms: guard.interval_ms,
+                        client: Client::connect(&guard).await.map(|client| client.core),
+                    };
+                    drop(guard);
+                    attempt
                 }
-            }
+            })
+            .await
         }))
     }
 }

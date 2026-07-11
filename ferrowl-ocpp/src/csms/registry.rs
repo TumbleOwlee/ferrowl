@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use tokio::sync::mpsc;
 
 use super::command::ConnCommand;
@@ -57,27 +58,21 @@ impl<V: Version> ConnectionRegistry<V> {
     ) {
         self.connections
             .write()
-            .unwrap()
             .insert(id, ConnectionHandle { cmd_tx, identity });
     }
 
     pub(crate) fn remove(&self, id: ConnectionId) {
-        self.connections.write().unwrap().remove(&id);
+        self.connections.write().remove(&id);
     }
 
     pub(crate) fn sender(&self, id: ConnectionId) -> Option<mpsc::Sender<ConnCommand<V>>> {
-        self.connections
-            .read()
-            .unwrap()
-            .get(&id)
-            .map(|h| h.cmd_tx.clone())
+        self.connections.read().get(&id).map(|h| h.cmd_tx.clone())
     }
 
     /// Senders for every live connection (for broadcast).
     pub(crate) fn all_senders(&self) -> Vec<mpsc::Sender<ConnCommand<V>>> {
         self.connections
             .read()
-            .unwrap()
             .values()
             .map(|h| h.cmd_tx.clone())
             .collect()
@@ -85,14 +80,13 @@ impl<V: Version> ConnectionRegistry<V> {
 
     /// Snapshot of currently connected ids.
     pub fn connection_ids(&self) -> Vec<ConnectionId> {
-        self.connections.read().unwrap().keys().copied().collect()
+        self.connections.read().keys().copied().collect()
     }
 
     /// The charge-point identity for a connection, if one was provided at handshake.
     pub fn identity(&self, id: ConnectionId) -> Option<String> {
         self.connections
             .read()
-            .unwrap()
             .get(&id)
             .and_then(|h| h.identity.clone())
     }

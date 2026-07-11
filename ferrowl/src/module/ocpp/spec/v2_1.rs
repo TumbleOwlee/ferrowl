@@ -634,7 +634,7 @@ mod tests {
             let Some(spec) = action_spec(name) else {
                 continue;
             };
-            let dialog = ActionDialog::filled_for_test(name.to_string(), &spec);
+            let mut dialog = ActionDialog::filled_for_test(name.to_string(), &spec);
             let payload = dialog.payload_for_test();
             assert!(
                 V2_1::decode_call(name, payload.clone()).is_ok(),

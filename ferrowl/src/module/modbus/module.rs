@@ -121,7 +121,7 @@ impl ModbusModule {
         let log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
 
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
-        open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
+        let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
         let timing = Self::resolve_timing(device);
         let net_config = endpoint_to_config(&spec.endpoint, &timing);
@@ -158,8 +158,9 @@ impl ModbusModule {
 
     /// (Re)point this module's log file at `base` (None disables file logging). The filename is
     /// `<stem>.<tab-name>.<ext>` next to `base`. Takes effect on already-running modules.
-    pub fn set_log_base(&self, base: Option<&str>) {
-        open_sink(&self.file_sink, base, &self.name);
+    /// Returns an error if the file can't be opened.
+    pub fn set_log_base(&self, base: Option<&str>) -> Result<(), std::io::Error> {
+        open_sink(&self.file_sink, base, &self.name)
     }
 
     pub fn memory(&self) -> ModuleMemory {
@@ -471,9 +472,9 @@ mod tests {
         module.remove_register_by_name("new");
         assert_eq!(module.registers().len(), 2);
 
-        // Log-base reconfiguration: clear, then point at a fresh (unwritable) path.
-        module.set_log_base(None);
-        module.set_log_base(Some("/no/such/ferrowl/dir/base.log"));
+        // Log-base reconfiguration: clear, then attempt a path that fails.
+        assert!(module.set_log_base(None).is_ok());
+        assert!(module.set_log_base(Some("/no/such/ferrowl/dir/base.log")).is_err());
     }
 
     #[test]

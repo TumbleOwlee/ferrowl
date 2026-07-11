@@ -47,24 +47,17 @@ where
     /// access kinds on overlapping cells are widened to `ReadWrite` (a read
     /// range over a write cell, or vice versa). Returns `false` if an overlap
     /// has an incompatible register [`CellType`] or access combination, in which
-    /// case the memory may be left partially updated.
+    /// case `self`'s memory for `id` is left completely unchanged -- the call
+    /// is all-or-nothing even when `ranges` has multiple entries.
     pub fn add_ranges(&mut self, id: K, kind: &CellKind, ranges: &[Range]) -> bool {
-        let mut ranges = ranges.iter().sorted_by(|r1, r2| r1.start.cmp(&r2.start));
-        match self.slices.entry(id.clone()) {
-            std::collections::hash_map::Entry::Vacant(e) => {
-                if let Some(r) = ranges.next() {
-                    let mut m = BTreeMap::new();
-                    m.insert(r.clone(), Slice::from_range(kind, r.clone()));
-                    e.insert(m);
-                }
-            }
-            std::collections::hash_map::Entry::Occupied(_) => {}
-        }
+        let ranges = ranges.iter().sorted_by(|r1, r2| r1.start.cmp(&r2.start));
 
-        // Only `None` when the entry was vacant and `ranges` was empty: nothing to do.
-        let Some(m) = self.slices.get_mut(&id) else {
-            return true;
-        };
+        // Work on a private copy of the device's slice map so an incompatible
+        // overlap found partway through `ranges` can abort without leaving
+        // `self.slices` partially merged. The copy also lets range N in this
+        // call see the merged result of range N-1, matching the sequential
+        // semantics multiple `add_ranges` calls would have.
+        let mut m = self.slices.get(&id).cloned().unwrap_or_default();
         for r in ranges {
             let val = m.iter_mut().find(|(range, _)| r.intersect(range).is_some());
             if let Some((range, _)) = val {
@@ -86,6 +79,7 @@ where
                             (Cell::Write(t1, v1), CellKind::Read(t2)) if t1 == t2 => {
                                 slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
                             }
+                            // `self.slices` still holds the pre-call map: safe to bail here.
                             _ => return false,
                         }
                     }
@@ -100,6 +94,11 @@ where
             } else {
                 m.insert(r.clone(), Slice::from_range(kind, r.clone()));
             }
+        }
+
+        // Every range validated and merged cleanly against the copy: commit it.
+        if !m.is_empty() {
+            self.slices.insert(id, m);
         }
         true
     }
@@ -590,6 +589,90 @@ mod tests {
             &CellKind::Read(CellType::Register),
             &[Range::new(0, 5)]
         ));
+    }
+
+    #[test]
+    fn ut_memory_add_ranges_partial_failure_leaves_map_untouched() {
+        // Multi-range call: range1 merges cleanly, range2 hits an incompatible
+        // overlap. The whole call must fail atomically -- range1's merge must
+        // not have been committed to `self.slices`.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 10)]);
+        memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(20, 10)]);
+
+        let before = format!("{:?}", memory.slices.get(&1u8).unwrap());
+
+        // range1 = [5,15) overlaps the Read(Coil) slice compatibly (widens to
+        // ReadWrite); range2 = [20,30) overlaps the Write(Coil) slice with an
+        // incompatible type (Register vs Coil) and must fail the whole call.
+        let ok = memory.add_ranges(
+            1u8,
+            &CellKind::Read(CellType::Register),
+            &[Range::new(5, 10), Range::new(20, 10)],
+        );
+        assert!(!ok);
+
+        let after = format!("{:?}", memory.slices.get(&1u8).unwrap());
+        assert_eq!(before, after);
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(0, 10))
+                .is_ok()
+        );
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(0, 10))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ut_memory_add_ranges_partial_failure_third_range_leaves_map_untouched() {
+        // Three ranges in one call: range1 and range2 each merge cleanly
+        // against separate pre-existing slices (range2 merging against a
+        // snapshot that already reflects range1's merge), then range3 hits
+        // an incompatible overlap. The whole call must fail atomically, with
+        // none of range1's or range2's merges committed either.
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 10)]);
+        memory.add_ranges(
+            1u8,
+            &CellKind::Write(CellType::Coil),
+            &[Range::new(10, 10)],
+        );
+        memory.add_ranges(
+            1u8,
+            &CellKind::Write(CellType::Coil),
+            &[Range::new(30, 10)],
+        );
+
+        let before = format!("{:?}", memory.slices.get(&1u8).unwrap());
+
+        // range1 = [5,15) widens the Read(Coil)/Write(Coil) slices at [0,10)
+        // and [10,20) (compatible, merges into one ReadWrite run). range2 =
+        // [20,25) is a fresh disjoint insert. range3 = [30,40) overlaps the
+        // Write(Coil) slice at [30,40) with an incompatible Register type.
+        let ok = memory.add_ranges(
+            1u8,
+            &CellKind::Read(CellType::Register),
+            &[Range::new(5, 10), Range::new(20, 5), Range::new(30, 10)],
+        );
+        assert!(!ok);
+
+        let after = format!("{:?}", memory.slices.get(&1u8).unwrap());
+        assert_eq!(before, after, "map must be untouched after a failing call");
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(10, 10))
+                .is_ok(),
+            "range1's merge must not have been committed"
+        );
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(20, 5))
+                .is_err(),
+            "range2's fresh insert must not have been committed"
+        );
     }
 
     #[test]

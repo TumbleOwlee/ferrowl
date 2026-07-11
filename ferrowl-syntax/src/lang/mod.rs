@@ -2,6 +2,7 @@
 
 pub(crate) mod json;
 pub(crate) mod lua;
+mod scan;
 
 use crate::{LineState, SyntaxKind};
 

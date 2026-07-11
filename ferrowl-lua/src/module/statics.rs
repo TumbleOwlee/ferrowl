@@ -10,7 +10,6 @@ use mlua::{Result, UserData};
 /// Exposed Lua method: `Get(name)` — returns the stored constant as the
 /// matching Lua type (number / string / boolean), erroring if the key is
 /// missing.
-#[allow(dead_code)]
 #[derive(Default, Module)]
 #[module = "C_Statics"]
 pub struct Statics {

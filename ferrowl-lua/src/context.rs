@@ -30,9 +30,6 @@ where
 
     /// Enable support of standard libraries in lua context
     pub fn enable_stdlib(&mut self) -> Result<()> {
-        self.lua.load_std_libs(StdLib::STRING)?;
-        self.lua.load_std_libs(StdLib::MATH)?;
-        self.lua.load_std_libs(StdLib::TABLE)?;
         self.lua.load_std_libs(StdLib::ALL_SAFE)?;
         Ok(())
     }
@@ -67,21 +64,19 @@ where
 
     /// Execute a loaded script specified by specific key
     pub fn call(&mut self, key: &K) -> Result<()> {
-        self.iter_mut()
-            .filter(|(k, _)| *k == key)
-            .map(|(_, v)| v.exec())
-            .find(|r| r.is_err())
-            .unwrap_or(Ok(()))
+        match self.scripts.get_mut(key) {
+            Some(script) => script.exec(),
+            None => Ok(()),
+        }
     }
 
     /// Execute a loaded script specified by specific key while skipping it if it has been executed
     /// in the last timeframe of given duration
     pub fn refresh(&mut self, key: &K, since: std::time::Duration) -> Result<()> {
-        self.iter_mut()
-            .filter(|(k, v)| *k == key && v.since_last_execution() >= since)
-            .map(|(_, v)| v.exec())
-            .find(|r| r.is_err())
-            .unwrap_or(Ok(()))
+        match self.scripts.get_mut(key) {
+            Some(script) if script.since_last_execution() >= since => script.exec(),
+            _ => Ok(()),
+        }
     }
 
     /// Execute all loaded scripts

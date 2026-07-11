@@ -1,5 +1,10 @@
 //! The single declarative macro that materializes a whole OCPP version.
 
+// `define_ocpp_version!` interleaves a generated `#[cfg(test)]` drift-check module with the
+// test-only helpers (`ocpp_validate_flag!`, `validate_probe`, `ocpp_has_validate!`) that support
+// it; that's intentional, not accidental item ordering.
+#![allow(clippy::items_after_test_module)]
+
 /// Expand to the per-variant validation arm. `rust_ocpp` derives `validator::Validate` on only
 /// some request types, so each table row declares `yes` (call `Validate::validate`) or `no`
 /// (skip). This is fully deterministic — no specialization tricks — and degrades safely if a
@@ -126,7 +131,81 @@ macro_rules! define_ocpp_version {
                 }
             }
         }
+
+        // Catches drift between each row's hand-maintained `yes`/`no` validate flag and whether
+        // the request type actually derives `validator::Validate` (see `ocpp_validate_arm!`'s
+        // doc comment — this exact drift bit 24 v2.0.1 actions previously).
+        #[cfg(test)]
+        mod ut_validate_flags {
+            #[test]
+            fn ut_validate_flag_matches_request_type() {
+                $(
+                    assert_eq!(
+                        $crate::action::macros::ocpp_validate_flag!($validate),
+                        $crate::action::macros::ocpp_has_validate!($req),
+                        "{}: table says validate = {}, but request type's actual Validate impl says {}",
+                        stringify!($variant),
+                        stringify!($validate),
+                        $crate::action::macros::ocpp_has_validate!($req),
+                    );
+                )+
+            }
+        }
     };
 }
 
 pub(crate) use define_ocpp_version;
+
+/// Expand the `yes`/`no` table tag to the matching `bool` literal, for tests that compare the
+/// hand-maintained flag against the request type's actual `validator::Validate` impl.
+#[cfg(test)]
+macro_rules! ocpp_validate_flag {
+    (yes) => {
+        true
+    };
+    (no) => {
+        false
+    };
+}
+
+#[cfg(test)]
+pub(crate) use ocpp_validate_flag;
+
+/// Autoref-specialization probe: detects, for a concrete type, whether it implements
+/// `validator::Validate` — without nightly specialization. This only resolves correctly when
+/// `$t` is concrete at the expansion site (trait selection for an unresolved generic parameter
+/// can't be specialized this way), which holds here since `define_ocpp_version!` expands one
+/// arm per action with `$req` bound to a concrete `rust_ocpp` path.
+///
+/// `(&<$t>::default()).__ferrowl_probe_validate()` picks whichever of the two `Probe*` impls is
+/// more specific for `$t`: `ProbeValidate` (blanket on bare `T: Validate`) is an exact by-value
+/// match and wins over `ProbeDefault` (blanket on `&T`, reached only via extra autoref), so it
+/// resolves to `ProbeValidate` exactly when `$t: Validate`.
+#[cfg(test)]
+pub(crate) mod validate_probe {
+    pub trait ProbeDefault {
+        fn __ferrowl_probe_validate(&self) -> bool {
+            false
+        }
+    }
+    impl<T> ProbeDefault for &T {}
+
+    pub trait ProbeValidate {
+        fn __ferrowl_probe_validate(&self) -> bool {
+            true
+        }
+    }
+    impl<T: ::validator::Validate> ProbeValidate for T {}
+}
+
+#[cfg(test)]
+macro_rules! ocpp_has_validate {
+    ($t:ty) => {{
+        #[allow(unused_imports)]
+        use $crate::action::macros::validate_probe::{ProbeDefault, ProbeValidate};
+        (&<$t>::default()).__ferrowl_probe_validate()
+    }};
+}
+
+#[cfg(test)]
+pub(crate) use ocpp_has_validate;

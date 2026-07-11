@@ -205,3 +205,138 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::Arc;
+
+    use ferrowl_modbus::{Command, FunctionCode, Key, Operation, SlaveKey, tcp};
+    use ferrowl_store::Range;
+    use parking_lot::RwLock as MemLock;
+    use tokio::sync::RwLock;
+
+    /// No-op log/status sink satisfying `LogFn + Clone`.
+    fn sink() -> impl LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    /// A `tcp::Config` pointed at a local port nothing is listening on. `start()` still
+    /// succeeds (spawn itself never touches the network) — only the spawned task's
+    /// internal reconnect loop sees the refused connection.
+    fn dead_tcp_config() -> tcp::Config {
+        tcp::Config {
+            ip: "127.0.0.1".to_string(),
+            port: free_port(),
+            timeout_ms: 200,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        }
+    }
+
+    fn tcp_client_instance() -> Instance<SlaveKey> {
+        let operations = Arc::new(RwLock::new(vec![Operation {
+            slave_id: 1,
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 2),
+        }]));
+        Instance::with_tcp_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_tcp_config())),
+            operations,
+            memory: Arc::new(MemLock::new(ferrowl_store::Memory::<Key<SlaveKey>>::default())),
+        })
+    }
+
+    #[tokio::test]
+    async fn start_twice_is_already_active() {
+        let mut instance = tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("first start");
+        assert!(instance.active());
+
+        let err = instance.start(sink(), sink()).await.unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::AlreadyActive)));
+
+        instance.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test]
+    async fn stop_never_started_is_not_running() {
+        let mut instance = tcp_client_instance();
+        let err = instance.stop().await.unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::NotRunning)));
+    }
+
+    #[tokio::test]
+    async fn send_command_never_started_is_not_running() {
+        let instance = tcp_client_instance();
+        let err = instance
+            .send_command(Command::Terminate)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::NotRunning)));
+    }
+
+    /// `send_command` on a server-role handle must reject with `InvalidOperation`. A real
+    /// server would need a bound TCP listener; instead we construct the `Handle::Server`
+    /// variant directly (both are in-crate types), which exercises exactly the same
+    /// branch in `send_command` without any real I/O.
+    #[tokio::test]
+    async fn send_command_on_server_is_invalid_operation() {
+        let mut instance = tcp_client_instance();
+        let task = tokio::spawn(async { Ok(()) });
+        instance.handle = Some(handle::Handle::Server(handle::ServerHandle { handle: task }));
+
+        let err = instance
+            .send_command(Command::Terminate)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::InvalidOperation)));
+
+        instance.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test]
+    async fn graceful_stop_deactivates_instance() {
+        let mut instance = tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
+    }
+
+    #[tokio::test]
+    async fn active_reflects_finished_task() {
+        let mut instance = tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+
+        // Force the client task to exit on its own by telling it to terminate, then give
+        // it a moment to actually finish, without going through `stop()`'s bookkeeping.
+        instance
+            .send_command(Command::Terminate)
+            .await
+            .expect("send terminate");
+        for _ in 0..50 {
+            if !instance.active() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        assert!(!instance.active());
+
+        // `stop()` on an already-finished task still tears down bookkeeping cleanly.
+        instance.stop().await.expect("stop after natural finish");
+    }
+}

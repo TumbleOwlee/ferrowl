@@ -342,6 +342,33 @@ impl Default for LuaHelpOverlay {
     }
 }
 
+/// Outcome of [`route_lua_help`]: whether the overlay was open, so the caller knows whether to
+/// keep routing the key itself.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LuaHelpOutcome {
+    /// No overlay was open; the key wasn't touched, the caller should route it itself.
+    NotActive,
+    /// The overlay captured the key (closing itself if applicable); the caller should stop
+    /// routing this key further.
+    Consumed,
+}
+
+/// Feed one key through `lua_help`, if the Lua bindings overlay is currently open. Clears
+/// `*lua_help` when [`LuaHelpOverlay::handle_key`] reports the overlay should close.
+pub fn route_lua_help(
+    lua_help: &mut Option<LuaHelpOverlay>,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+) -> LuaHelpOutcome {
+    let Some(help) = lua_help.as_mut() else {
+        return LuaHelpOutcome::NotActive;
+    };
+    if help.handle_key(modifiers, code) {
+        *lua_help = None;
+    }
+    LuaHelpOutcome::Consumed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,5 +532,37 @@ mod tests {
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Char('x')));
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Enter));
         assert!(!overlay.handle_key(KeyModifiers::NONE, KeyCode::Tab));
+    }
+
+    // --- route_lua_help -------------------------------------------------
+
+    #[test]
+    fn ut_route_not_active_when_none() {
+        let mut lua_help: Option<LuaHelpOverlay> = None;
+        assert_eq!(
+            route_lua_help(&mut lua_help, KeyModifiers::NONE, KeyCode::Char('q')),
+            LuaHelpOutcome::NotActive
+        );
+        assert!(lua_help.is_none());
+    }
+
+    #[test]
+    fn ut_route_close_key_clears_overlay() {
+        let mut lua_help = Some(LuaHelpOverlay::new());
+        assert_eq!(
+            route_lua_help(&mut lua_help, KeyModifiers::NONE, KeyCode::Esc),
+            LuaHelpOutcome::Consumed
+        );
+        assert!(lua_help.is_none());
+    }
+
+    #[test]
+    fn ut_route_other_key_stays_open_and_consumed() {
+        let mut lua_help = Some(LuaHelpOverlay::new());
+        assert_eq!(
+            route_lua_help(&mut lua_help, KeyModifiers::NONE, KeyCode::Char('j')),
+            LuaHelpOutcome::Consumed
+        );
+        assert!(lua_help.is_some());
     }
 }

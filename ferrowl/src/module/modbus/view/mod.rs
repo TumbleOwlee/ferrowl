@@ -592,10 +592,14 @@ impl ModuleView for ModbusModuleView {
             let file = file.trim().to_string();
             return Box::pin(async move {
                 self.device.log_file = Some(file.clone());
-                self.module.set_log_base(Some(&file));
-                CommandResult::Handled(Some(format!(
-                    "Logging to files based on {file} (':wd' to persist)"
-                )))
+                match self.module.set_log_base(Some(&file)) {
+                    Ok(()) => CommandResult::Handled(Some(format!(
+                        "Logging to files based on {file} (':wd' to persist)"
+                    ))),
+                    Err(e) => CommandResult::Handled(Some(format!(
+                        "Failed to open log file {file}: {e}"
+                    ))),
+                }
             });
         }
 

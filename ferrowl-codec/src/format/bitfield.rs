@@ -35,6 +35,18 @@ impl BitField {
     pub fn is_full(&self) -> bool {
         self.mask == u128::MAX
     }
+
+    /// Whether `mask` fits within the low `bits` bits, i.e. sets no bit at or
+    /// above position `bits`. `bits >= 128` always fits (`u128`/`i128`). The
+    /// full-width default (`u128::MAX`) is always considered to fit, since it
+    /// is the no-op sentinel narrowed to any format's width when applied.
+    pub fn fits(&self, bits: u32) -> bool {
+        if self.is_full() {
+            return true;
+        }
+        let limit = if bits >= 128 { u128::MAX } else { (1u128 << bits) - 1 };
+        self.mask <= limit
+    }
 }
 
 impl std::fmt::Display for BitField {
@@ -56,5 +68,17 @@ mod tests {
         assert_eq!(BitField { mask: 0xFF00 }.shift(), 8);
         assert!(!BitField { mask: 0xFF00 }.is_full());
         assert_eq!(BitField { mask: 0xABCD }.to_string(), "0xABCD");
+    }
+
+    #[test]
+    fn ut_bitfield_fits() {
+        assert!(BitField { mask: 0xFF }.fits(8));
+        assert!(!BitField { mask: 0x1FF }.fits(8));
+        assert!(!BitField { mask: 0xFF00 }.fits(8));
+        assert!(BitField { mask: u128::MAX }.fits(128));
+        // The full-width sentinel always fits: it is narrowed to each
+        // format's own width when applied, regardless of `bits`.
+        assert!(BitField::default().fits(128));
+        assert!(BitField::default().fits(8));
     }
 }

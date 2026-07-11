@@ -359,7 +359,7 @@ pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream>
 
 #[cfg(test)]
 mod tests {
-    use super::expand_focus;
+    use super::{expand_focus, expand_focusable};
 
     #[test]
     fn rejects_struct_with_no_focus_fields() {
@@ -374,6 +374,101 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "Focus derive requires at least one #[focus] field"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_focus_attribute_syntax() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(invalid syntax)]
+                field: Widget,
+            }
+        };
+
+        let err = expand_focus(input)
+            .expect_err("expected invalid focus attribute syntax to be rejected");
+        assert!(
+            err.to_string()
+                .contains("Invalid syntax for #[focus] attribute")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_focus_attribute_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(unknown = some_value)]
+                field: Widget,
+            }
+        };
+
+        let err =
+            expand_focus(input).expect_err("expected unknown focus key to be rejected");
+        assert!(
+            err.to_string()
+                .contains("Invalid argument for #[focus] attribute")
+        );
+    }
+
+    #[test]
+    fn rejects_focus_on_unnamed_field() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView(
+                #[focus]
+                Widget,
+            );
+        };
+
+        let err = expand_focus(input).expect_err("expected unnamed field to be rejected");
+        assert!(
+            err.to_string()
+                .contains("FocusSwitch only works on named fields with ident")
+        );
+    }
+
+    #[test]
+    fn rejects_focus_derive_on_enum() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestEnum {
+                #[focus]
+                Variant,
+            }
+        };
+
+        let err = expand_focus(input).expect_err("expected enum to be rejected");
+        assert!(
+            err.to_string()
+                .contains("Focus can only be derived for structs")
+        );
+    }
+
+    #[test]
+    fn rejects_focusable_on_enum() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestEnum {
+                Variant,
+            }
+        };
+
+        let err = expand_focusable(input).expect_err("expected focusable on enum to be rejected");
+        assert!(
+            err.to_string()
+                .contains("#[focusable] can only be applied to structs")
+        );
+    }
+
+    #[test]
+    fn rejects_focusable_on_tuple_struct() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView(Widget, Widget);
+        };
+
+        let err =
+            expand_focusable(input).expect_err("expected focusable on tuple struct to be rejected");
+        assert!(
+            err.to_string()
+                .contains("#[focusable] only works on structs with named fields")
         );
     }
 }

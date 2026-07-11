@@ -28,6 +28,11 @@ fn expand_tilde(input: &str, home: Option<&Path>) -> PathBuf {
 ///
 /// Returns `(completed path in the user's prefix form, is_dir)` pairs, directories first, then
 /// files, each group sorted alphabetically, capped at `max` entries.
+///
+/// Filesystem errors (e.g., missing directory, permission denied) are silently treated as
+/// "no suggestions" rather than surfaced as errors. This is intentional: callers implement
+/// the [`SuggestionProvider`] trait, which has no error channel (only returns `Vec<Suggestion>`),
+/// and autocomplete widgets must never interrupt user typing with error dialogs.
 pub fn complete_path(input: &str, extensions: Option<&[&str]>, max: usize) -> Vec<(String, bool)> {
     let (dir_part, partial) = match input.rfind('/') {
         Some(idx) => (&input[..=idx], &input[idx + 1..]),
@@ -43,6 +48,8 @@ pub fn complete_path(input: &str, extensions: Option<&[&str]>, max: usize) -> Ve
 
     let entries = match std::fs::read_dir(&read_dir_path) {
         Ok(e) => e,
+        // Directory doesn't exist or isn't readable: intentional silent fallback to no suggestions.
+        // See function doc comment for rationale.
         Err(_) => return Vec::new(),
     };
 

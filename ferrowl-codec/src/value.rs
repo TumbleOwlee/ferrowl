@@ -24,20 +24,26 @@ pub enum UnscaledValue {
 
 impl std::fmt::Display for UnscaledValue {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Every variant just forwards its inner value's own Display.
+        macro_rules! disp {
+            ($v:expr) => {
+                write!(fmt, "{}", $v)
+            };
+        }
         match self {
-            Self::U8(v) => write!(fmt, "{}", v),
-            Self::U16(v) => write!(fmt, "{}", v),
-            Self::U32(v) => write!(fmt, "{}", v),
-            Self::U64(v) => write!(fmt, "{}", v),
-            Self::U128(v) => write!(fmt, "{}", v),
-            Self::I8(v) => write!(fmt, "{}", v),
-            Self::I16(v) => write!(fmt, "{}", v),
-            Self::I32(v) => write!(fmt, "{}", v),
-            Self::I64(v) => write!(fmt, "{}", v),
-            Self::I128(v) => write!(fmt, "{}", v),
-            Self::F32(v) => write!(fmt, "{}", v),
-            Self::F64(v) => write!(fmt, "{}", v),
-            Self::Ascii(v) => write!(fmt, "{}", v),
+            Self::U8(v) => disp!(v),
+            Self::U16(v) => disp!(v),
+            Self::U32(v) => disp!(v),
+            Self::U64(v) => disp!(v),
+            Self::U128(v) => disp!(v),
+            Self::I8(v) => disp!(v),
+            Self::I16(v) => disp!(v),
+            Self::I32(v) => disp!(v),
+            Self::I64(v) => disp!(v),
+            Self::I128(v) => disp!(v),
+            Self::F32(v) => disp!(v),
+            Self::F64(v) => disp!(v),
+            Self::Ascii(v) => disp!(v),
         }
     }
 }
@@ -93,19 +99,25 @@ impl std::fmt::Display for Value {
 
 impl Value {
     pub fn unscaled(self) -> UnscaledValue {
+        // Drops the resolution, keeping the same variant and raw value.
+        macro_rules! unscaled {
+            ($variant:ident, $v:expr) => {
+                UnscaledValue::$variant($v)
+            };
+        }
         match self {
-            Self::U8((v, _r)) => UnscaledValue::U8(v),
-            Self::U16((v, _r)) => UnscaledValue::U16(v),
-            Self::U32((v, _r)) => UnscaledValue::U32(v),
-            Self::U64((v, _r)) => UnscaledValue::U64(v),
-            Self::U128((v, _r)) => UnscaledValue::U128(v),
-            Self::I8((v, _r)) => UnscaledValue::I8(v),
-            Self::I16((v, _r)) => UnscaledValue::I16(v),
-            Self::I32((v, _r)) => UnscaledValue::I32(v),
-            Self::I64((v, _r)) => UnscaledValue::I64(v),
-            Self::I128((v, _r)) => UnscaledValue::I128(v),
-            Self::F32((v, _r)) => UnscaledValue::F32(v),
-            Self::F64((v, _r)) => UnscaledValue::F64(v),
+            Self::U8((v, _r)) => unscaled!(U8, v),
+            Self::U16((v, _r)) => unscaled!(U16, v),
+            Self::U32((v, _r)) => unscaled!(U32, v),
+            Self::U64((v, _r)) => unscaled!(U64, v),
+            Self::U128((v, _r)) => unscaled!(U128, v),
+            Self::I8((v, _r)) => unscaled!(I8, v),
+            Self::I16((v, _r)) => unscaled!(I16, v),
+            Self::I32((v, _r)) => unscaled!(I32, v),
+            Self::I64((v, _r)) => unscaled!(I64, v),
+            Self::I128((v, _r)) => unscaled!(I128, v),
+            Self::F32((v, _r)) => unscaled!(F32, v),
+            Self::F64((v, _r)) => unscaled!(F64, v),
             Self::Ascii(v) => UnscaledValue::Ascii(v),
         }
     }

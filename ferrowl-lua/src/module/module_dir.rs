@@ -245,7 +245,7 @@ mod tests {
             }
         }
         fn connectors(&self) -> Vec<i64> {
-            self.conns.lock().unwrap().keys().map(|k| *k).collect()
+            self.conns.lock().unwrap().keys().copied().collect()
         }
     }
 

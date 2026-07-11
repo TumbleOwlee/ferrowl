@@ -1598,7 +1598,7 @@ mod tests {
             };
             // Fields whose default source is Empty but are required must be filled to decode; give
             // every required-text field a placeholder so the structural check is meaningful.
-            let dialog = ActionDialog::filled_for_test(name.to_string(), &spec);
+            let mut dialog = ActionDialog::filled_for_test(name.to_string(), &spec);
             let payload = dialog.payload_for_test();
             assert!(
                 V2_0_1::decode_call(name, payload.clone()).is_ok(),

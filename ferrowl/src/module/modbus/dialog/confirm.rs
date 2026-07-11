@@ -1,10 +1,12 @@
 //! Yes/no confirmation dialog guarding register deletion.
 
+use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
     state::{ButtonState, ButtonStateBuilder},
     style::{ButtonStyle, TextStyle},
+    traits::HandleEvents,
     widgets::{Button, ButtonBuilder, Text, TextBuilder, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -14,6 +16,62 @@ use ratatui::{
     widgets::{Block, StatefulWidget, Widget as UiWidget},
 };
 use std::fmt::Debug;
+
+/// Outcome of [`route_delete_confirm`]: whether a delete-confirmation popup was open, and if so,
+/// whether the caller should now perform the delete.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeleteConfirmOutcome {
+    /// No confirm popup was open; the key wasn't touched, the caller should route it itself.
+    NotActive,
+    /// The user confirmed: the caller should now delete the selected item.
+    Confirmed,
+    /// The popup captured the key (or was just dismissed/navigated) and the caller should stop
+    /// routing this key further.
+    Consumed,
+}
+
+/// Feed one key through `confirm`, if a delete-confirmation popup is currently open. Esc cancels,
+/// Tab/BackTab switch focus, Enter/Space selects the focused button (clearing the popup either
+/// way); anything else is offered to the popup's own event handling. Returns
+/// [`DeleteConfirmOutcome::Confirmed`] when the DELETE button was selected — the caller is
+/// responsible for performing the delete, since this popup carries no reference to the item it
+/// guards.
+pub fn route_delete_confirm(
+    confirm: &mut Option<ConfirmDeleteDialog>,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+) -> DeleteConfirmOutcome {
+    let Some(c) = confirm.as_mut() else {
+        return DeleteConfirmOutcome::NotActive;
+    };
+    match (modifiers, code) {
+        (KeyModifiers::NONE, KeyCode::Esc) => {
+            *confirm = None;
+            DeleteConfirmOutcome::Consumed
+        }
+        (KeyModifiers::NONE, KeyCode::Tab) => {
+            c.focus_next();
+            DeleteConfirmOutcome::Consumed
+        }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+            c.focus_previous();
+            DeleteConfirmOutcome::Consumed
+        }
+        (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) => {
+            let confirmed = c.is_confirm_focused();
+            *confirm = None;
+            if confirmed {
+                DeleteConfirmOutcome::Confirmed
+            } else {
+                DeleteConfirmOutcome::Consumed
+            }
+        }
+        _ => {
+            let _ = c.handle_events(modifiers, code);
+            DeleteConfirmOutcome::Consumed
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // ConfirmDeleteDialog — small inline yes/no box guarding register deletion
@@ -188,5 +246,75 @@ impl ConfirmDeleteDialog {
             buf,
             &mut self.keybinds.state,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_route_not_active_when_none() {
+        let mut confirm: Option<ConfirmDeleteDialog> = None;
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Enter),
+            DeleteConfirmOutcome::NotActive
+        );
+    }
+
+    #[test]
+    fn ut_route_esc_cancels_and_clears() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Esc),
+            DeleteConfirmOutcome::Consumed
+        );
+        assert!(confirm.is_none());
+    }
+
+    #[test]
+    fn ut_route_enter_on_cancel_focused_is_consumed_not_confirmed() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Enter),
+            DeleteConfirmOutcome::Consumed
+        );
+        assert!(confirm.is_none());
+    }
+
+    #[test]
+    fn ut_route_tab_then_enter_confirms() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Tab),
+            DeleteConfirmOutcome::Consumed
+        );
+        assert!(confirm.is_some());
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Enter),
+            DeleteConfirmOutcome::Confirmed
+        );
+        assert!(confirm.is_none());
+    }
+
+    #[test]
+    fn ut_route_space_confirms_when_delete_focused() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        confirm.as_mut().unwrap().focus_next();
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Char(' ')),
+            DeleteConfirmOutcome::Confirmed
+        );
+        assert!(confirm.is_none());
+    }
+
+    #[test]
+    fn ut_route_other_key_stays_open() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        assert_eq!(
+            route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Char('x')),
+            DeleteConfirmOutcome::Consumed
+        );
+        assert!(confirm.is_some());
     }
 }

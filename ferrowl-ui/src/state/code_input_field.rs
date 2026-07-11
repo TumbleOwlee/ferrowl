@@ -173,6 +173,43 @@ impl CodeInputFieldState {
         }
     }
 
+    /// Inserts `text` at character index `idx` on `line`, converting to a
+    /// byte offset via `char_indices` so multi-byte characters splice
+    /// correctly. `idx` past the end of the line inserts at its end.
+    fn insert_at(&mut self, line: usize, idx: usize, text: &str) {
+        let target = &self.lines[line];
+        let byte_idx = target
+            .char_indices()
+            .nth(idx)
+            .map(|(b, _)| b)
+            .unwrap_or(target.len());
+        self.lines[line].insert_str(byte_idx, text);
+    }
+
+    /// Removes the charwise range `start..end` (exclusive) on `line` and
+    /// returns the removed text, so callers that need it for yank/undo
+    /// registers don't have to re-slice. Out-of-range bounds clamp instead
+    /// of panicking.
+    fn remove_range(&mut self, line: usize, start: usize, end: usize) -> String {
+        let target = &self.lines[line];
+        let len = target.chars().count();
+        let end = end.min(len);
+        let start = start.min(end);
+        let start_b = target
+            .char_indices()
+            .nth(start)
+            .map(|(b, _)| b)
+            .unwrap_or(target.len());
+        let end_b = target
+            .char_indices()
+            .nth(end)
+            .map(|(b, _)| b)
+            .unwrap_or(target.len());
+        let removed = target[start_b..end_b].to_string();
+        self.lines[line].replace_range(start_b..end_b, "");
+        removed
+    }
+
     fn snapshot_undo(&mut self) {
         self.undo = Some((self.lines.clone(), self.active_line, self.cursor_col));
     }
@@ -267,6 +304,8 @@ impl CodeInputFieldState {
             }
             self.cursor_col = 0;
         } else {
+            // Splice can cross lines (start.0 != end.0), so this stays a manual
+            // splice rather than remove_range, which only handles one line.
             let first: Vec<char> = self.lines[start.0].chars().collect();
             let last: Vec<char> = self.lines[end.0].chars().collect();
             let to = (end.1 + 1).min(last.len());
@@ -313,21 +352,19 @@ impl CodeInputFieldState {
             self.cursor_col = 0;
         } else {
             let parts: Vec<&str> = text.split('\n').collect();
-            let chars: Vec<char> = self.lines[self.active_line].chars().collect();
+            let line_len = self.lines[self.active_line].chars().count();
             let insert_col = if after {
-                (self.cursor_col + 1).min(chars.len())
+                (self.cursor_col + 1).min(line_len)
             } else {
                 self.cursor_col
             };
             if parts.len() == 1 {
-                let insert_chars: Vec<char> = parts[0].chars().collect();
-                let mut new_chars = Vec::with_capacity(chars.len() + insert_chars.len());
-                new_chars.extend_from_slice(&chars[..insert_col]);
-                new_chars.extend_from_slice(&insert_chars);
-                new_chars.extend_from_slice(&chars[insert_col..]);
-                self.lines[self.active_line] = new_chars.into_iter().collect();
-                self.cursor_col = insert_col + insert_chars.len().saturating_sub(1);
+                self.insert_at(self.active_line, insert_col, parts[0]);
+                self.cursor_col = insert_col + parts[0].chars().count().saturating_sub(1);
             } else {
+                // Genuine multi-line splice (paste text spans multiple lines): doesn't
+                // fit the single-line insert_at/remove_range helpers.
+                let chars: Vec<char> = self.lines[self.active_line].chars().collect();
                 let before: String = chars[..insert_col].iter().collect();
                 let tail: String = chars[insert_col..].iter().collect();
                 let first_line = format!("{before}{}", parts[0]);
@@ -508,16 +545,9 @@ impl CodeInputFieldState {
                     let len = self.lines[self.active_line].chars().count();
                     if len > 0 {
                         self.snapshot_undo();
-                        let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                        let removed = chars[self.cursor_col];
-                        let new_line: String = chars
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| *i != self.cursor_col)
-                            .map(|(_, c)| *c)
-                            .collect();
-                        self.lines[self.active_line] = new_line;
-                        self.set_register(removed.to_string(), false);
+                        let removed =
+                            self.remove_range(self.active_line, self.cursor_col, self.cursor_col + 1);
+                        self.set_register(removed, false);
                         self.clamp_normal();
                     }
                 }
@@ -686,12 +716,7 @@ impl CodeInputFieldState {
             }
             (KeyModifiers::NONE, KeyCode::Tab) => {
                 self.last_space = None;
-                let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                let mut new_chars = Vec::with_capacity(chars.len() + 4);
-                new_chars.extend_from_slice(&chars[..self.cursor_col]);
-                new_chars.extend([' ', ' ', ' ', ' ']);
-                new_chars.extend_from_slice(&chars[self.cursor_col..]);
-                self.lines[self.active_line] = new_chars.into_iter().collect();
+                self.insert_at(self.active_line, self.cursor_col, "    ");
                 self.cursor_col += 4;
                 EventResult::Consumed
             }
@@ -703,8 +728,7 @@ impl CodeInputFieldState {
                     .count()
                     .min(4);
                 if leading > 0 {
-                    self.lines[self.active_line] =
-                        self.lines[self.active_line].chars().skip(leading).collect();
+                    self.remove_range(self.active_line, 0, leading);
                     self.cursor_col = self.cursor_col.saturating_sub(leading);
                 }
                 EventResult::Consumed
@@ -826,14 +850,7 @@ impl CodeInputFieldState {
             }
             (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
                 if self.cursor_col > 0 {
-                    let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                    let new_line: String = chars
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != self.cursor_col - 1)
-                        .map(|(_, c)| *c)
-                        .collect();
-                    self.lines[self.active_line] = new_line;
+                    self.remove_range(self.active_line, self.cursor_col - 1, self.cursor_col);
                     self.cursor_col -= 1;
                 } else if self.active_line > 0 {
                     let current = self.lines.remove(self.active_line);
@@ -846,14 +863,7 @@ impl CodeInputFieldState {
             (KeyModifiers::NONE, KeyCode::Delete) if !self.disabled => {
                 let line_len = self.lines[self.active_line].chars().count();
                 if self.cursor_col < line_len {
-                    let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                    let new_line: String = chars
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != self.cursor_col)
-                        .map(|(_, c)| *c)
-                        .collect();
-                    self.lines[self.active_line] = new_line;
+                    self.remove_range(self.active_line, self.cursor_col, self.cursor_col + 1);
                 } else if self.active_line + 1 < self.lines.len() {
                     let next = self.lines.remove(self.active_line + 1);
                     self.lines[self.active_line].push_str(&next);
@@ -867,22 +877,12 @@ impl CodeInputFieldState {
                     && col == self.cursor_col
                     && at.elapsed() <= threshold
                 {
-                    let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                    let mut new_chars = Vec::with_capacity(chars.len() + 3);
-                    new_chars.extend_from_slice(&chars[..self.cursor_col]);
-                    new_chars.extend([' ', ' ', ' ']);
-                    new_chars.extend_from_slice(&chars[self.cursor_col..]);
-                    self.lines[self.active_line] = new_chars.into_iter().collect();
+                    self.insert_at(self.active_line, self.cursor_col, "   ");
                     self.cursor_col += 3;
                     self.last_space = None;
                     return EventResult::Consumed;
                 }
-                let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                let mut new_chars = Vec::with_capacity(chars.len() + 1);
-                new_chars.extend_from_slice(&chars[..self.cursor_col]);
-                new_chars.push(' ');
-                new_chars.extend_from_slice(&chars[self.cursor_col..]);
-                self.lines[self.active_line] = new_chars.into_iter().collect();
+                self.insert_at(self.active_line, self.cursor_col, " ");
                 self.cursor_col += 1;
                 if self.space_indent.is_some() {
                     self.last_space = Some((Instant::now(), self.active_line, self.cursor_col));
@@ -890,12 +890,7 @@ impl CodeInputFieldState {
                 EventResult::Consumed
             }
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) if !self.disabled => {
-                let chars: Vec<char> = self.lines[self.active_line].chars().collect();
-                let mut new_chars = Vec::with_capacity(chars.len() + 1);
-                new_chars.extend_from_slice(&chars[..self.cursor_col]);
-                new_chars.push(c);
-                new_chars.extend_from_slice(&chars[self.cursor_col..]);
-                self.lines[self.active_line] = new_chars.into_iter().collect();
+                self.insert_at(self.active_line, self.cursor_col, &c.to_string());
                 self.cursor_col += 1;
                 EventResult::Consumed
             }

@@ -40,8 +40,7 @@ where
         methods.add_method(action, move |_, this, args: Option<Table>| {
             match table_to_overrides(args) {
                 Ok(overrides) => Ok(handle(this).dispatch(action, overrides)),
-                // Bad argument shape (e.g. a non-scalar override value) -> false, not a raise.
-                Err(_) => Ok(false),
+                Err(e) => Err(e),
             }
         });
     }
@@ -318,7 +317,7 @@ mod tests {
             }
         }
         fn connectors(&self) -> Vec<i64> {
-            self.conns.borrow().keys().map(|k| *k).collect()
+            self.conns.borrow().keys().copied().collect()
         }
     }
 
@@ -469,5 +468,25 @@ mod tests {
                 .borrow()
                 .contains(&("cp002/1".to_string(), "StartTransaction".to_string()))
         );
+    }
+
+    #[test]
+    fn ut_malformed_override_table_propagates_error() {
+        let handle = MockHandle::default();
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(Ocpp::init(handle.clone()))
+            .with_script(
+                "s".to_string(),
+                r#"
+                -- Table value (non-scalar) in override should cause error.
+                result = C_OCPP:StartTransaction({key = {nested = "table"}})
+                "#,
+            )
+            .build()
+            .expect("build context");
+
+        let errors = ctx.call_all().expect_err("expected error from malformed table");
+        assert!(!errors.is_empty(), "expected at least one error from malformed override table");
     }
 }

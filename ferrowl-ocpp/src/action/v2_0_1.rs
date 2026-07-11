@@ -156,4 +156,107 @@ mod tests {
         assert_eq!(scope("SetChargingProfile"), Required);
         assert_eq!(scope("ClearCache"), None);
     }
+
+    #[test]
+    fn ut_round_trip_boot_notification() {
+        use ::rust_ocpp::v2_0_1::datatypes::charging_station::ChargingStationType;
+        use ::rust_ocpp::v2_0_1::enumerations::boot_reason::BootReasonEnumType;
+        use ::rust_ocpp::v2_0_1::enumerations::registration_status::RegistrationStatusEnumType;
+        use ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationResponse;
+
+        let req = ::rust_ocpp::v2_0_1::messages::boot_notification::BootNotificationRequest {
+            charging_station: ChargingStationType {
+                model: "Model-X".into(),
+                vendor_name: "Acme".into(),
+                ..Default::default()
+            },
+            reason: BootReasonEnumType::PowerUp,
+            ..Default::default()
+        };
+        let action = Action::BootNotification(Box::new(req));
+        let payload = V2_0_1::encode_action(&action).unwrap();
+        let decoded = V2_0_1::decode_call("BootNotification", payload).unwrap();
+        assert_eq!(decoded, action);
+
+        let resp = BootNotificationResponse {
+            interval: 300,
+            status: RegistrationStatusEnumType::Accepted,
+            ..Default::default()
+        };
+        let response = Response::BootNotification(Box::new(resp));
+        let payload = V2_0_1::encode_response(&response).unwrap();
+        let decoded = V2_0_1::decode_result(&action, payload).unwrap();
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn ut_round_trip_meter_values() {
+        use ::rust_ocpp::v2_0_1::datatypes::meter_value::MeterValueType;
+        use ::rust_ocpp::v2_0_1::datatypes::sampled_value::SampledValueType;
+        use ::rust_ocpp::v2_0_1::messages::meter_values::MeterValuesRequest;
+
+        let sampled = SampledValueType::default();
+        let meter_value = MeterValueType {
+            sampled_value: vec![sampled],
+            ..Default::default()
+        };
+        let req = MeterValuesRequest {
+            evse_id: 1,
+            meter_value: vec![meter_value],
+            ..Default::default()
+        };
+        let action = Action::MeterValues(Box::new(req));
+        let payload = V2_0_1::encode_action(&action).unwrap();
+        let decoded = V2_0_1::decode_call("MeterValues", payload).unwrap();
+        assert_eq!(decoded, action);
+    }
+
+    #[test]
+    fn ut_round_trip_authorize() {
+        use ::rust_ocpp::v2_0_1::datatypes::id_token::IdTokenType;
+        use ::rust_ocpp::v2_0_1::enumerations::id_token::IdTokenEnumType;
+        use ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeRequest;
+
+        let req = AuthorizeRequest {
+            id_token: IdTokenType {
+                id_token: "DEADBEEF".into(),
+                kind: IdTokenEnumType::ISO14443,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let action = Action::Authorize(Box::new(req));
+        assert!(V2_0_1::validate(&action).is_ok());
+        let payload = V2_0_1::encode_action(&action).unwrap();
+        let decoded = V2_0_1::decode_call("Authorize", payload).unwrap();
+        assert_eq!(decoded, action);
+    }
+
+    #[test]
+    fn ut_validate_rejects_authorize_certificate_too_long() {
+        use ::rust_ocpp::v2_0_1::datatypes::id_token::IdTokenType;
+        use ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeRequest;
+
+        // `certificate` is capped at 5500 chars by `AuthorizeRequest`'s `Validate` impl.
+        let req = AuthorizeRequest {
+            certificate: Some("A".repeat(5501)),
+            id_token: IdTokenType::default(),
+            ..Default::default()
+        };
+        let action = Action::Authorize(Box::new(req));
+        assert!(V2_0_1::validate(&action).is_err());
+    }
+
+    #[test]
+    fn ut_validate_rejects_datatransfer_vendor_id_too_long() {
+        use ::rust_ocpp::v2_0_1::messages::datatransfer::DataTransferRequest;
+
+        // `vendor_id` is capped at 255 chars by `DataTransferRequest`'s `Validate` impl.
+        let req = DataTransferRequest {
+            vendor_id: "V".repeat(256),
+            ..Default::default()
+        };
+        let action = Action::DataTransfer(Box::new(req));
+        assert!(V2_0_1::validate(&action).is_err());
+    }
 }

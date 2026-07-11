@@ -250,21 +250,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_ui_derive::TableEntry;
+    use crate as ferrowl_ui;
 
-    #[derive(Clone, Default, Debug, PartialEq)]
-    struct Row(String);
-
-    impl TableEntry<1> for Row {
-        fn values(&self) -> [String; 1] {
-            [self.0.clone()]
-        }
-        fn height(&self) -> u16 {
-            1
-        }
+    #[derive(Clone, Default, Debug, PartialEq, TableEntry)]
+    struct Row {
+        #[column(name = "Value", min = 1, max = 100)]
+        value: String,
     }
 
     fn table(n: usize) -> TableState<Row, 1> {
-        let values = (0..n).map(|i| Row(i.to_string())).collect::<Vec<_>>();
+        let values = (0..n).map(|i| Row { value: i.to_string() }).collect::<Vec<_>>();
         TableStateBuilder::default().values(values).build().unwrap()
     }
 
@@ -360,7 +356,7 @@ mod tests {
         let mut s = table(0);
         s.move_down(); // empty -> selection becomes None
         assert_eq!(selected(&s), None);
-        s.set_values(vec![Row("a".into()), Row("b".into())]);
+        s.set_values(vec![Row { value: "a".into() }, Row { value: "b".into() }]);
         assert_eq!(selected(&s), Some(0));
     }
 
@@ -369,7 +365,7 @@ mod tests {
         let mut s = table(5);
         s.move_to_bottom();
         assert_eq!(selected(&s), Some(4));
-        s.set_values(vec![Row("a".into()), Row("b".into()), Row("c".into())]);
+        s.set_values(vec![Row { value: "a".into() }, Row { value: "b".into() }, Row { value: "c".into() }]);
         assert_eq!(selected(&s), Some(2));
     }
 
@@ -386,7 +382,7 @@ mod tests {
         s.move_down();
         s.move_down();
         assert_eq!(selected(&s), Some(2));
-        s.set_values((0..5).map(|i| Row(format!("x{i}"))).collect());
+        s.set_values((0..5).map(|i| Row { value: format!("x{i}") }).collect());
         assert_eq!(selected(&s), Some(2));
     }
 

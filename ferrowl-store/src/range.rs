@@ -255,4 +255,19 @@ mod tests {
         assert_eq!(format!("{}", Range::new(10, 5)), "[10, 15)");
         assert_eq!(format!("{}", Range::new(0, 0)), "[0, 0)");
     }
+
+    #[test]
+    fn ut_range_deserialize_invalid_end_lt_start() {
+        let json = r#"{"start": 10, "end": 5}"#;
+        let result = serde_json::from_str::<Range>(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("invalid Range"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Range::new: start + size overflows usize")]
+    fn ut_range_new_overflow() {
+        let _ = Range::new(usize::MAX, 1);
+    }
 }

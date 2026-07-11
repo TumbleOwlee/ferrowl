@@ -5,8 +5,9 @@
 //! completes entries) and the per-call awaiter tasks (which register and wait).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -30,26 +31,26 @@ impl PendingCalls {
     /// Register interest in the reply to `id`, returning the receiver to await.
     pub fn register(&self, id: UniqueId) -> oneshot::Receiver<CallOutcome> {
         let (tx, rx) = oneshot::channel();
-        self.inner.lock().unwrap().insert(id, tx);
+        self.inner.lock().insert(id, tx);
         rx
     }
 
     /// Complete the entry for `id` with `outcome`. No-op (does not panic) if `id` is unknown or
     /// its waiter already dropped.
     pub fn complete(&self, id: &UniqueId, outcome: CallOutcome) {
-        if let Some(tx) = self.inner.lock().unwrap().remove(id) {
+        if let Some(tx) = self.inner.lock().remove(id) {
             let _ = tx.send(outcome);
         }
     }
 
     /// Forget the entry for `id` without completing it (e.g. on timeout).
     pub fn remove(&self, id: &UniqueId) {
-        self.inner.lock().unwrap().remove(id);
+        self.inner.lock().remove(id);
     }
 
     /// Drop every pending entry, signaling each waiter that the connection is gone.
     pub fn fail_all(&self, err: &CallError) {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = self.inner.lock();
         for (_, tx) in guard.drain() {
             let _ = tx.send(Err(err.clone()));
         }

@@ -29,7 +29,7 @@ where
     /// Enables raw mode, enters the alternate screen, and sets up the
     /// ratatui terminal.
     pub fn new() -> Result<Self, std::io::Error> {
-        enable_raw_mode().unwrap();
+        enable_raw_mode()?;
 
         // Setup output
         let mut output = W::init();
@@ -70,13 +70,12 @@ where
 {
     fn drop(&mut self) {
         // restore terminal
-        disable_raw_mode().expect("Disable raw mode failed.");
-        execute!(
+        let _ = disable_raw_mode();
+        let _ = execute!(
             self.terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture
-        )
-        .expect("Failed to leave alternate screen.");
-        self.terminal.show_cursor().expect("Failed to show cursor.");
+        );
+        let _ = self.terminal.show_cursor();
     }
 }

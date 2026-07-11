@@ -22,4 +22,8 @@ pub enum CodecError {
     /// variant that does not match the target `Format`'s variant.
     #[error("Value does not match format {0:?}")]
     ValueFormatMismatch(Format),
+    /// A [`BitField`](crate::format::BitField)'s mask sets bits outside the
+    /// format's own integer width (e.g. a mask of `0x1FF` on a `Format::U8`).
+    #[error("Bit field mask does not fit format {0:?}")]
+    BitFieldWidth(Format),
 }

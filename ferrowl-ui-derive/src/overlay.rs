@@ -162,3 +162,91 @@ pub fn expand_overlay(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::expand_overlay;
+
+    #[test]
+    fn rejects_non_enum() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct NotAnEnum {
+                field: u32,
+            }
+        };
+
+        let err = expand_overlay(input).expect_err("expected non-enum to be rejected");
+        assert_eq!(err.to_string(), "Overlay can only be derived for enums");
+    }
+
+    #[test]
+    fn rejects_unknown_overlay_attribute() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestOverlay {
+                #[overlay(invalid_key)]
+                SomeVariant,
+                #[overlay(none)]
+                None,
+            }
+        };
+
+        let err = expand_overlay(input).expect_err("expected unknown attribute to be rejected");
+        assert!(
+            err.to_string().contains("unknown `overlay` key"),
+            "Error message should mention unknown key, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rejects_none_on_non_unit_variant() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestOverlay {
+                #[overlay(none)]
+                None(u32),
+            }
+        };
+
+        let err = expand_overlay(input).expect_err("expected non-unit none variant to be rejected");
+        assert_eq!(
+            err.to_string(),
+            "`#[overlay(none)]` variant must be a unit variant"
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_none_variants() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestOverlay {
+                #[overlay(none)]
+                None1,
+                #[overlay(none)]
+                None2,
+            }
+        };
+
+        let err = expand_overlay(input).expect_err("expected multiple none variants to be rejected");
+        assert_eq!(
+            err.to_string(),
+            "only one `#[overlay(none)]` variant is allowed"
+        );
+    }
+
+    #[test]
+    fn rejects_esc_close_without_single_field() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            enum TestOverlay {
+                #[overlay(esc_close)]
+                BadVariant(u32, u32),
+                #[overlay(none)]
+                None,
+            }
+        };
+
+        let err = expand_overlay(input).expect_err("expected multi-field esc_close variant to be rejected");
+        assert_eq!(
+            err.to_string(),
+            "an `esc_close`/`focus_cycle` overlay variant must hold exactly one field"
+        );
+    }
+}

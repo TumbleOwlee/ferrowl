@@ -44,17 +44,54 @@ pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
                 Ok(Value::$variant((field, $r.clone())))
             }};
         }
+        macro_rules! check_width {
+            ($bf:expr, $bits:expr) => {
+                if !$bf.fits($bits) {
+                    return Err(CodecError::BitFieldWidth(format.clone()));
+                }
+            };
+        }
         match format {
-            Format::U8((e, r, bf)) => decode_byte!(U8, u8, e, r, bf),
-            Format::I8((e, r, bf)) => decode_byte!(I8, i8, e, r, bf),
-            Format::U16((e, r, bf)) => decode_int!(U16, u16, u16, e, r, bf),
-            Format::U32((e, r, bf)) => decode_int!(U32, u32, u32, e, r, bf),
-            Format::U64((e, r, bf)) => decode_int!(U64, u64, u64, e, r, bf),
-            Format::U128((e, r, bf)) => decode_int!(U128, u128, u128, e, r, bf),
-            Format::I16((e, r, bf)) => decode_int!(I16, u16, i16, e, r, bf),
-            Format::I32((e, r, bf)) => decode_int!(I32, u32, i32, e, r, bf),
-            Format::I64((e, r, bf)) => decode_int!(I64, u64, i64, e, r, bf),
-            Format::I128((e, r, bf)) => decode_int!(I128, u128, i128, e, r, bf),
+            Format::U8((e, r, bf)) => {
+                check_width!(bf, 8);
+                decode_byte!(U8, u8, e, r, bf)
+            }
+            Format::I8((e, r, bf)) => {
+                check_width!(bf, 8);
+                decode_byte!(I8, i8, e, r, bf)
+            }
+            Format::U16((e, r, bf)) => {
+                check_width!(bf, 16);
+                decode_int!(U16, u16, u16, e, r, bf)
+            }
+            Format::U32((e, r, bf)) => {
+                check_width!(bf, 32);
+                decode_int!(U32, u32, u32, e, r, bf)
+            }
+            Format::U64((e, r, bf)) => {
+                check_width!(bf, 64);
+                decode_int!(U64, u64, u64, e, r, bf)
+            }
+            Format::U128((e, r, bf)) => {
+                check_width!(bf, 128);
+                decode_int!(U128, u128, u128, e, r, bf)
+            }
+            Format::I16((e, r, bf)) => {
+                check_width!(bf, 16);
+                decode_int!(I16, u16, i16, e, r, bf)
+            }
+            Format::I32((e, r, bf)) => {
+                check_width!(bf, 32);
+                decode_int!(I32, u32, i32, e, r, bf)
+            }
+            Format::I64((e, r, bf)) => {
+                check_width!(bf, 64);
+                decode_int!(I64, u64, i64, e, r, bf)
+            }
+            Format::I128((e, r, bf)) => {
+                check_width!(bf, 128);
+                decode_int!(I128, u128, i128, e, r, bf)
+            }
             Format::F32((e, r)) => {
                 let u: u32 = match e {
                     Endian::Big => bytes.parse(),
@@ -128,7 +165,10 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
             Ok(Value::F64((val, r.clone())))
         }
         Format::Ascii(_) => Ok(Value::Ascii(s.to_string())),
-        Format::U8((_, r, _)) => {
+        Format::U8((_, r, bf)) => {
+            if !bf.fits(8) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
             let val: u8 = if let Some(s) = s.strip_prefix("0x") {
                 u8::from_str_radix(s, 16)?
             } else {
@@ -136,11 +176,34 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
             };
             Ok(Value::U8((val, r.clone())))
         }
-        Format::U16((_, r, _)) => parse_uint!(U16, u16, r, s),
-        Format::U32((_, r, _)) => parse_uint!(U32, u32, r, s),
-        Format::U64((_, r, _)) => parse_uint!(U64, u64, r, s),
-        Format::U128((_, r, _)) => parse_uint!(U128, u128, r, s),
-        Format::I8((_, r, _)) => {
+        Format::U16((_, r, bf)) => {
+            if !bf.fits(16) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_uint!(U16, u16, r, s)
+        }
+        Format::U32((_, r, bf)) => {
+            if !bf.fits(32) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_uint!(U32, u32, r, s)
+        }
+        Format::U64((_, r, bf)) => {
+            if !bf.fits(64) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_uint!(U64, u64, r, s)
+        }
+        Format::U128((_, r, bf)) => {
+            if !bf.fits(128) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_uint!(U128, u128, r, s)
+        }
+        Format::I8((_, r, bf)) => {
+            if !bf.fits(8) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
             let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
                 (u8::from_str_radix(s, 16)? as i8).wrapping_neg()
             } else if let Some(s) = s.strip_prefix("0x") {
@@ -150,10 +213,30 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
             };
             Ok(Value::I8((val, r.clone())))
         }
-        Format::I16((_, r, _)) => parse_int!(I16, i16, u16, r, s),
-        Format::I32((_, r, _)) => parse_int!(I32, i32, u32, r, s),
-        Format::I64((_, r, _)) => parse_int!(I64, i64, u64, r, s),
-        Format::I128((_, r, _)) => parse_int!(I128, i128, u128, r, s),
+        Format::I16((_, r, bf)) => {
+            if !bf.fits(16) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_int!(I16, i16, u16, r, s)
+        }
+        Format::I32((_, r, bf)) => {
+            if !bf.fits(32) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_int!(I32, i32, u32, r, s)
+        }
+        Format::I64((_, r, bf)) => {
+            if !bf.fits(64) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_int!(I64, i64, u64, r, s)
+        }
+        Format::I128((_, r, bf)) => {
+            if !bf.fits(128) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            parse_int!(I128, i128, u128, r, s)
+        }
     }
 }
 
@@ -241,34 +324,84 @@ pub fn encode_value(format: &Format, value: &Value) -> Result<Vec<u16>, CodecErr
             }
             _ => Err(mismatch()),
         },
-        Format::U8((e, _, bf)) => match value {
-            Value::U8((val, _)) => {
-                let val = (((*val as u128) << bf.shift()) & bf.mask) as u8;
-                Ok(match e {
-                    Endian::Big => vec![val as u16],
-                    Endian::Little => vec![(val as u16) << 8],
-                })
+        Format::U8((e, _, bf)) => {
+            if !bf.fits(8) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
             }
-            _ => Err(mismatch()),
-        },
-        Format::U16((e, _, bf)) => encode_uint!(U16, u16, e, bf),
-        Format::U32((e, _, bf)) => encode_uint!(U32, u32, e, bf),
-        Format::U64((e, _, bf)) => encode_uint!(U64, u64, e, bf),
-        Format::U128((e, _, bf)) => encode_uint!(U128, u128, e, bf),
-        Format::I8((e, _, bf)) => match value {
-            Value::I8((val, _)) => {
-                let val = (((((*val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
-                Ok(match e {
-                    Endian::Big => vec![val as u16],
-                    Endian::Little => vec![(val as u16) << 8],
-                })
+            match value {
+                Value::U8((val, _)) => {
+                    let val = (((*val as u128) << bf.shift()) & bf.mask) as u8;
+                    Ok(match e {
+                        Endian::Big => vec![val as u16],
+                        Endian::Little => vec![(val as u16) << 8],
+                    })
+                }
+                _ => Err(mismatch()),
             }
-            _ => Err(mismatch()),
-        },
-        Format::I16((e, _, bf)) => encode_int!(I16, i16, u16, e, bf),
-        Format::I32((e, _, bf)) => encode_int!(I32, i32, u32, e, bf),
-        Format::I64((e, _, bf)) => encode_int!(I64, i64, u64, e, bf),
-        Format::I128((e, _, bf)) => encode_int!(I128, i128, u128, e, bf),
+        }
+        Format::U16((e, _, bf)) => {
+            if !bf.fits(16) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_uint!(U16, u16, e, bf)
+        }
+        Format::U32((e, _, bf)) => {
+            if !bf.fits(32) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_uint!(U32, u32, e, bf)
+        }
+        Format::U64((e, _, bf)) => {
+            if !bf.fits(64) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_uint!(U64, u64, e, bf)
+        }
+        Format::U128((e, _, bf)) => {
+            if !bf.fits(128) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_uint!(U128, u128, e, bf)
+        }
+        Format::I8((e, _, bf)) => {
+            if !bf.fits(8) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            match value {
+                Value::I8((val, _)) => {
+                    let val = (((((*val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
+                    Ok(match e {
+                        Endian::Big => vec![val as u16],
+                        Endian::Little => vec![(val as u16) << 8],
+                    })
+                }
+                _ => Err(mismatch()),
+            }
+        }
+        Format::I16((e, _, bf)) => {
+            if !bf.fits(16) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_int!(I16, i16, u16, e, bf)
+        }
+        Format::I32((e, _, bf)) => {
+            if !bf.fits(32) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_int!(I32, i32, u32, e, bf)
+        }
+        Format::I64((e, _, bf)) => {
+            if !bf.fits(64) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_int!(I64, i64, u64, e, bf)
+        }
+        Format::I128((e, _, bf)) => {
+            if !bf.fits(128) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            encode_int!(I128, i128, u128, e, bf)
+        }
     }
 }
 
@@ -304,7 +437,7 @@ pub fn mask_words(format: &Format) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::{encode, encode_value};
+    use crate::codec::{decode, encode, encode_value};
     use crate::format::{Alignment, BitField, Endian, Format, Resolution, Width};
     use crate::value::Value;
     use crate::{CodecError, Register, RegisterBuilder};
@@ -970,6 +1103,39 @@ mod tests {
                 _ => panic!("Wrong variant"),
             }
         }
+    }
+
+    // --- Bit-field mask width validation ---
+
+    #[test]
+    fn ut_decode_bitfield_mask_out_of_width_errors() {
+        // 0x1FF on a U8 sets bit 8, outside the 8-bit width.
+        let format = Format::U8((Endian::Big, res(), BitField { mask: 0x1FF }));
+        let err = decode(&format, &[0x0001]).unwrap_err();
+        assert!(matches!(err, CodecError::BitFieldWidth(_)));
+
+        // 0xFF00 on a U8 masks out every bit of the 8-bit value entirely.
+        let format = Format::U8((Endian::Big, res(), BitField { mask: 0xFF00 }));
+        let err = decode(&format, &[0x0001]).unwrap_err();
+        assert!(matches!(err, CodecError::BitFieldWidth(_)));
+    }
+
+    #[test]
+    fn ut_encode_bitfield_mask_out_of_width_errors() {
+        let format = Format::U8((Endian::Big, res(), BitField { mask: 0x1FF }));
+        let err = encode(&format, "1").unwrap_err();
+        assert!(matches!(err, CodecError::BitFieldWidth(_)));
+
+        let err = encode_value(&format, &Value::U8((1, res()))).unwrap_err();
+        assert!(matches!(err, CodecError::BitFieldWidth(_)));
+    }
+
+    #[test]
+    fn ut_bitfield_mask_in_width_still_works() {
+        // Existing in-width masks keep decoding/encoding as before.
+        assert!(reg(u16_be_mask(0xFF00)).decode(&[0xAB12]).is_ok());
+        assert!(reg(u16_be_mask(0x0FF0)).encode("0xAB").is_ok());
+        assert!(reg(u8_be()).decode(&[0x00FF]).is_ok());
     }
 
     #[test]

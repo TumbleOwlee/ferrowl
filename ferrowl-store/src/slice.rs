@@ -9,7 +9,7 @@ use crate::cell::{Cell, CellKind, ValueRange};
 ///
 /// `buffer[i]` holds the cell at address `range.start + i`; the buffer
 /// length always equals `range.length()`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Slice {
     /// The address range covered by this slice.
     pub range: Range,
@@ -90,10 +90,7 @@ impl Slice {
     /// Returns `true` if `range` lies within the slice and every cell in it
     /// accepts writes of type `ty`.
     pub fn writable(&self, ty: &CellType, range: &Range) -> bool {
-        self.contains(range)
-            && self
-                .cells_in(range)
-                .all(|mem| matches!(mem, Cell::Write(t, _) | Cell::ReadWrite(t, _) if t == ty))
+        self.contains(range) && self.cells_in(range).all(|mem| mem.accepts_write(ty))
     }
 
     /// Writes `values` into `range`, skipping read-only cells silently.
@@ -103,10 +100,7 @@ impl Slice {
         let writable = self.contains(range) && range.length() == values.len();
         if writable {
             for (mem, val) in self.cells_in_mut(range).zip(values.iter()) {
-                match mem {
-                    Cell::Write(_, w) | Cell::ReadWrite(_, w) => *w = *val,
-                    Cell::Read(_, _) => {}
-                }
+                mem.try_set_value(*val);
             }
         }
         writable
@@ -117,9 +111,7 @@ impl Slice {
         let ok = self.contains(range) && range.length() == values.len();
         if ok {
             for (mem, val) in self.cells_in_mut(range).zip(values.iter()) {
-                match mem {
-                    Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = *val,
-                }
+                mem.set_value(*val);
             }
         }
         ok
@@ -132,12 +124,7 @@ impl Slice {
             return None;
         }
         // Collecting into `Option<Vec<_>>` short-circuits on the first write-only cell.
-        self.cells_in(range)
-            .map(|mem| match mem {
-                Cell::Read(_, r) | Cell::ReadWrite(_, r) => Some(*r),
-                Cell::Write(_, _) => None,
-            })
-            .collect()
+        self.cells_in(range).map(Cell::try_value).collect()
     }
 
     /// Reads values regardless of cell kind — write-only cells return their
@@ -146,22 +133,13 @@ impl Slice {
         if !self.contains(range) {
             return None;
         }
-        Some(
-            self.cells_in(range)
-                .map(|mem| match mem {
-                    Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v,
-                })
-                .collect(),
-        )
+        Some(self.cells_in(range).map(Cell::value).collect())
     }
 
     /// Returns `true` if `range` lies within the slice and every cell in it
     /// is readable as type `ty`.
     pub fn readable(&self, ty: &CellType, range: &Range) -> bool {
-        self.contains(range)
-            && self
-                .cells_in(range)
-                .all(|mem| matches!(mem, Cell::Read(t, _) | Cell::ReadWrite(t, _) if t == ty))
+        self.contains(range) && self.cells_in(range).all(|mem| mem.accepts_read(ty))
     }
 }
 

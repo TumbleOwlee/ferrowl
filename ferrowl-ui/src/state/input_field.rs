@@ -113,16 +113,10 @@ impl HandleEvents for InputFieldState {
                         if self.input.is_empty() || self.input.chars().count() == self.cursor {
                             self.input.push(c);
                         } else {
-                            self.input = self.input.chars().enumerate().fold(
-                                String::with_capacity(self.input.capacity() + 1),
-                                |mut s, (i, v)| {
-                                    if i == self.cursor {
-                                        s.push(c);
-                                    }
-                                    s.push(v);
-                                    s
-                                },
-                            );
+                            let byte_idx = self.input.char_indices().nth(self.cursor)
+                                .map(|(idx, _)| idx)
+                                .unwrap_or(self.input.len());
+                            self.input.insert(byte_idx, c);
                         }
                         self.cursor += 1;
                     }
@@ -132,15 +126,10 @@ impl HandleEvents for InputFieldState {
             (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
                 if !self.disabled && self.cursor > 0 {
                     if self.input.chars().count() >= self.cursor {
-                        self.input = self.input.chars().enumerate().fold(
-                            String::with_capacity(self.input.capacity() + 1),
-                            |mut s, (i, v)| {
-                                if i != self.cursor - 1 {
-                                    s.push(v);
-                                }
-                                s
-                            },
-                        );
+                        let byte_idx = self.input.char_indices().nth(self.cursor - 1)
+                            .map(|(idx, _)| idx)
+                            .expect("cursor > 0 so char at cursor-1 exists");
+                        self.input.remove(byte_idx);
                     }
                     self.cursor -= 1;
                 }
@@ -148,15 +137,10 @@ impl HandleEvents for InputFieldState {
             }
             (KeyModifiers::NONE, KeyCode::Delete) if !self.disabled => {
                 if !self.disabled && self.input.chars().count() > self.cursor {
-                    self.input = self.input.chars().enumerate().fold(
-                        String::with_capacity(self.input.capacity() + 1),
-                        |mut s, (i, v)| {
-                            if i != self.cursor {
-                                s.push(v);
-                            }
-                            s
-                        },
-                    );
+                    let byte_idx = self.input.char_indices().nth(self.cursor)
+                        .map(|(idx, _)| idx)
+                        .expect("input.chars().count() > cursor so char exists");
+                    self.input.remove(byte_idx);
                 }
                 EventResult::Consumed
             }

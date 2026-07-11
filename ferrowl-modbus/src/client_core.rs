@@ -8,6 +8,7 @@ use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunCo
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -16,6 +17,18 @@ use tokio::time::sleep;
 use tokio_modbus::FunctionCode;
 use tokio_modbus::client::Context;
 use tokio_modbus::prelude::{Client as ModbusClient, Reader, Slave, SlaveContext, Writer};
+
+/// Outcome of one connection attempt, as reported by a transport's `connect` closure passed to
+/// [`ClientCore::run_reconnect_loop`]. Bundles the just-read config snapshot (`reconnect` plus
+/// the timing fields `run` needs) alongside the connection result itself, since `reconnect` must
+/// be known even when the connect attempt failed.
+pub(crate) struct ConnectAttempt {
+    pub(crate) reconnect: bool,
+    pub(crate) timeout_ms: usize,
+    pub(crate) delay_ms: usize,
+    pub(crate) interval_ms: usize,
+    pub(crate) client: Result<ClientCore, Error>,
+}
 
 /// Number of consecutive Modbus exceptions tolerated before the client skips the operation.
 pub(crate) const MAX_RETRIES: u32 = 3;
@@ -409,6 +422,92 @@ impl ClientCore {
         }
     }
 
+    /// Drives a transport's connect-retry-run loop: repeatedly calls `connect` to obtain a
+    /// [`ConnectAttempt`], runs the resulting client via [`ClientCore::run`] until it exits, and
+    /// on failure waits an exponential backoff (capped, reset after a run that got at least one
+    /// read through) before retrying. `Command::Terminate` (or the command channel closing) ends
+    /// the loop cleanly at any point; with `reconnect` unset for the current config snapshot, a
+    /// transport error ends the loop instead of backing off. `connect` alone differs between the
+    /// TCP and RTU transports (socket dial vs. serial open); everything else here is shared.
+    pub(crate) async fn run_reconnect_loop<T, L, S, F, Fut>(
+        mut receiver: Receiver<Command>,
+        log: L,
+        status: S,
+        operations: Arc<RwLock<Vec<Operation>>>,
+        memory: Arc<MemLock<Memory<Key<T>>>>,
+        mut connect: F,
+    ) -> Result<(), Error>
+    where
+        T: KeyParams,
+        L: LogFn + Clone,
+        S: LogFn + Clone,
+        F: FnMut() -> Fut,
+        Fut: Future<Output = ConnectAttempt>,
+    {
+        let mut backoff = INITIAL_BACKOFF;
+        loop {
+            let attempt = connect().await;
+            let reconnect = attempt.reconnect;
+            let run_config = RunConfig {
+                log: log.clone(),
+                status: status.clone(),
+                timeout_ms: attempt.timeout_ms,
+                delay_ms: attempt.delay_ms,
+                interval_ms: attempt.interval_ms,
+            };
+
+            let core = match attempt.client {
+                Ok(core) => core,
+                Err(e) => {
+                    if !reconnect {
+                        log.invoke(format!("{e} Reconnect disabled; client stopping."))
+                            .await;
+                        status.invoke("Client disconnected".to_string()).await;
+                        return Err(e);
+                    }
+                    log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
+                        .await;
+                    if Self::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                        status.invoke("Client disconnected".to_string()).await;
+                        return Ok(());
+                    }
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                    continue;
+                }
+            };
+
+            let (had_success, result) = core
+                .run::<T, _, _>(
+                    operations.clone(),
+                    memory.clone(),
+                    &mut receiver,
+                    run_config,
+                )
+                .await;
+            match result {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    if !reconnect {
+                        // run() already logged the underlying disconnect; just surface the
+                        // status change before the task ends.
+                        status.invoke("Client disconnected".to_string()).await;
+                        return Err(e);
+                    }
+                    if had_success {
+                        backoff = INITIAL_BACKOFF;
+                    }
+                    log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
+                        .await;
+                    if Self::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                        status.invoke("Client disconnected".to_string()).await;
+                        return Ok(());
+                    }
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
+            }
+        }
+    }
+
     /// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command
     /// channel closing (returns `true`). Any other command received while disconnected is
     /// dropped with a log line rather than queued for after reconnect.
@@ -435,5 +534,77 @@ impl ClientCore {
                 },
             }
         }
+    }
+}
+
+// `poll_once`/`run`/`handle_write_result` all drive a real `tokio_modbus::client::Context`
+// (constructed from an actual TCP socket or serial port), so exercising them meaningfully needs a
+// live transport; that end-to-end coverage lives in `tests/tcp_loopback.rs` (round-robin advance,
+// retry-then-skip past `MAX_RETRIES`, every write outcome, reconnect/backoff, graceful
+// termination). What's unit-testable in isolation here is the pure classification/conversion
+// logic those methods build on.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_modbus::ExceptionCode;
+
+    type ReadResult<V> = Result<
+        Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
+        tokio::time::error::Elapsed,
+    >;
+
+    #[test]
+    fn ut_bits_to_words_maps_true_false_to_one_zero() {
+        assert_eq!(
+            ClientCore::bits_to_words(vec![true, false, true, true]),
+            vec![1u16, 0, 1, 1]
+        );
+    }
+
+    #[test]
+    fn ut_bits_to_words_empty_is_empty() {
+        assert_eq!(ClientCore::bits_to_words(vec![]), Vec::<u16>::new());
+    }
+
+    #[test]
+    fn ut_classify_success_unwraps_value() {
+        let res: ReadResult<u16> = Ok(Ok(Ok(42)));
+        assert_eq!(ClientCore::classify(res).unwrap(), 42);
+    }
+
+    #[test]
+    fn ut_classify_exception_maps_to_modbus_exception() {
+        let res: ReadResult<u16> = Ok(Ok(Err(ExceptionCode::IllegalDataAddress)));
+        let e = ClientCore::classify(res).unwrap_err();
+        assert!(matches!(e, ModbusError::Exception(ExceptionCode::IllegalDataAddress)));
+    }
+
+    #[test]
+    fn ut_classify_transport_error_maps_to_modbus_error() {
+        let io_err = std::io::Error::other("boom");
+        let res: ReadResult<u16> = Ok(Err(tokio_modbus::Error::Transport(io_err)));
+        let e = ClientCore::classify(res).unwrap_err();
+        assert!(matches!(e, ModbusError::Error(_)));
+    }
+
+    #[tokio::test]
+    async fn ut_classify_elapsed_maps_to_modbus_timeout() {
+        // A zero-duration timeout against a never-resolving future always elapses immediately,
+        // giving a real `Elapsed` without needing any transport.
+        let elapsed = tokio::time::timeout(Duration::from_millis(0), std::future::pending::<()>())
+            .await
+            .unwrap_err();
+        let res: ReadResult<u16> = Err(elapsed);
+        let e = ClientCore::classify(res).unwrap_err();
+        assert!(matches!(e, ModbusError::Timeout(_)));
+    }
+
+    #[test]
+    fn ut_classify_maps_bits_through_to_words_on_success() {
+        // Same classify() call the ReadCoils/ReadDiscreteInputs arms make, chained with
+        // `.map(Self::bits_to_words)` as `read()` does.
+        let res: ReadResult<Vec<bool>> = Ok(Ok(Ok(vec![true, false])));
+        let words = ClientCore::classify(res).map(ClientCore::bits_to_words).unwrap();
+        assert_eq!(words, vec![1u16, 0]);
     }
 }

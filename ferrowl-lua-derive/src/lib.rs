@@ -33,7 +33,15 @@ fn expand_module(input: syn::DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         match &nv.value {
             Expr::Lit(ExprLit {
                 lit: Lit::Str(s), ..
-            }) => name = Some(s.clone()),
+            }) => {
+                if name.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        "duplicate `#[module = …]` attribute",
+                    ));
+                }
+                name = Some(s.clone());
+            }
             other => {
                 return Err(syn::Error::new_spanned(
                     other,
@@ -57,4 +65,48 @@ fn expand_module(input: syn::DeriveInput) -> syn::Result<proc_macro2::TokenStrea
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_module_attribute_errors() {
+        let input = syn::parse_quote! {
+            #[module = "First"]
+            #[module = "Second"]
+            struct Test;
+        };
+
+        let result = expand_module(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn module_attribute_non_string_literal_errors() {
+        let input = syn::parse_quote! {
+            #[module = 42]
+            struct Test;
+        };
+
+        let result = expand_module(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("string literal"));
+    }
+
+    #[test]
+    fn missing_module_attribute_errors() {
+        let input = syn::parse_quote! {
+            struct Test;
+        };
+
+        let result = expand_module(input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires a `#[module"));
+    }
 }

@@ -9,8 +9,9 @@ mod tls_stream;
 
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -203,7 +204,7 @@ async fn accept_loop<V, H, L>(
                         let identity_cell = Arc::new(Mutex::new(None));
                         let cell = identity_cell.clone();
                         let callback = move |req: &Request, mut resp: Response| {
-                            *cell.lock().unwrap() = identity_from_path(req.uri().path());
+                            *cell.lock() = identity_from_path(req.uri().path());
                             if let Some(auth) = &basic_auth
                                 && !auth.matches(req.headers().get("authorization"))
                             {
@@ -226,7 +227,7 @@ async fn accept_loop<V, H, L>(
                             }
                         };
                         let conn = registry.next_id();
-                        let identity = identity_cell.lock().unwrap().clone();
+                        let identity = identity_cell.lock().clone();
                         let (conn_tx, conn_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
                         registry.insert(conn, conn_tx, identity);
                         core::run_connection::<V, H, _, _>(

@@ -4,6 +4,8 @@
 
 use crate::{LineState, LuaCarry, SyntaxKind};
 
+use super::scan;
+
 const KEYWORDS: &[&str] = &[
     "and", "break", "do", "else", "elseif", "end", "for", "function", "goto", "if", "in", "local",
     "not", "or", "repeat", "return", "then", "until", "while",
@@ -94,19 +96,7 @@ pub(crate) fn highlight_line(
 
         if c == '"' || c == '\'' {
             let start = i;
-            let quote = c;
-            i += 1;
-            while i < len {
-                if chars[i] == '\\' && i + 1 < len {
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == quote {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
+            i = scan::scan_quoted(&chars, i, c);
             spans.push((start, i, SyntaxKind::String));
             continue;
         }
@@ -257,27 +247,7 @@ fn parse_number(chars: &[char], start: usize) -> usize {
     while i < len && chars[i].is_ascii_digit() {
         i += 1;
     }
-    if i < len && chars[i] == '.' {
-        i += 1;
-        while i < len && chars[i].is_ascii_digit() {
-            i += 1;
-        }
-    }
-    if i < len && (chars[i] == 'e' || chars[i] == 'E') {
-        let save = i;
-        i += 1;
-        if i < len && (chars[i] == '+' || chars[i] == '-') {
-            i += 1;
-        }
-        if i < len && chars[i].is_ascii_digit() {
-            while i < len && chars[i].is_ascii_digit() {
-                i += 1;
-            }
-        } else {
-            i = save;
-        }
-    }
-    i
+    scan::scan_fraction_exponent(chars, i, true)
 }
 
 fn starts_with(chars: &[char], pos: usize, pat: &str) -> bool {
@@ -430,6 +400,66 @@ mod tests {
                 assert!(start <= end);
                 assert!(end <= len);
             }
+        }
+    }
+
+    #[test]
+    fn ut_non_ascii_identifier() {
+        let line = "local café = 1";
+        let spans = spans_for(line);
+        let len = line.chars().count();
+        for (start, end, _) in &spans {
+            assert!(*start <= *end);
+            assert!(*end <= len);
+        }
+        let idents: Vec<_> = spans
+            .iter()
+            .filter(|s| s.2 == SyntaxKind::Ident)
+            .collect();
+        assert_eq!(idents.len(), 1);
+    }
+
+    #[test]
+    fn ut_non_ascii_string_content() {
+        let line = r#"local msg = "café 日本語""#;
+        let spans = spans_for(line);
+        let len = line.chars().count();
+        for (start, end, _) in &spans {
+            assert!(*start <= *end);
+            assert!(*end <= len);
+        }
+        let strings: Vec<_> = spans
+            .iter()
+            .filter(|s| s.2 == SyntaxKind::String)
+            .collect();
+        assert_eq!(strings.len(), 1);
+        let (s_start, s_end, _) = *strings[0];
+        let string_chars: String = line.chars().skip(s_start).take(s_end - s_start).collect();
+        assert!(string_chars.contains("café"));
+        assert!(string_chars.contains("日本語"));
+    }
+
+    #[test]
+    fn ut_emoji_in_string_and_unrecognized() {
+        let line = r#"s = "hello 🚀""#;
+        let spans = spans_for(line);
+        let len = line.chars().count();
+        for (start, end, _) in &spans {
+            assert!(*start <= *end);
+            assert!(*end <= len);
+        }
+        let strings: Vec<_> = spans
+            .iter()
+            .filter(|s| s.2 == SyntaxKind::String)
+            .collect();
+        assert_eq!(strings.len(), 1);
+
+        let line_emoji_alone = "🚀 local x";
+        let spans_emoji = spans_for(line_emoji_alone);
+        let len_emoji = line_emoji_alone.chars().count();
+        for (start, end, _) in &spans_emoji {
+            assert!(*start <= *end);
+            assert!(*end <= len_emoji);
         }
     }
 }
