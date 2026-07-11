@@ -52,7 +52,8 @@ pub enum Level {
 }
 
 impl Level {
-    /// Fixed-width label used both in the on-screen `Level` column and the file-sink prefix.
+    /// Label used both in the on-screen `Level` column (padded to width by the table widget)
+    /// and the file-sink prefix.
     pub fn label(&self) -> &'static str {
         match self {
             Level::Info => "INFO",
