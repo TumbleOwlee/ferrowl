@@ -91,6 +91,13 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
     let definitions = collect_definitions(&s.fields)?;
 
+    if definitions.is_empty() {
+        return Err(syn::Error::new_spanned(
+            identifier,
+            "Focus derive requires at least one #[focus] field",
+        ));
+    }
+
     // Number of focusable fields.
     let def_len = definitions.len();
 
@@ -348,4 +355,25 @@ pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream>
     named.named.push(view_focused_field);
 
     Ok(quote! { #input })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_focus;
+
+    #[test]
+    fn rejects_struct_with_no_focus_fields() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct EmptyView {
+                focus: EmptyViewFocus,
+                view_focused: bool,
+            }
+        };
+
+        let err = expand_focus(input).expect_err("expected zero-field struct to be rejected");
+        assert_eq!(
+            err.to_string(),
+            "Focus derive requires at least one #[focus] field"
+        );
+    }
 }

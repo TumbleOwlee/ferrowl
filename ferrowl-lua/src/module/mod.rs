@@ -14,7 +14,7 @@ pub use module_dir::{ModuleDir as ModuleDirModule, ModuleDirectory, ModuleHandle
 pub use ocpp::traits::{OcppActions, OcppClientHost, OcppHandle, OcppServerHost};
 pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppServer};
 pub use register::Register as RegisterModule;
-pub use register::traits::{Read, Write};
+pub use register::traits::{Has, Read, Write};
 pub use statics::Statics as StaticsModule;
 pub use test::Test as TestModule;
 pub use time::Time as TimeModule;

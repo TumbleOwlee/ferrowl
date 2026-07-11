@@ -20,7 +20,9 @@ pub struct SelectionState<ValueType>
 where
     ValueType: ToLabel + Clone,
 {
-    #[getset(get_copy = "pub")]
+    // getset's struct-level `set = "pub"` would otherwise generate an inherent
+    // `set_focused` shadowing the `SetFocus` trait impl below.
+    #[getset(skip)]
     #[builder(default = "true")]
     focused: bool,
     #[getset(get_copy = "pub")]
@@ -31,6 +33,15 @@ where
     horizontal_offset: usize,
     #[getset(get = "pub")]
     values: Vec<ValueType>,
+}
+
+impl<ValueType> SelectionState<ValueType>
+where
+    ValueType: ToLabel + Clone,
+{
+    pub fn focused(&self) -> bool {
+        self.focused
+    }
 }
 
 impl<ValueType> SetFocus for SelectionState<ValueType>

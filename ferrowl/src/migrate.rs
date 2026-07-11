@@ -151,13 +151,13 @@ impl From<LegacyScalar> for Scalar {
 // ── Conversion helpers ────────────────────────────────────────────────────────
 
 /// Remap the read code from the old convention to the new one.
-fn migrate_read_code(old: u8) -> Kind {
+fn migrate_read_code(old: u8) -> Result<Kind, String> {
     match old {
-        1 => Kind::Coil,
-        2 => Kind::DiscreteInput,
-        3 => Kind::HoldingRegister,
-        4 => Kind::InputRegister,
-        _ => unreachable!("Invalid read code"),
+        1 => Ok(Kind::Coil),
+        2 => Ok(Kind::DiscreteInput),
+        3 => Ok(Kind::HoldingRegister),
+        4 => Ok(Kind::InputRegister),
+        other => Err(format!("unknown read_code {other}")),
     }
 }
 
@@ -328,7 +328,7 @@ fn convert_def(
     };
 
     let values = convert_values(src.values, reg_name, warnings);
-    let kind = migrate_read_code(src.read_code);
+    let kind = migrate_read_code(src.read_code)?;
 
     Ok(RegisterDef {
         slave_id: src.slave_id,
@@ -549,10 +549,16 @@ mod tests {
 
     #[test]
     fn ut_migrate_read_code_swap() {
-        assert_eq!(migrate_read_code(1), Kind::Coil);
-        assert_eq!(migrate_read_code(2), Kind::DiscreteInput);
-        assert_eq!(migrate_read_code(3), Kind::HoldingRegister);
-        assert_eq!(migrate_read_code(4), Kind::InputRegister);
+        assert_eq!(migrate_read_code(1).unwrap(), Kind::Coil);
+        assert_eq!(migrate_read_code(2).unwrap(), Kind::DiscreteInput);
+        assert_eq!(migrate_read_code(3).unwrap(), Kind::HoldingRegister);
+        assert_eq!(migrate_read_code(4).unwrap(), Kind::InputRegister);
+    }
+
+    #[test]
+    fn ut_migrate_read_code_invalid() {
+        assert!(migrate_read_code(0).is_err());
+        assert!(migrate_read_code(5).is_err());
     }
 
     #[test]
@@ -602,6 +608,37 @@ mod tests {
         assert_eq!(values[1].name, "255");
         assert!(matches!(values[1].value, Scalar::Int(255)));
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn ut_convert_def_invalid_read_code_warns_no_panic() {
+        let def = LegacyRegisterDef {
+            slave_id: 1,
+            read_code: 9, // invalid
+            address: Some(LegacyAddress::Str("0x1000".into())),
+            length: 1,
+            access: "ReadOnly".into(),
+            value_type: "U16".into(),
+            reverse: false,
+            resolution: 1.0,
+            is_virtual: false,
+            description: "bogus".into(),
+            on_update: None,
+            values: vec![],
+            default: None,
+        };
+        let mut legacy = legacy_sample();
+        legacy.definitions.clear();
+        legacy.definitions.insert("bogus_reg".into(), def);
+
+        let (device, warnings) = convert(legacy);
+
+        assert!(!device.definitions.contains_key("bogus_reg"));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("bogus_reg") && w.contains("read_code"))
+        );
     }
 
     #[test]

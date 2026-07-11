@@ -105,7 +105,7 @@ impl ModbusModule {
                             kind: def.register().kind().clone(),
                         },
                     };
-                    memory.write_unchecked(write_key, &Range::new(range.start, raw.len()), &raw);
+                    memory.write_unchecked(write_key, &Range::new(range.start(), raw.len()), &raw);
                 }
             }
         }

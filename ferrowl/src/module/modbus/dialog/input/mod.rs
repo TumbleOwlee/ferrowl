@@ -11,6 +11,7 @@ use ferrowl_codec::format::{
 use ferrowl_codec::{Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
+    traits::SetFocus,
     widgets::{Button, GetValue, InputField, Selection, Text, Validate, ValidateResult, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};

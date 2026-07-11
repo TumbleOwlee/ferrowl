@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use ferrowl_codec::{Address, Format, Register, Value};
 use ferrowl_lua::module::{
-    LogModule, LogSink, Read, RegisterModule, TestModule, TimeModule, ValueType, Write,
+    Has, LogModule, LogSink, Read, RegisterModule, TestModule, TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
@@ -123,6 +123,12 @@ impl Write for RegisterBridge {
                 "write to '{name}' rejected (not writable)"
             )))
         }
+    }
+}
+
+impl Has for RegisterBridge {
+    fn has(&self, name: String) -> Result<bool> {
+        Ok(self.register(&name).is_ok())
     }
 }
 
@@ -334,7 +340,7 @@ pub fn run_sim(
         };
 
         while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.call_all(Duration::ZERO) {
+            if let Err(errors) = context.call_all() {
                 for e in errors {
                     emit(&log, &sink, &format!("[sim] {e}"));
                 }
@@ -511,7 +517,7 @@ mod tests {
             .build()
             .expect("build context");
 
-        context.call_all(Duration::ZERO).expect("run script");
+        context.call_all().expect("run script");
 
         let power = memory
             .read()
@@ -546,9 +552,7 @@ mod tests {
             .build()
             .expect("build context");
 
-        let errors = context
-            .call_all(Duration::ZERO)
-            .expect_err("assertion should fail");
+        let errors = context.call_all().expect_err("assertion should fail");
         assert!(
             errors.iter().any(|e| e
                 .to_string()

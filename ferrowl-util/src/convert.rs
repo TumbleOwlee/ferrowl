@@ -71,7 +71,7 @@ impl Converter {
                 // emit as a bogus sub-table. Normalizing turns those back into plain integers/floats.
                 let json = serde_json::to_value(value)
                     .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?;
-                toml::to_string_pretty(&json_to_toml(&json))
+                toml::to_string_pretty(&json_to_toml(&json)?)
                     .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?
             }
             FileType::Json => serde_json::to_string_pretty(value)
@@ -131,34 +131,44 @@ impl Converter {
 
 /// Convert a `serde_json::Value` into a `toml::Value`, normalizing numbers so they serialize as
 /// plain TOML integers/floats instead of the `arbitrary_precision` wrapper struct. JSON `null`s
-/// (which TOML cannot represent) are dropped from objects.
-fn json_to_toml(value: &serde_json::Value) -> toml::Value {
+/// are dropped when they appear as an object field's value; TOML has no null type, so a `null`
+/// appearing at the top level or inside an array (where there's no key to omit) is an error.
+/// `u64` values that overflow `i64` are represented as a TOML float rather than silently wrapping.
+fn json_to_toml(value: &serde_json::Value) -> Result<toml::Value, Error> {
     use serde_json::Value as J;
     match value {
-        J::Null => toml::Value::String(String::new()),
-        J::Bool(b) => toml::Value::Boolean(*b),
+        J::Null => Err(Error::Serialize(
+            "Cannot represent JSON null as TOML outside of an object field.".to_string(),
+        )),
+        J::Bool(b) => Ok(toml::Value::Boolean(*b)),
         J::Number(n) => {
             if let Some(i) = n.as_i64() {
-                toml::Value::Integer(i)
+                Ok(toml::Value::Integer(i))
             } else if let Some(u) = n.as_u64() {
-                toml::Value::Integer(u as i64)
+                if u > i64::MAX as u64 {
+                    Ok(toml::Value::Float(u as f64))
+                } else {
+                    Ok(toml::Value::Integer(u as i64))
+                }
             } else if let Some(f) = n.as_f64() {
-                toml::Value::Float(f)
+                Ok(toml::Value::Float(f))
             } else {
-                toml::Value::String(n.to_string())
+                Ok(toml::Value::String(n.to_string()))
             }
         }
-        J::String(s) => toml::Value::String(s.clone()),
-        J::Array(a) => toml::Value::Array(a.iter().map(json_to_toml).collect()),
+        J::String(s) => Ok(toml::Value::String(s.clone())),
+        J::Array(a) => Ok(toml::Value::Array(
+            a.iter().map(json_to_toml).collect::<Result<Vec<_>, _>>()?,
+        )),
         J::Object(o) => {
             let mut table = toml::value::Table::new();
             for (k, v) in o {
                 if v.is_null() {
                     continue;
                 }
-                table.insert(k.clone(), json_to_toml(v));
+                table.insert(k.clone(), json_to_toml(v)?);
             }
-            toml::Value::Table(table)
+            Ok(toml::Value::Table(table))
         }
     }
 }
@@ -368,6 +378,39 @@ mod tests {
     fn ut_load_missing_file_errors() {
         let r = Converter::load::<Sample>("/no/such/ferrowl/file.toml", FileType::Toml);
         assert!(matches!(r, Err(Error::Deserialize(_))));
+    }
+
+    #[test]
+    fn ut_json_to_toml_null_top_level_errors() {
+        let r = json_to_toml(&serde_json::Value::Null);
+        assert!(matches!(r, Err(Error::Serialize(_))));
+    }
+
+    #[test]
+    fn ut_json_to_toml_null_in_array_errors() {
+        let r = json_to_toml(&serde_json::json!([1, null, 3]));
+        assert!(matches!(r, Err(Error::Serialize(_))));
+    }
+
+    #[test]
+    fn ut_json_to_toml_null_in_object_is_dropped() {
+        let v = json_to_toml(&serde_json::json!({ "a": 1, "b": null })).unwrap();
+        let table = v.as_table().unwrap();
+        assert_eq!(table.get("a").unwrap().as_integer(), Some(1));
+        assert!(!table.contains_key("b"));
+    }
+
+    #[test]
+    fn ut_json_to_toml_u64_overflow_falls_back_to_float() {
+        let big = u64::MAX;
+        let v = json_to_toml(&serde_json::json!(big)).unwrap();
+        assert_eq!(v.as_float(), Some(big as f64));
+    }
+
+    #[test]
+    fn ut_json_to_toml_u64_in_range_stays_integer() {
+        let v = json_to_toml(&serde_json::json!(42u64)).unwrap();
+        assert_eq!(v.as_integer(), Some(42));
     }
 
     #[test]

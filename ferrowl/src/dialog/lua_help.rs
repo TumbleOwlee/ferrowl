@@ -49,7 +49,7 @@ static OCPP_CLIENT_SECTION: BindingSection = BindingSection {
         ),
         (
             "C_OCPP:<Action>(overrides?)",
-            "one method per OCPP action, e.g. BootNotification(), StartTransaction({ idTag = \"ABC\" })",
+            "one method per OCPP action, e.g. StartTransaction({ idTag = \"ABC\" })",
         ),
         (
             "C_OCPP:Connector(id)",
@@ -79,7 +79,7 @@ static OCPP_SERVER_SECTION: BindingSection = BindingSection {
         ),
         (
             "<accessor>:<Action>(overrides?)",
-            "one method per OCPP action, e.g. StatusNotification(), MeterValues({ energy = 100 })",
+            "one method per OCPP action, e.g. MeterValues({ energy = 100 })",
         ),
     ],
 };
@@ -131,7 +131,7 @@ static MODULE_SECTION: BindingSection = BindingSection {
         ),
         (
             "<ocpp-accessor>:<Action>(json?)",
-            "one method per OCPP action, e.g. StatusNotification(), MeterValues({ energy = 100 })",
+            "one method per OCPP action, e.g. MeterValues({ energy = 100 })",
         ),
     ],
 };
@@ -297,7 +297,7 @@ impl LuaHelpOverlay {
 
     /// Renders the overlay as a centered popup over `area`.
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: ScriptContext) {
-        let popup_w = 75.min(area.width);
+        let popup_w = 120.min(area.width);
         let inner_width = popup_w.saturating_sub(4) as usize;
         let desc_budget = inner_width.saturating_sub(36);
 

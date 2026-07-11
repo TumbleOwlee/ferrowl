@@ -5,7 +5,7 @@
 
 use super::super::widgets;
 use super::{EditSelectionDialog, EditSelectionDialogBuilder, EditSelectionDialogFocus, ValueType};
-use ferrowl_ui::traits::ToLabel;
+use ferrowl_ui::traits::{SetFocus, ToLabel};
 use ratatui::layout::HorizontalAlignment;
 
 impl<V: ToLabel + Clone> EditSelectionDialog<V> {

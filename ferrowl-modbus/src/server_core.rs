@@ -34,7 +34,7 @@ where
     log.invoke(format!(
         "{name} request received for slave ID {slave} and range [{}, {}).",
         addr,
-        addr + cnt
+        addr as usize + cnt as usize
     ))
     .await;
     let key = Key {
@@ -51,7 +51,7 @@ where
                 log.invoke(format!(
                     "{name} request for slave ID {slave} and range [{}, {}) successful.",
                     addr,
-                    addr + cnt
+                    addr as usize + cnt as usize
                 ))
                 .await;
             }
@@ -62,7 +62,7 @@ where
                 log.invoke(format!(
                     "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
                     addr,
-                    addr + cnt
+                    addr as usize + cnt as usize
                 ))
                 .await;
             }

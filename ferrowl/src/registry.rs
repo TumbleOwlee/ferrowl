@@ -352,7 +352,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         let key = Key {
             id: SlaveKey {
@@ -402,7 +402,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         assert!(matches!(
             state.read().cs_get("Model"),
@@ -464,7 +464,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         assert!(matches!(
             with_state_mut(&states, |reg| reg

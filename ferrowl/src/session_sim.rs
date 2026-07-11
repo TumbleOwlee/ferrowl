@@ -96,7 +96,7 @@ impl SessionSim {
             };
 
             while !thread_stop.load(Ordering::Relaxed) {
-                if let Err(errors) = context.call_all(Duration::ZERO) {
+                if let Err(errors) = context.call_all() {
                     for e in errors {
                         emit(&log, &format!("[sim] {e}"));
                     }
@@ -120,7 +120,7 @@ impl Drop for SessionSim {
 mod tests {
     use super::*;
     use crate::app::LOG_SIZE;
-    use ferrowl_lua::module::{ModuleHost, Read, RegisterModule, ValueType, Write};
+    use ferrowl_lua::module::{Has, ModuleHost, Read, RegisterModule, ValueType, Write};
     use mlua::{AnyUserData, Lua, Result as LuaResult};
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -145,6 +145,11 @@ mod tests {
         fn write(&self, name: String, value: ValueType) -> LuaResult<()> {
             self.store.lock().unwrap().insert(name, value);
             Ok(())
+        }
+    }
+    impl Has for MockReadWrite {
+        fn has(&self, name: String) -> LuaResult<bool> {
+            Ok(self.store.lock().unwrap().get(&name).is_some())
         }
     }
 

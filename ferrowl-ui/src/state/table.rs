@@ -18,7 +18,9 @@ pub struct TableState<V, const N: usize>
 where
     V: TableEntry<N>,
 {
-    #[getset(get_copy = "pub")]
+    // getset's struct-level `set = "pub"` would otherwise generate an inherent
+    // `set_focused` shadowing the `SetFocus` trait impl below.
+    #[getset(skip)]
     #[builder(default = "true")]
     focused: bool,
     #[getset(get_copy = "pub")]
@@ -53,6 +55,15 @@ where
             .get(self.table_state.selected().unwrap_or(0))
             .map(|v| (*v).clone())
             .unwrap_or_default()
+    }
+}
+
+impl<V, const N: usize> TableState<V, N>
+where
+    V: TableEntry<N>,
+{
+    pub fn focused(&self) -> bool {
+        self.focused
     }
 }
 
@@ -154,6 +165,12 @@ where
     /// populated. Callers pass an index known to be valid for the rows that will be
     /// rendered; [`set_values`](Self::set_values) clamps as a safety net.
     pub fn select_index(&mut self, idx: usize) {
+        if self.values.is_empty() {
+            self.table_state.select(None);
+            self.vertical_scroll = self.vertical_scroll.position(0);
+            return;
+        }
+        let idx = idx.min(self.values.len() - 1);
         self.table_state.select(Some(idx));
         self.vertical_scroll = self.vertical_scroll.position(idx);
     }

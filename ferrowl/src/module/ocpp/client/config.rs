@@ -7,7 +7,7 @@ use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult,
     state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
     style::{InputFieldStyle, SelectionStyle},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};

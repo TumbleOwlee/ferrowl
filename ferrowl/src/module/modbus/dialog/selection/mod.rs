@@ -17,6 +17,7 @@ use ferrowl_codec::{Address, Register, RegisterBuilder};
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
     traits::HandleEvents,
+    traits::SetFocus,
     traits::ToLabel,
     widgets::{Button, GetValue, InputField, Selection, Text, Validate, ValidateResult, Widget},
 };

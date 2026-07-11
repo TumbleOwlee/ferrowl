@@ -15,12 +15,20 @@ use crate::{
 pub struct ButtonState {
     #[getset(get = "pub")]
     label: String,
-    #[getset(get_copy = "pub")]
+    // getset's struct-level `set = "pub"` would otherwise generate an inherent
+    // `set_focused` shadowing the `SetFocus` trait impl below.
+    #[getset(skip)]
     #[builder(default = "true")]
     focused: bool,
     #[getset(get_copy = "pub")]
     #[builder(default = "false")]
     disabled: bool,
+}
+
+impl ButtonState {
+    pub fn focused(&self) -> bool {
+        self.focused
+    }
 }
 
 impl SetFocus for ButtonState {

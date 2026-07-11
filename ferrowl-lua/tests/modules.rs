@@ -7,7 +7,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use ferrowl_lua::module::{
-    LogModule, LogSink, Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write,
+    Has, LogModule, LogSink, Read, RegisterModule, StaticsModule, TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{Context, ContextBuilder, Error, Result};
 
@@ -27,6 +27,18 @@ impl Read for Handle {
             // Any other name returns an Int, which is the wrong type for the
             // float/string/bool getters -> exercises the type-mismatch arm.
             _ => Ok(ValueType::Int(0)),
+        }
+    }
+}
+
+impl Has for Handle {
+    fn has(&self, name: String) -> Result<bool> {
+        match name.as_str() {
+            "i" | "f" | "s" | "b" => Ok(true),
+            // Surfaces the `Err(e)` arm of every getter.
+            "err" => Err(Error::RuntimeError("boom".to_string())),
+            // Any other name is not present
+            _ => Ok(false),
         }
     }
 }
@@ -105,7 +117,7 @@ fn ut_iter_lists_loaded_scripts() {
 fn ut_call_all_ok_when_no_script_errors() {
     let mut ctx = build_context();
     // Every script asserts cleanly, so call_all reports success (the Ok arm).
-    assert!(ctx.call_all(Duration::ZERO).is_ok());
+    assert!(ctx.call_all().is_ok());
 }
 
 #[test]

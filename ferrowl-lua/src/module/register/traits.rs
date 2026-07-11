@@ -12,3 +12,8 @@ pub trait Write {
 pub trait Read {
     fn read(&self, name: String) -> Result<ValueType>;
 }
+
+/// Check if the register named `name` exists.
+pub trait Has {
+    fn has(&self, name: String) -> Result<bool>;
+}

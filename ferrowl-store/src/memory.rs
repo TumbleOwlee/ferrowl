@@ -90,7 +90,12 @@ where
                         }
                     }
                 }
-                slice.extend(kind, &Range::new(range.end, end - range.end));
+                if start < range.start {
+                    slice.extend(kind, &Range::new(start, range.start - start));
+                }
+                if end > range.end {
+                    slice.extend(kind, &Range::new(range.end, end - range.end));
+                }
                 m.insert(Range::new(start, end - start), slice);
             } else {
                 m.insert(r.clone(), Slice::from_range(kind, r.clone()));

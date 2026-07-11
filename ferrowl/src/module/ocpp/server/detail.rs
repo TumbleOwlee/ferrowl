@@ -24,7 +24,7 @@ use ferrowl_ui::{
     COLOR_SCHEME,
     state::{InputFieldState, TableState},
     style::InputFieldStyle,
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{GetValue, InputField, Table, Widget},
 };
 use ferrowl_ui_derive::{Focus, TableEntry, focusable};

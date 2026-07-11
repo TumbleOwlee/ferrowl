@@ -21,7 +21,9 @@ pub struct InputFieldState {
     #[getset(get_copy = "pub")]
     #[builder(default = "0")]
     cursor: usize,
-    #[getset(get_copy = "pub")]
+    // getset's struct-level `set = "pub"` would otherwise generate an inherent
+    // `set_focused` shadowing the `SetFocus` trait impl below.
+    #[getset(skip)]
     #[builder(default = "true")]
     focused: bool,
     #[getset(get_copy = "pub")]
@@ -51,6 +53,12 @@ impl GetValue for InputFieldState {
 
     fn get_value(&self) -> Self::ValueType {
         self.input.clone()
+    }
+}
+
+impl InputFieldState {
+    pub fn focused(&self) -> bool {
+        self.focused
     }
 }
 

@@ -6,6 +6,7 @@
 use super::super::widgets;
 use super::{EditInputDialog, EditInputDialogBuilder, EditInputDialogFocus, ValueType};
 use crate::dialog::NonEmpty;
+use ferrowl_ui::traits::SetFocus;
 use ratatui::layout::HorizontalAlignment;
 
 impl EditInputDialog {

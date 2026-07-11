@@ -218,7 +218,7 @@ mod tests {
             .build()
             .expect("build context");
 
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         // Set/Get round-tripped through the host store.
         match handle.store.borrow().get("Power") {
@@ -339,7 +339,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         // Bare Get/Set hit CS-level state; Connector(id) hits that connector's store.
         assert!(matches!(store_get(&host.cs, "Model"), Some(ValueType::String(s)) if s == "M"));
@@ -437,7 +437,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         let stations = host.stations.borrow();
         let (cp001_cs, cp001_conns) = &stations["cp001"];

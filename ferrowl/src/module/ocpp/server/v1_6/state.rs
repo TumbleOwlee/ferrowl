@@ -197,18 +197,18 @@ impl OcppFields for ConnectorState {
                     .map(|t| t.to_string())
                     .unwrap_or_default(),
             ),
-            "ChargeLimit" => match self.limit {
-                Some(l) => ValueType::Float(l),
-                None => return None,
-            },
-            "DefaultChargeLimit" => match self.default_limit {
-                Some(l) => ValueType::Float(l),
-                None => return None,
-            },
-            "MaxChargeLimit" => match self.max_limit {
-                Some(l) => ValueType::Float(l),
-                None => return None,
-            },
+            "ChargeLimit" => {
+                let l = self.limit?;
+                ValueType::Float(l)
+            }
+            "DefaultChargeLimit" => {
+                let l = self.default_limit?;
+                ValueType::Float(l)
+            }
+            "MaxChargeLimit" => {
+                let l = self.max_limit?;
+                ValueType::Float(l)
+            }
             _ => return None,
         })
     }

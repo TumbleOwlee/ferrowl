@@ -9,12 +9,15 @@ use crate::lang::lua::highlight_line;
 use crate::{LineState, LuaCarry, SyntaxKind};
 
 pub(crate) fn is_opener(text: &str, kind: SyntaxKind) -> bool {
+    // `(` is deliberately excluded: it tracks call/signature grouping, not block
+    // nesting, and counting it alongside `function`/`do`/etc. double-counts depth
+    // on multi-line signatures and calls (e.g. `function foo(\n  a,\n)`).
     matches!(text, "function" | "do" | "then" | "repeat")
-        || (kind == SyntaxKind::Punct && matches!(text, "{" | "("))
+        || (kind == SyntaxKind::Punct && text == "{")
 }
 
 pub(crate) fn is_closer(text: &str, kind: SyntaxKind) -> bool {
-    matches!(text, "end" | "until") || (kind == SyntaxKind::Punct && matches!(text, "}" | ")"))
+    matches!(text, "end" | "until") || (kind == SyntaxKind::Punct && text == "}")
 }
 
 pub(crate) fn is_else(text: &str) -> bool {
@@ -139,5 +142,14 @@ mod tests {
     fn ut_always_returns_something_for_garbage() {
         let src = "]==] unterminated [==[";
         let _ = format(src);
+    }
+
+    #[test]
+    fn ut_multiline_call_parens_do_not_double_indent() {
+        // Regression: `(` used to be tracked as a block opener alongside `function`,
+        // doubling the indent depth for continuation lines inside a multi-line signature.
+        let src = "function foo(\na,\nb\n)\nbody()\nend";
+        let expected = "function foo(\n    a,\n    b\n    )\n    body()\nend";
+        assert_eq!(format(src), expected);
     }
 }

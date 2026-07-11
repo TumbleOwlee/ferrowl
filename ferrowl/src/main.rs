@@ -167,29 +167,45 @@ fn demo_session_script() -> crate::config::script::ScriptDef {
     crate::config::script::ScriptDef {
         name: "power-report".to_string(),
         code: r#"-- Demo: read `Power` from every modbus server and OCPP connector via C_Module.
+local total_power = 0
+local num_modbus = 0
+local num_ocpp = 0
+
+-- Go over all modules
 for _, name in ipairs(C_Module:List()) do
+    -- Get module context
     local m = C_Module:Get(name)
-    if m:Type() == "modbus" and m:Role() == "server" then
-        local ok, power = pcall(function() return m:Register():Get("Power") end)
-        if ok then C_Log:Print(name .. ": Power = " .. tostring(power)) end
-    elseif m:Type() == "ocpp" then
+    local ty = m:Type()
+    local r = m:Role()
+
+    if ty == "modbus" and r == "server" then
+        -- Get power of modbus charger
+        local reg = m:Register()
+
+        -- Check if register exists before access
+        if reg:Has("Power") then
+            total_power = total_power + reg:Get("Power")
+        end
+
+        num_modbus = num_modbus + 1
+    elseif ty == "ocpp" and r == "client" then
+        -- Get power of ocpp charger
         local o = m:OCPP()
-        if m:Role() == "client" then
-            local ok, power = pcall(function() return o:Connector(1):Get("Power") end)
-            if ok then C_Log:Print(name .. "/1: Power = " .. tostring(power)) end
-        else
-            for _, cs in ipairs(o:GetChargingStations()) do
-                for _, id in ipairs(o:GetConnectors(cs)) do
-                    local ok, power = pcall(function() return o:Connector(cs, id):Get("Power") end)
-                    if ok then
-                        C_Log:Print(name .. "/" .. cs .. "/" .. id .. ": Power = " .. tostring(power))
-                    end
-                end
-            end
+
+        -- Get all available connector ids
+        for _, i in ipairs(o:GetConnectors()) do
+            -- Get connector context
+            local con = o:Connector(i)
+            total_power = total_power + con:Get("Power")
+
+            num_ocpp = num_ocpp + 1
         end
     end
-end"#
-        .to_string(),
+end
+
+-- Print to log
+print("[M" .. num_modbus .. "|O" .. num_ocpp .. "] Total Power = " .. total_power)"#
+            .to_string(),
         enabled: true,
     }
 }
@@ -419,7 +435,7 @@ mod tests {
             .with_script(script.name.clone(), &script.code)
             .build()
             .expect("demo session script must parse");
-        ctx.call_all(std::time::Duration::ZERO)
+        ctx.call_all()
             .expect("demo session script must run on an empty registry");
     }
 }

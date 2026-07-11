@@ -101,7 +101,7 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
     macro_rules! parse_int {
         ($variant:ident, $ty:ty, $uty:ty, $r:expr, $s:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
-                -<$ty>::from_str_radix(s, 16)?
+                (<$uty>::from_str_radix(s, 16)? as $ty).wrapping_neg()
             } else if let Some(s) = $s.strip_prefix("0x") {
                 <$uty>::from_str_radix(s, 16)? as $ty
             } else {
@@ -142,7 +142,7 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
         Format::U128((_, r, _)) => parse_uint!(U128, u128, r, s),
         Format::I8((_, r, _)) => {
             let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
-                -i8::from_str_radix(s, 16)?
+                (u8::from_str_radix(s, 16)? as i8).wrapping_neg()
             } else if let Some(s) = s.strip_prefix("0x") {
                 u8::from_str_radix(s, 16)? as i8
             } else {
@@ -224,15 +224,19 @@ pub fn encode_value(format: &Format, value: &Value) -> Result<Vec<u16>, CodecErr
         Format::Ascii((a, w)) => match value {
             Value::Ascii(s) => {
                 let length = 2 * w.0;
-
-                let mut zeroes = itertools::repeat_n(0, 0);
-                if s.len() < length {
-                    zeroes = itertools::repeat_n(0u8, length - s.len());
-                }
+                let zeroes = length.saturating_sub(s.len());
 
                 match a {
-                    Alignment::Left => Ok(s.bytes().chain(zeroes).take(length).into_vec()?),
-                    Alignment::Right => Ok(zeroes.chain(s.bytes()).take(length).into_vec()?),
+                    Alignment::Left => Ok(s
+                        .bytes()
+                        .chain(itertools::repeat_n(0u8, zeroes))
+                        .take(length)
+                        .into_vec()?),
+                    // Oversized input keeps the *last* `length` bytes, not the first.
+                    Alignment::Right => Ok(itertools::repeat_n(0u8, zeroes)
+                        .chain(s.bytes().skip(s.len().saturating_sub(length)))
+                        .take(length)
+                        .into_vec()?),
                 }
             }
             _ => Err(mismatch()),

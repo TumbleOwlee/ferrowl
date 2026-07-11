@@ -117,7 +117,7 @@ pub(crate) fn build_read_operations(
             // (leading/trailing space inside the range is not read). Registers outside every
             // explicit range are auto-merged into their own requests.
             let mut windows: Vec<(usize, usize)> =
-                explicit.iter().map(|r| (r.start, r.end)).collect();
+                explicit.iter().map(|r| (r.start(), r.end())).collect();
             windows.sort_unstable();
             let windows = merge_spans(&windows);
 
@@ -197,7 +197,7 @@ pub(crate) fn explicit_read_coverage(
             },
         };
         for r in &explicit {
-            for gap in subtract_spans(r.start, r.end, &covered) {
+            for gap in subtract_spans(r.start(), r.end(), &covered) {
                 out.push((key.clone(), MemKind::Read(mem_type), gap));
             }
         }
@@ -418,8 +418,8 @@ mod tests {
         let ops = build_read_operations(&regs, &read_ranges);
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].fn_code, FunctionCode::ReadHoldingRegisters);
-        assert_eq!((ops[0].range.start, ops[0].range.end), (0, 3));
-        assert_eq!((ops[1].range.start, ops[1].range.end), (5, 6));
+        assert_eq!((ops[0].range.start(), ops[0].range.end()), (0, 3));
+        assert_eq!((ops[1].range.start(), ops[1].range.end()), (5, 6));
 
         // Different function codes never merge even at the same address.
         let regs = vec![
@@ -445,8 +445,8 @@ mod tests {
             .collect();
         let ops = build_read_operations(&regs, &read_ranges);
         assert_eq!(ops.len(), 2);
-        assert_eq!((ops[0].range.start, ops[0].range.end), (0, 120));
-        assert_eq!((ops[1].range.start, ops[1].range.end), (120, 128));
+        assert_eq!((ops[0].range.start(), ops[0].range.end()), (0, 120));
+        assert_eq!((ops[1].range.start(), ops[1].range.end()), (120, 128));
     }
 
     #[test]
@@ -478,7 +478,7 @@ mod tests {
         };
         let ops = build_read_operations(&regs, &ranges);
         assert_eq!(ops.len(), 1);
-        assert_eq!((ops[0].range.start, ops[0].range.end), (20, 31));
+        assert_eq!((ops[0].range.start(), ops[0].range.end()), (20, 31));
 
         // A bridged bounding span exceeding the limit is split into limit-sized requests.
         let regs = vec![
@@ -491,8 +491,8 @@ mod tests {
         };
         let ops = build_read_operations(&regs, &wide);
         assert_eq!(ops.len(), 2);
-        assert_eq!((ops[0].range.start, ops[0].range.end), (0, 125));
-        assert_eq!((ops[1].range.start, ops[1].range.end), (125, 201));
+        assert_eq!((ops[0].range.start(), ops[0].range.end()), (0, 125));
+        assert_eq!((ops[1].range.start(), ops[1].range.end()), (125, 201));
 
         // A register outside every explicit range is still read, in its own request.
         let regs = vec![
@@ -505,7 +505,7 @@ mod tests {
             ..Default::default()
         };
         let ops = build_read_operations(&regs, &small);
-        let mut got: Vec<_> = ops.iter().map(|o| (o.range.start, o.range.end)).collect();
+        let mut got: Vec<_> = ops.iter().map(|o| (o.range.start(), o.range.end())).collect();
         got.sort_unstable();
         // Registers 0 and 2 bridge to [0,3); register 50 reads alone.
         assert_eq!(got, vec![(0, 3), (50, 51)]);

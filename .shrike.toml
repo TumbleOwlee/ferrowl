@@ -3,30 +3,45 @@ profile = "rust"
 
 [rust]
 image = "rust:latest"
+setup = "rustup component add --toolchain stable-x86_64-unknown-linux-gnu clippy rustfmt"
+
+[rust.fmt]
+desc = "Apply format."
+cmd = "cargo fmt"
+
+[rust.clippy]
+desc = "Apply clippy."
+cmd = "cargo clippy --fix --allow-dirty"
 
 [rust.build]
 desc = "Compile in debug mode."
-cmd = "rustup default nightly && cargo build"
+cmd = "cargo build"
+
+[rust.release]
+desc = "Compile in release mode."
+cmd = "cargo build --release"
+
+[rust.run-demo]
+desc = "Run demo."
+cmd = "cargo run -- --demo"
+interactive = true
+hidden = true
 
 [rust.demo]
-desc = "Build and run demo."
-cmd = "rustup default nightly && cargo run -- --demo"
-interactive = true
+desc = "Run demo"
+pipeline = ["build", "run-demo"]
 
-[rust.ex]
+[rust.build-dialog]
+desc = "Build dialog example."
+cmd = "cargo build --example dialog"
+hidden = true
+
+[rust.run-dialog]
 desc = "Run dialog example."
-cmd = "cargo run --example"
+cmd = "cargo run --example dialog"
 interactive = true
+hidden = true
 
-# ======================================================================================= #
-# Claude Environment
-# ======================================================================================= #
-[claude]
-image = "rust:latest"
-setup = "apt-get update && apt-get install -y npm && curl -fsSL https://claude.ai/install.sh | bash && curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash"
-volumes = ["~/.claude.json:/root/.claude.json", "~/.claude:/root/.claude"]
-
-[claude.run]
-desc = "Run claude."
-cmd = "/root/.local/bin/claude"
-interactive = true
+[rust.dialog]
+desc = "Run dialog example"
+pipeline = ["build-dialog", "run-dialog"]

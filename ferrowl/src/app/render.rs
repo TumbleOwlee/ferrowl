@@ -102,7 +102,7 @@ fn render_help(
     module: Option<(&str, &[CommandDescriptor])>,
     scroll: &mut u16,
 ) {
-    let popup_w = 75.min(area.width);
+    let popup_w = 120.min(area.width);
     let inner_width = popup_w.saturating_sub(4) as usize;
     let desc_budget = inner_width.saturating_sub(36);
 

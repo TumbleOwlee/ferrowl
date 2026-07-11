@@ -3,7 +3,7 @@ use ferrowl_ui::{
     AlternateScreen, Border, EventResult,
     state::{InputFieldState, InputFieldStateBuilder},
     style::InputFieldStyle,
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{InputField, InputFieldBuilder},
 };
 use ratatui::{

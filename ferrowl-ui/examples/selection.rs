@@ -4,7 +4,7 @@ use ferrowl_ui::{
     AlternateScreen, Border, EventResult,
     state::{SelectionState, SelectionStateBuilder},
     style::SelectionStyle,
-    traits::{HandleEvents, ToLabel},
+    traits::{HandleEvents, SetFocus, ToLabel},
     widgets::SelectionBuilder,
 };
 use ratatui::{

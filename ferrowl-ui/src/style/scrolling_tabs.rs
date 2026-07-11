@@ -8,7 +8,7 @@ use crate::COLOR_SCHEME;
 pub struct ScrollingTabsStyle {
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg).bold()")]
     pub general: Style,
-    #[builder(default = "Style::default().bg(COLOR_SCHEME.hi).fg(COLOR_SCHEME.text_hi).bold()")]
+    #[builder(default = "Style::default().bg(COLOR_SCHEME.hi_bg).fg(COLOR_SCHEME.text).bold()")]
     pub selected: Style,
 }
 

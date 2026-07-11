@@ -8,12 +8,36 @@ use std::{
 ///
 /// Ordering compares `start` first, then `end`, so ranges sort by position
 /// in the address space (used as `BTreeMap` keys in [`Memory`](crate::Memory)).
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct Range {
     /// First address contained in the range.
-    pub start: usize,
+    pub(crate) start: usize,
     /// First address past the end of the range.
-    pub end: usize,
+    pub(crate) end: usize,
+}
+
+impl<'de> Deserialize<'de> for Range {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RangeRepr {
+            start: usize,
+            end: usize,
+        }
+        let repr = RangeRepr::deserialize(deserializer)?;
+        if repr.end < repr.start {
+            return Err(serde::de::Error::custom(format!(
+                "invalid Range: end ({}) < start ({})",
+                repr.end, repr.start
+            )));
+        }
+        Ok(Range {
+            start: repr.start,
+            end: repr.end,
+        })
+    }
 }
 
 impl Display for Range {
@@ -25,10 +49,20 @@ impl Display for Range {
 impl Range {
     /// Creates the range `[start, start + size)`.
     pub fn new(start: usize, size: usize) -> Self {
-        Self {
-            start,
-            end: start + size,
-        }
+        let end = start
+            .checked_add(size)
+            .expect("Range::new: start + size overflows usize");
+        Self { start, end }
+    }
+
+    /// First address contained in the range.
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// First address past the end of the range.
+    pub fn end(&self) -> usize {
+        self.end
     }
 
     /// Returns the number of addresses in the range.

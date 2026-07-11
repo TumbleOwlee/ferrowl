@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::HandleEvents;
+use ferrowl_ui::traits::{HandleEvents, SetFocus};
 
 use crate::app::{DIGIT_CHORD_TIMEOUT, KeyMode};
 

@@ -4,7 +4,7 @@ use ferrowl_ui::{
     AlternateScreen, Border, EventResult,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{Header, Table, TableBuilder, TableEntry, Width},
 };
 use ratatui::{Frame, layout::Margin, style::palette::tailwind};

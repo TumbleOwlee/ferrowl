@@ -9,7 +9,9 @@ pub enum VimMode {
     Normal,
     Insert,
     /// `linewise` is `true` for `V` (line-visual), `false` for `v` (charwise).
-    Visual { linewise: bool },
+    Visual {
+        linewise: bool,
+    },
 }
 
 /// Word-class used by the `w`/`b`/`e` motions: a "word" is a maximal run of
@@ -138,8 +140,7 @@ pub fn word_backward(lines: &[String], line: usize, col: usize) -> (usize, usize
     }
 }
 
-const B64_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Minimal standard-alphabet base64 encoder (with `=` padding) — hand-rolled
 /// so this module doesn't need a new dependency just for OSC 52 payloads.

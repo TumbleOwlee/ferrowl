@@ -164,7 +164,10 @@ impl CodeInputFieldState {
     /// clamps to the last valid index (`len - 1`), not `len` — an empty line
     /// clamps to `0`.
     fn clamp_normal(&mut self) {
-        let max = self.lines[self.active_line].chars().count().saturating_sub(1);
+        let max = self.lines[self.active_line]
+            .chars()
+            .count()
+            .saturating_sub(1);
         if self.cursor_col > max {
             self.cursor_col = max;
         }
@@ -436,8 +439,10 @@ impl CodeInputFieldState {
                     true
                 }
                 '$' => {
-                    self.cursor_col =
-                        self.lines[self.active_line].chars().count().saturating_sub(1);
+                    self.cursor_col = self.lines[self.active_line]
+                        .chars()
+                        .count()
+                        .saturating_sub(1);
                     true
                 }
                 'w' => {
@@ -531,7 +536,9 @@ impl CodeInputFieldState {
                 EventResult::Consumed
             }
             (KeyModifiers::NONE, KeyCode::Char('u')) => {
-                if let Some((lines, active_line, cursor_col)) = self.undo.take() {
+                if !self.disabled
+                    && let Some((lines, active_line, cursor_col)) = self.undo.take()
+                {
                     let cur = (self.lines.clone(), self.active_line, self.cursor_col);
                     self.lines = lines;
                     self.active_line = active_line;
@@ -670,7 +677,10 @@ impl CodeInputFieldState {
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 self.last_space = None;
                 self.mode = VimMode::Normal;
-                let max = self.lines[self.active_line].chars().count().saturating_sub(1);
+                let max = self.lines[self.active_line]
+                    .chars()
+                    .count()
+                    .saturating_sub(1);
                 self.cursor_col = self.cursor_col.saturating_sub(1).min(max);
                 EventResult::Consumed
             }
@@ -693,10 +703,8 @@ impl CodeInputFieldState {
                     .count()
                     .min(4);
                 if leading > 0 {
-                    self.lines[self.active_line] = self.lines[self.active_line]
-                        .chars()
-                        .skip(leading)
-                        .collect();
+                    self.lines[self.active_line] =
+                        self.lines[self.active_line].chars().skip(leading).collect();
                     self.cursor_col = self.cursor_col.saturating_sub(leading);
                 }
                 EventResult::Consumed

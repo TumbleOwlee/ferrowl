@@ -5,7 +5,7 @@ use ferrowl_codec::{Address, Value};
 use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Memory, Range};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::{HandleEvents, OverlayRoute};
+use ferrowl_ui::traits::{HandleEvents, OverlayRoute, SetFocus};
 use ferrowl_ui_derive::Overlay;
 use ratatui::Frame;
 use ratatui::layout::Rect;

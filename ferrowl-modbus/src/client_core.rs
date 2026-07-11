@@ -78,9 +78,16 @@ impl ClientCore {
     where
         L: LogFn,
     {
-        let start = op.range.start;
-        let end = op.range.end;
-        let count = (end - start) as u16;
+        let start = op.range.start();
+        let end = op.range.end();
+        let Ok(count) = u16::try_from(end - start) else {
+            return (
+                "Unknown",
+                Err(ModbusError::Exception(
+                    tokio_modbus::ExceptionCode::IllegalDataValue,
+                )),
+            );
+        };
         match op.fn_code {
             FunctionCode::ReadCoils => {
                 Self::log_read_intent(log, "ReadCoils", op.slave_id, start, end).await;
@@ -215,8 +222,8 @@ impl ClientCore {
         if let Some(operation) = operation {
             let fc = operation.fn_code;
             let range = operation.range.clone();
-            let start = range.start;
-            let end = range.end;
+            let start = range.start();
+            let end = range.end();
             match self.read(&operation, timeout_ms, log).await {
                 (s, Ok(values)) => {
                     *had_success = true;

@@ -85,10 +85,9 @@ where
     }
 
     /// Execute all loaded scripts
-    pub fn call_all(&mut self, since: std::time::Duration) -> std::result::Result<(), Vec<Error>> {
+    pub fn call_all(&mut self) -> std::result::Result<(), Vec<Error>> {
         let errors: Vec<_> = self
             .iter_mut()
-            .filter(|(_, v)| v.since_last_execution() >= since)
             .map(|(_, v)| v.exec())
             .filter(|r| r.is_err())
             .map(|e| e.err().unwrap())
@@ -183,8 +182,7 @@ mod tests {
         let mut ctx = Context::<String>::default();
         ctx.load_script(key("ok"), "local x = 1").unwrap();
         ctx.load_script(key("boom"), "error('x')").unwrap();
-        // Duration::ZERO means every script is eligible to run.
-        let errs = ctx.call_all(Duration::ZERO).unwrap_err();
+        let errs = ctx.call_all().unwrap_err();
         assert_eq!(errs.len(), 1);
     }
 

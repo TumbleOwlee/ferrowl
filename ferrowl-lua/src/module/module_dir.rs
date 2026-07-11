@@ -114,7 +114,9 @@ mod tests {
     use super::*;
     use crate::ContextBuilder;
     use crate::module::ValueType;
-    use crate::module::{OcppActions, OcppClient, OcppClientHost, Read, RegisterModule, Write};
+    use crate::module::{
+        Has, OcppActions, OcppClient, OcppClientHost, Read, RegisterModule, Write,
+    };
     use std::collections::HashMap;
     use std::sync::{Mutex, RwLock};
 
@@ -163,6 +165,11 @@ mod tests {
         fn write(&self, name: String, value: ValueType) -> mlua::Result<()> {
             self.store.lock().unwrap().insert(name, value);
             Ok(())
+        }
+    }
+    impl Has for MockReadWrite {
+        fn has(&self, name: String) -> mlua::Result<bool> {
+            Ok(self.store.lock().unwrap().get(&name).is_some())
         }
     }
 
@@ -293,7 +300,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
     }
 
     #[test]
@@ -306,7 +313,7 @@ mod tests {
             .with_script("s".to_string(), r#"C_Module:Get("nope")"#)
             .build()
             .expect("build context");
-        let err = ctx.call_all(std::time::Duration::ZERO).unwrap_err();
+        let err = ctx.call_all().unwrap_err();
         assert!(err[0].to_string().contains("unknown module"));
     }
 
@@ -334,7 +341,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
     }
 
     #[test]
@@ -357,7 +364,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        let err = ctx.call_all(std::time::Duration::ZERO).unwrap_err();
+        let err = ctx.call_all().unwrap_err();
         assert!(err[0].to_string().contains("is not a modbus module"));
     }
 
@@ -378,7 +385,7 @@ mod tests {
             .with_script("s".to_string(), r#"local m = C_Module:Get("a"); m:OCPP()"#)
             .build()
             .expect("build context");
-        let err = ctx.call_all(std::time::Duration::ZERO).unwrap_err();
+        let err = ctx.call_all().unwrap_err();
         assert!(err[0].to_string().contains("is not an ocpp module"));
     }
 
@@ -407,7 +414,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         match rw.store.lock().unwrap().get("x") {
             Some(ValueType::Int(v)) => assert_eq!(*v, 7),
@@ -441,7 +448,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        ctx.call_all(std::time::Duration::ZERO).expect("run");
+        ctx.call_all().expect("run");
 
         assert!(matches!(
             handle.store.lock().unwrap().get("Model"),
