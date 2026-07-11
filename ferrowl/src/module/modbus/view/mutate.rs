@@ -19,7 +19,8 @@ use super::ModbusModuleView;
 /// Classifies a `:set`-style status message for the log ring: outright failures are `Error`,
 /// rejected/invalid input is `Warning`, and successful sets are `Info`.
 fn set_result_level(msg: &str) -> Level {
-    if msg.contains("failed") || msg.contains("error") {
+    let lower = msg.to_lowercase();
+    if lower.contains("failed") || lower.contains("error") {
         Level::Error
     } else if msg.starts_with(':') {
         Level::Warning

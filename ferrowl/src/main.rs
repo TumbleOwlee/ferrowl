@@ -237,7 +237,7 @@ fn session_sim_config(
 /// Classifies a `handle_command("start")` status message for the log ring: "... failed: {e}" is
 /// `Error`, a successful "Started ..." line is `Info`.
 fn start_result_level(msg: &str) -> Level {
-    if msg.contains("failed") {
+    if msg.to_lowercase().contains("failed") {
         Level::Error
     } else {
         Level::Info

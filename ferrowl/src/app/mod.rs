@@ -551,7 +551,7 @@ impl App {
 /// Classifies a `handle_command`-style status message for the log ring: "... failed: {e}"-shaped
 /// text is `Error`, everything else (success, plain status) is `Info`.
 pub(super) fn classify_command_result(msg: &str) -> Level {
-    if msg.contains("failed") {
+    if msg.to_lowercase().contains("failed") {
         Level::Error
     } else {
         Level::Info
