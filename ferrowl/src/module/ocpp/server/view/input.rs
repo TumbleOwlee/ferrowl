@@ -217,6 +217,17 @@ where
                 }
                 EventResult::Consumed
             }
+            // Space activates the table/button panes, same as Enter — but must not be swallowed
+            // while the code viewer is focused, since Space is a valid character there.
+            (KeyModifiers::NONE, KeyCode::Char(' ')) if self.focus != ServerViewFocus::Code => {
+                match self.focus {
+                    ServerViewFocus::CsTable => self.open_detail(),
+                    ServerViewFocus::ScriptsButton => self.open_scripts(),
+                    ServerViewFocus::Actions => self.trigger_action(),
+                    ServerViewFocus::MsgTable | ServerViewFocus::Code => {}
+                }
+                EventResult::Consumed
+            }
             _ => match self.focus {
                 ServerViewFocus::CsTable => self.cs_table.state.handle_events(modifiers, code),
                 ServerViewFocus::Actions => self.actions.state.handle_events(modifiers, code),
