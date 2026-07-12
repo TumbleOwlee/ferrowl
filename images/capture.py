@@ -107,6 +107,13 @@ SHOTS = [
         keys=[([":new", "Enter"], 0.6)],
     ),
     Shot(
+        out="session.png",
+        desc="Session dialog (:session) with the demo power-report script and live log",
+        # The demo session script runs on a 1s interval, so waiting lets the
+        # log pane at the bottom fill with a few report lines.
+        keys=[([":session", "Enter"], 3.0)],
+    ),
+    Shot(
         out="modbus/new-module.png",
         desc="Modbus module setup dialog",
         keys=[([":new", "Enter"], 0.6), (["Enter"], 0.6)],
@@ -185,6 +192,13 @@ def sh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(args, check=check, capture_output=True, text=True)
 
 
+def tmux(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """tmux on a dedicated server socket (-L). On the default socket an already
+    running server (e.g. the user's own tmux) would ignore both our -f config
+    and the -x/-y size, capturing a wrong-sized pane."""
+    return sh("tmux", "-L", SESSION, *args, check=check)
+
+
 # The focused-selection background of the vscode_dark scheme, as emitted in
 # `capture-pane -e` output — used to locate the highlighted list row.
 SELECTED_BG = "48;2;86;156;214"
@@ -204,7 +218,7 @@ def selected_text(ansi: str) -> str:
 
 
 def pane_ansi() -> str:
-    return sh("tmux", "capture-pane", "-e", "-N", "-p", "-t", SESSION).stdout
+    return tmux("capture-pane", "-e", "-N", "-p", "-t", SESSION).stdout
 
 
 def select_action(target: str) -> None:
@@ -213,21 +227,21 @@ def select_action(target: str) -> None:
     open-loop Up/Down counting proved not to be."""
     for _ in range(10):  # to the top: stop when Up no longer changes the highlight
         before = selected_text(pane_ansi())
-        sh("tmux", "send-keys", "-t", SESSION, "Up")
+        tmux("send-keys", "-t", SESSION, "Up")
         time.sleep(0.15)
         if selected_text(pane_ansi()) == before:
             break
     for _ in range(15):  # down to the target
         if selected_text(pane_ansi()) == target:
             return
-        sh("tmux", "send-keys", "-t", SESSION, "Down")
+        tmux("send-keys", "-t", SESSION, "Down")
         time.sleep(0.15)
     raise RuntimeError(f"could not select action '{target}' (at '{selected_text(pane_ansi())}')")
 
 
 def capture_shot(shot: Shot) -> str:
     """Run the demo, walk to the shot's UI state, return the ANSI capture."""
-    sh("tmux", "kill-session", "-t", SESSION, check=False)
+    tmux("kill-server", check=False)
     # Truecolor must be configured before the binary starts (crossterm sniffs
     # TERM/COLORTERM at startup and silently degrades RGB otherwise), so the
     # options go into a config file the fresh tmux server reads at launch.
@@ -237,8 +251,7 @@ def capture_shot(shot: Shot) -> str:
         'set -ga terminal-features ",*:RGB"\n'
         'set -ga terminal-overrides ",*:Tc"\n'
     )
-    sh(
-        "tmux",
+    tmux(
         "-f", str(conf),
         "new-session", "-d",
         "-s", SESSION,
@@ -256,15 +269,15 @@ def capture_shot(shot: Shot) -> str:
             # One key per send-keys call: bursts proved lossy against the app's
             # 100ms input tick (keys were swallowed mid-sequence).
             for key in keys:
-                sh("tmux", "send-keys", "-t", SESSION, key)
+                tmux("send-keys", "-t", SESSION, key)
                 time.sleep(0.15)
             time.sleep(delay if delay else KEY_DELAY)
         # -N preserves trailing spaces: styled padding (e.g. the full-width green
         # status line) is trailing whitespace and would be trimmed without it.
-        out = sh("tmux", "capture-pane", "-e", "-N", "-p", "-t", SESSION)
+        out = tmux("capture-pane", "-e", "-N", "-p", "-t", SESSION)
         return out.stdout
     finally:
-        sh("tmux", "kill-session", "-t", SESSION, check=False)
+        tmux("kill-server", check=False)
 
 
 # --- ANSI -> PNG rendering -------------------------------------------------

@@ -188,6 +188,14 @@ captured terminal content to PNG — run it after UI changes to refresh them.
     </p>
 </p>
 
+#### Session Dialog
+
+<p align="center">
+    <p align="center">
+        <img src="./images/session.png" style="border-radius: 8px">
+    </p>
+</p>
+
 #### Dialog: New Module
 
 <p align="center">
