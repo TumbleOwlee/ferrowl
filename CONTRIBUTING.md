@@ -37,6 +37,7 @@ CI runs `cargo check` and `cargo test` on every push (`check` workflow); a `nigh
 - Keep PRs focused — one feature or fix per PR.
 - Add or update tests for behavior changes; the existing unit tests live in `#[cfg(test)]` modules next to the code (`ut_*` naming).
 - Update the README when you change commands, keybindings, configuration fields or the Lua API.
+- Update `docs/prd.md` and the relevant `docs/agents/*.md` file(s) when you change behavior they document (see `docs/agents/prd.md` for which file covers which crate) — they're living docs, not a one-time snapshot.
 
 ## Reporting Issues
 
