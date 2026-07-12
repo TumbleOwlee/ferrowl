@@ -43,8 +43,10 @@ where
 {
     /// Declares memory regions for device `id` with the given access `kind`.
     ///
-    /// Ranges overlapping an existing slice are merged into it; compatible
-    /// access kinds on overlapping cells are widened to `ReadWrite` (a read
+    /// A range is merged with *every* slice it intersects -- the range and all
+    /// those slices become one slice spanning their union, keeping each merged
+    /// slice's cells at their own addresses. Compatible access kinds on
+    /// overlapping cells are widened to `ReadWrite` (a read
     /// range over a write cell, or vice versa). Returns `false` if an overlap
     /// has an incompatible register [`CellType`] or access combination, in which
     /// case `self`'s memory for `id` is left completely unchanged -- the call
@@ -59,41 +61,54 @@ where
         // semantics multiple `add_ranges` calls would have.
         let mut m = self.slices.get(&id).cloned().unwrap_or_default();
         for r in ranges {
-            let val = m.iter_mut().find(|(range, _)| r.intersect(range).is_some());
-            if let Some((range, _)) = val {
-                let range = range.clone();
-                let end = std::cmp::max(r.end, range.end);
-                let start = std::cmp::min(r.start, range.start);
-                let mut slice = m.remove(&range).unwrap();
-                if let Some(rg) = r.intersect(&slice.range) {
-                    for i in (rg.start - slice.range.start)..(rg.end - slice.range.start) {
-                        // Same register type: a Read+Write (in either order) widens to ReadWrite;
-                        // matching access is a no-op. Any other combination is incompatible.
-                        match (&slice.buffer[i], kind) {
-                            (Cell::Read(t1, _), CellKind::Read(t2)) if t1 == t2 => {}
-                            (Cell::Write(t1, _), CellKind::Write(t2)) if t1 == t2 => {}
-                            (Cell::ReadWrite(t1, _), CellKind::ReadWrite(t2)) if t1 == t2 => {}
-                            (Cell::Read(t1, v1), CellKind::Write(t2)) if t1 == t2 => {
-                                slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
-                            }
-                            (Cell::Write(t1, v1), CellKind::Read(t2)) if t1 == t2 => {
-                                slice.buffer[i] = Cell::ReadWrite(*t1, *v1);
-                            }
-                            // `self.slices` still holds the pre-call map: safe to bail here.
-                            _ => return false,
+            // A range can bridge several existing slices (e.g. [5,25) over [0,10) and [20,30)), so
+            // every intersecting slice is absorbed -- merging only the first would leave the rest
+            // keyed at addresses the merged slice now also covers, breaking the non-overlap
+            // invariant and shadowing their values.
+            let targets: Vec<Range> = m
+                .keys()
+                .filter(|range| r.intersect(range).is_some())
+                .cloned()
+                .collect();
+            let (Some(first), Some(last)) = (targets.first(), targets.last()) else {
+                m.insert(r.clone(), Slice::from_range(kind, r.clone()));
+                continue;
+            };
+            let start = std::cmp::min(r.start, first.start);
+            let end = std::cmp::max(r.end, last.end);
+
+            // Cells the union newly covers start out zero-initialized as `kind`; every absorbed
+            // slice then writes its own cells back over them, preserving type and value.
+            let mut merged = Slice::from_range(kind, Range::new(start, end - start));
+            for t in &targets {
+                let slice = m.remove(t).unwrap();
+                let offset = slice.range.start - start;
+                for (i, cell) in slice.buffer.into_iter().enumerate() {
+                    merged.buffer[offset + i] = cell;
+                }
+            }
+
+            for t in &targets {
+                let Some(rg) = r.intersect(t) else { continue };
+                for i in (rg.start - start)..(rg.end - start) {
+                    // Same register type: a Read+Write (in either order) widens to ReadWrite;
+                    // matching access is a no-op. Any other combination is incompatible.
+                    match (&merged.buffer[i], kind) {
+                        (Cell::Read(t1, _), CellKind::Read(t2)) if t1 == t2 => {}
+                        (Cell::Write(t1, _), CellKind::Write(t2)) if t1 == t2 => {}
+                        (Cell::ReadWrite(t1, _), CellKind::ReadWrite(t2)) if t1 == t2 => {}
+                        (Cell::Read(t1, v1), CellKind::Write(t2)) if t1 == t2 => {
+                            merged.buffer[i] = Cell::ReadWrite(*t1, *v1);
                         }
+                        (Cell::Write(t1, v1), CellKind::Read(t2)) if t1 == t2 => {
+                            merged.buffer[i] = Cell::ReadWrite(*t1, *v1);
+                        }
+                        // `self.slices` still holds the pre-call map: safe to bail here.
+                        _ => return false,
                     }
                 }
-                if start < range.start {
-                    slice.extend(kind, &Range::new(start, range.start - start));
-                }
-                if end > range.end {
-                    slice.extend(kind, &Range::new(range.end, end - range.end));
-                }
-                m.insert(Range::new(start, end - start), slice);
-            } else {
-                m.insert(r.clone(), Slice::from_range(kind, r.clone()));
             }
+            m.insert(Range::new(start, end - start), merged);
         }
 
         // Every range validated and merged cleanly against the copy: commit it.
@@ -308,6 +323,37 @@ mod tests {
         assert!(slices.is_some());
         let slices = slices.unwrap();
         assert!(slices.get(&Range::new(0, 10)).is_some());
+    }
+
+    #[test]
+    fn ut_memory_add_ranges_bridging_two_slices_merges_all() {
+        let kind = CellKind::ReadWrite(CellType::Register);
+        let mut memory = Memory::default();
+        memory.add_ranges(1, &kind, &[Range::new(0, 10), Range::new(20, 10)]);
+        memory
+            .write(1, &CellType::Register, &Range::new(20, 5), &[7; 5])
+            .unwrap();
+
+        // Bridges [0,10) and [20,30): all three must collapse into one slice.
+        assert!(memory.add_ranges(1, &kind, &[Range::new(5, 20)]));
+
+        let slices = memory.slices.get(&1).unwrap();
+        assert_eq!(slices.len(), 1);
+        assert!(slices.get(&Range::new(0, 30)).is_some());
+        // The absorbed slice's values survive at their own addresses.
+        assert_eq!(
+            memory
+                .read(1, &CellType::Register, &Range::new(20, 5))
+                .unwrap(),
+            vec![7; 5]
+        );
+        // The gap the new range newly covers is zero-initialized and addressable.
+        assert_eq!(
+            memory
+                .read(1, &CellType::Register, &Range::new(10, 10))
+                .unwrap(),
+            vec![0; 10]
+        );
     }
 
     #[test]
