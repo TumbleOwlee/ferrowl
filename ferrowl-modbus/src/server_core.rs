@@ -66,7 +66,7 @@ where
                 ))
                 .await;
             }
-            Err(ExceptionCode::IllegalFunction)
+            Err(ExceptionCode::IllegalDataAddress)
         }
     }
 }
@@ -125,7 +125,7 @@ where
                 ))
                 .await;
             }
-            Err(ExceptionCode::IllegalFunction)
+            Err(ExceptionCode::IllegalDataAddress)
         }
     }
 }
@@ -180,7 +180,7 @@ where
                 ))
                 .await;
             }
-            Err(ExceptionCode::IllegalFunction)
+            Err(ExceptionCode::IllegalDataAddress)
         }
     }
 }
@@ -410,7 +410,7 @@ where
                         ))
                         .await;
                     }
-                    Err(ExceptionCode::IllegalFunction)
+                    Err(ExceptionCode::IllegalDataAddress)
                 }
                 Outcome::Ok(v) => {
                     if verbose {
@@ -572,7 +572,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_handle_read_unknown_slave_is_illegal_function() {
+    async fn ut_handle_read_unknown_slave_is_illegal_data_address() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
         // Slave 2 has no registered ranges, so the lookup fails.
@@ -585,7 +585,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     #[tokio::test]
@@ -679,7 +679,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_write_multiple_coils_out_of_range_is_illegal_function() {
+    async fn ut_write_multiple_coils_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 8, &[]);
         let (log, _) = recording_log();
         // addr 6 + 5 coils overruns the registered [0, 8) region.
@@ -692,7 +692,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     // ---- Coil / discrete-input reads ----
@@ -708,13 +708,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_read_coils_out_of_range_is_illegal_function() {
+    async fn ut_read_coils_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(1, Request::ReadCoils(10, 2), &mem, &log, false)
             .await
             .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     #[tokio::test]
@@ -729,14 +729,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_read_discrete_inputs_unknown_slave_is_illegal_function() {
+    async fn ut_read_discrete_inputs_unknown_slave_is_illegal_data_address() {
         let mem = seeded(RegKind::DiscreteInput, CellType::Coil, 3, &[]);
         let (log, _) = recording_log();
         let err =
             handle_request::<SlaveKey, _>(2, Request::ReadDiscreteInputs(0, 3), &mem, &log, false)
                 .await
                 .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     // ---- Register reads ----
@@ -753,18 +753,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_read_input_registers_out_of_range_is_illegal_function() {
+    async fn ut_read_input_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::InputRegister, CellType::Register, 3, &[]);
         let (log, _) = recording_log();
         let err =
             handle_request::<SlaveKey, _>(1, Request::ReadInputRegisters(2, 5), &mem, &log, false)
                 .await
                 .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     #[tokio::test]
-    async fn ut_read_holding_registers_out_of_range_is_illegal_function() {
+    async fn ut_read_holding_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
@@ -776,7 +776,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     // ---- Single writes ----
@@ -797,18 +797,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_write_single_coil_out_of_range_is_illegal_function() {
+    async fn ut_write_single_coil_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
         let err =
             handle_request::<SlaveKey, _>(1, Request::WriteSingleCoil(9, true), &mem, &log, false)
                 .await
                 .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     #[tokio::test]
-    async fn ut_write_single_register_out_of_range_is_illegal_function() {
+    async fn ut_write_single_register_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
@@ -820,7 +820,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     // ---- WriteMultipleRegisters ----
@@ -852,7 +852,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ut_write_multiple_registers_out_of_range_is_illegal_function() {
+    async fn ut_write_multiple_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
@@ -864,7 +864,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     // ---- ReadWriteMultipleRegisters (reads and writes the same holding region) ----
