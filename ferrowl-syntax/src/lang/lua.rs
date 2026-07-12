@@ -412,10 +412,7 @@ mod tests {
             assert!(*start <= *end);
             assert!(*end <= len);
         }
-        let idents: Vec<_> = spans
-            .iter()
-            .filter(|s| s.2 == SyntaxKind::Ident)
-            .collect();
+        let idents: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::Ident).collect();
         assert_eq!(idents.len(), 1);
     }
 
@@ -428,10 +425,7 @@ mod tests {
             assert!(*start <= *end);
             assert!(*end <= len);
         }
-        let strings: Vec<_> = spans
-            .iter()
-            .filter(|s| s.2 == SyntaxKind::String)
-            .collect();
+        let strings: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::String).collect();
         assert_eq!(strings.len(), 1);
         let (s_start, s_end, _) = *strings[0];
         let string_chars: String = line.chars().skip(s_start).take(s_end - s_start).collect();
@@ -448,10 +442,7 @@ mod tests {
             assert!(*start <= *end);
             assert!(*end <= len);
         }
-        let strings: Vec<_> = spans
-            .iter()
-            .filter(|s| s.2 == SyntaxKind::String)
-            .collect();
+        let strings: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::String).collect();
         assert_eq!(strings.len(), 1);
 
         let line_emoji_alone = "🚀 local x";

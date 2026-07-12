@@ -126,9 +126,14 @@ impl StatefulWidget for &CodeInputField {
             return;
         }
 
-        // Adjust scroll so active_line is always visible
+        // Adjust scroll so active_line is always visible. Only a focused field
+        // follows its cursor: unfocused fields keep their viewport (set_content
+        // parks the cursor at the end of the text, and following it would show
+        // an unfocused pane scrolled to the bottom/right).
         let scroll = state.scroll_offset();
-        let scroll = if active < scroll {
+        let scroll = if !state.focused() {
+            scroll.min(line_count.saturating_sub(1))
+        } else if active < scroll {
             active
         } else if active >= scroll + visible_height {
             active + 1 - visible_height
@@ -147,6 +152,8 @@ impl StatefulWidget for &CodeInputField {
         let h_scroll = state.h_scroll();
         let h_scroll = if content_width == 0 {
             0
+        } else if !state.focused() {
+            h_scroll
         } else if cursor_col < h_scroll {
             cursor_col
         } else if cursor_col >= h_scroll + content_width {

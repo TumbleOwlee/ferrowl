@@ -347,17 +347,14 @@ impl<V: ClientVersion> ClientView<V> {
                         Level::Info,
                         format!("Connecting to {}", self.spec.url()),
                     ))),
-                    Err(e) => CommandResult::Handled(Some((
-                        Level::Error,
-                        format!("Connect failed: {e}"),
-                    ))),
+                    Err(e) => {
+                        CommandResult::Handled(Some((Level::Error, format!("Connect failed: {e}"))))
+                    }
                 }
             }),
             "stop" => Box::pin(async move {
                 match self.backend.stop().await {
-                    Ok(()) => {
-                        CommandResult::Handled(Some((Level::Info, "Disconnected".into())))
-                    }
+                    Ok(()) => CommandResult::Handled(Some((Level::Info, "Disconnected".into()))),
                     Err(e) => CommandResult::Handled(Some((
                         Level::Error,
                         format!("Disconnect failed: {e}"),
@@ -368,9 +365,7 @@ impl<V: ClientVersion> ClientView<V> {
                 let _ = self.backend.stop().await;
                 let handler = self.make_handler();
                 match self.backend.start(&self.spec, handler).await {
-                    Ok(()) => {
-                        CommandResult::Handled(Some((Level::Info, "Reconnecting".into())))
-                    }
+                    Ok(()) => CommandResult::Handled(Some((Level::Info, "Reconnecting".into()))),
                     Err(e) => CommandResult::Handled(Some((
                         Level::Error,
                         format!("Reconnect failed: {e}"),

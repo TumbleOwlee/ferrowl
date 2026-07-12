@@ -505,7 +505,10 @@ mod tests {
             ..Default::default()
         };
         let ops = build_read_operations(&regs, &small);
-        let mut got: Vec<_> = ops.iter().map(|o| (o.range.start(), o.range.end())).collect();
+        let mut got: Vec<_> = ops
+            .iter()
+            .map(|o| (o.range.start(), o.range.end()))
+            .collect();
         got.sort_unstable();
         // Registers 0 and 2 bridge to [0,3); register 50 reads alone.
         assert_eq!(got, vec![(0, 3), (50, 51)]);

@@ -95,11 +95,7 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
 {
     let handle: JoinHandle<<F as Future>::Output> = tokio_spawn(future);
     let mut context = CONTEXT.lock().await;
-    context
-        .0
-        .entry(ctx)
-        .or_default()
-        .push(Box::new(handle));
+    context.0.entry(ctx).or_default().push(Box::new(handle));
 }
 
 /// Join all tasks that are stored in any of the contexts

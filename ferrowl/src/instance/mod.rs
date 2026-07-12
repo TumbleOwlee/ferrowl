@@ -254,7 +254,9 @@ mod tests {
         Instance::with_tcp_client(config::ClientConfig {
             config: Arc::new(RwLock::new(dead_tcp_config())),
             operations,
-            memory: Arc::new(MemLock::new(ferrowl_store::Memory::<Key<SlaveKey>>::default())),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
         })
     }
 
@@ -280,10 +282,7 @@ mod tests {
     #[tokio::test]
     async fn send_command_never_started_is_not_running() {
         let instance = tcp_client_instance();
-        let err = instance
-            .send_command(Command::Terminate)
-            .await
-            .unwrap_err();
+        let err = instance.send_command(Command::Terminate).await.unwrap_err();
         assert!(matches!(err, Error::Instance(InstanceError::NotRunning)));
     }
 
@@ -295,13 +294,15 @@ mod tests {
     async fn send_command_on_server_is_invalid_operation() {
         let mut instance = tcp_client_instance();
         let task = tokio::spawn(async { Ok(()) });
-        instance.handle = Some(handle::Handle::Server(handle::ServerHandle { handle: task }));
+        instance.handle = Some(handle::Handle::Server(handle::ServerHandle {
+            handle: task,
+        }));
 
-        let err = instance
-            .send_command(Command::Terminate)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, Error::Instance(InstanceError::InvalidOperation)));
+        let err = instance.send_command(Command::Terminate).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Instance(InstanceError::InvalidOperation)
+        ));
 
         instance.stop().await.expect("cleanup stop");
     }

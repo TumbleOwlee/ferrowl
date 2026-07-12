@@ -22,11 +22,7 @@ pub(crate) fn open_sink(
 ) -> Result<(), std::io::Error> {
     if let Some(base) = base {
         let path = module_log_path(base, name);
-        match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
+        match OpenOptions::new().create(true).append(true).open(path) {
             Ok(file) => {
                 if let Ok(mut guard) = sink.lock() {
                     *guard = Some(BufWriter::new(file));
@@ -111,7 +107,7 @@ mod tests {
 
     #[test]
     fn ut_open_sink_error_on_nonexistent_dir() {
-        use super::{open_sink, FileSink};
+        use super::{FileSink, open_sink};
 
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
         let result = open_sink(&sink, Some("/nonexistent/dir/base.log"), "test");
@@ -123,7 +119,7 @@ mod tests {
 
     #[test]
     fn ut_open_sink_success_with_valid_dir() {
-        use super::{open_sink, FileSink};
+        use super::{FileSink, open_sink};
 
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
         let temp_dir = std::env::temp_dir();
@@ -143,7 +139,7 @@ mod tests {
 
     #[test]
     fn ut_open_sink_clears_on_none_base() {
-        use super::{open_sink, FileSink};
+        use super::{FileSink, open_sink};
 
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
         let result = open_sink(&sink, None, "test");

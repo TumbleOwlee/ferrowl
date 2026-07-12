@@ -158,7 +158,10 @@ static TEST_SECTION: BindingSection = BindingSection {
 static LOG_SECTION: BindingSection = BindingSection {
     title: "C_Log",
     entries: &[
-        ("C_Log:Info(message)", "append an info line to the module log"),
+        (
+            "C_Log:Info(message)",
+            "append an info line to the module log",
+        ),
         (
             "C_Log:Warn(message)",
             "append a warning line to the module log",

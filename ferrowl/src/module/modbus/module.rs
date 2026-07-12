@@ -516,7 +516,11 @@ mod tests {
 
         // Log-base reconfiguration: clear, then attempt a path that fails.
         assert!(module.set_log_base(None).is_ok());
-        assert!(module.set_log_base(Some("/no/such/ferrowl/dir/base.log")).is_err());
+        assert!(
+            module
+                .set_log_base(Some("/no/such/ferrowl/dir/base.log"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -779,7 +783,9 @@ mod tests {
             .map(|(_, _, l)| l)
             .collect();
         assert!(
-            !general_lines.iter().any(|l| l == "hello" || l == "info-line"),
+            !general_lines
+                .iter()
+                .any(|l| l == "hello" || l == "info-line"),
             "Lua output must not leak into the general log: {general_lines:?}"
         );
     }

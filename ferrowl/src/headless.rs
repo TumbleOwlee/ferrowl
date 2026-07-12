@@ -216,8 +216,7 @@ fn now_ms() -> u64 {
 /// we're already tearing down).
 async fn stop_all(modules: &mut [RunModule]) {
     for module in modules.iter_mut() {
-        if let CommandResult::Handled(Some((level, msg))) =
-            module.view.handle_command("stop").await
+        if let CommandResult::Handled(Some((level, msg))) = module.view.handle_command("stop").await
         {
             module.log.write().await.write(level, &msg);
         }

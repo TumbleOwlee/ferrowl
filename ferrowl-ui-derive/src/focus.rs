@@ -403,8 +403,7 @@ mod tests {
             }
         };
 
-        let err =
-            expand_focus(input).expect_err("expected unknown focus key to be rejected");
+        let err = expand_focus(input).expect_err("expected unknown focus key to be rejected");
         assert!(
             err.to_string()
                 .contains("Invalid argument for #[focus] attribute")

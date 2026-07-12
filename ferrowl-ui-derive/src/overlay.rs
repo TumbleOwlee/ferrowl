@@ -225,7 +225,8 @@ mod tests {
             }
         };
 
-        let err = expand_overlay(input).expect_err("expected multiple none variants to be rejected");
+        let err =
+            expand_overlay(input).expect_err("expected multiple none variants to be rejected");
         assert_eq!(
             err.to_string(),
             "only one `#[overlay(none)]` variant is allowed"
@@ -243,7 +244,8 @@ mod tests {
             }
         };
 
-        let err = expand_overlay(input).expect_err("expected multi-field esc_close variant to be rejected");
+        let err = expand_overlay(input)
+            .expect_err("expected multi-field esc_close variant to be rejected");
         assert_eq!(
             err.to_string(),
             "an `esc_close`/`focus_cycle` overlay variant must hold exactly one field"

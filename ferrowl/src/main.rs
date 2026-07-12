@@ -319,12 +319,13 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
         if renamed {
             tab.log.write().await.write(
                 Level::Warning,
-                &format!("Warning: duplicate module name — renamed to '{}'", spec.name),
+                &format!(
+                    "Warning: duplicate module name — renamed to '{}'",
+                    spec.name
+                ),
             );
         }
-        if let CommandResult::Handled(Some((level, msg))) =
-            tab.view.handle_command("start").await
-        {
+        if let CommandResult::Handled(Some((level, msg))) = tab.view.handle_command("start").await {
             tab.log.write().await.write(level, &msg);
         }
         tabs.push(tab);

@@ -692,10 +692,7 @@ where
                     let path = cmd["log ".len()..].trim().to_string();
                     if path.is_empty() {
                         self.device.log_file = None;
-                        CommandResult::Handled(Some((
-                            Level::Info,
-                            "File logging disabled".into(),
-                        )))
+                        CommandResult::Handled(Some((Level::Info, "File logging disabled".into())))
                     } else {
                         self.device.log_file = Some(path.clone());
                         CommandResult::Handled(Some((Level::Info, format!("Logging to {path}"))))
@@ -727,10 +724,7 @@ where
                         )));
                     }
                     if with_rfids_mut(&self.rfids, |s| s.add(Scope::CS, tag.clone())) {
-                        CommandResult::Handled(Some((
-                            Level::Info,
-                            format!("Added CS RFID {tag}"),
-                        )))
+                        CommandResult::Handled(Some((Level::Info, format!("Added CS RFID {tag}"))))
                     } else {
                         CommandResult::Handled(Some((
                             Level::Warning,

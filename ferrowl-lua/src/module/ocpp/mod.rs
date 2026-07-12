@@ -37,12 +37,13 @@ where
 
     // One method per version-specific action: `:<Action>(overrides?)`.
     for action in H::actions() {
-        methods.add_method(action, move |_, this, args: Option<Table>| {
-            match table_to_overrides(args) {
+        methods.add_method(
+            action,
+            move |_, this, args: Option<Table>| match table_to_overrides(args) {
                 Ok(overrides) => Ok(handle(this).dispatch(action, overrides)),
                 Err(e) => Err(e),
-            }
-        });
+            },
+        );
     }
 }
 
@@ -486,7 +487,12 @@ mod tests {
             .build()
             .expect("build context");
 
-        let errors = ctx.call_all().expect_err("expected error from malformed table");
-        assert!(!errors.is_empty(), "expected at least one error from malformed override table");
+        let errors = ctx
+            .call_all()
+            .expect_err("expected error from malformed table");
+        assert!(
+            !errors.is_empty(),
+            "expected at least one error from malformed override table"
+        );
     }
 }

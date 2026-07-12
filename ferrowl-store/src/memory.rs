@@ -635,16 +635,8 @@ mod tests {
         // none of range1's or range2's merges committed either.
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 10)]);
-        memory.add_ranges(
-            1u8,
-            &CellKind::Write(CellType::Coil),
-            &[Range::new(10, 10)],
-        );
-        memory.add_ranges(
-            1u8,
-            &CellKind::Write(CellType::Coil),
-            &[Range::new(30, 10)],
-        );
+        memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(10, 10)]);
+        memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(30, 10)]);
 
         let before = format!("{:?}", memory.slices.get(&1u8).unwrap());
 

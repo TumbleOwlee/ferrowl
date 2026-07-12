@@ -357,7 +357,10 @@ mod tests {
     #[test]
     fn ut_device_config_script_interval_duration_sanitized() {
         let mut cfg = OcppDeviceConfig::default();
-        assert_eq!(cfg.script_interval_duration(), std::time::Duration::from_secs(1));
+        assert_eq!(
+            cfg.script_interval_duration(),
+            std::time::Duration::from_secs(1)
+        );
         cfg.script_interval = 0.25;
         assert_eq!(
             cfg.script_interval_duration(),
@@ -365,7 +368,10 @@ mod tests {
         );
         for bad in [f64::NAN, f64::INFINITY, -1.0, 0.0] {
             cfg.script_interval = bad;
-            assert_eq!(cfg.script_interval_duration(), std::time::Duration::from_secs(1));
+            assert_eq!(
+                cfg.script_interval_duration(),
+                std::time::Duration::from_secs(1)
+            );
         }
     }
 

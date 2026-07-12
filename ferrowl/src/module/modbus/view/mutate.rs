@@ -19,10 +19,9 @@ use super::ModbusModuleView;
 impl ModbusModuleView {
     pub(super) fn apply_order(&mut self, col: &str, descending: bool) -> CommandResult {
         match column_index(col) {
-            None => CommandResult::Handled(Some((
-                Level::Warning,
-                format!("Unknown column '{col}'"),
-            ))),
+            None => {
+                CommandResult::Handled(Some((Level::Warning, format!("Unknown column '{col}'"))))
+            }
             Some(idx) => {
                 self.sort = Some((idx, descending));
                 self.table.sort_definitions(idx, descending);
@@ -386,10 +385,9 @@ impl ModbusModuleView {
                             format!("set {register_name} = {value} (sent)"),
                         )))
                     }
-                    Err(e) => CommandResult::Handled(Some((
-                        Level::Error,
-                        format!(":set failed: {e}"),
-                    ))),
+                    Err(e) => {
+                        CommandResult::Handled(Some((Level::Error, format!(":set failed: {e}"))))
+                    }
                 }
             }
         }

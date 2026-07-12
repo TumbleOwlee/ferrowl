@@ -576,7 +576,10 @@ mod tests {
     fn ut_classify_exception_maps_to_modbus_exception() {
         let res: ReadResult<u16> = Ok(Ok(Err(ExceptionCode::IllegalDataAddress)));
         let e = ClientCore::classify(res).unwrap_err();
-        assert!(matches!(e, ModbusError::Exception(ExceptionCode::IllegalDataAddress)));
+        assert!(matches!(
+            e,
+            ModbusError::Exception(ExceptionCode::IllegalDataAddress)
+        ));
     }
 
     #[test]
@@ -604,7 +607,9 @@ mod tests {
         // Same classify() call the ReadCoils/ReadDiscreteInputs arms make, chained with
         // `.map(Self::bits_to_words)` as `read()` does.
         let res: ReadResult<Vec<bool>> = Ok(Ok(Ok(vec![true, false])));
-        let words = ClientCore::classify(res).map(ClientCore::bits_to_words).unwrap();
+        let words = ClientCore::classify(res)
+            .map(ClientCore::bits_to_words)
+            .unwrap();
         assert_eq!(words, vec![1u16, 0]);
     }
 }

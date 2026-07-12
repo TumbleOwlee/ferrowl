@@ -545,8 +545,11 @@ impl CodeInputFieldState {
                     let len = self.lines[self.active_line].chars().count();
                     if len > 0 {
                         self.snapshot_undo();
-                        let removed =
-                            self.remove_range(self.active_line, self.cursor_col, self.cursor_col + 1);
+                        let removed = self.remove_range(
+                            self.active_line,
+                            self.cursor_col,
+                            self.cursor_col + 1,
+                        );
                         self.set_register(removed, false);
                         self.clamp_normal();
                     }

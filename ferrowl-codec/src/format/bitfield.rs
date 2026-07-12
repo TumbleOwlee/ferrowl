@@ -44,7 +44,11 @@ impl BitField {
         if self.is_full() {
             return true;
         }
-        let limit = if bits >= 128 { u128::MAX } else { (1u128 << bits) - 1 };
+        let limit = if bits >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << bits) - 1
+        };
         self.mask <= limit
     }
 }

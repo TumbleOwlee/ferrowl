@@ -113,7 +113,10 @@ impl HandleEvents for InputFieldState {
                         if self.input.is_empty() || self.input.chars().count() == self.cursor {
                             self.input.push(c);
                         } else {
-                            let byte_idx = self.input.char_indices().nth(self.cursor)
+                            let byte_idx = self
+                                .input
+                                .char_indices()
+                                .nth(self.cursor)
                                 .map(|(idx, _)| idx)
                                 .unwrap_or(self.input.len());
                             self.input.insert(byte_idx, c);
@@ -126,7 +129,10 @@ impl HandleEvents for InputFieldState {
             (KeyModifiers::NONE, KeyCode::Backspace) if !self.disabled => {
                 if !self.disabled && self.cursor > 0 {
                     if self.input.chars().count() >= self.cursor {
-                        let byte_idx = self.input.char_indices().nth(self.cursor - 1)
+                        let byte_idx = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor - 1)
                             .map(|(idx, _)| idx)
                             .expect("cursor > 0 so char at cursor-1 exists");
                         self.input.remove(byte_idx);
@@ -137,7 +143,10 @@ impl HandleEvents for InputFieldState {
             }
             (KeyModifiers::NONE, KeyCode::Delete) if !self.disabled => {
                 if !self.disabled && self.input.chars().count() > self.cursor {
-                    let byte_idx = self.input.char_indices().nth(self.cursor)
+                    let byte_idx = self
+                        .input
+                        .char_indices()
+                        .nth(self.cursor)
                         .map(|(idx, _)| idx)
                         .expect("input.chars().count() > cursor so char exists");
                     self.input.remove(byte_idx);

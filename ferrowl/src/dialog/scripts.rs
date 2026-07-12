@@ -121,8 +121,7 @@ impl ScriptDialog {
     /// first so unsaved keystrokes aren't lost.
     pub fn resolve(mut self) -> (Vec<ScriptDef>, Duration) {
         self.flush_code_to_selection();
-        let interval =
-            parse_interval(self.interval.state.input()).unwrap_or(self.initial_interval);
+        let interval = parse_interval(self.interval.state.input()).unwrap_or(self.initial_interval);
         (self.scripts, interval)
     }
 
