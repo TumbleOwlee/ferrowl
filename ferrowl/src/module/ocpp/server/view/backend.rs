@@ -498,8 +498,9 @@ where
     fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
-            return CommandResult::Handled(Some(format!(
-                "unknown format for '{path}' (use .toml or .json)"
+            return CommandResult::Handled(Some((
+                Level::Warning,
+                format!("unknown format for '{path}' (use .toml or .json)"),
             )));
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
@@ -507,8 +508,11 @@ where
         device.log_file = self.device.log_file.clone();
         with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
         match Converter::save(&device, path, ty) {
-            Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
-            Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
+            Ok(()) => CommandResult::Handled(Some((
+                Level::Info,
+                format!("Saved device config to {path}"),
+            ))),
+            Err(e) => CommandResult::Handled(Some((Level::Error, format!("Save failed: {e:?}")))),
         }
     }
 
@@ -615,10 +619,14 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
-                        Ok(binding) => {
-                            CommandResult::Handled(Some(started_message(binding, "started")))
-                        }
-                        Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
+                        Ok(binding) => CommandResult::Handled(Some((
+                            Level::Info,
+                            started_message(binding, "started"),
+                        ))),
+                        Err(e) => CommandResult::Handled(Some((
+                            Level::Error,
+                            format!("listen failed: {e}"),
+                        ))),
                     }
                 }
                 "stop" => {
@@ -628,7 +636,7 @@ where
                     self.conn_identity.clear();
                     self.cs_configs.clear();
                     self.clear_lua_states();
-                    CommandResult::Handled(Some("CSMS server stopped".into()))
+                    CommandResult::Handled(Some((Level::Info, "CSMS server stopped".into())))
                 }
                 "restart" => {
                     let _ = self.backend.stop().await;
@@ -639,10 +647,14 @@ where
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
-                        Ok(binding) => {
-                            CommandResult::Handled(Some(started_message(binding, "restarted")))
-                        }
-                        Err(e) => CommandResult::Handled(Some(format!("listen failed: {e}"))),
+                        Ok(binding) => CommandResult::Handled(Some((
+                            Level::Info,
+                            started_message(binding, "restarted"),
+                        ))),
+                        Err(e) => CommandResult::Handled(Some((
+                            Level::Error,
+                            format!("listen failed: {e}"),
+                        ))),
                     }
                 }
                 "edit" | "e" => {
@@ -656,9 +668,10 @@ where
                 }
                 "wd" => {
                     if self.device_path.is_empty() {
-                        CommandResult::Handled(Some(
+                        CommandResult::Handled(Some((
+                            Level::Warning,
                             "No configuration file path configured.".into(),
-                        ))
+                        )))
                     } else {
                         self.save_device_to(&self.device_path.clone())
                     }
@@ -673,16 +686,19 @@ where
                 }
                 "log" => {
                     self.device.log_file = None;
-                    CommandResult::Handled(Some("File logging disabled".into()))
+                    CommandResult::Handled(Some((Level::Info, "File logging disabled".into())))
                 }
                 cmd if cmd.starts_with("log ") => {
                     let path = cmd["log ".len()..].trim().to_string();
                     if path.is_empty() {
                         self.device.log_file = None;
-                        CommandResult::Handled(Some("File logging disabled".into()))
+                        CommandResult::Handled(Some((
+                            Level::Info,
+                            "File logging disabled".into(),
+                        )))
                     } else {
                         self.device.log_file = Some(path.clone());
-                        CommandResult::Handled(Some(format!("Logging to {path}")))
+                        CommandResult::Handled(Some((Level::Info, format!("Logging to {path}"))))
                     }
                 }
                 "rfid" => {
@@ -693,31 +709,47 @@ where
                             format!("Accepted CS RFIDs: {}", s.cs.join(", "))
                         }
                     });
-                    CommandResult::Handled(Some(msg))
+                    CommandResult::Handled(Some((Level::Info, msg)))
                 }
                 "rfid clear" => {
                     with_rfids_mut(&self.rfids, |s| s.cs.clear());
-                    CommandResult::Handled(Some(
+                    CommandResult::Handled(Some((
+                        Level::Info,
                         "CS RFID accept-list cleared (all accepted)".into(),
-                    ))
+                    )))
                 }
                 cmd if cmd.starts_with("rfid add ") => {
                     let tag = cmd["rfid add ".len()..].trim().to_string();
                     if tag.is_empty() {
-                        return CommandResult::Handled(Some("Usage: :rfid add <tag>".into()));
+                        return CommandResult::Handled(Some((
+                            Level::Warning,
+                            "Usage: :rfid add <tag>".into(),
+                        )));
                     }
                     if with_rfids_mut(&self.rfids, |s| s.add(Scope::CS, tag.clone())) {
-                        CommandResult::Handled(Some(format!("Added CS RFID {tag}")))
+                        CommandResult::Handled(Some((
+                            Level::Info,
+                            format!("Added CS RFID {tag}"),
+                        )))
                     } else {
-                        CommandResult::Handled(Some(format!("{tag} already in accept-list")))
+                        CommandResult::Handled(Some((
+                            Level::Warning,
+                            format!("{tag} already in accept-list"),
+                        )))
                     }
                 }
                 cmd if cmd.starts_with("rfid del ") => {
                     let tag = cmd["rfid del ".len()..].trim().to_string();
                     if with_rfids_mut(&self.rfids, |s| s.remove(Scope::CS, &tag)) {
-                        CommandResult::Handled(Some(format!("Removed CS RFID {tag}")))
+                        CommandResult::Handled(Some((
+                            Level::Info,
+                            format!("Removed CS RFID {tag}"),
+                        )))
                     } else {
-                        CommandResult::Handled(Some(format!("{tag} not in accept-list")))
+                        CommandResult::Handled(Some((
+                            Level::Warning,
+                            format!("{tag} not in accept-list"),
+                        )))
                     }
                 }
                 _ => CommandResult::Unhandled,

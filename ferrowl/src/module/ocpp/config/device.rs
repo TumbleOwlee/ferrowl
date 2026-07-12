@@ -208,6 +208,11 @@ fn default_script_interval() -> f64 {
     1.0
 }
 
+/// Floor for the script sim cycle: below this, a Lua script would busy-loop the sim thread with
+/// no benefit (register I/O and Lua execution themselves take real time). Well under the old
+/// fixed 1s device-poll-derived floor this replaces, so genuinely fast cycles are still possible.
+const MIN_SCRIPT_INTERVAL_SECS: f64 = 0.05;
+
 impl OcppDeviceConfig {
     /// Assemble a device config from a runtime spec, carrying the given scripts. Used when a
     /// setup/edit dialog supplies version/role/timeout and the scripts are preserved separately.
@@ -228,16 +233,14 @@ impl OcppDeviceConfig {
         }
     }
 
-    /// The script sim cycle interval as a `Duration`. A hand-edited file can carry a
-    /// non-finite or non-positive `script_interval`; those fall back to the 1.0s default
-    /// instead of panicking in `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
+    /// The script sim cycle interval as a `Duration`; see
+    /// [`crate::config::sanitize_interval_secs`] for the sanitization rule.
     pub fn script_interval_duration(&self) -> std::time::Duration {
-        let secs = if self.script_interval.is_finite() && self.script_interval > 0.0 {
-            self.script_interval
-        } else {
-            default_script_interval()
-        };
-        std::time::Duration::from_secs_f64(secs)
+        crate::config::sanitize_interval_secs(
+            self.script_interval,
+            default_script_interval(),
+            MIN_SCRIPT_INTERVAL_SECS,
+        )
     }
 }
 
@@ -364,6 +367,18 @@ mod tests {
             cfg.script_interval = bad;
             assert_eq!(cfg.script_interval_duration(), std::time::Duration::from_secs(1));
         }
+    }
+
+    #[test]
+    fn ut_device_config_script_interval_duration_floored() {
+        let cfg = OcppDeviceConfig {
+            script_interval: 0.0001,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.script_interval_duration(),
+            std::time::Duration::from_millis(50)
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use ferrowl_ui::traits::{HandleEvents, IsFocus, SetFocus};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::app::LogRing;
+use crate::app::{Level, LogRing};
 use crate::config::script::ScriptDef;
 
 /// Generic log channel shared between a [`ModuleView`] and the owning [`Tab`].
@@ -12,8 +12,10 @@ pub type SharedLog = std::sync::Arc<tokio::sync::RwLock<LogRing>>;
 
 /// Result returned by [`ModuleView::handle_command`].
 pub enum CommandResult {
-    /// Command was handled; optional message to append to the tab log.
-    Handled(Option<String>),
+    /// Command was handled; optional `(level, message)` to append to the tab log. The producer
+    /// picks the level explicitly — callers must never re-derive it by pattern-matching the
+    /// message text.
+    Handled(Option<(Level, String)>),
     /// Command is not known to this module.
     Unhandled,
 }

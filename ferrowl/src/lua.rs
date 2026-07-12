@@ -374,16 +374,7 @@ struct LuaLogSink {
 
 impl LogSink for LuaLogSink {
     fn log(&self, level: LogLevel, line: &str) {
-        emit(&self.log, &self.sink, level_from_lua(level), line);
-    }
-}
-
-/// Translate the `ferrowl-lua`-local [`LogLevel`] into the host's [`Level`].
-fn level_from_lua(level: LogLevel) -> Level {
-    match level {
-        LogLevel::Info => Level::Info,
-        LogLevel::Warning => Level::Warning,
-        LogLevel::Error => Level::Error,
+        emit(&self.log, &self.sink, level.into(), line);
     }
 }
 

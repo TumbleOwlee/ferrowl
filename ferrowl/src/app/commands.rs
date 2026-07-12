@@ -6,7 +6,7 @@ use ferrowl_util::convert::{Converter, FileType};
 use crate::config::Session;
 use crate::module::view::CommandResult;
 
-use super::{App, Level, classify_command_result};
+use super::{App, Level};
 
 /// Pure validation: usable index or error text. Unit-testable without an App.
 fn validate_copy_index(
@@ -73,12 +73,7 @@ impl App {
                 _ => self.forward_to_view(input).await,
             },
             Cmd::ScriptCopy(idx) => {
-                let msg = self.copy_scripts(idx);
-                let level = if msg.starts_with("Replaced") {
-                    Level::Info
-                } else {
-                    Level::Warning
-                };
+                let (level, msg) = self.copy_scripts(idx);
                 self.log_active(level, msg).await;
             }
             Cmd::Swap(from, to) => {
@@ -96,8 +91,8 @@ impl App {
                 };
                 match result {
                     CommandResult::Handled(msg) => {
-                        if let Some(m) = msg {
-                            self.log_active(classify_command_result(&m), m).await;
+                        if let Some((level, m)) = msg {
+                            self.log_active(level, m).await;
                         }
                         if let Some(tab) = self.tabs.get_mut(self.active) {
                             tab.log = tab.view.log();
@@ -120,8 +115,8 @@ impl App {
         } else {
             CommandResult::Unhandled
         };
-        if let CommandResult::Handled(Some(msg)) = result {
-            self.log_active(classify_command_result(&msg), msg).await;
+        if let CommandResult::Handled(Some((level, msg))) = result {
+            self.log_active(level, msg).await;
         }
     }
 
@@ -144,23 +139,32 @@ impl App {
     }
 
     /// `:script copy <idx>` — replace the active tab's script list with tab `<idx>`'s.
-    fn copy_scripts(&mut self, idx: Option<usize>) -> String {
+    fn copy_scripts(&mut self, idx: Option<usize>) -> (Level, String) {
         let src = match validate_copy_index(idx, self.tabs.len(), self.active) {
             Ok(i) => i,
-            Err(e) => return e,
+            Err(e) => return (Level::Warning, e),
         };
         // Clone source list first; avoids a split borrow across tabs.
         let Some(scripts) = self.tabs[src].view.scripts().map(<[_]>::to_vec) else {
-            return format!("tab [{src}] has no script support");
+            return (Level::Warning, format!("tab [{src}] has no script support"));
         };
         let n = scripts.len();
         let Some(tab) = self.tabs.get_mut(self.active) else {
-            return "active module has no script support".to_string();
+            return (
+                Level::Warning,
+                "active module has no script support".to_string(),
+            );
         };
         if tab.view.set_scripts(scripts) {
-            format!("Replaced scripts with {n} script(s) from tab [{src}]")
+            (
+                Level::Info,
+                format!("Replaced scripts with {n} script(s) from tab [{src}]"),
+            )
         } else {
-            "active module has no script support".to_string()
+            (
+                Level::Warning,
+                "active module has no script support".to_string(),
+            )
         }
     }
 }

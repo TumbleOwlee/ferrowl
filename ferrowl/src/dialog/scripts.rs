@@ -69,6 +69,9 @@ impl Validate for Interval {
 pub struct ScriptDialog {
     #[focus]
     interval: Widget<InputFieldState, InputField<Interval>>,
+    /// Interval the dialog was opened with — the fallback if the field is left invalid at close,
+    /// so a fat-fingered edit reverts to what was already running instead of a hardcoded default.
+    initial_interval: Duration,
     scripts: Vec<ScriptDef>,
     #[focus]
     table: ScriptTable,
@@ -93,6 +96,7 @@ impl ScriptDialog {
         set_input(&mut interval_field, &format_interval(interval));
         let mut dialog = Self {
             interval: interval_field,
+            initial_interval: interval,
             table: script_manager::script_table(script_manager::rows(&scripts)),
             name_input: script_manager::name_input(border_style()),
             code: script_manager::code_editor(border_style()),
@@ -110,14 +114,15 @@ impl ScriptDialog {
         dialog
     }
 
-    /// Apply the working copy back to the caller: the validated interval (falling back to the 1s
-    /// default if the field is currently invalid — an invalid field must never propagate a bogus
-    /// duration) and the scripts list, with the open editor flushed into the selected script first
-    /// so unsaved keystrokes aren't lost.
+    /// Apply the working copy back to the caller: the validated interval (falling back to the
+    /// interval the dialog was opened with if the field is currently invalid — an invalid field
+    /// must never propagate a bogus duration, and must not silently discard whatever was already
+    /// running either) and the scripts list, with the open editor flushed into the selected script
+    /// first so unsaved keystrokes aren't lost.
     pub fn resolve(mut self) -> (Vec<ScriptDef>, Duration) {
         self.flush_code_to_selection();
-        let interval = parse_interval(self.interval.state.input())
-            .unwrap_or_else(|| Duration::from_secs_f64(1.0));
+        let interval =
+            parse_interval(self.interval.state.input()).unwrap_or(self.initial_interval);
         (self.scripts, interval)
     }
 
@@ -285,7 +290,12 @@ impl ScriptDialog {
                     .bg(COLOR_SCHEME.bg),
             )
             .title_alignment(HorizontalAlignment::Center)
-            .title("Lua Scripts");
+            .title(match self.context {
+                ScriptContext::Session => "Session",
+                ScriptContext::Modbus => "Modbus Scripts",
+                ScriptContext::OcppClient => "OCPP Client Scripts",
+                ScriptContext::OcppServer => "OCPP Server Scripts",
+            });
         let block_inner = block.inner(vc);
         block.render(vc, buf);
         let inner = block_inner.inner(Margin {
@@ -483,10 +493,12 @@ mod tests {
 
     #[test]
     fn ut_resolve_falls_back_on_invalid_interval() {
+        // Falls back to the interval the dialog was opened with (2.5s, per `dialog()`), not a
+        // hardcoded default — an invalid edit must not silently reset an already-running sim.
         let mut d = dialog();
         set_input(&mut d.interval, "not-a-number");
         let (_, interval) = d.resolve();
-        assert_eq!(interval, Duration::from_secs_f64(1.0));
+        assert_eq!(interval, Duration::from_secs_f64(2.5));
     }
 
     // The dialog-wide Tab rotation: Interval → table → name input → code editor → log →

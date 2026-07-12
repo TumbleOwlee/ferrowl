@@ -68,8 +68,9 @@ impl<V: ClientVersion> ClientView<V> {
     fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
-            return CommandResult::Handled(Some(format!(
-                "unknown format for '{path}' (use .toml or .json)"
+            return CommandResult::Handled(Some((
+                Level::Warning,
+                format!("unknown format for '{path}' (use .toml or .json)"),
             )));
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
@@ -92,8 +93,11 @@ impl<V: ClientVersion> ClientView<V> {
                 .collect()
         });
         match Converter::save(&device, path, ty) {
-            Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
-            Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
+            Ok(()) => CommandResult::Handled(Some((
+                Level::Info,
+                format!("Saved device config to {path}"),
+            ))),
+            Err(e) => CommandResult::Handled(Some((Level::Error, format!("Save failed: {e:?}")))),
         }
     }
 
@@ -339,24 +343,38 @@ impl<V: ClientVersion> ClientView<V> {
             "start" => Box::pin(async move {
                 let handler = self.make_handler();
                 match self.backend.start(&self.spec, handler).await {
-                    Ok(()) => {
-                        CommandResult::Handled(Some(format!("Connecting to {}", self.spec.url())))
-                    }
-                    Err(e) => CommandResult::Handled(Some(format!("Connect failed: {e}"))),
+                    Ok(()) => CommandResult::Handled(Some((
+                        Level::Info,
+                        format!("Connecting to {}", self.spec.url()),
+                    ))),
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Connect failed: {e}"),
+                    ))),
                 }
             }),
             "stop" => Box::pin(async move {
                 match self.backend.stop().await {
-                    Ok(()) => CommandResult::Handled(Some("Disconnected".into())),
-                    Err(e) => CommandResult::Handled(Some(format!("Disconnect failed: {e}"))),
+                    Ok(()) => {
+                        CommandResult::Handled(Some((Level::Info, "Disconnected".into())))
+                    }
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Disconnect failed: {e}"),
+                    ))),
                 }
             }),
             "restart" => Box::pin(async move {
                 let _ = self.backend.stop().await;
                 let handler = self.make_handler();
                 match self.backend.start(&self.spec, handler).await {
-                    Ok(()) => CommandResult::Handled(Some("Reconnecting".into())),
-                    Err(e) => CommandResult::Handled(Some(format!("Reconnect failed: {e}"))),
+                    Ok(()) => {
+                        CommandResult::Handled(Some((Level::Info, "Reconnecting".into())))
+                    }
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Reconnect failed: {e}"),
+                    ))),
                 }
             }),
             "edit" | "e" => {
@@ -374,7 +392,10 @@ impl<V: ClientVersion> ClientView<V> {
             }
             "wd" => {
                 let result = if self.device_path.is_empty() {
-                    CommandResult::Handled(Some("No configuration file path configured.".into()))
+                    CommandResult::Handled(Some((
+                        Level::Warning,
+                        "No configuration file path configured.".into(),
+                    )))
                 } else {
                     self.save_device_to(&self.device_path.clone())
                 };
@@ -387,9 +408,10 @@ impl<V: ClientVersion> ClientView<V> {
             }
             "log" => {
                 self.device.log_file = None;
-                Box::pin(std::future::ready(CommandResult::Handled(Some(
+                Box::pin(std::future::ready(CommandResult::Handled(Some((
+                    Level::Info,
                     "File logging disabled".into(),
-                ))))
+                )))))
             }
             cmd if cmd.starts_with("log ") => {
                 let path = cmd["log ".len()..].trim().to_string();
@@ -400,7 +422,10 @@ impl<V: ClientVersion> ClientView<V> {
                     self.device.log_file = Some(path.clone());
                     format!("Logging to {path}")
                 };
-                Box::pin(std::future::ready(CommandResult::Handled(Some(msg))))
+                Box::pin(std::future::ready(CommandResult::Handled(Some((
+                    Level::Info,
+                    msg,
+                )))))
             }
             _ => Box::pin(std::future::ready(CommandResult::Unhandled)),
         }

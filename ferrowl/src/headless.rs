@@ -93,18 +93,16 @@ async fn build_ocpp_module(module: OcppModuleSpec) -> Result<RunModule, String> 
     start_module(name, view).await
 }
 
-/// Start a module via `handle_command("start")`. The [`ModuleView`] trait has no dedicated
-/// success/failure signal for commands (`CommandResult::Handled(Some(msg))` covers both), so an
-/// error is detected by the same convention every start handler in this codebase follows: the
-/// message contains the substring "failed" (e.g. "Start server failed: ...", "listen failed:
-/// ...", "Connect failed: ..."). This is a heuristic, not a structured error channel.
+/// Start a module via `handle_command("start")`. Each start handler tags its own message with an
+/// explicit [`Level`] (see [`CommandResult`]) — a `Level::Error` result is treated as a start
+/// failure here.
 async fn start_module(name: String, mut view: Box<dyn ModuleView>) -> Result<RunModule, String> {
     let log = view.log();
-    if let CommandResult::Handled(Some(msg)) = view.handle_command("start").await {
-        if msg.to_lowercase().contains("failed") {
+    if let CommandResult::Handled(Some((level, msg))) = view.handle_command("start").await {
+        if level == Level::Error {
             return Err(format!("'{name}': {msg}"));
         }
-        log.write().await.write(Level::Info, &msg);
+        log.write().await.write(level, &msg);
     }
     Ok(RunModule {
         name,
@@ -218,12 +216,9 @@ fn now_ms() -> u64 {
 /// we're already tearing down).
 async fn stop_all(modules: &mut [RunModule]) {
     for module in modules.iter_mut() {
-        if let CommandResult::Handled(Some(msg)) = module.view.handle_command("stop").await {
-            let level = if msg.to_lowercase().contains("failed") {
-                Level::Error
-            } else {
-                Level::Info
-            };
+        if let CommandResult::Handled(Some((level, msg))) =
+            module.view.handle_command("stop").await
+        {
             module.log.write().await.write(level, &msg);
         }
     }

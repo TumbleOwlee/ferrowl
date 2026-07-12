@@ -9,7 +9,7 @@ use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::ModuleView;
 
-use super::{App, Focus, Level, Overlay, Tab, classify_command_result};
+use super::{App, Focus, Level, Overlay, Tab};
 
 impl App {
     pub(super) async fn handle_dialog_key(
@@ -129,8 +129,8 @@ impl App {
         self.active = self.tabs.len() - 1;
         self.rebuild_registry();
         let result = self.tabs[self.active].view.handle_command("start").await;
-        if let crate::module::view::CommandResult::Handled(Some(msg)) = result {
-            self.log_active(classify_command_result(&msg), msg).await;
+        if let crate::module::view::CommandResult::Handled(Some((level, msg))) = result {
+            self.log_active(level, msg).await;
         }
         self.close_overlay();
     }

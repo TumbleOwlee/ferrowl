@@ -63,6 +63,16 @@ impl Level {
     }
 }
 
+impl From<ferrowl_lua::module::LogLevel> for Level {
+    fn from(level: ferrowl_lua::module::LogLevel) -> Self {
+        match level {
+            ferrowl_lua::module::LogLevel::Info => Level::Info,
+            ferrowl_lua::module::LogLevel::Warning => Level::Warning,
+            ferrowl_lua::module::LogLevel::Error => Level::Error,
+        }
+    }
+}
+
 impl std::fmt::Display for Level {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.label())
@@ -545,16 +555,6 @@ impl App {
         if let Some(tab) = self.tabs.get(self.active) {
             tab.log.write().await.write(level, &message);
         }
-    }
-}
-
-/// Classifies a `handle_command`-style status message for the log ring: "... failed: {e}"-shaped
-/// text is `Error`, everything else (success, plain status) is `Info`.
-pub(super) fn classify_command_result(msg: &str) -> Level {
-    if msg.to_lowercase().contains("failed") {
-        Level::Error
-    } else {
-        Level::Info
     }
 }
 

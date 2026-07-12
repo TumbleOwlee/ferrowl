@@ -235,16 +235,6 @@ fn session_sim_config(
 /// Builds one UI tab per configured module, starting each module via `handle_command("start")`.
 /// Start failures are written to the module's log. Modules whose device config fails to load
 /// are skipped with a warning on stderr.
-/// Classifies a `handle_command("start")` status message for the log ring: "... failed: {e}" is
-/// `Error`, a successful "Started ..." line is `Info`.
-fn start_result_level(msg: &str) -> Level {
-    if msg.to_lowercase().contains("failed") {
-        Level::Error
-    } else {
-        Level::Info
-    }
-}
-
 async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     let specs = args.module_specs()?;
 
@@ -290,8 +280,10 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
             ),
         ];
         for tab in tabs.iter_mut() {
-            if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-                tab.log.write().await.write(start_result_level(&msg), &msg);
+            if let CommandResult::Handled(Some((level, msg))) =
+                tab.view.handle_command("start").await
+            {
+                tab.log.write().await.write(level, &msg);
             }
         }
         return Ok(tabs);
@@ -330,8 +322,10 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
                 &format!("Warning: duplicate module name — renamed to '{}'", spec.name),
             );
         }
-        if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-            tab.log.write().await.write(start_result_level(&msg), &msg);
+        if let CommandResult::Handled(Some((level, msg))) =
+            tab.view.handle_command("start").await
+        {
+            tab.log.write().await.write(level, &msg);
         }
         tabs.push(tab);
     }
@@ -364,8 +358,8 @@ async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
         OcppRole::Server => build_server_view(spec, module.device.clone(), device),
     };
     let mut tab = Tab::new_from_view(name, view);
-    if let CommandResult::Handled(Some(msg)) = tab.view.handle_command("start").await {
-        tab.log.write().await.write(start_result_level(&msg), &msg);
+    if let CommandResult::Handled(Some((level, msg))) = tab.view.handle_command("start").await {
+        tab.log.write().await.write(level, &msg);
     }
     tab
 }

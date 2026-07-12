@@ -32,16 +32,11 @@ fn default_interval() -> f64 {
 }
 
 impl Session {
-    /// The sim cycle interval as a `Duration`. A hand-edited file can carry a non-finite or
-    /// non-positive `interval`; those fall back to the 1.0s default instead of panicking in
-    /// `Duration::from_secs_f64` (NaN/negative) or busy-waiting (zero).
+    /// The sim cycle interval as a `Duration`; see [`crate::config::sanitize_interval_secs`] for
+    /// the sanitization rule (no floor here — the session dialog has always allowed arbitrarily
+    /// small positive intervals).
     pub fn interval_duration(&self) -> std::time::Duration {
-        let secs = if self.interval.is_finite() && self.interval > 0.0 {
-            self.interval
-        } else {
-            default_interval()
-        };
-        std::time::Duration::from_secs_f64(secs)
+        crate::config::sanitize_interval_secs(self.interval, default_interval(), 0.0)
     }
 }
 

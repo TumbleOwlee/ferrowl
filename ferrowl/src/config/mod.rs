@@ -23,6 +23,26 @@ use ferrowl_util::convert::{Converter, FileType};
 /// `Session::version`), so older configs can be detected for compatibility shims.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Sanitize a hand-edited (or dialog-typed) sim-cycle interval in seconds into a `Duration`: a
+/// non-finite or non-positive value falls back to `default_secs` (instead of panicking in
+/// `Duration::from_secs_f64` or busy-waiting on zero), and an otherwise-valid value is floored to
+/// `min_secs` (instead of thrashing the sim thread on a near-zero interval). Pass `0.0` for
+/// `min_secs` when no floor is wanted. Shared by [`Session::interval_duration`],
+/// [`DeviceConfig::script_interval_duration`], and [`OcppDeviceConfig::script_interval_duration`]
+/// so the NaN/negative/zero guard and floor rule stay in exactly one place.
+pub(crate) fn sanitize_interval_secs(
+    value: f64,
+    default_secs: f64,
+    min_secs: f64,
+) -> std::time::Duration {
+    let secs = if value.is_finite() && value > 0.0 {
+        value.max(min_secs)
+    } else {
+        default_secs
+    };
+    std::time::Duration::from_secs_f64(secs)
+}
+
 /// Error type for config loading.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {

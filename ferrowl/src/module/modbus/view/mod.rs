@@ -10,6 +10,7 @@ use ferrowl_ui_derive::Overlay;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+use crate::app::Level;
 use crate::config::script::ScriptDef;
 use crate::config::{DeviceConfig, ModuleSpec};
 use crate::dialog::close_confirm::CloseConfirmEvent;
@@ -488,8 +489,14 @@ impl ModuleView for ModbusModuleView {
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
                 match self.module.start().await {
-                    Ok(()) => CommandResult::Handled(Some(format!("Started {role} on {endpoint}"))),
-                    Err(e) => CommandResult::Handled(Some(format!("Start {role} failed: {e}"))),
+                    Ok(()) => CommandResult::Handled(Some((
+                        Level::Info,
+                        format!("Started {role} on {endpoint}"),
+                    ))),
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Start {role} failed: {e}"),
+                    ))),
                 }
             });
         }
@@ -498,8 +505,13 @@ impl ModuleView for ModbusModuleView {
             return Box::pin(async move {
                 let role = self.spec.role.to_string();
                 match self.module.stop().await {
-                    Ok(()) => CommandResult::Handled(Some(format!("Stopped {role}"))),
-                    Err(e) => CommandResult::Handled(Some(format!("Stop {role} failed: {e}"))),
+                    Ok(()) => {
+                        CommandResult::Handled(Some((Level::Info, format!("Stopped {role}"))))
+                    }
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Stop {role} failed: {e}"),
+                    ))),
                 }
             });
         }
@@ -510,10 +522,14 @@ impl ModuleView for ModbusModuleView {
                 let endpoint = self.spec.endpoint.to_string();
                 let _ = self.module.stop().await;
                 match self.module.start().await {
-                    Ok(()) => {
-                        CommandResult::Handled(Some(format!("Restarted {role} on {endpoint}")))
-                    }
-                    Err(e) => CommandResult::Handled(Some(format!("Restart {role} failed: {e}"))),
+                    Ok(()) => CommandResult::Handled(Some((
+                        Level::Info,
+                        format!("Restarted {role} on {endpoint}"),
+                    ))),
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Restart {role} failed: {e}"),
+                    ))),
                 }
             });
         }
@@ -521,16 +537,18 @@ impl ModuleView for ModbusModuleView {
         if trimmed == "reload" {
             return Box::pin(async move {
                 if self.spec.device.is_empty() {
-                    return CommandResult::Handled(Some(
+                    return CommandResult::Handled(Some((
+                        Level::Warning,
                         "No configuration file path configured. Reload aborted.".into(),
-                    ));
+                    )));
                 }
                 let path = self.spec.device.clone();
                 let device = match crate::config::load_device(&path) {
                     Ok(d) => d,
                     Err(e) => {
-                        return CommandResult::Handled(Some(format!(
-                            ":reload failed to load '{path}': {e}"
+                        return CommandResult::Handled(Some((
+                            Level::Error,
+                            format!(":reload failed to load '{path}': {e}"),
                         )));
                     }
                 };
@@ -547,9 +565,12 @@ impl ModuleView for ModbusModuleView {
                 self.table.set_definitions(defs);
                 self.sort = None;
                 if let Err(e) = self.module.start().await {
-                    return CommandResult::Handled(Some(format!(":reload start error: {e}")));
+                    return CommandResult::Handled(Some((
+                        Level::Error,
+                        format!(":reload start error: {e}"),
+                    )));
                 }
-                CommandResult::Handled(Some(format!(":reload done — '{path}'")))
+                CommandResult::Handled(Some((Level::Info, format!(":reload done — '{path}'"))))
             });
         }
 
@@ -589,9 +610,10 @@ impl ModuleView for ModbusModuleView {
 
         if trimmed == "wd" {
             if self.spec.device.is_empty() {
-                return Box::pin(std::future::ready(CommandResult::Handled(Some(
+                return Box::pin(std::future::ready(CommandResult::Handled(Some((
+                    Level::Warning,
                     "No configuration file path configured.".into(),
-                ))));
+                )))));
             }
             let path = self.spec.device.clone();
             let result = self.save_device_to(&path);
@@ -609,11 +631,13 @@ impl ModuleView for ModbusModuleView {
             return Box::pin(async move {
                 self.device.log_file = Some(file.clone());
                 match self.module.set_log_base(Some(&file)) {
-                    Ok(()) => CommandResult::Handled(Some(format!(
-                        "Logging to files based on {file} (':wd' to persist)"
+                    Ok(()) => CommandResult::Handled(Some((
+                        Level::Info,
+                        format!("Logging to files based on {file} (':wd' to persist)"),
                     ))),
-                    Err(e) => CommandResult::Handled(Some(format!(
-                        "Failed to open log file {file}: {e}"
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!("Failed to open log file {file}: {e}"),
                     ))),
                 }
             });
@@ -628,7 +652,10 @@ impl ModuleView for ModbusModuleView {
                     .unwrap_or("");
                 let (register, value) = parse_set_args(rest);
                 if register.is_empty() || value.is_empty() {
-                    return CommandResult::Handled(Some(":set requires <register> <value>".into()));
+                    return CommandResult::Handled(Some((
+                        Level::Warning,
+                        ":set requires <register> <value>".into(),
+                    )));
                 }
                 self.set_register_value(&register, &value).await
             });
@@ -646,7 +673,7 @@ impl ModuleView for ModbusModuleView {
                     .collect();
                 self.sort = None;
                 self.table.set_definitions(original);
-                CommandResult::Handled(Some("Order cleared".to_string()))
+                CommandResult::Handled(Some((Level::Info, "Order cleared".to_string())))
             }
             ["order", col] | ["order", col, "asc"] => self.apply_order(col, false),
             ["order", col, "desc"] => self.apply_order(col, true),

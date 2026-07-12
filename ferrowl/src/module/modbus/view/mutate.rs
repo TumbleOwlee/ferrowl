@@ -16,29 +16,19 @@ use super::super::ModbusModule;
 use super::super::registers::{register_mem_binding, sync_register_def, write_command};
 use super::ModbusModuleView;
 
-/// Classifies a `:set`-style status message for the log ring: outright failures are `Error`,
-/// rejected/invalid input is `Warning`, and successful sets are `Info`.
-fn set_result_level(msg: &str) -> Level {
-    let lower = msg.to_lowercase();
-    if lower.contains("failed") || lower.contains("error") {
-        Level::Error
-    } else if msg.starts_with(':') {
-        Level::Warning
-    } else {
-        Level::Info
-    }
-}
-
 impl ModbusModuleView {
     pub(super) fn apply_order(&mut self, col: &str, descending: bool) -> CommandResult {
         match column_index(col) {
-            None => CommandResult::Handled(Some(format!("Unknown column '{col}'"))),
+            None => CommandResult::Handled(Some((
+                Level::Warning,
+                format!("Unknown column '{col}'"),
+            ))),
             Some(idx) => {
                 self.sort = Some((idx, descending));
                 self.table.sort_definitions(idx, descending);
                 let header = TableHeader::header()[idx].clone();
                 let dir = if descending { "DESC" } else { "ASC" };
-                CommandResult::Handled(Some(format!("Ordered by {header} {dir}")))
+                CommandResult::Handled(Some((Level::Info, format!("Ordered by {header} {dir}"))))
             }
         }
     }
@@ -46,15 +36,19 @@ impl ModbusModuleView {
     pub(super) fn save_device_to(&self, path: &str) -> CommandResult {
         use ferrowl_util::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
-            return CommandResult::Handled(Some(format!(
-                "unknown format for '{path}' (use .toml or .json)"
+            return CommandResult::Handled(Some((
+                Level::Warning,
+                format!("unknown format for '{path}' (use .toml or .json)"),
             )));
         };
         let mut device = self.device.clone();
         device.version = Some(crate::config::VERSION.to_string());
         match Converter::save(&device, path, ty) {
-            Ok(()) => CommandResult::Handled(Some(format!("Saved device config to {path}"))),
-            Err(e) => CommandResult::Handled(Some(format!("Save failed: {e:?}"))),
+            Ok(()) => CommandResult::Handled(Some((
+                Level::Info,
+                format!("Saved device config to {path}"),
+            ))),
+            Err(e) => CommandResult::Handled(Some((Level::Error, format!("Save failed: {e:?}")))),
         }
     }
 
@@ -117,23 +111,15 @@ impl ModbusModuleView {
             let result = self
                 .set_register_value(&edited.name, &default_scalar.to_string())
                 .await;
-            if let CommandResult::Handled(Some(msg)) = result {
-                self.module
-                    .log()
-                    .write()
-                    .await
-                    .write(set_result_level(&msg), &msg);
+            if let CommandResult::Handled(Some((level, msg))) = result {
+                self.module.log().write().await.write(level, &msg);
             }
         }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;
-            if let CommandResult::Handled(Some(msg)) = result {
-                self.module
-                    .log()
-                    .write()
-                    .await
-                    .write(set_result_level(&msg), &msg);
+            if let CommandResult::Handled(Some((level, msg))) = result {
+                self.module.log().write().await.write(level, &msg);
             }
         }
     }
@@ -212,23 +198,15 @@ impl ModbusModuleView {
             && edited.value.is_none()
         {
             let result = self.set_register_value(&edited.name, &v).await;
-            if let CommandResult::Handled(Some(msg)) = result {
-                self.module
-                    .log()
-                    .write()
-                    .await
-                    .write(set_result_level(&msg), &msg);
+            if let CommandResult::Handled(Some((level, msg))) = result {
+                self.module.log().write().await.write(level, &msg);
             }
         }
 
         if let Some(value) = edited.value {
             let result = self.set_register_value(&edited.name, &value).await;
-            if let CommandResult::Handled(Some(msg)) = result {
-                self.module
-                    .log()
-                    .write()
-                    .await
-                    .write(set_result_level(&msg), &msg);
+            if let CommandResult::Handled(Some((level, msg))) = result {
+                self.module.log().write().await.write(level, &msg);
             }
         }
     }
@@ -306,8 +284,9 @@ impl ModbusModuleView {
             .map(|d| (d.register.clone(), self.spec.role));
 
         let Some((register, role)) = resolved else {
-            return CommandResult::Handled(Some(format!(
-                ":set unknown register '{register_name}'"
+            return CommandResult::Handled(Some((
+                Level::Warning,
+                format!(":set unknown register '{register_name}'"),
             )));
         };
 
@@ -319,12 +298,14 @@ impl ModbusModuleView {
                         crate::module::modbus::str_to_value(value, &register),
                     )
                     .await;
-                return CommandResult::Handled(Some(format!(
-                    "set {register_name} = {value} (virtual)"
+                return CommandResult::Handled(Some((
+                    Level::Info,
+                    format!("set {register_name} = {value} (virtual)"),
                 )));
             } else {
-                return CommandResult::Handled(Some(format!(
-                    ":set '{register_name}' is virtual — only writable on servers"
+                return CommandResult::Handled(Some((
+                    Level::Warning,
+                    format!(":set '{register_name}' is virtual — only writable on servers"),
                 )));
             }
         }
@@ -335,7 +316,12 @@ impl ModbusModuleView {
         };
         let raw = match register.encode(value) {
             Ok(r) => r,
-            Err(e) => return CommandResult::Handled(Some(format!(":set encode error: {e}"))),
+            Err(e) => {
+                return CommandResult::Handled(Some((
+                    Level::Error,
+                    format!(":set encode error: {e}"),
+                )));
+            }
         };
         let slave = *register.slave_id();
 
@@ -358,10 +344,16 @@ impl ModbusModuleView {
                     guard.write_unchecked(key, &range, &merged)
                 };
                 if ok {
-                    CommandResult::Handled(Some(format!("set {register_name} = {value}")))
+                    CommandResult::Handled(Some((
+                        Level::Info,
+                        format!("set {register_name} = {value}"),
+                    )))
                 } else {
-                    CommandResult::Handled(Some(format!(
-                        ":set '{register_name}' rejected (addr {addr}, slave {slave}, {raw:?} not writable)"
+                    CommandResult::Handled(Some((
+                        Level::Warning,
+                        format!(
+                            ":set '{register_name}' rejected (addr {addr}, slave {slave}, {raw:?} not writable)"
+                        ),
                     )))
                 }
             }
@@ -389,11 +381,15 @@ impl ModbusModuleView {
                             let memory = self.module.memory();
                             memory.write().write_unchecked(key, &range, &merged);
                         }
-                        CommandResult::Handled(Some(format!(
-                            "set {register_name} = {value} (sent)"
+                        CommandResult::Handled(Some((
+                            Level::Info,
+                            format!("set {register_name} = {value} (sent)"),
                         )))
                     }
-                    Err(e) => CommandResult::Handled(Some(format!(":set failed: {e}"))),
+                    Err(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!(":set failed: {e}"),
+                    ))),
                 }
             }
         }
