@@ -162,7 +162,7 @@ fn parse_ranges(spec: &str) -> Vec<Range> {
 pub struct RegisterDef {
     #[serde(default)]
     pub slave_id: u8,
-    /// Modbus read function code: 1=Coil, 2=DiscreteInput, 3=InputRegister, 4=HoldingRegister.
+    /// Modbus read function code: 1=Coil, 2=DiscreteInput, 3=HoldingRegister, 4=InputRegister.
     #[serde(default = "default_kind")]
     pub kind: Kind,
     /// Start address; omitted (or `virtual = true`) marks a virtual register.
