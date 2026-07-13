@@ -91,6 +91,22 @@ pub fn decode(text: &str) -> Result<OcppJMessage, FramingError> {
     }
 }
 
+/// Recover the `uniqueId` of a Call frame that [`decode`] rejected, so the peer can be answered
+/// with a `CallError` instead of being left to time out (OCPP-J requires a reply whenever the id
+/// is recoverable).
+///
+/// Only Call frames qualify: a malformed CallResult or CallError must never be answered, since a
+/// `CallError` about a `CallError` is not a thing the protocol allows. Returns `None` when the
+/// text is not JSON, is not an array, has no `messageTypeId` of 2, or carries no string id.
+pub fn recover_call_id(text: &str) -> Option<UniqueId> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let arr = value.as_array()?;
+    if arr.first().and_then(Value::as_i64)? != MessageTypeId::Call as i64 {
+        return None;
+    }
+    Some(UniqueId(arr.get(1).and_then(Value::as_str)?.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +168,31 @@ mod tests {
             decode("[2, \"id\"]"),
             Err(FramingError::BadArity(2))
         ));
+    }
+
+    #[test]
+    fn ut_recover_call_id_from_malformed_call() {
+        // Short-arity Call, and a Call whose action isn't a string: both rejected by `decode`,
+        // both still owed a CallError, so the id must come back.
+        assert_eq!(
+            recover_call_id("[2, \"id-1\"]"),
+            Some(UniqueId("id-1".into()))
+        );
+        assert_eq!(
+            recover_call_id("[2, \"id-2\", 7, {}]"),
+            Some(UniqueId("id-2".into()))
+        );
+    }
+
+    #[test]
+    fn ut_recover_call_id_gives_up_when_unanswerable() {
+        assert_eq!(recover_call_id("not json"), None);
+        assert_eq!(recover_call_id("{\"a\": 1}"), None); // not an array
+        assert_eq!(recover_call_id("[]"), None); // no messageTypeId
+        assert_eq!(recover_call_id("[2, 42, \"Heartbeat\", {}]"), None); // id not a string
+        // A malformed CallResult/CallError must never be answered -- you can't CallError a
+        // CallError, and a CallResult has no pending call on the peer's side to fail.
+        assert_eq!(recover_call_id("[3, \"id-3\"]"), None);
+        assert_eq!(recover_call_id("[4, \"id-4\"]"), None);
     }
 }

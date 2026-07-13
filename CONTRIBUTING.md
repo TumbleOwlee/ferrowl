@@ -16,7 +16,14 @@ Run the app during development with `cargo run --release -- --demo` (starts a de
 
 ## Project Layout
 
-The repository is a Cargo workspace building the `ferrowl` binary. See the [Architecture section](./README.md#architecture) of the README for the crate dependency graph and each crate's responsibility.
+The repository is a Cargo workspace building the `ferrowl` binary. See
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate dependency graph and each
+crate's responsibility, and [`PRD.md`](./PRD.md) for the product framing.
+
+Ferrowl is **spec-driven**: [`docs/specs/`](./docs/specs/) is the authoritative
+specification of what the software must do, split by capability area. The code is
+expected to conform to it. Before changing behavior, read the relevant area's
+`requirements.md`.
 
 ## Before Submitting
 
@@ -36,7 +43,8 @@ CI runs `cargo check` and `cargo test` on every push (`check` workflow); a `nigh
 - Branch off `main` and open your PR against `main`.
 - Keep PRs focused — one feature or fix per PR.
 - Add or update tests for behavior changes; the existing unit tests live in `#[cfg(test)]` modules next to the code (`ut_*` naming).
-- Update the README when you change commands, keybindings, configuration fields or the Lua API.
+- **Update the spec in the same PR.** When you change behavior, update the relevant `docs/specs/<area>/` file(s) — they are the authoritative source, not a one-time snapshot. New requirements get a fresh, appended ID (never renumber or reuse). A behavior change with no spec change is incomplete.
+- Update the README when you change user-facing commands, keybindings, configuration fields, or the Lua API.
 
 ## Reporting Issues
 

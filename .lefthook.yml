@@ -17,3 +17,19 @@ pre-commit:
 
         cargo clippy found issues.
         Fix the warnings above, then re-stage your changes.
+
+    # Warning only (never blocks the commit): ferrowl is spec-driven, so a change to
+    # product code in a capability area usually comes with a docs/specs/ update in the
+    # same commit. This nudges when code changed but no spec did -- override by just
+    # committing again; it does not fail.
+    spec-reminder:
+      run: |
+        staged="$(git diff --cached --name-only)"
+        code="$(printf '%s\n' "$staged" | grep -E '^ferrowl(-codec|-store|-modbus|-ocpp|-lua|-lua-derive|-ui|-ui-derive|-syntax)?/src/' || true)"
+        spec="$(printf '%s\n' "$staged" | grep -E '^docs/specs/' || true)"
+        if [ -n "$code" ] && [ -z "$spec" ]; then
+          echo "note: product code changed but no docs/specs/ file is staged."
+          echo "      If this commit changes behavior, update the area's requirements.md too"
+          echo "      (see AGENTS.md 'Spec-driven'). This is a reminder, not a failure."
+        fi
+        exit 0

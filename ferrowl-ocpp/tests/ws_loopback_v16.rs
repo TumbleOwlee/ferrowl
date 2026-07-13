@@ -169,3 +169,42 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     client.terminate().await.expect("client terminate failed");
     server.terminate().await.expect("server terminate failed");
 }
+
+/// A malformed Call whose `uniqueId` is still readable must come back as a `CallError` — leaving
+/// it unanswered strands the peer until its own call timeout fires. Driven over a raw websocket,
+/// since the typed client cannot produce a malformed frame.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn malformed_call_with_recoverable_id_gets_call_error() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    let server = start_server().await;
+    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let mut request = url.into_client_request().expect("bad url");
+    request
+        .headers_mut()
+        .insert("Sec-WebSocket-Protocol", "ocpp1.6".parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("raw websocket connect failed");
+
+    // Arity-3 Call: the decoder rejects it, but "bad-1" survives.
+    ws.send(Message::text("[2, \"bad-1\", \"Heartbeat\"]"))
+        .await
+        .expect("send failed");
+
+    let reply = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("no reply: the peer was left to time out")
+        .expect("stream closed without a reply")
+        .expect("websocket error");
+    let v: serde_json::Value =
+        serde_json::from_str(reply.into_text().unwrap().as_str()).expect("reply is not JSON");
+
+    assert_eq!(v[0], 4, "expected a CallError frame");
+    assert_eq!(v[1], "bad-1", "CallError must carry the recovered id");
+    assert_eq!(v[2], "FormationViolation");
+
+    server.terminate().await.expect("server terminate failed");
+}

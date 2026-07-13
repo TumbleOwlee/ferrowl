@@ -11,4 +11,5 @@
 
 # Claude Code artifacts
 .agents/
+.claude/
 skills-lock.json

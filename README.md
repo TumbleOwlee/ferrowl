@@ -17,28 +17,15 @@ Provide a CLI application to simulate Modbus Servers and Clients as well as OCPP
 
 ## Architecture
 
-The project is organized as a Cargo workspace and builds the `ferrowl` binary. See the following image for the dependencies between the different crates of the workspace and their provided functionality.
+The project is organized as a Cargo workspace and builds the `ferrowl` binary.
 
 <p align="center">
     <img src="./images/architecture.svg">
 </p>
 
-
-| Crate | Responsibility |
-| ----- | ----- |
-| `ferrowl` | Binary. Event/redraw loop, tabs, views, dialogs, `:` commands, session & device configuration, `migrate` subcommand. |
-| `ferrowl-ui` | Reusable [ratatui](https://ratatui.rs) building blocks: widgets with their state types, styling and alternate-screen handling. |
-| `ferrowl-ui-derive` | Proc macros for the UI layer: `#[derive(TableEntry)]`, `#[derive(Overlay)]` and `#[derive(Focus)]` (keyboard focus cycling and event dispatch for views). |
-| `ferrowl-lua-derive` | Proc macro `#[derive(Module)]` that bridges Rust host types into Lua modules. |
-| `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
-| `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells shared as `Arc<RwLock<Memory>>`. |
-| `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, built on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
-| `ferrowl-ocpp` | OCPP protocol types and actions with a version-generic `Version` trait; Charging Station (CS) and Central System (CSMS) over JSON-on-WebSocket, wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). Supports OCPP 1.6, 2.0.1, and 2.1. |
-| `ferrowl-lua` | Embedded Lua runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_Register`, `C_Time`, `C_OCPP` and `C_Log` modules to simulation scripts. |
-| `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs the per-module log pane (as `Ring<(u64, String), N>`). |
-| `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
-
-All runtime interaction meets in the shared memory of a module: the network task polls a remote server (client role) or answers incoming requests (server role) against it, the Lua simulation thread reads and writes it through the `C_Register` bridge, and the UI decodes its raw words into the typed values shown in the register table.
+The crate dependency graph, each crate's responsibility, and the runtime data-flow
+and concurrency model are documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Authoritative, per-capability behavior lives under [`docs/specs/`](./docs/specs/).
 
 ## OCPP
 

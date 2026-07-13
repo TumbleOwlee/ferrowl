@@ -216,6 +216,19 @@ async fn reader_task<V, St, D, L>(
                 Ok(msg) => msg,
                 Err(e) => {
                     log.invoke(format!("OCPP-J framing error: {e}")).await;
+                    // A malformed Call whose id survives is still owed an answer -- without one
+                    // the peer waits out its own call timeout. Anything else (unparseable text,
+                    // no id, or a malformed CallResult/CallError) has no one to answer.
+                    if let Some(id) = codec::recover_call_id(text.as_str()) {
+                        let _ = out_tx
+                            .send(OcppJMessage::CallError {
+                                id,
+                                code: CallErrorCode::FormationViolation,
+                                description: e.to_string(),
+                                details: serde_json::Value::Object(serde_json::Map::new()),
+                            })
+                            .await;
+                    }
                     continue;
                 }
             },

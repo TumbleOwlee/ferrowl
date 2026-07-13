@@ -28,9 +28,38 @@ where
         globals.set(T::module(), value)
     }
 
-    /// Enable support of standard libraries in lua context
+    /// Enable the standard libraries a sim script is allowed to use.
+    ///
+    /// Deliberately **not** `StdLib::ALL_SAFE`: that set only drops FFI and `debug`, leaving `io`,
+    /// `os` (including `os.execute`), and `package`/`require` reachable -- so any script in a
+    /// device or session config could read/write files and spawn processes, and loading a config
+    /// would be equivalent to running an untrusted program. Sim scripts model device behavior;
+    /// they have no legitimate need for the filesystem, the shell, or dynamic library loading.
+    ///
+    /// Only the pure computation libraries are kept (`string`, `table`, `math`, `utf8`,
+    /// `coroutine`). Clock access, which a sim genuinely needs, is provided by the sandboxed
+    /// `C_Time` module instead of `os`.
+    ///
+    /// `mlua` constructs a `Lua` with `ALL_SAFE` already loaded, so `load_std_libs` can only add
+    /// libraries, never remove them -- the unwanted ones (`io`, `os`, `package`) and the base
+    /// library's dynamic-code loaders (`load`, `loadfile`, `dofile`, `require`), none of which a
+    /// `StdLib` flag can gate off, are therefore removed by clearing them from the globals.
     pub fn enable_stdlib(&mut self) -> Result<()> {
-        self.lua.load_std_libs(StdLib::ALL_SAFE)?;
+        let safe = StdLib::STRING | StdLib::TABLE | StdLib::MATH | StdLib::UTF8 | StdLib::COROUTINE;
+        self.lua.load_std_libs(safe)?;
+        let globals = self.lua.globals();
+        for name in [
+            "io",
+            "os",
+            "package",
+            "load",
+            "loadfile",
+            "dofile",
+            "loadstring",
+            "require",
+        ] {
+            globals.set(name, mlua::Value::Nil)?;
+        }
         Ok(())
     }
 
@@ -170,6 +199,46 @@ mod tests {
         assert!(ctx.call(&key("ok")).is_ok());
         let err = ctx.call(&key("boom")).unwrap_err();
         assert!(err.to_string().contains("kaboom"));
+    }
+
+    #[test]
+    fn ut_sandbox_denies_filesystem_shell_and_dynamic_loading() {
+        // A script in a config is untrusted input; the sandbox must not give it the filesystem,
+        // the shell, or a way to pull in more code. Each of these globals must be absent.
+        let mut ctx = Context::<String>::default();
+        ctx.enable_stdlib().unwrap();
+        // The whole table/global is gone, so `os.execute` et al. are unreachable -- an indexing
+        // attempt would even throw "index a nil value" rather than return nil.
+        for global in [
+            "io",
+            "os",
+            "package",
+            "require",
+            "load",
+            "loadfile",
+            "dofile",
+            "loadstring",
+        ] {
+            ctx.load_script(key(global), &format!("assert({global} == nil)"))
+                .unwrap();
+            assert!(
+                ctx.call(&key(global)).is_ok(),
+                "sandbox leaks `{global}` to scripts"
+            );
+        }
+    }
+
+    #[test]
+    fn ut_sandbox_keeps_pure_computation_libraries() {
+        let mut ctx = Context::<String>::default();
+        ctx.enable_stdlib().unwrap();
+        ctx.load_script(
+            key("pure"),
+            "assert(string.upper('a') == 'A'); assert(math.floor(1.5) == 1); \
+             assert(table.concat({'x'}) == 'x')",
+        )
+        .unwrap();
+        assert!(ctx.call(&key("pure")).is_ok());
     }
 
     #[test]
