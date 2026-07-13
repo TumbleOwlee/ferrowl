@@ -7,3 +7,5 @@ authoritative per-capability specs under [`docs/specs/`](./docs/specs/).
 
 This file exists only so tools that look for `CLAUDE.md` by name find their way in;
 it is intentionally not a second copy of `AGENTS.md`.
+
+@./AGENTS.md
