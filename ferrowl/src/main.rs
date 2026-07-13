@@ -332,10 +332,28 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     }
 
     for (spec, resolved_name) in ocpp_specs.into_iter().zip(&resolved[specs.len()..]) {
+        // A blank path is a legitimate quick-start (no device file, run on defaults). A non-blank
+        // path that fails to load is a real config error and is skipped with a warning, exactly as
+        // a Modbus module would be -- rather than silently starting a default-config tab that hides
+        // the mistake.
+        let device = if spec.device.is_empty() {
+            OcppDeviceConfig::default()
+        } else {
+            match config::load_ocpp_device(&spec.device) {
+                Ok(device) => device,
+                Err(e) => {
+                    eprintln!(
+                        "Skipping '{}': failed to load '{}': {e}",
+                        spec.name, spec.device
+                    );
+                    continue;
+                }
+            }
+        };
         let renamed = *resolved_name != spec.name;
         let mut spec = spec;
         spec.name = resolved_name.clone();
-        let tab = build_ocpp_tab(spec).await;
+        let tab = build_ocpp_tab(spec, device).await;
         if renamed {
             tab.log.write().await.write(
                 Level::Warning,
@@ -347,12 +365,11 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
     Ok(tabs)
 }
 
-/// Build a UI tab for one OCPP module spec, starting it via `handle_command("start")`. The
-/// device-config file (role/version/timeout/scripts) is loaded from the spec's path; a missing or
-/// unreadable file falls back to defaults.
-async fn build_ocpp_tab(module: OcppModuleSpec) -> Tab {
+/// Build a UI tab for one OCPP module spec and its already-loaded device config, starting it via
+/// `handle_command("start")`. Loading (and the skip-on-failure decision) happens in the caller, so
+/// a missing device file is handled the same way as for a Modbus module.
+async fn build_ocpp_tab(module: OcppModuleSpec, device: OcppDeviceConfig) -> Tab {
     let name = module.name.clone();
-    let device = config::load_ocpp_device(&module.device).unwrap_or_default();
     let spec = OcppSpec::from_parts(&module, &device);
     let view: Box<dyn ModuleView> = match device.role {
         OcppRole::Client => build_client_view(spec, module.device.clone(), device),
