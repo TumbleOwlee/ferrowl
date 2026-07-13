@@ -19,7 +19,7 @@ use crate::module::ocpp::server::backend::{
     Scope, ServerEvent, TlsBinding, inbound_messages, with_rfids, with_rfids_mut,
 };
 use crate::module::ocpp::server::build_server_view;
-use crate::module::ocpp::server::lua::run_server_sim;
+use crate::module::ocpp::server::lua::{run_server_script_once, run_server_sim};
 use crate::module::view::{CommandFuture, CommandResult, RefreshFuture};
 
 use super::{
@@ -77,6 +77,18 @@ where
             self.runtime.lua_queue.clone(),
             self.enabled_scripts(),
             self.device.script_interval_duration(),
+            self.script_log.clone(),
+        );
+    }
+
+    /// Execute one script once against the shared state registry, outside the sim (SC-R-035). The
+    /// sim thread is left alone, and the script runs whether or not it is enabled.
+    pub(super) fn run_script_once(&mut self, name: String, code: String) {
+        run_server_script_once(
+            self.lua_states.clone(),
+            self.runtime.lua_queue.clone(),
+            name,
+            code,
             self.script_log.clone(),
         );
     }

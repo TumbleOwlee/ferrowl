@@ -423,6 +423,9 @@ impl ModuleView for ModbusModuleView {
                     self.module.set_script_interval(interval);
                     self.module
                         .reload_scripts(super::registers::collect_scripts(&self.device));
+                } else if let Some(script) = dialog.take_run_request() {
+                    // Pulled out of the dialog borrow before touching `self.module` (UI-R-051).
+                    self.module.run_script_once(script.name, script.code);
                 }
             }
             ModbusViewOverlay::Register(_) => self.handle_overlay_key(modifiers, code),

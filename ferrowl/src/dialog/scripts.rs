@@ -5,7 +5,8 @@
 //!
 //! One flat Tab order: Interval → script table → name input → code editor → log → Interval
 //! (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t` toggles a
-//! script, `d` deletes (with confirmation), `c` toggles compact rows, Enter in the name input
+//! script, `d` deletes (with confirmation), `c` toggles compact rows, `e` runs the selected script
+//! once (see [`ScriptDialog::take_run_request`]), Enter in the name input
 //! creates a new (enabled) script. Edits are live on a working copy, applied when the dialog
 //! closes via [`ScriptDialog::resolve`]. `Esc` opens a close confirmation popup (Enter/Space
 //! confirms, Esc dismisses it); `?` from the code editor's Normal mode opens the Lua bindings
@@ -82,6 +83,10 @@ pub struct ScriptDialog {
     #[focus]
     log: LogView,
     confirm: Option<ConfirmDeleteDialog>,
+    /// Set by `e` on the script table: the selected script, to be executed once by the owner
+    /// (which holds the Lua modules the dialog knows nothing about). Pulled out with
+    /// [`ScriptDialog::take_run_request`] after each key.
+    pending_run: Option<ScriptDef>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
     close_confirm: Option<CloseConfirmDialog>,
@@ -104,6 +109,7 @@ impl ScriptDialog {
             focus: ScriptDialogFocus::Interval,
             view_focused: true,
             confirm: None,
+            pending_run: None,
             compact: false,
             close_confirm: None,
             context,
@@ -177,6 +183,20 @@ impl ScriptDialog {
         self.manager().delete_selected();
     }
 
+    /// Queue the selected script for a one-shot run (UI-R-051). The editor is flushed first so the
+    /// run uses what is on screen, not the last-synced copy; the script's enabled flag is ignored
+    /// — running a disabled script on demand is the point. No selection: nothing to run.
+    fn request_run(&mut self) {
+        self.flush_code_to_selection();
+        self.pending_run = self.selected().map(|i| self.scripts[i].clone());
+    }
+
+    /// Take the script queued by `e`, if any. The owner calls this after every key and executes
+    /// the script once against its own Lua modules (SC-R-035).
+    pub fn take_run_request(&mut self) -> Option<ScriptDef> {
+        self.pending_run.take()
+    }
+
     /// Handle a key. Returns `true` when the dialog should close (confirmed via the close-confirm
     /// popup).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
@@ -237,6 +257,7 @@ impl ScriptDialog {
                     let _ = self.interval.state.handle_events(modifiers, code);
                 }
                 ScriptDialogFocus::Table => match (modifiers, code) {
+                    (KeyModifiers::NONE, KeyCode::Char('e')) => self.request_run(),
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
                     (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
                     (KeyModifiers::NONE, KeyCode::Char('d')) => {
@@ -577,6 +598,65 @@ mod tests {
         assert_eq!(scripts.len(), 1);
         assert_eq!(scripts[0].name, "sim");
         assert!(scripts[0].enabled);
+    }
+
+    /// UI-R-051 — `e` on the focused table queues the selected script for a one-shot run, carrying
+    /// the editor's current content (edits not yet flushed to the script) and ignoring `enabled`.
+    #[test]
+    fn ut_e_requests_run_of_selected_script() {
+        let mut d = ScriptDialog::new(
+            &[ScriptDef {
+                name: "boot".into(),
+                code: "print(1)".into(),
+                enabled: false,
+            }],
+            Duration::from_secs(1),
+            ScriptContext::Modbus,
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        // Edit in the code editor, then come back to the table without leaving the dialog: the
+        // run must see the edited buffer, not the code the script was created with.
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code editor
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('i')); // vim insert
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc); // back to Normal
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> log
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> interval
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+
+        assert!(d.take_run_request().is_none(), "no run requested yet");
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
+
+        let run = d.take_run_request().expect("e queues a run");
+        assert_eq!(run.name, "boot");
+        assert!(
+            run.code.contains('x'),
+            "unsaved edit must run: {}",
+            run.code
+        );
+        assert!(!run.enabled, "a disabled script still runs on demand");
+        assert!(d.take_run_request().is_none(), "request is taken once");
+    }
+
+    /// UI-R-051 — `e` with no script selected is a no-op.
+    #[test]
+    fn ut_e_without_selection_is_noop() {
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
+        assert!(d.take_run_request().is_none());
+    }
+
+    /// UI-R-051 — `e` is a table binding: in the name input it is literal text, not a run.
+    #[test]
+    fn ut_e_in_name_input_types_char() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
+        assert!(d.take_run_request().is_none());
+        assert_eq!(d.name_input.state.input(), "e");
     }
 
     #[test]

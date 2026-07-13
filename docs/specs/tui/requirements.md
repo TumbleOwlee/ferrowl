@@ -172,6 +172,14 @@ the popup open and re-query (e.g. descending a directory); accepting a
 non-partial suggestion shall close it. While closed, those keys shall pass through
 to the surrounding dialog.
 
+**UI-R-051** — In the script-manager dialog, while the script table is focused, `e`
+shall execute the selected script exactly once, using the script's current editor
+content (including edits not yet applied to the owner) and regardless of the script's
+enabled flag. With no script selected it shall be a no-op. The dialog shall stay open,
+and the run's `print`/`C_Log` output and any error shall appear in the dialog's log
+pane. The execution semantics are specified by SC-R-035 in
+[`../scripting/requirements.md`](../scripting/requirements.md).
+
 ## Code editor (vim-modal)
 
 **UI-R-027** — The multi-line code editor shall support two operating profiles:

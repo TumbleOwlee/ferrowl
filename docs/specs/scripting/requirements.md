@@ -84,7 +84,9 @@ that thread and loops until stopped. The UI event loop and the async network
 runtime shall never execute Lua directly.
 
 **SC-R-011** — A sim thread shall be spawned only when at least one script is
-enabled for its owner; with no enabled script, no sim thread shall exist.
+enabled for its owner; with no enabled script, no sim thread shall exist. This
+constrains *sim* threads only: the on-demand single-script execution of SC-R-035 runs
+on its own short-lived thread and is neither gated on nor counted as a sim thread.
 
 **SC-R-012** — A sim thread shall be controlled by a stop flag it observes only
 between execution cycles. Setting the flag and joining the thread shall stop the
@@ -114,6 +116,18 @@ floor.
 **SC-R-017** — Time observed through `C_Time` shall be measured from the moment
 the sim thread's context is built. Rebuilding the context (SC-R-024) shall reset
 this origin to zero.
+
+**SC-R-035** — An owner shall support executing a single script **once, on demand**
+(driven from the script-manager dialog, UI-R-051). Such a run shall build its own Lua
+context on its own short-lived thread, registering the same `C_*` modules its owner's
+sim would register (SC-R-018) and loading only the one script; it shall call that script
+exactly once, log any error to the owner's script log, and exit. It shall not require a
+running sim thread, shall not share Lua state with one (see
+[`edge-cases.md`](./edge-cases.md) §5.8), and shall ignore the script's enabled flag.
+Errors from such a run shall be logged under a `[run]` prefix, distinct from the `[sim]`
+prefix that marks sim diagnostics (SC-R-032): `ferrowl run --exit-on-error` keys its exit
+code 2 off `[sim]` (CL-R-031), so an interactive test run must not be mistakable for a
+sim failure.
 
 ---
 

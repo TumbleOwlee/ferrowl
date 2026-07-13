@@ -530,7 +530,11 @@ impl App {
         let Some(dialog) = self.session_dialog.as_mut() else {
             return false;
         };
-        if dialog.handle_events(modifiers, code) {
+        let done = dialog.handle_events(modifiers, code);
+        if let Some(script) = dialog.take_run_request() {
+            self.session_sim.run_once(script.name, script.code);
+        }
+        if done {
             let dialog = self.session_dialog.take().expect("checked above");
             let (scripts, interval) = dialog.resolve();
             self.session_scripts = scripts.clone();

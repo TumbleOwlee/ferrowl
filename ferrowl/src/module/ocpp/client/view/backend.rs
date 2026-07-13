@@ -5,7 +5,9 @@
 use crate::app::Level;
 use crate::module::ocpp::client::backend::{DEFAULT_HEARTBEAT_SECS, TICKS_PER_SEC};
 use crate::module::ocpp::client::build_client_view;
-use crate::module::ocpp::client::lua_sim::{merge_overrides, run_client_sim};
+use crate::module::ocpp::client::lua_sim::{
+    merge_overrides, run_client_script_once, run_client_sim,
+};
 use crate::module::ocpp::config::device::{ConfigKeyDef, OcppDeviceConfig};
 use crate::module::ocpp::config::session::OcppRole;
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
@@ -31,6 +33,18 @@ impl<V: ClientVersion> ClientView<V> {
         if let Some(mut sim) = self.runtime.handle.take() {
             sim.stop();
         }
+    }
+
+    /// Execute one script once against this station's state, outside the sim (SC-R-035). The sim
+    /// thread is left alone, and the script runs whether or not it is enabled.
+    pub(super) fn run_script_once(&mut self, name: String, code: String) {
+        run_client_script_once(
+            self.state.clone(),
+            self.runtime.action_queue.clone(),
+            name,
+            code,
+            self.script_log.clone(),
+        );
     }
 
     /// Drain and send one Lua-enqueued action. The transaction shortcuts map to a TransactionEvent

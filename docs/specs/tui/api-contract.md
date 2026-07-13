@@ -202,6 +202,7 @@ Insert/Visual mode `?` is literal text.
 | `t` | script table focused | Toggle the selected script's enabled flag |
 | `d` | script table focused | Delete the selected script (opens confirm) |
 | `c` | script table focused | Toggle compact rows |
+| `e` | script table focused | Execute the selected script once (current editor content, enabled or not) |
 | `Enter` | name input focused | Create a new script with the typed name |
 | `?` | code editor, Normal mode | Open the Lua-bindings help overlay |
 

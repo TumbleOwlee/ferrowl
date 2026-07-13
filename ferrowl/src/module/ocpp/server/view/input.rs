@@ -128,10 +128,11 @@ where
 
                 // Scripts editor: routes every key through its own handler; commit on done.
                 ServerOverlay::Scripts(_) => {
-                    let done = if let ServerOverlay::Scripts(dialog) = &mut self.overlay {
-                        dialog.handle_events(modifiers, code)
+                    let (done, run) = if let ServerOverlay::Scripts(dialog) = &mut self.overlay {
+                        let done = dialog.handle_events(modifiers, code);
+                        (done, dialog.take_run_request())
                     } else {
-                        false
+                        (false, None)
                     };
                     if done {
                         let ServerOverlay::Scripts(dialog) = self.overlay.take() else {
@@ -141,6 +142,8 @@ where
                         self.device.scripts = scripts;
                         self.device.script_interval = interval.as_secs_f64();
                         self.start_sim();
+                    } else if let Some(script) = run {
+                        self.run_script_once(script.name, script.code);
                     }
                 }
 

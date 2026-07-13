@@ -21,7 +21,7 @@ use crate::config::{
 };
 use crate::instance::Instance;
 use crate::instance::error::Error;
-use crate::lua::{SimHandle, run_sim};
+use crate::lua::{SimHandle, run_script_once, run_sim};
 
 use super::build::{
     Timing, build_instance, build_read_operations, default_value, endpoint_to_config,
@@ -343,6 +343,26 @@ impl ModbusModule {
     /// the restart.
     pub fn set_script_interval(&mut self, interval: Duration) {
         self.script_interval = interval;
+    }
+
+    /// Execute one script once against this module's registers, outside the sim (SC-R-035). Does
+    /// not touch the sim thread: the script need not be in `self.scripts` and need not be enabled,
+    /// which is what lets the script dialog run an unsaved, disabled script on demand.
+    pub fn run_script_once(&self, name: String, code: String) {
+        let registers: HashMap<String, Register> = self
+            .registers
+            .iter()
+            .map(|(name, _, register, _)| (name.clone(), register.clone()))
+            .collect();
+        run_script_once(
+            self.memory.clone(),
+            self.virtual_values.clone(),
+            registers,
+            name,
+            code,
+            self.script_log.clone(),
+            self.file_sink.clone(),
+        );
     }
 
     /// Send a write command to the underlying client (errors for servers / when stopped).

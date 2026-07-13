@@ -221,6 +221,42 @@ impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
 /// Spawn the single Lua sim thread for the whole server module. Returns `None` when there are no
 /// scripts. The Lua `Context` is built inside the thread (it is `!Send`); script errors go to the
 /// module log. Mirrors the client [`run_client_sim`](crate::module::ocpp::client::lua_sim::run_client_sim).
+/// Run one server script exactly once on a short-lived detached thread, outside the sim
+/// (SC-R-035). Fresh context, same `C_*` modules as [`run_server_sim`], one script, no enabled
+/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[lua]`/`[sim]` lines.
+pub fn run_server_script_once<V: ServerVersion>(
+    states: SharedServerStates<V>,
+    queue: ServerActionQueue,
+    name: String,
+    code: String,
+    log: SharedLog,
+) {
+    std::thread::spawn(move || {
+        let host = ServerHost { states, queue };
+        let context = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppServer::init(host))
+            .with_module(TimeModule::default())
+            .with_module(TestModule)
+            .with_module(LogModule::init(LuaLogSink(log.clone())))
+            .with_print_sink(LuaLogSink(log.clone()))
+            .with_script(name.clone(), &code)
+            .build();
+        match context {
+            Ok(mut context) => {
+                if let Err(e) = context.call(&name) {
+                    emit(&log, Level::Error, &format!("[run] {e}"));
+                }
+            }
+            Err(e) => emit(
+                &log,
+                Level::Error,
+                &format!("[run] failed to build context: {e}"),
+            ),
+        }
+    });
+}
+
 pub fn run_server_sim<V: ServerVersion>(
     states: SharedServerStates<V>,
     queue: ServerActionQueue,

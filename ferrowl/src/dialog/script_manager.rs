@@ -143,7 +143,9 @@ pub(crate) fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
         state: TableStateBuilder::default().values(rows).build().unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some("Scripts (t: toggle, d: delete, c: compact)".into()))
+            .title(Some(
+                "Scripts (e: run, t: toggle, d: delete, c: compact)".into(),
+            ))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,

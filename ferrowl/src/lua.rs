@@ -359,6 +359,54 @@ pub fn run_sim(
     })
 }
 
+/// Run one script exactly once on a short-lived thread, outside any sim (SC-R-035). Unlike
+/// [`run_sim`] there is no enabled filter and no loop: the script is executed on a fresh context
+/// with the same `C_*` modules, whether or not it is enabled and whether or not a sim is running.
+/// Errors are logged under `[run]`, not `[sim]`, so a dialog-driven test run is never mistaken for
+/// a sim failure by headless `--exit-on-error` (CL-R-031). The thread is detached — a script with
+/// no execution ceiling (SC-R-034) must not be able to block the UI by hanging.
+pub fn run_script_once(
+    memory: ModuleMemory,
+    virtual_store: VirtualStore,
+    registers: HashMap<String, Register>,
+    name: String,
+    code: String,
+    log: ModuleLog,
+    sink: FileSink,
+) {
+    std::thread::spawn(move || {
+        let bridge = RegisterBridge::new(memory, virtual_store, Arc::new(registers));
+        let context = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(RegisterModule::init(bridge))
+            .with_module(TimeModule::default())
+            .with_module(TestModule)
+            .with_module(LogModule::init(LuaLogSink {
+                log: log.clone(),
+                sink: sink.clone(),
+            }))
+            .with_print_sink(LuaLogSink {
+                log: log.clone(),
+                sink: sink.clone(),
+            })
+            .with_script(name.clone(), &code)
+            .build();
+        match context {
+            Ok(mut context) => {
+                if let Err(e) = context.call(&name) {
+                    emit(&log, &sink, Level::Error, &format!("[run] {e}"));
+                }
+            }
+            Err(e) => emit(
+                &log,
+                &sink,
+                Level::Error,
+                &format!("[run] failed to build Lua context: {e}"),
+            ),
+        }
+    });
+}
+
 /// Append a line to the module's ring log and file sink from the (non-runtime) sim thread.
 fn emit(log: &ModuleLog, sink: &FileSink, level: Level, line: &str) {
     log.blocking_write().write(level, line);
@@ -562,6 +610,90 @@ mod tests {
                 .contains("assertion failed: setpoint must be 1")),
             "expected assertion failure in {errors:?}"
         );
+    }
+
+    /// Polls `cond` up to `timeout`, sleeping in small steps (mirrors `session_sim`'s helper).
+    fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
+        let step = Duration::from_millis(10);
+        let mut waited = Duration::ZERO;
+        while waited < timeout {
+            if cond() {
+                return true;
+            }
+            std::thread::sleep(step);
+            waited += step;
+        }
+        cond()
+    }
+
+    fn script_log() -> ModuleLog {
+        Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
+    }
+
+    /// A sink with no file attached — the run-once path must log to the ring regardless.
+    fn no_sink() -> FileSink {
+        Arc::new(std::sync::Mutex::new(None))
+    }
+
+    fn log_lines(log: &ModuleLog) -> Vec<String> {
+        log.blocking_read()
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, line)| line)
+            .collect()
+    }
+
+    /// SC-R-035 — a one-shot run executes the script against the module's registers without a sim.
+    #[test]
+    fn ut_run_script_once_writes_register() {
+        let memory = evse_memory();
+        let log = script_log();
+        run_script_once(
+            memory.clone(),
+            vstore(),
+            evse_registers(),
+            "once".to_string(),
+            "C_Register:Set(\"power\", 7)".to_string(),
+            log,
+            no_sink(),
+        );
+
+        assert!(wait_for(Duration::from_secs(2), || {
+            memory
+                .read()
+                .read(
+                    Key {
+                        id: SlaveKey {
+                            slave_id: 1,
+                            kind: Kind::HoldingRegister,
+                        },
+                    },
+                    &CellType::Register,
+                    &Range::new(1, 1),
+                )
+                .is_ok_and(|v| v == vec![7])
+        }));
+    }
+
+    /// SC-R-035 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
+    /// keys its exit code off `[sim]` (CL-R-031) and must not see an interactive test run.
+    #[test]
+    fn ut_run_script_once_error_logged_with_run_prefix() {
+        let log = script_log();
+        run_script_once(
+            evse_memory(),
+            vstore(),
+            evse_registers(),
+            "bad".to_string(),
+            "C_Register:Set(\"nope\", 1)".to_string(),
+            log.clone(),
+            no_sink(),
+        );
+
+        assert!(wait_for(Duration::from_secs(2), || {
+            log_lines(&log).iter().any(|l| l.contains("[run]"))
+        }));
+        assert!(!log_lines(&log).iter().any(|l| l.contains("[sim]")));
     }
 
     // --- Typed write path (no string round-trip) ---

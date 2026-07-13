@@ -215,6 +215,44 @@ impl ClientFields for crate::module::ocpp::client::v1_6::state::CsState {
 /// Spawn the simulation thread for one multi-connector client module. Like [`run_ocpp_sim`] but
 /// over split CS/connector state via the [`OcppClient`] module (bare `Get/Set/<Action>` = CS,
 /// `Connector(id)` = one connector).
+/// Run one client script exactly once on a short-lived detached thread, outside the sim
+/// (SC-R-035). Fresh context, same `C_*` modules as [`run_client_sim`], one script, no enabled
+/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[lua]` lines.
+pub fn run_client_script_once<S>(
+    state: Arc<RwLock<S>>,
+    queue: ScopedActionQueue,
+    name: String,
+    code: String,
+    log: SharedLog,
+) where
+    S: ClientFields + Send + Sync + 'static,
+{
+    std::thread::spawn(move || {
+        let bridge = ClientCsHandle { state, queue };
+        let context = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppClient::init(bridge))
+            .with_module(TimeModule::default())
+            .with_module(TestModule)
+            .with_module(LogModule::init(LuaLogSink(log.clone())))
+            .with_print_sink(LuaLogSink(log.clone()))
+            .with_script(name.clone(), &code)
+            .build();
+        match context {
+            Ok(mut context) => {
+                if let Err(e) = context.call(&name) {
+                    emit(&log, Level::Error, &format!("[run] {e}"));
+                }
+            }
+            Err(e) => emit(
+                &log,
+                Level::Error,
+                &format!("[run] failed to build context: {e}"),
+            ),
+        }
+    });
+}
+
 pub fn run_client_sim<S>(
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,

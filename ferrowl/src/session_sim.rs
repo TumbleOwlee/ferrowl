@@ -57,6 +57,38 @@ impl SessionSim {
         self.handle = None;
     }
 
+    /// Run one script exactly once on a short-lived detached thread, outside the sim (SC-R-035).
+    /// Independent of the sim thread: no enabled filter, no loop, and no effect on `handle` — a
+    /// disabled script runs, and a running sim keeps running alongside it on its own Lua state.
+    /// Errors log under `[run]`, not `[sim]`.
+    pub fn run_once(&self, name: String, code: String) {
+        let directory = self.directory.clone();
+        let log = self.log.clone();
+        std::thread::spawn(move || {
+            let context = ContextBuilder::<String>::default()
+                .with_stdlib()
+                .with_module(ModuleDirModule::init(directory))
+                .with_module(TimeModule::default())
+                .with_module(TestModule)
+                .with_module(LogModule::init(LuaLogSink(log.clone())))
+                .with_print_sink(LuaLogSink(log.clone()))
+                .with_script(name.clone(), &code)
+                .build();
+            match context {
+                Ok(mut context) => {
+                    if let Err(e) = context.call(&name) {
+                        emit(&log, Level::Error, &format!("[run] {e}"));
+                    }
+                }
+                Err(e) => emit(
+                    &log,
+                    Level::Error,
+                    &format!("[run] failed to build Lua context: {e}"),
+                ),
+            }
+        });
+    }
+
     /// Tears down any running sim thread, then spawns a fresh one if at least one script is
     /// enabled.
     fn ensure(&mut self) {
@@ -347,6 +379,31 @@ mod tests {
         assert!(wait_for(Duration::from_millis(500), || {
             matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(9)))
         }));
+    }
+
+    /// SC-R-035 / SC-R-011 — `run_once` executes a **disabled** script on demand and starts no sim
+    /// thread: the one-shot is independent of the sim lifecycle.
+    #[test]
+    fn ut_run_once_executes_disabled_script_without_sim() {
+        let rw = MockReadWrite::default();
+        let directory = directory_with_mock(rw.clone());
+        let mut sim = SessionSim::new(directory, log());
+        sim.set_scripts(vec![ScriptDef {
+            name: "s".into(),
+            code: r#"C_Module:Get("m"):Register():Set("x", 5)"#.into(),
+            enabled: false,
+        }]);
+        assert!(sim.handle.is_none(), "disabled script starts no sim");
+
+        sim.run_once(
+            "s".to_string(),
+            r#"C_Module:Get("m"):Register():Set("x", 5)"#.to_string(),
+        );
+
+        assert!(wait_for(Duration::from_secs(2), || {
+            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(5)))
+        }));
+        assert!(sim.handle.is_none(), "run_once must not start a sim thread");
     }
 
     #[test]

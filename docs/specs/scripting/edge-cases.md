@@ -125,3 +125,17 @@ A `ModuleHandle` obtained from `C_Module:Get` re-resolves its target on every
 method call. If the module is removed from the session between obtaining the
 handle and using it, the next call raises `unknown module` rather than returning a
 stale accessor. Scripts holding a handle across cycles must tolerate this.
+
+### 5.8 A run-once (`e`) executes in an isolated Lua VM
+
+The on-demand single-script execution (SC-R-035, bound to `e` in the script-manager
+dialog) builds a **fresh** Lua context on its own thread. It therefore shares no Lua
+state with the owner's running sim: globals the sim has accumulated are invisible to the
+run, the run's own globals are discarded when its thread exits, and `C_Time` restarts
+from zero for it. A script that depends on state built up over previous sim cycles will
+behave differently under `e` than it does in the sim — `e` is an isolated test run, not a
+step of the sim loop.
+
+The run also touches the same shared register/charging-station state as a concurrently
+running sim, serialized only by the per-operation locks. A run-once and a sim cycle
+interleaving their writes to the same register is possible and is not prevented.
