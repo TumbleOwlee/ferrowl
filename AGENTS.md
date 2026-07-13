@@ -14,14 +14,75 @@ Structure and crate map: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 `docs/specs/` is the **authoritative** specification: the code is expected to
 conform to it, not the other way around. Before you edit code in an area, read that
-area's `requirements.md`. If your change alters behavior the spec describes, update
-the spec **in the same commit** — a behavior change with no spec change is
-incomplete. If the code and the spec already disagree, that is a defect in one of
-them: resolve it or flag it, don't work around it.
+area's `requirements.md`. A behavior change with no spec change is incomplete — the
+workflow below is how the two stay together.
+
+**`main` never contains an unfinished spec.** A requirement on `main` is a statement
+about code that exists and is tested. A feature branch may hold a spec commit ahead of
+its implementation (see the workflow); `main` may not, which the squash merge
+guarantees.
+
+If the code and the spec already disagree and it is *not* what you were asked to fix:
+**stop and raise it as its own task.** Do not fold the fix into the change in flight —
+it silently widens work that was already approved, and the fix deserves its own review.
 
 Specs contain no `file:line` pointers by design — locate code with your own search
 tools. Requirements have stable IDs (`MB-R-*`, `OC-R-*`, …); reference them in
 commits and PRs.
+
+## Workflow — follow this for every behavior change
+
+This project's workflow **replaces** any generic workflow skill (including `/workflow`);
+do not run one here. `docs/specs/` already serves as the PRD and the design record — a
+second design-artifact system would only give the "why" two homes to diverge in.
+
+**It triggers on behavior change, not on size.** Ask: *does this change what the
+software is required to do?* If yes — a new feature, a changed keybinding, different
+observable semantics — the full workflow applies, however small the diff. If no — a
+refactor, a rename, perf work with identical semantics, tests, docs — there is no spec
+diff to approve, so skip the gates and just do the work. Size decides how many *stages*
+the plan has, never whether the gates exist.
+
+Work on a branch off `main`, never on `main` itself. `<type>/<slug>`, conventional-commit
+type (`feat/`, `fix/`, `docs/`).
+
+1. **Read the affected area's spec.** Use the routing table below to find it. Read
+   `requirements.md` and `edge-cases.md` before proposing anything — `edge-cases.md`
+   records behavior that is ugly *on purpose*.
+2. **Gate 1 — the behavior contract.** Propose the **spec diff itself**: the actual
+   "shall" text of the new or changed requirements, with their appended IDs, plus any
+   `edge-cases.md` entries. Not prose about what you intend to build — the normative
+   text, ready to land. Design choices that are observable *are* spec, and get settled
+   here. **Stop for approval.** For a bug fix where the spec is already right and the
+   code is wrong, there is no diff to approve: state the requirement the code violates
+   and move on.
+3. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
+   the file only ever contains normative text. The plan tracks what is not yet backed by
+   a passing test.
+4. **Gate 2 — the implementation plan.** Stages, file-level steps, a table mapping each
+   new requirement ID to the test that will pin it, and a **Verification** section naming
+   how the change will be exercised (tests alone; driving the demo TUI; a real CSMS).
+   State the expected commits. **Stop for approval.**
+5. **Implement, stage by stage.** A stage is a **green checkpoint**: it compiles,
+   `cargo test --workspace` passes, `clippy -D warnings` passes. **Commit every green
+   stage** — that is what makes the plan resumable after an interrupted session. Stage
+   commits are branch-local scaffolding and are squashed away on merge, so keep their
+   messages cheap; the squash message is the one that must carry the requirement IDs and
+   the why. The spec is the first stage, hence the first commit — legal on a branch,
+   never on `main`.
+   Every new or changed requirement ships with at least one test whose doc comment cites
+   its ID (`/// UI-R-051 — …`). Do not backfill IDs onto existing tests.
+   The task is not done until the plan's Verification method has actually been run and
+   its outcome reported. Waiving it requires asking.
+6. **Reconcile the spec.** If implementation forced the behavior to differ from what
+   gate 1 approved, the "shall" text changes — that is a **normative** change and it
+   **re-opens gate 1**: show the diff, say what forced it, get approval before
+   committing. Fixing a wrong cross-reference or clumsy wording is **editorial** and
+   needs no approval. **Always report the final spec diff** when you finish, so the
+   difference between the two is visible without diffing by hand.
+
+Merge to `main` by **squash merge**, so the branch's stage commits — including the spec
+commit that briefly ran ahead of its code — never reach `main`.
 
 ## Where to look for task X
 
