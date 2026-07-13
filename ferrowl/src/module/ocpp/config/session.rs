@@ -119,7 +119,14 @@ impl OcppSpec {
     /// `self_signed` — an ephemeral self-signed fallback. A wss-labeled server must never
     /// silently bind plain TCP; this mirrors the setup dialog's semantics for configs that
     /// bypass the dialog (hand-written files, `--ocpp` flags, pre-existing sessions).
+    ///
+    /// The scheme is authoritative in the other direction too: a `ws://` server binds plain TCP
+    /// even when certificate files are configured, so its URL never lies about its transport.
+    /// This mirrors a `ws://` client, which likewise ignores its own TLS material.
     pub fn effective_csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
+        if self.protocol != OcppProtocol::Wss {
+            return None;
+        }
         self.security.csms_tls().or_else(|| {
             self.csms_self_signed_fallback()
                 .then_some(ferrowl_ocpp::CsmsTlsConfig {
@@ -277,6 +284,19 @@ mod tests {
     fn ut_effective_csms_tls_ws_stays_plain() {
         let spec = spec_with(OcppProtocol::Ws, Default::default());
         assert!(!spec.csms_self_signed_fallback());
+        assert!(spec.effective_csms_tls().is_none());
+    }
+
+    // The scheme wins: a ws endpoint binds plain TCP even with certificate files configured, so
+    // the URL never advertises a transport the listener doesn't speak.
+    #[test]
+    fn ut_effective_csms_tls_ws_ignores_configured_certificates() {
+        let security = crate::config::ocpp::OcppSecurityConfig {
+            cert_file: Some("certs/csms.pem".into()),
+            key_file: Some("certs/csms.key".into()),
+            ..Default::default()
+        };
+        let spec = spec_with(OcppProtocol::Ws, security);
         assert!(spec.effective_csms_tls().is_none());
     }
 
