@@ -19,9 +19,16 @@ steps:
   check:
     image: rust:latest
     commands:
-      - cargo check
+      - cargo check --workspace
 
   test:
     image: rust:latest
     commands:
-      - cargo test
+      - cargo test --workspace
+
+  # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
+  deny:
+    image: rust:latest
+    commands:
+      - cargo install cargo-deny --locked
+      - cargo deny check

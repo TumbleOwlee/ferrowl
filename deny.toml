@@ -1,0 +1,75 @@
+# cargo-deny policy. Run locally with `cargo deny check`; CI runs it as the `deny` step
+# of the check pipeline.
+
+[graph]
+# Ferrowl targets Linux, macOS and Windows (see docs/specs/non-functional-requirements.md).
+# Restricting the graph to those keeps advisories for platforms we do not ship from
+# failing the build.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+version = 2
+# Every entry here needs a comment saying why it is accepted and what would let us drop it.
+# An unexplained ignore is indistinguishable from an unnoticed vulnerability.
+ignore = [
+    # proc-macro-error2 is unmaintained. Transitive and not ours to fix: it arrives via
+    # validator_derive <- validator, which both ferrowl-ocpp and rust-ocpp depend on. It is a
+    # compile-time-only proc-macro crate, so it ships no code in the binary and the
+    # unmaintained status carries no runtime exposure. Drop this once validator moves off it.
+    "RUSTSEC-2026-0173",
+    # rustls-pemfile is unmaintained; the crate is now a thin wrapper around the PEM parsing
+    # already in rustls-pki-types, and the advisory's own guidance is to call that directly.
+    # That is a source change in ferrowl-ocpp, not a dependency bump, so it is deliberately
+    # out of scope for the PR that introduced this file and is tracked separately. Drop this
+    # once ferrowl-ocpp uses rustls_pki_types::pem::PemObject.
+    "RUSTSEC-2025-0134",
+]
+
+[licenses]
+version = 2
+# Permissive licenses only. Ferrowl itself is MIT (see LICENSE); a strong-copyleft dependency
+# would change what downstream users may do with the binary, so it is a decision, not a
+# dependency bump.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    # serialport, reached via tokio-serial, which is what gives Modbus RTU a serial port at
+    # all — so this is not an optional dependency we could simply drop. MPL-2.0 is file-level
+    # copyleft: it obliges us to publish changes to serialport's own files, and says nothing
+    # about the rest of the binary. Linking it into an MIT program is fine. Anything stronger
+    # (GPL/LGPL/AGPL) stays rejected.
+    "MPL-2.0",
+    # webpki-roots. The "code" here is Mozilla's CA certificate list, and CDLA-Permissive-2.0
+    # is a permissive *data* license — no copyleft, no attribution burden on the binary.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicates are reported but not fatal: nearly all of them are transitive crates mid-major-
+# version-migration (bitflags 1/2, thiserror 1/2, ...) that we do not select and cannot unify.
+multiple-versions = "warn"
+wildcards = "deny"
+# The 12 workspace crates depend on each other by path with no version requirement, which is a
+# wildcard by cargo-deny's reckoning. That is correct for an unpublished workspace — the
+# lockstep version in [workspace.package] is what pins them.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# rust-ocpp is consumed from a fork (see ferrowl-ocpp/Cargo.toml) rather than crates.io.
+allow-git = ["https://github.com/TumbleOwlee/rust-ocpp"]
