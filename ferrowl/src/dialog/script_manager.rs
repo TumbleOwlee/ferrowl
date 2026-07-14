@@ -194,9 +194,9 @@ pub(crate) fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
         state: TableStateBuilder::default().values(rows).build().unwrap(),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(
-                "Scripts (Enter: rename, e: run, t: toggle, d: delete, c: compact)".into(),
-            ))
+            // UI-R-056 — the full binding list lived here and overflowed the panel; it now lives in
+            // the `?` overlay, and the title only points at it.
+            .title(Some("Scripts (?: help)".into()))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
                 vertical: 1,
@@ -361,6 +361,18 @@ mod tests {
 
         mgr.delete_selected();
         assert!(mgr.scripts.is_empty());
+    }
+
+    /// UI-R-056 — the table title advertises the help overlay only; the binding list it used to
+    /// carry overflowed the panel and now lives in that overlay.
+    #[test]
+    fn ut_script_table_title_advertises_help_only() {
+        let table = script_table(rows(&[]));
+        let title = format!("{:?}", table.widget);
+        assert!(title.contains("Scripts (?: help)"), "{title}");
+        for binding in ["e: run", "t: toggle", "d: delete", "c: compact"] {
+            assert!(!title.contains(binding), "title still lists '{binding}'");
+        }
     }
 
     /// UI-R-054 — the suffix search skips every taken name, not just the base.
