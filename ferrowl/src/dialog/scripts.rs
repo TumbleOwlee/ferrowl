@@ -3,24 +3,27 @@
 //! input) on the left, the code editor for the selected script on the right, and a read-only tail
 //! of the owner's script log at the bottom.
 //!
-//! One flat Tab order: Interval → script table → name input → code editor → log → Interval
-//! (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t` toggles a
-//! script, `d` deletes (with confirmation), `c` toggles compact rows, `e` runs the selected script
-//! once (see [`ScriptDialog::take_run_request`]), Enter in the name input
-//! creates a new (enabled) script. Edits are live on a working copy, applied when the dialog
-//! closes via [`ScriptDialog::resolve`]. `Esc` opens a close confirmation popup (Enter/Space
-//! confirms, Esc dismisses it); `?` from the code editor's Normal mode opens the Lua bindings
-//! overlay, routed to the right reference page by `context`.
+//! One flat Tab order: Interval → script table → name input → Templates button → code editor → log
+//! → Interval (`Shift+Tab` reversed; the code editor is skipped while no script is selected). `t`
+//! toggles a script, `d` deletes (with confirmation), `c` toggles compact rows, `e` runs the
+//! selected script once (see [`ScriptDialog::take_run_request`]), `Enter` on the table renames the
+//! selected script (UI-R-055), Enter in the name input creates a new (enabled) script, and the
+//! Templates button opens the bundled-template browser (UI-R-052). Edits are live on a working
+//! copy, applied when the dialog closes via [`ScriptDialog::resolve`]. `Esc` opens a close
+//! confirmation popup (Enter/Space confirms, Esc dismisses it); `?` from the code editor's Normal
+//! mode opens the Lua bindings overlay, routed to the right reference page by `context`.
 
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{CodeInputFieldState, InputFieldState, InputFieldStateBuilder, VimMode},
+    state::{ButtonState, CodeInputFieldState, InputFieldState, InputFieldStateBuilder, VimMode},
     style::InputFieldStyleBuilder,
     traits::{HandleEvents, SetFocus},
-    widgets::{CodeInputField, InputField, InputFieldBuilder, Validate, ValidateResult, Widget},
+    widgets::{
+        Button, CodeInputField, InputField, InputFieldBuilder, Validate, ValidateResult, Widget,
+    },
 };
 use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
@@ -32,7 +35,11 @@ use ratatui::{
 use crate::config::script::ScriptDef;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::lua_help::{LuaHelpOutcome, LuaHelpOverlay, ScriptContext, route_lua_help};
+use crate::dialog::rename::{RenameOutcome, RenamePrompt, route_rename};
 use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
+use crate::dialog::template_browser::{
+    TemplateBrowser, TemplateBrowserOutcome, route_template_browser,
+};
 use crate::module::modbus::dialog::{
     ConfirmDeleteDialog, DeleteConfirmOutcome, route_delete_confirm,
 };
@@ -63,8 +70,8 @@ impl Validate for Interval {
 /// The script manager dialog. Works on a private copy of the scripts/interval; the caller applies
 /// the result via [`ScriptDialog::resolve`] on close.
 ///
-/// Tab order (declaration order below): interval → script table → name input → code editor
-/// (skipped while no script is selected) → log.
+/// Tab order (declaration order below): interval → script table → name input → Templates button →
+/// code editor (skipped while no script is selected) → log.
 #[focusable]
 #[derive(Focus)]
 pub struct ScriptDialog {
@@ -78,11 +85,17 @@ pub struct ScriptDialog {
     table: ScriptTable,
     #[focus]
     name_input: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    templates_button: Widget<ButtonState, Button>,
     #[focus(when = self.selected().is_some())]
     code: Widget<CodeInputFieldState, CodeInputField>,
     #[focus]
     log: LogView,
     confirm: Option<ConfirmDeleteDialog>,
+    /// The template browser opened by the Templates button (UI-R-052).
+    template_browser: Option<TemplateBrowser>,
+    /// The rename prompt opened by `Enter` on the script table (UI-R-055).
+    rename: Option<RenamePrompt>,
     /// Set by `e` on the script table: the selected script, to be executed once by the owner
     /// (which holds the Lua modules the dialog knows nothing about). Pulled out with
     /// [`ScriptDialog::take_run_request`] after each key.
@@ -104,11 +117,14 @@ impl ScriptDialog {
             initial_interval: interval,
             table: script_manager::script_table(script_manager::rows(&scripts)),
             name_input: script_manager::name_input(border_style()),
+            templates_button: script_manager::templates_button(),
             code: script_manager::code_editor(border_style()),
             log: new_log_view(),
             focus: ScriptDialogFocus::Interval,
             view_focused: true,
             confirm: None,
+            template_browser: None,
+            rename: None,
             pending_run: None,
             compact: false,
             close_confirm: None,
@@ -191,6 +207,13 @@ impl ScriptDialog {
         self.pending_run = self.selected().map(|i| self.scripts[i].clone());
     }
 
+    /// Open the rename prompt on the selected script (UI-R-055). No selection: nothing to rename.
+    fn request_rename(&mut self) {
+        if let Some(i) = self.selected() {
+            self.rename = Some(RenamePrompt::new(&self.scripts[i].name));
+        }
+    }
+
     /// Take the script queued by `e`, if any. The owner calls this after every key and executes
     /// the script once against its own Lua modules (SC-R-035).
     pub fn take_run_request(&mut self) -> Option<ScriptDef> {
@@ -204,6 +227,30 @@ impl ScriptDialog {
         match route_lua_help(&mut self.lua_help, modifiers, code) {
             LuaHelpOutcome::NotActive => {}
             LuaHelpOutcome::Consumed => return false,
+        }
+
+        // The template browser takes precedence over the dialog's own keys while open (UI-R-053).
+        match route_template_browser(&mut self.template_browser, modifiers, code) {
+            TemplateBrowserOutcome::NotActive => {}
+            TemplateBrowserOutcome::Consumed => return false,
+            TemplateBrowserOutcome::Insert(template) => {
+                self.manager().insert_template(template);
+                return false;
+            }
+        }
+
+        // The rename prompt takes precedence too — notably over `Esc`, which cancels the prompt
+        // rather than opening the dialog's close-confirm (UI-R-055).
+        match route_rename(&mut self.rename, modifiers, code) {
+            RenameOutcome::NotActive => {}
+            RenameOutcome::Consumed => return false,
+            RenameOutcome::Commit(name) => {
+                // A refused (empty/duplicate) name leaves the prompt open to be corrected.
+                if self.manager().rename_selected(&name) {
+                    self.rename = None;
+                }
+                return false;
+            }
         }
 
         // The close-confirm popup takes precedence once open.
@@ -257,6 +304,7 @@ impl ScriptDialog {
                     let _ = self.interval.state.handle_events(modifiers, code);
                 }
                 ScriptDialogFocus::Table => match (modifiers, code) {
+                    (KeyModifiers::NONE, KeyCode::Enter) => self.request_rename(),
                     (KeyModifiers::NONE, KeyCode::Char('e')) => self.request_run(),
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
                     (KeyModifiers::NONE, KeyCode::Char('c')) => self.toggle_compact(),
@@ -276,6 +324,13 @@ impl ScriptDialog {
                         let _ = self.name_input.state.handle_events(modifiers, code);
                     }
                 },
+                ScriptDialogFocus::TemplatesButton => {
+                    if let (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) =
+                        (modifiers, code)
+                    {
+                        self.template_browser = Some(TemplateBrowser::new(self.context));
+                    }
+                }
                 // Code-focus keys were already offered to the editor above; anything
                 // reaching this arm was left unhandled by it.
                 ScriptDialogFocus::Code => {}
@@ -330,9 +385,10 @@ impl ScriptDialog {
         // editor right.
         let [left, right] =
             Layout::horizontal([Constraint::Max(50), Constraint::Min(1)]).areas(scripts_area);
-        let [interval_area, list_area, input_area] = Layout::vertical([
+        let [interval_area, list_area, input_area, button_area] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(1),
+            Constraint::Length(3),
             Constraint::Length(3),
         ])
         .areas(left);
@@ -346,6 +402,9 @@ impl ScriptDialog {
         self.name_input
             .state
             .set_focused(self.focus == ScriptDialogFocus::NameInput);
+        self.templates_button
+            .state
+            .set_focused(self.focus == ScriptDialogFocus::TemplatesButton);
         self.code
             .state
             .set_focused(self.focus == ScriptDialogFocus::Code);
@@ -366,11 +425,25 @@ impl ScriptDialog {
             buf,
             &mut self.name_input.state,
         );
+        StatefulWidget::render(
+            &self.templates_button.widget,
+            button_area,
+            buf,
+            &mut self.templates_button.state,
+        );
         StatefulWidget::render(&self.code.widget, right, buf, &mut self.code.state);
         StatefulWidget::render(&self.log.widget, log_area, buf, &mut self.log.state);
 
         if let Some(confirm) = self.confirm.as_mut() {
             confirm.render(vc, buf);
+        }
+
+        if let Some(browser) = self.template_browser.as_mut() {
+            browser.render(area, buf);
+        }
+
+        if let Some(rename) = self.rename.as_mut() {
+            rename.render(area, buf);
         }
 
         if let Some(help) = self.lua_help.as_mut() {
@@ -530,6 +603,7 @@ mod tests {
         let expected = [
             ScriptDialogFocus::Table,
             ScriptDialogFocus::NameInput,
+            ScriptDialogFocus::TemplatesButton,
             ScriptDialogFocus::Code,
             ScriptDialogFocus::Log,
             ScriptDialogFocus::Interval,
@@ -546,6 +620,7 @@ mod tests {
         let expected = [
             ScriptDialogFocus::Log,
             ScriptDialogFocus::Code,
+            ScriptDialogFocus::TemplatesButton,
             ScriptDialogFocus::NameInput,
             ScriptDialogFocus::Table,
             ScriptDialogFocus::Interval,
@@ -562,10 +637,11 @@ mod tests {
         let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // code skipped -> log
         assert_eq!(d.focus, ScriptDialogFocus::Log);
-        d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab); // code skipped -> name input
-        assert_eq!(d.focus, ScriptDialogFocus::NameInput);
+        d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab); // code skipped -> templates button
+        assert_eq!(d.focus, ScriptDialogFocus::TemplatesButton);
     }
 
     #[test]
@@ -617,6 +693,7 @@ mod tests {
         // Edit in the code editor, then come back to the table without leaving the dialog: the
         // run must see the edited buffer, not the code the script was created with.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code editor
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i')); // vim insert
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
@@ -737,6 +814,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
@@ -749,6 +827,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
@@ -773,6 +852,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
@@ -786,6 +866,7 @@ mod tests {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
@@ -814,6 +895,7 @@ mod tests {
 
         // From Code Insert mode: `?` is text.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
         assert_eq!(d.focus, ScriptDialogFocus::Code);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
@@ -834,11 +916,175 @@ mod tests {
             let mut d = dialog();
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
             d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
             assert!(d.lua_help.is_some());
             assert!(!d.handle_events(KeyModifiers::NONE, close_key));
             assert!(d.lua_help.is_none());
         }
+    }
+
+    // --- templates ------------------------------------------------------
+
+    /// Tab to the Templates button (interval → table → name input → button).
+    fn focus_templates_button(d: &mut ScriptDialog) {
+        while d.focus != ScriptDialogFocus::TemplatesButton {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        }
+    }
+
+    /// UI-R-052 — the Templates button sits in the focus cycle after the name input, and
+    /// `Enter`/`Space` on it opens the template browser.
+    #[test]
+    fn ut_templates_button_in_focus_cycle_and_opens_browser() {
+        for open_key in [KeyCode::Enter, KeyCode::Char(' ')] {
+            let mut d = dialog();
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
+            assert_eq!(d.focus, ScriptDialogFocus::TemplatesButton);
+
+            assert!(d.template_browser.is_none());
+            assert!(!d.handle_events(KeyModifiers::NONE, open_key));
+            assert!(d.template_browser.is_some(), "{open_key:?} must open it");
+        }
+    }
+
+    /// UI-R-053 — while the browser is open it takes every key: `Esc` closes it instead of opening
+    /// the dialog's close-confirm.
+    #[test]
+    fn ut_open_browser_takes_precedence_over_dialog_keys() {
+        let mut d = dialog();
+        focus_templates_button(&mut d);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.template_browser.is_none(), "Esc closes the browser");
+        assert!(d.close_confirm.is_none(), "and not the dialog");
+    }
+
+    /// UI-R-054 — confirming a template appends it as a new enabled script, selects it, and leaves
+    /// the dialog open with the browser closed.
+    #[test]
+    fn ut_insert_template_appends_enabled_script() {
+        let mut d = dialog();
+        focus_templates_button(&mut d);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open browser
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Enter)); // insert first template
+        assert!(d.template_browser.is_none());
+
+        let template = crate::script_template::templates(ScriptContext::Modbus)[0];
+        assert_eq!(d.selected(), Some(1), "the new script is selected");
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 2);
+        assert_eq!(scripts[1].name, template.name);
+        assert_eq!(scripts[1].code, template.code);
+        assert!(scripts[1].enabled);
+    }
+
+    /// UI-R-054 — inserting the same template twice suffixes the second rather than refusing it.
+    #[test]
+    fn ut_insert_duplicate_template_auto_suffixes() {
+        let mut d = dialog();
+        for _ in 0..2 {
+            focus_templates_button(&mut d);
+            d.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open browser
+            d.handle_events(KeyModifiers::NONE, KeyCode::Enter); // insert
+        }
+        let template = crate::script_template::templates(ScriptContext::Modbus)[0];
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts.len(), 3);
+        assert_eq!(scripts[1].name, template.name);
+        assert_eq!(scripts[2].name, format!("{}-2", template.name));
+    }
+
+    // --- rename ---------------------------------------------------------
+
+    /// UI-R-055 — `Enter` on the script table opens a rename prompt pre-filled with the current
+    /// name; committing renames the script, preserving its code and enabled flag.
+    #[test]
+    fn ut_enter_on_table_renames_selected_script() {
+        let mut d = ScriptDialog::new(
+            &[ScriptDef {
+                name: "boot".into(),
+                code: "print('hi')".into(),
+                enabled: false,
+            }],
+            Duration::from_secs(1),
+            ScriptContext::Modbus,
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
+        assert!(d.rename.is_some());
+
+        for c in ['-', '2'] {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
+        assert!(d.rename.is_none(), "an accepted name closes the prompt");
+
+        let (scripts, _) = d.resolve();
+        assert_eq!(scripts[0].name, "boot-2");
+        assert_eq!(scripts[0].code, "print('hi')");
+        assert!(!scripts[0].enabled);
+    }
+
+    /// UI-R-055 — an empty or duplicate name is refused and the prompt stays open.
+    #[test]
+    fn ut_rename_refuses_empty_and_duplicate() {
+        let mut d = ScriptDialog::new(
+            &[
+                ScriptDef {
+                    name: "boot".into(),
+                    code: String::new(),
+                    enabled: true,
+                },
+                ScriptDef {
+                    name: "other".into(),
+                    code: String::new(),
+                    enabled: true,
+                },
+            ],
+            Duration::from_secs(1),
+            ScriptContext::Modbus,
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (row 0: boot)
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open the prompt
+
+        // Clear the field, then commit an empty name.
+        for _ in 0..4 {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Backspace);
+        }
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.rename.is_some(), "empty name must be refused");
+
+        // Type the other script's name: also refused.
+        for c in "other".chars() {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.rename.is_some(), "duplicate name must be refused");
+
+        assert_eq!(d.scripts[0].name, "boot", "the name is unchanged");
+    }
+
+    /// UI-R-055 — `Esc` dismisses the prompt, leaving the name unchanged; with no script selected
+    /// `Enter` on the table is a no-op.
+    #[test]
+    fn ut_rename_esc_cancels_and_empty_table_is_noop() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(d.rename.is_none());
+        assert!(d.close_confirm.is_none(), "Esc belonged to the prompt");
+        assert_eq!(d.scripts[0].name, "boot");
+
+        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
+        assert!(!empty.handle_events(KeyModifiers::NONE, KeyCode::Enter));
+        assert!(empty.rename.is_none());
     }
 }

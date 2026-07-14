@@ -197,14 +197,32 @@ Insert/Visual mode `?` is literal text.
 
 | Key | Context | Action |
 |---|---|---|
-| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → code editor → interval → log); the code editor is skipped while no script is selected |
+| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); the code editor is skipped while no script is selected |
 | `Esc` | dialog | Open close-confirm |
 | `t` | script table focused | Toggle the selected script's enabled flag |
 | `d` | script table focused | Delete the selected script (opens confirm) |
 | `c` | script table focused | Toggle compact rows |
 | `e` | script table focused | Execute the selected script once (current editor content, enabled or not) |
+| `Enter` | script table focused | Open the rename prompt for the selected script |
 | `Enter` | name input focused | Create a new script with the typed name |
+| `Enter` / `Space` | Templates button focused | Open the template-browser overlay |
 | `?` | code editor, Normal mode | Open the Lua-bindings help overlay |
+
+### 4.10 Template-browser overlay (Templates button in the script-manager dialog)
+
+| Key | Context | Action |
+|---|---|---|
+| `j` / `k` / `Up` / `Down` | template list | Move the selection; the preview follows |
+| `Tab` / `Shift+Tab` | overlay | Cycle focus between the template list and the (read-only) preview |
+| `Enter` | overlay | Insert the selected template as a new enabled script and close the overlay |
+| `Esc` / `q` | overlay | Close, changing nothing |
+
+### 4.11 Script rename prompt (`Enter` on the script table)
+
+| Key | Context | Action |
+|---|---|---|
+| `Enter` | prompt | Commit the new name; an empty or duplicate name is refused and the prompt stays open |
+| `Esc` | prompt | Cancel, leaving the name unchanged |
 
 ## 5. Code editor — modes and commands
 

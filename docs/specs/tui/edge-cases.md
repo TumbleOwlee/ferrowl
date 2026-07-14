@@ -46,6 +46,12 @@ it is not mistaken for an oversight and silently "fixed".
 | `:` or `?` pressed while a view overlay is open | Not treated as global; the key is delivered to the overlay (so `?` types into a Lua editor, `:` into a text field) |
 | A key with no binding in the current dialog/field | Left unhandled; the generic dialog defaults (`Enter`/`Esc`/`Tab`) apply only if no widget consumed it, otherwise nothing happens |
 | Suggestion popup closed, `Up`/`Down`/`Enter`/`Tab`/`Esc` pressed | Passed through to the surrounding dialog rather than consumed by the popup |
+| Inserting a template whose name is already used in the script list | Inserted as `<name>-2` (then `-3`, …); never refused |
+| Preview pane of the template browser | A disabled code editor: vim motions and visual-yank work, edits do not |
+| Renaming a script to an empty or duplicate name | Refused silently; the prompt stays open (same rule as creating a script) |
+| Renaming a script to its own current name | Accepted; a no-op |
+| `Esc` while the rename prompt is open | Cancels the prompt; it does not reach the dialog's close-confirm |
+| A rename is an edit | Like any script edit, it restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
 
 ## 4. Code editor
 

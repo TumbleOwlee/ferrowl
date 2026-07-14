@@ -12,13 +12,13 @@ use ferrowl_syntax::Language;
 use ferrowl_ui::{
     Border,
     state::{
-        CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState, InputFieldStateBuilder,
-        TableState, TableStateBuilder,
+        ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
+        InputFieldState, InputFieldStateBuilder, TableState, TableStateBuilder,
     },
-    style::{InputFieldStyleBuilder, TableStyleBuilder},
+    style::{ButtonStyle, InputFieldStyleBuilder, TableStyleBuilder},
     widgets::{
-        CodeInputField, CodeInputFieldBuilder, InputField, InputFieldBuilder, Table, TableBuilder,
-        Widget,
+        Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, InputField,
+        InputFieldBuilder, Table, TableBuilder, Widget,
     },
 };
 use ferrowl_ui_derive::TableEntry;
@@ -28,6 +28,7 @@ use ratatui::{
 };
 
 use crate::config::script::ScriptDef;
+use crate::script_template::ScriptTemplate;
 
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = ScriptHeader)]
@@ -103,6 +104,44 @@ impl ScriptManagerRef<'_> {
         self.sync_code_from_selection();
     }
 
+    /// Append a bundled template as a new enabled script and select it (UI-R-054). The code is
+    /// **copied** — the inserted script has no link back to the template. A name already taken is
+    /// suffixed rather than refused, so picking the same template twice always produces a script.
+    pub fn insert_template(&mut self, template: &ScriptTemplate) {
+        self.scripts.push(ScriptDef {
+            name: unique_name(self.scripts, template.name),
+            code: template.code.to_string(),
+            enabled: true,
+        });
+        self.refresh_rows();
+        self.table.state.move_to_bottom();
+        self.sync_code_from_selection();
+    }
+
+    /// Rename the selected script (UI-R-055). Returns `false` — refusing — for an empty name or one
+    /// another script already holds; renaming a script to its own current name is accepted as a
+    /// no-op. Code and enabled flag are untouched either way.
+    pub fn rename_selected(&mut self, new_name: &str) -> bool {
+        let Some(i) = self.selected() else {
+            return false;
+        };
+        let name = new_name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        if self
+            .scripts
+            .iter()
+            .enumerate()
+            .any(|(j, s)| j != i && s.name == name)
+        {
+            return false;
+        }
+        self.scripts[i].name = name.to_string();
+        self.refresh_rows();
+        true
+    }
+
     pub fn toggle_compact(&mut self) {
         *self.compact = !*self.compact;
         self.table.widget.set_row_margin(Margin {
@@ -128,6 +167,18 @@ impl ScriptManagerRef<'_> {
     }
 }
 
+/// `base` if free, else the first free `base-2`, `base-3`, … (UI-R-054).
+fn unique_name(scripts: &[ScriptDef], base: &str) -> String {
+    let taken = |name: &str| scripts.iter().any(|s| s.name == name);
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|name| !taken(name))
+        .expect("an unbounded suffix search always terminates")
+}
+
 pub(crate) fn rows(scripts: &[ScriptDef]) -> Vec<ScriptRow> {
     scripts
         .iter()
@@ -144,7 +195,7 @@ pub(crate) fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(
-                "Scripts (e: run, t: toggle, d: delete, c: compact)".into(),
+                "Scripts (Enter: rename, e: run, t: toggle, d: delete, c: compact)".into(),
             ))
             .style(TableStyleBuilder::default().build().unwrap())
             .row_margin(Margin {
@@ -177,6 +228,28 @@ pub(crate) fn name_input(border: Style) -> Widget<InputFieldState, InputField<St
                 vertical: 0,
                 horizontal: 0,
             })
+            .build()
+            .unwrap(),
+    }
+}
+
+/// The *Templates* button (UI-R-052): opens the template browser from the script dialog.
+pub(crate) fn templates_button() -> Widget<ButtonState, Button> {
+    Widget {
+        state: ButtonStateBuilder::default()
+            .focused(false)
+            .label("TEMPLATES".to_string())
+            .disabled(false)
+            .build()
+            .unwrap(),
+        widget: ButtonBuilder::default()
+            .border_margin(Margin::new(1, 0))
+            .margin(Margin {
+                vertical: 0,
+                horizontal: 0,
+            })
+            .style(ButtonStyle::default())
+            .horizontal_alignment(HorizontalAlignment::Center)
             .build()
             .unwrap(),
     }
@@ -288,6 +361,52 @@ mod tests {
 
         mgr.delete_selected();
         assert!(mgr.scripts.is_empty());
+    }
+
+    /// UI-R-054 — the suffix search skips every taken name, not just the base.
+    #[test]
+    fn ut_unique_name_suffixes_past_taken_names() {
+        let scripts = vec![
+            ScriptDef {
+                name: "ramp".into(),
+                code: String::new(),
+                enabled: true,
+            },
+            ScriptDef {
+                name: "ramp-2".into(),
+                code: String::new(),
+                enabled: true,
+            },
+        ];
+        assert_eq!(unique_name(&scripts, "ramp"), "ramp-3");
+        assert_eq!(unique_name(&scripts, "sine"), "sine");
+    }
+
+    /// UI-R-055 — renaming to the script's own name is accepted (a no-op), not refused as a
+    /// duplicate of itself.
+    #[test]
+    fn ut_rename_to_own_name_is_accepted() {
+        let mut scripts = vec![ScriptDef {
+            name: "boot".into(),
+            code: "x".into(),
+            enabled: true,
+        }];
+        let mut table = script_table(rows(&scripts));
+        let mut name_input = name_input(Style::default());
+        let mut code = code_editor(Style::default());
+        let mut compact = false;
+        let mut mgr = manager_fixture(
+            &mut scripts,
+            &mut table,
+            &mut name_input,
+            &mut code,
+            &mut compact,
+        );
+
+        assert!(mgr.rename_selected("boot"));
+        assert!(!mgr.rename_selected("   "), "blank name is refused");
+        assert_eq!(mgr.scripts[0].name, "boot");
+        assert_eq!(mgr.scripts[0].code, "x");
     }
 
     #[test]

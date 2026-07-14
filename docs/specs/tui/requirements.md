@@ -180,6 +180,33 @@ and the run's `print`/`C_Log` output and any error shall appear in the dialog's 
 pane. The execution semantics are specified by SC-R-035 in
 [`../scripting/requirements.md`](../scripting/requirements.md).
 
+**UI-R-052** — The script-manager dialog shall carry a *Templates* button in its
+focus cycle, positioned after the new-script name input. `Enter` or `Space` on the
+focused button shall open the template-browser overlay.
+
+**UI-R-053** — The template-browser overlay shall list only the templates
+applicable to the dialog's script context (SC-R-036 in
+[`../scripting/requirements.md`](../scripting/requirements.md)), each with its name
+and description, alongside a read-only preview of the selected template's Lua code
+with syntax highlighting. `Esc` or `q` shall close the overlay without changing the
+script list. While the overlay is open it shall take precedence over all other
+dialog keys.
+
+**UI-R-054** — Confirming a template in the overlay shall append it to the dialog's
+working script list as a new enabled script whose code is a copy of the template
+body, select that script, close the overlay, and leave the dialog open. The new
+script shall take the template's name; if that name is already taken in the list, it
+shall take the first free `<name>-<n>` (n from 2 upwards) — insertion shall never be
+refused for a name collision.
+
+**UI-R-055** — In the script-manager dialog, while the script table is focused,
+`Enter` on a selected script shall open a rename prompt pre-filled with that
+script's current name. Confirming with `Enter` shall rename the script; `Esc` shall
+dismiss the prompt leaving the name unchanged. A name that is empty (after trimming)
+or already used by another script in the list shall be refused and the prompt shall
+stay open. With no script selected, `Enter` shall be a no-op. Renaming shall change
+only the script's name — its code and enabled flag shall be preserved.
+
 ## Code editor (vim-modal)
 
 **UI-R-027** — The multi-line code editor shall support two operating profiles:

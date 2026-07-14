@@ -186,6 +186,20 @@ the client is connected or the server is bound.
 
 ---
 
+## Script templates
+
+**SC-R-036** — The binary shall carry a fixed library of Lua script templates,
+compiled in at build time. Each template shall have a name, a one-line
+description, a Lua code body, and the set of script contexts (Modbus, OCPP client,
+OCPP server, session) it applies to. A template shall not be a script: it becomes
+one only by being copied into a script list, and nothing shall load template code
+from disk at run time (SC-R-023 stands).
+
+**SC-R-037** — Every template's code body shall be loadable by the Lua runtime — a
+template that fails to compile shall be a build/test failure, not a run-time one.
+
+---
+
 ## State access semantics
 
 **SC-R-027** — A value read from a register or an OCPP state field shall be
