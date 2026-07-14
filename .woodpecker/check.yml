@@ -1,11 +1,27 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
+
 steps:
+  fmt:
+    image: rust:latest
+    commands:
+      - rustup component add rustfmt
+      - cargo fmt --check
+
+  clippy:
+    image: rust:latest
+    commands:
+      - rustup component add clippy
+      - cargo clippy --workspace -- -D warnings
+
   check:
     image: rust:latest
     commands:
       - cargo check
+
+  test:
+    image: rust:latest
+    commands:
       - cargo test
-    when:
-      - event: push
-      - event: manual
-
-

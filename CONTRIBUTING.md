@@ -30,13 +30,13 @@ expected to conform to it. Before changing behavior, read the relevant area's
 Please make sure the following pass locally:
 
 ```sh
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
 cargo check
 cargo test --workspace
-cargo clippy --workspace
-cargo fmt --check
 ```
 
-CI runs `cargo check` and `cargo test` on every push (`check` workflow); a `nightly` workflow (only run on `main`) builds the prebuilt executables published on the Release page.
+CI runs all four as separate steps of the `check` pipeline — on every push **and every pull request** — so anything the pre-commit hook would reject is rejected by CI too. A `nightly` workflow (only run on `main`) builds the prebuilt executables published on the Release page.
 
 ## Pull Requests
 
