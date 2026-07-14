@@ -1,13 +1,16 @@
 [package]
 name = "ferrowl-store"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-itertools = "0.14.0"
-serde = { version = "1.0.228", features = ["derive"] }
-thiserror = "2.0"
+itertools = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json = { workspace = true }
