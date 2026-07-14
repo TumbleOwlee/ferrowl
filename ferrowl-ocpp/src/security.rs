@@ -9,13 +9,12 @@
 //! Profiles 2 and 3 share the same rustls plumbing; a [`CsTlsConfig`]/[`CsmsTlsConfig`] only
 //! becomes "profile 3" once a client certificate (CS) or `require_client_cert` (CSMS) is set.
 
-use std::fs::File;
-use std::io::BufReader;
 use std::sync::Arc;
 
 use base64::Engine;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
+use rustls::pki_types::pem::{self, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio_tungstenite::Connector;
@@ -269,17 +268,28 @@ fn generate_self_signed(
     Ok((vec![cert_der], key_der))
 }
 
+/// Map a PEM failure onto the `io::Error` shape the rest of this module already speaks. A file
+/// that cannot be opened arrives as `pem::Error::Io` and is passed through unchanged; every other
+/// variant is a parse failure, which the previous `rustls-pemfile` codec also surfaced as an
+/// `InvalidData` `io::Error`.
+fn pem_io_error(err: pem::Error) -> std::io::Error {
+    match err {
+        pem::Error::Io(io) => io,
+        other => std::io::Error::new(std::io::ErrorKind::InvalidData, other.to_string()),
+    }
+}
+
 /// Load a PEM certificate chain from `path`.
 fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, Error> {
-    let file = File::open(path).map_err(|source| TlsError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    let certs = rustls_pemfile::certs(&mut BufReader::new(file))
+    let certs = CertificateDer::pem_file_iter(path)
+        .map_err(|source| TlsError::Io {
+            path: path.to_owned(),
+            source: pem_io_error(source),
+        })?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| TlsError::Io {
             path: path.to_owned(),
-            source,
+            source: pem_io_error(source),
         })?;
     if certs.is_empty() {
         return Err(TlsError::NoCertificates(path.to_owned()).into());
@@ -289,15 +299,90 @@ fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, Error> {
 
 /// Load a PEM private key from `path`.
 fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>, Error> {
-    let file = File::open(path).map_err(|source| TlsError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    let mut reader = BufReader::new(file);
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|source| TlsError::Io {
+    match PrivateKeyDer::from_pem_file(path) {
+        Ok(key) => Ok(key),
+        Err(pem::Error::NoItemsFound) => Err(TlsError::NoPrivateKey(path.to_owned()).into()),
+        Err(source) => Err(TlsError::Io {
             path: path.to_owned(),
-            source,
-        })?
-        .ok_or_else(|| TlsError::NoPrivateKey(path.to_owned()).into())
+            source: pem_io_error(source),
+        }
+        .into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Write `contents` to a fresh file under the OS temp dir and return its path. Left in place;
+    /// the platform reclaims its temp dir, and this keeps the tests free of a TempDir dependency.
+    fn temp_pem(tag: &str, contents: &str) -> String {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ferrowl-ocpp-sec-{tag}-{}-{n}.pem",
+            std::process::id()
+        ));
+        std::fs::File::create(&path)
+            .and_then(|mut f| f.write_all(contents.as_bytes()))
+            .expect("write temp pem");
+        path.to_string_lossy().into_owned()
+    }
+
+    /// A self-signed certificate and its matching key, both PEM-encoded (PKCS#8 key, as rcgen
+    /// emits and as the loopback tests feed the real TLS stack).
+    fn cert_and_key_pem() -> (String, String) {
+        let params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
+        let key = rcgen::KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        (cert.pem(), key.serialize_pem())
+    }
+
+    /// OC-R-041 — a well-formed certificate and key load, pinning the happy path the negative
+    /// cases below are measured against.
+    #[test]
+    fn ut_load_certs_and_key_roundtrip() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cert_path = temp_pem("roundtrip-cert", &cert_pem);
+        let key_path = temp_pem("roundtrip-key", &key_pem);
+        assert_eq!(load_certs(&cert_path).unwrap().len(), 1);
+        load_private_key(&key_path).expect("key should load");
+    }
+
+    /// OC-R-041 — failing to open a certificate file is a TLS error, not a panic or a silent
+    /// empty chain.
+    #[test]
+    fn ut_load_certs_missing_file_is_tls_error() {
+        let missing = temp_pem("missing-cert", "");
+        std::fs::remove_file(&missing).unwrap();
+        assert!(matches!(
+            load_certs(&missing),
+            Err(Error::Tls(TlsError::Io { .. }))
+        ));
+    }
+
+    /// OC-R-041 — a readable file with no certificate section fails as NoCertificates rather than
+    /// being accepted as an empty chain.
+    #[test]
+    fn ut_load_certs_without_certificate_section_is_no_certificates() {
+        let (_cert, key_pem) = cert_and_key_pem();
+        let path = temp_pem("key-only", &key_pem);
+        assert!(matches!(
+            load_certs(&path),
+            Err(Error::Tls(TlsError::NoCertificates(_)))
+        ));
+    }
+
+    /// OC-R-041 — failing to find a private key in a readable file is NoPrivateKey.
+    #[test]
+    fn ut_load_private_key_without_key_section_is_no_private_key() {
+        let (cert_pem, _key) = cert_and_key_pem();
+        let path = temp_pem("cert-only", &cert_pem);
+        assert!(matches!(
+            load_private_key(&path),
+            Err(Error::Tls(TlsError::NoPrivateKey(_)))
+        ));
+    }
 }

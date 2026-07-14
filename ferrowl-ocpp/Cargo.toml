@@ -26,7 +26,6 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true, features = ["sink", "std"] }
 validator = { workspace = true }
 base64 = { workspace = true }
-rustls-pemfile = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
