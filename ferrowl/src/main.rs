@@ -16,6 +16,7 @@ mod lua;
 mod migrate;
 mod module;
 mod registry;
+mod script_template;
 #[cfg(test)]
 mod session_e2e_tests;
 mod session_sim;
@@ -159,54 +160,15 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
     Tab::new_from_view(spec.name.clone(), view)
 }
 
-/// The demo session's example script: uses `C_Module` to read the `Power` value of every modbus
-/// server instance and every OCPP connector (client-side connector 1, server-side all connectors
-/// of every connected station), printing them to the session log once per cycle. Reads are
-/// `pcall`-guarded so a scope without the field (e.g. a client whose connection is down) logs
-/// nothing instead of erroring every cycle.
+/// The demo session's example script: the bundled `power-report` template (SC-R-036), which uses
+/// `C_Module` to read the `Power` value of every modbus server instance and every OCPP connector,
+/// printing the total to the session log once per cycle.
 fn demo_session_script() -> crate::config::script::ScriptDef {
+    let template = script_template::by_name("power-report")
+        .expect("the bundled power-report session template");
     crate::config::script::ScriptDef {
-        name: "power-report".to_string(),
-        code: r#"-- Demo: read `Power` from every modbus server and OCPP connector via C_Module.
-local total_power = 0
-local num_modbus = 0
-local num_ocpp = 0
-
--- Go over all modules
-for _, name in ipairs(C_Module:List()) do
-    -- Get module context
-    local m = C_Module:Get(name)
-    local ty = m:Type()
-    local r = m:Role()
-
-    if ty == "modbus" and r == "server" then
-        -- Get power of modbus charger
-        local reg = m:Register()
-
-        -- Check if register exists before access
-        if reg:Has("Power") then
-            total_power = total_power + reg:Get("Power")
-        end
-
-        num_modbus = num_modbus + 1
-    elseif ty == "ocpp" and r == "client" then
-        -- Get power of ocpp charger
-        local o = m:OCPP()
-
-        -- Get all available connector ids
-        for _, i in ipairs(o:GetConnectors()) do
-            -- Get connector context
-            local con = o:Connector(i)
-            total_power = total_power + con:Get("Power")
-
-            num_ocpp = num_ocpp + 1
-        end
-    end
-end
-
--- Print to log
-print("[M" .. num_modbus .. "|O" .. num_ocpp .. "] Total Power = " .. total_power)"#
-            .to_string(),
+        name: template.name.to_string(),
+        code: template.code.to_string(),
         enabled: true,
     }
 }

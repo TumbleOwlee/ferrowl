@@ -3,8 +3,10 @@
 pub mod close_confirm;
 pub mod lua_help;
 pub mod path_suggest;
+pub mod rename;
 mod script_manager;
 pub mod scripts;
+pub mod template_browser;
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
 pub use crate::module::modbus::setup_dialog::SetupDialog;
