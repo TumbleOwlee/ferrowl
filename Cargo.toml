@@ -71,7 +71,7 @@ tokio = "1.49.0"
 tokio-modbus = "0.17.0"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-serial = "5.4.5"
-tokio-tungstenite = { version = "0.24", default-features = false, features = [
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "connect",
     "handshake",
     "rustls-tls-webpki-roots",
