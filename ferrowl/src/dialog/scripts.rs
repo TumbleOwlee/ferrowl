@@ -10,8 +10,10 @@
 //! selected script (UI-R-055), Enter in the name input creates a new (enabled) script, and the
 //! Templates button opens the bundled-template browser (UI-R-052). Edits are live on a working
 //! copy, applied when the dialog closes via [`ScriptDialog::resolve`]. `Esc` opens a close
-//! confirmation popup (Enter/Space confirms, Esc dismisses it); `?` from the code editor's Normal
-//! mode opens the Lua bindings overlay, routed to the right reference page by `context`.
+//! confirmation popup (Enter/Space confirms, Esc dismisses it).
+//!
+//! `?` opens a help overlay, which page depending on focus: from the script table, the table's own
+//! keybinds (UI-R-056); from the code editor's Normal mode, the Lua bindings for `context`.
 
 use std::time::Duration;
 
@@ -34,8 +36,10 @@ use ratatui::{
 
 use crate::config::script::ScriptDef;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
-use crate::dialog::lua_help::{LuaHelpOutcome, LuaHelpOverlay, ScriptContext, route_lua_help};
+use crate::dialog::help::{HelpOutcome, HelpOverlay, route_help};
+use crate::dialog::lua_help::{ScriptContext, lua_help_overlay};
 use crate::dialog::rename::{RenameOutcome, RenamePrompt, route_rename};
+use crate::dialog::script_keys::script_keys_overlay;
 use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
 use crate::dialog::template_browser::{
     TemplateBrowser, TemplateBrowserOutcome, route_template_browser,
@@ -104,7 +108,9 @@ pub struct ScriptDialog {
     compact: bool,
     close_confirm: Option<CloseConfirmDialog>,
     context: ScriptContext,
-    lua_help: Option<LuaHelpOverlay>,
+    /// The open `?` help overlay: the Lua bindings (from the code editor) or the script table's
+    /// keybinds (from the table). Which page it shows is decided when it is opened (UI-R-056).
+    help: Option<HelpOverlay>,
 }
 
 impl ScriptDialog {
@@ -129,7 +135,7 @@ impl ScriptDialog {
             compact: false,
             close_confirm: None,
             context,
-            lua_help: None,
+            help: None,
             scripts,
         };
         dialog.sync_code_from_selection();
@@ -223,10 +229,11 @@ impl ScriptDialog {
     /// Handle a key. Returns `true` when the dialog should close (confirmed via the close-confirm
     /// popup).
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        // The Lua bindings overlay takes precedence over everything else while open.
-        match route_lua_help(&mut self.lua_help, modifiers, code) {
-            LuaHelpOutcome::NotActive => {}
-            LuaHelpOutcome::Consumed => return false,
+        // An open help overlay (Lua bindings or script-table keys) takes precedence over everything
+        // else (UI-R-056).
+        match route_help(&mut self.help, modifiers, code) {
+            HelpOutcome::NotActive => {}
+            HelpOutcome::Consumed => return false,
         }
 
         // The template browser takes precedence over the dialog's own keys while open (UI-R-053).
@@ -278,7 +285,7 @@ impl ScriptDialog {
             && let (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?')) =
                 (modifiers, code)
         {
-            self.lua_help = Some(LuaHelpOverlay::new());
+            self.help = Some(lua_help_overlay(self.context));
             return false;
         }
 
@@ -304,6 +311,11 @@ impl ScriptDialog {
                     let _ = self.interval.state.handle_events(modifiers, code);
                 }
                 ScriptDialogFocus::Table => match (modifiers, code) {
+                    // UI-R-056 — the table's bindings are documented in an overlay, not in a title
+                    // that no longer has room for them.
+                    (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?')) => {
+                        self.help = Some(script_keys_overlay());
+                    }
                     (KeyModifiers::NONE, KeyCode::Enter) => self.request_rename(),
                     (KeyModifiers::NONE, KeyCode::Char('e')) => self.request_run(),
                     (KeyModifiers::NONE, KeyCode::Char('t')) => self.toggle_selected(),
@@ -446,8 +458,8 @@ impl ScriptDialog {
             rename.render(area, buf);
         }
 
-        if let Some(help) = self.lua_help.as_mut() {
-            help.render(area, buf, self.context);
+        if let Some(help) = self.help.as_mut() {
+            help.render(area, buf);
         }
 
         if let Some(confirm) = self.close_confirm.as_mut() {
@@ -872,7 +884,7 @@ mod tests {
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char(':')));
         assert!(d.close_confirm.is_none());
-        assert!(d.lua_help.is_none());
+        assert!(d.help.is_none());
     }
 
     #[test]
@@ -889,9 +901,6 @@ mod tests {
     fn ut_question_opens_bindings_only_code_normal() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
-        // From Scripts focus: `?` is not bound there, no overlay.
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
-        assert!(d.lua_help.is_none());
 
         // From Code Insert mode: `?` is text.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
@@ -901,13 +910,13 @@ mod tests {
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('i'));
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
         assert!(d.code.state.content().contains('?'));
-        assert!(d.lua_help.is_none());
+        assert!(d.help.is_none());
 
         // From Code Normal mode: `?` opens the overlay.
         d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert_eq!(d.code.state.vim_mode(), VimMode::Normal);
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
-        assert!(d.lua_help.is_some());
+        assert!(d.help.is_some());
     }
 
     #[test]
@@ -919,9 +928,9 @@ mod tests {
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> code
             d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
-            assert!(d.lua_help.is_some());
+            assert!(d.help.is_some());
             assert!(!d.handle_events(KeyModifiers::NONE, close_key));
-            assert!(d.lua_help.is_none());
+            assert!(d.help.is_none());
         }
     }
 
@@ -1086,5 +1095,53 @@ mod tests {
         empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         assert!(!empty.handle_events(KeyModifiers::NONE, KeyCode::Enter));
         assert!(empty.rename.is_none());
+    }
+
+    // --- script-table keybind help --------------------------------------
+
+    /// UI-R-056 — `?` on the script table opens the keybind help, with or without a selection.
+    #[test]
+    fn ut_question_mark_on_table_opens_script_keys_help() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char('?')));
+        assert!(d.help.is_some());
+
+        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
+        empty.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        assert!(empty.help.is_some());
+    }
+
+    /// UI-R-056 — `Esc`, `q` and `?` each close the overlay.
+    #[test]
+    fn ut_script_keys_help_closes_on_esc_q_question() {
+        for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
+            let mut d = dialog();
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+            d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+            assert!(d.help.is_some());
+            assert!(!d.handle_events(KeyModifiers::NONE, close_key));
+            assert!(d.help.is_none());
+        }
+    }
+
+    /// UI-R-056 — while the overlay is open it takes every key: the table's own bindings and the
+    /// dialog's `Esc` are not reachable through it.
+    #[test]
+    fn ut_script_keys_help_takes_precedence() {
+        let mut d = dialog();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+
+        // `d` would open the delete-confirm, `e` would queue a run, `Enter` would rename — while
+        // the overlay is open, none of them reach the table.
+        for key in [KeyCode::Char('d'), KeyCode::Char('e'), KeyCode::Enter] {
+            assert!(!d.handle_events(KeyModifiers::NONE, key));
+        }
+        assert!(d.confirm.is_none());
+        assert!(d.rename.is_none());
+        assert!(d.take_run_request().is_none());
+        assert!(d.help.is_some(), "only Esc/q/? close it");
     }
 }

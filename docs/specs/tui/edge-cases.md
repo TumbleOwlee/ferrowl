@@ -48,6 +48,7 @@ it is not mistaken for an oversight and silently "fixed".
 | Suggestion popup closed, `Up`/`Down`/`Enter`/`Tab`/`Esc` pressed | Passed through to the surrounding dialog rather than consumed by the popup |
 | Inserting a template whose name is already used in the script list | Inserted as `<name>-2` (then `-3`, …); never refused |
 | Preview pane of the template browser | A disabled code editor: vim motions and visual-yank work, edits do not |
+| `?` pressed in the script dialog | Focus decides the overlay: on the script table it opens the keybind help, in the code editor's Normal mode the Lua-bindings help (in Insert/Visual it stays literal text) |
 | Renaming a script to an empty or duplicate name | Refused silently; the prompt stays open (same rule as creating a script) |
 | Renaming a script to its own current name | Accepted; a no-op |
 | `Esc` while the rename prompt is open | Cancels the prompt; it does not reach the dialog's close-confirm |
