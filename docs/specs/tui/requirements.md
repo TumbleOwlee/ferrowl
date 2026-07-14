@@ -207,6 +207,13 @@ or already used by another script in the list shall be refused and the prompt sh
 stay open. With no script selected, `Enter` shall be a no-op. Renaming shall change
 only the script's name — its code and enabled flag shall be preserved.
 
+**UI-R-056** — In the script-manager dialog, while the script table is focused, `?`
+shall open a keybind-help overlay listing the script table's own bindings (rename,
+run once, toggle enabled, delete, compact) with a one-line description each. `Esc`,
+`q`, or `?` shall close it. While open it shall take precedence over all other dialog
+keys. The script table's title shall advertise only this overlay, not the individual
+bindings.
+
 ## Code editor (vim-modal)
 
 **UI-R-027** — The multi-line code editor shall support two operating profiles:

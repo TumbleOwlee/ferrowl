@@ -206,6 +206,7 @@ Insert/Visual mode `?` is literal text.
 | `Enter` | script table focused | Open the rename prompt for the selected script |
 | `Enter` | name input focused | Create a new script with the typed name |
 | `Enter` / `Space` | Templates button focused | Open the template-browser overlay |
+| `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) |
 | `?` | code editor, Normal mode | Open the Lua-bindings help overlay |
 
 ### 4.10 Template-browser overlay (Templates button in the script-manager dialog)
