@@ -1,13 +1,16 @@
 [package]
 name = "ferrowl-codec"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
-derive_builder = "0.20.2"
-getset = "0.1.6"
-itertools = "0.14.0"
-serde = { version = "1.0.228", features = ["derive"] }
-thiserror = "2.0"
-tokio-modbus = "0.17.0"
+derive_builder = { workspace = true }
+getset = { workspace = true }
+itertools = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio-modbus = { workspace = true }

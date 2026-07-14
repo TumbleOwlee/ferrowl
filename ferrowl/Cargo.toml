@@ -1,8 +1,11 @@
 [package]
 name = "ferrowl"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [features]
 default = ["vscode_dark"]
@@ -21,20 +24,17 @@ ferrowl-ocpp = { path = "../ferrowl-ocpp" }
 ferrowl-lua = { path = "../ferrowl-lua" }
 ferrowl-syntax = { path = "../ferrowl-syntax" }
 ferrowl-ui-derive = { path = "../ferrowl-ui-derive" }
-anyhow = "1.0.100"
-thiserror = "2.0"
-clap = { version = "4.5.54", features = ["derive"] }
-crossterm = "0.29.0"
-ratatui = { version = "0.30.0", features = [
-    "all-widgets",
-    "unstable-widget-ref",
-] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.49.0", features = ["sync", "time", "rt", "signal"] }
-derive_builder = "0.20.2"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "signal"] }
+derive_builder = { workspace = true }
 parking_lot = { workspace = true }
-futures-util = "0.3.31"
-mlua = { version = "0.11.4", default-features = false }
+futures-util = { workspace = true }
+mlua = { workspace = true }
 
 [dev-dependencies]

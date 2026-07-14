@@ -1,26 +1,29 @@
 [package]
 name = "ferrowl-modbus"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-codec = { path = "../ferrowl-codec" }
 
-anyhow = "1.0.100"
-thiserror = "2.0"
-itertools = "0.14.0"
-serde = { version = "1.0.228", features = ["derive"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+itertools = { workspace = true }
+serde = { workspace = true }
 parking_lot = { workspace = true }
-tokio = { version = "1.48.0", features = ["time"] }
-tokio-modbus = { version = "0.17.0", features = [
+tokio = { workspace = true, features = ["time"] }
+tokio-modbus = { workspace = true, features = [
     "futures-util",
     "rtu-server",
     "tcp-server",
 ] }
-tokio-serial = "5.4.5"
-clap = { version = "4.5.51", features = ["derive"] }
+tokio-serial = { workspace = true }
+clap = { workspace = true }
 
 [dev-dependencies]
 # Async test harness for the `handle_request` server logic (the crate's own tokio dep is
@@ -29,7 +32,7 @@ clap = { version = "4.5.51", features = ["derive"] }
 # test body sleeps between assertions (no longer required for any blocking bridge — the server's
 # request path is synchronous end-to-end and also passes on a current-thread runtime).
 # `ferrowl-store`/`ferrowl-codec` let that test build and seed memory directly.
-tokio = { version = "1.48.0", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "macros",
@@ -39,4 +42,4 @@ tokio = { version = "1.48.0", features = [
 ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-codec = { path = "../ferrowl-codec" }
 # Only used to unit-test `rtu::Config`'s serde defaults (`reconnect` missing vs. explicit).
-serde_json = "1.0"
+serde_json = { workspace = true }

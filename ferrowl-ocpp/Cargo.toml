@@ -1,8 +1,11 @@
 [package]
 name = "ferrowl-ocpp"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [features]
 default = ["v1_6", "v2_0_1", "v2_1"]
@@ -11,31 +14,25 @@ v2_0_1 = ["rust-ocpp/v2_0_1"]
 v2_1 = ["rust-ocpp/v2_1"]
 
 [dependencies]
-rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", branch = "main", default-features = false }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
-uuid = { version = "1", features = ["v4"] }
-tokio = { version = "1.48.0", features = [
-    "time",
-    "sync",
-    "rt",
-    "net",
-    "macros",
-] }
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
-futures-util = { version = "0.3", features = ["sink", "std"] }
-validator = "0.20.0"
-base64 = "0.22.1"
-rustls-pemfile = "2.2.0"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
-webpki-roots = "1.0.8"
-rcgen = "0.14.8"
+rust-ocpp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true, features = ["time", "sync", "rt", "net", "macros"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true, features = ["sink", "std"] }
+validator = { workspace = true }
+base64 = { workspace = true }
+rustls-pemfile = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }
+rcgen = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.48.0", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "macros",
@@ -43,4 +40,4 @@ tokio = { version = "1.48.0", features = [
     "time",
     "net",
 ] }
-serde_json = "1.0"
+serde_json = { workspace = true }

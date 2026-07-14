@@ -1,20 +1,23 @@
 [package]
 name = "ferrowl-ui-derive"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
-convert_case = "0.11.0"
-proc-macro2 = "1.0.106"
-quote = "1.0.45"
-syn = "2.0.117"
+convert_case = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
 
 [dev-dependencies]
 ferrowl-ui = { path = "../ferrowl-ui" }
-crossterm = "0.29.0"
-derive_builder = "0.20.2"
-ratatui = "0.30.0"
+crossterm = { workspace = true }
+derive_builder = { workspace = true }
+ratatui = { workspace = true }

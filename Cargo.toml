@@ -15,8 +15,67 @@ members = [
     "ferrowl-lua-derive",
 ]
 
+# All 12 crates are versioned in lockstep — bump this, not the members.
+[workspace.package]
+version = "0.4.14"
+edition = "2024"
+authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+
+# The lint policy CI enforces (`cargo clippy --workspace -- -D warnings`), stated here so a bare
+# `cargo clippy` and the editor see it too.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Every external dependency lives here so two crates cannot drift onto different versions of the
+# same one. Members add features on top; they never restate a version.
 [workspace.dependencies]
+anyhow = "1.0.100"
+async-trait = "0.1.89"
+base64 = "0.22.1"
+clap = { version = "4.5.54", features = ["derive"] }
+convert_case = "0.11.0"
+crossterm = "0.29.0"
+derive_builder = "0.20.2"
+futures-util = "0.3.31"
+getset = "0.1.6"
+itertools = "0.14.0"
+mlua = { version = "0.11.4", features = ["anyhow", "lua54", "vendored"] }
+once_cell = "1.21.3"
 parking_lot = "0.12"
+proc-macro2 = "1.0.106"
+quote = "1.0.45"
+ratatui = { version = "0.30.0", features = [
+    "all-widgets",
+    "unstable-widget-ref",
+] }
+rcgen = "0.14.8"
+rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", branch = "main", default-features = false }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
+rustls-pemfile = "2.2.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+syn = "2.0.117"
+thiserror = "2.0"
+tokio = "1.49.0"
+tokio-modbus = "0.17.0"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tokio-serial = "5.4.5"
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+toml = "0.9.11"
+uuid = { version = "1", features = ["v4"] }
+validator = "0.20.0"
+webpki-roots = "1.0.8"
 
 # Speed up repeated release builds during development.
 [profile.release]

@@ -1,9 +1,12 @@
 [package]
 name = "ferrowl-lua"
-version = "0.4.14"
-edition = "2024"
-authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 ferrowl-lua-derive = { path = "../ferrowl-lua-derive" }
-mlua = { version = "0.11.4", features = ["anyhow", "lua54", "vendored"] }
+mlua = { workspace = true }
