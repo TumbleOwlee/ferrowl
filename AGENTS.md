@@ -59,8 +59,17 @@ type (`feat/`, `fix/`, `docs/`).
 3. **Gate 1b — the tracking issue.** Once the spec is approved, search the repo's open
    issues (`gh issue list`, plus a search of closed ones) for anything with the **same
    goal**. If one exists, use it — reference its number from here on, do not open a second.
-   If none exists, draft the issue body (goal, the approved requirement IDs, scope) and
-   **stop for approval**; create it with `gh issue create` only once confirmed.
+   If none exists, draft the issue body and **stop for approval**; create it with
+   `gh issue create` only once confirmed.
+
+   The issue must be **self-contained**: at this point the spec lives only in the working
+   tree, so a reader who has only the issue cannot look a requirement ID up. **Always quote
+   the full normative text** of every new requirement next to its ID, and list every
+   *changed* requirement the same way (old → new), plus the `api-contract.md` and
+   `edge-cases.md` entries. An ID with no text is useless to the reader.
+
+   Keep the issue free of **implementation detail** — it states the goal and the normative
+   changes, not how the code will be structured. That belongs to gate 2.
 4. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
    the file only ever contains normative text. The plan tracks what is not yet backed by
    a passing test.
