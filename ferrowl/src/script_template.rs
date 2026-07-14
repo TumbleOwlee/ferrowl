@@ -37,6 +37,12 @@ static TEMPLATES: &[ScriptTemplate] = &[
         code: include_str!("../templates/modbus/sine-wave.lua"),
     },
     ScriptTemplate {
+        name: "apply-limit",
+        description: "Reflect given limit as actual measurements.",
+        contexts: &[ScriptContext::Modbus],
+        code: include_str!("../templates/modbus/apply-limit.lua"),
+    },
+    ScriptTemplate {
         name: "meter-values",
         description: "Set each connector's Power and send MeterValues",
         contexts: &[ScriptContext::OcppClient],
