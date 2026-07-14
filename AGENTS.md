@@ -56,14 +56,19 @@ type (`feat/`, `fix/`, `docs/`).
    here. **Stop for approval.** For a bug fix where the spec is already right and the
    code is wrong, there is no diff to approve: state the requirement the code violates
    and move on.
-3. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
+3. **Gate 1b — the tracking issue.** Once the spec is approved, search the repo's open
+   issues (`gh issue list`, plus a search of closed ones) for anything with the **same
+   goal**. If one exists, use it — reference its number from here on, do not open a second.
+   If none exists, draft the issue body (goal, the approved requirement IDs, scope) and
+   **stop for approval**; create it with `gh issue create` only once confirmed.
+4. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
    the file only ever contains normative text. The plan tracks what is not yet backed by
    a passing test.
-4. **Gate 2 — the implementation plan.** Stages, file-level steps, a table mapping each
+5. **Gate 2 — the implementation plan.** Stages, file-level steps, a table mapping each
    new requirement ID to the test that will pin it, and a **Verification** section naming
    how the change will be exercised (tests alone; driving the demo TUI; a real CSMS).
    State the expected commits. **Stop for approval.**
-5. **Implement, stage by stage.** A stage is a **green checkpoint**: it compiles,
+6. **Implement, stage by stage.** A stage is a **green checkpoint**: it compiles,
    `cargo test --workspace` passes, `clippy -D warnings` passes. **Commit every green
    stage** — that is what makes the plan resumable after an interrupted session. Stage
    commits are branch-local scaffolding and are squashed away on merge, so keep their
@@ -74,12 +79,18 @@ type (`feat/`, `fix/`, `docs/`).
    its ID (`/// UI-R-051 — …`). Do not backfill IDs onto existing tests.
    The task is not done until the plan's Verification method has actually been run and
    its outcome reported. Waiving it requires asking.
-6. **Reconcile the spec.** If implementation forced the behavior to differ from what
+7. **Reconcile the spec.** If implementation forced the behavior to differ from what
    gate 1 approved, the "shall" text changes — that is a **normative** change and it
    **re-opens gate 1**: show the diff, say what forced it, get approval before
    committing. Fixing a wrong cross-reference or clumsy wording is **editorial** and
    needs no approval. **Always report the final spec diff** when you finish, so the
    difference between the two is visible without diffing by hand.
+8. **Gate 3 — the pull request.** With the work done, the Verification method run and its
+   outcome reported: **stop and ask whether to open a PR.** The user may want a manual
+   test run of their own first — that is the point of this gate, so do not pre-empt it.
+   Once they confirm, draft the PR title and body (the why, the requirement IDs, the
+   verification actually performed, `Closes #<issue>` from gate 1b) and **stop for
+   approval** of that text. Only then push the branch and `gh pr create`.
 
 Merge to `main` by **squash merge**, so the branch's stage commits — including the spec
 commit that briefly ran ahead of its code — never reach `main`.
