@@ -1,5 +1,5 @@
 -- Drive a register with a sine wave derived from the module clock.
-local REGISTER = "power"
+local REGISTER = "Power"
 local AMPLITUDE = 50
 local OFFSET = 50
 local PERIOD = 60 -- seconds per full wave

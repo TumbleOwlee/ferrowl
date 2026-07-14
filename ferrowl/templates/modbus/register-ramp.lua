@@ -1,6 +1,6 @@
 -- Ramp a register up and down between two bounds, one step per sim cycle.
 -- The sim restarts with fresh globals on every script edit, so `direction` restarts too.
-local REGISTER = "power"
+local REGISTER = "Power"
 local MIN = 0
 local MAX = 100
 local STEP = 5

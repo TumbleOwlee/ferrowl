@@ -1,7 +1,7 @@
 -- Mirror one register into another every cycle.
 -- Adjust the names to registers this device actually has.
-local SOURCE = "setpoint"
-local TARGET = "power"
+local SOURCE = "SetPoint"
+local TARGET = "Power"
 
 if C_Register:Has(SOURCE) and C_Register:Has(TARGET) then
     C_Register:Set(TARGET, C_Register:Get(SOURCE))
