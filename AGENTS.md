@@ -139,7 +139,8 @@ cargo check -p ferrowl-ocpp               # typecheck one crate
 ```
 
 Run these before considering work done — `lefthook` enforces `fmt --check` and
-`clippy -D warnings` pre-commit; CI runs `check` + `test` on every push.
+`clippy -D warnings` pre-commit, and CI runs all four as separate steps of the `check`
+pipeline on every push **and every pull request**, so a lint failure is caught either way.
 
 Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config needed) or
 `cargo build --profile fastrel` for faster iterative builds (opt-level 1).
