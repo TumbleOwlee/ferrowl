@@ -57,7 +57,7 @@ jobs:
         # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     # Nightly is required (async_fn_traits, let_chains) and pinned by rust-toolchain.toml.
     # rust-src gives the extractor a sysroot so std macros (assert!, format!, vec!, …) resolve.
