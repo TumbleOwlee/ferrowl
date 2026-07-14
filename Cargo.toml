@@ -20,6 +20,10 @@ members = [
 version = "0.4.14"
 edition = "2024"
 authors = ["David Loewe <49597367+TumbleOwlee@users.noreply.github.com>"]
+license = "MIT"
+# The workspace ships a binary, not libraries: releases are GitHub artifacts and nothing here
+# is on crates.io. Saying so lets the crates depend on each other by bare path.
+publish = false
 
 # The lint policy CI enforces (`cargo clippy --workspace -- -D warnings`), stated here so a bare
 # `cargo clippy` and the editor see it too.
