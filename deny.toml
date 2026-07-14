@@ -24,12 +24,6 @@ ignore = [
     # compile-time-only proc-macro crate, so it ships no code in the binary and the
     # unmaintained status carries no runtime exposure. Drop this once validator moves off it.
     "RUSTSEC-2026-0173",
-    # rustls-pemfile is unmaintained; the crate is now a thin wrapper around the PEM parsing
-    # already in rustls-pki-types, and the advisory's own guidance is to call that directly.
-    # That is a source change in ferrowl-ocpp, not a dependency bump, so it is deliberately
-    # out of scope for the PR that introduced this file and is tracked separately. Drop this
-    # once ferrowl-ocpp uses rustls_pki_types::pem::PemObject.
-    "RUSTSEC-2025-0134",
 ]
 
 [licenses]
