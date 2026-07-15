@@ -162,6 +162,11 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config needed)
 - All 12 workspace crates are versioned in lockstep. Don't bump one independently.
 - Config files are TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
+- **Never split a source file just because it is large.** A split must earn its keep — it
+  separates genuinely distinct responsibilities, improves navigability, or cuts coupling. A
+  long file that covers one cohesive concern, or is flat generated data (e.g. a spec table),
+  stays whole. Treat a line count as a prompt to *review* the file, not a mandate to divide it;
+  an arbitrary boundary drawn to hit a number makes the code harder to follow, not easier.
 
 ## Scope boundaries — check with the user before
 
