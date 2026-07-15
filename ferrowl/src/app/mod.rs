@@ -295,6 +295,11 @@ pub struct App {
     session_sim: SessionSim,
 }
 
+/// UI-R-057: no tab and no open modal layer ⇒ nothing to interact with, so exit.
+fn is_empty_shell(tab_count: usize, modal_open: bool) -> bool {
+    tab_count == 0 && !modal_open
+}
+
 impl App {
     pub fn new(
         tabs: Vec<Tab>,
@@ -374,6 +379,13 @@ impl App {
         });
 
         loop {
+            // UI-R-057: no tab and no modal layer left is not a resting state — the only way to
+            // reach it is cancelling the startup selector (UI-R-008), so exit rather than sit on an
+            // empty shell. Checked at loop top so the frame after the cancel breaks before drawing.
+            if self.should_exit_empty() {
+                break;
+            }
+
             // A pending single-digit tab jump expires on its own if no second digit arrives.
             if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
                 && Instant::now() >= deadline
@@ -549,6 +561,13 @@ impl App {
         false
     }
 
+    /// UI-R-057: true once the app holds no tab and no modal layer (creation/type-select overlay,
+    /// session dialog, or keybind-help), i.e. there is nothing left to interact with.
+    fn should_exit_empty(&self) -> bool {
+        let modal_open = self.overlay.is_some() || self.session_dialog.is_some() || self.help_open;
+        is_empty_shell(self.tabs.len(), modal_open)
+    }
+
     fn close_overlay(&mut self) {
         self.overlay = None;
         self.focus = Focus::Content;
@@ -566,6 +585,17 @@ impl App {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    /// UI-R-057 — exit only when zero tabs and no modal layer remain; any tab, or any open
+    /// layer with zero tabs (e.g. the startup selector before cancel), keeps the app running.
+    #[test]
+    fn ut_is_empty_shell() {
+        assert!(is_empty_shell(0, false));
+        assert!(!is_empty_shell(0, true)); // startup selector still open
+        assert!(!is_empty_shell(1, false)); // a tab exists
+        assert!(!is_empty_shell(3, false));
+        assert!(!is_empty_shell(2, true));
+    }
 
     #[test]
     fn log_ring_persists_lines_to_file_sink() {
