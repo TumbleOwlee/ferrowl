@@ -78,6 +78,7 @@ mod tests {
         })
     }
 
+    /// OC-R-004 — the 1.6 version declares the fixed subprotocol token `ocpp1.6` and maps actions to their wire names.
     #[test]
     fn ut_action_name_matches_wire() {
         let a = Action::BootNotification(boot_req("M"));
@@ -85,6 +86,7 @@ mod tests {
         assert_eq!(V1_6::subprotocol(), "ocpp1.6");
     }
 
+    /// OC-R-006 — an action's request type is retrievable by its wire action name: encoding then decoding by name round-trips.
     #[test]
     fn ut_call_encode_decode_round_trip() {
         let action = Action::BootNotification(boot_req("Model-1"));
@@ -93,6 +95,7 @@ mod tests {
         assert_eq!(action, decoded);
     }
 
+    /// OC-R-018 — a CallResult carries no action name, so the reply is decoded using the originating action's response type.
     #[test]
     fn ut_decode_result_uses_originating_action() {
         let action = Action::BootNotification(boot_req("M"));
@@ -105,6 +108,7 @@ mod tests {
         assert!(matches!(resp, Response::BootNotification(_)));
     }
 
+    /// OC-R-002 — the 1.6 action table declares exactly 28 actions (with a Default-derived template per name, OC-R-006).
     #[test]
     fn ut_introspection() {
         // Full set is 28 actions; CS-originated subset is the 10 a charging station sends.
@@ -123,6 +127,7 @@ mod tests {
         assert!(V1_6::default_action("NoSuchAction").is_none());
     }
 
+    /// OC-R-003 — CS- and CSMS-originated sets partition the table (disjoint and complete); each CSMS action carries a connector scope (OC-R-005).
     #[test]
     fn ut_csms_actions_partition_and_scopes() {
         use crate::action::ConnectorScope::*;
@@ -149,6 +154,7 @@ mod tests {
         assert_eq!(scope("RemoteStartTransaction"), Optional);
     }
 
+    /// OC-R-026 — decoding a Call naming an action the version does not have yields an unknown-action error (answered NotImplemented).
     #[test]
     fn ut_unknown_action_errors() {
         assert!(matches!(
@@ -157,6 +163,7 @@ mod tests {
         ));
     }
 
+    /// OC-R-008 — the version's request-validation rules reject an out-of-spec field and accept a valid one.
     #[test]
     fn ut_validate_rejects_oversized_field() {
         let bad = Action::BootNotification(boot_req(&"x".repeat(21)));

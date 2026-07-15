@@ -182,11 +182,13 @@ mod tests {
     use super::*;
     use crate::action::Version;
 
+    /// OC-R-004 — the 2.1 version declares the fixed subprotocol token `ocpp2.1`.
     #[test]
     fn ut_subprotocol() {
         assert_eq!(V2_1::subprotocol(), "ocpp2.1");
     }
 
+    /// OC-R-003 — the 2.1 CS- and CSMS-originated sets partition the table (disjoint and complete); CSMS actions carry connector scopes (OC-R-005).
     #[test]
     fn ut_csms_actions_partition_and_scopes() {
         use crate::action::ConnectorScope::*;
@@ -212,6 +214,7 @@ mod tests {
         assert_eq!(scope("SetDERControl"), None);
     }
 
+    /// OC-R-006 — a 2.1 action encodes and decodes by wire name, and its response decodes via the originating action (OC-R-018).
     #[test]
     fn ut_round_trip_boot_notification() {
         use ::rust_ocpp::v2_1::datatypes::charging_station::ChargingStationType;
@@ -244,6 +247,7 @@ mod tests {
         assert_eq!(decoded, response);
     }
 
+    /// OC-R-006 — a 2.1 Authorize action validates then encodes/decodes by its wire action name.
     #[test]
     fn ut_round_trip_authorize() {
         use ::rust_ocpp::v2_1::datatypes::id_token::IdTokenType;
@@ -264,6 +268,7 @@ mod tests {
         assert_eq!(decoded, action);
     }
 
+    /// OC-R-006 — a 2.1 MeterValues action validates then encodes/decodes by its wire action name.
     #[test]
     fn ut_round_trip_meter_values() {
         use ::rust_ocpp::v2_1::datatypes::meter_value::MeterValueType;
@@ -287,6 +292,7 @@ mod tests {
         assert_eq!(decoded, action);
     }
 
+    /// OC-R-008 — the 2.1 validation rules reject a MeterValues with an empty meter-value list.
     #[test]
     fn ut_validate_rejects_meter_values_empty_meter_value() {
         use ::rust_ocpp::v2_1::messages::meter_values::MeterValuesRequest;
@@ -302,6 +308,7 @@ mod tests {
         assert!(V2_1::validate(&action).is_err());
     }
 
+    /// OC-R-008 — the 2.1 validation rules reject an Authorize whose certificate exceeds its length cap.
     #[test]
     fn ut_validate_rejects_authorize_certificate_too_long() {
         use ::rust_ocpp::v2_1::datatypes::id_token::IdTokenType;

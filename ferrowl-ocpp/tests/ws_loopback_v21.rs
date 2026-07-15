@@ -93,6 +93,7 @@ async fn first_connection(server: &csms::Server<V2_1>) -> csms::ConnectionId {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// OC-R-014 — the 2.1 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
     let url = format!("ws://{}/ocpp/CS001", server.local_addr());

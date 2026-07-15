@@ -119,6 +119,7 @@ mod tests {
         }
     }
 
+    /// OC-R-009 — a Call encodes/decodes as the `[2, uniqueId, action, payload]` text envelope.
     #[test]
     fn ut_call_round_trip() {
         let msg = OcppJMessage::Call {
@@ -129,6 +130,7 @@ mod tests {
         assert_eq!(msg, round_trip(&msg));
     }
 
+    /// OC-R-009 — a CallResult encodes/decodes as the `[3, uniqueId, payload]` text envelope.
     #[test]
     fn ut_call_result_round_trip() {
         let msg = OcppJMessage::CallResult {
@@ -138,6 +140,7 @@ mod tests {
         assert_eq!(msg, round_trip(&msg));
     }
 
+    /// OC-R-009 — a CallError encodes/decodes as the `[4, uniqueId, errorCode, errorDescription, errorDetails]` text envelope.
     #[test]
     fn ut_call_error_round_trip() {
         let msg = OcppJMessage::CallError {
@@ -149,11 +152,13 @@ mod tests {
         assert_eq!(msg, round_trip(&msg));
     }
 
+    /// OC-R-010 — a frame that is not a JSON array is rejected.
     #[test]
     fn ut_reject_non_array() {
         assert!(matches!(decode("{}"), Err(FramingError::NotAnArray)));
     }
 
+    /// OC-R-010 — a frame with an unknown message-type id is rejected.
     #[test]
     fn ut_reject_unknown_type() {
         assert!(matches!(
@@ -162,6 +167,7 @@ mod tests {
         ));
     }
 
+    /// OC-R-010 — a frame with the wrong element count for its message type is rejected.
     #[test]
     fn ut_reject_bad_arity() {
         assert!(matches!(
@@ -170,6 +176,7 @@ mod tests {
         ));
     }
 
+    /// OC-R-098 — a malformed but identifiable Call (type 2, string id) yields its id so it can be answered with a CallError.
     #[test]
     fn ut_recover_call_id_from_malformed_call() {
         // Short-arity Call, and a Call whose action isn't a string: both rejected by `decode`,
@@ -184,6 +191,8 @@ mod tests {
         );
     }
 
+    /// OC-R-099 — an unrecoverable id (non-JSON, non-array, no type-2, non-string id) yields nothing; a malformed
+    /// CallResult/CallError is never answerable either (OC-R-100).
     #[test]
     fn ut_recover_call_id_gives_up_when_unanswerable() {
         assert_eq!(recover_call_id("not json"), None);

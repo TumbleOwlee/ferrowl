@@ -95,6 +95,7 @@ async fn first_connection(server: &csms::Server<V1_6>) -> csms::ConnectionId {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// OC-R-014 — the 1.6 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
     let url = format!("ws://{}/ocpp/CS001", server.local_addr());
@@ -176,6 +177,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
 /// it unanswered strands the peer until its own call timeout fires. Driven over a raw websocket,
 /// since the typed client cannot produce a malformed frame.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// OC-R-098 — a malformed but identifiable inbound Call is answered with a CallError carrying its recovered id.
 async fn malformed_call_with_recoverable_id_gets_call_error() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
