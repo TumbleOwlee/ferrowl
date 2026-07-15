@@ -26,7 +26,7 @@ use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::{ModuleView, SharedLog};
 use crate::registry::{ModuleRegistry, dedupe_names};
-use crate::session_sim::SessionSim;
+use crate::session::SessionSim;
 use crate::view::command::{CommandLine, new_command_line};
 use crate::view::log::{LogEntry, LogView, format_timestamp, new_log_view};
 

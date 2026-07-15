@@ -27,7 +27,7 @@ use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView, SharedLog};
 use crate::registry::{ModuleRegistry, dedupe_names};
-use crate::session_sim::SessionSim;
+use crate::session::SessionSim;
 use crate::view::log::format_timestamp;
 
 /// Log source name the session-level Lua sim's drained lines are prefixed with, alongside every
