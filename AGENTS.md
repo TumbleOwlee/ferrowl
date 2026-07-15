@@ -90,7 +90,11 @@ type (`feat/`, `fix/`, `docs/`).
    the why. The spec is the first stage, hence the first commit — legal on a branch,
    never on `main`.
    Every new or changed requirement ships with at least one test whose doc comment cites
-   its ID (`/// UI-R-051 — …`). Do not backfill IDs onto existing tests.
+   its ID (`/// UI-R-051 — …`). Existing tests carry IDs on the same terms: every test that
+   pins observable behavior shall cite the requirement it verifies. A test of a pure internal
+   or helper detail that no requirement governs may stay untagged. Where a test verifies real
+   behavior that no requirement yet states, add the requirement (a normative change — gate 1)
+   rather than attach a loose ID.
    The task is not done until the plan's Verification method has actually been run and
    its outcome reported. Waiving it requires asking.
 7. **Reconcile the spec.** If implementation forced the behavior to differ from what
