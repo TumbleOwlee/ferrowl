@@ -49,7 +49,7 @@ impl AddNamedValueDialog {
                     .disabled(false)
                     .placeholder(Some("Name...".to_string()))
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Label".into()))
@@ -59,7 +59,7 @@ impl AddNamedValueDialog {
                     })
                     .style(input_style.clone())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .value(Widget {
                 state: InputFieldStateBuilder::default()
@@ -67,7 +67,7 @@ impl AddNamedValueDialog {
                     .disabled(false)
                     .placeholder(Some("0".to_string()))
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
                 widget: InputFieldBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Value".into()))
@@ -77,7 +77,7 @@ impl AddNamedValueDialog {
                     })
                     .style(input_style.clone())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .error(Widget {
                 state: "".to_string(),
@@ -90,7 +90,7 @@ impl AddNamedValueDialog {
                     })
                     .style(error_style.clone())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .keybinds([
                 Widget {
@@ -103,7 +103,7 @@ impl AddNamedValueDialog {
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .style(text_style.clone())
                         .build()
-                        .unwrap(),
+                        .expect("all required builder fields are set"),
                 },
                 Widget {
                     state: "<Esc>: cancel | <Enter>: confirm / newline".to_string(),
@@ -115,12 +115,12 @@ impl AddNamedValueDialog {
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .style(text_style.clone())
                         .build()
-                        .unwrap(),
+                        .expect("all required builder fields are set"),
                 },
             ])
             .focus(AddNamedValueDialogFocus::Label)
             .build()
-            .unwrap()
+            .expect("all required builder fields are set")
     }
 
     fn validate(&self) -> Result<(), String> {

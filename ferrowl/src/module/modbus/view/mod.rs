@@ -150,19 +150,24 @@ impl ModbusModuleView {
 
         if overlay.has_confirm_delete() {
             match code {
-                KeyCode::Esc => self.register_overlay_mut().unwrap().close_confirm_delete(),
+                KeyCode::Esc => self
+                    .register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .close_confirm_delete(),
                 KeyCode::Tab => self
                     .register_overlay_mut()
-                    .unwrap()
+                    .expect("a Register overlay was confirmed present at the top of this function")
                     .confirm_delete_focus_next(),
                 KeyCode::BackTab => self
                     .register_overlay_mut()
-                    .unwrap()
+                    .expect("a Register overlay was confirmed present at the top of this function")
                     .confirm_delete_focus_previous(),
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if self
                         .register_overlay()
-                        .unwrap()
+                        .expect(
+                            "a Register overlay was confirmed present at the top of this function",
+                        )
                         .confirm_delete_is_confirmed()
                     {
                         let name = self.table.selected().map(|d| d.name.clone());
@@ -171,7 +176,7 @@ impl ModbusModuleView {
                             self.pending = Some(PendingAction::Delete(name));
                         }
                     } else {
-                        self.register_overlay_mut().unwrap().close_confirm_delete();
+                        self.register_overlay_mut().expect("a Register overlay was confirmed present at the top of this function").close_confirm_delete();
                     }
                 }
                 _ => {}
@@ -181,26 +186,39 @@ impl ModbusModuleView {
 
         if overlay.has_sub_dialog() {
             match code {
-                KeyCode::Esc => self.register_overlay_mut().unwrap().close_add_dialog(),
-                KeyCode::Enter => self.register_overlay_mut().unwrap().confirm_add_dialog(),
-                KeyCode::Tab => self.register_overlay_mut().unwrap().add_dialog_focus_next(),
+                KeyCode::Esc => self
+                    .register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .close_add_dialog(),
+                KeyCode::Enter => self
+                    .register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .confirm_add_dialog(),
+                KeyCode::Tab => self
+                    .register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .add_dialog_focus_next(),
                 KeyCode::BackTab => self
                     .register_overlay_mut()
-                    .unwrap()
+                    .expect("a Register overlay was confirmed present at the top of this function")
                     .add_dialog_focus_previous(),
                 _ => self
                     .register_overlay_mut()
-                    .unwrap()
+                    .expect("a Register overlay was confirmed present at the top of this function")
                     .add_dialog_handle_events(modifiers, code),
             }
             return;
         }
 
         // The close-confirm popup takes precedence once open.
-        if self.register_overlay().unwrap().close_confirm_is_active() {
+        if self
+            .register_overlay()
+            .expect("a Register overlay was confirmed present at the top of this function")
+            .close_confirm_is_active()
+        {
             match self
                 .register_overlay_mut()
-                .unwrap()
+                .expect("a Register overlay was confirmed present at the top of this function")
                 .close_confirm_handle_key(modifiers, code)
             {
                 CloseConfirmEvent::Close => self.overlay.close(),
@@ -209,21 +227,32 @@ impl ModbusModuleView {
             return;
         }
 
-        self.register_overlay_mut().unwrap().clear_name_error();
+        self.register_overlay_mut()
+            .expect("a Register overlay was confirmed present at the top of this function")
+            .clear_name_error();
 
-        let confirm_button_focused = self.register_overlay().unwrap().is_confirm_button_focused();
+        let confirm_button_focused = self
+            .register_overlay()
+            .expect("a Register overlay was confirmed present at the top of this function")
+            .is_confirm_button_focused();
         let delete_button_focused = self
             .register_overlay()
-            .unwrap()
+            .expect("a Register overlay was confirmed present at the top of this function")
             .is_delete_register_button_focused();
 
         match (modifiers, code) {
             (KeyModifiers::NONE, KeyCode::Esc) => {
-                self.register_overlay_mut().unwrap().close_confirm_open();
+                self.register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .close_confirm_open();
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if delete_button_focused {
-                    self.register_overlay_mut().unwrap().open_confirm_delete();
+                    self.register_overlay_mut()
+                        .expect(
+                            "a Register overlay was confirmed present at the top of this function",
+                        )
+                        .open_confirm_delete();
                 } else {
                     self.confirm_overlay();
                 }
@@ -232,21 +261,29 @@ impl ModbusModuleView {
                 if confirm_button_focused {
                     self.confirm_overlay();
                 } else {
-                    self.register_overlay_mut().unwrap().handle_space();
+                    self.register_overlay_mut()
+                        .expect(
+                            "a Register overlay was confirmed present at the top of this function",
+                        )
+                        .handle_space();
                 }
             }
             (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                self.register_overlay_mut().unwrap().focus_previous();
+                self.register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .focus_previous();
             }
             (KeyModifiers::NONE, KeyCode::Tab) => {
-                self.register_overlay_mut().unwrap().focus_next();
+                self.register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .focus_next();
             }
             (KeyModifiers::NONE, KeyCode::Char('z')) => {
                 self.table.set_compact(!self.table.compact);
             }
             _ => {
                 self.register_overlay_mut()
-                    .unwrap()
+                    .expect("a Register overlay was confirmed present at the top of this function")
                     .handle_events(modifiers, code);
             }
         }
@@ -273,12 +310,18 @@ impl ModbusModuleView {
                     && self.device.definitions.contains_key(&edited.name)
                 {
                     let msg = format!("Name '{}' already in use", edited.name);
-                    self.register_overlay_mut().unwrap().set_name_error(msg);
+                    self.register_overlay_mut()
+                        .expect(
+                            "a Register overlay was confirmed present at the top of this function",
+                        )
+                        .set_name_error(msg);
                     return;
                 }
             } else if self.device.definitions.contains_key(&edited.name) {
                 let msg = format!("Name '{}' already in use", edited.name);
-                self.register_overlay_mut().unwrap().set_name_error(msg);
+                self.register_overlay_mut()
+                    .expect("a Register overlay was confirmed present at the top of this function")
+                    .set_name_error(msg);
                 return;
             }
             self.overlay.close();
@@ -352,7 +395,7 @@ impl ModuleView for ModbusModuleView {
                         .bold(),
                 })
                 .build()
-                .unwrap();
+                .expect("all required builder fields are set");
             let mut label = if online {
                 "ONLINE".to_string()
             } else {
