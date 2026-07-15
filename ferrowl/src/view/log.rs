@@ -100,7 +100,7 @@ pub fn new_log_view() -> LogView {
             .focused(false)
             .values(Vec::new())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Log".into()))
@@ -112,10 +112,10 @@ pub fn new_log_view() -> LogView {
                             .fg(COLOR_SCHEME.text_hi),
                     )
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

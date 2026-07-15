@@ -6,6 +6,8 @@
 //! `BasicConstraints::Ca` issuer, which is enough extra scaffolding that it's left for a
 //! follow-up rather than bolted on to this pass.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "v1_6")]
 
 use std::sync::atomic::{AtomicU32, Ordering};

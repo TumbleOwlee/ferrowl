@@ -1,6 +1,8 @@
 //! Low-level layer: a CSMS server and a CS client exchange Calls in both directions over a real
 //! websocket loopback, OCPP 1.6. Mirrors `ferrowl-modbus/tests/tcp_loopback.rs`.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "v1_6")]
 
 use std::sync::Arc;

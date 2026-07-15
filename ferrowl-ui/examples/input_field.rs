@@ -1,3 +1,6 @@
+// Example binary: unwrap keeps the demo focused on the widget being shown.
+#![allow(clippy::unwrap_used)]
+
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_ui::{
     AlternateScreen, Border, EventResult,

@@ -57,7 +57,7 @@ impl RenamePrompt {
                 .disabled(false)
                 .placeholder(Some("Script name".to_string()))
                 .build()
-                .unwrap(),
+                .expect("all required builder fields are set"),
             widget: InputFieldBuilder::default()
                 .border(Border::Full(Margin::new(1, 0)))
                 .title(Some(("New name", HorizontalAlignment::Left).into()))
@@ -65,14 +65,14 @@ impl RenamePrompt {
                     InputFieldStyleBuilder::default()
                         .border(border_style())
                         .build()
-                        .unwrap(),
+                        .expect("all required builder fields are set"),
                 )
                 .margin(Margin {
                     vertical: 0,
                     horizontal: 0,
                 })
                 .build()
-                .unwrap(),
+                .expect("all required builder fields are set"),
         };
         input.state.set_input(current.to_string());
         input.state.set_cursor(current.chars().count());
@@ -90,7 +90,7 @@ impl RenamePrompt {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(TextStyle::default())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             },
         }
     }

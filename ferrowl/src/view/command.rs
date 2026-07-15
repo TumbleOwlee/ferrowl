@@ -19,7 +19,7 @@ pub fn new_command_line() -> CommandLine {
             .focused(false)
             .disabled(false)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::None)
             .multiline(false)
@@ -34,7 +34,7 @@ pub fn new_command_line() -> CommandLine {
                 ..InputFieldStyle::default()
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

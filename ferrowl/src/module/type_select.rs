@@ -55,7 +55,7 @@ impl TypeSelectDialog {
                 .focused(true)
                 .values(values)
                 .build()
-                .unwrap(),
+                .expect("all required builder fields are set"),
             widget: SelectionBuilder::default()
                 .border(Border::Full(Margin::new(1, 0)))
                 .title(Some(("Type", HorizontalAlignment::Left).into()))
@@ -65,7 +65,7 @@ impl TypeSelectDialog {
                 })
                 .style(SelectionStyle::default())
                 .build()
-                .unwrap(),
+                .expect("all required builder fields are set"),
         };
 
         let keybinds = [
@@ -80,7 +80,7 @@ impl TypeSelectDialog {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(TextStyle::default())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             },
             Widget {
                 state: "<Esc>: cancel".to_string(),
@@ -93,7 +93,7 @@ impl TypeSelectDialog {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(TextStyle::default())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             },
         ];
 

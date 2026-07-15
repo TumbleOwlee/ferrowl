@@ -191,19 +191,26 @@ pub(crate) fn rows(scripts: &[ScriptDef]) -> Vec<ScriptRow> {
 
 pub(crate) fn script_table(rows: Vec<ScriptRow>) -> ScriptTable {
     Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(rows)
+            .build()
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             // UI-R-056 — the full binding list lived here and overflowed the panel; it now lives in
             // the `?` overlay, and the title only points at it.
             .title(Some("Scripts (?: help)".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -214,7 +221,7 @@ pub(crate) fn name_input(border: Style) -> Widget<InputFieldState, InputField<St
             .disabled(false)
             .placeholder(Some("New Script".to_string()))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(("New Script", HorizontalAlignment::Left).into()))
@@ -222,14 +229,14 @@ pub(crate) fn name_input(border: Style) -> Widget<InputFieldState, InputField<St
                 InputFieldStyleBuilder::default()
                     .border(border)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -241,7 +248,7 @@ pub(crate) fn templates_button() -> Widget<ButtonState, Button> {
             .label("TEMPLATES".to_string())
             .disabled(false)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: ButtonBuilder::default()
             .border_margin(Margin::new(1, 0))
             .margin(Margin {
@@ -251,7 +258,7 @@ pub(crate) fn templates_button() -> Widget<ButtonState, Button> {
             .style(ButtonStyle::default())
             .horizontal_alignment(HorizontalAlignment::Center)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -263,7 +270,7 @@ pub(crate) fn code_editor(border: Style) -> Widget<CodeInputFieldState, CodeInpu
             .placeholder(Some("-- select or create a script".to_string()))
             .language(Some(Language::Lua))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: CodeInputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Code".into()))
@@ -271,14 +278,14 @@ pub(crate) fn code_editor(border: Style) -> Widget<CodeInputFieldState, CodeInpu
                 InputFieldStyleBuilder::default()
                     .border(border)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

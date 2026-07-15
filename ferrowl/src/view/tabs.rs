@@ -5,7 +5,9 @@ use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
 
 /// Render the tab bar with `names`, scrolling as needed to keep `active` visible.
 pub fn render_tabs(names: &[String], active: usize, area: Rect, buf: &mut Buffer) {
-    let widget = ScrollingTabsBuilder::<String>::default().build().unwrap();
+    let widget = ScrollingTabsBuilder::<String>::default()
+        .build()
+        .expect("all required builder fields are set");
     let mut state = ScrollingTabsState {
         titles: names.to_vec(),
         selected: active,

@@ -2,6 +2,8 @@
 //! websocket loopback, OCPP 2.0.1. Mirrors `ws_loopback_v16.rs`; its primary job is to prove the
 //! `ocpp2.0.1` subprotocol is negotiated end-to-end (regression guard for the 400-Bad-Request bug).
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "v2_0_1")]
 
 use std::sync::Arc;
