@@ -31,6 +31,9 @@ tables: coil, discrete input, holding register, input register.
 **MB-R-005** — A register's access shall be one of `ReadOnly`, `WriteOnly`,
 `ReadWrite`, defaulting to `ReadWrite`.
 
+**MB-R-097** — A register definition's kind shall default to holding register
+when unspecified.
+
 **MB-R-006** — A register's format shall determine its width in 16-bit registers,
 and that width shall be the number of consecutive addresses the register occupies
 starting at its address.

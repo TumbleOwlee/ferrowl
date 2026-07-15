@@ -16,7 +16,8 @@ fn int(endian: Endian) -> Format {
     Format::U16((endian, res(), BitField::default()))
 }
 
-/// MB-R-002 — an unspecified slave id defaults to 0 (with access defaulting to `ReadWrite`, MB-R-005).
+/// MB-R-002 — an unspecified slave id defaults to 0 (access defaults to `ReadWrite`, MB-R-005;
+/// kind defaults to holding register, MB-R-097).
 #[test]
 fn it_register_builder_applies_documented_defaults() {
     let reg = RegisterBuilder::default()
@@ -25,7 +26,7 @@ fn it_register_builder_applies_documented_defaults() {
         .expect("only `format` is required to build a Register");
     assert_eq!(*reg.slave_id(), 0);
     assert_eq!(*reg.access(), Access::ReadWrite);
-    assert_eq!(*reg.kind(), Kind::InputRegister);
+    assert_eq!(*reg.kind(), Kind::HoldingRegister);
 }
 
 /// MB-R-007 — a typed U16 value round-trips through raw register words.

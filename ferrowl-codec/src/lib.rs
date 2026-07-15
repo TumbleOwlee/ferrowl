@@ -47,7 +47,7 @@ pub struct Register {
     #[builder(default = "Access::ReadWrite")]
     access: Access,
     #[getset(get = "pub")]
-    #[builder(default = "Kind::InputRegister")]
+    #[builder(default = "Kind::HoldingRegister")]
     kind: Kind,
     #[getset(get = "pub")]
     #[builder(default = "Address::Virtual")]

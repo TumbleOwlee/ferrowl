@@ -219,7 +219,7 @@ impl ToLabel for NamedValue {
 }
 
 fn default_kind() -> Kind {
-    Kind::InputRegister
+    Kind::HoldingRegister
 }
 
 fn default_resolution() -> f64 {
@@ -683,6 +683,7 @@ mod tests {
         );
     }
 
+    /// MB-R-097 — a register definition with no `kind` defaults to holding register (resolution 1.0, length 1).
     #[test]
     fn ut_register_def_serde_defaults() {
         // A minimal definition omitting kind/resolution/length triggers the default fns.
@@ -690,7 +691,7 @@ mod tests {
         let path = path.to_str().unwrap();
         std::fs::write(path, "type = \"U16\"\n").unwrap();
         let def: RegisterDef = Converter::load(path, FileType::Toml).unwrap();
-        assert_eq!(def.kind, Kind::InputRegister);
+        assert_eq!(def.kind, Kind::HoldingRegister);
         assert_eq!(def.resolution, 1.0);
         assert_eq!(def.length, 1);
     }
