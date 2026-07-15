@@ -68,6 +68,14 @@ purposes.
 new-module type selector immediately, so the user is never left on an empty shell
 with no obvious action.
 
+**UI-R-057** — Whenever the application holds zero tabs and no modal layer is open
+— no app-level creation/type-select overlay, no session dialog, and no keybind-help
+dialog — it shall exit through the normal terminal-restoring exit path (UI-R-001).
+In particular, cancelling the startup new-module selector opened by UI-R-008 before
+any tab has been created shall quit the application rather than leave an empty shell.
+This invariant is a safety net independent of `:quit`/`:qall` (UI-R-019), which quit
+explicitly.
+
 ## Navigation & tab switching
 
 **UI-R-009** — `Ctrl+w` shall begin a window-switch chord; the following `j`, `k`,

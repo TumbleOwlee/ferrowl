@@ -41,6 +41,7 @@ it is not mistaken for an oversight and silently "fixed".
 |---|---|
 | `Esc` on a dialog with edits | Opens a close-confirm popup rather than discarding; `Enter`/`Space` confirms close, `Esc` returns to editing |
 | Creating a tab whose name collides with an existing tab | Refused; a Warning is logged to the active tab's log and the setup dialog stays open |
+| Startup new-module selector cancelled before any tab is created | The application exits — zero tabs with no dialog open is not a reachable resting state (UI-R-057) |
 | A rename/session-load produces a duplicate tab name | The later duplicate is auto-suffixed and a Warning is logged into the renamed tab's own log |
 | Dialog focus cycle reaches a field whose enabling condition is false | That field is skipped in the `Tab`/`Shift+Tab` cycle |
 | `:` or `?` pressed while a view overlay is open | Not treated as global; the key is delivered to the overlay (so `?` types into a Lua editor, `:` into a text field) |
