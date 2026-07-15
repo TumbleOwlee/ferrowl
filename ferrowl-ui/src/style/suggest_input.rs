@@ -22,6 +22,6 @@ pub struct SuggestInputStyle {
 
 impl Default for SuggestInputStyle {
     fn default() -> Self {
-        SuggestInputStyleBuilder::default().build().unwrap()
+        SuggestInputStyleBuilder::default().build().expect("SuggestInputStyleBuilder fields all default")
     }
 }

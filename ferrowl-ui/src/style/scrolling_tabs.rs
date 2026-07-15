@@ -14,6 +14,6 @@ pub struct ScrollingTabsStyle {
 
 impl Default for ScrollingTabsStyle {
     fn default() -> Self {
-        ScrollingTabsStyleBuilder::default().build().unwrap()
+        ScrollingTabsStyleBuilder::default().build().expect("ScrollingTabsStyleBuilder fields all default")
     }
 }

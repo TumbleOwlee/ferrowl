@@ -1,0 +1,5 @@
+# Bare `unwrap` is denied in non-test code (see [workspace.lints.clippy] in Cargo.toml):
+# every fallible call must document why it cannot fail via `expect("...")`. Tests are exempt —
+# a panicking `unwrap` there is the assertion, and a message would only restate the test name.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

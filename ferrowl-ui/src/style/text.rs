@@ -13,6 +13,6 @@ pub struct TextStyle {
 
 impl Default for TextStyle {
     fn default() -> Self {
-        TextStyleBuilder::default().build().unwrap()
+        TextStyleBuilder::default().build().expect("TextStyleBuilder fields all default")
     }
 }

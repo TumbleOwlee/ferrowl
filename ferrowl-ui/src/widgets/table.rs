@@ -95,7 +95,7 @@ where
     H: Header<N>,
 {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut state = TableStateBuilder::default().build().unwrap();
+        let mut state = TableStateBuilder::default().build().expect("TableStateBuilder fields all default");
         StatefulWidget::render(self, area, buf, &mut state);
     }
 }
@@ -162,7 +162,7 @@ where
             .map(|h| h.chars().count())
             .collect::<Vec<usize>>()
             .try_into()
-            .unwrap();
+            .expect("header() yields exactly N columns");
         let column_max_widths = state
             .values()
             .iter()
@@ -198,7 +198,7 @@ where
         state.set_total_width(std::cmp::max(table_width, area.width));
 
         let rows = state.values().iter().enumerate().map(|(i, item)| {
-            let color = self.style.rows.get(i % 2).unwrap();
+            let color = self.style.rows.get(i % 2).expect("rows is [Style; 2]; i % 2 is in bounds");
             let spacing =
                 itertools::repeat_n('\n', self.row_margin.vertical as usize).collect::<String>();
             let cell_styles = item.cell_styles();

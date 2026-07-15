@@ -82,7 +82,7 @@ where
     ValueType: ToLabel + Clone,
 {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut state = SelectionStateBuilder::default().build().unwrap();
+        let mut state = SelectionStateBuilder::default().build().expect("SelectionStateBuilder fields all default");
         StatefulWidget::render(self, area, buf, &mut state);
     }
 }
