@@ -360,6 +360,7 @@ mod tests {
         )
     }
 
+    /// MB-R-021 — parsed input carries the register's display resolution (non-numeric input falls through to ASCII).
     #[test]
     fn ut_str_to_value_uses_register_resolution() {
         use super::str_to_value;
@@ -396,6 +397,9 @@ mod tests {
         }
     }
 
+    /// MB-R-081 — poll operations are derived from the registers, excluding write-only ones and grouping
+    /// by (slave, read function code); different function codes never merge, and batches split at the
+    /// per-request limit (MB-R-085) snapped to a register boundary (MB-R-086).
     #[test]
     fn ut_build_read_operations_batches() {
         use super::build_read_operations;
@@ -449,6 +453,8 @@ mod tests {
         assert_eq!((ops[1].range.start(), ops[1].range.end()), (120, 128));
     }
 
+    /// MB-R-083 — with explicit `read_ranges`, registers inside one range are read by a single request
+    /// trimmed to their extent (bridging gaps), and registers outside every range are read on their own.
     #[test]
     fn ut_explicit_read_ranges() {
         use super::build_read_operations;
@@ -515,6 +521,7 @@ mod tests {
     }
 
     // Replicates the server `:set`/edit write path + the table decode read path.
+    /// MB-R-090 — writing a value to a fixed-address register on a server read-modify-writes it into the store, observable on read-back.
     #[test]
     fn ut_server_value_write_roundtrip() {
         let mut memory: Memory<Key<SlaveKey>> = Memory::default();

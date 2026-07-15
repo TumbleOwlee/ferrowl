@@ -478,6 +478,7 @@ mod tests {
         );
     }
 
+    /// MB-R-077 — a register definition maps to its kind, memory cell type, and format width for store construction.
     #[test]
     fn ut_register_mapping() {
         let def = &sample().definitions["setpoint"];
@@ -486,6 +487,7 @@ mod tests {
         assert_eq!(def.format().width(), 1);
     }
 
+    /// MB-R-083 — read-range config parses inclusive bounds into address ranges, skipping malformed/reversed entries.
     #[test]
     fn ut_parse_ranges() {
         // Inclusive bounds; bare address = single-cell range; whitespace tolerated.
@@ -500,6 +502,7 @@ mod tests {
         assert_eq!(parse_ranges("9-3,4"), vec![Range::new(4, 1)]);
     }
 
+    /// MB-R-014 — a configured bit-field mask derives its shift from the trailing-zero count; absent/garbage yields the full mask.
     #[test]
     fn ut_parse_bitmask() {
         assert_eq!(parse_bitmask(Some("0xFF00")).mask, 0xFF00);
@@ -511,6 +514,7 @@ mod tests {
         assert!(parse_bitmask(Some("nonsense")).is_full());
     }
 
+    /// MB-R-017 — a bit-field mask threads into an integer format but float formats ignore it (full no-op mask).
     #[test]
     fn ut_bitmask_threaded_into_format() {
         let mut def = sample().definitions["setpoint"].clone();
@@ -546,6 +550,7 @@ mod tests {
         }
     }
 
+    /// MB-R-083 — explicit read ranges are configured per function code and resolved to that code's ranges.
     #[test]
     fn ut_read_ranges_is_empty_and_ranges_for() {
         let mut rr = ReadRanges::default();
@@ -616,6 +621,7 @@ mod tests {
         ));
     }
 
+    /// MB-R-078 — a register definition's kind fixes its memory cell type (coil vs register) across every value type.
     #[test]
     fn ut_register_def_kind_mem_type_and_all_formats() {
         for kind in [
@@ -657,6 +663,7 @@ mod tests {
         }
     }
 
+    /// MB-R-080 — a virtual register (or the `virtual` flag over a fixed address) occupies no store range; a fixed one does.
     #[test]
     fn ut_register_def_address_range_and_register() {
         let fixed = def_with(ValueType::U16, Kind::HoldingRegister, Some(10), false);

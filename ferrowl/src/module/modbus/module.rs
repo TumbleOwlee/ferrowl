@@ -413,6 +413,7 @@ impl ModbusModule {
 mod tests {
     use ferrowl_codec::Kind;
 
+    /// MB-R-087 — effective timing uses the device config's values when set, otherwise the built-in defaults.
     #[test]
     fn ut_resolve_timing_fallback() {
         use super::ModbusModule;
@@ -501,6 +502,7 @@ mod tests {
         }
     }
 
+    /// MB-R-076 — a module instance is a TCP server owning one store, register set, and log; register-cache edits rebuild it (MB-R-088).
     #[test]
     fn ut_module_new_tcp_server_and_sync_accessors() {
         use super::ModbusModule;
@@ -543,6 +545,7 @@ mod tests {
         );
     }
 
+    /// MB-R-076 — a module instance can be an RTU client, building its register set from the device config.
     #[test]
     fn ut_module_new_rtu_client() {
         use super::ModbusModule;
