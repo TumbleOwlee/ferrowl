@@ -499,6 +499,7 @@ mod tests {
 
     // --- U8 decode ---
 
+    /// MB-R-012 — a big-endian U8 reads the byte from the register's low byte.
     #[test]
     fn ut_decode_u8_big() {
         match reg(u8_be()).decode(&[0x00FF]).unwrap() {
@@ -507,6 +508,7 @@ mod tests {
         }
     }
 
+    /// MB-R-012 — a little-endian U8 reads the byte from the register's high byte.
     #[test]
     fn ut_decode_u8_little() {
         match reg(u8_le()).decode(&[0xFF00]).unwrap() {
@@ -517,16 +519,19 @@ mod tests {
 
     // --- U8 encode ---
 
+    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (decimal input).
     #[test]
     fn ut_encode_u8_big_decimal() {
         assert_eq!(reg(u8_be()).encode("255").unwrap(), vec![0x00FFu16]);
     }
 
+    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (hex input).
     #[test]
     fn ut_encode_u8_big_hex() {
         assert_eq!(reg(u8_be()).encode("0xFF").unwrap(), vec![0x00FFu16]);
     }
 
+    /// MB-R-012 — a little-endian U8 places the byte in the register's high byte.
     #[test]
     fn ut_encode_u8_little() {
         assert_eq!(reg(u8_le()).encode("255").unwrap(), vec![0xFF00u16]);
@@ -554,6 +559,7 @@ mod tests {
 
     // --- I8 decode ---
 
+    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (negative value).
     #[test]
     fn ut_decode_i8_negative() {
         // -1i8 as u8 = 0xFF; stored in low byte of register
@@ -563,6 +569,7 @@ mod tests {
         }
     }
 
+    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (positive value).
     #[test]
     fn ut_decode_i8_positive() {
         match reg(i8_be()).decode(&[0x0042]).unwrap() {
@@ -973,6 +980,7 @@ mod tests {
         }
     }
 
+    /// MB-R-012 — a little-endian I8 places the byte in the register's high byte.
     #[test]
     fn ut_encode_i8_little_endian() {
         // I8 little-endian places the byte in the high byte of the word.
