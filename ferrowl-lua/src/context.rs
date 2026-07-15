@@ -114,7 +114,7 @@ where
             .iter_mut()
             .map(|(_, v)| v.exec())
             .filter(|r| r.is_err())
-            .map(|e| e.err().unwrap())
+            .map(|e| e.expect_err("filter kept only Err results"))
             .collect();
 
         if errors.is_empty() {
@@ -135,7 +135,7 @@ where
             .filter(|(_, v)| v.since_last_execution() >= since)
             .map(|(_, v)| v.exec())
             .filter(|r| r.is_err())
-            .map(|e| e.err().unwrap())
+            .map(|e| e.expect_err("filter kept only Err results"))
             .collect();
 
         if errors.is_empty() {

@@ -209,7 +209,7 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 })
                 .multiline(true)
                 .build()
-                .unwrap();
+                .expect("all required builder fields are set");
             let mut message: String = "No predefined values — reopen to use free-text input".into();
             StatefulWidget::render(&text, horizontal_layout[0], buf, &mut message);
         } else {

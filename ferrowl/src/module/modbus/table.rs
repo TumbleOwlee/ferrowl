@@ -211,11 +211,18 @@ impl TableView {
     pub fn new(values: Vec<Definition>) -> Self {
         TableViewBuilder::default()
             .table(Widget {
-                state: TableStateBuilder::default().values(values).build().unwrap(),
+                state: TableStateBuilder::default()
+                    .values(values)
+                    .build()
+                    .expect("all required builder fields are set"),
                 widget: TableBuilder::default()
                     .border(Border::Full(Margin::new(1, 0)))
                     .title(Some("Register".into()))
-                    .style(TableStyleBuilder::default().build().unwrap())
+                    .style(
+                        TableStyleBuilder::default()
+                            .build()
+                            .expect("all required builder fields are set"),
+                    )
                     .split_by_whitespace([
                         true, true, true, true, true, true, true, true, true, false, true,
                     ])
@@ -224,11 +231,11 @@ impl TableView {
                         horizontal: 0,
                     })
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .focus(TableViewFocus::Table)
             .build()
-            .unwrap()
+            .expect("all required builder fields are set")
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {

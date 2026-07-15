@@ -81,7 +81,7 @@ where
             // slice then writes its own cells back over them, preserving type and value.
             let mut merged = Slice::from_range(kind, Range::new(start, end - start));
             for t in &targets {
-                let slice = m.remove(t).unwrap();
+                let slice = m.remove(t).expect("t is drawn from m's own ranges");
                 let offset = slice.range.start - start;
                 for (i, cell) in slice.buffer.into_iter().enumerate() {
                     merged.buffer[offset + i] = cell;
@@ -137,7 +137,10 @@ where
             });
         }
         self.writable(&id, ty, range)?;
-        let map = self.slices.get_mut(&id).unwrap();
+        let map = self
+            .slices
+            .get_mut(&id)
+            .expect("writable() confirmed the id is registered");
         let mut idx = 0;
         walk_slices_mut(map, range, |slice, seg| {
             let count = seg.length();
@@ -190,7 +193,10 @@ where
     /// readable as type `ty`.
     pub fn read(&self, id: K, ty: &CellType, range: &Range) -> Result<Vec<u16>, MemoryError> {
         self.readable(&id, ty, range)?;
-        let map = self.slices.get(&id).unwrap();
+        let map = self
+            .slices
+            .get(&id)
+            .expect("readable() confirmed the id is registered");
         let mut output: Vec<u16> = Vec::with_capacity(range.length());
         walk_slices(map, range, |slice, seg| {
             if let Some(mut v) = slice.read(&seg) {

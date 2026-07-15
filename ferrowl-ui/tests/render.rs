@@ -4,6 +4,9 @@
 //! branches. We assert that rendering does not panic and (where cheap) that
 //! something was drawn; the goal is to drive the layout/scroll logic.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::{HorizontalAlignment, Margin, Rect};
 use ratatui::widgets::{StatefulWidget, Widget as RWidget};

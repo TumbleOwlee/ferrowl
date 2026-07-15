@@ -2,6 +2,9 @@
 //! would corrupt the host TUI's alternate screen, so `with_print_sink` redirects it to a host
 //! `LogSink` instead.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use std::sync::{Arc, Mutex};
 
 use ferrowl_lua::ContextBuilder;

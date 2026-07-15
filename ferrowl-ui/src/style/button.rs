@@ -15,6 +15,8 @@ pub struct ButtonStyle {
 
 impl Default for ButtonStyle {
     fn default() -> Self {
-        ButtonStyleBuilder::default().build().unwrap()
+        ButtonStyleBuilder::default()
+            .build()
+            .expect("ButtonStyleBuilder fields all default")
     }
 }

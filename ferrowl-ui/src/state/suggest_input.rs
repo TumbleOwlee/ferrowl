@@ -27,7 +27,7 @@ where
     /// Suggestion labels, kept in a `SelectionState` so navigation/scroll
     /// logic can be reused for rendering.
     #[builder(
-        default = "SelectionStateBuilder::default().values(Vec::new()).build().unwrap()",
+        default = "SelectionStateBuilder::default().values(Vec::new()).build().expect(\"SelectionStateBuilder has its values set\")",
         setter(skip)
     )]
     list: SelectionState<String>,
@@ -115,7 +115,7 @@ where
         self.list = SelectionStateBuilder::default()
             .values(labels)
             .build()
-            .unwrap();
+            .expect("SelectionStateBuilder has its values set above");
         self.open = true;
     }
 

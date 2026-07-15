@@ -29,6 +29,10 @@ publish = false
 # `cargo clippy` and the editor see it too.
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
+# Bare `unwrap` is denied in non-test code: every fallible call must document why it cannot fail
+# via `expect("...")`. `expect_used` stays off — `expect` is the sanctioned, documented form. Test
+# code is exempt (see clippy.toml).
+unwrap_used = "deny"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

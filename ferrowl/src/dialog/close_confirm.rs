@@ -89,7 +89,7 @@ impl CloseConfirmDialog {
                     .label("CLOSE".to_string())
                     .disabled(false)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
                 widget: ButtonBuilder::default()
                     .border_margin(Margin::new(1, 0))
                     .margin(Margin {
@@ -99,7 +99,7 @@ impl CloseConfirmDialog {
                     .style(button_style)
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .keybinds(Widget {
                 state: "<Enter>: close | <Esc>: cancel".to_string(),
@@ -111,10 +111,10 @@ impl CloseConfirmDialog {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(text_style)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .build()
-            .unwrap()
+            .expect("all required builder fields are set")
     }
 
     /// Feed one key while the confirm is open.

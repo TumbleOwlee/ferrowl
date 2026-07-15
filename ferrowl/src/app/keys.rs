@@ -111,7 +111,10 @@ impl App {
             // Ctrl+t then a digit: jump straight there, or wait for a second digit if one could
             // still form a valid two-digit index.
             (Some(KeyMode::CtrlTab), _, KeyCode::Char(c)) if c.is_ascii_digit() => {
-                let d = c.to_digit(10).unwrap() as usize;
+                let d = c
+                    .to_digit(10)
+                    .expect("c is an ASCII digit, matched by the guard above")
+                    as usize;
                 match digit_outcome(None, d, self.tabs.len()) {
                     DigitOutcome::Wait(first) => {
                         self.keymode = Some(KeyMode::TabDigit {
@@ -129,7 +132,10 @@ impl App {
             // Second digit of the chord, within the timeout window.
             (Some(KeyMode::TabDigit { first, .. }), _, KeyCode::Char(c)) if c.is_ascii_digit() => {
                 let first = *first;
-                let d = c.to_digit(10).unwrap() as usize;
+                let d = c
+                    .to_digit(10)
+                    .expect("c is an ASCII digit, matched by the guard above")
+                    as usize;
                 self.keymode = None;
                 if let DigitOutcome::Jump(idx) = digit_outcome(Some(first), d, self.tabs.len()) {
                     self.switch_tab(idx);

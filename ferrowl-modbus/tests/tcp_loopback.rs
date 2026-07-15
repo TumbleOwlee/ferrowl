@@ -2,6 +2,9 @@
 //! loopback socket. Drives the shared client loop (`client_core`) through every
 //! read function code and every write command, plus graceful termination.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

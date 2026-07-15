@@ -38,6 +38,8 @@ pub struct InputFieldStyle {
 
 impl Default for InputFieldStyle {
     fn default() -> Self {
-        InputFieldStyleBuilder::default().build().unwrap()
+        InputFieldStyleBuilder::default()
+            .build()
+            .expect("InputFieldStyleBuilder fields all default")
     }
 }

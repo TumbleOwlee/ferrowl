@@ -26,6 +26,8 @@ pub struct SelectionStyle {
 
 impl Default for SelectionStyle {
     fn default() -> Self {
-        SelectionStyleBuilder::default().build().unwrap()
+        SelectionStyleBuilder::default()
+            .build()
+            .expect("SelectionStyleBuilder fields all default")
     }
 }

@@ -174,7 +174,7 @@ fn input(title: &str, current: &str) -> Widget<InputFieldState, InputField<Strin
         .focused(false)
         .disabled(false)
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     state.set_input(current.to_string());
     state.set_cursor(current.chars().count());
     Widget {
@@ -188,7 +188,7 @@ fn input(title: &str, current: &str) -> Widget<InputFieldState, InputField<Strin
                 horizontal: 1,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -198,7 +198,7 @@ fn readonly_select(current: bool) -> Widget<SelectionState<String>, Selection<St
         .focused(false)
         .values(values)
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     state.set_selection(if current { 1 } else { 0 });
     Widget {
         state,
@@ -211,7 +211,7 @@ fn readonly_select(current: bool) -> Widget<SelectionState<String>, Selection<St
                 horizontal: 1,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

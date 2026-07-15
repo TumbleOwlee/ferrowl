@@ -493,19 +493,23 @@ fn interval_input() -> Widget<InputFieldState, InputField<Interval>> {
             .placeholder(Some("1.0".to_string()))
             .allowed_for::<Interval>()
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(
                 ("Interval (seconds)", HorizontalAlignment::Left).into(),
             ))
-            .style(InputFieldStyleBuilder::default().build().unwrap())
+            .style(
+                InputFieldStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

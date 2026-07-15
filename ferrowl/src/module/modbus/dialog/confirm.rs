@@ -121,7 +121,7 @@ impl ConfirmDeleteDialog {
                     })
                     .style(warn_style)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .cancel_button(Widget {
                 state: ButtonStateBuilder::default()
@@ -129,7 +129,7 @@ impl ConfirmDeleteDialog {
                     .label("CANCEL".to_string())
                     .disabled(false)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
                 widget: ButtonBuilder::default()
                     .border_margin(Margin::new(1, 0))
                     .margin(Margin {
@@ -139,7 +139,7 @@ impl ConfirmDeleteDialog {
                     .style(button_style.clone())
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .delete_button(Widget {
                 state: ButtonStateBuilder::default()
@@ -147,7 +147,7 @@ impl ConfirmDeleteDialog {
                     .label("DELETE".to_string())
                     .disabled(false)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
                 widget: ButtonBuilder::default()
                     .border_margin(Margin::new(1, 0))
                     .margin(Margin {
@@ -157,7 +157,7 @@ impl ConfirmDeleteDialog {
                     .style(button_style)
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .keybinds(Widget {
                 state: "<Tab>: switch | <Space>/<Enter>: select | <Esc>: cancel".to_string(),
@@ -169,11 +169,11 @@ impl ConfirmDeleteDialog {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(text_style)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .focus(ConfirmDeleteDialogFocus::CancelButton)
             .build()
-            .unwrap()
+            .expect("all required builder fields are set")
     }
 
     /// Whether the DELETE button (rather than CANCEL) currently holds focus.

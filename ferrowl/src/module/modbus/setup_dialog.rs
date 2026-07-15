@@ -403,7 +403,7 @@ impl SetupDialog {
                     .multiline(true)
                     .style(error_style)
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .keybinds(Widget {
                 state: "<Tab> next   <Enter> confirm   <Esc> cancel".to_string(),
@@ -415,12 +415,12 @@ impl SetupDialog {
                     .horizontal_alignment(HorizontalAlignment::Center)
                     .style(TextStyle::default())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             })
             .mode(mode)
             .focus(SetupDialogFocus::Name)
             .build()
-            .unwrap();
+            .expect("all required builder fields are set");
 
         // Prefill timing inputs with the resolved defaults so clients always show a value.
         set_input(&mut dialog.timeout, &timing.timeout_ms.to_string());
@@ -824,7 +824,7 @@ fn input<T: Validate + Clone>(
             .placeholder(Some(placeholder.to_string()))
             .allowed_for::<T>()
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(
@@ -836,7 +836,7 @@ fn input<T: Validate + Clone>(
             })
             .style(style.clone())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -859,11 +859,11 @@ fn suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider 
                     .placeholder(Some(placeholder.to_string()))
                     .allowed_for::<T>()
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .provider(provider)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: SuggestInputBuilder::default()
             .input_field(
                 InputFieldBuilder::default()
@@ -877,10 +877,10 @@ fn suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider 
                     })
                     .style(style.clone())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -895,7 +895,7 @@ fn selection<T: ToLabel + Clone>(
             .focused(false)
             .values(values)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: SelectionBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(
@@ -907,7 +907,7 @@ fn selection<T: ToLabel + Clone>(
             })
             .style(style.clone())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

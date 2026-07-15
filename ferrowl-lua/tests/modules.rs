@@ -1,6 +1,9 @@
 //! Integration tests exercising the host modules (Time, Statics, Register)
 //! end-to-end through a real Lua context built with [`ContextBuilder`].
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashMap;
 use std::time::Duration;
 

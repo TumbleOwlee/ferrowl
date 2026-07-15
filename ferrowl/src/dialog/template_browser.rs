@@ -220,17 +220,24 @@ fn rows(templates: &[&'static ScriptTemplate]) -> Vec<TemplateRow> {
 
 fn template_table(rows: Vec<TemplateRow>) -> TemplateTable {
     Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(rows)
+            .build()
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Templates".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -243,7 +250,7 @@ fn preview_editor() -> Widget<CodeInputFieldState, CodeInputField> {
             .placeholder(Some("-- no template selected".to_string()))
             .language(Some(Language::Lua))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: CodeInputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Preview".into()))
@@ -251,14 +258,14 @@ fn preview_editor() -> Widget<CodeInputFieldState, CodeInputField> {
                 InputFieldStyleBuilder::default()
                     .border(border_style())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
