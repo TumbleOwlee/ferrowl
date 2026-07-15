@@ -26,6 +26,7 @@ impl std::fmt::Display for Alignment {
 mod tests {
     use super::Alignment;
 
+    /// MB-R-019 — `Ascii` carries an alignment of `Left` or `Right`.
     #[test]
     fn ut_alignment_display() {
         assert_eq!(Alignment::Left.to_string(), "Left");

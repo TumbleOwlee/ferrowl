@@ -26,6 +26,7 @@ impl std::fmt::Display for Endian {
 mod tests {
     use super::Endian;
 
+    /// MB-R-013 — every integer/float format carries a byte order of `Big` or `Little`.
     #[test]
     fn ut_endian_display() {
         assert_eq!(Endian::Little.to_string(), "Little Endian");

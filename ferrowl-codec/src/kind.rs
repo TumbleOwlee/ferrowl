@@ -33,6 +33,8 @@ impl Display for Kind {
 mod tests {
     use super::Kind;
 
+    /// MB-R-004 — the four Modbus register tables (coil, discrete input, holding
+    /// register, input register) are exactly the values a kind can take.
     #[test]
     fn ut_kind_display() {
         assert_eq!(Kind::Coil.to_string(), "Coil");

@@ -129,6 +129,7 @@ mod tests {
         BitField::default()
     }
 
+    /// MB-R-011 — per-format register widths (1/1/1/1, 2/2/2, 4/4/4, 8/8, Ascii = width).
     #[test]
     fn ut_format_width() {
         assert_eq!(Format::Ascii((Alignment::Left, Width(4))).width(), 4);
@@ -146,6 +147,7 @@ mod tests {
         assert_eq!(Format::I128((Endian::Big, res(), bf())).width(), 8);
     }
 
+    /// MB-R-011 — byte length is twice the register width.
     #[test]
     fn ut_format_length() {
         assert_eq!(Format::U8((Endian::Big, res(), bf())).length(), 2);
@@ -155,6 +157,7 @@ mod tests {
         assert_eq!(Format::Ascii((Alignment::Left, Width(3))).length(), 6);
     }
 
+    /// MB-R-017 — float (and ASCII) formats carry no bit-field; their bit-field is the no-op full mask.
     #[test]
     fn ut_format_bitfield() {
         // Integer carries its BitField; float/ASCII report the no-op default.
@@ -177,6 +180,7 @@ mod tests {
         );
     }
 
+    /// MB-R-021 — every numeric format carries a display resolution; ASCII carries none.
     #[test]
     fn ut_format_resolution() {
         let r = Resolution(0.5);
@@ -208,6 +212,7 @@ mod tests {
         );
     }
 
+    /// MB-R-021 — every numeric format variant carries a display resolution.
     #[test]
     fn ut_format_resolution_all_variants() {
         let r = Resolution(0.25);
@@ -227,6 +232,7 @@ mod tests {
         }
     }
 
+    /// MB-R-017 — every integer variant carries its bit-field; the float variant reports the no-op default.
     #[test]
     fn ut_format_bitfield_all_variants() {
         let m = BitField { mask: 0x0FF0 };
@@ -248,6 +254,7 @@ mod tests {
         assert!(Format::F64((e, res())).bitfield().is_full());
     }
 
+    /// MB-R-010 — exactly the thirteen data formats (Ascii, U8..U128, I8..I128, F32, F64) exist.
     #[test]
     fn ut_format_display_all_variants() {
         assert_eq!(

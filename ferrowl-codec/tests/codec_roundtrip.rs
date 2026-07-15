@@ -16,6 +16,7 @@ fn int(endian: Endian) -> Format {
     Format::U16((endian, res(), BitField::default()))
 }
 
+/// MB-R-002 — an unspecified slave id defaults to 0 (with access defaulting to `ReadWrite`, MB-R-005).
 #[test]
 fn it_register_builder_applies_documented_defaults() {
     let reg = RegisterBuilder::default()
@@ -27,6 +28,7 @@ fn it_register_builder_applies_documented_defaults() {
     assert_eq!(*reg.kind(), Kind::InputRegister);
 }
 
+/// MB-R-007 — a typed U16 value round-trips through raw register words.
 #[test]
 fn it_u16_value_roundtrips_through_words() {
     let fmt = int(Endian::Big);
@@ -38,6 +40,7 @@ fn it_u16_value_roundtrips_through_words() {
     }
 }
 
+/// MB-R-013 — big- and little-endian produce different words but each decodes back to the same value.
 #[test]
 fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
     let value = Value::U32((0x0001_0002, res()));
@@ -70,6 +73,7 @@ fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
     );
 }
 
+/// MB-R-007 — a negative signed value round-trips through raw register words.
 #[test]
 fn it_signed_value_roundtrips_negative() {
     let fmt = Format::I16((Endian::Big, res(), BitField::default()));
@@ -80,6 +84,7 @@ fn it_signed_value_roundtrips_negative() {
     }
 }
 
+/// MB-R-018 — a float value round-trips through its IEEE 754 register words.
 #[test]
 fn it_float_value_roundtrips() {
     let fmt = Format::F32((Endian::Big, res()));
@@ -90,6 +95,7 @@ fn it_float_value_roundtrips() {
     }
 }
 
+/// MB-R-007 — an ASCII value round-trips through raw register words.
 #[test]
 fn it_ascii_value_roundtrips_through_string_encoding() {
     let fmt = Format::Ascii((Alignment::Left, Width(4)));
@@ -100,6 +106,7 @@ fn it_ascii_value_roundtrips_through_string_encoding() {
     }
 }
 
+/// MB-R-023 — decoding fewer words than the format width is rejected.
 #[test]
 fn it_decode_rejects_too_few_words() {
     let fmt = Format::U32((Endian::Big, res(), BitField::default()));
@@ -109,6 +116,7 @@ fn it_decode_rejects_too_few_words() {
     );
 }
 
+/// MB-R-022 — a string that is neither a decimal nor a `0x` literal fails to encode into a numeric register.
 #[test]
 fn it_encode_rejects_unparseable_string() {
     let fmt = int(Endian::Big);

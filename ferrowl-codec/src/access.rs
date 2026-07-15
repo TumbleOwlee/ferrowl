@@ -29,6 +29,7 @@ impl Display for Access {
 mod tests {
     use super::Access;
 
+    /// MB-R-005 — access is exactly one of `ReadOnly`, `WriteOnly`, `ReadWrite`.
     #[test]
     fn ut_access_display() {
         assert_eq!(Access::ReadOnly.to_string(), "ReadOnly");

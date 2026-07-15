@@ -172,6 +172,7 @@ mod tests {
         Resolution(1.0)
     }
 
+    /// MB-R-021 — displaying a value yields `raw × resolution`; resolution 1.0 leaves it unchanged.
     #[test]
     fn ut_value_as_str_no_scaling() {
         assert_eq!(Value::U8((42, res())).to_string(), "42");
@@ -181,6 +182,7 @@ mod tests {
         assert_eq!(Value::Ascii("hello".to_string()).to_string(), "hello");
     }
 
+    /// MB-R-021 — displaying a value applies the display resolution as `raw × resolution`.
     #[test]
     fn ut_value_as_str_with_scaling() {
         // Use resolution 2.0 so that integer * 2.0 is exact in f64
@@ -190,6 +192,7 @@ mod tests {
         assert_eq!(Value::F32((1.5f32, r.clone())).to_string(), "3");
     }
 
+    /// MB-R-021 — the unscaled value is the raw value, with the resolution not applied.
     #[test]
     fn ut_value_unscaled_drops_resolution() {
         // The unscaled string is the raw value, regardless of resolution.
@@ -214,6 +217,7 @@ mod tests {
         assert!(!Value::U16((0, res())).is_empty());
     }
 
+    /// MB-R-025 — a value renders as raw zero-padded hex (two's complement for signed, one byte per ASCII char).
     #[test]
     fn ut_value_as_hex_str() {
         assert_eq!(Value::U8((0xFF, res())).as_hex_str(), "0xFF");
@@ -227,6 +231,7 @@ mod tests {
         assert_eq!(Value::Ascii("AB".to_string()).as_hex_str(), "0x4142");
     }
 
+    /// MB-R-025 — a float renders as its IEEE 754 bit pattern in zero-padded hex.
     #[test]
     fn ut_value_as_hex_str_f32() {
         let bits = 1.5f32.to_bits();
@@ -234,6 +239,7 @@ mod tests {
         assert_eq!(Value::F32((1.5f32, res())).as_hex_str(), expected);
     }
 
+    /// MB-R-025 — an f64 renders as its IEEE 754 bit pattern in zero-padded hex.
     #[test]
     fn ut_value_as_hex_str_f64() {
         let bits = 1.5f64.to_bits();
@@ -241,6 +247,7 @@ mod tests {
         assert_eq!(Value::F64((1.5f64, res())).as_hex_str(), expected);
     }
 
+    /// MB-R-021 — the unscaled value displays the raw value for every variant.
     #[test]
     fn ut_unscaled_value_display_all_variants() {
         use super::UnscaledValue;
@@ -259,6 +266,7 @@ mod tests {
         assert_eq!(UnscaledValue::Ascii("hi".to_string()).to_string(), "hi");
     }
 
+    /// MB-R-021 — every numeric variant displays as `raw × resolution`.
     #[test]
     fn ut_value_display_all_numeric_variants() {
         // Resolution 1.0 keeps the scaled value equal to the raw value.
@@ -270,6 +278,7 @@ mod tests {
         assert_eq!(Value::F64((2.5, res())).to_string(), "2.5");
     }
 
+    /// MB-R-021 — `unscaled` preserves the raw value and variant for every type.
     #[test]
     fn ut_value_unscaled_all_variants() {
         use super::UnscaledValue;
@@ -311,6 +320,7 @@ mod tests {
         ));
     }
 
+    /// MB-R-025 — wide and signed variants render as raw zero-padded two's-complement hex.
     #[test]
     fn ut_value_as_hex_str_remaining_variants() {
         assert_eq!(
