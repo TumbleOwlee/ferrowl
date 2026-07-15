@@ -59,8 +59,10 @@ type (`feat/`, `fix/`, `docs/`).
 3. **Gate 1b — the tracking issue.** Once the spec is approved, search the repo's open
    issues (`gh issue list`, plus a search of closed ones) for anything with the **same
    goal**. If one exists, use it — reference its number from here on, do not open a second.
-   If none exists, draft the issue body and **stop for approval**; create it with
-   `gh issue create` only once confirmed.
+   If none exists, draft the issue title and body and **stop for approval**; create it
+   with `gh issue create` only once confirmed. Give it a **human-friendly title** — a
+   plain-language summary of the goal a maintainer can scan, not a slug, a requirement ID,
+   or a restated commit subject.
 
    The issue must be **self-contained**: at this point the spec lives only in the working
    tree, so a reader who has only the issue cannot look a requirement ID up. **Always quote
@@ -68,8 +70,11 @@ type (`feat/`, `fix/`, `docs/`).
    *changed* requirement the same way (old → new), plus the `api-contract.md` and
    `edge-cases.md` entries. An ID with no text is useless to the reader.
 
-   Keep the issue free of **implementation detail** — it states the goal and the normative
-   changes, not how the code will be structured. That belongs to gate 2.
+   The issue body states the **goal** and the normative changes only. **Never put
+   implementation detail in it** — how the code will be structured, which files or
+   functions change, the chosen approach. That is part of the implementation, so it belongs
+   to the plan (gate 2) and to the PR that describes how the issue was resolved, never to
+   the issue.
 4. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
    the file only ever contains normative text. The plan tracks what is not yet backed by
    a passing test.
@@ -97,9 +102,12 @@ type (`feat/`, `fix/`, `docs/`).
 8. **Gate 3 — the pull request.** With the work done, the Verification method run and its
    outcome reported: **stop and ask whether to open a PR.** The user may want a manual
    test run of their own first — that is the point of this gate, so do not pre-empt it.
-   Once they confirm, draft the PR title and body (the why, the requirement IDs, the
-   verification actually performed, `Closes #<issue>` from gate 1b) and **stop for
-   approval** of that text. Only then push the branch and `gh pr create`.
+   Once they confirm, draft the PR title and body and **stop for approval** of that text.
+   Give the PR a **human-friendly title** in the same plain-language style as the issue.
+   The PR body is where the implementation lives: the why, the requirement IDs, **how the
+   issue was resolved** (the approach and structure the issue deliberately omitted), the
+   verification actually performed, and `Closes #<issue>` from gate 1b. Only then push the
+   branch and `gh pr create`.
 
 Merge to `main` by **squash merge**, so the branch's stage commits — including the spec
 commit that briefly ran ahead of its code — never reach `main`.
