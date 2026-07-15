@@ -73,12 +73,14 @@ mod tests {
         assert_eq!(key.id, sk);
     }
 
+    /// MB-R-026 — the default device key is the (slave id, register table) pair.
     #[test]
     fn ut_key_default_is_slave_kind_default() {
         let key = Key::<SlaveKey>::default();
         assert_eq!(key.id, SlaveKey::default());
     }
 
+    /// MB-R-027 — coil-family function codes derive the coil register table.
     #[test]
     fn ut_slave_kind_from_slave_fn_coil() {
         let sk = SlaveKey::from_slave_fn(3, FunctionCode::ReadCoils);

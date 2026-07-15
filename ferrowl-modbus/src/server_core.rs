@@ -543,6 +543,7 @@ mod tests {
     // `tokio_modbus`'s `process()` loop just `.await`s, this must succeed on a current-thread
     // runtime with no dedicated worker threads to bridge onto.
     #[tokio::test]
+    /// MB-R-057 — the server answers an inbound request directly from the shared store.
     async fn ut_server_call_works_on_current_thread_runtime() {
         use tokio_modbus::server::Service;
 
@@ -561,6 +562,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-057 — a holding-register read is answered from the values stored in the shared store.
     async fn ut_handle_read_holding_returns_seeded_values() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
@@ -572,6 +574,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a read against a slave with no declared regions is answered with `IllegalDataAddress`.
     async fn ut_handle_read_unknown_slave_is_illegal_data_address() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
@@ -589,6 +592,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-058 — a write-single-register request is answered and its value persisted in the store.
     async fn ut_handle_write_single_register_persists() {
         let mem = seeded_memory(&[]);
         let (log, _) = recording_log();
@@ -608,6 +612,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-067 — a TCP (verbose) server logs the per-request outcome; without verbose only the "received" line.
     async fn ut_handle_verbose_logs_outcome_quiet_when_off() {
         let mem = seeded_memory(&[1, 2]);
 
@@ -654,6 +659,7 @@ mod tests {
     // ---- WriteMultipleCoils: regression for the hard-coded range length bug ----
 
     #[tokio::test]
+    /// MB-R-062 — a multi-coil write is answered with the address written and the number of values written.
     async fn ut_write_multiple_coils_persists_every_bit() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 8, &[]);
         let (log, _) = recording_log();
@@ -679,6 +685,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a multi-coil write overrunning the declared region is answered with `IllegalDataAddress`.
     async fn ut_write_multiple_coils_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 8, &[]);
         let (log, _) = recording_log();
@@ -698,6 +705,7 @@ mod tests {
     // ---- Coil / discrete-input reads ----
 
     #[tokio::test]
+    /// MB-R-061 — a coil read reports each stored word as set when it is non-zero.
     async fn ut_read_coils_returns_seeded_bits() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[1, 0, 1, 0]);
         let (log, _) = recording_log();
@@ -708,6 +716,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a coil read outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_read_coils_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
@@ -718,6 +727,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-058 — the server answers read-discrete-inputs from the stored bits.
     async fn ut_read_discrete_inputs_returns_seeded_bits() {
         let mem = seeded(RegKind::DiscreteInput, CellType::Coil, 3, &[0, 1, 1]);
         let (log, _) = recording_log();
@@ -729,6 +739,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a discrete-input read against an undeclared slave is answered with `IllegalDataAddress`.
     async fn ut_read_discrete_inputs_unknown_slave_is_illegal_data_address() {
         let mem = seeded(RegKind::DiscreteInput, CellType::Coil, 3, &[]);
         let (log, _) = recording_log();
@@ -742,6 +753,7 @@ mod tests {
     // ---- Register reads ----
 
     #[tokio::test]
+    /// MB-R-057 — an input-register read is answered from the values stored in the shared store.
     async fn ut_read_input_registers_returns_seeded_values() {
         let mem = seeded(RegKind::InputRegister, CellType::Register, 3, &[7, 8, 9]);
         let (log, _) = recording_log();
@@ -753,6 +765,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — an input-register read outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_read_input_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::InputRegister, CellType::Register, 3, &[]);
         let (log, _) = recording_log();
@@ -764,6 +777,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a holding-register read outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_read_holding_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
@@ -782,6 +796,7 @@ mod tests {
     // ---- Single writes ----
 
     #[tokio::test]
+    /// MB-R-061 — a coil write stores a set coil, observable on read-back.
     async fn ut_write_single_coil_persists() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
@@ -797,6 +812,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a single-coil write outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_write_single_coil_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
@@ -808,6 +824,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a single-register write outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_write_single_register_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
@@ -826,6 +843,7 @@ mod tests {
     // ---- WriteMultipleRegisters ----
 
     #[tokio::test]
+    /// MB-R-062 — a multi-register write is answered with the address written and the number of values written.
     async fn ut_write_multiple_registers_persists_all() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 8, &[]);
         let (log, _) = recording_log();
@@ -852,6 +870,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-060 — a multi-register write outside the declared region is answered with `IllegalDataAddress`.
     async fn ut_write_multiple_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
@@ -870,6 +889,7 @@ mod tests {
     // ---- ReadWriteMultipleRegisters (reads and writes the same holding region) ----
 
     #[tokio::test]
+    /// MB-R-063 — a read/write-multiple request applies the write and returns the values read before it.
     async fn ut_read_write_multiple_registers_writes_then_returns_read() {
         let mem = seeded(
             RegKind::HoldingRegister,
@@ -902,6 +922,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-064 — a read/write-multiple whose write range is not writable is answered `IllegalDataAddress` and applies no write.
     async fn ut_read_write_multiple_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(
             RegKind::HoldingRegister,
@@ -925,6 +946,7 @@ mod tests {
     // ---- Unsupported function codes ----
 
     #[tokio::test]
+    /// MB-R-059 — report-server-id is rejected with `IllegalFunction`.
     async fn ut_report_server_id_is_illegal_function() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
@@ -937,6 +959,7 @@ mod tests {
     // ---- Verbose logging: every arm's success/failure log branch ----
 
     #[tokio::test]
+    /// MB-R-067 — a TCP (verbose) server logs a success outcome for every supported request.
     async fn ut_verbose_logs_success_for_every_request() {
         macro_rules! ok {
             ($mem:expr, $req:expr) => {{
@@ -991,6 +1014,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-067 — a TCP (verbose) server logs a failure outcome for every rejected request.
     async fn ut_verbose_logs_failure_for_every_request() {
         macro_rules! fail {
             ($mem:expr, $req:expr) => {{
@@ -1048,6 +1072,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-059 — mask-write-register, read-device-identification, and custom function codes are rejected with `IllegalFunction`.
     async fn ut_unsupported_function_codes_are_illegal() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
