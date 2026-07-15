@@ -50,7 +50,7 @@ derive_builder = "0.20.2"
 futures-util = "0.3.31"
 getset = "0.1.6"
 itertools = "0.14.0"
-mlua = { version = "0.11.4", features = ["anyhow", "lua54", "vendored"] }
+mlua = { version = "0.12.0", features = ["anyhow", "lua54", "vendored"] }
 once_cell = "1.21.3"
 parking_lot = "0.12"
 proc-macro2 = "1.0.106"
