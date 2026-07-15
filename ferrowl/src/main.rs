@@ -10,16 +10,13 @@ mod cli;
 mod command;
 mod config;
 mod dialog;
-mod headless;
 mod instance;
 mod lua;
 mod migrate;
 mod module;
 mod registry;
 mod script_template;
-#[cfg(test)]
-mod session_e2e_tests;
-mod session_sim;
+mod session;
 mod view;
 
 use std::collections::BTreeMap;
@@ -356,7 +353,7 @@ fn main() {
     let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{}]", e));
 
     if let Some(SubCommand::Run(ref run_args)) = args.command {
-        let code = runtime.block_on(headless::run(run_args));
+        let code = runtime.block_on(cli::headless::run(run_args));
         std::process::exit(code);
     }
 

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 
 use clap::{Args, Parser, Subcommand};
 
+pub mod headless;
+
 use crate::config::ocpp::OcppProtocol;
 use crate::config::{self, Endpoint, ModuleSpec, OcppModuleSpec, Role};
 
@@ -42,7 +44,7 @@ pub enum SubCommand {
     /// Warnings about dropped or approximated fields are printed to stderr.
     Migrate(MigrateArgs),
 
-    /// Run configured modules without the TUI (headless/CI mode). See [`crate::headless::run`]
+    /// Run configured modules without the TUI (headless/CI mode). See [`crate::cli::headless::run`]
     /// for the exit-code contract.
     Run(RunArgs),
 }

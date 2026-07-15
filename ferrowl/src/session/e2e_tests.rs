@@ -30,7 +30,7 @@ use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedSe
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
 use crate::registry::{ModbusHost, ModuleRegistry, OcppClientEntry, OcppServerEntry};
-use crate::session_sim::SessionSim;
+use crate::session::SessionSim;
 
 fn log() -> SharedLog {
     Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
