@@ -59,6 +59,8 @@ impl SyntaxTheme {
 
 impl Default for SyntaxTheme {
     fn default() -> Self {
-        SyntaxThemeBuilder::default().build().expect("SyntaxThemeBuilder fields all default")
+        SyntaxThemeBuilder::default()
+            .build()
+            .expect("SyntaxThemeBuilder fields all default")
     }
 }

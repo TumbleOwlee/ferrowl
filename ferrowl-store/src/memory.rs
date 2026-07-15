@@ -137,7 +137,10 @@ where
             });
         }
         self.writable(&id, ty, range)?;
-        let map = self.slices.get_mut(&id).expect("writable() confirmed the id is registered");
+        let map = self
+            .slices
+            .get_mut(&id)
+            .expect("writable() confirmed the id is registered");
         let mut idx = 0;
         walk_slices_mut(map, range, |slice, seg| {
             let count = seg.length();
@@ -190,7 +193,10 @@ where
     /// readable as type `ty`.
     pub fn read(&self, id: K, ty: &CellType, range: &Range) -> Result<Vec<u16>, MemoryError> {
         self.readable(&id, ty, range)?;
-        let map = self.slices.get(&id).expect("readable() confirmed the id is registered");
+        let map = self
+            .slices
+            .get(&id)
+            .expect("readable() confirmed the id is registered");
         let mut output: Vec<u16> = Vec::with_capacity(range.length());
         walk_slices(map, range, |slice, seg| {
             if let Some(mut v) = slice.read(&seg) {

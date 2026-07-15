@@ -395,7 +395,7 @@ impl OcppSetupDialog {
             .keybinds(keybinds_text())
             .focus(OcppSetupDialogFocus::Name)
             .build()
-            .unwrap()
+            .expect("all required builder fields are set")
     }
 
     /// Build a dialog pre-filled with an existing spec + device-config path, for `:edit`.
@@ -1034,7 +1034,7 @@ fn input<T: Validate + Clone>(
             .placeholder(Some(placeholder.to_string()))
             .allowed_for::<T>()
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some((title, HorizontalAlignment::Left).into()))
@@ -1044,7 +1044,7 @@ fn input<T: Validate + Clone>(
             })
             .style(style.clone())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -1062,7 +1062,7 @@ fn suggest_input<T: Validate + Clone>(
     let mut state = SuggestInputStateBuilder::default()
         .provider(provider)
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     state.set_placeholder(Some(placeholder.to_string()));
 
     Widget {
@@ -1078,11 +1078,11 @@ fn suggest_input<T: Validate + Clone>(
                     })
                     .style(style.clone())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .popup_style(SuggestInputStyle::default())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -1104,7 +1104,7 @@ fn selection<T: ToLabel + Clone>(
             .focused(false)
             .values(values)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: SelectionBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some((title, HorizontalAlignment::Left).into()))
@@ -1114,7 +1114,7 @@ fn selection<T: ToLabel + Clone>(
             })
             .style(style.clone())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -1132,7 +1132,7 @@ fn text(style: TextStyle) -> Widget<String, Text> {
             .horizontal_alignment(HorizontalAlignment::Center)
             .style(style)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -1149,7 +1149,7 @@ fn hint_text() -> Widget<String, Text> {
             .horizontal_alignment(HorizontalAlignment::Left)
             .style(TextStyle::default())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -1165,7 +1165,7 @@ fn keybinds_text() -> Widget<String, Text> {
             .horizontal_alignment(HorizontalAlignment::Center)
             .style(TextStyle::default())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 

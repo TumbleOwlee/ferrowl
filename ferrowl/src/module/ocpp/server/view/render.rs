@@ -137,7 +137,7 @@ where
                     .bold(),
             })
             .build()
-            .unwrap();
+            .expect("all required builder fields are set");
         let mut status = if online {
             format!("ONLINE  {}", self.backend.bound_addr().unwrap_or_default())
         } else {
@@ -179,17 +179,21 @@ pub(super) fn cs_table() -> CsTable {
         state: TableStateBuilder::default()
             .values(Vec::new())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
             .title(Some("Charging Stations".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(ratatui::layout::Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -198,17 +202,21 @@ pub(super) fn msg_table() -> MsgTable {
         state: TableStateBuilder::default()
             .values(Vec::new())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
             .title(Some("Messages".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(ratatui::layout::Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -220,7 +228,7 @@ pub(super) fn action_list(
             .focused(false)
             .values(values)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: SelectionBuilder::default()
             .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
             .title(Some(("Actions", HorizontalAlignment::Left).into()))
@@ -234,14 +242,14 @@ pub(super) fn action_list(
                             .bold(),
                     )
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(ratatui::layout::Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -252,7 +260,7 @@ pub(super) fn scripts_button() -> Widget<ButtonState, Button> {
             .label("Lua Scripts".to_string())
             .disabled(false)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: ButtonBuilder::default()
             .border_margin(ratatui::layout::Margin::new(1, 0))
             .margin(ratatui::layout::Margin {
@@ -265,7 +273,7 @@ pub(super) fn scripts_button() -> Widget<ButtonState, Button> {
             })
             .horizontal_alignment(HorizontalAlignment::Center)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -277,7 +285,7 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
             .placeholder(Some("select a message".to_string()))
             .language(Some(Language::Json))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: CodeInputFieldBuilder::default()
             .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
             .title(Some("Payload".into()))
@@ -285,13 +293,13 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
                 InputFieldStyleBuilder::default()
                     .border(border_style())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(ratatui::layout::Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }

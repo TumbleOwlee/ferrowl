@@ -156,7 +156,7 @@ impl<V: ClientVersion> ClientView<V> {
                     .bold(),
             })
             .build()
-            .unwrap();
+            .expect("all required builder fields are set");
         let mut status = if online { "ONLINE" } else { "OFFLINE" }.to_string();
         StatefulWidget::render(&status_widget, status_area, buf, &mut status);
     }
@@ -241,50 +241,71 @@ fn boxed(title: &str) -> Block<'_> {
 
 pub(super) fn nv_table(rows: Vec<NvRow>) -> StateTable {
     Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(rows)
+            .build()
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("State".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
 pub(super) fn conn_table(rows: Vec<ConnRow>) -> ConnTable {
     Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(rows)
+            .build()
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Connectors".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             // Always compact (no vertical margin), independent of `:compact`, to save space.
             .row_margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
 pub(super) fn config_table<V: ClientVersion>(rows: Vec<ConfigRow>) -> ConfigTable {
     Widget {
-        state: TableStateBuilder::default().values(rows).build().unwrap(),
+        state: TableStateBuilder::default()
+            .values(rows)
+            .build()
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(V::config_title().into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -295,7 +316,7 @@ pub(super) fn panel_input(title: &str) -> Widget<InputFieldState, InputField<Str
             .disabled(false)
             .placeholder(Some(title.to_string()))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: InputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some((title, HorizontalAlignment::Left).into()))
@@ -303,14 +324,14 @@ pub(super) fn panel_input(title: &str) -> Widget<InputFieldState, InputField<Str
                 InputFieldStyleBuilder::default()
                     .border(border_style())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -319,17 +340,21 @@ pub(super) fn msg_table() -> MsgTable {
         state: TableStateBuilder::default()
             .values(Vec::new())
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: TableBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Messages".into()))
-            .style(TableStyleBuilder::default().build().unwrap())
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
             .row_margin(Margin {
                 vertical: 1,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -341,7 +366,7 @@ pub(super) fn action_list(
             .focused(false)
             .values(values)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: SelectionBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some(("Actions", HorizontalAlignment::Left).into()))
@@ -355,14 +380,14 @@ pub(super) fn action_list(
                             .bold(),
                     )
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -376,7 +401,7 @@ pub fn choice(
         .focused(true)
         .values(values)
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     if let Some(idx) = options.iter().position(|o| *o == current) {
         state.set_selection(idx);
     }
@@ -389,7 +414,7 @@ pub fn choice(
                 horizontal: 1,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -400,7 +425,7 @@ pub fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
         .disabled(false)
         .allowed_for::<f64>()
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     let text = format!("{current}");
     state.set_input(text.clone());
     state.set_cursor(text.chars().count());
@@ -413,7 +438,7 @@ pub fn number(current: f64) -> Widget<InputFieldState, InputField<f64>> {
                 horizontal: 1,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -423,7 +448,7 @@ pub fn text_input(current: &str) -> Widget<InputFieldState, InputField<String>> 
         .focused(true)
         .disabled(false)
         .build()
-        .unwrap();
+        .expect("all required builder fields are set");
     state.set_input(current.to_string());
     state.set_cursor(current.chars().count());
     Widget {
@@ -435,7 +460,7 @@ pub fn text_input(current: &str) -> Widget<InputFieldState, InputField<String>> 
                 horizontal: 1,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -446,7 +471,7 @@ pub(super) fn scripts_button() -> Widget<ButtonState, Button> {
             .label("Lua Scripts".to_string())
             .disabled(false)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: ButtonBuilder::default()
             .border_margin(Margin::new(1, 0))
             .margin(Margin {
@@ -459,7 +484,7 @@ pub(super) fn scripts_button() -> Widget<ButtonState, Button> {
             })
             .horizontal_alignment(HorizontalAlignment::Center)
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }
 
@@ -471,7 +496,7 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
             .placeholder(Some("select a message".to_string()))
             .language(Some(Language::Json))
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
         widget: CodeInputFieldBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
             .title(Some("Payload".into()))
@@ -479,13 +504,13 @@ pub(super) fn code_view() -> Widget<CodeInputFieldState, CodeInputField> {
                 InputFieldStyleBuilder::default()
                     .border(border_style())
                     .build()
-                    .unwrap(),
+                    .expect("all required builder fields are set"),
             )
             .margin(Margin {
                 vertical: 0,
                 horizontal: 0,
             })
             .build()
-            .unwrap(),
+            .expect("all required builder fields are set"),
     }
 }

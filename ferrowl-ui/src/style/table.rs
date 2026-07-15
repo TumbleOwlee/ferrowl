@@ -32,6 +32,8 @@ pub struct TableStyle {
 
 impl Default for TableStyle {
     fn default() -> Self {
-        TableStyleBuilder::default().build().expect("TableStyleBuilder fields all default")
+        TableStyleBuilder::default()
+            .build()
+            .expect("TableStyleBuilder fields all default")
     }
 }

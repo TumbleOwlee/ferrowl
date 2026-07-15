@@ -28,7 +28,9 @@ where
     P: SuggestionProvider + Clone,
 {
     #[getset(get = "pub")]
-    #[builder(default = "InputFieldBuilder::default().build().expect(\"InputFieldBuilder fields all default\")")]
+    #[builder(
+        default = "InputFieldBuilder::default().build().expect(\"InputFieldBuilder fields all default\")"
+    )]
     input_field: InputField<ValueType>,
     #[getset(get = "pub")]
     #[builder(default = "SuggestInputStyle::default()")]

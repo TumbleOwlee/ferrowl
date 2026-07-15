@@ -90,7 +90,12 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             col_names.push(name.ok_or_else(|| err("`column` requires `name`"))?);
             col_mins.push(min.ok_or_else(|| err("`column` requires `min`"))?);
             col_maxs.push(max.ok_or_else(|| err("`column` requires `max`"))?);
-            col_fields.push(field.ident.clone().expect("TableEntry rejects non-named-field structs above"));
+            col_fields.push(
+                field
+                    .ident
+                    .clone()
+                    .expect("TableEntry rejects non-named-field structs above"),
+            );
         }
     }
 
