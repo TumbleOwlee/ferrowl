@@ -213,6 +213,7 @@ mod tests {
         }
     }
 
+    /// MB-R-095 — extending a region with adjacent ranges merges them into one contiguous region.
     #[test]
     fn ut_slice_extend() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
@@ -257,6 +258,7 @@ mod tests {
         }
     }
 
+    /// MB-R-033 — a range is writable only where its cells accept writes of the requested cell type.
     #[test]
     fn ut_slice_writable() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
@@ -270,6 +272,7 @@ mod tests {
         assert!(slice.writable(&CellType::Coil, &Range::new(270, 10)));
     }
 
+    /// MB-R-033 — a checked write succeeds on writable cells and fails out of range or on the wrong type.
     #[test]
     fn ut_slice_write() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
@@ -322,6 +325,7 @@ mod tests {
         assert!(!slice.writable(&CellType::Register, &Range::new(190, 20)));
     }
 
+    /// MB-R-033 — a range is readable only where its cells accept reads of the requested cell type.
     #[test]
     fn ut_slice_readable() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
@@ -335,6 +339,7 @@ mod tests {
         assert!(slice.readable(&CellType::Coil, &Range::new(270, 10)));
     }
 
+    /// MB-R-033 — a checked read returns readable cells and fails out of range.
     #[test]
     fn ut_slice_read() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
@@ -405,6 +410,7 @@ mod tests {
         assert!(slice.read(&Range::new(500, 20)).is_none());
     }
 
+    /// MB-R-096 — a non-adjacent extend is a no-op, so regions never merge into an overlapping span.
     #[test]
     fn ut_slice_extend_non_adjacent() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(100, 10));
@@ -414,6 +420,7 @@ mod tests {
         assert_eq!(slice.range, Range::new(100, 10));
     }
 
+    /// MB-R-034 — an unchecked write forces values into read/write/read-only cells alike, within coverage.
     #[test]
     fn ut_slice_write_unchecked() {
         let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(0, 5));
@@ -431,6 +438,7 @@ mod tests {
         assert!(!slice.write_unchecked(&Range::new(0, 5), &[1, 2, 3]));
     }
 
+    /// MB-R-034 — an unchecked read returns the stored value of write-only cells.
     #[test]
     fn ut_slice_read_unchecked() {
         let mut slice = Slice::from_range(&CellKind::Write(CellType::Register), Range::new(0, 4));
@@ -446,6 +454,7 @@ mod tests {
         assert!(slice.read_unchecked(&Range::new(0, 99)).is_none());
     }
 
+    /// MB-R-029 — addresses outside the declared region are neither readable nor writable.
     #[test]
     fn ut_slice_readable_out_of_range() {
         let slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(10, 5));

@@ -256,6 +256,7 @@ mod tests {
         assert_eq!(format!("{}", Range::new(0, 0)), "[0, 0)");
     }
 
+    /// MB-R-028 — a range whose end precedes its start is rejected on deserialization.
     #[test]
     fn ut_range_deserialize_invalid_end_lt_start() {
         let json = r#"{"start": 10, "end": 5}"#;
