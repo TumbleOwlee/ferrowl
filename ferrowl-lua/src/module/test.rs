@@ -49,11 +49,13 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-018 — C_Test is registered under the Lua global name `C_Test`.
     fn ut_module_name() {
         assert_eq!(<Test as Module>::module(), "C_Test");
     }
 
     #[test]
+    /// SC-R-038 — Assert with a true condition returns with no effect.
     fn ut_assert_true_passes() {
         let lua = lua_with_test();
         lua.load(r#"C_Test:Assert(true, "should not fire")"#)
@@ -62,6 +64,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-038 — every non-nil, non-false value (including numbers and strings) is truthy and passes.
     fn ut_assert_truthy_value_passes() {
         let lua = lua_with_test();
         lua.load(r#"C_Test:Assert(1, "should not fire")"#)
@@ -73,6 +76,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-038 — Assert with `false` raises `assertion failed: <msg>`.
     fn ut_assert_false_raises() {
         let lua = lua_with_test();
         let err = lua
@@ -83,6 +87,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-038 — Assert with `nil` (Lua-falsy) raises `assertion failed: <msg>`.
     fn ut_assert_nil_raises() {
         let lua = lua_with_test();
         let err = lua
@@ -93,6 +98,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-038 — Fail always raises `assertion failed: <msg>`.
     fn ut_fail_always_raises() {
         let lua = lua_with_test();
         let err = lua.load(r#"C_Test:Fail("nope")"#).exec().unwrap_err();

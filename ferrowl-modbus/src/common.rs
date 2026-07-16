@@ -61,18 +61,21 @@ mod tests {
     use std::future::Future;
 
     #[test]
+    /// MB-R-072 — unset serial parameters leave the library's own default in place.
     fn ut_serial_config_valid_minimal() {
         // No optional fields set: builder construction must succeed.
         assert!(serial_config_from("/dev/null", 9600, None, None, None).is_ok());
     }
 
     #[test]
+    /// MB-R-073 — valid `data_bits`/`stop_bits`/`parity` values are accepted.
     fn ut_serial_config_valid_full() {
         let r = serial_config_from("/dev/null", 19200, Some(8), Some(1), Some("even"));
         assert!(r.is_ok());
     }
 
     #[test]
+    /// MB-R-073 — `parity` accepts `even`/`odd`/`none` case-insensitively.
     fn ut_serial_config_parity_case_insensitive() {
         // Parity is lower-cased before matching, so mixed case is accepted.
         assert!(serial_config_from("/dev/null", 9600, None, None, Some("ODD")).is_ok());
@@ -80,6 +83,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-073 — a `data_bits` value other than 5/6/7/8 fails with a serial configuration error.
     fn ut_serial_config_rejects_bad_data_bits() {
         let e = serial_config_from("/dev/null", 9600, Some(9), None, None).unwrap_err();
         assert!(matches!(e, SerialError::Configuration(_)));
@@ -87,6 +91,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-073 — a `stop_bits` value other than 1/2 fails with a serial configuration error.
     fn ut_serial_config_rejects_bad_stop_bits() {
         let e = serial_config_from("/dev/null", 9600, None, Some(3), None).unwrap_err();
         assert!(matches!(e, SerialError::Configuration(_)));
@@ -94,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-073 — a `parity` value other than even/odd/none fails with a serial configuration error.
     fn ut_serial_config_rejects_bad_parity() {
         let e = serial_config_from("/dev/null", 9600, None, None, Some("bogus")).unwrap_err();
         assert!(matches!(e, SerialError::Configuration(_)));
@@ -101,6 +107,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-073 — `data_bits` accepts exactly 5, 6, 7, and 8.
     fn ut_serial_config_accepts_all_data_bit_widths() {
         for bits in [5u8, 6, 7, 8] {
             assert!(serial_config_from("/dev/null", 9600, Some(bits), None, None).is_ok());
@@ -108,6 +115,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-073 — `stop_bits` accepts exactly 1 and 2.
     fn ut_serial_config_accepts_both_stop_bits() {
         assert!(serial_config_from("/dev/null", 9600, None, Some(1), None).is_ok());
         assert!(serial_config_from("/dev/null", 9600, None, Some(2), None).is_ok());

@@ -414,6 +414,7 @@ mod tests {
     use ferrowl_codec::Kind;
 
     #[test]
+    /// MB-R-087 — effective timing uses the device config's values when set, otherwise the built-in defaults.
     fn ut_resolve_timing_fallback() {
         use super::ModbusModule;
         use crate::config::DeviceConfig;
@@ -502,6 +503,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-076 — a module instance is a TCP server owning one store, register set, and log; register-cache edits rebuild it (MB-R-088).
     fn ut_module_new_tcp_server_and_sync_accessors() {
         use super::ModbusModule;
         use crate::config::{Endpoint, ModuleSpec, Role};
@@ -544,6 +546,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-076 — a module instance can be an RTU client, building its register set from the device config.
     fn ut_module_new_rtu_client() {
         use super::ModbusModule;
         use crate::config::{Endpoint, ModuleSpec, Role};
@@ -680,6 +683,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-026 — a Modbus sim runs from construction on an enabled script, with no network start.
     fn ut_sim_starts_at_construction_without_network_start() {
         use super::ModbusModule;
 
@@ -692,6 +696,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-011 — with no enabled script (empty or disabled), no sim thread is spawned.
     fn ut_sim_not_started_when_no_enabled_scripts() {
         use super::ModbusModule;
 
@@ -705,6 +710,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-024 — reloading with no enabled script stops the running sim and leaves it stopped.
     fn ut_reload_scripts_all_disabled_stops_sim() {
         use super::ModbusModule;
 
@@ -717,6 +723,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-024 — toggling a script on via reload starts a fresh sim thread.
     fn ut_reload_scripts_toggle_on_starts_sim() {
         use super::ModbusModule;
 
@@ -733,6 +740,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-024 — editing a script restarts the sim on a fresh Lua context so the new code takes over.
     fn ut_reload_scripts_changed_code_takes_effect() {
         use super::ModbusModule;
 
@@ -750,6 +758,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// SC-R-026 — starting or stopping the network instance leaves the sim thread running.
     async fn ut_network_stop_leaves_sim_running() {
         use super::ModbusModule;
 
@@ -766,6 +775,7 @@ mod tests {
     // Confirms the log-ring split (stage 5): Lua `print()`/`C_Log` output lands only in
     // `script_log`, never in the module's general `log` (connection/status/traffic lines).
     #[test]
+    /// SC-R-031 — Modbus sim print/C_Log output goes to the module's script log, not its connection log.
     fn ut_lua_output_lands_in_script_log_not_general_log() {
         use super::ModbusModule;
 

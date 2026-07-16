@@ -34,8 +34,8 @@ pub fn script_keys_overlay() -> HelpOverlay {
 mod tests {
     use super::*;
 
-    /// UI-R-056 — the overlay documents every binding the script table has.
     #[test]
+    /// UI-R-056 — the overlay documents every binding the script table has.
     fn ut_lists_every_script_table_binding() {
         for key in ["Enter", "e", "t", "d", "c"] {
             assert!(
@@ -53,6 +53,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-056 — the overlay carries the script table's own bindings section.
     fn ut_overlay_carries_the_section() {
         let _ = script_keys_overlay();
     }

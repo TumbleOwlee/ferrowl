@@ -211,6 +211,7 @@ fn code_input_field_render_variants() {
 }
 
 #[test]
+/// UI-R-039 — rendered Lua highlighting maps keyword/comment kinds to their theme colors.
 fn code_input_field_lua_syntax_highlighting() {
     let theme = SyntaxTheme::default();
     let content = "local x = 1 -- hi";
@@ -247,6 +248,7 @@ fn code_input_field_lua_syntax_highlighting() {
 }
 
 #[test]
+/// UI-R-039 — rendered JSON highlighting maps key/string kinds to their theme colors.
 fn code_input_field_json_key_and_string_styles() {
     let theme = SyntaxTheme::default();
     let content = r#"{"key": "value"}"#;
@@ -288,6 +290,7 @@ fn code_input_field_json_key_and_string_styles() {
 }
 
 #[test]
+/// UI-R-046 — horizontal scroll clips a highlighted span to the visible content window.
 fn code_input_field_h_scroll_clips_mid_span() {
     let theme = SyntaxTheme::default();
     let content = r#"local s = "abcdefghijklmnopqrstuvwxyz""#;
@@ -332,6 +335,7 @@ fn code_input_field_h_scroll_clips_mid_span() {
 // ---- ScrollingTabs ----
 
 #[test]
+/// UI-R-046 — the tab bar scrolls horizontally to keep the selected tab visible.
 fn scrolling_tabs_render_variants() {
     let w = ScrollingTabsBuilder::<String>::default().build().unwrap();
 
@@ -432,6 +436,7 @@ fn opened_suggest_state(input: &str) -> ferrowl_ui::state::SuggestInputState<Fix
 }
 
 #[test]
+/// UI-R-026 — the completion popup renders below its anchor when there is room.
 fn suggest_input_popup_renders_below_anchor() {
     let w = SuggestInputBuilder::<String, FixedProvider>::default()
         .build()
@@ -452,6 +457,7 @@ fn suggest_input_popup_renders_below_anchor() {
 }
 
 #[test]
+/// UI-R-026 — the completion popup flips above its anchor when there is no room below.
 fn suggest_input_popup_flips_above_when_no_room_below() {
     let w = SuggestInputBuilder::<String, FixedProvider>::default()
         .build()
@@ -471,6 +477,7 @@ fn suggest_input_popup_flips_above_when_no_room_below() {
 }
 
 #[test]
+/// UI-R-026 — rendering the popup on a tiny buffer, or when closed, is a no-op not a panic.
 fn suggest_input_popup_no_panic_on_tiny_buffer() {
     let w = SuggestInputBuilder::<String, FixedProvider>::default()
         .build()
@@ -560,6 +567,7 @@ impl Header<2> for Cols {
 }
 
 #[test]
+/// UI-R-046 — a table wider than its area renders with horizontal scroll.
 fn table_render_variants() {
     let rows = vec![
         Row(

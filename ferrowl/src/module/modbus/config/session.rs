@@ -206,6 +206,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-033 — a session file round-trips its module instances, scripts, and interval.
     fn ut_session_roundtrip() {
         let original = sample();
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -220,6 +221,7 @@ mod tests {
     // An old-format session file (predating `scripts`/`interval`) must still load, with
     // `scripts` defaulting to empty and `interval` to 1.0.
     #[test]
+    /// CS-R-012 — a module entry with no `type` tag loads as modbus.
     fn ut_session_old_format_compat() {
         let json = r#"{"modules":[]}"#;
         let session: Session = serde_json::from_str(json).unwrap();
@@ -230,6 +232,7 @@ mod tests {
     // A hand-edited `interval` that is NaN, negative, or zero must fall back to the 1.0s
     // default instead of panicking or busy-waiting; a valid value converts as-is.
     #[test]
+    /// CS-R-017 — a non-finite/non-positive session interval falls back to 1.0s (no floor).
     fn ut_session_interval_duration_sanitized() {
         let mut session = Session::default();
         assert_eq!(session.interval_duration(), Duration::from_secs(1));

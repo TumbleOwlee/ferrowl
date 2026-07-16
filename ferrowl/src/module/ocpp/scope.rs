@@ -65,6 +65,7 @@ mod tests {
     use super::Scope;
 
     #[test]
+    /// OC-R-078 — a message scope labels the charge point, a 1.6 connector, or a 2.0.1 EVSE/connector for display and logging.
     fn ut_scope_label_and_is_connector() {
         assert_eq!(Scope::CS.label(), "");
         assert!(!Scope::CS.is_connector());

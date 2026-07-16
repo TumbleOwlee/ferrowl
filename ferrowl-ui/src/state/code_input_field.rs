@@ -926,6 +926,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — plain editor: printable keys insert and Backspace deletes.
     fn type_and_delete() {
         let mut s = state();
         type_char(&mut s, 'a');
@@ -948,6 +949,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Backspace deletes the character before the cursor mid-line.
     fn backspace_mid_line() {
         let mut s = state();
         type_char(&mut s, 'a');
@@ -960,6 +962,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Backspace at column zero merges the line into the previous one.
     fn backspace_merges_lines() {
         let mut s = state();
         type_char(&mut s, 'a');
@@ -975,6 +978,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Delete removes the character under the cursor.
     fn delete_forward() {
         let mut s = state();
         type_char(&mut s, 'a');
@@ -992,6 +996,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Delete at end of line merges the next line up.
     fn delete_merges_next_line() {
         let mut s = state();
         type_char(&mut s, 'a');
@@ -1019,6 +1024,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Up/Down navigate lines and clamp the column to a shorter line.
     fn up_down_navigate_and_clamp_to_shorter_line() {
         let mut s = state();
         s.set_content("longline\nx");
@@ -1033,6 +1039,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Up on the first line and Down on the last are no-ops.
     fn up_at_first_line_and_down_at_last_are_noops() {
         let mut s = state();
         s.set_content("a\nb");
@@ -1045,6 +1052,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Left at column zero wraps to the end of the previous line.
     fn left_wraps_to_previous_line_end() {
         let mut s = state();
         s.set_content("ab\ncd");
@@ -1057,6 +1065,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Right at end of line wraps to the start of the next line.
     fn right_wraps_to_next_line_start() {
         let mut s = state();
         s.set_content("ab\ncd");
@@ -1068,6 +1077,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — Enter splits the line at the cursor.
     fn enter_splits_line_at_cursor() {
         let mut s = state();
         s.set_content("abcd");
@@ -1080,6 +1090,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-035 — editor cursor/edit positions are character-based across multi-byte text.
     fn multibyte_chars_count_by_character() {
         let mut s = state();
         type_char(&mut s, 'é');
@@ -1098,6 +1109,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-036 — a disabled editor ignores mutating keys.
     fn disabled_state_ignores_keys() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1110,6 +1122,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — in the plain editor two spaces at the same position within the bound expand to a four-space indent.
     fn double_space_expands_to_four_within_threshold() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1123,6 +1136,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — an intervening key cancels the pending double-space expansion.
     fn intervening_key_between_spaces_cancels_expansion() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1138,6 +1152,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — with space-indent off, two spaces insert plain spaces.
     fn space_indent_disabled_inserts_plain_spaces() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1151,6 +1166,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — the double-space expansion also works mid-line.
     fn double_space_expansion_mid_line() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1166,6 +1182,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — four rapid spaces expand to two four-space indents.
     fn four_rapid_space_presses_yield_eight_spaces() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1181,6 +1198,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — losing focus reformats the buffer through the language formatter.
     fn blur_formats_messy_json() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1196,6 +1214,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — when the formatter declines (invalid JSON), the buffer is left unchanged on blur.
     fn blur_leaves_invalid_json_unchanged() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1208,6 +1227,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — a disabled field never reformats on blur.
     fn disabled_field_never_formats_on_blur() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1221,6 +1241,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — gaining focus never reformats the buffer.
     fn gaining_focus_never_formats() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1234,6 +1255,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — Enter after a Lua opener auto-indents the new line by the block-balance delta.
     fn enter_auto_indents_after_lua_opener() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1247,6 +1269,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — Enter on a plain line inherits its leading indentation.
     fn enter_inherits_indent_on_plain_line() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1260,6 +1283,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — Enter after a closing line does not add indentation.
     fn enter_does_not_indent_after_closing_line() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1273,6 +1297,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — Enter auto-indents JSON and carries the closing tail to a dedented line.
     fn enter_auto_indents_json_and_carries_tail() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1288,6 +1313,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — without a language set, Enter adds no automatic indent.
     fn enter_without_language_does_not_indent() {
         let mut s = state();
         s.set_content("    x {");
@@ -1297,6 +1323,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — losing focus reindents Lua through the formatter.
     fn blur_reindents_lua() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1319,6 +1346,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — the vim-modal editor starts in Normal mode.
     fn vim_defaults_to_normal_mode() {
         let s = vim_state();
         assert_eq!(s.vim_mode(), VimMode::Normal);
@@ -1326,6 +1354,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-029 — h/l do not wrap across lines and clamp to the last character in Normal mode.
     fn h_l_do_not_wrap_and_clamp_to_last_char() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1340,6 +1369,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-029 — j/k keep the block cursor clamped to a shorter line's last column.
     fn j_k_clamp_to_shorter_line() {
         let mut s = vim_state();
         s.set_content("longline\nx");
@@ -1352,6 +1382,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — 0 and $ motions move to the first/last column.
     fn zero_and_dollar_motions() {
         let mut s = vim_state();
         s.set_content("hello");
@@ -1362,6 +1393,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — w/b/e word motions handle punctuation runs and line crossing.
     fn w_b_e_handle_punctuation_and_line_crossing() {
         let mut s = vim_state();
         s.set_content("foo.bar\nbaz");
@@ -1382,6 +1414,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — gg jumps to the first line and G to the last.
     fn gg_and_g_capital_motions() {
         let mut s = vim_state();
         s.set_content("a\nb\nc");
@@ -1397,6 +1430,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a pending g/d operator is canceled by an unrelated key.
     fn pending_g_and_d_canceled_by_other_key() {
         let mut s = vim_state();
         s.set_content("a\nb\nc");
@@ -1410,6 +1444,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — x deletes the character under the cursor into the register.
     fn x_deletes_char_under_cursor() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1419,6 +1454,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — dd deletes the line into the register; deleting the last line leaves it empty.
     fn dd_deletes_line_last_line_becomes_empty() {
         let mut s = vim_state();
         s.set_content("a\nb");
@@ -1435,6 +1471,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — yy yanks linewise and p/P paste the line below/above.
     fn yy_and_p_linewise_paste_below_and_above() {
         let mut s = vim_state();
         s.set_content("a\nb");
@@ -1457,6 +1494,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — a charwise yank pastes after the cursor.
     fn charwise_yank_and_paste_after_cursor() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1470,6 +1508,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — a charwise visual yank spans lines into the register.
     fn visual_charwise_yank_across_lines() {
         let mut s = vim_state();
         s.set_content("abc\ndef");
@@ -1490,6 +1529,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — V enters linewise visual and y yanks the selected lines.
     fn visual_linewise_v_and_y() {
         let mut s = vim_state();
         s.set_content("a\nb\nc");
@@ -1505,6 +1545,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — a visual delete removes the selection into the register, joining lines.
     fn visual_delete_joins_lines() {
         let mut s = vim_state();
         s.set_content("abc\ndef");
@@ -1519,6 +1560,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-031 — u provides single-level undo, swapping the buffer with its pre-edit snapshot.
     fn undo_toggles_one_edit_and_one_insert_session() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1540,6 +1582,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — i/a/I/A/o/O enter Insert mode at their documented cursor positions.
     fn insert_entry_positions() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1564,6 +1607,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — o opens a line below with Lua auto-indent.
     fn o_opens_line_below_with_lua_auto_indent() {
         let mut s = CodeInputFieldStateBuilder::default()
             .language(Some(ferrowl_syntax::Language::Lua))
@@ -1577,6 +1621,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — O opens a line above at the same indent.
     fn shift_o_opens_line_above_same_indent() {
         let mut s = vim_state();
         s.set_content("  abc");
@@ -1587,6 +1632,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — Esc from Insert returns to Normal and moves the cursor left onto a character.
     fn esc_from_insert_moves_cursor_left() {
         let mut s = vim_state();
         s.set_content("abc");
@@ -1597,6 +1643,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — Esc in Normal mode is left unhandled so it reaches the dialog.
     fn esc_in_normal_is_unhandled() {
         let mut s = vim_state();
         let r = s.handle_events(KeyModifiers::NONE, KeyCode::Esc);
@@ -1604,6 +1651,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — Tab in Insert mode inserts four spaces.
     fn tab_inserts_four_spaces_in_insert_mode() {
         let mut s = vim_state();
         s.set_content("ab");
@@ -1615,6 +1663,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — Shift+Tab removes up to four leading spaces.
     fn backtab_dedents_partial_indent() {
         let mut s = vim_state();
         s.set_content("  abc");
@@ -1626,6 +1675,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — Shift+BackTab dedents in Insert mode.
     fn backtab_with_shift_modifier_dedents_in_insert_mode() {
         // Crossterm actually delivers BackTab with the SHIFT modifier set
         // (see ferrowl/src/app/overlay.rs and ferrowl/src/dialog/scripts.rs),
@@ -1641,6 +1691,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-034 — Tab/Shift+Tab are unhandled in Normal mode (Insert-only indent keys).
     fn tab_and_backtab_unhandled_in_normal_mode() {
         let mut s = vim_state();
         let r = s.handle_events(KeyModifiers::NONE, KeyCode::Tab);
@@ -1652,6 +1703,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-036 — a disabled editor permits motion and visual yank but ignores edits.
     fn disabled_field_allows_motion_and_visual_yank_but_not_edits() {
         let mut s = CodeInputFieldStateBuilder::default()
             .disabled(true)
@@ -1679,6 +1731,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a plain character in Normal mode is consumed as a command, not inserted.
     fn plain_char_in_normal_mode_is_consumed_not_inserted() {
         let mut s = vim_state();
         let r = key(&mut s, 'z');
@@ -1687,6 +1740,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — the editor reports a label for each vim mode.
     fn mode_label_values() {
         let mut s = vim_state();
         assert_eq!(s.mode_label(), Some("NORMAL"));
@@ -1710,6 +1764,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a visual selection range normalizes when the anchor is after the cursor.
     fn selection_range_normalizes_when_anchor_after_cursor() {
         let mut s = vim_state();
         s.set_content("abcdef");
@@ -1720,6 +1775,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-027 — in the plain single-mode profile, printable keys insert immediately.
     fn vim_false_legacy_chars_insert_immediately() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)

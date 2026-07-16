@@ -294,6 +294,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-074 — the CSMS maintains charge-point-wide and per-connector RFID accept-lists, deduplicating entries.
     fn ut_add_remove_dedup() {
         let mut s = RfidStore::default();
         assert!(s.add(Scope::CS, "A".into()));
@@ -306,6 +307,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-075 — an empty effective accept-set (nothing listed anywhere) accepts every tag.
     fn ut_empty_everywhere_accepts_all() {
         let s = store(&[]);
         assert!(cs_authorized(&s, "ANY"));
@@ -313,6 +315,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-076 — a charge-point-wide authorization is checked against the cp-wide list unioned with every connector list.
     fn ut_cs_authorize_unions_all_connectors() {
         let s = store(&["CS"]);
         with_rfids_mut(&s, |s| s.add(Scope::connector(2), "CONN2".into()));
@@ -324,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-074 — a connector's effective accept-set is its own list unioned with the charge-point-wide list.
     fn ut_scope_authorize_inherits_cs_only() {
         let s = store(&["CS"]);
         with_rfids_mut(&s, |s| s.add(Scope::connector(1), "CONN1".into()));

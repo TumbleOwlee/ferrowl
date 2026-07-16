@@ -69,6 +69,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-031 — a line logged via C_Log is routed to the host's module log sink.
     fn ut_log_routes_to_sink() {
         let sink = VecSink::default();
         let log = Log::init(sink.clone());

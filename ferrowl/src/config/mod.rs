@@ -92,6 +92,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-033 — a saved device/session file reloads to an equal value (envelope round-trips).
     fn ut_load_device_and_session_roundtrip() {
         let dpath = tmp("ferrowl_cfgmod_device.toml");
         Converter::save(&DeviceConfig::default(), &dpath, FileType::Toml).unwrap();
@@ -103,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-054 — loading a device config self-heals a legacy per-register `update` snippet on every load.
     fn ut_load_device_migrates_update_scripts() {
         let path = tmp("ferrowl_cfgmod_legacy_update.toml");
         std::fs::write(
@@ -119,6 +121,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-003 — a path with an unknown extension fails to load with an unknown-format error.
     fn ut_load_unknown_format_errors() {
         let e = load_session("/tmp/ferrowl_cfg.bin");
         assert!(matches!(e, Err(ConfigError::UnknownFormat(_))));

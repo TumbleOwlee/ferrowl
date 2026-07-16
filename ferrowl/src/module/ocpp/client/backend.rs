@@ -416,6 +416,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// OC-R-060 — the CS heartbeat cadence uses the interval the CSMS returned in its BootNotification response.
     fn boot_interval_prefers_csms_value() {
         let resp =
             json!({ "currentTime": "2026-01-01T00:00:00Z", "interval": 120, "status": "Accepted" });
@@ -423,6 +424,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-060 — the heartbeat cadence falls back to 30 s when the CSMS interval is absent or zero.
     fn boot_interval_falls_back_on_zero_or_absent() {
         // Zero is treated as "unset" so the caller uses DEFAULT_HEARTBEAT_SECS.
         assert_eq!(boot_interval(&json!({ "interval": 0 })), None);
@@ -431,6 +433,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-087 — the in-memory message log is bounded to the most recent 200 messages, evicting oldest-first.
     fn push_capped_evicts_oldest_beyond_limit() {
         let mut buf = Vec::new();
         for _ in 0..(MAX_MESSAGES + 50) {
@@ -447,6 +450,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-078 — each recorded message renders its direction, status, and payload for display and logging.
     fn log_line_renders_direction_status_and_payload() {
         let m = OcppMessage::new(
             Dir::In,

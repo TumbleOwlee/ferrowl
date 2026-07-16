@@ -138,6 +138,7 @@ mod tests {
     use super::{Cell, CellKind, CellType, ValueRange};
 
     #[test]
+    /// MB-R-030 — a cell carries both a cell type and an access direction (read/write/read-write).
     fn ut_value_default() {
         assert_eq!(
             Cell::default(&CellKind::Read(CellType::Coil)),
@@ -154,6 +155,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-030 — a value-initialized cell preserves its cell type and access direction.
     fn ut_value_from_u16() {
         assert_eq!(
             Cell::from_u16(&CellKind::Read(CellType::Coil), 1),
@@ -179,6 +181,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-030 — a region's declared kind exposes its underlying cell type independent of access direction.
     fn ut_kind_get_type() {
         assert_eq!(CellKind::Read(CellType::Coil).cell_type(), CellType::Coil);
         assert_eq!(

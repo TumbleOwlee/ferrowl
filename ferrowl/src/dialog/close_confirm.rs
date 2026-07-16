@@ -191,6 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-023 — Enter on the close-confirm popup closes the underlying dialog.
     fn ut_enter_closes() {
         let mut d = CloseConfirmDialog::new();
         assert_eq!(
@@ -200,6 +201,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Space on the close-confirm popup closes the underlying dialog.
     fn ut_space_closes() {
         let mut d = CloseConfirmDialog::new();
         assert_eq!(
@@ -209,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc dismisses the close-confirm popup and returns to editing.
     fn ut_esc_dismisses() {
         let mut d = CloseConfirmDialog::new();
         assert_eq!(
@@ -218,6 +221,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — a modified key is consumed and keeps the confirm popup open.
     fn ut_modified_keys_consumed() {
         let mut d = CloseConfirmDialog::new();
         for code in [KeyCode::Enter, KeyCode::Char(' '), KeyCode::Esc] {
@@ -232,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — an unrelated key is consumed and keeps the confirm popup open.
     fn ut_other_keys_consumed() {
         let mut d = CloseConfirmDialog::new();
         assert_eq!(
@@ -267,6 +272,7 @@ mod tests {
     // --- route_close_confirm -------------------------------------------------
 
     #[test]
+    /// UI-R-023 — routing reports NotActive when no confirm popup is open.
     fn ut_route_not_active_when_none() {
         let mut confirm: Option<CloseConfirmDialog> = None;
         assert_eq!(
@@ -277,6 +283,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — confirming through the router closes and clears the popup.
     fn ut_route_close_clears_popup() {
         let mut confirm = Some(CloseConfirmDialog::new());
         assert_eq!(
@@ -287,6 +294,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — dismissing through the router clears the popup and consumes the key.
     fn ut_route_dismiss_clears_popup_and_reports_consumed() {
         let mut confirm = Some(CloseConfirmDialog::new());
         assert_eq!(
@@ -297,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — an unrelated key routed to the popup keeps it open and is consumed.
     fn ut_route_other_key_stays_open_and_consumed() {
         let mut confirm = Some(CloseConfirmDialog::new());
         assert_eq!(

@@ -51,7 +51,7 @@ Thirteen formats. Every one of them determines a fixed width in 16-bit registers
 ### 2.1 `U8` / `I8`
 
 An 8-bit format still occupies a **whole 16-bit register**, never half of one. The
-byte sits in the register's **high** byte under `Big` endian and in its **low**
+byte sits in the register's **low** byte under `Big` endian and in its **high**
 byte under `Little` endian.
 
 ### 2.2 Byte order

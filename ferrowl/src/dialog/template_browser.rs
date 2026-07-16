@@ -274,8 +274,8 @@ mod tests {
     use super::*;
     use ferrowl_ui::state::VimMode;
 
-    /// UI-R-053 — the browser lists only the templates of its own script context.
     #[test]
+    /// UI-R-053 — the browser lists only the templates of its own script context.
     fn ut_lists_only_context_templates() {
         let browser = TemplateBrowser::new(ScriptContext::Modbus);
         assert!(!browser.templates.is_empty());
@@ -288,8 +288,8 @@ mod tests {
         }
     }
 
-    /// UI-R-053 — the preview shows the selected template's code and cannot be edited.
     #[test]
+    /// UI-R-053 — the preview shows the selected template's code and cannot be edited.
     fn ut_preview_is_read_only_and_follows_selection() {
         let mut browser = TemplateBrowser::new(ScriptContext::Modbus);
         let first = browser.selected().unwrap();
@@ -311,8 +311,8 @@ mod tests {
         assert_eq!(browser.preview.state.content().trim(), second.code.trim());
     }
 
-    /// UI-R-053 — `Esc` and `q` close the overlay without picking anything.
     #[test]
+    /// UI-R-053 — `Esc` and `q` close the overlay without picking anything.
     fn ut_esc_and_q_close() {
         let mut browser = TemplateBrowser::new(ScriptContext::Session);
         assert_eq!(
@@ -325,8 +325,8 @@ mod tests {
         );
     }
 
-    /// UI-R-054 — `Enter` yields the selected template for insertion.
     #[test]
+    /// UI-R-054 — `Enter` yields the selected template for insertion.
     fn ut_enter_yields_selected_template() {
         let mut browser = TemplateBrowser::new(ScriptContext::Session);
         let selected = browser.selected().unwrap();
@@ -337,6 +337,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-053 — Tab cycles focus between the template list and its preview.
     fn ut_tab_cycles_list_and_preview() {
         let mut browser = TemplateBrowser::new(ScriptContext::Modbus);
         assert_eq!(browser.focus, BrowserFocus::List);
@@ -347,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-053 — routing reports NotActive when the browser is closed.
     fn ut_route_not_active_when_none() {
         let mut browser: Option<TemplateBrowser> = None;
         assert_eq!(
@@ -356,6 +358,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-054 — confirming a template through the router closes the browser overlay.
     fn ut_route_insert_clears_overlay() {
         let mut browser = Some(TemplateBrowser::new(ScriptContext::Session));
         let outcome = route_template_browser(&mut browser, KeyModifiers::NONE, KeyCode::Enter);
@@ -364,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-053 — a close key clears the browser overlay.
     fn ut_route_close_clears_overlay() {
         let mut browser = Some(TemplateBrowser::new(ScriptContext::Session));
         assert_eq!(
@@ -382,6 +386,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-053 — the read-only template preview cannot be edited.
     fn ut_preview_stays_in_normal_mode() {
         // Sanity: a disabled vim editor never leaves Normal mode, so `i` cannot start typing.
         let mut browser = TemplateBrowser::new(ScriptContext::Modbus);

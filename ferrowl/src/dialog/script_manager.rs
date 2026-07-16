@@ -310,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — a new script name that is empty or duplicates another is refused.
     fn ut_create_script_rejects_empty_and_duplicate_names() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),
@@ -343,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-058 — `t` toggles and `d` deletes the selected script in the working list.
     fn ut_toggle_and_delete_selected() {
         let mut scripts = vec![ScriptDef {
             name: "a".into(),
@@ -370,9 +372,8 @@ mod tests {
         assert!(mgr.scripts.is_empty());
     }
 
-    /// UI-R-056 — the table title advertises the help overlay only; the binding list it used to
-    /// carry overflowed the panel and now lives in that overlay.
     #[test]
+    /// UI-R-056 — the script table's title advertises only the help overlay, not individual bindings.
     fn ut_script_table_title_advertises_help_only() {
         let table = script_table(rows(&[]));
         let title = format!("{:?}", table.widget);
@@ -382,8 +383,8 @@ mod tests {
         }
     }
 
-    /// UI-R-054 — the suffix search skips every taken name, not just the base.
     #[test]
+    /// UI-R-054 — the suffix search skips every taken name, not just the base.
     fn ut_unique_name_suffixes_past_taken_names() {
         let scripts = vec![
             ScriptDef {
@@ -401,9 +402,8 @@ mod tests {
         assert_eq!(unique_name(&scripts, "sine"), "sine");
     }
 
-    /// UI-R-055 — renaming to the script's own name is accepted (a no-op), not refused as a
-    /// duplicate of itself.
     #[test]
+    /// UI-R-055 — renaming a script to its own current name is accepted.
     fn ut_rename_to_own_name_is_accepted() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),
@@ -429,6 +429,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-058 — `c` toggles the script table between compact and normal rows.
     fn ut_toggle_compact_flips_row_margin() {
         let mut scripts: Vec<ScriptDef> = Vec::new();
         let mut table = script_table(rows(&scripts));

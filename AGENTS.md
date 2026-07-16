@@ -75,6 +75,13 @@ type (`feat/`, `fix/`, `docs/`).
    functions change, the chosen approach. That is part of the implementation, so it belongs
    to the plan (gate 2) and to the PR that describes how the issue was resolved, never to
    the issue.
+
+   **Structure every issue with `##` section headers**, not a wall of prose, so a reader can
+   scan it: a `## Background` (or `## Why`) stating the problem and context, a `## Scope` (or
+   the requirement changes) naming what is in scope, and a `## Goal` stating the outcome.
+   Add further sections as the issue warrants. Keep long enumerations compact (grouped ID
+   ranges, not one paragraph per item). The same structured, header-per-section shape applies
+   to PR bodies (gate 3).
 4. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
    the file only ever contains normative text. The plan tracks what is not yet backed by
    a passing test.
@@ -90,7 +97,14 @@ type (`feat/`, `fix/`, `docs/`).
    the why. The spec is the first stage, hence the first commit — legal on a branch,
    never on `main`.
    Every new or changed requirement ships with at least one test whose doc comment cites
-   its ID (`/// UI-R-051 — …`). Do not backfill IDs onto existing tests.
+   its ID (`/// UI-R-051 — …`). Existing tests carry IDs on the same terms: every test that
+   pins observable behavior shall cite the requirement it verifies. A test of a pure internal
+   or helper detail that no requirement governs may stay untagged. Where a test verifies real
+   behavior that no requirement yet states, add the requirement (a normative change — gate 1)
+   rather than attach a loose ID.
+   The citing doc comment goes on the line **directly below** the `#[test]`/`#[tokio::test]`
+   attribute, immediately above the `fn`. A given requirement ID appears **at most once** per
+   test — one test verifying several requirements lists each once; never repeat the same ID.
    The task is not done until the plan's Verification method has actually been run and
    its outcome reported. Waiving it requires asking.
 7. **Reconcile the spec.** If implementation forced the behavior to differ from what

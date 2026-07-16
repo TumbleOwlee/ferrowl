@@ -138,6 +138,8 @@ macro_rules! define_ocpp_version {
         #[cfg(test)]
         mod ut_validate_flags {
             #[test]
+            /// OC-R-008 — each action's validate flag matches whether its request type actually derives `Validate`,
+            /// so the version's validation rules are applied to exactly the actions that have them.
             fn ut_validate_flag_matches_request_type() {
                 $(
                     assert_eq!(

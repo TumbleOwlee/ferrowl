@@ -222,6 +222,17 @@ run once, toggle enabled, delete, compact) with a one-line description each. `Es
 keys. The script table's title shall advertise only this overlay, not the individual
 bindings.
 
+**UI-R-058** — In the script-manager dialog, while the script table is focused, the
+table shall support editing its working script list: entering a non-empty name in the
+new-script input and confirming shall add a new enabled, empty script (a name that is
+empty or already used by another script is refused, per the same rule as UI-R-055);
+`t` shall toggle the selected script between enabled and disabled; `d` shall delete the
+selected script after a yes/no confirmation (UI-R-023); and `c` shall toggle the table
+between compact and normal row rendering. `t` and `d` shall be a no-op when no script is
+selected. These edits change the dialog's working list only and take effect on the owner
+when the dialog is applied (per SC-R-024); they are the bindings advertised by the
+table's help overlay (UI-R-056).
+
 ## Code editor (vim-modal)
 
 **UI-R-027** — The multi-line code editor shall support two operating profiles:

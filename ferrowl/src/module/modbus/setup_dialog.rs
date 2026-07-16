@@ -847,6 +847,7 @@ mod tests {
     /// Typing into the config-path field opens the filesystem suggestion popup, and the
     /// popup is drawn on top of the dialog by the trailing `render_overlay` calls in `render`.
     #[test]
+    /// UI-R-026 — the config-path field shows a completion popup.
     fn ut_render_config_path_field_shows_suggestion_popup() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
@@ -869,6 +870,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — the setup dialog resolves a reconnect-off selection into the config value.
     fn ut_resolve_reconnect_off_maps_to_some_false() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
@@ -884,6 +886,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server-role setup resolves to no reconnect setting.
     fn ut_resolve_server_role_reports_no_reconnect() {
         // Reconnect is hidden for servers; resolving must not report a value for a setting the
         // user never saw, so applying it can't clobber the device config's existing setting.
@@ -900,6 +903,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — Edit mode pre-fills the dialog from the existing config.
     fn ut_edit_prefills_reconnect_off() {
         let timing = Timing {
             timeout_ms: 100,
@@ -925,6 +929,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — the focus cycle skips the reconnect field when it is disabled for a server role.
     fn ut_focus_next_skips_reconnect_for_server_role() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
@@ -950,6 +955,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter sets the close request, which clears after being taken.
     fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
         let mut dialog = SetupDialog::create(default_timing());
         assert!(!dialog.take_close_request());
@@ -961,6 +967,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into a setup text field rather than entering command mode.
     fn ut_colon_in_text_input_types() {
         let mut dialog = SetupDialog::create(default_timing());
         // Default focus is Name, a free-text field; `:` is typed as ordinary text.
@@ -969,6 +976,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm keeps the setup dialog open.
     fn ut_esc_in_confirm_keeps_setup_open() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
@@ -979,6 +987,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Space in the close-confirm closes the setup dialog.
     fn ut_space_in_confirm_closes() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);

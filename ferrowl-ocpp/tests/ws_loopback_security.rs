@@ -81,6 +81,7 @@ fn write_pem(label: &str, pem: &str) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-030 — a CS with Basic Auth sends the `Authorization: Basic` header and the CSMS accepts matching credentials.
 async fn basic_auth_accepts_matching_credentials() {
     let auth = BasicAuth {
         username: "cp001".to_owned(),
@@ -117,6 +118,7 @@ async fn basic_auth_accepts_matching_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-031 — a CSMS rejects an upgrade whose Basic Auth credentials do not match, answering 401.
 async fn basic_auth_rejects_mismatched_credentials() {
     let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),
@@ -154,6 +156,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-031 — a CSMS rejects an upgrade with no `Authorization` header, answering 401.
 async fn basic_auth_rejects_missing_credentials() {
     let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),
@@ -188,6 +191,7 @@ async fn basic_auth_rejects_missing_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-034 — a CS trusts a certificate supplied via `ca_file`, completing a TLS loopback to the CSMS.
 async fn tls_loopback_over_self_signed_cert() {
     let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
     let cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
@@ -239,6 +243,7 @@ async fn tls_loopback_over_self_signed_cert() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-034 — a CS rejects a server certificate not trusted by the webpki roots or its configured `ca_file`.
 async fn tls_loopback_rejects_untrusted_cert() {
     let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
     let cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
@@ -292,6 +297,7 @@ async fn tls_loopback_rejects_untrusted_cert() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-036 — a CS with `insecure_skip_verify` accepts any server certificate and connects.
 async fn self_signed_csms_with_skip_verify_client_connects() {
     let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),
@@ -332,6 +338,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-036 — without `insecure_skip_verify`, a CS rejects an untrusted self-signed CSMS certificate.
 async fn self_signed_csms_without_skip_verify_client_rejects() {
     let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),
@@ -372,6 +379,7 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-031 — Basic Auth credential checking still applies when layered over a self-signed TLS connection.
 async fn basic_auth_over_self_signed_tls_checks_credentials() {
     let auth = BasicAuth {
         username: "cp001".to_owned(),
@@ -439,6 +447,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-040 — `require_client_cert` combined with a self-signed CSMS certificate fails the server's start.
 async fn self_signed_with_require_client_cert_is_rejected_at_build() {
     let result = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),

@@ -975,6 +975,7 @@ mod tests {
     // over plain ws is valid, config-file-only) must hand that section back unchanged — the
     // security UI is hidden for ws, and a hidden section must never clobber the file.
     #[test]
+    /// UI-R-024 — a ws setup resolves preserving the prefilled security.
     fn ut_resolve_ws_preserves_prefilled_security() {
         let security = OcppSecurityConfig {
             username: Some("cp001".into()),
@@ -1008,6 +1009,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a wss server with no TLS material resolves (self-signed) without a validation error.
     fn ut_server_wss_none_resolves_self_signed_no_cert_error() {
         let d = wss_dialog(1); // Server, security level defaults to None
         let spec = d
@@ -1019,6 +1021,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a wss server with basic auth resolves without a validation error.
     fn ut_server_wss_basic_auth_resolves_self_signed_no_cert_error() {
         let mut d = wss_dialog(1); // Server
         d.security
@@ -1034,6 +1037,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server TLS setup missing its cert fails validation and keeps the dialog open.
     fn ut_server_tls_missing_cert_is_rejected() {
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1042,6 +1046,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server TLS setup with a nonexistent cert file fails validation.
     fn ut_server_tls_nonexistent_cert_is_rejected() {
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1052,6 +1057,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server TLS setup with valid files passes validation.
     fn ut_server_tls_valid_files_pass() {
         let cert = tmp_file("cert.crt");
         let key = tmp_file("key.key");
@@ -1063,6 +1069,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS server missing its client CA fails validation.
     fn ut_server_mutual_tls_missing_client_ca_is_rejected() {
         let cert = tmp_file("cert2.crt");
         let key = tmp_file("key2.key");
@@ -1077,6 +1084,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS client missing its cert/key fails validation.
     fn ut_client_mutual_tls_missing_cert_key_is_rejected() {
         let mut d = wss_dialog(0); // Client
         d.security
@@ -1087,6 +1095,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a client CA file, when set, must exist to pass validation.
     fn ut_client_ca_file_when_set_must_exist() {
         let mut d = wss_dialog(0);
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1096,12 +1105,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a wss client with no TLS material passes validation.
     fn ut_client_wss_none_is_allowed() {
         let d = wss_dialog(0); // Client, level defaults to None
         assert!(d.resolve().is_ok());
     }
 
     #[test]
+    /// UI-R-024 — a ws setup never requires security material.
     fn ut_ws_never_requires_security() {
         let mut d = OcppSetupDialog::new(); // Ws, Client by default
         set_text(&mut d.name, "cs-1");
@@ -1112,6 +1123,7 @@ mod tests {
     // --- edit -> resolve round trip ------------------------------------------------------------
 
     #[test]
+    /// UI-R-024 — Edit mode round-trips a mutual-TLS server config through the dialog.
     fn ut_edit_resolve_roundtrip_mutual_tls_server() {
         let cert = tmp_file("rt_cert.crt");
         let key = tmp_file("rt_key.key");
@@ -1139,6 +1151,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — Edit mode round-trips a skip-verify client config through the dialog.
     fn ut_edit_resolve_roundtrip_client_skip_verify() {
         let spec = OcppSpec {
             name: "cp-1".into(),
@@ -1163,6 +1176,7 @@ mod tests {
     // --- render height -----------------------------------------------------------------------
 
     #[test]
+    /// UI-R-024 — the TLS hint row renders only for the server role.
     fn ut_render_hint_row_only_for_server_below_tls() {
         let area = Rect::new(0, 0, 80, 60);
 
@@ -1202,6 +1216,7 @@ mod tests {
     // --- focus traversal ------------------------------------------------------------------------
 
     #[test]
+    /// UI-R-022 — a ws selection hides (skips) all security fields in the focus cycle.
     fn ut_focus_ws_hides_all_security_fields() {
         let mut d = OcppSetupDialog::new(); // Ws by default
         d.set_focused(true);
@@ -1226,6 +1241,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — a wss client focus cycle includes the security selection and skip-verify fields.
     fn ut_focus_wss_none_shows_security_selection_and_skip_verify_for_client() {
         let mut d = wss_dialog(0); // Client, wss, level None
         d.set_focused(true);
@@ -1241,6 +1257,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — a wss server focus cycle omits the skip-verify field.
     fn ut_focus_wss_none_server_has_no_skip_verify() {
         let mut d = wss_dialog(1); // Server, wss, level None
         d.set_focused(true);
@@ -1254,6 +1271,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — a mutual-TLS server focus cycle reaches the client-CA field.
     fn ut_focus_wss_mutual_tls_server_reaches_client_ca_file() {
         let mut d = wss_dialog(1); // Server
         d.security
@@ -1274,6 +1292,7 @@ mod tests {
     /// Typing into the config-path field opens the filesystem suggestion popup, and the popup is
     /// drawn on top of the dialog by the trailing `render_overlay` calls in `render`.
     #[test]
+    /// UI-R-026 — the config-path field shows a completion popup.
     fn ut_render_config_path_field_shows_suggestion_popup() {
         let mut dialog = OcppSetupDialog::new();
         dialog.config_path.state.set_focused(true);
@@ -1293,6 +1312,7 @@ mod tests {
     // --- close-confirm --------------------------------------------------------------------------
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter sets the close request, which clears after being taken.
     fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
         let mut dialog = OcppSetupDialog::new();
         assert!(!dialog.take_close_request());
@@ -1304,6 +1324,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm keeps the setup dialog open.
     fn ut_esc_in_confirm_keeps_open() {
         let mut dialog = OcppSetupDialog::new();
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
@@ -1314,6 +1335,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into a setup text field rather than entering command mode.
     fn ut_colon_in_text_input_types() {
         let mut dialog = OcppSetupDialog::new();
         // Default focus is Name, a free-text field; `:` must be typed as ordinary text.

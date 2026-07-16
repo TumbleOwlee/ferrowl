@@ -89,6 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-033 — the Lua formatter reindents nested function/if/for blocks four spaces per level.
     fn ut_nested_function_if_for_blocks_reindent() {
         let src = "function foo()\nfor i=1,10 do\nif i>5 then\nprint(i)\nend\nend\nend";
         let expected = "function foo()\n    for i=1,10 do\n        if i>5 then\n            print(i)\n        end\n    end\nend";
@@ -96,6 +97,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — elseif/else are reindented to the parent block depth.
     fn ut_elseif_and_else_sit_at_parent_depth() {
         let src = "if x then\na()\nelseif y then\nb()\nelse\nc()\nend";
         let expected = "if x then\n    a()\nelseif y then\n    b()\nelse\n    c()\nend";
@@ -103,6 +105,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — the formatter leaves long-string interior lines byte-for-byte unchanged.
     fn ut_long_string_interior_lines_byte_untouched() {
         let src = "local s = [[\n    keep me exactly    \nend]]";
         let expected = "local s = [[\n    keep me exactly    \nend]]";
@@ -110,6 +113,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — an `end` inside a string does not change reindent depth.
     fn ut_end_inside_string_does_not_dedent() {
         let src = "function foo()\nlocal s = \"end\"\nend";
         let expected = "function foo()\n    local s = \"end\"\nend";
@@ -117,6 +121,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — repeat/until blocks reindent correctly.
     fn ut_repeat_until_blocks() {
         let src = "repeat\nx()\nuntil done";
         let expected = "repeat\n    x()\nuntil done";
@@ -124,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — blank lines are normalized to empty by the formatter.
     fn ut_blank_lines_become_empty() {
         let src = "function foo()\n\nend";
         let expected = "function foo()\n\nend";
@@ -131,6 +137,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — the Lua formatter is idempotent.
     fn ut_idempotent() {
         let src = "function foo()\n  for i=1,10 do\n      print(i)\n end\nend";
         let once = format(src);
@@ -139,12 +146,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — the Lua formatter always returns output, even for un-parseable input.
     fn ut_always_returns_something_for_garbage() {
         let src = "]==] unterminated [==[";
         let _ = format(src);
     }
 
     #[test]
+    /// UI-R-033 — multi-line call parentheses do not double-indent.
     fn ut_multiline_call_parens_do_not_double_indent() {
         // Regression: `(` used to be tracked as a block opener alongside `function`,
         // doubling the indent depth for continuation lines inside a multi-line signature.

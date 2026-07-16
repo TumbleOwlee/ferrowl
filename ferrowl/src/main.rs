@@ -407,6 +407,7 @@ mod tests {
     // The demo session script must at least parse and run cleanly against an empty module
     // registry (no modules -> the loop body never executes, so C_Log is never touched).
     #[test]
+    /// SC-R-020 — the demo session-level script runs against the module registry.
     fn ut_demo_session_script_runs_on_empty_registry() {
         let script = demo_session_script();
         assert!(script.enabled);

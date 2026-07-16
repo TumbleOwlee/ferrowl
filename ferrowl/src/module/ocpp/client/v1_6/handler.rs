@@ -473,6 +473,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// OC-R-063 — an inbound Call naming a connector this CS does not have is rejected with PropertyConstraintViolation.
     fn ut_unknown_connector_rejected() {
         let mut s = CsState::default();
         s.connectors.clear();
@@ -536,6 +537,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a reservation is recorded at the connector level the request targets.
     fn ut_reserve_now_targets_connector_not_cs() {
         let h = handler_with(two_connectors());
         drive(
@@ -556,6 +558,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — connector id 0 records the reservation at the charge-point level (OC-R-063: id 0 is the charge point).
     fn ut_reserve_now_connector_zero_is_cs_level() {
         let h = handler_with(CsState::default());
         drive(
@@ -571,6 +574,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a cancellation carrying the same reservation id clears the reservation at whichever level holds it.
     fn ut_cancel_reservation_clears_matching_connector() {
         let h = handler_with(two_connectors());
         drive(
@@ -586,6 +590,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-063 — connector id 0 means the charge point itself, so ChangeAvailability at 0 targets every connector.
     fn ut_change_availability_status_and_zero_targets_all() {
         let h = handler_with(two_connectors());
         drive(
@@ -604,6 +609,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-070 — a remote start mints a transaction id and sets the connector charging; a remote stop clears it and returns to available.
     fn ut_remote_start_then_stop_transaction() {
         let h = handler_with(two_connectors());
         drive(
@@ -624,6 +630,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-068 — clearing charging profiles with no purpose erases every per-purpose limit on the connector.
     fn ut_clear_profile_and_unlock_connector() {
         let mut s = two_connectors();
         s.connector_mut(1).unwrap().limit = Some(16.0);
@@ -636,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-068 — clearing charging profiles by purpose erases only the per-purpose limit matching that criterion.
     fn ut_clear_profile_erases_only_named_purpose() {
         let mut s = two_connectors();
         {
@@ -684,6 +692,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-067 — a charging-profile installation whose stack level exceeds the configured maximum is rejected.
     fn ut_set_charging_profile_rejects_above_max_stack() {
         // Default config seeds ChargeProfileMaxStackLevel = 10.
         let h = handler_with(two_connectors());
@@ -700,6 +709,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-067 — an accepted charging profile applies its limit to the targeted connector under the field matching its purpose.
     fn ut_set_charging_profile_routes_by_purpose() {
         let h = handler_with(two_connectors());
         drive(&h, "SetChargingProfile", set_profile("TxProfile", 0, 16.0));
@@ -721,6 +731,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-072 — ending a transaction clears only the transaction-scoped limit; the default and maximum limits persist.
     fn ut_stop_clears_only_tx_limit() {
         let mut s = two_connectors();
         {

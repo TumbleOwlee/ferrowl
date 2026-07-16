@@ -298,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a focused vim editor shows its current mode tag in the title.
     fn focused_vim_field_appends_mode_tag_to_title() {
         let w = CodeInputFieldBuilder::default()
             .border(full_border())
@@ -311,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — an unfocused editor shows no mode tag.
     fn unfocused_field_has_no_mode_tag() {
         let w = CodeInputFieldBuilder::default()
             .border(full_border())
@@ -329,6 +331,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — the mode tag tracks Insert and Visual mode transitions.
     fn mode_tag_tracks_insert_and_visual_after_events() {
         // No configured title -> bare "[LABEL]" title.
         let w = CodeInputFieldBuilder::default()
@@ -350,6 +353,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a charwise visual selection is highlighted across two lines, with the cursor cell winning.
     fn selection_highlights_charwise_span_two_lines() {
         let w = CodeInputFieldBuilder::default().build().unwrap();
         let mut st = CodeInputFieldStateBuilder::default().build().unwrap();
@@ -383,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — a visual selection highlight is clipped to the horizontal-scroll window.
     fn selection_clips_to_h_scroll_window() {
         let w = CodeInputFieldBuilder::default().build().unwrap();
         let mut st = CodeInputFieldStateBuilder::default().build().unwrap();

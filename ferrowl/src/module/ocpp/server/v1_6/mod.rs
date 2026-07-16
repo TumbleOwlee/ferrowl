@@ -107,6 +107,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// OC-R-078 — an inbound Call is tagged with the charge-point/connector scope it belongs to.
     fn ut_inbound_connector_scope() {
         assert_eq!(
             V1_6::inbound_connector("StatusNotification", &json!({ "connectorId": 2 })),
@@ -124,6 +125,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-078 — an outbound Call is tagged with the connector scope it targets, defaulting the connector id.
     fn ut_inject_scope_defaults_connector_id() {
         // A connector-scoped Lua payload gets the connector id when it lacks one.
         let mut p = json!({});
@@ -144,6 +146,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-065 — a GetConfiguration naming keys targets those keys; naming none targets every key.
     fn ut_config_request_all_vs_single() {
         assert_eq!(V1_6::config_request(""), json!({}));
         assert_eq!(
@@ -153,6 +156,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-065 — a GetConfiguration request's key list is parsed to select which configuration keys are read.
     fn ut_parse_get_configuration() {
         let resp = json!({
             "configurationKey": [

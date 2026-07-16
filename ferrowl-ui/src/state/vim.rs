@@ -194,11 +194,13 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-030 — the OSC 52 clipboard side-effect is best-effort and never panics.
     fn emit_osc52_does_not_panic() {
         emit_osc52("hello");
     }
 
     #[test]
+    /// UI-R-028 — the `w` motion treats a punctuation run as its own word.
     fn word_forward_skips_punct_run_as_own_word() {
         let lines = vec!["foo.bar baz".to_string()];
         assert_eq!(word_forward(&lines, 0, 0), (0, 3));
@@ -207,12 +209,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — the `w` motion crosses line boundaries like vim.
     fn word_forward_crosses_lines() {
         let lines = vec!["foo".to_string(), "bar".to_string()];
         assert_eq!(word_forward(&lines, 0, 0), (1, 0));
     }
 
     #[test]
+    /// UI-R-028 — the `b` motion moves to the start of the previous word.
     fn word_backward_basic() {
         let lines = vec!["foo bar baz".to_string()];
         assert_eq!(word_backward(&lines, 0, 8), (0, 4));
@@ -220,6 +224,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-028 — the `e` motion moves to the end of the current/next word.
     fn word_end_forward_basic() {
         let lines = vec!["foo bar".to_string()];
         assert_eq!(word_end_forward(&lines, 0, 0), (0, 2));

@@ -197,6 +197,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// OC-R-081 — the session entry carries the endpoint (scheme, ip, port, path), from which the connection URL is built.
     fn ut_protocol_display_and_url() {
         let spec = OcppSpec {
             name: "cs-1".into(),
@@ -232,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-011 — an OCPP module entry round-trips carrying its self-describing `type` tag.
     fn ut_spec_roundtrip_with_type_tag() {
         let spec = OcppSpec {
             name: "cs-1".into(),
@@ -272,6 +274,7 @@ mod tests {
     // A wss endpoint without TLS material must never yield `None` (would bind plain TCP):
     // it falls back to the ephemeral self-signed mode.
     #[test]
+    /// OC-R-095 — a wss CSMS with no TLS material configured falls back to an ephemeral self-signed certificate.
     fn ut_effective_csms_tls_wss_without_material_falls_back_to_self_signed() {
         let spec = spec_with(OcppProtocol::Wss, Default::default());
         assert!(spec.csms_self_signed_fallback());
@@ -281,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-042 — a ws:// CSMS endpoint binds plain TCP; the endpoint scheme is authoritative for the transport.
     fn ut_effective_csms_tls_ws_stays_plain() {
         let spec = spec_with(OcppProtocol::Ws, Default::default());
         assert!(!spec.csms_self_signed_fallback());
@@ -290,6 +294,7 @@ mod tests {
     // The scheme wins: a ws endpoint binds plain TCP even with certificate files configured, so
     // the URL never advertises a transport the listener doesn't speak.
     #[test]
+    /// OC-R-042 — a ws:// CSMS endpoint leaves any configured TLS material inert.
     fn ut_effective_csms_tls_ws_ignores_configured_certificates() {
         let security = crate::config::ocpp::OcppSecurityConfig {
             cert_file: Some("certs/csms.pem".into()),
@@ -301,6 +306,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-096 — explicit server cert + key files take precedence over the ephemeral self-signed fallback.
     fn ut_effective_csms_tls_explicit_files_win_over_fallback() {
         let security = crate::config::ocpp::OcppSecurityConfig {
             cert_file: Some("certs/csms.pem".into()),

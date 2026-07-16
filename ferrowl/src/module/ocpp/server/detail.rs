@@ -662,6 +662,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// OC-R-066 — a config-update merges into existing keys and appends new ones in the CS detail view.
     fn merge_config_updates_existing_and_appends_new() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("A".into(), "1".into(), false);
@@ -677,6 +678,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — the connector detail overlay's focus cycle omits the config-key pane.
     fn connector_overlay_has_no_key_pane() {
         let mut d = DetailOverlay::new("CP".into(), Scope::connector(1), false);
         assert!(!d.is_cs);
@@ -688,6 +690,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — the CS detail overlay's focus cycle reaches the config-key pane.
     fn cs_overlay_reaches_key_pane() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         assert!(d.is_cs);
@@ -762,6 +765,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — the detail overlay's focus cycle includes the RFID panes.
     fn focus_cycle_includes_rfid_panes() {
         // CS flat (component_col=false): State -> Cfg -> KeyInput -> Rfid -> RfidInput -> wrap.
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
@@ -789,6 +793,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — the CS detail focus cycle includes the component column.
     fn focus_cycle_cs_component_col() {
         // CS with a Component column: State -> Cfg4 -> KeyInput -> Rfid -> RfidInput -> wrap.
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, true);
@@ -816,6 +821,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-066 — the CS config table shows a readonly column per key.
     fn config_table_shows_readonly_column() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("A".into(), "1".into(), true);
@@ -831,6 +837,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-066 — deleting removes the selected config key.
     fn delete_removes_selected_config_key() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("A".into(), "1".into(), false);
@@ -842,6 +849,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-066 — refetching the selected config key requests a fetch.
     fn refetch_selected_config_key_requests_fetch() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
@@ -851,6 +859,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — Enter on a config key opens the value dialog, then emits a set request.
     fn enter_on_config_opens_value_dialog_then_set_request() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
@@ -883,6 +892,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc on the detail overlay returns no close (opens the confirm).
     fn esc_returns_none() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -892,6 +902,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter on the detail overlay returns close.
     fn esc_then_enter_returns_close() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -903,6 +914,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc cancels the set-value sub-dialog.
     fn set_value_dialog_esc_cancels() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.merge_config("HeartbeatInterval".into(), "30".into(), false);
@@ -914,6 +926,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into the RFID input rather than entering command mode.
     fn colon_in_rfid_input_types() {
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, false);
         d.focus = DetailOverlayFocus::RfidInput;

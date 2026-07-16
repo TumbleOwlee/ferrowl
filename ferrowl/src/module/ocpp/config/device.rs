@@ -250,6 +250,7 @@ mod tests {
     use ferrowl_util::convert::{Converter, FileType};
 
     #[test]
+    /// SC-R-022 — a script entry with no `enabled` flag defaults to enabled.
     fn ut_script_enabled_defaults_true() {
         // A file entry without an `enabled` flag deserializes as active.
         let s: ScriptDef = serde_json::from_str(r#"{"name":"a","code":"x = 1"}"#).unwrap();
@@ -257,6 +258,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — an OCPP device config round-trips through TOML and JSON.
     fn ut_device_config_roundtrip() {
         let cfg = OcppDeviceConfig {
             version: Some("0.1.0".into()),
@@ -322,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-023 — an OCPP device config predating the security section loads with its default.
     fn ut_device_config_without_security_section_still_parses() {
         // Pre-existing config files (written before Security Profiles were added) have no
         // `security` table/key at all; `#[serde(default)]` must fill it in as the all-`None`
@@ -343,6 +346,7 @@ mod tests {
     // An old-format device config file (predating `script_interval`) must still load, with
     // `script_interval` defaulting to 1.0.
     #[test]
+    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     fn ut_device_config_loads_without_script_interval_field() {
         let json = serde_json::json!({
             "ocpp_version": "1.6",
@@ -355,6 +359,7 @@ mod tests {
     // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
     // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
     #[test]
+    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     fn ut_device_config_script_interval_duration_sanitized() {
         let mut cfg = OcppDeviceConfig::default();
         assert_eq!(
@@ -376,6 +381,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     fn ut_device_config_script_interval_duration_floored() {
         let cfg = OcppDeviceConfig {
             script_interval: 0.0001,
@@ -388,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — new security fields round-trip through TOML and JSON.
     fn ut_security_config_new_fields_round_trip() {
         let cfg = OcppSecurityConfig {
             self_signed: true,
@@ -404,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-096 — a wss CSMS with no server cert/key files uses `self_signed` for its TLS material.
     fn ut_csms_tls_self_signed_without_cert_files() {
         let cfg = OcppSecurityConfig {
             self_signed: true,
@@ -414,6 +422,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-096 — explicit server cert + key files take precedence over `self_signed` for a wss CSMS.
     fn ut_csms_tls_explicit_files_win_over_self_signed() {
         let cfg = OcppSecurityConfig {
             self_signed: true,
@@ -426,6 +435,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-036 — a CS TLS configuration carries the `insecure_skip_verify` flag.
     fn ut_cs_tls_carries_insecure_skip_verify() {
         let cfg = OcppSecurityConfig {
             insecure_skip_verify: true,
@@ -438,6 +448,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-081 — the device config carries the module's Lua scripts (not the session entry).
     fn ut_from_spec_carries_scripts() {
         let spec = OcppSpec {
             name: "cs-1".into(),

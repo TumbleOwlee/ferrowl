@@ -340,9 +340,9 @@ mod tests {
         (cert.pem(), key.serialize_pem())
     }
 
+    #[test]
     /// OC-R-041 — a well-formed certificate and key load, pinning the happy path the negative
     /// cases below are measured against.
-    #[test]
     fn ut_load_certs_and_key_roundtrip() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cert_path = temp_pem("roundtrip-cert", &cert_pem);
@@ -351,9 +351,9 @@ mod tests {
         load_private_key(&key_path).expect("key should load");
     }
 
+    #[test]
     /// OC-R-041 — failing to open a certificate file is a TLS error, not a panic or a silent
     /// empty chain.
-    #[test]
     fn ut_load_certs_missing_file_is_tls_error() {
         let missing = temp_pem("missing-cert", "");
         std::fs::remove_file(&missing).unwrap();
@@ -363,9 +363,9 @@ mod tests {
         ));
     }
 
+    #[test]
     /// OC-R-041 — a readable file with no certificate section fails as NoCertificates rather than
     /// being accepted as an empty chain.
-    #[test]
     fn ut_load_certs_without_certificate_section_is_no_certificates() {
         let (_cert, key_pem) = cert_and_key_pem();
         let path = temp_pem("key-only", &key_pem);
@@ -375,8 +375,8 @@ mod tests {
         ));
     }
 
-    /// OC-R-041 — failing to find a private key in a readable file is NoPrivateKey.
     #[test]
+    /// OC-R-041 — failing to find a private key in a readable file is NoPrivateKey.
     fn ut_load_private_key_without_key_section_is_no_private_key() {
         let (cert_pem, _key) = cert_and_key_pem();
         let path = temp_pem("cert-only", &cert_pem);

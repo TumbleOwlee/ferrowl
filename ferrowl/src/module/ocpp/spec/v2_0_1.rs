@@ -1524,6 +1524,7 @@ mod tests {
 
     /// Every JSON-only action ships a handcrafted template that decodes and validates.
     #[test]
+    /// OC-R-091 — every 2.0.1 raw-JSON action ships a template that decodes and validates against its request type.
     fn ut_json_templates_cover_all_json_actions_and_decode() {
         for name in json_actions() {
             let template =
@@ -1546,6 +1547,7 @@ mod tests {
     ];
 
     #[test]
+    /// OC-R-090 — an action is raw-JSON exactly when its required fields include nested/repeated shapes a flat table cannot express.
     fn ut_flat_and_nested_actions_have_specs() {
         assert!(action_spec("Reset").is_some());
         assert!(action_spec("UnlockConnector").is_some());
@@ -1562,6 +1564,7 @@ mod tests {
 
     /// Every dialog-reachable action is exactly one of: a typed spec or an explicit JSON action.
     #[test]
+    /// OC-R-089 — every dialog-reachable 2.0.1 action is exactly one of typed or raw-JSON.
     fn ut_every_dialog_action_is_classified() {
         let mut reachable: Vec<&str> = V2_0_1::csms_actions().iter().map(|(n, _)| *n).collect();
         reachable.extend(
@@ -1584,6 +1587,7 @@ mod tests {
     /// real rust-ocpp request type (required fields present, enum values + types valid). This is
     /// the guardrail against a wrong wire name / enum / nesting in a spec or assembler.
     #[test]
+    /// OC-R-094 — every typed action's default-prefilled dialog assembles a payload that decodes against the version's request type.
     fn ut_default_payloads_decode_for_every_spec() {
         let mut reachable: Vec<&str> = V2_0_1::csms_actions().iter().map(|(n, _)| *n).collect();
         reachable.extend(

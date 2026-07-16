@@ -17,6 +17,8 @@ fn int(endian: Endian) -> Format {
 }
 
 #[test]
+/// MB-R-002 — an unspecified slave id defaults to 0 (access defaults to `ReadWrite`, MB-R-005;
+/// kind defaults to holding register, MB-R-097).
 fn it_register_builder_applies_documented_defaults() {
     let reg = RegisterBuilder::default()
         .format(int(Endian::Big))
@@ -24,10 +26,11 @@ fn it_register_builder_applies_documented_defaults() {
         .expect("only `format` is required to build a Register");
     assert_eq!(*reg.slave_id(), 0);
     assert_eq!(*reg.access(), Access::ReadWrite);
-    assert_eq!(*reg.kind(), Kind::InputRegister);
+    assert_eq!(*reg.kind(), Kind::HoldingRegister);
 }
 
 #[test]
+/// MB-R-007 — a typed U16 value round-trips through raw register words.
 fn it_u16_value_roundtrips_through_words() {
     let fmt = int(Endian::Big);
     let words = encode_value(&fmt, &Value::U16((300, res()))).expect("300 fits a u16 register");
@@ -39,6 +42,7 @@ fn it_u16_value_roundtrips_through_words() {
 }
 
 #[test]
+/// MB-R-013 — big- and little-endian produce different words but each decodes back to the same value.
 fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
     let value = Value::U32((0x0001_0002, res()));
     let be = encode_value(
@@ -71,6 +75,7 @@ fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
 }
 
 #[test]
+/// MB-R-007 — a negative signed value round-trips through raw register words.
 fn it_signed_value_roundtrips_negative() {
     let fmt = Format::I16((Endian::Big, res(), BitField::default()));
     let words = encode_value(&fmt, &Value::I16((-5, res()))).expect("encodes -5");
@@ -81,6 +86,7 @@ fn it_signed_value_roundtrips_negative() {
 }
 
 #[test]
+/// MB-R-018 — a float value round-trips through its IEEE 754 register words.
 fn it_float_value_roundtrips() {
     let fmt = Format::F32((Endian::Big, res()));
     let words = encode_value(&fmt, &Value::F32((1.5, res()))).expect("encodes 1.5");
@@ -91,6 +97,7 @@ fn it_float_value_roundtrips() {
 }
 
 #[test]
+/// MB-R-007 — an ASCII value round-trips through raw register words.
 fn it_ascii_value_roundtrips_through_string_encoding() {
     let fmt = Format::Ascii((Alignment::Left, Width(4)));
     let words = encode(&fmt, "Hi").expect("ASCII text encodes into 4 registers");
@@ -101,6 +108,7 @@ fn it_ascii_value_roundtrips_through_string_encoding() {
 }
 
 #[test]
+/// MB-R-023 — decoding fewer words than the format width is rejected.
 fn it_decode_rejects_too_few_words() {
     let fmt = Format::U32((Endian::Big, res(), BitField::default()));
     assert!(
@@ -110,6 +118,7 @@ fn it_decode_rejects_too_few_words() {
 }
 
 #[test]
+/// MB-R-022 — a string that is neither a decimal nor a `0x` literal fails to encode into a numeric register.
 fn it_encode_rejects_unparseable_string() {
     let fmt = int(Endian::Big);
     assert!(

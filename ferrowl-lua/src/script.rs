@@ -42,6 +42,7 @@ mod tests {
     use mlua::Lua;
 
     #[test]
+    /// SC-R-003 — a compiled script is invoked with no args; a successful call is Ok, a failing one Err.
     fn ut_script() {
         let lua = Lua::new();
 

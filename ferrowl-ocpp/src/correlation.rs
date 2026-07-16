@@ -63,6 +63,7 @@ mod tests {
     use crate::ocppj::CallErrorCode;
 
     #[tokio::test]
+    /// OC-R-017 — a registered outbound Call is completed by the matching inbound reply, keyed by unique id.
     async fn ut_register_complete() {
         let p = PendingCalls::new();
         let id = UniqueId("a".into());
@@ -73,6 +74,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-019 — completing an id that matches no pending entry is discarded silently (no panic).
     async fn ut_complete_unknown_id_is_noop() {
         let p = PendingCalls::new();
         // Must not panic.
@@ -80,6 +82,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-022 — on teardown every pending outbound Call is failed with a rejection, so no caller waits forever.
     async fn ut_fail_all_notifies_waiters() {
         let p = PendingCalls::new();
         let rx = p.register(UniqueId("x".into()));

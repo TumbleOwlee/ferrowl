@@ -292,6 +292,7 @@ mod tests {
     use crate::{Cell, CellKind, CellType, Memory, MemoryError, range::Range};
 
     #[test]
+    /// MB-R-030 — a default cell carries its cell type and access direction, zero-initialized.
     fn ut_memory() {
         assert_eq!(
             Cell::default(&CellKind::Read(CellType::Coil)),
@@ -308,6 +309,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-095 — declaring an overlapping same-type range merges into one region spanning the union.
     fn ut_memory_add_ranges_1() {
         let mut memory = Memory::default();
         memory.add_ranges(1, &CellKind::Read(CellType::Coil), &[Range::new(0, 10)]);
@@ -320,6 +322,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-095 — a contained overlapping range merges into the existing region, not a new one.
     fn ut_memory_add_ranges_2() {
         let mut memory = Memory::default();
         memory.add_ranges(1, &CellKind::Read(CellType::Coil), &[Range::new(0, 10)]);
@@ -332,6 +335,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-095 — a bridging range merges all intersecting regions, preserving stored values and zero-initializing newly covered addresses.
     fn ut_memory_add_ranges_bridging_two_slices_merges_all() {
         let kind = CellKind::ReadWrite(CellType::Register);
         let mut memory = Memory::default();
@@ -363,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-095 — a range overlapping from below merges into a single region spanning the union.
     fn ut_memory_add_ranges_3() {
         let mut memory = Memory::default();
         memory.add_ranges(1, &CellKind::Read(CellType::Coil), &[Range::new(10, 10)]);
@@ -375,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-096 — disjoint declared regions stay separate; no address is covered by more than one.
     fn ut_memory_add_ranges_4() {
         let mut memory = Memory::default();
         memory.add_ranges(1, &CellKind::Read(CellType::Coil), &[Range::new(15, 10)]);
@@ -388,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-029 — a write then read succeeds on addresses fully covered by a declared region.
     fn ut_memory_write_read_combined() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -408,6 +415,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-029 — a write/read of a sub-range fully inside a declared region succeeds.
     fn ut_memory_write_read_partial_range() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -428,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked write fails when the supplied value count does not equal the range length.
     fn ut_memory_write_wrong_length() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -447,6 +456,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked write fails when the key is unregistered.
     fn ut_memory_write_unknown_key() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -463,6 +473,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked read fails when the key is unregistered.
     fn ut_memory_read_unknown_key() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]);
@@ -474,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked write fails when the addressed cell is not writable as the requested cell type.
     fn ut_memory_writable_wrong_type() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -489,6 +501,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked read fails when the addressed cell is not readable as the requested cell type.
     fn ut_memory_readable_wrong_type() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -504,6 +517,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked write fails on a read-only cell.
     fn ut_memory_readonly_not_writable() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]);
@@ -515,6 +529,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-033 — a checked read fails on a write-only cell.
     fn ut_memory_writeonly_not_readable() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(0, 5)]);
@@ -534,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-031 — a write region overlapping a read cell of the same type widens it to read/write.
     fn ut_memory_widen_read_then_write() {
         // Read cell + overlapping Write of same type -> ReadWrite.
         let mut memory: Memory<u8> = Memory::default();
@@ -560,6 +576,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-031 — a read region overlapping a write cell of the same type widens it to read/write.
     fn ut_memory_widen_write_then_read() {
         // Write cell + overlapping Read of same type -> ReadWrite.
         let mut memory: Memory<u8> = Memory::default();
@@ -578,6 +595,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-031 — a same-type same-access overlap merges without changing the access direction.
     fn ut_memory_widen_write_then_write_noop() {
         // Write cell + overlapping Write of same type -> unchanged, still write-only.
         let mut memory: Memory<u8> = Memory::default();
@@ -596,6 +614,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-031 — a read/write region overlapping a read/write cell of the same type is a no-op merge.
     fn ut_memory_widen_readwrite_then_readwrite_noop() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -621,6 +640,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-032 — declaring a range overlapping a cell of incompatible cell type fails.
     fn ut_memory_widen_incompatible_read_cell() {
         // Read cell + overlapping incompatible access (wrong type) -> false.
         let mut memory: Memory<u8> = Memory::default();
@@ -633,6 +653,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-032 — declaring a range overlapping a write cell of incompatible cell type fails.
     fn ut_memory_widen_incompatible_write_cell() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(0, 5)]);
@@ -644,6 +665,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-032 — a multi-range declaration with a later incompatible overlap leaves the store entirely unchanged.
     fn ut_memory_add_ranges_partial_failure_leaves_map_untouched() {
         // Multi-range call: range1 merges cleanly, range2 hits an incompatible
         // overlap. The whole call must fail atomically -- range1's merge must
@@ -679,6 +701,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-032 — a three-range declaration failing on the third range commits none of the earlier merges.
     fn ut_memory_add_ranges_partial_failure_third_range_leaves_map_untouched() {
         // Three ranges in one call: range1 and range2 each merge cleanly
         // against separate pre-existing slices (range2 merging against a
@@ -720,6 +743,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-032 — declaring a non-read/write range overlapping a read/write cell fails as an incompatible access combination.
     fn ut_memory_widen_incompatible_readwrite_cell() {
         // ReadWrite cell + non-ReadWrite overlapping access -> false.
         let mut memory: Memory<u8> = Memory::default();
@@ -732,6 +756,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-034 — unchecked read/write ignore per-cell access direction but still require declared coverage.
     fn ut_memory_write_read_unchecked() {
         let mut memory: Memory<u8> = Memory::default();
         memory.add_ranges(
@@ -757,6 +782,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-029 — a read/write spanning multiple adjacent declared regions succeeds across them.
     fn ut_memory_walk_multiple_slices() {
         // Two adjacent but non-overlapping slices: a read/write spanning both
         // walks each slice in turn.

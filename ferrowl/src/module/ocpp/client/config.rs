@@ -232,6 +232,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter sets the close request, which clears after being taken.
     fn ut_take_close_request_set_via_esc_enter_and_cleared_after_take() {
         let mut dialog = dialog();
         assert!(!dialog.take_close_request());
@@ -243,6 +244,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm keeps the config dialog open.
     fn ut_esc_in_confirm_keeps_open() {
         let mut dialog = dialog();
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
@@ -253,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into a config text field rather than entering command mode.
     fn ut_colon_in_text_input_types() {
         let mut dialog = dialog();
         // Default focus is Key, a free-text field; `:` must be typed as ordinary text.

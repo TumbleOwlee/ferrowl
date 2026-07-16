@@ -31,6 +31,9 @@ tables: coil, discrete input, holding register, input register.
 **MB-R-005** — A register's access shall be one of `ReadOnly`, `WriteOnly`,
 `ReadWrite`, defaulting to `ReadWrite`.
 
+**MB-R-097** — A register definition's kind shall default to holding register
+when unspecified.
+
 **MB-R-006** — A register's format shall determine its width in 16-bit registers,
 and that width shall be the number of consecutive addresses the register occupies
 starting at its address.
@@ -61,7 +64,7 @@ aliasing the same address. Words absent from `old` shall be treated as zero.
 configured width. Byte length shall be twice the register width.
 
 **MB-R-012** — `U8` and `I8` shall occupy a whole 16-bit register; the byte shall
-sit in the high byte for big-endian and the low byte for little-endian.
+sit in the low byte for big-endian and the high byte for little-endian.
 
 **MB-R-013** — Every integer and float format shall carry a byte order of either
 `Big` or `Little`. Big-endian shall interpret the register words' byte stream in

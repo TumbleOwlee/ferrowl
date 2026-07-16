@@ -135,6 +135,8 @@ fn client_mem() -> Mem {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-035 — the client polls every read operation and writes each result into the shared store
+/// (and accepts write commands, MB-R-046, and terminates gracefully, MB-R-049).
 async fn tcp_client_polls_server_and_executes_commands() {
     let port = free_port();
     let srv_mem = server_mem();
@@ -262,6 +264,8 @@ async fn tcp_client_polls_server_and_executes_commands() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-043 — Modbus exceptions do not disconnect the client; it retries then skips the operation
+/// (and rejected write commands are logged without disconnecting, MB-R-047).
 async fn tcp_client_handles_server_rejections() {
     let port = free_port();
     // Server with no registered regions: every request for slave 1 is rejected.
@@ -312,6 +316,7 @@ async fn tcp_client_handles_server_rejections() {
 }
 
 #[tokio::test]
+/// MB-R-068 — a TCP client connect attempt to a port with no listener fails.
 async fn tcp_client_connect_refused_is_error() {
     // Nothing is listening on this port, so the connect fails.
     let port = free_port();
@@ -319,6 +324,7 @@ async fn tcp_client_connect_refused_is_error() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-071 — failure to bind the TCP listen address fails the server's start and surfaces the error.
 async fn tcp_server_bind_conflict_is_error() {
     let port = free_port();
     // Occupy the port so the server's bind fails.
@@ -331,6 +337,7 @@ async fn tcp_server_bind_conflict_is_error() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-055 — with reconnect disabled, a failed connect ends the client task with that error.
 async fn tcp_client_reconnect_false_dies_on_refused_connect() {
     // No listener; with reconnect off the spawned task's join result carries the connect error
     // instead of retrying forever.
@@ -358,6 +365,7 @@ async fn tcp_client_reconnect_false_dies_on_refused_connect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-050 — with reconnect enabled, a refused connect is retried after a backoff and connects once a listener appears.
 async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     // Nothing is listening yet: the client's first connect attempt fails. With reconnect on it
     // keeps retrying in the background; once a server starts on the port, it should connect and
@@ -415,6 +423,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-053 — Terminate aborts a reconnect backoff wait immediately and ends the client task with success.
 async fn tcp_client_terminate_during_backoff_exits_promptly() {
     // No listener, so the client sits in its reconnect backoff (up to 1s initially). Sending
     // Terminate must abort that wait immediately rather than sleeping it out.

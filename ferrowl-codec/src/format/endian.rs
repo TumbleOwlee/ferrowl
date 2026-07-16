@@ -27,6 +27,7 @@ mod tests {
     use super::Endian;
 
     #[test]
+    /// MB-R-013 — every integer/float format carries a byte order of `Big` or `Little`.
     fn ut_endian_display() {
         assert_eq!(Endian::Little.to_string(), "Little Endian");
         assert_eq!(Endian::Big.to_string(), "Big Endian");

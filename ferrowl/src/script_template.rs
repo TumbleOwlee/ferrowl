@@ -98,9 +98,9 @@ mod tests {
         ScriptContext::Session,
     ];
 
+    #[test]
     /// SC-R-037 — every bundled template's code body loads in the Lua runtime; a syntax error in a
     /// template is a test failure, never something a user meets after inserting it.
-    #[test]
     fn ut_every_template_compiles() {
         for template in TEMPLATES {
             let ctx = ferrowl_lua::ContextBuilder::<String>::default()
@@ -116,8 +116,8 @@ mod tests {
         }
     }
 
-    /// SC-R-036 — `templates(ctx)` returns exactly the templates declaring `ctx`.
     #[test]
+    /// SC-R-036 — `templates(ctx)` returns exactly the templates declaring `ctx`.
     fn ut_templates_filtered_by_context() {
         for ctx in CONTEXTS {
             for template in templates(ctx) {
@@ -136,8 +136,8 @@ mod tests {
         assert!(!modbus.contains(&"power-report"));
     }
 
-    /// SC-R-036 — every script context has at least one template, so the browser is never empty.
     #[test]
+    /// SC-R-036 — every script context has at least one template, so the browser is never empty.
     fn ut_every_context_has_a_template() {
         for ctx in CONTEXTS {
             assert!(!templates(ctx).is_empty(), "{ctx:?} has no template");

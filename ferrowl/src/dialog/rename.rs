@@ -178,15 +178,15 @@ pub fn route_rename(
 mod tests {
     use super::*;
 
-    /// UI-R-055 — the prompt opens pre-filled with the current name.
     #[test]
+    /// UI-R-055 — the prompt opens pre-filled with the current name.
     fn ut_prompt_is_prefilled() {
         let prompt = RenamePrompt::new("boot");
         assert_eq!(prompt.input.state.input(), "boot");
     }
 
-    /// UI-R-055 — `Enter` commits the trimmed field content, `Esc` cancels.
     #[test]
+    /// UI-R-055 — `Enter` commits the trimmed field content, `Esc` cancels.
     fn ut_enter_commits_trimmed_and_esc_cancels() {
         let mut prompt = RenamePrompt::new("boot");
         assert_eq!(
@@ -200,6 +200,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — typing edits the rename prompt's field.
     fn ut_typing_edits_the_field() {
         let mut prompt = RenamePrompt::new("a");
         assert_eq!(
@@ -212,8 +213,8 @@ mod tests {
         );
     }
 
-    /// UI-R-055 — `Esc` clears the prompt; a commit leaves it in place for the host to judge.
     #[test]
+    /// UI-R-055 — `Esc` clears the prompt; a commit leaves it in place for the host to judge.
     fn ut_route_cancel_clears_commit_keeps() {
         let mut rename = Some(RenamePrompt::new("a"));
         assert_eq!(
@@ -233,6 +234,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — routing reports NotActive when no rename prompt is open.
     fn ut_route_not_active_when_none() {
         let mut rename: Option<RenamePrompt> = None;
         assert_eq!(

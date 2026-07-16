@@ -198,6 +198,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — the module registry (C_Module) resolves and lists modules by name.
     fn ut_registry_resolve_and_list() {
         let registry = ModuleRegistry::new();
         assert!(registry.list().is_empty());
@@ -230,6 +231,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — replacing the registry drops stale module entries.
     fn ut_registry_replace_all_drops_stale_entries() {
         let registry = ModuleRegistry::new();
         let mut first: HashMap<String, Arc<dyn ModuleHost>> = HashMap::new();
@@ -250,6 +252,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-014 — the first occurrence of a duplicated instance name is left unchanged.
     fn ut_dedupe_names_first_occurrence_unchanged() {
         assert_eq!(
             dedupe_names(&["a".to_string(), "b".to_string()]),
@@ -258,6 +261,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-014 — later duplicate names are suffixed ` (2)`, ` (3)`, … in creation order.
     fn ut_dedupe_names_suffixes_repeats_in_order() {
         let names = vec!["a".to_string(), "a".to_string(), "a".to_string()];
         assert_eq!(
@@ -267,6 +271,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-014 — name de-duplication skips a suffix already taken by an earlier name.
     fn ut_dedupe_names_skips_candidate_colliding_with_earlier_name() {
         // "a (2)" is already taken by an earlier distinct name, so the second "a" must skip to
         // "a (3)".
@@ -320,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — a modbus module's register state is reachable from the session sim via the C_Module directory.
     fn ut_modbus_host_roundtrip_through_directory() {
         let mut registers = HashMap::new();
         registers.insert("setpoint".to_string(), holding(0));
@@ -368,6 +374,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — an ocpp client module's state and actions are reachable from the session sim via C_Module.
     fn ut_ocpp_client_entry_roundtrip_through_directory() {
         use crate::module::ocpp::client::lua_sim::ClientFields;
         use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
@@ -418,6 +425,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — an ocpp server module's stations are reachable from the session sim via C_Module.
     fn ut_ocpp_server_entry_roundtrip_through_directory() {
         use crate::module::ocpp::client::lua_sim::OcppFields;
         use crate::module::ocpp::lock::with_state_mut;
@@ -481,6 +489,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — a handle resolved before a registry replace goes stale and errors.
     fn ut_resolve_stale_after_replace_all_errors() {
         let registry = ModuleRegistry::new();
         let mut modules: HashMap<String, Arc<dyn ModuleHost>> = HashMap::new();

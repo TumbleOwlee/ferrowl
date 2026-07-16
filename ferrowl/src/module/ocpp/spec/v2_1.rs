@@ -555,6 +555,7 @@ mod tests {
     /// Every JSON-only action (2.1-only and inherited) ships a template that decodes and
     /// validates against the 2.1 types — this also proves the reused 2.0.1 templates still fit.
     #[test]
+    /// OC-R-091 — every 2.1 raw-JSON action (own and inherited) ships a template that decodes and validates against the 2.1 types.
     fn ut_json_templates_cover_all_json_actions_and_decode() {
         for name in json_actions() {
             let template =
@@ -588,6 +589,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-090 — the new 2.1 actions are classified typed vs raw-JSON by whether their required fields are nested/repeated.
     fn ut_new_2_1_actions_have_specs_or_are_json() {
         // Flat.
         assert!(action_spec("NotifyDERAlarm").is_some());
@@ -605,6 +607,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-089 — a 2.1 action shared with 2.0.1 resolves to the same typed/raw-JSON classification through the version seam.
     fn ut_shared_actions_delegate_to_v2_0_1() {
         // A shared action classified by 2.0.1 must resolve identically through 2.1's seam.
         assert!(action_spec("Reset").is_some());
@@ -615,6 +618,7 @@ mod tests {
 
     /// Every dialog-reachable 2.1 action is exactly one of: a typed spec or an explicit JSON action.
     #[test]
+    /// OC-R-089 — every dialog-reachable 2.1 action is exactly one of typed or raw-JSON.
     fn ut_every_dialog_action_is_classified() {
         for name in reachable() {
             let has_spec = action_spec(name).is_some();
@@ -629,6 +633,7 @@ mod tests {
     /// Every typed action's default-prefilled dialog assembles a payload that decodes into the real
     /// rust-ocpp 2.1 request type.
     #[test]
+    /// OC-R-094 — every typed 2.1 action's default-prefilled dialog assembles a payload that decodes against the 2.1 request type.
     fn ut_default_payloads_decode_for_every_spec() {
         for name in reachable() {
             let Some(spec) = action_spec(name) else {

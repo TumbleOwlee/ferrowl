@@ -314,6 +314,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-048 — the u32 field filter accepts digits and rejects other characters.
     fn u32_allowed_char_accepts_digits_rejects_others() {
         assert!(u32::allowed_char('0'));
         assert!(u32::allowed_char('9'));
@@ -322,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the i32 field filter accepts a leading minus.
     fn i32_allowed_char_accepts_minus() {
         assert!(i32::allowed_char('-'));
         assert!(i32::allowed_char('5'));
@@ -329,6 +331,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the f64 field filter accepts float characters.
     fn f64_allowed_char_accepts_float_chars() {
         assert!(f64::allowed_char('.'));
         assert!(f64::allowed_char('e'));
@@ -337,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the String field filter accepts any character.
     fn string_allowed_char_accepts_anything() {
         assert!(String::allowed_char('a'));
         assert!(String::allowed_char('!'));

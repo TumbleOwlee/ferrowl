@@ -177,6 +177,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — path completion filters candidates by the typed prefix.
     fn ut_prefix_filtering() {
         let root = setup("ferrowl_pathsuggest_prefix");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -191,6 +192,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — directory completions carry a trailing slash (partial suggestions).
     fn ut_trailing_slash_on_dirs() {
         let root = setup("ferrowl_pathsuggest_slash");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -203,6 +205,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — hidden entries are excluded from completions by default.
     fn ut_hidden_excluded_by_default() {
         let root = setup("ferrowl_pathsuggest_hidden_excl");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -214,6 +217,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — hidden entries appear once a dot prefix is typed.
     fn ut_hidden_included_when_typed() {
         let root = setup("ferrowl_pathsuggest_hidden_incl");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -226,6 +230,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — an extension filter keeps directories reachable for descent.
     fn ut_extension_filter_keeps_dirs() {
         let root = setup("ferrowl_pathsuggest_ext");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -243,12 +248,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — a missing directory yields no completions.
     fn ut_missing_dir_returns_empty() {
         let results = complete_path("/no/such/ferrowl/dir/foo", None, MAX_SUGGESTIONS);
         assert!(results.is_empty());
     }
 
     #[test]
+    /// UI-R-026 — a leading tilde expands to the home directory in completions.
     fn ut_tilde_expansion_with_fake_home() {
         let root = setup("ferrowl_pathsuggest_tilde");
         let expanded = expand_tilde("~/conf", Some(&root));
@@ -260,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — the completion list is capped in length.
     fn ut_result_cap() {
         let root = tmp("ferrowl_pathsuggest_cap");
         cleanup(&root);
@@ -278,6 +286,7 @@ mod tests {
     static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
+    /// UI-R-026 — empty input lists the current directory.
     fn ut_empty_input_lists_current_dir_without_prefix() {
         let _guard = CWD_LOCK.lock().unwrap();
         let original_cwd = std::env::current_dir().unwrap();
@@ -301,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — a directory suggestion is marked partial with a trailing-slash label.
     fn ut_provider_dir_partial_and_trailing_slash_label() {
         let root = setup("ferrowl_pathsuggest_provider_dir");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -317,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — a file suggestion's label is its last path component.
     fn ut_provider_file_label_is_last_component() {
         let root = setup("ferrowl_pathsuggest_provider_file");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -333,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — the provider honors the configured extension filter.
     fn ut_provider_extension_filter_honored() {
         let root = setup("ferrowl_pathsuggest_provider_ext");
         let dir_prefix = format!("{}/", root.to_string_lossy());
@@ -346,6 +358,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — the provider returns no suggestions for a missing directory.
     fn ut_provider_missing_dir_returns_empty() {
         let provider = FsPathProvider::default();
         let results = provider.suggest("/no/such/ferrowl/dir/foo");

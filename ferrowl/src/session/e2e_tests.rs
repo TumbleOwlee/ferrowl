@@ -176,6 +176,7 @@ fn server_entry_with_station(
 // --- 1. Two modbus modules, session mirror ----------------------------------
 
 #[test]
+/// SC-R-020 — the session sim mirrors state between two modbus modules via C_Module.
 fn it_two_modbus_modules_session_mirror() {
     let mem_a = evse_memory();
     let mem_b = evse_memory();
@@ -210,6 +211,7 @@ fn it_two_modbus_modules_session_mirror() {
 // --- 2. OCPP client -> modbus mirror -----------------------------------------
 
 #[test]
+/// SC-R-020 — the session sim mirrors OCPP client state into a modbus module via C_Module.
 fn it_ocpp_client_to_modbus_mirror() {
     let (state, _queue, entry) = client_entry();
     // seed connector 1 power before the sim starts.
@@ -240,6 +242,7 @@ fn it_ocpp_client_to_modbus_mirror() {
 // --- 3. OCPP action dispatch cross-module -------------------------------------
 
 #[test]
+/// SC-R-020 — the session sim dispatches an OCPP action on another module via C_Module.
 fn it_ocpp_action_dispatch_cross_module() {
     let (_state, queue, entry) = client_entry();
     let registry = registry_from(vec![("cs1", Arc::new(entry) as Arc<dyn ModuleHost>)]);
@@ -273,6 +276,7 @@ fn it_ocpp_action_dispatch_cross_module() {
 // --- 4. OCPP server enumeration -----------------------------------------------
 
 #[test]
+/// SC-R-020 — the session sim enumerates an OCPP server's stations via C_Module.
 fn it_ocpp_server_enumeration() {
     let (states, _queue, entry) = server_entry_with_station("CP1", 1);
     let registry = registry_from(vec![("csms", Arc::new(entry) as Arc<dyn ModuleHost>)]);
@@ -310,6 +314,7 @@ fn it_ocpp_server_enumeration() {
 // --- 5. Module removal mid-run -------------------------------------------------
 
 #[test]
+/// SC-R-020 — a module removed mid-run makes its C_Module handle error while the sim keeps looping.
 fn it_module_removal_mid_run_logs_error_and_keeps_looping() {
     let mem_b = evse_memory();
     let mem_keep = evse_memory();
@@ -364,6 +369,7 @@ fn it_module_removal_mid_run_logs_error_and_keeps_looping() {
 // --- 6. Rename -----------------------------------------------------------------
 
 #[test]
+/// SC-R-020 — after a rename, the old C_Module name errors and the new name resolves.
 fn it_module_rename_old_name_errors_new_name_resolves() {
     let mem_b = evse_memory();
     let registry = ModuleRegistry::new();
@@ -418,6 +424,7 @@ fn it_module_rename_old_name_errors_new_name_resolves() {
 // --- 7. Type/Role introspection -------------------------------------------------
 
 #[test]
+/// SC-R-020 — C_Module reports each module's type and role.
 fn it_type_role_introspection() {
     let mem = evse_memory();
     let (_state, _queue, entry) = client_entry();

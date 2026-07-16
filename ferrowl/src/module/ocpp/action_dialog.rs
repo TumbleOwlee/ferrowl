@@ -729,6 +729,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-089 — a typed dialog assembles a flat property table with each property's kind and prefill source.
     fn assemble_coerces_kinds_and_prefills_state() {
         let mut d = dialog();
         // connectorId prefilled from state (number), idTag from constant, optional note omitted.
@@ -754,6 +755,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-093 — a nested action (SetChargingProfile) is driven by a typed dialog whose custom assembler folds flat fields into the nested request.
     fn set_charging_profile_charging_rate_unit_in_table() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
         let mut d = ActionDialog::new("SetChargingProfile".into(), &s, |_| None, || "t".into());
@@ -764,6 +766,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-089 — a typed property is coerced to its declared kind (integer vs float) when assembled.
     fn number_coercion_int_vs_float() {
         assert_eq!(ActionDialog::coerce(PropKind::Number, "3"), Some(json!(3)));
         assert_eq!(
@@ -778,6 +781,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-089 — a property with a "now" prefill source is populated from current state.
     fn now_prefill_is_nonempty() {
         const TS: &[PropSpec] = &[PropSpec {
             name: "expiryDate",
@@ -799,6 +803,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-092 — a typed dialog's raw-JSON mode is prefilled from the current property rows.
     fn json_toggle_matches_assembled_rows() {
         let mut d = dialog();
         let assembled = d.payload().unwrap();
@@ -808,6 +813,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-094 — a payload that fails to decode against the version's request type is reported and not sent.
     fn malformed_json_aborts_send_and_sets_error() {
         let mut d = ActionDialog::json_only("Custom".into(), "{}");
         d.json.state.set_content("{ \"a\": 1, }"); // trailing comma: invalid JSON
@@ -826,6 +832,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-094 — a payload that decodes against the version's request type clears the error and is sent.
     fn valid_json_send_clears_error_and_sends() {
         let mut d = ActionDialog::json_only("Custom".into(), "{}");
         d.json_error = Some("stale error from a previous attempt".into());
@@ -844,6 +851,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — Enter on an argument row opens the value editor sub-overlay.
     fn enter_on_row_opens_value_editor() {
         let mut d = dialog();
         assert!(d.editor.is_none());
@@ -852,6 +860,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-094 — the assembled payload is validated by decoding against the version's request type before it is sent.
     fn send_button_emits_decodable_payload() {
         // Drive a real spec end-to-end: assemble must decode into the typed action.
         let s = crate::module::ocpp::spec::v1_6::action_spec("ChangeAvailability").unwrap();
@@ -868,6 +877,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-093 — a typed dialog's custom assembler folds flat fields into a nested SetChargingProfile request that decodes.
     fn nested_set_charging_profile_decodes() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
         let mut d = ActionDialog::new(
@@ -886,6 +896,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-093 — a typed dialog's custom assembler builds a nested SendLocalList request that decodes.
     fn nested_send_local_list_single_entry_decodes() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SendLocalList").unwrap();
         let mut d = ActionDialog::new(
@@ -900,6 +911,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-092 — a nested typed dialog's raw-JSON mode round-trips with its assembled rows.
     fn nested_json_toggle_round_trips() {
         let s = crate::module::ocpp::spec::v1_6::action_spec("SetChargingProfile").unwrap();
         let mut d = ActionDialog::new("SetChargingProfile".into(), &s, |_| None, || "t".into());
@@ -910,6 +922,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-093 — a typed dialog's custom assembler builds a nested NotifyEvent request that decodes.
     fn nested_notify_event_single_entry_decodes() {
         use ferrowl_ocpp::V2_0_1;
         let s = crate::module::ocpp::spec::v2_0_1::action_spec("NotifyEvent").unwrap();
@@ -942,6 +955,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc on the action dialog returns no close (opens the confirm).
     fn esc_returns_none() {
         let mut d = dialog();
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -951,6 +965,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter on the action dialog returns close.
     fn esc_then_enter_returns_close() {
         let mut d = dialog();
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -962,6 +977,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Space on the focused Send button sends and keeps the dialog open.
     fn space_on_send_returns_send_keep() {
         let mut d = dialog();
         while d.focus != ActionDialogFocus::Send {
@@ -974,6 +990,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Space off the Send button does not send.
     fn space_elsewhere_does_not_send() {
         let mut d = dialog();
         assert!(d.focus == ActionDialogFocus::Table);
@@ -981,6 +998,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc cancels only the value editor, not the whole dialog.
     fn value_editor_esc_still_cancels_editor_only() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Enter); // open value editor for selected row
@@ -990,6 +1008,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` inserts into the JSON editor in Insert mode.
     fn json_insert_colon_inserts() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1008,6 +1027,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc from JSON Insert mode returns to Normal without opening the confirm.
     fn json_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1029,6 +1049,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` in JSON Normal mode is consumed by the editor, opening no command line.
     fn json_normal_colon_consumed_by_editor() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1042,6 +1063,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm keeps the action dialog open.
     fn esc_in_confirm_keeps_dialog() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Esc);
@@ -1053,6 +1075,7 @@ mod tests {
     // --- #[derive(Focus)] cycle characterization --------------------------
 
     #[test]
+    /// UI-R-022 — Tab cycles table → toggle → Send in table mode.
     fn tab_cycles_table_toggle_send_in_table_mode() {
         let mut d = dialog();
         assert_eq!(d.focus, ActionDialogFocus::Table);
@@ -1068,6 +1091,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Tab cycles JSON → Send, skipping the disabled toggle in JSON-only mode.
     fn tab_cycles_json_send_skipping_toggle_in_json_only_mode() {
         let mut d = ActionDialog::json_only("Custom".into(), "{}");
         assert_eq!(d.focus, ActionDialogFocus::Json);
@@ -1081,6 +1105,7 @@ mod tests {
     // Sanctioned behavior change: pressing Toggle no longer jumps focus back to the fields;
     // it stays on the Toggle button, and the next Tab now routes through Json instead of Table.
     #[test]
+    /// UI-R-022 — toggling keeps focus, then Tab routes through the JSON editor.
     fn toggle_keeps_focus_then_tab_routes_through_json() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Tab); // Table -> Toggle

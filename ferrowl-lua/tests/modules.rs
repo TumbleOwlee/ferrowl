@@ -104,6 +104,7 @@ fn build_context() -> Context<String> {
 }
 
 #[test]
+/// SC-R-027 — a register read returns its natural Lua type and a host read error propagates as a Lua error.
 fn ut_modules_run_via_call() {
     let mut ctx = build_context();
     ctx.call(&"time".to_string()).unwrap();
@@ -125,6 +126,7 @@ fn ut_call_all_ok_when_no_script_errors() {
 }
 
 #[test]
+/// SC-R-014 — refresh_all runs each script once per interval, skipping any that ran within the window.
 fn ut_refresh_all_runs_then_throttles() {
     let mut ctx = build_context();
     // First pass with a zero window runs everything successfully.
@@ -134,6 +136,7 @@ fn ut_refresh_all_runs_then_throttles() {
 }
 
 #[test]
+/// SC-R-032 — a script error during refresh_all is collected without stopping the pass.
 fn ut_refresh_all_collects_errors() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("boom".to_string(), "error('x')")
@@ -165,6 +168,7 @@ impl LogSink for VecSink {
 }
 
 #[test]
+/// SC-R-031 — C_Log:Info output is routed to the host's module log sink.
 fn ut_c_log_info_routes_to_host_sink() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
@@ -178,6 +182,7 @@ fn ut_c_log_info_routes_to_host_sink() {
 }
 
 #[test]
+/// SC-R-033 — a Lua syntax error at load makes context construction fail (all-or-nothing per context).
 fn ut_builder_propagates_script_error() {
     // Invalid Lua makes the builder carry the error through to build().
     let result = ContextBuilder::<String>::default()
