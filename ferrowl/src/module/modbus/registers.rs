@@ -146,3 +146,136 @@ fn endian_cfg(e: &ferrowl_codec::format::Endian) -> EndianCfg {
         ferrowl_codec::format::Endian::Little => EndianCfg::Little,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::script::ScriptDef;
+    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::{Address, Format, RegisterBuilder};
+
+    fn reg(kind: Kind, address: Address) -> Register {
+        RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(kind)
+            .address(address)
+            .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
+            .build()
+            .unwrap()
+    }
+
+    /// MB-R-046 — a client write command is single/multiple by width and coil/register by kind.
+    #[test]
+    fn ut_write_command_selects_by_kind_and_width() {
+        let coil = reg(Kind::Coil, Address::Fixed(0));
+        assert!(matches!(
+            write_command(&coil, 1, 0, &[1]),
+            Command::WriteSingleCoil(1, 0, true)
+        ));
+        assert!(matches!(
+            write_command(&coil, 1, 0, &[0, 1]),
+            Command::WriteMultipleCoils(1, 0, _)
+        ));
+        let hr = reg(Kind::HoldingRegister, Address::Fixed(0));
+        assert!(matches!(
+            write_command(&hr, 1, 5, &[7]),
+            Command::WriteSingleRegister(1, 5, 7)
+        ));
+        assert!(matches!(
+            write_command(&hr, 1, 5, &[7, 8]),
+            Command::WriteMultipleRegister(1, 5, _)
+        ));
+    }
+
+    /// MB-R-080 — a virtual register occupies no store memory, so it has no memory binding.
+    #[test]
+    fn ut_register_mem_binding_virtual_is_none() {
+        assert!(register_mem_binding(&reg(Kind::HoldingRegister, Address::Virtual)).is_none());
+    }
+
+    /// MB-R-078 — coil/holding bind read/write cells; discrete-input/input bind read-only cells.
+    #[test]
+    fn ut_register_mem_binding_kind_direction() {
+        let bind = |k| register_mem_binding(&reg(k, Address::Fixed(2))).unwrap().0;
+        assert!(matches!(bind(Kind::Coil), MemKind::ReadWrite(CellType::Coil)));
+        assert!(matches!(
+            bind(Kind::DiscreteInput),
+            MemKind::Read(CellType::Coil)
+        ));
+        assert!(matches!(
+            bind(Kind::HoldingRegister),
+            MemKind::ReadWrite(CellType::Register)
+        ));
+        assert!(matches!(
+            bind(Kind::InputRegister),
+            MemKind::Read(CellType::Register)
+        ));
+    }
+
+    #[test]
+    fn ut_collect_scripts_keeps_enabled_nonempty() {
+        let device = crate::config::DeviceConfig {
+            scripts: vec![
+                ScriptDef {
+                    name: "a".into(),
+                    code: "x=1".into(),
+                    enabled: true,
+                },
+                ScriptDef {
+                    name: "disabled".into(),
+                    code: "y=2".into(),
+                    enabled: false,
+                },
+                ScriptDef {
+                    name: "blank".into(),
+                    code: "   ".into(),
+                    enabled: true,
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            collect_scripts(&device),
+            vec![("a".to_string(), "x=1".to_string())]
+        );
+    }
+
+    #[test]
+    fn ut_sync_register_def_writes_back_edited_fields() {
+        let mut def = RegisterDef {
+            slave_id: 0,
+            kind: Kind::HoldingRegister,
+            address: Some(0),
+            is_virtual: false,
+            access: AccessCfg::ReadOnly,
+            value_type: DevValueType::U16,
+            endian: EndianCfg::Big,
+            resolution: 1.0,
+            bitmask: None,
+            length: 4,
+            alignment: AlignmentCfg::Right,
+            values: vec![],
+            update: None,
+            description: String::new(),
+            default: None,
+        };
+        let register = RegisterBuilder::default()
+            .slave_id(9u8)
+            .access(Access::WriteOnly)
+            .kind(Kind::Coil)
+            .address(Address::Virtual)
+            .format(Format::F32((Endian::Little, Resolution(0.5))))
+            .build()
+            .unwrap();
+        sync_register_def(&mut def, &register);
+        assert_eq!(def.slave_id, 9);
+        assert!(matches!(def.access, AccessCfg::WriteOnly));
+        assert_eq!(def.kind, Kind::Coil);
+        assert!(def.is_virtual && def.address.is_none());
+        assert!(matches!(def.value_type, DevValueType::F32));
+        assert!(matches!(def.endian, EndianCfg::Little));
+        assert_eq!(def.resolution, 0.5);
+        assert!(def.bitmask.is_none());
+    }
+}
