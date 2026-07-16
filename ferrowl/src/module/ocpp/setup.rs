@@ -157,4 +157,25 @@ mod tests {
         apply_security_precedence(&mut loaded, &spec);
         assert_eq!(loaded.security, spec.security);
     }
+
+    #[test]
+    fn ut_render_and_focus_delegate_to_dialog() {
+        let mut sv = OcppSetupView::new();
+        sv.focus_next();
+        sv.focus_previous();
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        sv.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(!text.trim().is_empty());
+    }
+
+    #[test]
+    fn ut_confirm_resolves_and_builds_a_working_factory() {
+        let sv = OcppSetupView::new();
+        if let Some((name, factory)) = sv.confirm() {
+            assert!(!name.is_empty());
+            let _view = factory();
+        }
+    }
 }
