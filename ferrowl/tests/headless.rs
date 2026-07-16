@@ -9,6 +9,7 @@ fn bin() -> Command {
 }
 
 #[test]
+/// CL-R-032 — a headless run reaching its --duration deadline exits 0.
 fn it_runs_a_modbus_server_and_exits_clean() {
     let device = concat!(env!("CARGO_MANIFEST_DIR"), "/../configs/evse.toml");
     let module = format!(
@@ -34,6 +35,7 @@ fn it_runs_a_modbus_server_and_exits_clean() {
 }
 
 #[test]
+/// CL-R-030 — a module whose device config fails to load makes the headless run exit 1.
 fn it_fails_hard_on_a_missing_device_config() {
     let module = "name=it-headless-bad,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=15921,role=server";
     let output = bin()

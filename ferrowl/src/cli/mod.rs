@@ -304,6 +304,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// CL-R-002 — a --module TCP descriptor parses into a module instance.
     fn ut_parse_tcp_module() {
         let spec = parse_module_spec(
             "name=evse-1,device=configs/evse.toml,transport=tcp,ip=10.0.0.5,port=502,role=server",
@@ -322,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-002 — a --module TCP descriptor applies its documented defaults.
     fn ut_parse_tcp_defaults() {
         // ip and role default; type is an alias for device.
         let spec = parse_module_spec("name=m,type=d.toml,port=1502").unwrap();
@@ -336,6 +338,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-002 — a --module RTU descriptor parses into a module instance.
     fn ut_parse_rtu_module() {
         let spec = parse_module_spec(
             "name=m,device=d.toml,transport=rtu,path=/dev/ttyUSB0,baud=9600,role=client",
@@ -355,6 +358,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-004 — a --device occurrence auto-builds a TCP client with the fixed endpoint and default name.
     fn ut_device_spec_defaults() {
         let spec = create_module_spec_by_device("Device 0".to_string(), "d.toml".to_string());
         assert_eq!(spec.name, "Device 0");
@@ -370,16 +374,19 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-002 — a --module descriptor missing its name is a parse error.
     fn ut_missing_name_errors() {
         assert!(parse_module_spec("device=d.toml,port=502").is_err());
     }
 
     #[test]
+    /// CL-R-002 — a --module descriptor missing its port is a parse error.
     fn ut_missing_port_errors() {
         assert!(parse_module_spec("name=m,device=d.toml,transport=tcp").is_err());
     }
 
     #[test]
+    /// CL-R-007 — the instance set concatenates session, --module, then --device sources in order.
     fn ut_module_specs_combines_all_sources() {
         use ferrowl_util::convert::{Converter, FileType};
         let session = config::Session {
@@ -407,6 +414,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-003 — a --session file's instances resolve, split into modbus and ocpp.
     fn ut_session_splits_modbus_and_ocpp() {
         use ferrowl_util::convert::{Converter, FileType};
         let mut modbus =
@@ -456,6 +464,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-003 — a --session file that fails to load surfaces an error during resolution.
     fn ut_module_specs_session_load_error() {
         let args = CliArgs {
             command: None,
@@ -468,6 +477,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-002 — the descriptor mini-language rejects empty parts and malformed values.
     fn ut_parse_empty_parts_and_error_paths() {
         // Empty comma segment is skipped.
         assert_eq!(
@@ -488,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-002 — a --module RTU descriptor parses its full option set.
     fn ut_parse_rtu_full_options() {
         let spec = parse_module_spec(
             "name=m,device=d,transport=rtu,path=/dev/x,baud_rate=4800,parity=even,data_bits=7,stop_bits=2",
@@ -506,6 +517,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-013 — a run --ocpp descriptor applies its documented defaults.
     fn ut_parse_ocpp_spec_defaults() {
         let spec = parse_ocpp_spec("name=cs-1,device=cs.toml,port=9000").unwrap();
         assert_eq!(spec.name, "cs-1");
@@ -517,6 +529,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-013 — a run --ocpp descriptor parses its full option set.
     fn ut_parse_ocpp_spec_full() {
         let spec = parse_ocpp_spec(
             "name=cs-1,device=cs.toml,protocol=wss,ip=10.0.0.5,port=9001,path=/ocpp/cp001",
@@ -528,6 +541,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-013 — a malformed run --ocpp descriptor is a parse error.
     fn ut_parse_ocpp_spec_errors() {
         assert!(parse_ocpp_spec("device=d,port=1").is_err()); // missing name
         assert!(parse_ocpp_spec("name=m,port=1").is_err()); // missing device
@@ -537,6 +551,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-013 — the run subcommand parses its own flag set.
     fn ut_run_subcommand_parses() {
         let args = CliArgs::parse_from([
             "ferrowl",
@@ -570,6 +585,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-013 — run resolves modbus from --session/--module and ocpp from --session/--ocpp.
     fn ut_run_args_resolve_module_and_ocpp_specs() {
         let run = RunArgs {
             sessions: vec![],

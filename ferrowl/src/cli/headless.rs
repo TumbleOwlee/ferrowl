@@ -350,6 +350,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-043 — log draining is exact-by-count, emitting every occurrence of a repeated line.
     async fn ut_drain_log_counts_exact_even_with_duplicate_lines() {
         let log = new_log();
         {
@@ -384,6 +385,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-043 — a ring overflow between ticks is reported with a synthetic dropped-lines line.
     async fn ut_drain_log_reports_dropped_lines_on_ring_overflow() {
         let log = new_log();
         let overflow_by = 5;
@@ -402,6 +404,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-031 — a `[sim]` line flags exit-code 2 only when --exit-on-error is set.
     async fn ut_drain_log_flags_sim_error_prefix_only_when_requested() {
         let log = new_log();
         log.write().await.write(Level::Error, "[sim] boom");
@@ -415,6 +418,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-040 — session-sim lines are drained under the source name `session`.
     async fn ut_drain_log_session_source_uses_session_prefix() {
         let log = new_log();
         log.write().await.write(Level::Info, "hello");
@@ -430,6 +434,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-031 — a `[sim]` session-sim line flags exit-code 2 under --exit-on-error.
     async fn ut_drain_log_session_sim_error_flags_exit_on_error() {
         let log = new_log();
         log.write().await.write(Level::Error, "[sim] boom");
@@ -455,6 +460,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-023 — no session files means no session sim is created.
     fn ut_load_session_scripts_none_without_session_files() {
         // Mirrors the single-module `--module key=val` headless path (point 5 of the task):
         // no `--session` file means no `Session`, so no session sim is even considered.
@@ -463,6 +469,7 @@ mod tests {
     }
 
     #[test]
+    /// CL-R-027 — session scripts concatenate across files in order; the last file's interval wins.
     fn ut_load_session_scripts_aggregates_across_files_last_interval_wins() {
         use crate::config::Session as SessionConfig;
         use ferrowl_util::convert::{Converter, FileType};
@@ -602,6 +609,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-023 — the runner wires the session sim and drains its log under `session`.
     async fn ut_run_wires_session_sim_and_drains_its_log() {
         let args = session_run_args("enabled", true);
         let log_file = args.log_file.clone().unwrap();
@@ -617,6 +625,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-023 — with no enabled session script, no session sim is spawned.
     async fn ut_run_with_zero_enabled_scripts_spawns_no_session_sim() {
         let args = session_run_args("disabled", false);
         let log_file = args.log_file.clone().unwrap();
