@@ -1015,6 +1015,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — a fixed register's live value decodes from its memory word for display.
     fn ut_decode_definition_fixed_reads_memory_word() {
         let def = fixed_def();
         let mut memory = Memory::<Key<SlaveKey>>::default();
@@ -1037,6 +1038,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — a fixed register with no memory decodes to a zero display value.
     fn ut_decode_definition_fixed_missing_memory_defaults_to_zero() {
         let def = fixed_def();
         let memory = Memory::<Key<SlaveKey>>::default();
@@ -1046,6 +1048,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — a virtual register's live value comes from the virtual store.
     fn ut_decode_definition_virtual_uses_store_value() {
         let def = virtual_def();
         let memory = Memory::<Key<SlaveKey>>::default();
@@ -1057,6 +1060,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — a virtual register with no value renders blank.
     fn ut_decode_definition_virtual_missing_value_is_blank() {
         let def = virtual_def();
         let memory = Memory::<Key<SlaveKey>>::default();
@@ -1067,6 +1071,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — the first value fill is not counted as a change (no highlight).
     fn ut_decode_definition_first_fill_is_not_a_change() {
         let def = fixed_def();
         let memory = Memory::<Key<SlaveKey>>::default();
@@ -1079,6 +1084,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — a changed value stamps its change time to drive the highlight window.
     fn ut_decode_definition_value_change_stamps_changed_at() {
         let mut memory = Memory::<Key<SlaveKey>>::default();
         let key = Key {
@@ -1104,12 +1110,14 @@ mod tests {
     // --- view construction & key handling -----------------------------------
 
     #[test]
+    /// UI-R-021 — a new view starts with no overlay open.
     fn ut_new_view_starts_with_no_overlay() {
         let view = new_view();
         assert!(!view.is_overlay_active());
     }
 
     #[test]
+    /// UI-R-021 — Enter on an empty table opens no overlay.
     fn ut_enter_on_empty_table_does_not_open_overlay() {
         // No registers selected -> open_edit returns early without an overlay.
         let mut view = new_view();
@@ -1119,6 +1127,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-018 — the `:scripts` command is handled by the view, opening the script overlay.
     fn ut_scripts_command_opens_overlay_and_close_applies() {
         let mut view = new_view();
         drop(view.handle_command("script"));
@@ -1141,6 +1150,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-018 — the `:edit` command is handled by the view, opening the setup overlay.
     fn ut_edit_command_opens_setup_overlay() {
         let mut view = new_view();
         drop(view.handle_command("edit"));
@@ -1148,6 +1158,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Tab cycles focus through the setup overlay fields.
     fn ut_setup_overlay_tab_cycles_focus_via_derive() {
         // Regression for the `#[derive(Overlay)]` port: `Setup` is tagged `focus_cycle`, so Tab
         // must still advance the dialog's own focus once the dialog itself leaves the key
@@ -1169,6 +1180,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Shift+Tab cycles the setup overlay focus in reverse.
     fn ut_setup_overlay_backtab_cycles_focus_reverse() {
         use ferrowl_ui::traits::IsFocus;
         let mut view = new_view();
@@ -1184,6 +1196,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — an open register overlay consumes table-navigation keys.
     fn ut_register_overlay_swallows_table_navigation_key() {
         // Regression: while the register overlay is open, `Down` must be consumed by the
         // overlay's own dispatch (untagged -> bespoke `handle_overlay_key`), not fall through to
@@ -1202,6 +1215,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Enter confirms the edit dialog after field routing.
     fn ut_enter_still_confirms_edit_dialog_after_offer_first_routing() {
         // Regression for the offer-first key-routing refactor: the setup dialog is now offered
         // every key before the default Esc/Enter/Tab/BackTab handling runs, but Enter must still
@@ -1216,6 +1230,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc opens the close-confirm rather than closing the setup overlay.
     fn ut_esc_does_not_close_setup_overlay() {
         let mut view = new_view();
         drop(view.handle_command("edit"));
@@ -1229,6 +1244,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter closes the setup overlay.
     fn ut_esc_then_enter_closes_setup_overlay() {
         let mut view = new_view();
         drop(view.handle_command("edit"));
@@ -1240,6 +1256,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-018 — the `:add` command is handled by the view, opening the register-add overlay.
     fn ut_add_command_opens_add_overlay() {
         let mut view = new_view();
         drop(view.handle_command("add"));
@@ -1253,6 +1270,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-018 — the `:compact` command toggles the table's compact flag.
     fn ut_compact_command_toggles_table_compact_flag() {
         let mut view = new_view();
         assert!(!view.table.compact);
@@ -1320,6 +1338,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc opens the close-confirm rather than closing the register overlay.
     fn ut_esc_does_not_close_register_overlay() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1339,6 +1358,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter closes the register overlay.
     fn ut_esc_then_enter_closes_register_overlay() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1351,6 +1371,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into the value input rather than entering command mode.
     fn ut_colon_in_value_input_types() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1363,6 +1384,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the delete-confirm still cancels.
     fn ut_confirm_delete_esc_still_cancels() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1379,6 +1401,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the named-value sub-dialog still cancels.
     fn ut_named_value_subdialog_esc_still_cancels() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1392,6 +1415,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — Enter on a named-value register opens the selection overlay.
     fn ut_enter_on_named_value_register_opens_selection_overlay() {
         let mut view = view_for(device_with_defs());
         view.table.select_first();
@@ -1449,6 +1473,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-016 — `:set` argument parsing splits on the first whitespace.
     fn ut_parse_set_args_unquoted_splits_on_first_whitespace() {
         assert_eq!(parse_set_args("reg 123"), ("reg".into(), "123".into()));
         // Extra leading whitespace before the value is trimmed.
@@ -1458,6 +1483,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-016 — a quoted `:set` name keeps its inner spaces.
     fn ut_parse_set_args_quoted_name_keeps_inner_spaces() {
         assert_eq!(
             parse_set_args("\"my reg\" 456"),
@@ -1475,6 +1501,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// UI-R-024 — applying a server-role setup preserves the existing reconnect setting.
     async fn ut_apply_setup_server_role_preserves_existing_reconnect() {
         // Reconnect is hidden/unset (None) for Server-role dialog saves; applying it must not
         // clobber whatever the device config already had for a setting the user never saw.

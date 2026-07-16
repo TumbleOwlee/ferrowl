@@ -768,11 +768,13 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-049 — the 1.6 client view's focus cycle includes the payload pane.
     fn focus_cycle_includes_payload_pane_v1_6() {
         assert_focus_cycle::<V1_6>(OcppVersion::V1_6);
     }
 
     #[test]
+    /// UI-R-049 — the 2.0.1 client view's focus cycle includes the payload pane.
     fn focus_cycle_includes_payload_pane_v2_0_1() {
         assert_focus_cycle::<V2_0_1>(OcppVersion::V2_0_1);
     }
@@ -855,6 +857,7 @@ mod tests {
     // --- Esc-confirm migration: Setup / Config overlays --------------------------------------
 
     #[test]
+    /// UI-R-023 — Esc opens the close-confirm on the setup overlay; Enter closes it.
     fn setup_overlay_esc_opens_confirm_enter_closes() {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         v.overlay = ClientOverlay::Setup(Box::new(OcppSetupDialog::new()));
@@ -871,6 +874,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc opens the close-confirm on the config overlay; Enter closes it.
     fn config_overlay_esc_opens_confirm_enter_closes() {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         v.overlay = ClientOverlay::Config(Box::new(ConfigEditDialog::new(

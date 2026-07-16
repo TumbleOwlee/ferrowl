@@ -616,6 +616,7 @@ mod tests {
     // `start(&spec, ..)` — and stops the old listener so the next start rebinds with the edited
     // endpoint/security (e.g. wss + Basic Auth no longer leaves a plain unauthenticated listener).
     #[tokio::test]
+    /// UI-R-024 — applying an edit updates the module spec and stops its listener.
     async fn ut_edit_apply_updates_spec_and_stops_listener() {
         let mut v = server_view();
         let mut edited = v.spec.clone();
@@ -632,6 +633,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-049 — the server view's focus cycle includes the payload pane.
     fn focus_cycle_includes_payload_pane() {
         let mut v = server_view();
         // CsTable -> Scripts -> Actions -> Messages -> Payload -> CsTable.
@@ -672,6 +674,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — opening detail builds an overlay for the selected entry.
     fn open_detail_builds_overlay_for_selected_entry() {
         let mut v = server_view();
         // Add a CS-level entry and select its row.
@@ -842,6 +845,7 @@ mod tests {
     // --- Esc-confirm migration: Setup overlay; Confirm keeps Esc ----------------------------
 
     #[test]
+    /// UI-R-023 — Esc opens the close-confirm on the setup overlay; Enter closes it.
     fn setup_overlay_esc_opens_confirm_enter_closes() {
         let mut v = server_view();
         v.overlay = ServerOverlay::Setup(Box::new(
@@ -860,6 +864,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — the confirm overlay still closes on Esc.
     fn confirm_overlay_still_closes_on_esc() {
         let mut v = server_view();
         v.overlay = ServerOverlay::Confirm(Box::new(ConfirmDeleteDialog::new("CP1")));
@@ -871,6 +876,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — syncing actions preserves the table selection when nothing is selected.
     fn sync_actions_preserves_selection_when_no_entry_selected() {
         let mut v = server_view();
         // First sync builds the CS-level action list.

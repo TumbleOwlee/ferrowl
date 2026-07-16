@@ -851,6 +851,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-021 — Enter on an argument row opens the value editor sub-overlay.
     fn enter_on_row_opens_value_editor() {
         let mut d = dialog();
         assert!(d.editor.is_none());
@@ -954,6 +955,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc on the action dialog returns no close (opens the confirm).
     fn esc_returns_none() {
         let mut d = dialog();
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -963,6 +965,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc-then-Enter on the action dialog returns close.
     fn esc_then_enter_returns_close() {
         let mut d = dialog();
         assert!(d.input(KeyModifiers::NONE, KeyCode::Esc).is_none());
@@ -974,6 +977,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Space on the focused Send button sends and keeps the dialog open.
     fn space_on_send_returns_send_keep() {
         let mut d = dialog();
         while d.focus != ActionDialogFocus::Send {
@@ -986,6 +990,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Space off the Send button does not send.
     fn space_elsewhere_does_not_send() {
         let mut d = dialog();
         assert!(d.focus == ActionDialogFocus::Table);
@@ -993,6 +998,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc cancels only the value editor, not the whole dialog.
     fn value_editor_esc_still_cancels_editor_only() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Enter); // open value editor for selected row
@@ -1002,6 +1008,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` inserts into the JSON editor in Insert mode.
     fn json_insert_colon_inserts() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1020,6 +1027,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc from JSON Insert mode returns to Normal without opening the confirm.
     fn json_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1041,6 +1049,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` in JSON Normal mode is consumed by the editor, opening no command line.
     fn json_normal_colon_consumed_by_editor() {
         let mut d = dialog();
         d.toggle_mode();
@@ -1054,6 +1063,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm keeps the action dialog open.
     fn esc_in_confirm_keeps_dialog() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Esc);
@@ -1065,6 +1075,7 @@ mod tests {
     // --- #[derive(Focus)] cycle characterization --------------------------
 
     #[test]
+    /// UI-R-022 — Tab cycles table → toggle → Send in table mode.
     fn tab_cycles_table_toggle_send_in_table_mode() {
         let mut d = dialog();
         assert_eq!(d.focus, ActionDialogFocus::Table);
@@ -1080,6 +1091,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Tab cycles JSON → Send, skipping the disabled toggle in JSON-only mode.
     fn tab_cycles_json_send_skipping_toggle_in_json_only_mode() {
         let mut d = ActionDialog::json_only("Custom".into(), "{}");
         assert_eq!(d.focus, ActionDialogFocus::Json);
@@ -1093,6 +1105,7 @@ mod tests {
     // Sanctioned behavior change: pressing Toggle no longer jumps focus back to the fields;
     // it stays on the Toggle button, and the next Tab now routes through Json instead of Table.
     #[test]
+    /// UI-R-022 — toggling keeps focus, then Tab routes through the JSON editor.
     fn toggle_keeps_focus_then_tab_routes_through_json() {
         let mut d = dialog();
         d.input(KeyModifiers::NONE, KeyCode::Tab); // Table -> Toggle

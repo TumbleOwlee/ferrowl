@@ -308,12 +308,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — an unchanged register row carries no change-highlight cell style.
     fn ut_no_change_has_no_cell_styles() {
         let d = definition();
         assert!(d.cell_styles().iter().all(Option::is_none));
     }
 
     #[test]
+    /// UI-R-046 — a recently-changed register value highlights its row for a brief window.
     fn ut_recent_change_highlights_full_row() {
         let mut d = definition();
         d.changed_at = Some(Instant::now());
@@ -321,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-046 — the change highlight expires after its window.
     fn ut_highlight_expires_after_window() {
         let mut d = definition();
         d.changed_at = Instant::now().checked_sub(CHANGE_HIGHLIGHT + Duration::from_secs(1));

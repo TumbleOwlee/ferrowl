@@ -89,6 +89,7 @@ pub(crate) fn append(sink: &FileSink, line: &str) {
 #[cfg(test)]
 mod tests {
     #[test]
+    /// UI-R-045 — the module file-sink path is derived from the base path and module name.
     fn ut_module_log_path() {
         use super::module_log_path;
         assert_eq!(
@@ -106,6 +107,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-045 — opening a file sink in a nonexistent directory errors.
     fn ut_open_sink_error_on_nonexistent_dir() {
         use super::{FileSink, open_sink};
 
@@ -118,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-045 — a file sink opens against a valid directory.
     fn ut_open_sink_success_with_valid_dir() {
         use super::{FileSink, open_sink};
 
@@ -138,6 +141,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-045 — a None base path clears the file sink.
     fn ut_open_sink_clears_on_none_base() {
         use super::{FileSink, open_sink};
 

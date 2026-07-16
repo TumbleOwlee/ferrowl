@@ -100,6 +100,7 @@ mod tests {
     // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc→confirm
     // flow would silently do nothing for an OCPP module setup.
     #[test]
+    /// UI-R-023 — the OCPP setup delegates close-requested to the dialog's close-request flag.
     fn ut_close_requested_delegates_to_dialog_take_close_request() {
         let mut sv = OcppSetupView::new();
         assert!(!sv.close_requested());
@@ -127,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a ws setup preserves the loaded security config on resolve.
     fn ut_ws_preserves_loaded_security() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {
@@ -142,6 +144,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a wss setup resolves the dialog's security config over the loaded one.
     fn ut_wss_overwrites_loaded_security_with_dialog() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {

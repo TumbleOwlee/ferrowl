@@ -99,6 +99,7 @@ mod tests {
     // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
     // silently do nothing for a Modbus module setup.
     #[test]
+    /// UI-R-023 — the module setup delegates close-requested to the dialog's close-request flag.
     fn ut_close_requested_delegates_to_dialog_take_close_request() {
         let mut sv = ModbusSetupView::new_create();
         assert!(!sv.close_requested());

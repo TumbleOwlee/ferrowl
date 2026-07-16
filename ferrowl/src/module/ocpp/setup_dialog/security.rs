@@ -238,6 +238,7 @@ mod tests {
     // --- SecurityLevel::from_config -----------------------------------------------------------
 
     #[test]
+    /// UI-R-024 — the security fields load from a no-security config for both roles.
     fn ut_from_config_none_both_roles() {
         let cfg = OcppSecurityConfig::default();
         assert_eq!(
@@ -251,6 +252,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — the security fields load from a basic-auth config for both roles.
     fn ut_from_config_basic_auth_both_roles() {
         let cfg = OcppSecurityConfig {
             username: Some("u".into()),
@@ -268,6 +270,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a client TLS config loads into the CA-file field.
     fn ut_from_config_tls_client_is_ca_file() {
         let cfg = OcppSecurityConfig {
             ca_file: Some("ca.pem".into()),
@@ -280,6 +283,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server TLS config loads into the cert and key fields.
     fn ut_from_config_tls_server_is_cert_and_key() {
         let cfg = OcppSecurityConfig {
             cert_file: Some("s.crt".into()),
@@ -293,6 +297,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS client config loads into the client-cert fields.
     fn ut_from_config_mutual_tls_client_is_client_cert() {
         let cfg = OcppSecurityConfig {
             client_cert_file: Some("c.crt".into()),
@@ -305,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS server config loads into the require-flag/client-CA fields.
     fn ut_from_config_mutual_tls_server_is_require_flag_or_client_ca() {
         let by_flag = OcppSecurityConfig {
             require_client_cert: true,
@@ -327,6 +333,7 @@ mod tests {
     // --- SecurityLevel::build_config -----------------------------------------------------------
 
     #[test]
+    /// UI-R-024 — building the config drops fields not visible at the chosen security level.
     fn ut_build_config_drops_fields_not_visible_at_level() {
         let cfg = SecurityLevel::BasicAuth.build_config(
             OcppRole::Server,
@@ -350,6 +357,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a server TLS build keeps cert/key and drops client fields.
     fn ut_build_config_tls_server_keeps_cert_key_not_client_fields() {
         let cfg = SecurityLevel::Tls.build_config(
             OcppRole::Server,
@@ -371,6 +379,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS server build sets require-client-cert.
     fn ut_build_config_mutual_tls_server_sets_require_client_cert() {
         let cfg = SecurityLevel::MutualTls.build_config(
             OcppRole::Server,
@@ -391,6 +400,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-024 — a mutual-TLS client build keeps the client cert/key.
     fn ut_build_config_mutual_tls_client_keeps_client_cert_key() {
         let cfg = SecurityLevel::MutualTls.build_config(
             OcppRole::Client,
