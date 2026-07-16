@@ -597,6 +597,7 @@ mod tests {
         assert!(!is_empty_shell(2, true));
     }
 
+    /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     #[test]
     fn log_ring_persists_lines_to_file_sink() {
         let dir = std::env::temp_dir();

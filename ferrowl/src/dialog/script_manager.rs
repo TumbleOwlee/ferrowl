@@ -310,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — a new script name that is empty or duplicates another is refused.
     fn ut_create_script_rejects_empty_and_duplicate_names() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),
@@ -373,6 +374,7 @@ mod tests {
     /// UI-R-056 — the table title advertises the help overlay only; the binding list it used to
     /// carry overflowed the panel and now lives in that overlay.
     #[test]
+    /// UI-R-056 — the script table's title advertises only the help overlay, not individual bindings.
     fn ut_script_table_title_advertises_help_only() {
         let table = script_table(rows(&[]));
         let title = format!("{:?}", table.widget);
@@ -404,6 +406,7 @@ mod tests {
     /// UI-R-055 — renaming to the script's own name is accepted (a no-op), not refused as a
     /// duplicate of itself.
     #[test]
+    /// UI-R-055 — renaming a script to its own current name is accepted.
     fn ut_rename_to_own_name_is_accepted() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),

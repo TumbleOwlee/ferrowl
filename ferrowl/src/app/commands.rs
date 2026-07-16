@@ -174,6 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-017 — `:script copy <tab-index>` validates its index (usage error, out-of-range, self-copy).
     fn ut_validate_copy_index() {
         assert_eq!(
             validate_copy_index(None, 3, 0),

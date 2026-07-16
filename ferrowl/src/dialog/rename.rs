@@ -200,6 +200,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — typing edits the rename prompt's field.
     fn ut_typing_edits_the_field() {
         let mut prompt = RenamePrompt::new("a");
         assert_eq!(
@@ -233,6 +234,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-055 — routing reports NotActive when no rename prompt is open.
     fn ut_route_not_active_when_none() {
         let mut rename: Option<RenamePrompt> = None;
         assert_eq!(

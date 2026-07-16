@@ -241,31 +241,37 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-011 — a single digit jumps immediately when no two-digit index could start with it.
     fn single_digit_jumps_immediately_when_at_most_ten_tabs() {
         assert_eq!(digit_outcome(None, 3, 5), DigitOutcome::Jump(3));
     }
 
     #[test]
+    /// UI-R-011 — a first digit waits for a second when a valid two-digit index could start with it.
     fn first_digit_waits_when_it_could_start_a_two_digit_index() {
         assert_eq!(digit_outcome(None, 1, 25), DigitOutcome::Wait(1));
     }
 
     #[test]
+    /// UI-R-011 — a valid two-digit combination jumps to that index.
     fn valid_two_digit_combo_jumps() {
         assert_eq!(digit_outcome(Some(1), 2, 25), DigitOutcome::Jump(12));
     }
 
     #[test]
+    /// UI-R-011 — an out-of-range two-digit combination falls back to the first-digit jump.
     fn invalid_combo_falls_back_to_first_digit() {
         assert_eq!(digit_outcome(Some(1), 9, 15), DigitOutcome::Jump(1));
     }
 
     #[test]
+    /// UI-R-011 — an out-of-range single digit is ignored.
     fn out_of_range_single_digit_is_ignored() {
         assert_eq!(digit_outcome(None, 7, 5), DigitOutcome::Ignore);
     }
 
     #[test]
+    /// UI-R-011 — a leading zero jumps immediately regardless of tab count.
     fn leading_zero_jumps_immediately_even_with_many_tabs() {
         assert_eq!(digit_outcome(None, 0, 25), DigitOutcome::Jump(0));
     }

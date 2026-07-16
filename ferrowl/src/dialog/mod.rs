@@ -87,11 +87,13 @@ mod tests {
     // ---- NonEmpty ----
 
     #[test]
+    /// UI-R-048 — the non-empty field validator rejects empty input.
     fn non_empty_rejects_empty() {
         assert!(matches!(NonEmpty::validate(""), ValidateResult::Error(_)));
     }
 
     #[test]
+    /// UI-R-048 — the non-empty field validator accepts text.
     fn non_empty_accepts_text() {
         assert!(matches!(NonEmpty::validate("hello"), ValidateResult::None));
         assert!(matches!(NonEmpty::validate(" "), ValidateResult::None));
@@ -100,6 +102,7 @@ mod tests {
     // ---- Address ----
 
     #[test]
+    /// UI-R-048 — the address field validator accepts the `virtual` keyword.
     fn address_virtual_keyword() {
         assert!(matches!(
             Address::validate("virtual"),
@@ -108,6 +111,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the address field validator accepts an in-range value.
     fn address_valid_i16() {
         assert!(matches!(Address::validate("0"), ValidateResult::None));
         assert!(matches!(Address::validate("32767"), ValidateResult::None));
@@ -116,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the address field validator rejects an out-of-range value.
     fn address_overflow_i16() {
         assert!(matches!(
             Address::validate("32768"),
@@ -132,12 +137,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the address field validator rejects non-numeric input.
     fn address_non_numeric() {
         assert!(matches!(Address::validate("abc"), ValidateResult::Error(_)));
         assert!(matches!(Address::validate(""), ValidateResult::Error(_)));
     }
 
     #[test]
+    /// UI-R-048 — the address field's per-character filter admits only valid characters.
     fn address_allowed_char() {
         for c in "virtual1-".chars() {
             assert!(Address::allowed_char(c), "expected {c:?} to be allowed");
@@ -149,11 +156,13 @@ mod tests {
     // ---- Bitmask ----
 
     #[test]
+    /// UI-R-048 — an empty bitmask field validates as none.
     fn bitmask_empty_is_none() {
         assert!(matches!(Bitmask::validate(""), ValidateResult::None));
     }
 
     #[test]
+    /// UI-R-048 — the bitmask validator accepts a lowercase-prefixed hex value.
     fn bitmask_valid_hex_lowercase_prefix() {
         assert!(matches!(Bitmask::validate("0xFF"), ValidateResult::None));
         assert!(matches!(Bitmask::validate("0x0"), ValidateResult::None));
@@ -164,12 +173,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the bitmask validator accepts an uppercase-prefixed hex value.
     fn bitmask_valid_hex_uppercase_prefix() {
         assert!(matches!(Bitmask::validate("0XFF"), ValidateResult::None));
         assert!(matches!(Bitmask::validate("0X0"), ValidateResult::None));
     }
 
     #[test]
+    /// UI-R-048 — the bitmask validator rejects malformed hex.
     fn bitmask_invalid_hex() {
         assert!(matches!(
             Bitmask::validate("0xGG"),
@@ -179,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the bitmask validator accepts a decimal value.
     fn bitmask_valid_decimal() {
         assert!(matches!(Bitmask::validate("0"), ValidateResult::None));
         assert!(matches!(Bitmask::validate("255"), ValidateResult::None));
@@ -189,12 +201,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the bitmask validator rejects malformed decimal.
     fn bitmask_invalid_decimal() {
         assert!(matches!(Bitmask::validate("abc"), ValidateResult::Error(_)));
         assert!(matches!(Bitmask::validate("-1"), ValidateResult::Error(_)));
     }
 
     #[test]
+    /// UI-R-048 — the bitmask field's per-character filter admits only valid characters.
     fn bitmask_allowed_char() {
         for c in ['F', 'x', 'X', '9', 'a'] {
             assert!(Bitmask::allowed_char(c), "expected {c:?} to be allowed");

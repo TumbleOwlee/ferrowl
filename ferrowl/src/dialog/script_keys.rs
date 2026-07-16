@@ -53,6 +53,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-056 — the overlay carries the script table's own bindings section.
     fn ut_overlay_carries_the_section() {
         let _ = script_keys_overlay();
     }

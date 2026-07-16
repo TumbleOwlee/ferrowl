@@ -558,12 +558,14 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the interval field validator accepts a positive finite value.
     fn ut_interval_validate_accepts_positive_finite() {
         assert!(matches!(Interval::validate("2.5"), ValidateResult::None));
         assert!(matches!(Interval::validate("1"), ValidateResult::None));
     }
 
     #[test]
+    /// UI-R-048 — the interval field validator rejects non-finite/non-positive values.
     fn ut_interval_validate_rejects_bad_values() {
         assert!(matches!(Interval::validate("0"), ValidateResult::Error(_)));
         assert!(matches!(Interval::validate("-1"), ValidateResult::Error(_)));
@@ -582,6 +584,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the interval field's per-character filter admits only valid characters.
     fn ut_interval_allowed_char() {
         assert!(Interval::allowed_char('5'));
         assert!(Interval::allowed_char('.'));
@@ -613,6 +616,7 @@ mod tests {
     // The dialog-wide Tab rotation: Interval → table → name input → code editor → log →
     // Interval. The fixture has one script, so the code editor is reachable.
     #[test]
+    /// UI-R-022 — Tab rotates focus through every enabled dialog field.
     fn ut_tab_rotates_through_all_fields() {
         let mut d = dialog();
         assert_eq!(d.focus, ScriptDialogFocus::Interval);
@@ -631,6 +635,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-022 — Shift+Tab rotates dialog focus in reverse.
     fn ut_backtab_rotates_in_reverse() {
         let mut d = dialog();
         let expected = [
@@ -649,6 +654,7 @@ mod tests {
 
     // Without a selected script the code editor is disabled and both rotations skip it.
     #[test]
+    /// UI-R-022 — the focus cycle skips a disabled field (the code editor).
     fn ut_rotation_skips_disabled_code_editor() {
         let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -661,6 +667,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc on the dialog opens the close-confirm rather than closing immediately.
     fn ut_esc_does_not_close() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -670,6 +677,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — typing into the interval field updates its input.
     fn ut_typing_in_interval_updates_input() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('9'));
@@ -695,6 +703,7 @@ mod tests {
     /// UI-R-051 — `e` on the focused table queues the selected script for a one-shot run, carrying
     /// the editor's current content (edits not yet flushed to the script) and ignoring `enabled`.
     #[test]
+    /// UI-R-051 — `e` on the script table requests a one-shot run of the selected script.
     fn ut_e_requests_run_of_selected_script() {
         let mut d = ScriptDialog::new(
             &[ScriptDef {
@@ -799,6 +808,7 @@ mod tests {
     // --- close-confirm / lua-help integration -------------------------------
 
     #[test]
+    /// UI-R-023 — Esc then Enter confirms the close and dismisses the dialog.
     fn ut_esc_then_enter_closes() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -808,6 +818,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm returns to the dialog.
     fn ut_esc_in_confirm_keeps_dialog() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -818,6 +829,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Space in the close-confirm confirms the close.
     fn ut_space_in_confirm_closes() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
@@ -826,6 +838,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc from the code editor's Normal mode opens the close-confirm.
     fn ut_esc_from_code_normal_opens_confirm() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -839,6 +852,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc from Insert mode returns to Normal without opening the close-confirm.
     fn ut_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -854,6 +868,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` types into the name input rather than entering command mode.
     fn ut_colon_in_name_input_types() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -864,6 +879,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` inserts into the code editor in Insert mode.
     fn ut_colon_in_code_insert_inserts() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -878,6 +894,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-014 — `:` in the code editor's Normal mode opens no command line.
     fn ut_colon_in_code_normal_no_overlay() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -892,6 +909,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-023 — Esc in the close-confirm still cancels the close.
     fn ut_confirm_esc_still_cancels() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -902,6 +920,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-056 — `?` opens the keybind help only from the code editor's Normal mode (guarded).
     fn ut_question_opens_bindings_only_code_normal() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -924,6 +943,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-056 — Esc/q/? close the bindings help overlay.
     fn ut_bindings_close_keys() {
         for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
             let mut d = dialog();
@@ -950,6 +970,7 @@ mod tests {
     /// UI-R-052 — the Templates button sits in the focus cycle after the name input, and
     /// `Enter`/`Space` on it opens the template browser.
     #[test]
+    /// UI-R-052 — the Templates button sits in the focus cycle and opens the template browser.
     fn ut_templates_button_in_focus_cycle_and_opens_browser() {
         for open_key in [KeyCode::Enter, KeyCode::Char(' ')] {
             let mut d = dialog();
@@ -967,6 +988,7 @@ mod tests {
     /// UI-R-053 — while the browser is open it takes every key: `Esc` closes it instead of opening
     /// the dialog's close-confirm.
     #[test]
+    /// UI-R-053 — the open template browser takes precedence over all other dialog keys.
     fn ut_open_browser_takes_precedence_over_dialog_keys() {
         let mut d = dialog();
         focus_templates_button(&mut d);
@@ -980,6 +1002,7 @@ mod tests {
     /// UI-R-054 — confirming a template appends it as a new enabled script, selects it, and leaves
     /// the dialog open with the browser closed.
     #[test]
+    /// UI-R-054 — confirming a template appends it as a new enabled script.
     fn ut_insert_template_appends_enabled_script() {
         let mut d = dialog();
         focus_templates_button(&mut d);
@@ -1017,6 +1040,7 @@ mod tests {
     /// UI-R-055 — `Enter` on the script table opens a rename prompt pre-filled with the current
     /// name; committing renames the script, preserving its code and enabled flag.
     #[test]
+    /// UI-R-055 — Enter on a selected script opens the rename prompt and renames it.
     fn ut_enter_on_table_renames_selected_script() {
         let mut d = ScriptDialog::new(
             &[ScriptDef {
@@ -1085,6 +1109,7 @@ mod tests {
     /// UI-R-055 — `Esc` dismisses the prompt, leaving the name unchanged; with no script selected
     /// `Enter` on the table is a no-op.
     #[test]
+    /// UI-R-055 — Esc cancels the rename; Enter on an empty table is a no-op.
     fn ut_rename_esc_cancels_and_empty_table_is_noop() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -1133,6 +1158,7 @@ mod tests {
     /// UI-R-056 — while the overlay is open it takes every key: the table's own bindings and the
     /// dialog's `Esc` are not reachable through it.
     #[test]
+    /// UI-R-056 — the script-keys help overlay takes precedence over other dialog keys.
     fn ut_script_keys_help_takes_precedence() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
