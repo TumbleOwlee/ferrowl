@@ -385,4 +385,102 @@ mod tests {
             Err(Error::Tls(TlsError::NoPrivateKey(_)))
         ));
     }
+
+    fn auth() -> BasicAuth {
+        BasicAuth {
+            username: "user".into(),
+            password: "pass".into(),
+        }
+    }
+
+    #[test]
+    /// OC-R-030 — a configured Basic Auth credential produces a base64 `Authorization: Basic` header.
+    fn ut_basic_auth_header_value() {
+        assert_eq!(
+            auth().header_value().to_str().unwrap(),
+            "Basic dXNlcjpwYXNz"
+        );
+    }
+
+    #[test]
+    /// OC-R-031 — the CSMS matches only the exact credential header; a wrong or missing header never
+    /// matches.
+    fn ut_basic_auth_matches() {
+        let a = auth();
+        let good = a.header_value();
+        assert!(a.matches(Some(&good)));
+        assert!(!a.matches(Some(&HeaderValue::from_static("Basic d3Jvbmc="))));
+        assert!(!a.matches(None));
+    }
+
+    #[test]
+    /// OC-R-033 — the Basic Auth password never appears in a `{:?}` debug rendering.
+    fn ut_basic_auth_debug_redacts_password() {
+        let creds = BasicAuth {
+            username: "user".into(),
+            password: "s3cr3tpw".into(),
+        };
+        let shown = format!("{creds:?}");
+        assert!(shown.contains("<redacted>"));
+        assert!(!shown.contains("s3cr3tpw"));
+        assert!(shown.contains("user")); // username is not redacted
+    }
+
+    #[test]
+    /// OC-R-041 — a self-signed CSMS builds a usable server TLS config in memory.
+    fn ut_build_server_config_self_signed() {
+        let cfg = CsmsTlsConfig {
+            mode: CsmsTlsMode::SelfSigned,
+            client_ca_file: None,
+            require_client_cert: false,
+        };
+        assert!(cfg.build_server_config("localhost").is_ok());
+    }
+
+    #[test]
+    /// OC-R-029 — a self-signed CSMS cannot also require client certificates (no CA to issue).
+    fn ut_self_signed_with_client_cert_is_rejected() {
+        let cfg = CsmsTlsConfig {
+            mode: CsmsTlsMode::SelfSigned,
+            client_ca_file: None,
+            require_client_cert: true,
+        };
+        assert!(matches!(
+            cfg.build_server_config("localhost"),
+            Err(Error::Tls(TlsError::SelfSignedWithClientCert))
+        ));
+    }
+
+    #[test]
+    /// OC-R-041 — a CSMS builds its server TLS config from on-disk certificate/key files.
+    fn ut_build_server_config_from_files() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cfg = CsmsTlsConfig {
+            mode: CsmsTlsMode::Files {
+                cert_file: temp_pem("srv-cert", &cert_pem),
+                key_file: temp_pem("srv-key", &key_pem),
+            },
+            client_ca_file: None,
+            require_client_cert: false,
+        };
+        assert!(cfg.build_server_config("localhost").is_ok());
+    }
+
+    #[test]
+    /// OC-R-029 — requiring client certificates without a configured CA file is rejected.
+    fn ut_require_client_cert_without_ca_is_rejected() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cfg = CsmsTlsConfig {
+            mode: CsmsTlsMode::Files {
+                cert_file: temp_pem("srv-cert2", &cert_pem),
+                key_file: temp_pem("srv-key2", &key_pem),
+            },
+            client_ca_file: None,
+            require_client_cert: true,
+        };
+        assert!(matches!(
+            cfg.build_server_config("localhost"),
+            Err(Error::Tls(TlsError::MissingClientCa))
+        ));
+    }
 }
