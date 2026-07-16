@@ -458,6 +458,7 @@ pub(crate) fn active_meter_scopes(s: &CsState) -> Vec<Scope> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::ocpp::client::v2_0_1::state::ConnectorState;
     use ferrowl_ocpp::{ConnectorScope, OcppError, ValidationError};
 
     /// Minimal [`Version`] mock whose `encode_action` always fails, to exercise
@@ -497,7 +498,7 @@ mod tests {
             Ok(())
         }
         fn encode_response(_response: &()) -> Result<serde_json::Value, OcppError> {
-            unimplemented!("not exercised by this test")
+            Err(OcppError::UnknownAction("Failing".to_string()))
         }
         fn encode_action(_action: &()) -> Result<serde_json::Value, OcppError> {
             Err(OcppError::UnknownAction("Failing".to_string()))
@@ -513,5 +514,287 @@ mod tests {
             encode_action_or_log::<FailingVersion>(&()),
             serde_json::Value::Null
         );
+    }
+
+    #[test]
+    fn ut_encode_response_or_log_returns_null_on_encode_failure() {
+        assert_eq!(
+            encode_response_or_log::<FailingVersion>(&()),
+            serde_json::Value::Null
+        );
+    }
+
+    /// A CS with the given EVSE ids seeded via `add_connector` at connector ids 1..=n.
+    fn state_with(evses: &[i64]) -> CsState {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        for (i, &e) in evses.iter().enumerate() {
+            assert!(s.add_connector(e, i as i64 + 1));
+        }
+        s
+    }
+
+    /// OC-R-068 — clearing a per-purpose limit erases only the matching field; the rest persist.
+    #[test]
+    fn ut_clear_limit_by_purpose_matches_only_named_field() {
+        let mut c = ConnectorState::new(1, 1);
+        c.limit = Some(1.0);
+        c.default_limit = Some(2.0);
+        c.max_limit = Some(3.0);
+        c.external_limit = Some(4.0);
+        clear_limit_by_purpose(&mut c, Some("TxProfile"));
+        assert_eq!(c.limit, None);
+        assert_eq!(c.default_limit, Some(2.0));
+        assert_eq!(c.max_limit, Some(3.0));
+        assert_eq!(c.external_limit, Some(4.0));
+    }
+
+    #[test]
+    fn ut_clear_limit_by_purpose_unknown_clears_nothing() {
+        let mut c = ConnectorState::new(1, 1);
+        c.limit = Some(1.0);
+        c.default_limit = Some(2.0);
+        clear_limit_by_purpose(&mut c, Some("Nonsense"));
+        assert_eq!(c.limit, Some(1.0));
+        assert_eq!(c.default_limit, Some(2.0));
+    }
+
+    #[test]
+    fn ut_clear_limit_by_purpose_none_clears_all() {
+        let mut c = ConnectorState::new(1, 1);
+        c.limit = Some(1.0);
+        c.default_limit = Some(2.0);
+        c.max_limit = Some(3.0);
+        c.external_limit = Some(4.0);
+        clear_limit_by_purpose(&mut c, None);
+        assert!(c.limit.is_none() && c.default_limit.is_none());
+        assert!(c.max_limit.is_none() && c.external_limit.is_none());
+    }
+
+    #[test]
+    fn ut_inbound_evse_reads_nested_and_top_level() {
+        assert_eq!(
+            inbound_evse(&serde_json::json!({ "evse": { "id": 7 } })),
+            Some(7)
+        );
+        assert_eq!(inbound_evse(&serde_json::json!({ "evseId": 4 })), Some(4));
+        assert_eq!(inbound_evse(&serde_json::json!({ "connectorId": 2 })), None);
+    }
+
+    #[test]
+    fn ut_inbound_scope_keys_by_evse_else_cs() {
+        assert_eq!(
+            inbound_scope(&serde_json::json!({ "evseId": 3 })),
+            Scope::evse(3, None)
+        );
+        assert_eq!(inbound_scope(&serde_json::json!({})), Scope::CS);
+    }
+
+    /// OC-R-063 — an addressed EVSE the station lacks is reported; id 0 and absent are always valid.
+    #[test]
+    fn ut_unknown_evse_flags_missing_only() {
+        let s = state_with(&[1, 2]);
+        assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 9 }), &s), Some(9));
+        assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 2 }), &s), None);
+        assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 0 }), &s), None);
+        assert_eq!(unknown_evse(&serde_json::json!({}), &s), None);
+    }
+
+    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
+    #[test]
+    fn ut_client_state_surface_over_connectors() {
+        let mut s = state_with(&[1, 2]);
+        assert_eq!(s.connector_count(), 2);
+        assert_eq!(s.connector_position(2), Some(1));
+        assert_eq!(s.connector_position(99), None);
+        assert!(!s.cs_state_rows().is_empty());
+        assert!(!s.conn_state_rows(0).is_empty());
+        assert!(s.conn_state_rows(9).is_empty());
+        assert!(!s.config().is_empty());
+        s.remove_connector_at(0);
+        assert_eq!(s.connector_count(), 1);
+        s.clear_connectors();
+        assert_eq!(s.connector_count(), 0);
+    }
+
+    /// OC-R-059 — the 2.x state-driven action set (built from state, no dialog).
+    #[test]
+    fn ut_state_driven_set_and_flags() {
+        assert!(STATE_DRIVEN.contains(&"BootNotification"));
+        assert!(STATE_DRIVEN.contains(&"Heartbeat"));
+        assert!(!STATE_DRIVEN.contains(&"RequestStartTransaction"));
+        assert!(has_tx_shortcuts());
+        assert_eq!(config_title(), "Variables");
+        assert_eq!(add_connector_placeholder(), "Add evse/connector");
+    }
+
+    #[test]
+    fn ut_connector_index_resolves_scope_or_first() {
+        let s = state_with(&[1, 5]);
+        assert_eq!(connector_index(&s, Scope::evse(5, None)), Some(1));
+        assert_eq!(connector_index(&s, Scope::CS), Some(0));
+        assert_eq!(connector_index_for_state(&s, Scope::CS), None);
+        assert_eq!(connector_index(&state_with(&[]), Scope::CS), None);
+        assert_eq!(scope_of(&s, 1), Scope::evse(5, None));
+    }
+
+    #[test]
+    fn ut_add_connector_parses_evse_slash_connector() {
+        let mut s = state_with(&[]);
+        assert_eq!(add_connector(&mut s, "2/3"), Some(3));
+        assert_eq!(add_connector(&mut s, "7"), Some(7));
+        assert_eq!(add_connector(&mut s, "bad"), None);
+        assert_eq!(add_connector(&mut s, "2/3"), None); // duplicate connector id
+        // Connectors sort by (evse, connector): (1,7) then (2,3).
+        let r = connector_ref(&s, 1);
+        assert_eq!((r.evse, r.connector), (Some(2), 3));
+    }
+
+    #[test]
+    fn ut_seed_connector_defaults_evse_to_one() {
+        let mut s = state_with(&[]);
+        seed_connector(
+            &mut s,
+            &ConnectorRef {
+                evse: None,
+                connector: 4,
+            },
+        );
+        assert_eq!(s.connectors[0].evse_id, 1);
+        assert_eq!(s.connectors[0].connector_id, 4);
+    }
+
+    #[test]
+    fn ut_conn_edit_field_maps_rows_and_bounds() {
+        assert!(matches!(conn_edit_field(0), Some(EditField::EvseId)));
+        assert!(matches!(conn_edit_field(4), Some(EditField::Current(0))));
+        assert!(matches!(conn_edit_field(13), Some(EditField::Status)));
+        assert!(matches!(conn_edit_field(14), Some(EditField::Rfid)));
+        assert!(conn_edit_field(15).is_none()); // Charge Limit row is read-only
+    }
+
+    #[test]
+    fn ut_edit_kind_picks_widget_per_field() {
+        let s = state_with(&[1]);
+        let sc = Scope::evse(1, None);
+        assert!(matches!(
+            edit_kind(&s, sc, false, EditField::Status),
+            Some(EditKind::Choice(_))
+        ));
+        assert!(matches!(
+            edit_kind(&s, sc, false, EditField::Voltage),
+            Some(EditKind::Number(_))
+        ));
+        assert!(matches!(
+            edit_kind(&s, sc, true, EditField::Model),
+            Some(EditKind::Text(_))
+        ));
+    }
+
+    /// OC-R-059 — state-driven request payloads are assembled entirely from observed state.
+    #[test]
+    fn ut_state_payload_built_from_state() {
+        let s = state_with(&[1]);
+        let sc = Scope::evse(1, None);
+        assert_eq!(
+            state_payload(&s, "BootNotification", sc)["chargingStation"]["model"],
+            "Ferrowl-EVSE"
+        );
+        assert_eq!(state_payload(&s, "Heartbeat", sc), serde_json::json!({}));
+        assert_eq!(state_payload(&s, "MeterValues", sc)["evseId"], 1);
+        assert_eq!(
+            state_payload(&s, "StatusNotification", sc)["connectorStatus"],
+            "Available"
+        );
+        assert_eq!(
+            state_payload(&s, "Authorize", sc)["idToken"]["idToken"],
+            "DEADBEEF"
+        );
+        assert_eq!(state_payload(&s, "Unknown", sc), serde_json::json!({}));
+    }
+
+    /// OC-R-070 — a started transaction mints an id and puts the connector into a charging state.
+    #[test]
+    fn ut_start_event_mints_tx_and_occupies() {
+        let mut s = state_with(&[1]);
+        let ev = start_event(&mut s, Scope::evse(1, None));
+        assert_eq!(ev["eventType"], "Started");
+        assert!(ev["transactionInfo"]["transactionId"].is_string());
+        assert_eq!(s.connectors[0].status, "Occupied");
+        assert_eq!(s.connectors[0].session_energy, 0.0);
+        assert!(s.connectors[0].transaction_id.is_some());
+    }
+
+    /// OC-R-072 — ending a transaction clears the tx-scoped limit only; the default limit persists.
+    #[test]
+    fn ut_stop_event_clears_tx_and_tx_scoped_limit() {
+        let mut s = state_with(&[1]);
+        start_event(&mut s, Scope::evse(1, None));
+        s.connectors[0].limit = Some(16.0);
+        s.connectors[0].default_limit = Some(32.0);
+        let ev = stop_event(&mut s, Scope::evse(1, None)).unwrap();
+        assert_eq!(ev["eventType"], "Ended");
+        assert_eq!(s.connectors[0].status, "Available");
+        assert_eq!(s.connectors[0].transaction_id, None);
+        assert_eq!(s.connectors[0].limit, None);
+        assert_eq!(s.connectors[0].default_limit, Some(32.0));
+    }
+
+    #[test]
+    fn ut_stop_event_none_when_idle() {
+        let mut s = state_with(&[1]);
+        assert!(stop_event(&mut s, Scope::evse(1, None)).is_none());
+    }
+
+    /// OC-R-060 — the heartbeat cadence is taken from the BootNotification response's interval.
+    #[test]
+    fn ut_apply_post_send_boot_sets_heartbeat_interval() {
+        let mut s = state_with(&[1]);
+        apply_post_send(
+            &mut s,
+            "BootNotification",
+            Scope::CS,
+            None,
+            &serde_json::json!({ "interval": 90 }),
+        );
+        assert_eq!(s.heartbeat_interval_secs, Some(90));
+    }
+
+    #[test]
+    fn ut_apply_post_send_confirms_started_tx() {
+        let mut s = state_with(&[1]);
+        let tx = s.connectors[0].start_tx();
+        apply_post_send(
+            &mut s,
+            "TransactionEvent",
+            Scope::evse(1, None),
+            Some(&tx),
+            &serde_json::json!({}),
+        );
+        assert!(s.connectors[0].tx_confirmed);
+    }
+
+    /// OC-R-070 — a failed start rolls the connector back to available with no transaction.
+    #[test]
+    fn ut_rollback_tx_reverts_started_connector() {
+        let mut s = state_with(&[1]);
+        let tx = s.connectors[0].start_tx();
+        s.connectors[0].limit = Some(16.0);
+        s.connectors[0].status = "Occupied".to_string();
+        rollback_tx(&mut s, Scope::evse(1, None), Some(&tx));
+        assert_eq!(s.connectors[0].transaction_id, None);
+        assert_eq!(s.connectors[0].limit, None);
+        assert!(!s.connectors[0].tx_confirmed);
+        assert_eq!(s.connectors[0].status, "Available");
+    }
+
+    /// OC-R-061 — auto MeterValues target only connectors with a live, confirmed transaction.
+    #[test]
+    fn ut_active_meter_scopes_only_confirmed_tx() {
+        let mut s = state_with(&[1, 2]);
+        s.connectors[0].start_tx();
+        s.connectors[0].tx_confirmed = true;
+        s.connectors[1].start_tx(); // unconfirmed
+        assert_eq!(active_meter_scopes(&s), vec![Scope::evse(1, None)]);
     }
 }
