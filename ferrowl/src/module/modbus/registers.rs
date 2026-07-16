@@ -169,8 +169,8 @@ mod tests {
             .unwrap()
     }
 
-    /// MB-R-046 — a client write command is single/multiple by width and coil/register by kind.
     #[test]
+    /// MB-R-046 — a client write command is single/multiple by width and coil/register by kind.
     fn ut_write_command_selects_by_kind_and_width() {
         let coil = reg(Kind::Coil, Address::Fixed(0));
         assert!(matches!(
@@ -192,14 +192,14 @@ mod tests {
         ));
     }
 
-    /// MB-R-080 — a virtual register occupies no store memory, so it has no memory binding.
     #[test]
+    /// MB-R-080 — a virtual register occupies no store memory, so it has no memory binding.
     fn ut_register_mem_binding_virtual_is_none() {
         assert!(register_mem_binding(&reg(Kind::HoldingRegister, Address::Virtual)).is_none());
     }
 
-    /// MB-R-078 — coil/holding bind read/write cells; discrete-input/input bind read-only cells.
     #[test]
+    /// MB-R-078 — coil/holding bind read/write cells; discrete-input/input bind read-only cells.
     fn ut_register_mem_binding_kind_direction() {
         let bind = |k| register_mem_binding(&reg(k, Address::Fixed(2))).unwrap().0;
         assert!(matches!(

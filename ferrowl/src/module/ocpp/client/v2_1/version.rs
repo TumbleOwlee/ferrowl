@@ -140,8 +140,8 @@ mod tests {
         s
     }
 
-    /// OC-R-059 — the 2.1 binding exposes the shared state-driven set and per-version specs.
     #[test]
+    /// OC-R-059 — the 2.1 binding exposes the shared state-driven set and per-version specs.
     fn ut_static_seams() {
         assert!(<V2_1 as ClientVersion>::state_driven().contains(&"BootNotification"));
         assert_eq!(<V2_1 as ClientVersion>::config_title(), "Variables");
@@ -150,8 +150,8 @@ mod tests {
         assert!(<V2_1 as ClientVersion>::action_spec("GetVariables").is_some());
     }
 
-    /// OC-R-058 — connector-addressing seams delegate to the shared 2.x logic.
     #[test]
+    /// OC-R-058 — connector-addressing seams delegate to the shared 2.x logic.
     fn ut_connector_seams_delegate() {
         let mut s = state();
         let sc = Scope::evse(1, None);
@@ -171,8 +171,8 @@ mod tests {
         ));
     }
 
-    /// OC-R-070 — the transaction-shortcut seams (start/stop/rollback) delegate to shared 2.x logic.
     #[test]
+    /// OC-R-070 — the transaction-shortcut seams (start/stop/rollback) delegate to shared 2.x logic.
     fn ut_transaction_seams_delegate() {
         let mut s = state();
         let sc = Scope::evse(1, None);

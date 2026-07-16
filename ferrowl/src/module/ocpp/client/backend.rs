@@ -491,8 +491,8 @@ mod tests {
         assert_eq!(m.direction, Dir::Out);
     }
 
-    /// OC-R-078 — a recorded message renders into the log table with its direction and status.
     #[test]
+    /// OC-R-078 — a recorded message renders into the log table with its direction and status.
     fn ut_msg_row_and_cell_styles() {
         let ok = OcppMessage::new(Dir::In, "Boot", json!({}), Some(true), "ctx");
         let row = msg_row(&ok);

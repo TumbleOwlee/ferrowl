@@ -669,8 +669,8 @@ mod tests {
         );
     }
 
-    /// OC-R-077 — EVSE-scoped remote actions derive their payload from observed state.
     #[test]
+    /// OC-R-077 — EVSE-scoped remote actions derive their payload from observed state.
     fn ut_connector_derive_payloads() {
         let mut s = ConnectorState {
             evse_id: 3,
@@ -699,8 +699,8 @@ mod tests {
         );
     }
 
-    /// OC-R-077 — a TransactionEvent drives the observed transaction and status.
     #[test]
+    /// OC-R-077 — a TransactionEvent drives the observed transaction and status.
     fn ut_connector_transaction_event_lifecycle() {
         let mut s = ConnectorState::default();
         s.apply_inbound(

@@ -395,8 +395,8 @@ mod tests {
         s
     }
 
-    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
     #[test]
+    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
     fn ut_client_state_surface_over_connectors() {
         let mut s = state_with(&[1, 2]);
         assert_eq!(s.connector_count(), 2);
@@ -411,8 +411,8 @@ mod tests {
         assert_eq!(s.connector_count(), 0);
     }
 
-    /// OC-R-059 — the 1.6 state-driven action set (built from state, no dialog).
     #[test]
+    /// OC-R-059 — the 1.6 state-driven action set (built from state, no dialog).
     fn ut_state_driven_set() {
         let sd = <V1_6 as ClientVersion>::state_driven();
         assert!(sd.contains(&"BootNotification"));
@@ -504,8 +504,8 @@ mod tests {
         assert!(<V1_6 as ClientVersion>::edit_kind(&s, sc, false, EditField::EvseId).is_none());
     }
 
-    /// OC-R-059 — 1.6 state-driven request payloads are assembled entirely from observed state.
     #[test]
+    /// OC-R-059 — 1.6 state-driven request payloads are assembled entirely from observed state.
     fn ut_state_payload_built_from_state() {
         let s = state_with(&[1]);
         let sc = Scope::connector(1);
@@ -521,8 +521,8 @@ mod tests {
         assert_eq!(payload("Unknown"), serde_json::json!({}));
     }
 
-    /// OC-R-070 — a StartTransaction response records the transaction id and enters a charging state.
     #[test]
+    /// OC-R-070 — a StartTransaction response records the transaction id and enters a charging state.
     fn ut_apply_post_send_start_transaction() {
         let mut s = state_with(&[1]);
         <V1_6 as ClientVersion>::apply_post_send(
@@ -536,9 +536,9 @@ mod tests {
         assert_eq!(s.connectors[0].status, "Charging");
     }
 
+    #[test]
     /// OC-R-072 — StopTransaction clears the transaction and its tx-scoped limit, returning to
     /// available.
-    #[test]
     fn ut_apply_post_send_stop_transaction() {
         let mut s = state_with(&[1]);
         s.connectors[0].transaction_id = Some(42);
@@ -556,8 +556,8 @@ mod tests {
         assert_eq!(s.connectors[0].status, "Available");
     }
 
-    /// OC-R-060 — the heartbeat cadence comes from the BootNotification response interval.
     #[test]
+    /// OC-R-060 — the heartbeat cadence comes from the BootNotification response interval.
     fn ut_apply_post_send_boot_sets_heartbeat_interval() {
         let mut s = state_with(&[1]);
         <V1_6 as ClientVersion>::apply_post_send(
@@ -570,8 +570,8 @@ mod tests {
         assert_eq!(s.heartbeat_interval_secs, Some(90));
     }
 
-    /// OC-R-061 — auto MeterValues target only connectors with a live transaction.
     #[test]
+    /// OC-R-061 — auto MeterValues target only connectors with a live transaction.
     fn ut_active_meter_scopes_only_live_tx() {
         let mut s = state_with(&[1, 2]);
         s.connectors[0].transaction_id = Some(1);

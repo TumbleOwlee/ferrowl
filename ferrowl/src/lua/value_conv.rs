@@ -143,8 +143,8 @@ mod tests {
         kind((Endian::Big, Resolution(1.0), BitField::default()))
     }
 
-    /// SC-R-027 — a read returns each stored value as its natural Lua type.
     #[test]
+    /// SC-R-027 — a read returns each stored value as its natural Lua type.
     fn ut_value_to_type_natural_types() {
         assert!(matches!(
             value_to_type(Value::U16((7, Resolution(1.0)))),
@@ -164,8 +164,8 @@ mod tests {
         ));
     }
 
-    /// SC-R-027 — an integer write range-checks against the target width instead of truncating.
     #[test]
+    /// SC-R-027 — an integer write range-checks against the target width instead of truncating.
     fn ut_typed_value_int_range_checked() {
         let u8f = int_fmt(Format::U8);
         assert!(matches!(
@@ -182,8 +182,8 @@ mod tests {
         assert!(typed_value_from_type(ValueType::Nil, &u8f).is_err());
     }
 
-    /// SC-R-027 — a float write into an integer format only accepts a whole, in-range number.
     #[test]
+    /// SC-R-027 — a float write into an integer format only accepts a whole, in-range number.
     fn ut_typed_value_float_into_int_requires_whole() {
         let i16f = int_fmt(Format::I16);
         assert!(matches!(
@@ -209,9 +209,9 @@ mod tests {
         ));
     }
 
+    #[test]
     /// SC-R-027 — a virtual-register write stores the value as I64/F64 regardless of format, and
     /// nil fails.
-    #[test]
     fn ut_virtual_value_from_type() {
         let register = RegisterBuilder::default()
             .slave_id(1u8)

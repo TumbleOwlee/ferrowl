@@ -648,8 +648,8 @@ mod tests {
         );
     }
 
-    /// OC-R-077 — connector-scoped remote actions derive their payload from observed state.
     #[test]
+    /// OC-R-077 — connector-scoped remote actions derive their payload from observed state.
     fn ut_connector_derive_unlock_and_availability() {
         let s = ConnectorState::default();
         assert_eq!(
@@ -669,8 +669,8 @@ mod tests {
         );
     }
 
-    /// OC-R-077 — a StatusNotification updates the observed connector status.
     #[test]
+    /// OC-R-077 — a StatusNotification updates the observed connector status.
     fn ut_connector_status_notification_updates_status() {
         let mut s = ConnectorState::default();
         s.apply_inbound(

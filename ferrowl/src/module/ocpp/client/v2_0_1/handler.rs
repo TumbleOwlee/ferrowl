@@ -698,8 +698,8 @@ mod tests {
         )
     }
 
-    /// OC-R-065 — a configuration read answers known keys and flags unknown ones from the key store.
     #[test]
+    /// OC-R-065 — a configuration read answers known keys and flags unknown ones from the key store.
     fn ut_get_variables_reports_known_and_unknown() {
         let h = handler_with(CsState::default());
         let (json, _) = responded(
@@ -717,9 +717,9 @@ mod tests {
         assert_eq!(results[1]["attributeStatus"], "UnknownVariable");
     }
 
+    #[test]
     /// OC-R-066 — a configuration write updates a writable key, rejects a read-only key, and creates
     /// an unknown key.
-    #[test]
     fn ut_set_variables_update_reject_and_create() {
         let h = handler_with(CsState::default());
         let (json, _) = responded(
@@ -740,9 +740,9 @@ mod tests {
         assert!(h.state.read().config.iter().any(|c| c.key == "BrandNewKey"));
     }
 
+    #[test]
     /// OC-R-071 — a reset returns every connector to available, clears its transaction, and zeros
     /// session energy.
-    #[test]
     fn ut_reset_returns_all_connectors_available() {
         let mut s = two_evses();
         s.connectors[0].status = "Charging".to_string();
@@ -756,8 +756,8 @@ mod tests {
         assert_eq!(st.connectors[0].session_energy, 0.0);
     }
 
-    /// OC-R-067 — a charging profile whose stack level exceeds the configured max is rejected.
     #[test]
+    /// OC-R-067 — a charging profile whose stack level exceeds the configured max is rejected.
     fn ut_set_charging_profile_rejects_excess_stack_level() {
         let h = handler_with(two_evses()); // default ChargeProfileMaxStackLevel = 10
         let (json, ctx) = responded(
@@ -777,8 +777,8 @@ mod tests {
         assert!(ctx.contains("stackLevel"));
     }
 
-    /// OC-R-067 — an accepted charging profile applies its limit to the field matching its purpose.
     #[test]
+    /// OC-R-067 — an accepted charging profile applies its limit to the field matching its purpose.
     fn ut_set_charging_profile_applies_by_purpose() {
         let h = handler_with(two_evses());
         responded(
@@ -800,8 +800,8 @@ mod tests {
         );
     }
 
-    /// OC-R-064 — an inbound Call the simulator does not model is default-accepted, not rejected.
     #[test]
+    /// OC-R-064 — an inbound Call the simulator does not model is default-accepted, not rejected.
     fn ut_unmodeled_action_default_accepted() {
         let h = handler_with(CsState::default());
         let action = V2_0_1::decode_call(

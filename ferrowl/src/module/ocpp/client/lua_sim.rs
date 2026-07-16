@@ -521,8 +521,8 @@ mod tests {
         assert_eq!(item.2, serde_json::json!({ "power": 11.0 }));
     }
 
-    /// SC-R-028 — a Lua CS-level write applies to observed state; an action dispatch enqueues it.
     #[test]
+    /// SC-R-028 — a Lua CS-level write applies to observed state; an action dispatch enqueues it.
     fn ut_cs_handle_read_write_dispatch() {
         let state = Arc::new(RwLock::new(Cs201::default()));
         let q = queue();
@@ -545,8 +545,8 @@ mod tests {
         assert_eq!(handle.connectors(), vec![1]);
     }
 
-    /// SC-R-028 — a Lua connector-level write applies to that connector; dispatch uses its scope.
     #[test]
+    /// SC-R-028 — a Lua connector-level write applies to that connector; dispatch uses its scope.
     fn ut_conn_handle_read_write_dispatch() {
         let state = Arc::new(RwLock::new(Cs201::default()));
         let q = queue();

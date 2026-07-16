@@ -534,8 +534,8 @@ mod tests {
         s
     }
 
-    /// OC-R-068 — clearing a per-purpose limit erases only the matching field; the rest persist.
     #[test]
+    /// OC-R-068 — clearing a per-purpose limit erases only the matching field; the rest persist.
     fn ut_clear_limit_by_purpose_matches_only_named_field() {
         let mut c = ConnectorState::new(1, 1);
         c.limit = Some(1.0);
@@ -590,8 +590,8 @@ mod tests {
         assert_eq!(inbound_scope(&serde_json::json!({})), Scope::CS);
     }
 
-    /// OC-R-063 — an addressed EVSE the station lacks is reported; id 0 and absent are always valid.
     #[test]
+    /// OC-R-063 — an addressed EVSE the station lacks is reported; id 0 and absent are always valid.
     fn ut_unknown_evse_flags_missing_only() {
         let s = state_with(&[1, 2]);
         assert_eq!(
@@ -603,8 +603,8 @@ mod tests {
         assert_eq!(unknown_evse(&serde_json::json!({}), &s), None);
     }
 
-    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
     #[test]
+    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
     fn ut_client_state_surface_over_connectors() {
         let mut s = state_with(&[1, 2]);
         assert_eq!(s.connector_count(), 2);
@@ -620,8 +620,8 @@ mod tests {
         assert_eq!(s.connector_count(), 0);
     }
 
-    /// OC-R-059 — the 2.x state-driven action set (built from state, no dialog).
     #[test]
+    /// OC-R-059 — the 2.x state-driven action set (built from state, no dialog).
     fn ut_state_driven_set_and_flags() {
         assert!(STATE_DRIVEN.contains(&"BootNotification"));
         assert!(STATE_DRIVEN.contains(&"Heartbeat"));
@@ -694,8 +694,8 @@ mod tests {
         ));
     }
 
-    /// OC-R-059 — state-driven request payloads are assembled entirely from observed state.
     #[test]
+    /// OC-R-059 — state-driven request payloads are assembled entirely from observed state.
     fn ut_state_payload_built_from_state() {
         let s = state_with(&[1]);
         let sc = Scope::evse(1, None);
@@ -716,8 +716,8 @@ mod tests {
         assert_eq!(state_payload(&s, "Unknown", sc), serde_json::json!({}));
     }
 
-    /// OC-R-070 — a started transaction mints an id and puts the connector into a charging state.
     #[test]
+    /// OC-R-070 — a started transaction mints an id and puts the connector into a charging state.
     fn ut_start_event_mints_tx_and_occupies() {
         let mut s = state_with(&[1]);
         let ev = start_event(&mut s, Scope::evse(1, None));
@@ -728,8 +728,8 @@ mod tests {
         assert!(s.connectors[0].transaction_id.is_some());
     }
 
-    /// OC-R-072 — ending a transaction clears the tx-scoped limit only; the default limit persists.
     #[test]
+    /// OC-R-072 — ending a transaction clears the tx-scoped limit only; the default limit persists.
     fn ut_stop_event_clears_tx_and_tx_scoped_limit() {
         let mut s = state_with(&[1]);
         start_event(&mut s, Scope::evse(1, None));
@@ -749,8 +749,8 @@ mod tests {
         assert!(stop_event(&mut s, Scope::evse(1, None)).is_none());
     }
 
-    /// OC-R-060 — the heartbeat cadence is taken from the BootNotification response's interval.
     #[test]
+    /// OC-R-060 — the heartbeat cadence is taken from the BootNotification response's interval.
     fn ut_apply_post_send_boot_sets_heartbeat_interval() {
         let mut s = state_with(&[1]);
         apply_post_send(
@@ -777,8 +777,8 @@ mod tests {
         assert!(s.connectors[0].tx_confirmed);
     }
 
-    /// OC-R-070 — a failed start rolls the connector back to available with no transaction.
     #[test]
+    /// OC-R-070 — a failed start rolls the connector back to available with no transaction.
     fn ut_rollback_tx_reverts_started_connector() {
         let mut s = state_with(&[1]);
         let tx = s.connectors[0].start_tx();
@@ -791,8 +791,8 @@ mod tests {
         assert_eq!(s.connectors[0].status, "Available");
     }
 
-    /// OC-R-061 — auto MeterValues target only connectors with a live, confirmed transaction.
     #[test]
+    /// OC-R-061 — auto MeterValues target only connectors with a live, confirmed transaction.
     fn ut_active_meter_scopes_only_confirmed_tx() {
         let mut s = state_with(&[1, 2]);
         s.connectors[0].start_tx();

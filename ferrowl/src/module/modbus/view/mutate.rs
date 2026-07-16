@@ -478,8 +478,8 @@ mod tests {
         assert!(msg(&v.apply_order("Nonsense", false)).contains("Unknown column"));
     }
 
-    /// MB-R-088 — adding a register at runtime inserts its definition and rebuilds the op list.
     #[tokio::test]
+    /// MB-R-088 — adding a register at runtime inserts its definition and rebuilds the op list.
     async fn ut_apply_add_inserts_definition() {
         let mut v = view(Role::Server);
         v.apply_add(edited("hold", holding(0), None)).await;
@@ -487,8 +487,8 @@ mod tests {
         assert!(v.table.definitions().iter().any(|d| d.name == "hold"));
     }
 
-    /// MB-R-088 — editing a register updates and renames its definition.
     #[tokio::test]
+    /// MB-R-088 — editing a register updates and renames its definition.
     async fn ut_apply_edit_renames_definition() {
         let mut v = view(Role::Server);
         v.apply_add(edited("hold", holding(0), None)).await;
@@ -498,8 +498,8 @@ mod tests {
         assert!(!v.device.definitions.contains_key("hold"));
     }
 
-    /// MB-R-088 — deleting a register removes its definition and rebuilds the op list.
     #[tokio::test]
+    /// MB-R-088 — deleting a register removes its definition and rebuilds the op list.
     async fn ut_delete_register_removes_definition() {
         let mut v = view(Role::Server);
         v.apply_add(edited("hold", holding(0), None)).await;
@@ -508,8 +508,8 @@ mod tests {
         assert!(v.table.definitions().is_empty());
     }
 
-    /// MB-R-092 — a virtual-register write is accepted on a server and rejected on a client.
     #[tokio::test]
+    /// MB-R-092 — a virtual-register write is accepted on a server and rejected on a client.
     async fn ut_set_virtual_value_server_accepts_client_rejects() {
         let mut server = view(Role::Server);
         server.apply_add(edited("v", virtual_reg(), None)).await;
