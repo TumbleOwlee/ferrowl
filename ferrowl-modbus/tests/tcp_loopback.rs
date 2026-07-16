@@ -334,6 +334,87 @@ async fn tcp_client_handles_server_rejections() {
 }
 
 #[tokio::test]
+/// MB-R-069 — an `ip`/`port` pair that does not parse as a socket address fails with a TCP address
+/// error, for both the client and the server.
+async fn tcp_unparseable_address_is_error() {
+    use ferrowl_modbus::{Error, TcpError};
+
+    let mut bad = config(502);
+    bad.ip = "not.an.ip.address".to_string();
+
+    // Client side (`Client` isn't `Debug`, so match the result rather than `unwrap_err`).
+    assert!(matches!(
+        tcp::Client::connect(&bad).await,
+        Err(Error::Tcp(TcpError::Address(_)))
+    ));
+
+    // Server side.
+    let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
+    let server_err = tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
+        .spawn(sink())
+        .await
+        .unwrap_err();
+    assert!(matches!(server_err, Error::Tcp(TcpError::Address(_))));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-070 — a TCP server accepts connections in a loop, serving multiple concurrent clients
+/// against the same shared store.
+async fn tcp_server_serves_concurrent_clients() {
+    let port = free_port();
+    let srv_mem = server_mem();
+
+    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+        .spawn(sink())
+        .await
+        .expect("server failed to start");
+
+    // Two independent clients connect at the same time and both read from the one server.
+    let ops = || {
+        Arc::new(RwLock::new(vec![Operation {
+            slave_id: 1,
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 4),
+        }]))
+    };
+    let mem_a = client_mem();
+    let mem_b = client_mem();
+    let (tx_a, rx_a) = mpsc::channel::<Command>(16);
+    let (tx_b, rx_b) = mpsc::channel::<Command>(16);
+    let client_a =
+        tcp::ClientBuilder::new(Arc::new(RwLock::new(config(port))), ops(), mem_a.clone())
+            .spawn(rx_a, sink(), sink())
+            .await
+            .expect("client A failed to connect");
+    let client_b =
+        tcp::ClientBuilder::new(Arc::new(RwLock::new(config(port))), ops(), mem_b.clone())
+            .spawn(rx_b, sink(), sink())
+            .await
+            .expect("client B failed to connect");
+
+    sleep(Duration::from_millis(600)).await;
+
+    for m in [&mem_a, &mem_b] {
+        assert_eq!(
+            m.read()
+                .read(
+                    key(RegKind::HoldingRegister),
+                    &CellType::Register,
+                    &Range::new(0, 4)
+                )
+                .unwrap(),
+            vec![10, 20, 30, 40]
+        );
+    }
+
+    tx_a.send(Command::Terminate).await.unwrap();
+    tx_b.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client_a).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), client_b).await;
+    server.abort();
+}
+
+#[tokio::test]
 /// MB-R-068 — a TCP client connect attempt to a port with no listener fails.
 async fn tcp_client_connect_refused_is_error() {
     // Nothing is listening on this port, so the connect fails.

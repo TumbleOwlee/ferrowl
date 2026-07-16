@@ -943,6 +943,85 @@ mod tests {
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
+    #[tokio::test]
+    /// MB-R-065 — the server answers any slave id for which regions are declared; it does not filter by a configured slave id.
+    async fn ut_server_serves_any_declared_slave() {
+        // Regions declared for two different slave ids; the server has no "configured" slave.
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        for &slave in &[3u8, 9u8] {
+            let key = Key {
+                id: SlaveKey {
+                    slave_id: slave,
+                    kind: RegKind::HoldingRegister,
+                },
+            };
+            mem.add_ranges(
+                key.clone(),
+                &MemKind::ReadWrite(CellType::Register),
+                &[Range::new(0, 2)],
+            );
+            mem.write(
+                key,
+                &CellType::Register,
+                &Range::new(0, 2),
+                &[slave as u16, 0],
+            )
+            .unwrap();
+        }
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+
+        // Both slaves are answered from their own declared regions.
+        for &slave in &[3u8, 9u8] {
+            let resp = handle_request::<SlaveKey, _>(
+                slave,
+                Request::ReadHoldingRegisters(0, 2),
+                &mem,
+                &log,
+                false,
+            )
+            .await
+            .unwrap();
+            assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v[0] == slave as u16));
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-066 — a "request received" line is logged for every inbound request, including a rejected function code.
+    async fn ut_logs_request_received_including_rejected() {
+        let mem = seeded(
+            RegKind::HoldingRegister,
+            CellType::Register,
+            4,
+            &[10, 20, 30, 40],
+        );
+
+        // A supported request logs "request received".
+        let (log, buf) = recording_log();
+        handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, false)
+            .await
+            .unwrap();
+        assert!(
+            buf.lock()
+                .unwrap()
+                .iter()
+                .any(|l| l.contains("request received"))
+        );
+
+        // A rejected function code still logs "request received" before the IllegalFunction reply.
+        let (log, buf) = recording_log();
+        let err = handle_request::<SlaveKey, _>(1, Request::ReportServerId, &mem, &log, false)
+            .await
+            .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+        assert!(
+            buf.lock()
+                .unwrap()
+                .iter()
+                .any(|l| l.contains("request received"))
+        );
+    }
+
     // ---- Unsupported function codes ----
 
     #[tokio::test]
