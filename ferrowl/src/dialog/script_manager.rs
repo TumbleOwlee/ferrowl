@@ -344,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-058 — `t` toggles and `d` deletes the selected script in the working list.
     fn ut_toggle_and_delete_selected() {
         let mut scripts = vec![ScriptDef {
             name: "a".into(),
@@ -432,6 +433,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-058 — `c` toggles the script table between compact and normal rows.
     fn ut_toggle_compact_flips_row_margin() {
         let mut scripts: Vec<ScriptDef> = Vec::new();
         let mut table = script_table(rows(&scripts));

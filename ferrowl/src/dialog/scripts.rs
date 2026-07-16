@@ -685,6 +685,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-058 — the script table adds, toggles-enabled, and deletes scripts in its working list.
     fn ut_create_toggle_delete_script() {
         let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
         // Tab to the name input, type a name, Enter creates an enabled script.
