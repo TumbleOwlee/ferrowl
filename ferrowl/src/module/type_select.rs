@@ -207,4 +207,24 @@ mod tests {
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
         assert!(!dialog.take_close_request());
     }
+
+    #[test]
+    fn ut_down_moves_selection() {
+        let mut dialog = TypeSelectDialog::new();
+        assert_eq!(dialog.selected_index(), 0);
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        // With more than one registered type the highlight advances; otherwise it stays put.
+        let expected = usize::from(MODULE_TYPES.len() > 1);
+        assert_eq!(dialog.selected_index(), expected);
+    }
+
+    #[test]
+    fn ut_render_draws_titled_modal() {
+        let mut dialog = TypeSelectDialog::new();
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("New Module"));
+    }
 }
