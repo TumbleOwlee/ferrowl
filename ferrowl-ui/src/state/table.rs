@@ -273,11 +273,13 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — a table starts with its first row selected.
     fn starts_with_first_row_selected() {
         assert_eq!(selected(&table(3)), Some(0));
     }
 
     #[test]
+    /// UI-R-013 — j/Down moves the row selection down and clamps at the last row (no wrap).
     fn move_down_advances_and_clamps_at_bottom() {
         let mut s = table(3);
         s.move_down();
@@ -289,6 +291,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — k/Up moves the row selection up and clamps at the first row.
     fn move_up_retreats_and_clamps_at_top() {
         let mut s = table(3);
         s.move_to_bottom();
@@ -302,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — g jumps to the first row and G to the last.
     fn move_to_top_and_bottom_jump() {
         let mut s = table(5);
         s.move_to_bottom();
@@ -311,6 +315,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — table navigation is a safe no-op on an empty table.
     fn empty_table_navigation_selects_none_without_panic() {
         let mut s = table(0);
         s.move_down();
@@ -324,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — navigation on a single-row table stays put.
     fn single_row_navigation_stays_put() {
         let mut s = table(1);
         s.move_down();
@@ -333,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — column/horizontal movement clamps at the left edge.
     fn horizontal_scroll_does_not_underflow_at_left_edge() {
         let mut s = table(3);
         s.move_left();
@@ -343,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — vim keys dispatch table row/column navigation.
     fn handle_events_dispatches_vim_keys() {
         let mut s = table(4);
         s.handle_events(KeyModifiers::NONE, KeyCode::Char('j'));
@@ -356,6 +364,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — replacing the rows selects the first row when nothing was selected.
     fn set_values_selects_first_row_when_previously_unselected() {
         let mut s = table(0);
         s.move_down(); // empty -> selection becomes None
@@ -365,6 +374,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — the selection clamps into range when the row list shrinks.
     fn set_values_clamps_selection_when_list_shrinks() {
         let mut s = table(5);
         s.move_to_bottom();
@@ -378,6 +388,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — emptying the rows clears the selection.
     fn set_values_clears_selection_when_emptied() {
         let mut s = table(3);
         s.set_values(Vec::new());
@@ -385,6 +396,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — replacing the rows keeps an existing in-range selection.
     fn set_values_keeps_existing_in_range_selection() {
         let mut s = table(5);
         s.move_down();
@@ -401,6 +413,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — a row can be selected directly by index.
     fn select_index_sets_selection_directly() {
         let mut s = table(4);
         s.select_index(3);
@@ -408,6 +421,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-047 — an unhandled table key returns Unhandled so it propagates to the enclosing layer.
     fn handle_events_returns_unhandled_for_unknown_key() {
         let mut s = table(2);
         let r = s.handle_events(KeyModifiers::NONE, KeyCode::Char('z'));

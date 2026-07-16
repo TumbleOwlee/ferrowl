@@ -183,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — printable keys insert at the cursor and advance it.
     fn typing_appends_and_advances_cursor() {
         let mut s = field();
         type_str(&mut s, "abc");
@@ -191,6 +192,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — insertion happens at the cursor, mid-string.
     fn insert_at_cursor_mid_string() {
         let mut s = field();
         type_str(&mut s, "ac");
@@ -201,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Backspace at the start of the input is a no-op.
     fn backspace_at_start_is_noop() {
         let mut s = field();
         type_str(&mut s, "ab");
@@ -211,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Delete removes the character under the cursor.
     fn delete_removes_char_under_cursor() {
         let mut s = field();
         type_str(&mut s, "abc");
@@ -221,6 +225,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Home/End move the cursor to the input bounds.
     fn home_and_end_move_cursor_to_bounds() {
         let mut s = field();
         type_str(&mut s, "hello");
@@ -231,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Left/Right move the cursor and clamp at the bounds.
     fn left_right_clamp_at_bounds() {
         let mut s = field();
         type_str(&mut s, "ab");
@@ -243,6 +249,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — editing is character-based: Backspace removes one multi-byte character.
     fn multibyte_backspace_removes_one_character() {
         let mut s = field();
         type_str(&mut s, "aé语");
@@ -253,6 +260,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Ctrl+F autofills from the placeholder when the field is empty.
     fn ctrl_f_fills_empty_field_from_autofill() {
         let mut s = InputFieldStateBuilder::default()
             .autofill(Some("default".to_string()))
@@ -264,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Ctrl+F does not overwrite a non-empty field.
     fn ctrl_f_does_not_overwrite_non_empty_field() {
         let mut s = InputFieldStateBuilder::default()
             .autofill(Some("default".to_string()))
@@ -275,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — Ctrl+D clears the input.
     fn ctrl_d_clears_the_input() {
         let mut s = field();
         type_str(&mut s, "abc");
@@ -284,6 +294,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — a disabled input ignores typing.
     fn disabled_field_ignores_typing() {
         let mut s = InputFieldStateBuilder::default()
             .disabled(true)
@@ -294,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — a per-field filter rejects disallowed characters.
     fn allowed_for_filters_disallowed_chars() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()
@@ -305,6 +317,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — a focused input consumes a filtered-out printable key so it never leaks to app shortcuts.
     fn rejected_char_still_returns_consumed() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()
@@ -316,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the per-field filter does not gate Ctrl+F autofill.
     fn allowed_filter_does_not_affect_autofill() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()
@@ -327,6 +341,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — the per-field filter does not gate Ctrl+D, Backspace/Delete, or navigation.
     fn allowed_filter_does_not_affect_ctrl_d_backspace_delete_navigation() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()
@@ -359,6 +374,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-048 — a Shift-modified printable still passes through the per-field filter.
     fn shift_modified_char_respects_allowed_filter() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()

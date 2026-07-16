@@ -69,6 +69,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-047 — a button consumes no keys, returning Unhandled so the key propagates.
     fn ut_button_state_never_consumes_keys() {
         let mut s = ButtonState::default();
         let r = s.handle_events(KeyModifiers::NONE, KeyCode::Enter);

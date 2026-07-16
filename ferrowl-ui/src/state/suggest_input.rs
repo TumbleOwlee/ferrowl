@@ -271,6 +271,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — typing opens the completion popup when the provider returns matches.
     fn typing_opens_popup_on_match() {
         let mut s = state();
         type_str(&mut s, "a");
@@ -279,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — the popup stays closed when the provider returns no matches.
     fn typing_keeps_popup_closed_without_match() {
         let mut s = state();
         type_str(&mut s, "z");
@@ -286,6 +288,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — while open, Up/Down move the highlighted suggestion.
     fn up_down_wrap_around() {
         let mut s = state();
         type_str(&mut s, "a");
@@ -297,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — Enter accepts the highlighted (non-partial) suggestion and closes the popup.
     fn enter_accepts_selected_and_moves_cursor_to_end() {
         let mut s = state();
         type_str(&mut s, "a");
@@ -309,6 +313,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — accepting a partial suggestion re-queries and keeps the popup open.
     fn accepting_partial_suggestion_requeries_and_stays_open() {
         let mut s = state();
         type_str(&mut s, "d");
@@ -320,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — Esc dismisses the open popup without changing the text.
     fn esc_closes_popup_only_and_is_consumed_while_open() {
         let mut s = state();
         type_str(&mut s, "a");
@@ -330,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — while closed, the popup's keys pass through as Unhandled.
     fn navigation_keys_unhandled_while_closed() {
         let mut s = state();
         for code in [
@@ -345,6 +352,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-026 — losing focus closes the completion popup.
     fn set_focused_false_closes_popup() {
         let mut s = state();
         type_str(&mut s, "a");

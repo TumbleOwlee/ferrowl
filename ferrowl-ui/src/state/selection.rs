@@ -152,6 +152,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — j/Down moves the selection down; a selection list wraps at the end.
     fn move_down_advances_then_wraps() {
         let mut s = sel(3);
         assert_eq!(s.selection(), 0);
@@ -164,6 +165,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — k/Up moves the selection up; a selection list wraps to the bottom.
     fn move_up_wraps_to_bottom() {
         let mut s = sel(3);
         s.move_up(); // from 0 wraps to last
@@ -173,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — selection navigation is a safe no-op on an empty list.
     fn empty_values_navigation_is_noop_without_panic() {
         let mut s = sel(0);
         s.move_down();
@@ -182,6 +185,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — h/l move the horizontal item; leftward clamps at zero.
     fn move_left_does_not_underflow_at_zero() {
         let mut s = sel(3);
         s.move_left();
@@ -193,6 +197,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-013 — j/k/arrow keys dispatch selection navigation; an unrelated key is left unhandled.
     fn handle_events_dispatches_navigation() {
         let mut s = sel(3);
         s.handle_events(KeyModifiers::NONE, KeyCode::Char('j'));
