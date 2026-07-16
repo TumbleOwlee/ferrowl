@@ -102,6 +102,9 @@ type (`feat/`, `fix/`, `docs/`).
    or helper detail that no requirement governs may stay untagged. Where a test verifies real
    behavior that no requirement yet states, add the requirement (a normative change — gate 1)
    rather than attach a loose ID.
+   The citing doc comment goes on the line **directly below** the `#[test]`/`#[tokio::test]`
+   attribute, immediately above the `fn`. A given requirement ID appears **at most once** per
+   test — one test verifying several requirements lists each once; never repeat the same ID.
    The task is not done until the plan's Verification method has actually been run and
    its outcome reported. Waiving it requires asking.
 7. **Reconcile the spec.** If implementation forced the behavior to differ from what

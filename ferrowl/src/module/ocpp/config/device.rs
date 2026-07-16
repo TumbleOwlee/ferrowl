@@ -249,8 +249,8 @@ mod tests {
     use super::*;
     use ferrowl_util::convert::{Converter, FileType};
 
-    /// SC-R-022 — a script entry with no `enabled` flag defaults to enabled.
     #[test]
+    /// SC-R-022 — a script entry with no `enabled` flag defaults to enabled.
     fn ut_script_enabled_defaults_true() {
         // A file entry without an `enabled` flag deserializes as active.
         let s: ScriptDef = serde_json::from_str(r#"{"name":"a","code":"x = 1"}"#).unwrap();
@@ -345,8 +345,8 @@ mod tests {
 
     // An old-format device config file (predating `script_interval`) must still load, with
     // `script_interval` defaulting to 1.0.
-    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     #[test]
+    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     fn ut_device_config_loads_without_script_interval_field() {
         let json = serde_json::json!({
             "ocpp_version": "1.6",
@@ -358,8 +358,8 @@ mod tests {
 
     // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
     // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
-    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     #[test]
+    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     fn ut_device_config_script_interval_duration_sanitized() {
         let mut cfg = OcppDeviceConfig::default();
         assert_eq!(
@@ -380,8 +380,8 @@ mod tests {
         }
     }
 
-    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     #[test]
+    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     fn ut_device_config_script_interval_duration_floored() {
         let cfg = OcppDeviceConfig {
             script_interval: 0.0001,

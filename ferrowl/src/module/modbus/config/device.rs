@@ -386,8 +386,8 @@ mod tests {
         }
     }
 
-    /// SC-R-025 — legacy per-register `update` snippets migrate into named, enabled script entries.
     #[test]
+    /// SC-R-025 — legacy per-register `update` snippets migrate into named, enabled script entries.
     fn ut_migrate_update_scripts() {
         let mut cfg = sample();
         cfg.scripts.clear();
@@ -444,8 +444,8 @@ mod tests {
 
     // An old-format device config file (predating `script_interval`) must still load, with
     // `script_interval` defaulting to 1.0.
-    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     #[test]
+    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     fn ut_device_config_loads_without_script_interval_field() {
         let path = std::env::temp_dir().join("ferrowl_device_no_script_interval.toml");
         let path = path.to_str().unwrap();
@@ -456,8 +456,8 @@ mod tests {
 
     // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
     // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
-    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     #[test]
+    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     fn ut_device_config_script_interval_duration_sanitized() {
         let mut cfg = sample();
         cfg.script_interval = 0.25;
@@ -474,8 +474,8 @@ mod tests {
         }
     }
 
-    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     #[test]
+    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     fn ut_device_config_script_interval_duration_floored() {
         let mut cfg = sample();
         cfg.script_interval = 0.0001;
@@ -485,8 +485,8 @@ mod tests {
         );
     }
 
-    /// MB-R-077 — a register definition maps to its kind, memory cell type, and format width for store construction.
     #[test]
+    /// MB-R-077 — a register definition maps to its kind, memory cell type, and format width for store construction.
     fn ut_register_mapping() {
         let def = &sample().definitions["setpoint"];
         assert!(matches!(def.kind(), Kind::HoldingRegister));
@@ -494,8 +494,8 @@ mod tests {
         assert_eq!(def.format().width(), 1);
     }
 
-    /// MB-R-083 — read-range config parses inclusive bounds into address ranges, skipping malformed/reversed entries.
     #[test]
+    /// MB-R-083 — read-range config parses inclusive bounds into address ranges, skipping malformed/reversed entries.
     fn ut_parse_ranges() {
         // Inclusive bounds; bare address = single-cell range; whitespace tolerated.
         assert_eq!(
@@ -509,8 +509,8 @@ mod tests {
         assert_eq!(parse_ranges("9-3,4"), vec![Range::new(4, 1)]);
     }
 
-    /// MB-R-014 — a configured bit-field mask derives its shift from the trailing-zero count; absent/garbage yields the full mask.
     #[test]
+    /// MB-R-014 — a configured bit-field mask derives its shift from the trailing-zero count; absent/garbage yields the full mask.
     fn ut_parse_bitmask() {
         assert_eq!(parse_bitmask(Some("0xFF00")).mask, 0xFF00);
         assert_eq!(parse_bitmask(Some("0xFF00")).shift(), 8);
@@ -521,8 +521,8 @@ mod tests {
         assert!(parse_bitmask(Some("nonsense")).is_full());
     }
 
-    /// MB-R-017 — a bit-field mask threads into an integer format but float formats ignore it (full no-op mask).
     #[test]
+    /// MB-R-017 — a bit-field mask threads into an integer format but float formats ignore it (full no-op mask).
     fn ut_bitmask_threaded_into_format() {
         let mut def = sample().definitions["setpoint"].clone();
         def.bitmask = Some("0x0FF0".to_string());
@@ -557,8 +557,8 @@ mod tests {
         }
     }
 
-    /// MB-R-083 — explicit read ranges are configured per function code and resolved to that code's ranges.
     #[test]
+    /// MB-R-083 — explicit read ranges are configured per function code and resolved to that code's ranges.
     fn ut_read_ranges_is_empty_and_ranges_for() {
         let mut rr = ReadRanges::default();
         assert!(rr.is_empty());
@@ -628,8 +628,8 @@ mod tests {
         ));
     }
 
-    /// MB-R-078 — a register definition's kind fixes its memory cell type (coil vs register) across every value type.
     #[test]
+    /// MB-R-078 — a register definition's kind fixes its memory cell type (coil vs register) across every value type.
     fn ut_register_def_kind_mem_type_and_all_formats() {
         for kind in [
             Kind::Coil,
@@ -670,8 +670,8 @@ mod tests {
         }
     }
 
-    /// MB-R-080 — a virtual register (or the `virtual` flag over a fixed address) occupies no store range; a fixed one does.
     #[test]
+    /// MB-R-080 — a virtual register (or the `virtual` flag over a fixed address) occupies no store range; a fixed one does.
     fn ut_register_def_address_range_and_register() {
         let fixed = def_with(ValueType::U16, Kind::HoldingRegister, Some(10), false);
         assert_eq!(fixed.address(), Address::Fixed(10));
@@ -690,8 +690,8 @@ mod tests {
         );
     }
 
-    /// MB-R-097 — a register definition with no `kind` defaults to holding register (resolution 1.0, length 1).
     #[test]
+    /// MB-R-097 — a register definition with no `kind` defaults to holding register (resolution 1.0, length 1).
     fn ut_register_def_serde_defaults() {
         // A minimal definition omitting kind/resolution/length triggers the default fns.
         let path = std::env::temp_dir().join("ferrowl_codecdef_min.toml");

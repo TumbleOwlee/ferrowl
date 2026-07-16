@@ -27,8 +27,8 @@ impl std::fmt::Display for Resolution {
 mod tests {
     use super::Resolution;
 
-    /// MB-R-021 — every numeric format carries a display resolution defaulting to `1.0`.
     #[test]
+    /// MB-R-021 — every numeric format carries a display resolution defaulting to `1.0`.
     fn ut_resolution_default_and_display() {
         assert_eq!(Resolution::default().0, 1.0);
         assert_eq!(Resolution(2.5).to_string(), "2.5");

@@ -70,16 +70,16 @@ fn default_reconnect() -> bool {
 mod tests {
     use super::*;
 
-    /// MB-R-050 — reconnect is enabled by default when absent from the config.
     #[test]
+    /// MB-R-050 — reconnect is enabled by default when absent from the config.
     fn ut_config_serde_defaults_reconnect_true_when_absent() {
         let json = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0}"#;
         let cfg: Config = serde_json::from_str(json).unwrap();
         assert!(cfg.reconnect);
     }
 
-    /// MB-R-055 — an explicit `reconnect: false` disables reconnect.
     #[test]
+    /// MB-R-055 — an explicit `reconnect: false` disables reconnect.
     fn ut_config_serde_respects_explicit_reconnect_false() {
         let json = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0,"reconnect":false}"#;
         let cfg: Config = serde_json::from_str(json).unwrap();

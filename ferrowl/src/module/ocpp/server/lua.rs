@@ -312,8 +312,8 @@ mod tests {
     type Cs = <V1_6 as ServerVersion>::Cs;
     type Conn = <V1_6 as ServerVersion>::Conn;
 
-    /// SC-R-021 — a server module's C_OCPP bridge enumerates stations and routes Get/Set/action by identity.
     #[test]
+    /// SC-R-021 — a server module's C_OCPP bridge enumerates stations and routes Get/Set/action by identity.
     fn ut_server_host_resolves_and_routes_by_identity() {
         let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
         with_state_mut(&states, |reg| {

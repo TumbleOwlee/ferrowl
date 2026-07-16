@@ -486,8 +486,8 @@ mod tests {
 
     // --- Too few bytes ---
 
-    /// MB-R-023 — decoding fails with a too-few-bytes error when fewer words than the format width are supplied.
     #[test]
+    /// MB-R-023 — decoding fails with a too-few-bytes error when fewer words than the format width are supplied.
     fn ut_decode_too_few_bytes() {
         assert!(reg(u32_be()).decode(&[0x0001]).is_err());
         assert!(
@@ -499,8 +499,8 @@ mod tests {
 
     // --- U8 decode ---
 
-    /// MB-R-012 — a big-endian U8 reads the byte from the register's low byte.
     #[test]
+    /// MB-R-012 — a big-endian U8 reads the byte from the register's low byte.
     fn ut_decode_u8_big() {
         match reg(u8_be()).decode(&[0x00FF]).unwrap() {
             Value::U8((v, _)) => assert_eq!(v, 0xFF),
@@ -508,8 +508,8 @@ mod tests {
         }
     }
 
-    /// MB-R-012 — a little-endian U8 reads the byte from the register's high byte.
     #[test]
+    /// MB-R-012 — a little-endian U8 reads the byte from the register's high byte.
     fn ut_decode_u8_little() {
         match reg(u8_le()).decode(&[0xFF00]).unwrap() {
             Value::U8((v, _)) => assert_eq!(v, 0xFF),
@@ -519,28 +519,28 @@ mod tests {
 
     // --- U8 encode ---
 
-    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (decimal input).
     #[test]
+    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (decimal input).
     fn ut_encode_u8_big_decimal() {
         assert_eq!(reg(u8_be()).encode("255").unwrap(), vec![0x00FFu16]);
     }
 
-    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (hex input).
     #[test]
+    /// MB-R-012 — a big-endian U8 places the byte in the register's low byte (hex input).
     fn ut_encode_u8_big_hex() {
         assert_eq!(reg(u8_be()).encode("0xFF").unwrap(), vec![0x00FFu16]);
     }
 
-    /// MB-R-012 — a little-endian U8 places the byte in the register's high byte.
     #[test]
+    /// MB-R-012 — a little-endian U8 places the byte in the register's high byte.
     fn ut_encode_u8_little() {
         assert_eq!(reg(u8_le()).encode("255").unwrap(), vec![0xFF00u16]);
     }
 
     // --- U8 round-trip ---
 
-    /// MB-R-007 — encoding then decoding a U8 recovers the value.
     #[test]
+    /// MB-R-007 — encoding then decoding a U8 recovers the value.
     fn ut_roundtrip_u8_big() {
         let r = reg(u8_be());
         let words = r.encode("200").unwrap();
@@ -548,8 +548,8 @@ mod tests {
         assert_eq!(decoded.to_string(), "200");
     }
 
-    /// MB-R-007 — encoding then decoding a little-endian U8 recovers the value.
     #[test]
+    /// MB-R-007 — encoding then decoding a little-endian U8 recovers the value.
     fn ut_roundtrip_u8_little() {
         let r = reg(u8_le());
         let words = r.encode("42").unwrap();
@@ -559,8 +559,8 @@ mod tests {
 
     // --- I8 decode ---
 
-    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (negative value).
     #[test]
+    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (negative value).
     fn ut_decode_i8_negative() {
         // -1i8 as u8 = 0xFF; stored in low byte of register
         match reg(i8_be()).decode(&[0x00FF]).unwrap() {
@@ -569,8 +569,8 @@ mod tests {
         }
     }
 
-    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (positive value).
     #[test]
+    /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (positive value).
     fn ut_decode_i8_positive() {
         match reg(i8_be()).decode(&[0x0042]).unwrap() {
             Value::I8((v, _)) => assert_eq!(v, 66i8),
@@ -580,21 +580,21 @@ mod tests {
 
     // --- I8 encode ---
 
-    /// MB-R-022 — a signed format accepts a plain negative decimal literal.
     #[test]
+    /// MB-R-022 — a signed format accepts a plain negative decimal literal.
     fn ut_encode_i8_decimal_negative() {
         assert_eq!(reg(i8_be()).encode("-1").unwrap(), vec![-1i8 as u16]);
     }
 
-    /// MB-R-022 — a plain `0x` literal on a signed format is taken as the bit pattern.
     #[test]
+    /// MB-R-022 — a plain `0x` literal on a signed format is taken as the bit pattern.
     fn ut_encode_i8_hex() {
         // "0xFF" → u8 0xFF as i8 = -1
         assert_eq!(reg(i8_be()).encode("0xFF").unwrap(), vec![-1i8 as u16]);
     }
 
-    /// MB-R-022 — a signed format accepts a `-0x` literal as the negation of the hex bit pattern.
     #[test]
+    /// MB-R-022 — a signed format accepts a `-0x` literal as the negation of the hex bit pattern.
     fn ut_encode_i8_neg_hex() {
         // "-0x01" → -1i8
         assert_eq!(reg(i8_be()).encode("-0x01").unwrap(), vec![-1i8 as u16]);
@@ -602,8 +602,8 @@ mod tests {
 
     // --- I8 round-trip ---
 
-    /// MB-R-007 — encoding then decoding an I8 recovers the value across its range.
     #[test]
+    /// MB-R-007 — encoding then decoding an I8 recovers the value across its range.
     fn ut_roundtrip_i8() {
         let r = reg(i8_be());
         for val in [-128i8, -1, 0, 1, 127] {
@@ -615,8 +615,8 @@ mod tests {
 
     // --- U32 decode ---
 
-    /// MB-R-013 — big-endian decodes the register words' byte stream in wire order.
     #[test]
+    /// MB-R-013 — big-endian decodes the register words' byte stream in wire order.
     fn ut_decode_u32_big() {
         match reg(u32_be()).decode(&[0x0001, 0x0002]).unwrap() {
             Value::U32((v, _)) => assert_eq!(v, 0x00010002),
@@ -624,8 +624,8 @@ mod tests {
         }
     }
 
-    /// MB-R-013 — little-endian decodes the register words' byte stream fully reversed.
     #[test]
+    /// MB-R-013 — little-endian decodes the register words' byte stream fully reversed.
     fn ut_decode_u32_little() {
         // Bytes [0x01, 0x02, 0x03, 0x04] reversed = [0x04, 0x03, 0x02, 0x01]
         // parse = 0x04030201
@@ -637,8 +637,8 @@ mod tests {
 
     // --- U32 encode ---
 
-    /// MB-R-013 — big-endian encodes the value's byte stream in wire order.
     #[test]
+    /// MB-R-013 — big-endian encodes the value's byte stream in wire order.
     fn ut_encode_u32_big() {
         // 65538 = 0x00010002
         assert_eq!(
@@ -647,8 +647,8 @@ mod tests {
         );
     }
 
-    /// MB-R-022 — a `0x`-prefixed hex literal is accepted for numeric input.
     #[test]
+    /// MB-R-022 — a `0x`-prefixed hex literal is accepted for numeric input.
     fn ut_encode_u32_big_hex() {
         assert_eq!(
             reg(u32_be()).encode("0x00010002").unwrap(),
@@ -656,8 +656,8 @@ mod tests {
         );
     }
 
-    /// MB-R-013 — little-endian encodes the value's byte stream fully reversed.
     #[test]
+    /// MB-R-013 — little-endian encodes the value's byte stream fully reversed.
     fn ut_encode_u32_little() {
         // 0x00010002 in LE bytes: [0x02, 0x00, 0x01, 0x00] → registers [0x0200, 0x0100]
         assert_eq!(
@@ -668,8 +668,8 @@ mod tests {
 
     // --- U32 round-trip ---
 
-    /// MB-R-007 — encoding then decoding a big-endian U32 recovers the value.
     #[test]
+    /// MB-R-007 — encoding then decoding a big-endian U32 recovers the value.
     fn ut_roundtrip_u32_big() {
         let r = reg(u32_be());
         let words = r.encode("123456789").unwrap();
@@ -677,8 +677,8 @@ mod tests {
         assert_eq!(decoded.to_string(), "123456789");
     }
 
-    /// MB-R-007 — encoding then decoding a little-endian U32 recovers the value.
     #[test]
+    /// MB-R-007 — encoding then decoding a little-endian U32 recovers the value.
     fn ut_roundtrip_u32_little() {
         let r = reg(u32_le());
         let words = r.encode("987654321").unwrap();
@@ -688,8 +688,8 @@ mod tests {
 
     // --- I32 round-trip ---
 
-    /// MB-R-007 — encoding then decoding a big-endian I32 recovers the value across its range.
     #[test]
+    /// MB-R-007 — encoding then decoding a big-endian I32 recovers the value across its range.
     fn ut_roundtrip_i32_big() {
         let r = reg(i32_be());
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
@@ -699,8 +699,8 @@ mod tests {
         }
     }
 
-    /// MB-R-007 — encoding then decoding a little-endian I32 recovers the value across its range.
     #[test]
+    /// MB-R-007 — encoding then decoding a little-endian I32 recovers the value across its range.
     fn ut_roundtrip_i32_little() {
         let r = reg(i32_le());
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
@@ -710,8 +710,8 @@ mod tests {
         }
     }
 
-    /// MB-R-022 — a signed format accepts a `-0x` literal as the negation of the hex bit pattern.
     #[test]
+    /// MB-R-022 — a signed format accepts a `-0x` literal as the negation of the hex bit pattern.
     fn ut_encode_i32_neg_hex() {
         // "-0x01" → -1i32
         let r = reg(i32_be());
@@ -722,8 +722,8 @@ mod tests {
         }
     }
 
-    /// MB-R-022 — a plain `0x` literal on a signed format is taken as the two's-complement bit pattern.
     #[test]
+    /// MB-R-022 — a plain `0x` literal on a signed format is taken as the two's-complement bit pattern.
     fn ut_encode_i32_hex_two_complement() {
         // "0xFFFFFFFF" → u32 all-ones as i32 = -1
         let r = reg(i32_be());
@@ -736,8 +736,8 @@ mod tests {
 
     // --- F32 ---
 
-    /// MB-R-018 — a float decodes from its raw IEEE 754 bit pattern.
     #[test]
+    /// MB-R-018 — a float decodes from its raw IEEE 754 bit pattern.
     fn ut_decode_f32_big() {
         let bits = 1.5f32.to_bits();
         let words = vec![((bits >> 16) & 0xFFFF) as u16, (bits & 0xFFFF) as u16];
@@ -747,16 +747,16 @@ mod tests {
         }
     }
 
-    /// MB-R-018 — a float encodes as its raw IEEE 754 bit pattern.
     #[test]
+    /// MB-R-018 — a float encodes as its raw IEEE 754 bit pattern.
     fn ut_encode_f32_decimal() {
         let bits = 1.5f32.to_bits();
         let expected = vec![((bits >> 16) & 0xFFFF) as u16, (bits & 0xFFFF) as u16];
         assert_eq!(reg(f32_be()).encode("1.5").unwrap(), expected);
     }
 
-    /// MB-R-018 — encoding then decoding an F32 recovers the value via its bit pattern.
     #[test]
+    /// MB-R-018 — encoding then decoding an F32 recovers the value via its bit pattern.
     fn ut_roundtrip_f32_big() {
         let r = reg(f32_be());
         let words = r.encode("1.5").unwrap();
@@ -766,8 +766,8 @@ mod tests {
         }
     }
 
-    /// MB-R-022 — a `0x` literal on a float format is taken as its IEEE 754 bit pattern.
     #[test]
+    /// MB-R-022 — a `0x` literal on a float format is taken as its IEEE 754 bit pattern.
     fn ut_encode_f32_hex() {
         let bits = 1.5f32.to_bits();
         let hex_str = format!("0x{:08X}", bits);
@@ -777,8 +777,8 @@ mod tests {
 
     // --- F64 ---
 
-    /// MB-R-018 — encoding then decoding an F64 recovers the value via its bit pattern.
     #[test]
+    /// MB-R-018 — encoding then decoding an F64 recovers the value via its bit pattern.
     fn ut_roundtrip_f64_big() {
         let r = reg(f64_be());
         let words = r.encode("1.5").unwrap();
@@ -790,8 +790,8 @@ mod tests {
 
     // --- Ascii ---
 
-    /// MB-R-019 — `Ascii` packs two characters per register.
     #[test]
+    /// MB-R-019 — `Ascii` packs two characters per register.
     fn ut_decode_ascii_exact_fill() {
         // "ABCD" fills exactly 4 bytes (Width(2) = 2 registers = 4 bytes)
         let r = reg(Format::Ascii((Alignment::Left, Width(2))));
@@ -801,24 +801,24 @@ mod tests {
         }
     }
 
-    /// MB-R-020 — `Left` alignment zero-pads on the right to `2 × width` bytes.
     #[test]
+    /// MB-R-020 — `Left` alignment zero-pads on the right to `2 × width` bytes.
     fn ut_encode_ascii_left_aligned() {
         // "AB" left-aligned in 4 bytes: [0x41, 0x42, 0x00, 0x00]
         let r = reg(Format::Ascii((Alignment::Left, Width(2))));
         assert_eq!(r.encode("AB").unwrap(), vec![0x4142u16, 0x0000u16]);
     }
 
-    /// MB-R-020 — `Right` alignment zero-pads on the left to `2 × width` bytes.
     #[test]
+    /// MB-R-020 — `Right` alignment zero-pads on the left to `2 × width` bytes.
     fn ut_encode_ascii_right_aligned() {
         // "AB" right-aligned in 4 bytes: [0x00, 0x00, 0x41, 0x42]
         let r = reg(Format::Ascii((Alignment::Right, Width(2))));
         assert_eq!(r.encode("AB").unwrap(), vec![0x0000u16, 0x4142u16]);
     }
 
-    /// MB-R-007 — encoding then decoding an exact-fill ASCII value recovers the string.
     #[test]
+    /// MB-R-007 — encoding then decoding an exact-fill ASCII value recovers the string.
     fn ut_roundtrip_ascii_exact() {
         // Exact fill avoids null-padding in round-trip
         let r = reg(Format::Ascii((Alignment::Left, Width(2))));
@@ -831,8 +831,8 @@ mod tests {
 
     // --- Resolution scaling ---
 
-    /// MB-R-021 — the display resolution scales the shown value but not the words on the wire.
     #[test]
+    /// MB-R-021 — the display resolution scales the shown value but not the words on the wire.
     fn ut_decode_u16_with_resolution() {
         let r = reg(Format::U16((Endian::Big, Resolution(0.5), bf())));
         let words = r.encode("2048").unwrap();
@@ -847,8 +847,8 @@ mod tests {
         Format::U16((Endian::Big, res(), BitField { mask }))
     }
 
-    /// MB-R-015 — decoding an integer field yields `(raw & mask) >> shift`.
     #[test]
+    /// MB-R-015 — decoding an integer field yields `(raw & mask) >> shift`.
     fn ut_decode_u16_high_byte_field() {
         // mask 0xFF00 → shift 8: raw 0xAB12 reads as 0xAB.
         match reg(u16_be_mask(0xFF00)).decode(&[0xAB12]).unwrap() {
@@ -857,8 +857,8 @@ mod tests {
         }
     }
 
-    /// MB-R-015 — a low-byte mask (shift 0) decodes as `raw & mask`.
     #[test]
+    /// MB-R-015 — a low-byte mask (shift 0) decodes as `raw & mask`.
     fn ut_decode_u16_low_byte_field() {
         // mask 0x00FF → shift 0: raw 0xAB12 reads as 0x12.
         match reg(u16_be_mask(0x00FF)).decode(&[0xAB12]).unwrap() {
@@ -867,8 +867,8 @@ mod tests {
         }
     }
 
-    /// MB-R-015 — encoding a field places the value as `(value << shift) & mask`, other bits zero.
     #[test]
+    /// MB-R-015 — encoding a field places the value as `(value << shift) & mask`, other bits zero.
     fn ut_encode_u16_high_byte_field() {
         // value 0x12 placed into mask 0xFF00 → word 0x1200, other bits zero.
         assert_eq!(
@@ -877,8 +877,8 @@ mod tests {
         );
     }
 
-    /// MB-R-015 — encoding then decoding a bit-field value recovers the field.
     #[test]
+    /// MB-R-015 — encoding then decoding a bit-field value recovers the field.
     fn ut_roundtrip_u16_field() {
         let r = reg(u16_be_mask(0x0FF0));
         let words = r.encode("0xAB").unwrap();
@@ -890,8 +890,8 @@ mod tests {
         }
     }
 
-    /// MB-R-014 — the full-width default mask is a no-op on encode and decode.
     #[test]
+    /// MB-R-014 — the full-width default mask is a no-op on encode and decode.
     fn ut_full_mask_is_noop() {
         // Default (full) mask encodes/decodes exactly like before.
         let r = reg(u16_be_mask(u128::MAX));
@@ -902,8 +902,8 @@ mod tests {
         }
     }
 
-    /// MB-R-009 — a register exposes a per-word write mask selecting exactly the bits it owns.
     #[test]
+    /// MB-R-009 — a register exposes a per-word write mask selecting exactly the bits it owns.
     fn ut_mask_words_layout() {
         // U16 mask laid out as a single word.
         assert_eq!(reg(u16_be_mask(0xFF00)).write_mask(), vec![0xFF00u16]);
@@ -922,8 +922,8 @@ mod tests {
 
     // --- Wider integer variants, both endians (decode/encode/mask) ---
 
-    /// MB-R-007 — encoding then decoding the wide integer formats recovers the value in both byte orders.
     #[test]
+    /// MB-R-007 — encoding then decoding the wide integer formats recovers the value in both byte orders.
     fn ut_roundtrip_wide_ints() {
         let e = [Endian::Big, Endian::Little];
         for endian in e {
@@ -949,8 +949,8 @@ mod tests {
         }
     }
 
-    /// MB-R-018 — floats encode/decode via their bit pattern under little-endian byte order.
     #[test]
+    /// MB-R-018 — floats encode/decode via their bit pattern under little-endian byte order.
     fn ut_roundtrip_floats_little_endian() {
         let f32le = reg(Format::F32((Endian::Little, res())));
         let words = f32le.encode("1.5").unwrap();
@@ -967,8 +967,8 @@ mod tests {
         }
     }
 
-    /// MB-R-022 — a `0x` literal on an F64 format is taken as its IEEE 754 bit pattern.
     #[test]
+    /// MB-R-022 — a `0x` literal on an F64 format is taken as its IEEE 754 bit pattern.
     fn ut_encode_f64_hex() {
         let bits = 2.5f64.to_bits();
         let hex_str = format!("0x{:016X}", bits);
@@ -980,16 +980,16 @@ mod tests {
         }
     }
 
-    /// MB-R-012 — a little-endian I8 places the byte in the register's high byte.
     #[test]
+    /// MB-R-012 — a little-endian I8 places the byte in the register's high byte.
     fn ut_encode_i8_little_endian() {
         // I8 little-endian places the byte in the high byte of the word.
         let r = reg(Format::I8((Endian::Little, res(), bf())));
         assert_eq!(r.encode("-1").unwrap(), vec![(-1i8 as u16) << 8]);
     }
 
-    /// MB-R-009 — the per-word write mask is laid out correctly across every format width.
     #[test]
+    /// MB-R-009 — the per-word write mask is laid out correctly across every format width.
     fn ut_mask_words_all_widths() {
         // U8 little-endian mask sits in the high byte.
         assert_eq!(reg(u8_le()).write_mask(), vec![0xFF00u16]);
@@ -1022,8 +1022,8 @@ mod tests {
         );
     }
 
-    /// MB-R-009 — the merge `(old & !mask) | (new & mask)` preserves bits owned by sibling registers.
     #[test]
+    /// MB-R-009 — the merge `(old & !mask) | (new & mask)` preserves bits owned by sibling registers.
     fn ut_merge_write_preserves_sibling_bits() {
         // Two U16 regs aliasing one address: low byte and high byte.
         let low = reg(u16_be_mask(0x00FF));
@@ -1047,8 +1047,8 @@ mod tests {
 
     // --- Typed encode_value: equivalence with the string path ---
 
-    /// MB-R-007 — encoding a typed value produces the same words as encoding the equivalent string.
     #[test]
+    /// MB-R-007 — encoding a typed value produces the same words as encoding the equivalent string.
     fn ut_encode_value_matches_string_path_all_variants() {
         let e = [Endian::Big, Endian::Little];
         for endian in e {
@@ -1128,8 +1128,8 @@ mod tests {
         );
     }
 
-    /// MB-R-021 — the typed encode path applies the bit-field but not the resolution, matching the wire words.
     #[test]
+    /// MB-R-021 — the typed encode path applies the bit-field but not the resolution, matching the wire words.
     fn ut_encode_value_bitfield_and_resolution() {
         // Bit-field placement applies identically via the typed path.
         let format = u16_be_mask(0x0FF0);
@@ -1142,8 +1142,8 @@ mod tests {
         assert_eq!(words, encode(&format, "2048").unwrap());
     }
 
-    /// MB-R-007 — encoding a typed value then decoding recovers it.
     #[test]
+    /// MB-R-007 — encoding a typed value then decoding recovers it.
     fn ut_encode_value_roundtrip_via_decode() {
         let r = reg(i32_le());
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
@@ -1157,8 +1157,8 @@ mod tests {
 
     // --- Bit-field mask width validation ---
 
-    /// MB-R-016 — a mask setting a bit at or above the format width is rejected on decode.
     #[test]
+    /// MB-R-016 — a mask setting a bit at or above the format width is rejected on decode.
     fn ut_decode_bitfield_mask_out_of_width_errors() {
         // 0x1FF on a U8 sets bit 8, outside the 8-bit width.
         let format = Format::U8((Endian::Big, res(), BitField { mask: 0x1FF }));
@@ -1171,8 +1171,8 @@ mod tests {
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
     }
 
-    /// MB-R-016 — a mask setting a bit at or above the format width is rejected on encode.
     #[test]
+    /// MB-R-016 — a mask setting a bit at or above the format width is rejected on encode.
     fn ut_encode_bitfield_mask_out_of_width_errors() {
         let format = Format::U8((Endian::Big, res(), BitField { mask: 0x1FF }));
         let err = encode(&format, "1").unwrap_err();
@@ -1182,8 +1182,8 @@ mod tests {
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
     }
 
-    /// MB-R-016 — masks within the format width are accepted on decode and encode.
     #[test]
+    /// MB-R-016 — masks within the format width are accepted on decode and encode.
     fn ut_bitfield_mask_in_width_still_works() {
         // Existing in-width masks keep decoding/encoding as before.
         assert!(reg(u16_be_mask(0xFF00)).decode(&[0xAB12]).is_ok());
@@ -1191,8 +1191,8 @@ mod tests {
         assert!(reg(u8_be()).decode(&[0x00FF]).is_ok());
     }
 
-    /// MB-R-008 — encoding a typed value whose type does not match the format fails with a mismatch error.
     #[test]
+    /// MB-R-008 — encoding a typed value whose type does not match the format fails with a mismatch error.
     fn ut_encode_value_mismatch_errors() {
         let format = u32_be();
         let err = encode_value(&format, &Value::U16((1, res()))).unwrap_err();

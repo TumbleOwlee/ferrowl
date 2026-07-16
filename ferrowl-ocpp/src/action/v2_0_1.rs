@@ -132,8 +132,8 @@ mod tests {
     use super::*;
     use crate::action::Version;
 
-    /// OC-R-003 — the 2.0.1 CS- and CSMS-originated sets partition the table (disjoint and complete); CSMS actions carry connector scopes (OC-R-005).
     #[test]
+    /// OC-R-003 — the 2.0.1 CS- and CSMS-originated sets partition the table (disjoint and complete); CSMS actions carry connector scopes (OC-R-005).
     fn ut_csms_actions_partition_and_scopes() {
         use crate::action::ConnectorScope::*;
         let cs: std::collections::HashSet<_> = V2_0_1::cs_actions().iter().copied().collect();
@@ -158,8 +158,8 @@ mod tests {
         assert_eq!(scope("ClearCache"), None);
     }
 
-    /// OC-R-006 — a 2.0.1 action encodes and decodes by wire name, and its response decodes via the originating action (OC-R-018).
     #[test]
+    /// OC-R-006 — a 2.0.1 action encodes and decodes by wire name, and its response decodes via the originating action (OC-R-018).
     fn ut_round_trip_boot_notification() {
         use ::rust_ocpp::v2_0_1::datatypes::charging_station::ChargingStationType;
         use ::rust_ocpp::v2_0_1::enumerations::boot_reason::BootReasonEnumType;
@@ -191,8 +191,8 @@ mod tests {
         assert_eq!(decoded, response);
     }
 
-    /// OC-R-006 — a 2.0.1 MeterValues action encodes and decodes by its wire action name.
     #[test]
+    /// OC-R-006 — a 2.0.1 MeterValues action encodes and decodes by its wire action name.
     fn ut_round_trip_meter_values() {
         use ::rust_ocpp::v2_0_1::datatypes::meter_value::MeterValueType;
         use ::rust_ocpp::v2_0_1::datatypes::sampled_value::SampledValueType;
@@ -214,8 +214,8 @@ mod tests {
         assert_eq!(decoded, action);
     }
 
-    /// OC-R-006 — a 2.0.1 Authorize action validates then encodes/decodes by its wire action name.
     #[test]
+    /// OC-R-006 — a 2.0.1 Authorize action validates then encodes/decodes by its wire action name.
     fn ut_round_trip_authorize() {
         use ::rust_ocpp::v2_0_1::datatypes::id_token::IdTokenType;
         use ::rust_ocpp::v2_0_1::enumerations::id_token::IdTokenEnumType;
@@ -236,8 +236,8 @@ mod tests {
         assert_eq!(decoded, action);
     }
 
-    /// OC-R-008 — the 2.0.1 validation rules reject an Authorize whose certificate exceeds its length cap.
     #[test]
+    /// OC-R-008 — the 2.0.1 validation rules reject an Authorize whose certificate exceeds its length cap.
     fn ut_validate_rejects_authorize_certificate_too_long() {
         use ::rust_ocpp::v2_0_1::datatypes::id_token::IdTokenType;
         use ::rust_ocpp::v2_0_1::messages::authorize::AuthorizeRequest;
@@ -252,8 +252,8 @@ mod tests {
         assert!(V2_0_1::validate(&action).is_err());
     }
 
-    /// OC-R-008 — the 2.0.1 validation rules reject a DataTransfer whose vendor id exceeds its length cap.
     #[test]
+    /// OC-R-008 — the 2.0.1 validation rules reject a DataTransfer whose vendor id exceeds its length cap.
     fn ut_validate_rejects_datatransfer_vendor_id_too_long() {
         use ::rust_ocpp::v2_0_1::messages::datatransfer::DataTransferRequest;
 

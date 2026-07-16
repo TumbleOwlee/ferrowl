@@ -366,8 +366,8 @@ mod tests {
         Arc::new(RwLock::new(HashMap::new()))
     }
 
-    /// SC-R-027 — a virtual register round-trips its natural Lua type through the C_Register bridge.
     #[test]
+    /// SC-R-027 — a virtual register round-trips its natural Lua type through the C_Register bridge.
     fn ut_bridge_virtual_register_roundtrip() {
         let virtual_store = vstore();
         let mut registers = evse_registers();
@@ -406,8 +406,8 @@ mod tests {
         );
     }
 
-    /// SC-R-028 — a Lua register write is applied to the module's in-memory state and reads back.
     #[test]
+    /// SC-R-028 — a Lua register write is applied to the module's in-memory state and reads back.
     fn ut_bridge_write_then_read() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
@@ -427,8 +427,8 @@ mod tests {
     }
 
     // Mirrors `run_sim`'s body once: a `power` update copying `setpoint` reflects after a cycle.
-    /// SC-R-028 — a script's register write lands in the module's in-memory state after a cycle.
     #[test]
+    /// SC-R-028 — a script's register write lands in the module's in-memory state after a cycle.
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
         let bridge = RegisterBridge::new(memory.clone(), vstore(), Arc::new(evse_registers()));
@@ -467,8 +467,8 @@ mod tests {
 
     // A failing `C_Test` assertion surfaces through the same `call_all` error path the sim loop
     // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
-    /// SC-R-032 — a failed C_Test assertion surfaces through the sim's collected-error path.
     #[test]
+    /// SC-R-032 — a failed C_Test assertion surfaces through the sim's collected-error path.
     fn ut_sim_script_test_assertion_failure_surfaces() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         let mut context = ContextBuilder::<String>::default()
@@ -523,8 +523,8 @@ mod tests {
             .collect()
     }
 
-    /// SC-R-035 — a one-shot run executes the script against the module's registers without a sim.
     #[test]
+    /// SC-R-035 — a one-shot run executes the script against the module's registers without a sim.
     fn ut_run_script_once_writes_register() {
         let memory = evse_memory();
         let log = script_log();
@@ -555,9 +555,9 @@ mod tests {
         }));
     }
 
+    #[test]
     /// SC-R-035 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
     /// keys its exit code off `[sim]` (CL-R-031) and must not see an interactive test run.
-    #[test]
     fn ut_run_script_once_error_logged_with_run_prefix() {
         let log = script_log();
         run_script_once(
@@ -578,8 +578,8 @@ mod tests {
 
     // --- Typed write path (no string round-trip) ---
 
-    /// SC-R-027 — int/float/bool register writes round-trip as their natural host type.
     #[test]
+    /// SC-R-027 — int/float/bool register writes round-trip as their natural host type.
     fn ut_bridge_typed_int_float_bool_roundtrip() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
 
@@ -613,8 +613,8 @@ mod tests {
         }
     }
 
-    /// SC-R-027 — a fractional float onto an integer format is a range mismatch that errors, not truncates.
     #[test]
+    /// SC-R-027 — a fractional float onto an integer format is a range mismatch that errors, not truncates.
     fn ut_bridge_typed_float_fractional_onto_int_format_errors() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         assert!(
@@ -624,8 +624,8 @@ mod tests {
         );
     }
 
-    /// SC-R-027 — a string register write is applied via the encode path and reads back as its value.
     #[test]
+    /// SC-R-027 — a string register write is applied via the encode path and reads back as its value.
     fn ut_bridge_typed_string_roundtrip() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
@@ -637,8 +637,8 @@ mod tests {
         }
     }
 
-    /// SC-R-027 — a nil register write is rejected rather than silently coerced.
     #[test]
+    /// SC-R-027 — a nil register write is rejected rather than silently coerced.
     fn ut_bridge_typed_nil_errors_cleanly() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         let err = bridge
@@ -689,8 +689,8 @@ mod tests {
         }
     }
 
-    /// SC-R-027 — a nil write to a virtual register is rejected rather than coerced.
     #[test]
+    /// SC-R-027 — a nil write to a virtual register is rejected rather than coerced.
     fn ut_bridge_virtual_typed_nil_errors_cleanly() {
         let virtual_store = vstore();
         let mut registers = evse_registers();

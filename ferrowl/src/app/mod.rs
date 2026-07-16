@@ -586,9 +586,9 @@ mod tests {
     use super::*;
     use std::io::Read;
 
+    #[test]
     /// UI-R-057 — exit only when zero tabs and no modal layer remain; any tab, or any open
     /// layer with zero tabs (e.g. the startup selector before cancel), keeps the app running.
-    #[test]
     fn ut_is_empty_shell() {
         assert!(is_empty_shell(0, false));
         assert!(!is_empty_shell(0, true)); // startup selector still open
@@ -597,8 +597,8 @@ mod tests {
         assert!(!is_empty_shell(2, true));
     }
 
-    /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     #[test]
+    /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     fn log_ring_persists_lines_to_file_sink() {
         let dir = std::env::temp_dir();
         let base = dir.join(format!("ferrowl_logring_test_{}.log", std::process::id()));

@@ -260,8 +260,8 @@ mod tests {
         cond()
     }
 
-    /// SC-R-011 — an enabled session script starts the session sim with no explicit start call.
     #[test]
+    /// SC-R-011 — an enabled session script starts the session sim with no explicit start call.
     fn ut_enabled_script_runs_without_explicit_start() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw.clone());
@@ -278,8 +278,8 @@ mod tests {
         }));
     }
 
-    /// SC-R-011 — with every session script disabled, no sim thread exists.
     #[test]
+    /// SC-R-011 — with every session script disabled, no sim thread exists.
     fn ut_all_disabled_stops() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw);
@@ -293,8 +293,8 @@ mod tests {
         assert!(sim.handle.is_none());
     }
 
-    /// SC-R-024 — toggling a session script's enabled flag starts then stops the sim thread.
     #[test]
+    /// SC-R-024 — toggling a session script's enabled flag starts then stops the sim thread.
     fn ut_toggle_scripts_starts_and_stops() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw.clone());
@@ -319,8 +319,8 @@ mod tests {
         assert!(sim.handle.is_none());
     }
 
-    /// SC-R-024 — editing a session script restarts the sim on a fresh context so new code takes over.
     #[test]
+    /// SC-R-024 — editing a session script restarts the sim on a fresh context so new code takes over.
     fn ut_code_change_restarts_with_new_behavior() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw.clone());
@@ -345,8 +345,8 @@ mod tests {
         }));
     }
 
-    /// SC-R-032 — a session script error is logged at Error level with a `[sim]` prefix; print still logs.
     #[test]
+    /// SC-R-032 — a session script error is logged at Error level with a `[sim]` prefix; print still logs.
     fn ut_script_error_logged_with_sim_prefix_and_print_logged() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw);
@@ -369,8 +369,8 @@ mod tests {
         }));
     }
 
-    /// SC-R-032 — one session script's error does not prevent the others from running that cycle.
     #[test]
+    /// SC-R-032 — one session script's error does not prevent the others from running that cycle.
     fn ut_unknown_module_error_does_not_stop_loop() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw.clone());
@@ -387,9 +387,9 @@ mod tests {
         }));
     }
 
+    #[test]
     /// SC-R-035 / SC-R-011 — `run_once` executes a **disabled** script on demand and starts no sim
     /// thread: the one-shot is independent of the sim lifecycle.
-    #[test]
     fn ut_run_once_executes_disabled_script_without_sim() {
         let rw = MockReadWrite::default();
         let directory = directory_with_mock(rw.clone());
@@ -412,8 +412,8 @@ mod tests {
         assert!(sim.handle.is_none(), "run_once must not start a sim thread");
     }
 
-    /// SC-R-014 — the session sim runs its script about once per cycle interval.
     #[test]
+    /// SC-R-014 — the session sim runs its script about once per cycle interval.
     fn ut_interval_honored_roughly() {
         let rw = MockReadWrite::default();
         rw.store

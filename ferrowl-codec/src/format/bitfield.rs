@@ -63,9 +63,9 @@ impl std::fmt::Display for BitField {
 mod tests {
     use super::BitField;
 
+    #[test]
     /// MB-R-014 — the field shift is derived from the mask as its trailing-zero count;
     /// the default mask is the full-width no-op.
-    #[test]
     fn ut_bitfield_default_shift_is_full_display() {
         assert_eq!(BitField::default().mask, u128::MAX);
         assert!(BitField::default().is_full());
@@ -76,9 +76,9 @@ mod tests {
         assert_eq!(BitField { mask: 0xABCD }.to_string(), "0xABCD");
     }
 
+    #[test]
     /// MB-R-016 — a mask setting any bit at or above the format width is rejected; the
     /// full-width default mask always fits.
-    #[test]
     fn ut_bitfield_fits() {
         assert!(BitField { mask: 0xFF }.fits(8));
         assert!(!BitField { mask: 0x1FF }.fits(8));

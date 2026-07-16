@@ -8,8 +8,8 @@ fn mem() -> Memory<u8> {
     Memory::default()
 }
 
-/// MB-R-029 — reads and writes succeed on addresses fully covered by a declared region.
 #[test]
+/// MB-R-029 — reads and writes succeed on addresses fully covered by a declared region.
 fn it_declared_readwrite_region_roundtrips_values() {
     let mut m = mem();
     assert!(m.add_ranges(
@@ -25,8 +25,8 @@ fn it_declared_readwrite_region_roundtrips_values() {
     assert_eq!(got, vec![10, 20, 30, 40]);
 }
 
-/// MB-R-033 — a checked read on an unregistered key fails with `UnknownKey`.
 #[test]
+/// MB-R-033 — a checked read on an unregistered key fails with `UnknownKey`.
 fn it_read_on_unregistered_key_is_unknown_key() {
     let m = mem();
     let err = m
@@ -35,8 +35,8 @@ fn it_read_on_unregistered_key_is_unknown_key() {
     assert_eq!(err, MemoryError::UnknownKey);
 }
 
-/// MB-R-033 — a checked write whose value count differs from the range length fails with `LengthMismatch`.
 #[test]
+/// MB-R-033 — a checked write whose value count differs from the range length fails with `LengthMismatch`.
 fn it_write_with_wrong_length_is_length_mismatch() {
     let mut m = mem();
     m.add_ranges(
@@ -56,8 +56,8 @@ fn it_write_with_wrong_length_is_length_mismatch() {
     );
 }
 
-/// MB-R-033 — a checked write to a read-only region fails with `AddressNotWritable`.
 #[test]
+/// MB-R-033 — a checked write to a read-only region fails with `AddressNotWritable`.
 fn it_write_to_read_only_region_is_not_writable() {
     let mut m = mem();
     m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 2)]);
@@ -67,8 +67,8 @@ fn it_write_to_read_only_region_is_not_writable() {
     assert_eq!(err, MemoryError::AddressNotWritable);
 }
 
-/// MB-R-033 — a checked read from a write-only region fails with `AddressNotReadable`.
 #[test]
+/// MB-R-033 — a checked read from a write-only region fails with `AddressNotReadable`.
 fn it_read_from_write_only_region_is_not_readable() {
     let mut m = mem();
     m.add_ranges(1, &CellKind::Write(CellType::Register), &[Range::new(0, 2)]);
@@ -78,8 +78,8 @@ fn it_read_from_write_only_region_is_not_readable() {
     assert_eq!(err, MemoryError::AddressNotReadable);
 }
 
-/// MB-R-031 — a write range overlapping a read region of the same type widens it to read/write.
 #[test]
+/// MB-R-031 — a write range overlapping a read region of the same type widens it to read/write.
 fn it_overlapping_read_and_write_ranges_widen_to_readwrite() {
     let mut m = mem();
     assert!(m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 4)]));
@@ -93,8 +93,8 @@ fn it_overlapping_read_and_write_ranges_widen_to_readwrite() {
     assert_eq!(got, vec![5, 6, 7, 8]);
 }
 
-/// MB-R-032 — an incompatible cell-type overlap is rejected and leaves the store's memory unchanged.
 #[test]
+/// MB-R-032 — an incompatible cell-type overlap is rejected and leaves the store's memory unchanged.
 fn it_incompatible_cell_type_overlap_is_rejected_and_leaves_memory_unchanged() {
     let mut m = mem();
     assert!(m.add_ranges(

@@ -553,8 +553,8 @@ mod tests {
         tokio::time::error::Elapsed,
     >;
 
-    /// MB-R-042 — coil/discrete-input reads map to one word per bit: `1` for set, `0` for clear.
     #[test]
+    /// MB-R-042 — coil/discrete-input reads map to one word per bit: `1` for set, `0` for clear.
     fn ut_bits_to_words_maps_true_false_to_one_zero() {
         assert_eq!(
             ClientCore::bits_to_words(vec![true, false, true, true]),
@@ -562,8 +562,8 @@ mod tests {
         );
     }
 
-    /// MB-R-042 — an empty coil/discrete read maps to no words.
     #[test]
+    /// MB-R-042 — an empty coil/discrete read maps to no words.
     fn ut_bits_to_words_empty_is_empty() {
         assert_eq!(ClientCore::bits_to_words(vec![]), Vec::<u16>::new());
     }
@@ -574,8 +574,8 @@ mod tests {
         assert_eq!(ClientCore::classify(res).unwrap(), 42);
     }
 
-    /// MB-R-043 — a read returning a Modbus exception is classified as an exception (retried, not a disconnect).
     #[test]
+    /// MB-R-043 — a read returning a Modbus exception is classified as an exception (retried, not a disconnect).
     fn ut_classify_exception_maps_to_modbus_exception() {
         let res: ReadResult<u16> = Ok(Ok(Err(ExceptionCode::IllegalDataAddress)));
         let e = ClientCore::classify(res).unwrap_err();
@@ -585,8 +585,8 @@ mod tests {
         ));
     }
 
-    /// MB-R-045 — a transport error is classified as an error (disconnects the client).
     #[test]
+    /// MB-R-045 — a transport error is classified as an error (disconnects the client).
     fn ut_classify_transport_error_maps_to_modbus_error() {
         let io_err = std::io::Error::other("boom");
         let res: ReadResult<u16> = Ok(Err(tokio_modbus::Error::Transport(io_err)));
@@ -607,8 +607,8 @@ mod tests {
         assert!(matches!(e, ModbusError::Timeout(_)));
     }
 
-    /// MB-R-042 — a successful coil read is mapped through to one word per bit.
     #[test]
+    /// MB-R-042 — a successful coil read is mapped through to one word per bit.
     fn ut_classify_maps_bits_through_to_words_on_success() {
         // Same classify() call the ReadCoils/ReadDiscreteInputs arms make, chained with
         // `.map(Self::bits_to_words)` as `read()` does.
