@@ -155,7 +155,10 @@ mod tests {
         let sc = Scope::evse(1, None);
         assert_eq!(<V2_0_1 as ClientVersion>::connector_index(&s, sc), Some(0));
         assert_eq!(<V2_0_1 as ClientVersion>::scope_of(&s, 0), sc);
-        assert_eq!(<V2_0_1 as ClientVersion>::add_connector(&mut s, "2/4"), Some(4));
+        assert_eq!(
+            <V2_0_1 as ClientVersion>::add_connector(&mut s, "2/4"),
+            Some(4)
+        );
         assert!(matches!(
             <V2_0_1 as ClientVersion>::conn_edit_field(0),
             Some(EditField::EvseId)

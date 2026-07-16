@@ -591,7 +591,10 @@ mod tests {
             transaction_id: Some(9),
             ..Default::default()
         };
-        assert!(matches!(s.get_field("ConnectorId"), Some(ValueType::Int(3))));
+        assert!(matches!(
+            s.get_field("ConnectorId"),
+            Some(ValueType::Int(3))
+        ));
         assert!(matches!(s.get_field("Voltage"), Some(ValueType::Float(v)) if v == 230.0));
         assert!(matches!(s.get_field("CurrentL2"), Some(ValueType::Float(v)) if v == 15.0));
         assert!(matches!(s.get_field("Status"), Some(ValueType::String(ref v)) if v == "Charging"));
@@ -625,12 +628,24 @@ mod tests {
         };
         let metering = s.metering();
         assert_eq!(metering.len(), 10);
-        assert!(metering.iter().any(|(n, u, v)| n == "Voltage" && u == "V" && v == "230.0"));
+        assert!(
+            metering
+                .iter()
+                .any(|(n, u, v)| n == "Voltage" && u == "V" && v == "230.0")
+        );
         // A limit-less field renders as an em dash; a set one is formatted.
         let fields = s.fields();
-        assert!(fields.iter().any(|(n, _, v)| n == "ChargeLimit" && v == "—"));
+        assert!(
+            fields
+                .iter()
+                .any(|(n, _, v)| n == "ChargeLimit" && v == "—")
+        );
         s.default_limit = Some(10.0);
-        assert!(s.fields().iter().any(|(n, _, v)| n == "DefaultChargeLimit" && v == "10.0"));
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "DefaultChargeLimit" && v == "10.0")
+        );
     }
 
     /// OC-R-077 — connector-scoped remote actions derive their payload from observed state.
@@ -638,14 +653,18 @@ mod tests {
     fn ut_connector_derive_unlock_and_availability() {
         let s = ConnectorState::default();
         assert_eq!(
-            s.derive_payload("UnlockConnector", Scope::connector(4)).unwrap()["connectorId"],
+            s.derive_payload("UnlockConnector", Scope::connector(4))
+                .unwrap()["connectorId"],
             4
         );
-        let ca = s.derive_payload("ChangeAvailability", Scope::connector(4)).unwrap();
+        let ca = s
+            .derive_payload("ChangeAvailability", Scope::connector(4))
+            .unwrap();
         assert_eq!(ca["type"], "Operative");
         // An empty RFID falls back to the default id tag.
         assert_eq!(
-            s.derive_payload("RemoteStartTransaction", Scope::connector(1)).unwrap()["idTag"],
+            s.derive_payload("RemoteStartTransaction", Scope::connector(1))
+                .unwrap()["idTag"],
             "DEADBEEF"
         );
     }
@@ -675,7 +694,11 @@ mod tests {
         assert_eq!(s.fields().len(), 6);
         assert!(!CsLevelState::actions().is_empty());
         // Heartbeat stamps a timestamp; FirmwareStatusNotification annotates the version.
-        s.apply_inbound("Heartbeat", &serde_json::json!({}), &serde_json::Value::Null);
+        s.apply_inbound(
+            "Heartbeat",
+            &serde_json::json!({}),
+            &serde_json::Value::Null,
+        );
         assert!(!s.last_heartbeat.is_empty());
         s.firmware_version = "1.0.0".to_string();
         s.apply_inbound(
@@ -684,7 +707,10 @@ mod tests {
             &serde_json::Value::Null,
         );
         assert_eq!(s.firmware_version, "1.0.0 (Installing)");
-        assert_eq!(s.derive_payload("ClearCache", Scope::CS).unwrap(), serde_json::json!({}));
+        assert_eq!(
+            s.derive_payload("ClearCache", Scope::CS).unwrap(),
+            serde_json::json!({})
+        );
     }
 
     #[test]

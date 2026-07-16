@@ -594,7 +594,10 @@ mod tests {
     #[test]
     fn ut_unknown_evse_flags_missing_only() {
         let s = state_with(&[1, 2]);
-        assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 9 }), &s), Some(9));
+        assert_eq!(
+            unknown_evse(&serde_json::json!({ "evseId": 9 }), &s),
+            Some(9)
+        );
         assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 2 }), &s), None);
         assert_eq!(unknown_evse(&serde_json::json!({ "evseId": 0 }), &s), None);
         assert_eq!(unknown_evse(&serde_json::json!({}), &s), None);

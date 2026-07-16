@@ -627,10 +627,14 @@ mod tests {
         assert!(matches!(s.get_field("Voltage"), Some(ValueType::Float(v)) if v == 230.0));
         assert!(matches!(s.get_field("CurrentL3"), Some(ValueType::Float(v)) if v == 14.0));
         assert!(matches!(s.get_field("Status"), Some(ValueType::String(ref v)) if v == "Charging"));
-        assert!(matches!(s.get_field("TransactionId"), Some(ValueType::String(ref v)) if v == "tx-1"));
+        assert!(
+            matches!(s.get_field("TransactionId"), Some(ValueType::String(ref v)) if v == "tx-1")
+        );
         assert!(s.get_field("ExternalChargeLimit").is_none());
         s.external_limit = Some(20.0);
-        assert!(matches!(s.get_field("ExternalChargeLimit"), Some(ValueType::Float(v)) if v == 20.0));
+        assert!(
+            matches!(s.get_field("ExternalChargeLimit"), Some(ValueType::Float(v)) if v == 20.0)
+        );
         assert!(s.get_field("Nope").is_none());
     }
 
@@ -652,9 +656,17 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(s.metering().len(), 10);
-        assert!(s.fields().iter().any(|(n, _, v)| n == "ChargeLimit" && v == "—"));
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "ChargeLimit" && v == "—")
+        );
         s.max_limit = Some(32.0);
-        assert!(s.fields().iter().any(|(n, _, v)| n == "MaxChargeLimit" && v == "32.0"));
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "MaxChargeLimit" && v == "32.0")
+        );
     }
 
     /// OC-R-077 — EVSE-scoped remote actions derive their payload from observed state.
@@ -664,18 +676,25 @@ mod tests {
             evse_id: 3,
             ..Default::default()
         };
-        let start = s.derive_payload("RequestStartTransaction", Scope::evse(3, None)).unwrap();
+        let start = s
+            .derive_payload("RequestStartTransaction", Scope::evse(3, None))
+            .unwrap();
         assert_eq!(start["evseId"], 3);
         assert_eq!(start["idToken"]["idToken"], "DEADBEEF"); // empty RFID → default tag
         assert_eq!(
-            s.derive_payload("UnlockConnector", Scope::evse(3, None)).unwrap()["evseId"],
+            s.derive_payload("UnlockConnector", Scope::evse(3, None))
+                .unwrap()["evseId"],
             3
         );
         // No transaction yet → RequestStop derives no payload.
-        assert!(s.derive_payload("RequestStopTransaction", Scope::evse(3, None)).is_none());
+        assert!(
+            s.derive_payload("RequestStopTransaction", Scope::evse(3, None))
+                .is_none()
+        );
         s.transaction_id = Some("tx-9".to_string());
         assert_eq!(
-            s.derive_payload("RequestStopTransaction", Scope::evse(3, None)).unwrap()["transactionId"],
+            s.derive_payload("RequestStopTransaction", Scope::evse(3, None))
+                .unwrap()["transactionId"],
             "tx-9"
         );
     }
@@ -708,7 +727,10 @@ mod tests {
 
     #[test]
     fn ut_evse_of_reads_all_shapes() {
-        assert_eq!(evse_of(&serde_json::json!({ "evse": { "id": 5 } })), Some(5));
+        assert_eq!(
+            evse_of(&serde_json::json!({ "evse": { "id": 5 } })),
+            Some(5)
+        );
         assert_eq!(evse_of(&serde_json::json!({ "evseId": 6 })), Some(6));
         assert_eq!(evse_of(&serde_json::json!({ "connectorId": 7 })), Some(7));
         assert_eq!(evse_of(&serde_json::json!({})), None);
@@ -724,8 +746,15 @@ mod tests {
         assert!(s.get_field("Unknown").is_none());
         assert_eq!(s.fields().len(), 5);
         assert!(!CsLevelState::actions().is_empty());
-        s.apply_inbound("Heartbeat", &serde_json::json!({}), &serde_json::Value::Null);
+        s.apply_inbound(
+            "Heartbeat",
+            &serde_json::json!({}),
+            &serde_json::Value::Null,
+        );
         assert!(!s.last_heartbeat.is_empty());
-        assert_eq!(s.derive_payload("ClearCache", Scope::CS).unwrap(), serde_json::json!({}));
+        assert_eq!(
+            s.derive_payload("ClearCache", Scope::CS).unwrap(),
+            serde_json::json!({})
+        );
     }
 }

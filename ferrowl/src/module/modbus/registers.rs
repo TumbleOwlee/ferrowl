@@ -160,7 +160,11 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(kind)
             .address(address)
-            .format(Format::U16((Endian::Big, Resolution(1.0), BitField::default())))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
             .build()
             .unwrap()
     }
@@ -198,7 +202,10 @@ mod tests {
     #[test]
     fn ut_register_mem_binding_kind_direction() {
         let bind = |k| register_mem_binding(&reg(k, Address::Fixed(2))).unwrap().0;
-        assert!(matches!(bind(Kind::Coil), MemKind::ReadWrite(CellType::Coil)));
+        assert!(matches!(
+            bind(Kind::Coil),
+            MemKind::ReadWrite(CellType::Coil)
+        ));
         assert!(matches!(
             bind(Kind::DiscreteInput),
             MemKind::Read(CellType::Coil)

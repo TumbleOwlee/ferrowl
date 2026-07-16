@@ -503,7 +503,13 @@ mod tests {
         let styles = msg_cell_styles(&row);
         assert!(styles[3].is_some());
         assert!(styles[0].is_none());
-        let err = msg_row(&OcppMessage::new(Dir::Out, "Boot", json!({}), Some(false), ""));
+        let err = msg_row(&OcppMessage::new(
+            Dir::Out,
+            "Boot",
+            json!({}),
+            Some(false),
+            "",
+        ));
         assert_eq!(err.status, "Error");
         assert!(msg_cell_styles(&err)[3].is_some());
         let neutral = msg_row(&OcppMessage::new(Dir::Out, "Boot", json!({}), None, ""));

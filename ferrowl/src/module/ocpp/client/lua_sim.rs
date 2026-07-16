@@ -483,7 +483,10 @@ mod tests {
     fn ut_vt_to_json_maps_all_variants() {
         assert_eq!(vt_to_json(ValueType::Int(5)), serde_json::json!(5));
         assert_eq!(vt_to_json(ValueType::Float(1.5)), serde_json::json!(1.5));
-        assert_eq!(vt_to_json(ValueType::String("x".into())), serde_json::json!("x"));
+        assert_eq!(
+            vt_to_json(ValueType::String("x".into())),
+            serde_json::json!("x")
+        );
         assert_eq!(vt_to_json(ValueType::Bool(true)), serde_json::json!(true));
         assert_eq!(vt_to_json(ValueType::Nil), serde_json::Value::Null);
     }
@@ -525,7 +528,10 @@ mod tests {
         let q = queue();
         let handle = ClientCsHandle::new(state.clone(), q.clone());
         // read/write route through cs_get/cs_set.
-        assert!(matches!(handle.read("Model".into()), Ok(ValueType::String(_))));
+        assert!(matches!(
+            handle.read("Model".into()),
+            Ok(ValueType::String(_))
+        ));
         assert!(handle.read("Nope".into()).is_err());
         handle
             .write("Model".into(), ValueType::String("Custom".into()))
@@ -546,9 +552,13 @@ mod tests {
         let q = queue();
         let cs = ClientCsHandle::new(state.clone(), q.clone());
         let conn = cs.connector(1);
-        assert!(matches!(conn.read("Voltage".into()), Ok(ValueType::Float(_))));
+        assert!(matches!(
+            conn.read("Voltage".into()),
+            Ok(ValueType::Float(_))
+        ));
         assert!(conn.read("Nope".into()).is_err());
-        conn.write("Voltage".into(), ValueType::Float(240.0)).unwrap();
+        conn.write("Voltage".into(), ValueType::Float(240.0))
+            .unwrap();
         assert_eq!(state.read().connector(1).unwrap().voltage, 240.0);
         assert!(conn.write("Nope".into(), ValueType::Int(1)).is_err());
         assert!(conn.dispatch("MeterValues", vec![]));

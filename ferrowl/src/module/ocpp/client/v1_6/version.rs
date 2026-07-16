@@ -451,7 +451,10 @@ mod tests {
     #[test]
     fn ut_add_connector_parses_bare_id() {
         let mut s = state_with(&[]);
-        assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, " 5 "), Some(5));
+        assert_eq!(
+            <V1_6 as ClientVersion>::add_connector(&mut s, " 5 "),
+            Some(5)
+        );
         assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, "5"), None); // duplicate
         assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, "x"), None);
         <V1_6 as ClientVersion>::seed_connector(
@@ -507,7 +510,10 @@ mod tests {
         let s = state_with(&[1]);
         let sc = Scope::connector(1);
         let payload = |n| <V1_6 as ClientVersion>::state_payload(&s, n, sc);
-        assert_eq!(payload("BootNotification")["chargePointModel"], "Ferrowl-EVSE");
+        assert_eq!(
+            payload("BootNotification")["chargePointModel"],
+            "Ferrowl-EVSE"
+        );
         assert_eq!(payload("Heartbeat"), serde_json::json!({}));
         assert_eq!(payload("MeterValues")["connectorId"], 1);
         assert_eq!(payload("StartTransaction")["connectorId"], 1);
