@@ -265,12 +265,14 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-033 — the JSON formatter pretty-prints messy but valid JSON.
     fn ut_pretty_prints_messy_valid_json() {
         let out = format(r#"{"b":1,"a":[1,2]}"#).unwrap();
         assert_eq!(out, "{\n  \"b\": 1,\n  \"a\": [\n    1,\n    2\n  ]\n}");
     }
 
     #[test]
+    /// UI-R-033 — the JSON formatter is idempotent.
     fn ut_idempotent() {
         let once = format(r#"{"b":1,"a":[1,2],"c":{}}"#).unwrap();
         let twice = format(&once).unwrap();
@@ -278,6 +280,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — the JSON formatter declines (returns None) on invalid JSON, leaving the buffer unchanged.
     fn ut_invalid_json_returns_none() {
         assert!(format("{\"a\": ").is_none());
         assert!(format("{\"a\" 1}").is_none());
@@ -286,16 +289,19 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — the JSON formatter declines on partial JSON.
     fn ut_partial_json_returns_none() {
         assert!(format(r#"{"a": 1"#).is_none());
     }
 
     #[test]
+    /// UI-R-033 — the JSON formatter declines when trailing garbage follows valid JSON.
     fn ut_trailing_garbage_returns_none() {
         assert!(format(r#"{"a": 1} garbage"#).is_none());
     }
 
     #[test]
+    /// UI-R-033 — escaped quotes and unicode survive JSON reformatting verbatim.
     fn ut_escaped_quotes_and_unicode_survive_verbatim() {
         let input = "{\"a\":\"x\\\"y\\u00e9zé\"}";
         let out = format(input).unwrap();
@@ -303,18 +309,21 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-033 — empty objects/arrays format without error.
     fn ut_empty_containers() {
         let out = format(r#"{"a": [], "b": {}}"#).unwrap();
         assert_eq!(out, "{\n  \"a\": [],\n  \"b\": {}\n}");
     }
 
     #[test]
+    /// UI-R-033 — numbers are copied verbatim through the JSON formatter.
     fn ut_numbers_copied_verbatim() {
         let out = format(r#"[1.50, -3e10]"#).unwrap();
         assert_eq!(out, "[\n  1.50,\n  -3e10\n]");
     }
 
     #[test]
+    /// UI-R-033 — formatted JSON carries no trailing newline.
     fn ut_no_trailing_newline() {
         let out = format(r#"{"a": 1}"#).unwrap();
         assert!(!out.ends_with('\n'));

@@ -56,6 +56,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// UI-R-032 — a Lua block opener yields a positive block-balance delta so the next line indents.
     fn ut_lua_openers_indent_next_line() {
         assert_eq!(indent_delta(Language::Lua, "function foo()"), 1);
         assert_eq!(indent_delta(Language::Lua, "if x then"), 1);
@@ -65,6 +66,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — a balanced or plain line yields a zero indent delta.
     fn ut_lua_balanced_and_plain_lines_are_flat() {
         assert_eq!(indent_delta(Language::Lua, "print(x)"), 0);
         assert_eq!(indent_delta(Language::Lua, "if x then y() end"), 0);
@@ -72,6 +74,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — a leading closer affects the current line, not the next line's delta.
     fn ut_lua_leading_closer_does_not_dedent_next_line() {
         assert_eq!(indent_delta(Language::Lua, "end"), 0);
         assert_eq!(indent_delta(Language::Lua, "until done"), 0);
@@ -79,17 +82,20 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — else/elseif produce a body-indenting delta.
     fn ut_lua_else_and_elseif_indent_their_body() {
         assert_eq!(indent_delta(Language::Lua, "else"), 1);
         assert_eq!(indent_delta(Language::Lua, "elseif y then"), 1);
     }
 
     #[test]
+    /// UI-R-032 — a mid-line closer yields a negative delta so the next line dedents.
     fn ut_lua_mid_line_closer_dedents_next_line() {
         assert_eq!(indent_delta(Language::Lua, "x() end"), -1);
     }
 
     #[test]
+    /// UI-R-032 — block words inside strings do not affect the indent delta.
     fn ut_lua_keywords_in_strings_do_not_count() {
         assert_eq!(
             indent_delta(Language::Lua, "local s = \"function do then\""),
@@ -99,6 +105,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-032 — JSON braces/brackets drive the indent delta.
     fn ut_json_braces_and_brackets() {
         assert_eq!(indent_delta(Language::Json, "{"), 1);
         assert_eq!(indent_delta(Language::Json, "\"a\": ["), 1);

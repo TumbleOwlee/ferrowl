@@ -269,6 +269,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — highlight spans are sorted by start, non-overlapping, and use character indices.
     fn ut_spans_sorted_non_overlapping() {
         let spans = spans_for("local x = 1 + foo -- comment");
         for w in spans.windows(2) {
@@ -278,6 +279,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-038 — a Lua long string is highlighted across line boundaries via carry-over state.
     fn ut_long_string_carries_across_lines() {
         let (spans1, state1) =
             top_highlight_line(Language::Lua, "local s = [==[", LineState::default());
@@ -294,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-038 — a Lua long comment is highlighted across line boundaries via carry-over state.
     fn ut_long_comment_carries_across_lines() {
         let (_spans1, state1) =
             top_highlight_line(Language::Lua, "--[[ start", LineState::default());
@@ -308,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-038 — carry-over tracks the long-bracket level so a wrong-level closer does not end the construct.
     fn ut_long_bracket_level_mismatch_does_not_close_early() {
         let (_spans1, state1) =
             top_highlight_line(Language::Lua, "local s = [=[", LineState::default());
@@ -324,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — an escaped quote inside a string does not split the string span.
     fn ut_escaped_quote_does_not_terminate_string() {
         let spans = spans_for(r#"local s = "a\"b""#);
         let strings: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::String).collect();
@@ -331,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — hex and exponent numerals are one Number-kind span each.
     fn ut_numbers_hex_and_exponent() {
         let spans = spans_for("local a = 0x1F local b = 1e10");
         let nums: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::Number).collect();
@@ -338,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — keywords and literals map to their distinct highlight kinds.
     fn ut_keywords_vs_literals() {
         let spans = spans_for("if true then return nil end");
         let kinds: Vec<_> = spans.iter().map(|s| s.2).collect();
@@ -346,6 +353,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — an identifier in object/method position takes the Object/Function kind.
     fn ut_object_and_method_position() {
         // `C_Register:Set(1)` — object before the `:`, method after it.
         let spans = spans_for("C_Register:Set(1)");
@@ -358,6 +366,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — field-access chains and call sugar resolve to Object/Function kinds.
     fn ut_field_chain_and_call_positions() {
         // `a.b.c` — everything before the last access is an object; `c` stays plain.
         let spans = spans_for("a.b.c");
@@ -372,6 +381,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — `..` concat and `::` labels do not produce Object/Function kinds.
     fn ut_concat_and_labels_are_not_access() {
         // `..` is concat, `::` is a label marker — neither makes an object/function.
         let spans = spans_for("a .. b ::lbl::");
@@ -383,6 +393,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — malformed input never panics and every span index stays within the line.
     fn ut_garbage_input_does_not_panic() {
         let cases = [
             "\"abc",
@@ -404,6 +415,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — spans use character indices, so a multi-byte identifier is one in-range span.
     fn ut_non_ascii_identifier() {
         let line = "local café = 1";
         let spans = spans_for(line);
@@ -417,6 +429,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — a string span over multi-byte content is delimited by character indices.
     fn ut_non_ascii_string_content() {
         let line = r#"local msg = "café 日本語""#;
         let spans = spans_for(line);
@@ -434,6 +447,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — emoji (multi-byte) content keeps span indices character-based and in range.
     fn ut_emoji_in_string_and_unrecognized() {
         let line = r#"s = "hello 🚀""#;
         let spans = spans_for(line);

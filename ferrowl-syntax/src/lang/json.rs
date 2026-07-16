@@ -86,6 +86,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — JSON highlight spans are sorted, non-overlapping, and character-indexed.
     fn ut_spans_sorted_non_overlapping() {
         let spans = spans_for(r#"{"key": "value", "n": 1.5e-3}"#);
         for w in spans.windows(2) {
@@ -95,6 +96,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — a string in key position takes the JSON Key kind, a value string the String kind.
     fn ut_key_vs_value_string() {
         let spans = spans_for(r#"{"key": "value"}"#);
         let strings: Vec<_> = spans
@@ -107,6 +109,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — an escaped quote does not split a JSON string span.
     fn ut_escaped_quote_does_not_terminate_string() {
         let spans = spans_for(r#""a\"b""#);
         let strings: Vec<_> = spans
@@ -117,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — exponent and negative numerals are Number-kind spans.
     fn ut_numbers_exponent_and_negative() {
         let spans = spans_for(r#"[1e10, -3.5]"#);
         let nums: Vec<_> = spans.iter().filter(|s| s.2 == SyntaxKind::Number).collect();
@@ -124,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-039 — true/false/null map to the Literal kind.
     fn ut_literals() {
         let spans = spans_for("[true, false, null]");
         let lits: Vec<_> = spans
@@ -134,6 +139,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — malformed JSON never panics and span indices stay in range.
     fn ut_garbage_input_does_not_panic() {
         let cases = [
             "\"abc",
@@ -154,6 +160,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — a multi-byte JSON string is one character-indexed span.
     fn ut_non_ascii_string_value() {
         let line = r#"{"msg": "café"}"#;
         let spans = spans_for(line);
@@ -172,6 +179,7 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-037 — emoji content keeps JSON span indices character-based and in range.
     fn ut_emoji_in_json_string() {
         let line = r#"{"emoji": "🚀 🌟"}"#;
         let spans = spans_for(line);
