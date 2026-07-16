@@ -100,3 +100,49 @@ impl Register {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::format::{Endian, Format, Resolution, Width};
+    use crate::{Access, Address, Alignment, BitField, Kind, RegisterBuilder};
+
+    fn u16_be() -> Format {
+        Format::U16((Endian::Big, Resolution(1.0), BitField::default()))
+    }
+
+    #[test]
+    /// MB-R-001 — a register is described by exactly five properties: slave id, access, kind, address, format.
+    fn ut_register_carries_five_properties() {
+        let r = RegisterBuilder::default()
+            .slave_id(7)
+            .access(Access::ReadOnly)
+            .kind(Kind::InputRegister)
+            .address(Address::Fixed(100))
+            .format(u16_be())
+            .build()
+            .unwrap();
+
+        assert_eq!(*r.slave_id(), 7);
+        assert_eq!(*r.access(), Access::ReadOnly);
+        assert_eq!(*r.kind(), Kind::InputRegister);
+        assert_eq!(*r.address(), Address::Fixed(100));
+        assert_eq!(r.format().width(), 1);
+    }
+
+    #[test]
+    /// MB-R-006 — a register's format determines its width in 16-bit registers, the count of consecutive addresses it occupies.
+    fn ut_format_width_is_consecutive_address_count() {
+        // U16 = 1 word, F32 = 2 words, U64 = 4 words, U128 = 8 words, Ascii = its width.
+        assert_eq!(u16_be().width(), 1);
+        assert_eq!(Format::F32((Endian::Big, Resolution(1.0))).width(), 2);
+        assert_eq!(
+            Format::U64((Endian::Big, Resolution(1.0), BitField::default())).width(),
+            4
+        );
+        assert_eq!(
+            Format::U128((Endian::Big, Resolution(1.0), BitField::default())).width(),
+            8
+        );
+        assert_eq!(Format::Ascii((Alignment::Left, Width(5))).width(), 5);
+    }
+}
