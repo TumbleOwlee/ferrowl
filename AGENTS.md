@@ -75,6 +75,13 @@ type (`feat/`, `fix/`, `docs/`).
    functions change, the chosen approach. That is part of the implementation, so it belongs
    to the plan (gate 2) and to the PR that describes how the issue was resolved, never to
    the issue.
+
+   **Structure every issue with `##` section headers**, not a wall of prose, so a reader can
+   scan it: a `## Background` (or `## Why`) stating the problem and context, a `## Scope` (or
+   the requirement changes) naming what is in scope, and a `## Goal` stating the outcome.
+   Add further sections as the issue warrants. Keep long enumerations compact (grouped ID
+   ranges, not one paragraph per item). The same structured, header-per-section shape applies
+   to PR bodies (gate 3).
 4. **Write the spec into the working tree.** Do not mark it "unfinished" in the file —
    the file only ever contains normative text. The plan tracks what is not yet backed by
    a passing test.
