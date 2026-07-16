@@ -581,6 +581,139 @@ mod tests {
     }
 
     #[test]
+    fn ut_connector_get_field_covers_all() {
+        let mut s = ConnectorState {
+            connector_id: 3,
+            voltage: 230.0,
+            current: [16.0, 15.0, 14.0],
+            status: "Charging".to_string(),
+            rfid: "TAG".to_string(),
+            transaction_id: Some(9),
+            ..Default::default()
+        };
+        assert!(matches!(
+            s.get_field("ConnectorId"),
+            Some(ValueType::Int(3))
+        ));
+        assert!(matches!(s.get_field("Voltage"), Some(ValueType::Float(v)) if v == 230.0));
+        assert!(matches!(s.get_field("CurrentL2"), Some(ValueType::Float(v)) if v == 15.0));
+        assert!(matches!(s.get_field("Status"), Some(ValueType::String(ref v)) if v == "Charging"));
+        assert!(matches!(s.get_field("TransactionId"), Some(ValueType::String(ref v)) if v == "9"));
+        // Unset per-purpose limits report no value; an unknown field is None.
+        assert!(s.get_field("ChargeLimit").is_none());
+        s.limit = Some(16.0);
+        assert!(matches!(s.get_field("ChargeLimit"), Some(ValueType::Float(v)) if v == 16.0));
+        assert!(s.get_field("Nonexistent").is_none());
+    }
+
+    #[test]
+    fn ut_connector_set_field_coerces_and_rejects() {
+        let mut s = ConnectorState::default();
+        assert!(s.set_field("Voltage", ValueType::Int(230)));
+        assert_eq!(s.voltage, 230.0);
+        assert!(s.set_field("Power", ValueType::Float(11.0)));
+        assert!(s.set_field("Status", ValueType::String("Faulted".into())));
+        assert_eq!(s.status, "Faulted");
+        assert!(s.set_field("Rfid", ValueType::String("ABC".into())));
+        // Wrong value type and unknown field are rejected.
+        assert!(!s.set_field("Voltage", ValueType::String("x".into())));
+        assert!(!s.set_field("Unknown", ValueType::Int(1)));
+    }
+
+    #[test]
+    fn ut_connector_metering_and_fields_rows() {
+        let mut s = ConnectorState {
+            voltage: 230.0,
+            ..Default::default()
+        };
+        let metering = s.metering();
+        assert_eq!(metering.len(), 10);
+        assert!(
+            metering
+                .iter()
+                .any(|(n, u, v)| n == "Voltage" && u == "V" && v == "230.0")
+        );
+        // A limit-less field renders as an em dash; a set one is formatted.
+        let fields = s.fields();
+        assert!(
+            fields
+                .iter()
+                .any(|(n, _, v)| n == "ChargeLimit" && v == "—")
+        );
+        s.default_limit = Some(10.0);
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "DefaultChargeLimit" && v == "10.0")
+        );
+    }
+
+    #[test]
+    /// OC-R-077 — connector-scoped remote actions derive their payload from observed state.
+    fn ut_connector_derive_unlock_and_availability() {
+        let s = ConnectorState::default();
+        assert_eq!(
+            s.derive_payload("UnlockConnector", Scope::connector(4))
+                .unwrap()["connectorId"],
+            4
+        );
+        let ca = s
+            .derive_payload("ChangeAvailability", Scope::connector(4))
+            .unwrap();
+        assert_eq!(ca["type"], "Operative");
+        // An empty RFID falls back to the default id tag.
+        assert_eq!(
+            s.derive_payload("RemoteStartTransaction", Scope::connector(1))
+                .unwrap()["idTag"],
+            "DEADBEEF"
+        );
+    }
+
+    #[test]
+    /// OC-R-077 — a StatusNotification updates the observed connector status.
+    fn ut_connector_status_notification_updates_status() {
+        let mut s = ConnectorState::default();
+        s.apply_inbound(
+            "StatusNotification",
+            &serde_json::json!({ "connectorId": 2, "status": "Preparing" }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.connector_id, 2);
+        assert_eq!(s.status, "Preparing");
+    }
+
+    #[test]
+    fn ut_cs_level_get_set_and_heartbeat() {
+        let mut s = CsLevelState::default();
+        assert!(s.set_field("Model", ValueType::String("M".into())));
+        assert!(s.set_field("Vendor", ValueType::String("V".into())));
+        assert!(!s.set_field("Iccid", ValueType::String("x".into()))); // read-only field
+        assert!(!s.set_field("Model", ValueType::Int(1))); // wrong type
+        assert!(matches!(s.get_field("Model"), Some(ValueType::String(ref v)) if v == "M"));
+        assert!(s.get_field("Unknown").is_none());
+        assert_eq!(s.fields().len(), 6);
+        assert!(!CsLevelState::actions().is_empty());
+        // Heartbeat stamps a timestamp; FirmwareStatusNotification annotates the version.
+        s.apply_inbound(
+            "Heartbeat",
+            &serde_json::json!({}),
+            &serde_json::Value::Null,
+        );
+        assert!(!s.last_heartbeat.is_empty());
+        s.firmware_version = "1.0.0".to_string();
+        s.apply_inbound(
+            "FirmwareStatusNotification",
+            &serde_json::json!({ "status": "Installing" }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.firmware_version, "1.0.0 (Installing)");
+        assert_eq!(
+            s.derive_payload("ClearCache", Scope::CS).unwrap(),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
     /// OC-R-077 — the CSMS observes and derives charge-point-level state from inbound traffic.
     fn ut_cs_level_boot_and_derive() {
         let mut s = CsLevelState::default();

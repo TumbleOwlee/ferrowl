@@ -612,4 +612,149 @@ mod tests {
         );
         assert!(s.derive_payload("UnlockConnector", Scope::CS).is_none());
     }
+
+    #[test]
+    fn ut_connector_get_field_covers_all() {
+        let mut s = ConnectorState {
+            evse_id: 2,
+            voltage: 230.0,
+            current: [16.0, 15.0, 14.0],
+            status: "Charging".to_string(),
+            transaction_id: Some("tx-1".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(s.get_field("EvseId"), Some(ValueType::Int(2))));
+        assert!(matches!(s.get_field("Voltage"), Some(ValueType::Float(v)) if v == 230.0));
+        assert!(matches!(s.get_field("CurrentL3"), Some(ValueType::Float(v)) if v == 14.0));
+        assert!(matches!(s.get_field("Status"), Some(ValueType::String(ref v)) if v == "Charging"));
+        assert!(
+            matches!(s.get_field("TransactionId"), Some(ValueType::String(ref v)) if v == "tx-1")
+        );
+        assert!(s.get_field("ExternalChargeLimit").is_none());
+        s.external_limit = Some(20.0);
+        assert!(
+            matches!(s.get_field("ExternalChargeLimit"), Some(ValueType::Float(v)) if v == 20.0)
+        );
+        assert!(s.get_field("Nope").is_none());
+    }
+
+    #[test]
+    fn ut_connector_set_field_coerces_and_rejects() {
+        let mut s = ConnectorState::default();
+        assert!(s.set_field("Voltage", ValueType::Int(230)));
+        assert_eq!(s.voltage, 230.0);
+        assert!(s.set_field("Status", ValueType::String("Faulted".into())));
+        assert!(s.set_field("Rfid", ValueType::String("ABC".into())));
+        assert!(!s.set_field("Voltage", ValueType::String("x".into())));
+        assert!(!s.set_field("Unknown", ValueType::Int(1)));
+    }
+
+    #[test]
+    fn ut_connector_metering_and_fields_rows() {
+        let mut s = ConnectorState {
+            voltage: 230.0,
+            ..Default::default()
+        };
+        assert_eq!(s.metering().len(), 10);
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "ChargeLimit" && v == "—")
+        );
+        s.max_limit = Some(32.0);
+        assert!(
+            s.fields()
+                .iter()
+                .any(|(n, _, v)| n == "MaxChargeLimit" && v == "32.0")
+        );
+    }
+
+    #[test]
+    /// OC-R-077 — EVSE-scoped remote actions derive their payload from observed state.
+    fn ut_connector_derive_payloads() {
+        let mut s = ConnectorState {
+            evse_id: 3,
+            ..Default::default()
+        };
+        let start = s
+            .derive_payload("RequestStartTransaction", Scope::evse(3, None))
+            .unwrap();
+        assert_eq!(start["evseId"], 3);
+        assert_eq!(start["idToken"]["idToken"], "DEADBEEF"); // empty RFID → default tag
+        assert_eq!(
+            s.derive_payload("UnlockConnector", Scope::evse(3, None))
+                .unwrap()["evseId"],
+            3
+        );
+        // No transaction yet → RequestStop derives no payload.
+        assert!(
+            s.derive_payload("RequestStopTransaction", Scope::evse(3, None))
+                .is_none()
+        );
+        s.transaction_id = Some("tx-9".to_string());
+        assert_eq!(
+            s.derive_payload("RequestStopTransaction", Scope::evse(3, None))
+                .unwrap()["transactionId"],
+            "tx-9"
+        );
+    }
+
+    #[test]
+    /// OC-R-077 — a TransactionEvent drives the observed transaction and status.
+    fn ut_connector_transaction_event_lifecycle() {
+        let mut s = ConnectorState::default();
+        s.apply_inbound(
+            "TransactionEvent",
+            &serde_json::json!({
+                "evseId": 1,
+                "eventType": "Started",
+                "idToken": { "idToken": "RF" },
+                "transactionInfo": { "transactionId": "tx-7" },
+            }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.rfid, "RF");
+        assert_eq!(s.transaction_id.as_deref(), Some("tx-7"));
+        assert_eq!(s.status, "Charging");
+        s.apply_inbound(
+            "TransactionEvent",
+            &serde_json::json!({ "eventType": "Ended" }),
+            &serde_json::Value::Null,
+        );
+        assert_eq!(s.transaction_id, None);
+        assert_eq!(s.status, "Available");
+    }
+
+    #[test]
+    fn ut_evse_of_reads_all_shapes() {
+        assert_eq!(
+            evse_of(&serde_json::json!({ "evse": { "id": 5 } })),
+            Some(5)
+        );
+        assert_eq!(evse_of(&serde_json::json!({ "evseId": 6 })), Some(6));
+        assert_eq!(evse_of(&serde_json::json!({ "connectorId": 7 })), Some(7));
+        assert_eq!(evse_of(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn ut_cs_level_get_set_and_heartbeat() {
+        let mut s = CsLevelState::default();
+        assert!(s.set_field("Model", ValueType::String("M".into())));
+        assert!(!s.set_field("LastHeartbeat", ValueType::String("x".into()))); // read-only
+        assert!(!s.set_field("Model", ValueType::Int(1))); // wrong type
+        assert!(matches!(s.get_field("Model"), Some(ValueType::String(ref v)) if v == "M"));
+        assert!(s.get_field("Unknown").is_none());
+        assert_eq!(s.fields().len(), 5);
+        assert!(!CsLevelState::actions().is_empty());
+        s.apply_inbound(
+            "Heartbeat",
+            &serde_json::json!({}),
+            &serde_json::Value::Null,
+        );
+        assert!(!s.last_heartbeat.is_empty());
+        assert_eq!(
+            s.derive_payload("ClearCache", Scope::CS).unwrap(),
+            serde_json::json!({})
+        );
+    }
 }

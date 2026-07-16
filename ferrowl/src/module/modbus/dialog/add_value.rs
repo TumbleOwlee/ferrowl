@@ -225,3 +225,58 @@ impl AddNamedValueDialog {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::state::InputFieldState;
+    use ferrowl_ui::traits::{HandleEvents, SetFocus};
+
+    fn type_into(state: &mut InputFieldState, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
+    fn dialog_with(label: &str, value: &str) -> AddNamedValueDialog {
+        let mut d = AddNamedValueDialog::new();
+        type_into(&mut d.label.state, label);
+        type_into(&mut d.value.state, value);
+        d
+    }
+
+    #[test]
+    fn ut_apply_requires_label_and_value() {
+        assert!(AddNamedValueDialog::new().apply().is_err()); // both empty
+        assert!(dialog_with("only-label", "").apply().is_err());
+        assert!(dialog_with("", "5").apply().is_err());
+    }
+
+    #[test]
+    fn ut_apply_infers_scalar_type_from_input() {
+        assert!(matches!(
+            dialog_with("i", "42").apply().unwrap().value,
+            Scalar::Int(42)
+        ));
+        assert!(matches!(
+            dialog_with("f", "3.5").apply().unwrap().value,
+            Scalar::Float(v) if v == 3.5
+        ));
+        let text = dialog_with("t", "abc").apply().unwrap();
+        assert_eq!(text.name, "t");
+        assert!(matches!(text.value, Scalar::Text(ref s) if s == "abc"));
+    }
+
+    #[test]
+    fn ut_render_shows_title_and_inline_error() {
+        let mut d = AddNamedValueDialog::new(); // empty → validation error shown
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("Add Value"));
+        assert!(text.contains("must not be empty"));
+    }
+}

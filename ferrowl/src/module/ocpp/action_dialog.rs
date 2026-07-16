@@ -729,6 +729,42 @@ mod tests {
     }
 
     #[test]
+    fn ut_value_to_string_covers_all_types() {
+        assert_eq!(value_to_string(ValueType::Int(-3)), "-3");
+        assert_eq!(value_to_string(ValueType::Float(1.5)), "1.5");
+        assert_eq!(value_to_string(ValueType::String("s".into())), "s");
+        assert_eq!(value_to_string(ValueType::Bool(true)), "true");
+        assert_eq!(value_to_string(ValueType::Nil), "nil");
+    }
+
+    #[test]
+    fn ut_flat_object_and_prop_lookup() {
+        let pairs = [
+            ("a", Value::from(1)),
+            ("b", Value::Null),
+            ("c", Value::from("x")),
+        ];
+        let obj = flat_object(&pairs);
+        assert_eq!(obj["a"], 1);
+        assert_eq!(obj["c"], "x");
+        // prop finds a non-null value, treats null as absent, and misses unknown names.
+        assert_eq!(prop(&pairs, "a"), Some(&Value::from(1)));
+        assert_eq!(prop(&pairs, "b"), None);
+        assert_eq!(prop(&pairs, "zzz"), None);
+    }
+
+    #[test]
+    fn ut_prop_kind_label_and_gen_tx_id() {
+        assert_eq!(PropKind::Text.label(), "text");
+        assert_eq!(PropKind::Number.label(), "number");
+        assert_eq!(PropKind::Bool.label(), "bool");
+        assert_eq!(PropKind::Enum(&["A"]).label(), "enum");
+        assert_eq!(PropKind::Timestamp.label(), "timestamp");
+        // Transaction ids are unique across successive calls.
+        assert_ne!(gen_tx_id(), gen_tx_id());
+    }
+
+    #[test]
     /// OC-R-089 — a typed dialog assembles a flat property table with each property's kind and prefill source.
     fn assemble_coerces_kinds_and_prefills_state() {
         let mut d = dialog();

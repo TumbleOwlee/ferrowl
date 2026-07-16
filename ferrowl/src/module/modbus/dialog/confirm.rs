@@ -317,4 +317,23 @@ mod tests {
         );
         assert!(confirm.is_some());
     }
+
+    #[test]
+    fn ut_confirm_focus_starts_on_cancel_and_tab_moves_to_delete() {
+        let mut confirm = Some(ConfirmDeleteDialog::new("reg"));
+        assert!(!confirm.as_ref().unwrap().is_confirm_focused());
+        route_delete_confirm(&mut confirm, KeyModifiers::NONE, KeyCode::Tab);
+        assert!(confirm.as_ref().unwrap().is_confirm_focused());
+    }
+
+    #[test]
+    fn ut_render_names_the_register_in_a_titled_modal() {
+        let mut dialog = ConfirmDeleteDialog::new("my_reg");
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("Confirm Delete"));
+        assert!(text.contains("my_reg"));
+    }
 }

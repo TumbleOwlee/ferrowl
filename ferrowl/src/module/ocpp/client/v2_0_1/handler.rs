@@ -683,4 +683,134 @@ mod tests {
             "Available"
         );
     }
+
+    /// Drive an action through `respond` and return its encoded response JSON plus the log context.
+    fn responded(
+        h: &CsStateHandler,
+        name: &str,
+        payload: serde_json::Value,
+    ) -> (serde_json::Value, String) {
+        let action = V2_0_1::decode_call(name, payload).expect("action decodes");
+        let (resp, ctx) = h.respond(&action);
+        (
+            V2_0_1::encode_response(&resp.expect("accepted")).expect("encodes"),
+            ctx,
+        )
+    }
+
+    #[test]
+    /// OC-R-065 — a configuration read answers known keys and flags unknown ones from the key store.
+    fn ut_get_variables_reports_known_and_unknown() {
+        let h = handler_with(CsState::default());
+        let (json, _) = responded(
+            &h,
+            "GetVariables",
+            json!({
+                "getVariableData": [
+                    { "component": { "name": "OCPPCommCtrlr" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
+                    { "component": { "name": "X" }, "variable": { "name": "NoSuchKey" } },
+                ]
+            }),
+        );
+        let results = json["getVariableResult"].as_array().unwrap();
+        assert_eq!(results[0]["attributeStatus"], "Accepted");
+        assert_eq!(results[1]["attributeStatus"], "UnknownVariable");
+    }
+
+    #[test]
+    /// OC-R-066 — a configuration write updates a writable key, rejects a read-only key, and creates
+    /// an unknown key.
+    fn ut_set_variables_update_reject_and_create() {
+        let h = handler_with(CsState::default());
+        let (json, _) = responded(
+            &h,
+            "SetVariables",
+            json!({
+                "setVariableData": [
+                    { "attributeValue": "77", "component": { "name": "c" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
+                    { "attributeValue": "x", "component": { "name": "c" }, "variable": { "name": "EVSE.AvailabilityState" } },
+                    { "attributeValue": "v", "component": { "name": "c" }, "variable": { "name": "BrandNewKey" } },
+                ]
+            }),
+        );
+        let r = json["setVariableResult"].as_array().unwrap();
+        assert_eq!(r[0]["attributeStatus"], "Accepted");
+        assert_eq!(r[1]["attributeStatus"], "Rejected"); // read-only
+        assert_eq!(r[2]["attributeStatus"], "Accepted"); // created
+        assert!(h.state.read().config.iter().any(|c| c.key == "BrandNewKey"));
+    }
+
+    #[test]
+    /// OC-R-071 — a reset returns every connector to available, clears its transaction, and zeros
+    /// session energy.
+    fn ut_reset_returns_all_connectors_available() {
+        let mut s = two_evses();
+        s.connectors[0].status = "Charging".to_string();
+        s.connectors[0].transaction_id = Some("tx".into());
+        s.connectors[0].session_energy = 5.0;
+        let h = handler_with(s);
+        responded(&h, "Reset", json!({ "type": "Immediate" }));
+        let st = h.state.read();
+        assert!(st.connectors.iter().all(|c| c.status == "Available"));
+        assert!(st.connectors.iter().all(|c| c.transaction_id.is_none()));
+        assert_eq!(st.connectors[0].session_energy, 0.0);
+    }
+
+    #[test]
+    /// OC-R-067 — a charging profile whose stack level exceeds the configured max is rejected.
+    fn ut_set_charging_profile_rejects_excess_stack_level() {
+        let h = handler_with(two_evses()); // default ChargeProfileMaxStackLevel = 10
+        let (json, ctx) = responded(
+            &h,
+            "SetChargingProfile",
+            json!({
+                "evseId": 1,
+                "chargingProfile": {
+                    "id": 1, "stackLevel": 99, "chargingProfilePurpose": "TxProfile",
+                    "chargingProfileKind": "Absolute",
+                    "chargingSchedule": [{ "id": 1, "chargingRateUnit": "A",
+                        "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 16.0 }] }]
+                }
+            }),
+        );
+        assert_eq!(json["status"], "Rejected");
+        assert!(ctx.contains("stackLevel"));
+    }
+
+    #[test]
+    /// OC-R-067 — an accepted charging profile applies its limit to the field matching its purpose.
+    fn ut_set_charging_profile_applies_by_purpose() {
+        let h = handler_with(two_evses());
+        responded(
+            &h,
+            "SetChargingProfile",
+            json!({
+                "evseId": 1,
+                "chargingProfile": {
+                    "id": 1, "stackLevel": 1, "chargingProfilePurpose": "TxDefaultProfile",
+                    "chargingProfileKind": "Absolute",
+                    "chargingSchedule": [{ "id": 1, "chargingRateUnit": "A",
+                        "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 12.0 }] }]
+                }
+            }),
+        );
+        assert_eq!(
+            h.state.read().connector_by_evse(1).unwrap().default_limit,
+            Some(12.0)
+        );
+    }
+
+    #[test]
+    /// OC-R-064 — an inbound Call the simulator does not model is default-accepted, not rejected.
+    fn ut_unmodeled_action_default_accepted() {
+        let h = handler_with(CsState::default());
+        let action = V2_0_1::decode_call(
+            "GetBaseReport",
+            json!({ "requestId": 1, "reportBase": "FullInventory" }),
+        )
+        .expect("action decodes");
+        let (resp, ctx) = h.respond(&action);
+        assert!(resp.is_ok());
+        assert_eq!(ctx, "default-accepted");
+    }
 }

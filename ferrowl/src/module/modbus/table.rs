@@ -330,4 +330,63 @@ mod tests {
         assert!(d.changed_at.is_some(), "back-dating must succeed");
         assert!(d.cell_styles().iter().all(Option::is_none));
     }
+
+    fn named(name: &str, slave: u8) -> Definition {
+        let register = RegisterBuilder::default()
+            .slave_id(slave)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        Definition::new(name.to_string(), "d".to_string(), register, vec![])
+    }
+
+    #[test]
+    fn ut_column_index_normalizes_name() {
+        assert_eq!(column_index("Name"), Some(0));
+        assert_eq!(column_index("slave id"), Some(2)); // case + whitespace insensitive
+        assert_eq!(column_index("RAWVALUE"), Some(10));
+        assert_eq!(column_index("nonsense"), None);
+    }
+
+    #[test]
+    fn ut_cmp_definitions_numeric_and_lexical() {
+        // Column 2 (Slave ID) parses numerically: 2 sorts after 10 only lexically, not numerically.
+        let a = named("a", 2);
+        let b = named("b", 10);
+        assert_eq!(cmp_definitions(&a, &b, 2, false), std::cmp::Ordering::Less);
+        assert_eq!(
+            cmp_definitions(&a, &b, 2, true),
+            std::cmp::Ordering::Greater
+        );
+        // Column 0 (Name) compares lexically, case-insensitively.
+        let x = named("Alpha", 1);
+        let y = named("beta", 1);
+        assert_eq!(cmp_definitions(&x, &y, 0, false), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn ut_table_view_selection_and_sort() {
+        let mut t = TableView::new(vec![named("zeta", 9), named("alpha", 1)]);
+        assert_eq!(t.definitions().len(), 2);
+        t.select_first();
+        assert_eq!(t.selected_index(), Some(0));
+        assert_eq!(
+            t.selected().map(|d| d.name.clone()),
+            Some("zeta".to_string())
+        );
+        // Sorting by Name ascending brings "alpha" to the front.
+        t.sort_definitions(0, false);
+        assert_eq!(t.definitions()[0].name, "alpha");
+        // set_definitions replaces the contents.
+        t.set_definitions(vec![named("solo", 1)]);
+        assert_eq!(t.definitions().len(), 1);
+        t.set_compact(true);
+    }
 }

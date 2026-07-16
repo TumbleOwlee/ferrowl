@@ -264,4 +264,29 @@ mod tests {
         assert_eq!(dialog.key.state.input(), "k:");
         assert!(dialog.close_confirm.is_none());
     }
+
+    #[test]
+    fn ut_resolve_returns_edited_key_or_none_when_empty() {
+        let dialog = dialog();
+        let resolved = dialog.resolve().expect("non-empty key resolves");
+        assert_eq!(resolved.key, "k");
+        assert_eq!(resolved.value, "v");
+        assert!(!resolved.readonly);
+
+        // Emptying the key field yields no config key.
+        let mut empty = dialog;
+        empty.set_focused(true);
+        empty.handle_events(KeyModifiers::NONE, KeyCode::Backspace);
+        assert!(empty.resolve().is_none());
+    }
+
+    #[test]
+    fn ut_render_draws_titled_modal() {
+        let mut dialog = dialog();
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("Edit Config Key"));
+    }
 }

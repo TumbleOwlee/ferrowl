@@ -128,3 +128,61 @@ impl ClientVersion for V2_1 {
         common::active_meter_scopes(s)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> CsState {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        assert!(s.add_connector(1, 1));
+        s
+    }
+
+    #[test]
+    /// OC-R-059 — the 2.1 binding exposes the shared state-driven set and per-version specs.
+    fn ut_static_seams() {
+        assert!(<V2_1 as ClientVersion>::state_driven().contains(&"BootNotification"));
+        assert_eq!(<V2_1 as ClientVersion>::config_title(), "Variables");
+        assert!(<V2_1 as ClientVersion>::has_tx_shortcuts());
+        assert!(!<V2_1 as ClientVersion>::json_actions().is_empty());
+        assert!(<V2_1 as ClientVersion>::action_spec("GetVariables").is_some());
+    }
+
+    #[test]
+    /// OC-R-058 — connector-addressing seams delegate to the shared 2.x logic.
+    fn ut_connector_seams_delegate() {
+        let mut s = state();
+        let sc = Scope::evse(1, None);
+        assert_eq!(<V2_1 as ClientVersion>::connector_index(&s, sc), Some(0));
+        assert_eq!(<V2_1 as ClientVersion>::scope_of(&s, 0), sc);
+        assert_eq!(
+            <V2_1 as ClientVersion>::add_connector(&mut s, "2/4"),
+            Some(4)
+        );
+        assert!(matches!(
+            <V2_1 as ClientVersion>::conn_edit_field(0),
+            Some(EditField::EvseId)
+        ));
+        assert!(matches!(
+            <V2_1 as ClientVersion>::edit_kind(&s, sc, false, EditField::Voltage),
+            Some(EditKind::Number(_))
+        ));
+    }
+
+    #[test]
+    /// OC-R-070 — the transaction-shortcut seams (start/stop/rollback) delegate to shared 2.x logic.
+    fn ut_transaction_seams_delegate() {
+        let mut s = state();
+        let sc = Scope::evse(1, None);
+        let ev = <V2_1 as ClientVersion>::start_event(&mut s, sc);
+        assert_eq!(ev["eventType"], "Started");
+        assert_eq!(
+            <V2_1 as ClientVersion>::state_payload(&s, "Heartbeat", sc),
+            serde_json::json!({})
+        );
+        assert!(<V2_1 as ClientVersion>::stop_event(&mut s, sc).is_some());
+        assert!(<V2_1 as ClientVersion>::active_meter_scopes(&s).is_empty());
+    }
+}

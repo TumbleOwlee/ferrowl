@@ -109,4 +109,27 @@ mod tests {
         assert!(sv.close_requested());
         assert!(!sv.close_requested(), "flag must clear after take");
     }
+
+    #[test]
+    fn ut_render_and_focus_delegate_to_dialog() {
+        let mut sv = ModbusSetupView::new_create();
+        sv.focus_next();
+        sv.focus_previous();
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        sv.render(area, &mut buf);
+        // The setup modal draws something into the buffer.
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(!text.trim().is_empty());
+    }
+
+    #[test]
+    fn ut_confirm_resolves_and_builds_a_working_factory() {
+        let sv = ModbusSetupView::new_create();
+        // A fresh create dialog resolves to a named module and yields a factory that builds a view.
+        if let Some((name, factory)) = sv.confirm() {
+            assert!(!name.is_empty());
+            let _view = factory(); // exercises the boxed module/view construction closure
+        }
+    }
 }

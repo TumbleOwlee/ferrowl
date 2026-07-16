@@ -349,4 +349,66 @@ mod tests {
             .unwrap();
         assert!(matches!(cs.read("Model".to_string()).unwrap(), ValueType::String(s) if s == "X"));
     }
+
+    fn host_with_station() -> (ServerHost<V1_6>, ServerActionQueue) {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        with_state_mut(&states, |reg| {
+            let st = reg.stations.entry("CP1".to_string()).or_default();
+            st.cs = Some(Arc::new(RwLock::new(Cs::default())));
+            st.conns
+                .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
+        });
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        (
+            ServerHost {
+                states,
+                queue: queue.clone(),
+            },
+            queue,
+        )
+    }
+
+    #[test]
+    fn ut_cs_handle_dispatch_enqueues_at_cs_scope() {
+        let (host, queue) = host_with_station();
+        let cs = host.station("CP1").unwrap();
+        assert!(cs.dispatch("Reset", vec![("k".into(), ValueType::Int(3))]));
+        let (identity, scope, action, overrides) = queue.lock().pop_front().unwrap();
+        assert_eq!(identity, "CP1");
+        assert_eq!(scope, Scope::CS);
+        assert_eq!(action, "Reset");
+        assert_eq!(overrides, serde_json::json!({ "k": 3 }));
+        assert!(!<CsHandle<V1_6> as OcppActions>::actions().is_empty());
+    }
+
+    #[test]
+    fn ut_conn_handle_read_write_and_errors() {
+        let (host, _q) = host_with_station();
+        let conn = host.connector("CP1", 1).unwrap();
+        conn.write("Status".to_string(), ValueType::String("Charging".into()))
+            .unwrap();
+        assert!(matches!(
+            conn.read("Status".to_string()).unwrap(),
+            ValueType::String(s) if s == "Charging"
+        ));
+        // Unknown field reads and rejected writes surface as errors, not silent success.
+        assert!(conn.read("Nope".to_string()).is_err());
+        assert!(conn.write("Nope".to_string(), ValueType::Int(1)).is_err());
+        assert!(!<ConnHandle<V1_6> as OcppActions>::actions().is_empty());
+    }
+
+    #[test]
+    fn ut_cs_handle_write_reject_and_read_unknown_error() {
+        let (host, _q) = host_with_station();
+        let cs = host.station("CP1").unwrap();
+        assert!(cs.read("Nope".to_string()).is_err());
+        // A read-only / unknown CS field write is rejected.
+        assert!(cs.write("Nope".to_string(), ValueType::Int(1)).is_err());
+    }
+
+    #[test]
+    fn ut_connectors_of_unknown_station_is_empty() {
+        let (host, _q) = host_with_station();
+        assert!(host.connectors("ghost").is_empty());
+    }
 }

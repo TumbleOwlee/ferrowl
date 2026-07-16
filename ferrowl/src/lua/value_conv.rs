@@ -132,3 +132,112 @@ pub(super) fn value_to_type(value: Value) -> ValueType {
         Value::Ascii(s) => ValueType::String(s),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_codec::format::{Alignment, BitField, Endian, Resolution, Width};
+    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+
+    fn int_fmt(kind: fn((Endian, Resolution, BitField)) -> Format) -> Format {
+        kind((Endian::Big, Resolution(1.0), BitField::default()))
+    }
+
+    #[test]
+    /// SC-R-027 — a read returns each stored value as its natural Lua type.
+    fn ut_value_to_type_natural_types() {
+        assert!(matches!(
+            value_to_type(Value::U16((7, Resolution(1.0)))),
+            ValueType::Int(7)
+        ));
+        assert!(matches!(
+            value_to_type(Value::I128((-9, Resolution(1.0)))),
+            ValueType::Int(-9)
+        ));
+        assert!(matches!(
+            value_to_type(Value::F64((1.5, Resolution(1.0)))),
+            ValueType::Float(f) if f == 1.5
+        ));
+        assert!(matches!(
+            value_to_type(Value::Ascii("hi".into())),
+            ValueType::String(ref s) if s == "hi"
+        ));
+    }
+
+    #[test]
+    /// SC-R-027 — an integer write range-checks against the target width instead of truncating.
+    fn ut_typed_value_int_range_checked() {
+        let u8f = int_fmt(Format::U8);
+        assert!(matches!(
+            typed_value_from_type(ValueType::Int(200), &u8f).unwrap(),
+            Value::U8((200, _))
+        ));
+        assert!(typed_value_from_type(ValueType::Int(300), &u8f).is_err()); // out of u8 range
+        // A bool writes as 0/1 through the integer path.
+        assert!(matches!(
+            typed_value_from_type(ValueType::Bool(true), &u8f).unwrap(),
+            Value::U8((1, _))
+        ));
+        // Nil always errors rather than coercing.
+        assert!(typed_value_from_type(ValueType::Nil, &u8f).is_err());
+    }
+
+    #[test]
+    /// SC-R-027 — a float write into an integer format only accepts a whole, in-range number.
+    fn ut_typed_value_float_into_int_requires_whole() {
+        let i16f = int_fmt(Format::I16);
+        assert!(matches!(
+            typed_value_from_type(ValueType::Float(42.0), &i16f).unwrap(),
+            Value::I16((42, _))
+        ));
+        assert!(typed_value_from_type(ValueType::Float(3.5), &i16f).is_err()); // fractional
+        assert!(typed_value_from_type(ValueType::Float(f64::NAN), &i16f).is_err()); // non-finite
+        assert!(typed_value_from_type(ValueType::Float(1e9), &i16f).is_err()); // out of i16 range
+    }
+
+    #[test]
+    fn ut_typed_value_float_and_ascii_formats() {
+        let f32f = Format::F32((Endian::Big, Resolution(1.0)));
+        assert!(matches!(
+            typed_value_from_type(ValueType::Float(1.25), &f32f).unwrap(),
+            Value::F32((v, _)) if v == 1.25
+        ));
+        let ascii = Format::Ascii((Alignment::Left, Width(4)));
+        assert!(matches!(
+            typed_value_from_type(ValueType::Int(12), &ascii).unwrap(),
+            Value::Ascii(ref s) if s == "12"
+        ));
+    }
+
+    #[test]
+    /// SC-R-027 — a virtual-register write stores the value as I64/F64 regardless of format, and
+    /// nil fails.
+    fn ut_virtual_value_from_type() {
+        let register = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Virtual)
+            .format(int_fmt(Format::U16))
+            .build()
+            .unwrap();
+        assert!(matches!(
+            virtual_value_from_type(ValueType::Bool(true), &register).unwrap(),
+            Value::I64((1, _))
+        ));
+        assert!(matches!(
+            virtual_value_from_type(ValueType::Int(5), &register).unwrap(),
+            Value::I64((5, _))
+        ));
+        // An out-of-i64 literal falls back to F64, mirroring the string path.
+        assert!(matches!(
+            virtual_value_from_type(ValueType::Int(i128::MAX), &register).unwrap(),
+            Value::F64(_)
+        ));
+        assert!(matches!(
+            virtual_value_from_type(ValueType::Float(2.5), &register).unwrap(),
+            Value::F64((v, _)) if v == 2.5
+        ));
+        assert!(virtual_value_from_type(ValueType::Nil, &register).is_err());
+    }
+}

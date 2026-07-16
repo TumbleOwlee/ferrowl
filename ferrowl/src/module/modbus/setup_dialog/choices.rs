@@ -108,3 +108,33 @@ impl ToLabel for U8Choice {
         self.0.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_labels() {
+        assert_eq!(Transport::Tcp.to_label(), "TCP");
+        assert_eq!(Transport::Rtu.to_label(), "RTU");
+        assert_eq!(Parity::Even.to_label(), "Even");
+        assert_eq!(ReconnectChoice::On.to_label(), "On");
+        assert_eq!(U8Choice(8).to_label(), "8");
+        assert_eq!(Role::Server.to_label(), format!("{}", Role::Server));
+    }
+
+    #[test]
+    fn ut_parity_config_round_trip_and_index() {
+        assert_eq!(Parity::None.to_config(), None);
+        assert_eq!(Parity::Odd.to_config().as_deref(), Some("odd"));
+        assert_eq!(Parity::Even.to_config().as_deref(), Some("even"));
+        // from_config is case-insensitive; anything unrecognized (or absent) is None parity.
+        assert_eq!(Parity::from_config(Some("ODD")), Parity::Odd);
+        assert_eq!(Parity::from_config(Some("even")), Parity::Even);
+        assert_eq!(Parity::from_config(Some("weird")), Parity::None);
+        assert_eq!(Parity::from_config(None), Parity::None);
+        assert_eq!(Parity::None.index(), 0);
+        assert_eq!(Parity::Odd.index(), 1);
+        assert_eq!(Parity::Even.index(), 2);
+    }
+}
