@@ -386,6 +386,7 @@ mod tests {
         }
     }
 
+    /// SC-R-025 — legacy per-register `update` snippets migrate into named, enabled script entries.
     #[test]
     fn ut_migrate_update_scripts() {
         let mut cfg = sample();
@@ -440,6 +441,7 @@ mod tests {
 
     // An old-format device config file (predating `script_interval`) must still load, with
     // `script_interval` defaulting to 1.0.
+    /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     #[test]
     fn ut_device_config_loads_without_script_interval_field() {
         let path = std::env::temp_dir().join("ferrowl_device_no_script_interval.toml");
@@ -451,6 +453,7 @@ mod tests {
 
     // A hand-edited `script_interval` that is NaN, negative, or zero must fall back to the
     // 1.0s default instead of panicking or busy-waiting; a valid value converts as-is.
+    /// SC-R-016 — a non-finite or non-positive script_interval falls back to the 1.0s default.
     #[test]
     fn ut_device_config_script_interval_duration_sanitized() {
         let mut cfg = sample();
@@ -468,6 +471,7 @@ mod tests {
         }
     }
 
+    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
     #[test]
     fn ut_device_config_script_interval_duration_floored() {
         let mut cfg = sample();

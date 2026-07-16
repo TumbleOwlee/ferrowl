@@ -682,6 +682,7 @@ mod tests {
         false
     }
 
+    /// SC-R-026 — a Modbus sim runs from construction on an enabled script, with no network start.
     #[test]
     fn ut_sim_starts_at_construction_without_network_start() {
         use super::ModbusModule;
@@ -694,6 +695,7 @@ mod tests {
         assert!(wait_for_marker(&module, 7));
     }
 
+    /// SC-R-011 — with no enabled script (empty or disabled), no sim thread is spawned.
     #[test]
     fn ut_sim_not_started_when_no_enabled_scripts() {
         use super::ModbusModule;
@@ -707,6 +709,7 @@ mod tests {
         assert!(!module.lua_running());
     }
 
+    /// SC-R-024 — reloading with no enabled script stops the running sim and leaves it stopped.
     #[test]
     fn ut_reload_scripts_all_disabled_stops_sim() {
         use super::ModbusModule;
@@ -719,6 +722,7 @@ mod tests {
         assert!(!module.lua_running());
     }
 
+    /// SC-R-024 — toggling a script on via reload starts a fresh sim thread.
     #[test]
     fn ut_reload_scripts_toggle_on_starts_sim() {
         use super::ModbusModule;
@@ -735,6 +739,7 @@ mod tests {
         assert!(wait_for_marker(&module, 7));
     }
 
+    /// SC-R-024 — editing a script restarts the sim on a fresh Lua context so the new code takes over.
     #[test]
     fn ut_reload_scripts_changed_code_takes_effect() {
         use super::ModbusModule;
@@ -752,6 +757,7 @@ mod tests {
         assert!(wait_for_marker(&module, 2));
     }
 
+    /// SC-R-026 — starting or stopping the network instance leaves the sim thread running.
     #[tokio::test]
     async fn ut_network_stop_leaves_sim_running() {
         use super::ModbusModule;
@@ -768,6 +774,7 @@ mod tests {
 
     // Confirms the log-ring split (stage 5): Lua `print()`/`C_Log` output lands only in
     // `script_log`, never in the module's general `log` (connection/status/traffic lines).
+    /// SC-R-031 — Modbus sim print/C_Log output goes to the module's script log, not its connection log.
     #[test]
     fn ut_lua_output_lands_in_script_log_not_general_log() {
         use super::ModbusModule;

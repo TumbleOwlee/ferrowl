@@ -320,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — a modbus module's register state is reachable from the session sim via the C_Module directory.
     fn ut_modbus_host_roundtrip_through_directory() {
         let mut registers = HashMap::new();
         registers.insert("setpoint".to_string(), holding(0));
@@ -368,6 +369,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — an ocpp client module's state and actions are reachable from the session sim via C_Module.
     fn ut_ocpp_client_entry_roundtrip_through_directory() {
         use crate::module::ocpp::client::lua_sim::ClientFields;
         use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
@@ -418,6 +420,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — an ocpp server module's stations are reachable from the session sim via C_Module.
     fn ut_ocpp_server_entry_roundtrip_through_directory() {
         use crate::module::ocpp::client::lua_sim::OcppFields;
         use crate::module::ocpp::lock::with_state_mut;

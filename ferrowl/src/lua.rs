@@ -366,6 +366,7 @@ mod tests {
         Arc::new(RwLock::new(HashMap::new()))
     }
 
+    /// SC-R-027 — a virtual register round-trips its natural Lua type through the C_Register bridge.
     #[test]
     fn ut_bridge_virtual_register_roundtrip() {
         let virtual_store = vstore();
@@ -405,6 +406,7 @@ mod tests {
         );
     }
 
+    /// SC-R-028 — a Lua register write is applied to the module's in-memory state and reads back.
     #[test]
     fn ut_bridge_write_then_read() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -425,6 +427,7 @@ mod tests {
     }
 
     // Mirrors `run_sim`'s body once: a `power` update copying `setpoint` reflects after a cycle.
+    /// SC-R-028 — a script's register write lands in the module's in-memory state after a cycle.
     #[test]
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
@@ -464,6 +467,7 @@ mod tests {
 
     // A failing `C_Test` assertion surfaces through the same `call_all` error path the sim loop
     // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
+    /// SC-R-032 — a failed C_Test assertion surfaces through the sim's collected-error path.
     #[test]
     fn ut_sim_script_test_assertion_failure_surfaces() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -574,6 +578,7 @@ mod tests {
 
     // --- Typed write path (no string round-trip) ---
 
+    /// SC-R-027 — int/float/bool register writes round-trip as their natural host type.
     #[test]
     fn ut_bridge_typed_int_float_bool_roundtrip() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -597,7 +602,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_float_whole_number_onto_int_format() {
-        // Mirrors the string path: a whole-number float parses onto an integer format.
+        // SC-R-027 — a whole-number float writes onto an integer format (no coercion loss).
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         bridge
             .write("setpoint".to_string(), ValueType::Float(42.0))
@@ -608,6 +613,7 @@ mod tests {
         }
     }
 
+    /// SC-R-027 — a fractional float onto an integer format is a range mismatch that errors, not truncates.
     #[test]
     fn ut_bridge_typed_float_fractional_onto_int_format_errors() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -618,6 +624,7 @@ mod tests {
         );
     }
 
+    /// SC-R-027 — a string register write is applied via the encode path and reads back as its value.
     #[test]
     fn ut_bridge_typed_string_roundtrip() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -630,6 +637,7 @@ mod tests {
         }
     }
 
+    /// SC-R-027 — a nil register write is rejected rather than silently coerced.
     #[test]
     fn ut_bridge_typed_nil_errors_cleanly() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
@@ -641,7 +649,7 @@ mod tests {
 
     #[test]
     fn ut_bridge_typed_int_overflow_errors_cleanly() {
-        // "setpoint" is U16 (max 65535); a too-large Int must error, not silently truncate.
+        // SC-R-027 — "setpoint" is U16 (max 65535); a too-large Int must error, not silently truncate.
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         assert!(
             bridge
@@ -681,6 +689,7 @@ mod tests {
         }
     }
 
+    /// SC-R-027 — a nil write to a virtual register is rejected rather than coerced.
     #[test]
     fn ut_bridge_virtual_typed_nil_errors_cleanly() {
         let virtual_store = vstore();
