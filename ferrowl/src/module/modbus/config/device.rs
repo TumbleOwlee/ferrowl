@@ -418,11 +418,13 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — a device config round-trips through TOML with no field loss.
     fn ut_device_roundtrip_toml() {
         roundtrip(FileType::Toml, "toml");
     }
 
     #[test]
+    /// CS-R-004 — a device config round-trips through JSON with no field loss.
     fn ut_device_roundtrip_json() {
         roundtrip(FileType::Json, "json");
     }
@@ -431,6 +433,7 @@ mod tests {
     /// load, falling back to `None` (which `ModbusModule::resolve_timing` then maps to
     /// `DEFAULT_RECONNECT`).
     #[test]
+    /// CS-R-023 — a device config predating the reconnect field loads with its default.
     fn ut_device_config_loads_without_reconnect_field() {
         let path = std::env::temp_dir().join("ferrowl_device_no_reconnect.toml");
         let path = path.to_str().unwrap();

@@ -258,6 +258,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — an OCPP device config round-trips through TOML and JSON.
     fn ut_device_config_roundtrip() {
         let cfg = OcppDeviceConfig {
             version: Some("0.1.0".into()),
@@ -323,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-023 — an OCPP device config predating the security section loads with its default.
     fn ut_device_config_without_security_section_still_parses() {
         // Pre-existing config files (written before Security Profiles were added) have no
         // `security` table/key at all; `#[serde(default)]` must fill it in as the all-`None`
@@ -392,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — new security fields round-trip through TOML and JSON.
     fn ut_security_config_new_fields_round_trip() {
         let cfg = OcppSecurityConfig {
             self_signed: true,

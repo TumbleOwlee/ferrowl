@@ -202,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-002 — the encoding is selected from the file-path extension.
     fn ut_filetype_from_path() {
         assert_eq!(FileType::from_path("cfg.toml"), Some(FileType::Toml));
         assert_eq!(FileType::from_path("cfg.json"), Some(FileType::Json));
@@ -213,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — a value saves and loads through TOML to an equal value.
     fn ut_toml_save_load_round_trip() {
         let path = tmp_path("toml");
         let value = Sample {
@@ -226,6 +228,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-005 — a numeric value serializes as a plain TOML number, not a wrapper table.
     fn ut_toml_embedded_json_value_number_is_plain() {
         // A struct embedding a `serde_json::Value` with numbers must serialize to plain TOML
         // integers — not the `$serde_json::private::Number` wrapper that `arbitrary_precision`
@@ -248,6 +251,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — a value saves and loads through JSON to an equal value.
     fn ut_json_save_load_round_trip() {
         let path = tmp_path("json");
         let value = Sample {
@@ -261,6 +265,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — converting TOML to JSON preserves the data model.
     fn ut_convert_toml_to_json_preserves_data() {
         let src = tmp_path("toml");
         let dst = tmp_path("json");
@@ -277,6 +282,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-004 — converting JSON to TOML preserves the data model.
     fn ut_convert_json_to_toml_preserves_data() {
         // Exercises the JSON-source read path and the TOML-destination write path.
         let src = tmp_path("json");
@@ -306,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-050 — a malformed source fails to convert with a deserialize error.
     fn ut_convert_json_source_malformed_error() {
         let src = tmp_path("json");
         std::fs::write(&src, "{ not valid json ").unwrap();
@@ -381,18 +388,21 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-006 — a top-level JSON null is not representable in TOML and fails serialization.
     fn ut_json_to_toml_null_top_level_errors() {
         let r = json_to_toml(&serde_json::Value::Null);
         assert!(matches!(r, Err(Error::Serialize(_))));
     }
 
     #[test]
+    /// CS-R-006 — a JSON null inside an array is not representable in TOML and fails.
     fn ut_json_to_toml_null_in_array_errors() {
         let r = json_to_toml(&serde_json::json!([1, null, 3]));
         assert!(matches!(r, Err(Error::Serialize(_))));
     }
 
     #[test]
+    /// CS-R-006 — a JSON null at an object key is dropped (field omitted) in TOML.
     fn ut_json_to_toml_null_in_object_is_dropped() {
         let v = json_to_toml(&serde_json::json!({ "a": 1, "b": null })).unwrap();
         let table = v.as_table().unwrap();
@@ -401,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-005 — a u64 exceeding the signed-64 range serializes as a TOML float.
     fn ut_json_to_toml_u64_overflow_falls_back_to_float() {
         let big = u64::MAX;
         let v = json_to_toml(&serde_json::json!(big)).unwrap();
@@ -408,12 +419,14 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-005 — a u64 within range stays a TOML integer.
     fn ut_json_to_toml_u64_in_range_stays_integer() {
         let v = json_to_toml(&serde_json::json!(42u64)).unwrap();
         assert_eq!(v.as_integer(), Some(42));
     }
 
     #[test]
+    /// CS-R-050 — malformed file content fails to load with a deserialize error.
     fn ut_load_malformed_content_errors() {
         let path = tmp_path("json");
         std::fs::write(&path, "{ not valid json ").unwrap();

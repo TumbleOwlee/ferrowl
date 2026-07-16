@@ -549,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-041 — migration swaps the legacy holding/input read codes.
     fn ut_migrate_read_code_swap() {
         assert_eq!(migrate_read_code(1).unwrap(), Kind::Coil);
         assert_eq!(migrate_read_code(2).unwrap(), Kind::DiscreteInput);
@@ -557,12 +558,14 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-044 — an unknown read code skips that register with a warning.
     fn ut_migrate_read_code_invalid() {
         assert!(migrate_read_code(0).is_err());
         assert!(migrate_read_code(5).is_err());
     }
 
     #[test]
+    /// CS-R-041 — a trailing `le` type suffix splits into an explicit little-endian byte order.
     fn ut_parse_le_type() {
         let (vt, endian) = parse_type("F32le").unwrap();
         assert_eq!(vt, ValueType::F32);
@@ -574,6 +577,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-041 — legacy ascii type subtypes are parsed by the migration transform.
     fn ut_parse_ascii_types() {
         for t in &["PackedAscii", "LooseAscii", "PackedUtf8", "LooseUtf8"] {
             let (vt, _) = parse_type(t).unwrap();
@@ -582,6 +586,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-041 — a hex address is parsed during migration.
     fn ut_address_hex_parse() {
         assert_eq!(
             LegacyAddress::Str("0x1000".into()).resolve().unwrap(),
@@ -592,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-041 — a bare legacy value is named during the migration transform.
     fn ut_bare_value_gets_integer_name() {
         let mut warnings = Vec::new();
         let values = convert_values(
@@ -612,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-044 — a per-register conversion error warns and does not panic, letting the rest proceed.
     fn ut_convert_def_invalid_read_code_warns_no_panic() {
         let def = LegacyRegisterDef {
             slave_id: 1,
@@ -643,6 +650,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-041 — a full legacy sample migrates through the transformation contract.
     fn ut_convert_full_sample() {
         let (device, warnings) = convert(legacy_sample());
 

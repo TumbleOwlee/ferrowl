@@ -233,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-011 — an OCPP module entry round-trips carrying its self-describing `type` tag.
     fn ut_spec_roundtrip_with_type_tag() {
         let spec = OcppSpec {
             name: "cs-1".into(),
