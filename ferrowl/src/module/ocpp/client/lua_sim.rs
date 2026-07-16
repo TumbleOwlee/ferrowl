@@ -478,4 +478,81 @@ mod tests {
         assert!(!cs.contains(&"MeterValues"));
         assert!(cs.contains(&"BootNotification"));
     }
+
+    #[test]
+    fn ut_vt_to_json_maps_all_variants() {
+        assert_eq!(vt_to_json(ValueType::Int(5)), serde_json::json!(5));
+        assert_eq!(vt_to_json(ValueType::Float(1.5)), serde_json::json!(1.5));
+        assert_eq!(vt_to_json(ValueType::String("x".into())), serde_json::json!("x"));
+        assert_eq!(vt_to_json(ValueType::Bool(true)), serde_json::json!(true));
+        assert_eq!(vt_to_json(ValueType::Nil), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn ut_merge_overrides_object_and_noop() {
+        let mut base = serde_json::json!({ "a": 1, "b": 2 });
+        merge_overrides(&mut base, serde_json::json!({ "b": 9, "c": 3 }));
+        assert_eq!(base, serde_json::json!({ "a": 1, "b": 9, "c": 3 }));
+        // A non-object override (or base) is a no-op.
+        let mut scalar = serde_json::json!(1);
+        merge_overrides(&mut scalar, serde_json::json!({ "a": 1 }));
+        assert_eq!(scalar, serde_json::json!(1));
+    }
+
+    fn queue() -> ScopedActionQueue {
+        Arc::new(Mutex::new(VecDeque::new()))
+    }
+
+    #[test]
+    fn ut_enqueue_pushes_scope_action_and_json_overrides() {
+        let q = queue();
+        enqueue(
+            &q,
+            Scope::connector(2),
+            "MeterValues",
+            vec![("power".into(), ValueType::Float(11.0))],
+        );
+        let item = q.lock().pop_front().unwrap();
+        assert_eq!(item.0, Scope::connector(2));
+        assert_eq!(item.1, "MeterValues");
+        assert_eq!(item.2, serde_json::json!({ "power": 11.0 }));
+    }
+
+    /// SC-R-028 — a Lua CS-level write applies to observed state; an action dispatch enqueues it.
+    #[test]
+    fn ut_cs_handle_read_write_dispatch() {
+        let state = Arc::new(RwLock::new(Cs201::default()));
+        let q = queue();
+        let handle = ClientCsHandle::new(state.clone(), q.clone());
+        // read/write route through cs_get/cs_set.
+        assert!(matches!(handle.read("Model".into()), Ok(ValueType::String(_))));
+        assert!(handle.read("Nope".into()).is_err());
+        handle
+            .write("Model".into(), ValueType::String("Custom".into()))
+            .unwrap();
+        assert_eq!(state.read().model, "Custom");
+        assert!(handle.write("Nope".into(), ValueType::Int(1)).is_err());
+        // dispatch enqueues at CS scope.
+        assert!(handle.dispatch("BootNotification", vec![]));
+        assert_eq!(q.lock().front().unwrap().0, Scope::CS);
+        // connectors() returns the sorted connector ids.
+        assert_eq!(handle.connectors(), vec![1]);
+    }
+
+    /// SC-R-028 — a Lua connector-level write applies to that connector; dispatch uses its scope.
+    #[test]
+    fn ut_conn_handle_read_write_dispatch() {
+        let state = Arc::new(RwLock::new(Cs201::default()));
+        let q = queue();
+        let cs = ClientCsHandle::new(state.clone(), q.clone());
+        let conn = cs.connector(1);
+        assert!(matches!(conn.read("Voltage".into()), Ok(ValueType::Float(_))));
+        assert!(conn.read("Nope".into()).is_err());
+        conn.write("Voltage".into(), ValueType::Float(240.0)).unwrap();
+        assert_eq!(state.read().connector(1).unwrap().voltage, 240.0);
+        assert!(conn.write("Nope".into(), ValueType::Int(1)).is_err());
+        assert!(conn.dispatch("MeterValues", vec![]));
+        // 2.0.1 connector scope carries the EVSE.
+        assert_eq!(q.lock().front().unwrap().0, Scope::evse(1, Some(1)));
+    }
 }
