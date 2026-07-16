@@ -109,3 +109,107 @@ pub trait SubDialogs {
         *self.name_error_slot() = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferrowl_ui::state::InputFieldState;
+    use ferrowl_ui::traits::SetFocus;
+
+    #[derive(Default)]
+    struct Host {
+        add: Option<AddNamedValueDialog>,
+        confirm: Option<ConfirmDeleteDialog>,
+        name_error: Option<String>,
+        accepted: Vec<NamedValue>,
+    }
+
+    impl SubDialogs for Host {
+        fn add_dialog_opt(&self) -> Option<&AddNamedValueDialog> {
+            self.add.as_ref()
+        }
+        fn add_dialog_slot(&mut self) -> &mut Option<AddNamedValueDialog> {
+            &mut self.add
+        }
+        fn confirm_delete_opt(&self) -> Option<&ConfirmDeleteDialog> {
+            self.confirm.as_ref()
+        }
+        fn confirm_delete_slot(&mut self) -> &mut Option<ConfirmDeleteDialog> {
+            &mut self.confirm
+        }
+        fn name_error_slot(&mut self) -> &mut Option<String> {
+            &mut self.name_error
+        }
+        fn register_label(&self) -> String {
+            "reg".to_string()
+        }
+        fn accept_named_value(&mut self, nv: NamedValue) {
+            self.accepted.push(nv);
+        }
+    }
+
+    fn type_into(state: &mut InputFieldState, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn ut_add_dialog_open_close_and_route() {
+        let mut h = Host::default();
+        assert!(!h.has_sub_dialog());
+        h.open_add_dialog();
+        assert!(h.has_sub_dialog());
+        // Routing / focus helpers run against the open dialog without panicking.
+        h.add_dialog_focus_next();
+        h.add_dialog_focus_previous();
+        h.add_dialog_handle_events(KeyModifiers::NONE, KeyCode::Char('a'));
+        h.close_add_dialog();
+        assert!(!h.has_sub_dialog());
+    }
+
+    #[test]
+    fn ut_confirm_add_accepts_valid_and_keeps_open_on_error() {
+        let mut h = Host::default();
+        h.open_add_dialog();
+        // Empty fields fail validation: the dialog stays open with an error.
+        h.confirm_add_dialog();
+        assert!(h.has_sub_dialog());
+        assert!(h.accepted.is_empty());
+        // Fill valid label/value, then confirm: the value is accepted and the dialog closes.
+        {
+            let d = h.add_dialog_slot().as_mut().unwrap();
+            type_into(&mut d.label.state, "Idle");
+            type_into(&mut d.value.state, "0");
+        }
+        h.confirm_add_dialog();
+        assert_eq!(h.accepted.len(), 1);
+        assert_eq!(h.accepted[0].name, "Idle");
+        assert!(!h.has_sub_dialog());
+    }
+
+    #[test]
+    fn ut_confirm_delete_open_focus_and_close() {
+        let mut h = Host::default();
+        assert!(!h.has_confirm_delete());
+        h.open_confirm_delete();
+        assert!(h.has_confirm_delete());
+        assert!(!h.confirm_delete_is_confirmed());
+        h.confirm_delete_focus_next();
+        assert!(h.confirm_delete_is_confirmed());
+        h.confirm_delete_focus_previous();
+        assert!(!h.confirm_delete_is_confirmed());
+        h.close_confirm_delete();
+        assert!(!h.has_confirm_delete());
+    }
+
+    #[test]
+    fn ut_name_error_set_and_clear() {
+        let mut h = Host::default();
+        h.set_name_error("dup".into());
+        assert_eq!(h.name_error, Some("dup".to_string()));
+        h.clear_name_error();
+        assert!(h.name_error.is_none());
+    }
+}
