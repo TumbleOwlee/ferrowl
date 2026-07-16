@@ -489,6 +489,7 @@ mod tests {
     use parking_lot::RwLock;
 
     #[test]
+    /// OC-R-063 — an inbound Call naming an EVSE this CS does not have is rejected with PropertyConstraintViolation.
     fn ut_unknown_evse_rejected() {
         let mut s = CsState::default();
         s.connectors.clear();
@@ -503,6 +504,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-078 — an inbound Call is tagged with the connector/EVSE scope it belongs to for recording.
     fn ut_inbound_scope_keyed_by_evse_only() {
         // A nested connectorId is ignored: the scope is keyed by EVSE id with connector `None`.
         assert_eq!(
@@ -568,6 +570,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a reservation is recorded at the EVSE level the request targets.
     fn ut_reserve_now_targets_evse_not_cs() {
         let h = handler_with(two_evses());
         drive(
@@ -585,6 +588,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a reservation with no EVSE is recorded at the charge-point level.
     fn ut_reserve_now_without_evse_is_cs_level() {
         let h = handler_with(two_evses());
         drive(
@@ -600,6 +604,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a cancellation carrying the same reservation id clears the reservation at whichever level holds it.
     fn ut_cancel_reservation_clears_matching_evse() {
         let h = handler_with(two_evses());
         drive(
@@ -616,6 +621,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-063 — an absent EVSE id means the charge point itself, so ChangeAvailability targets every connector.
     fn ut_change_availability_status_and_absent_evse_targets_all() {
         let h = handler_with(two_evses());
         drive(
@@ -637,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-070 — a remote start mints a transaction id and sets the EVSE charging; a remote stop clears it and returns to available.
     fn ut_request_start_then_stop_transaction() {
         let h = handler_with(two_evses());
         drive(
@@ -658,6 +665,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-068 — clearing charging profiles erases the per-purpose limit(s) on the targeted EVSE.
     fn ut_clear_profile_and_unlock_by_evse() {
         let mut s = two_evses();
         s.connector_mut_by_evse(1).unwrap().limit = Some(16.0);

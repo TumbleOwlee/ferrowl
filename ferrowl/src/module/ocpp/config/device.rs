@@ -404,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-096 — a wss CSMS with no server cert/key files uses `self_signed` for its TLS material.
     fn ut_csms_tls_self_signed_without_cert_files() {
         let cfg = OcppSecurityConfig {
             self_signed: true,
@@ -414,6 +415,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-096 — explicit server cert + key files take precedence over `self_signed` for a wss CSMS.
     fn ut_csms_tls_explicit_files_win_over_self_signed() {
         let cfg = OcppSecurityConfig {
             self_signed: true,
@@ -426,6 +428,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-036 — a CS TLS configuration carries the `insecure_skip_verify` flag.
     fn ut_cs_tls_carries_insecure_skip_verify() {
         let cfg = OcppSecurityConfig {
             insecure_skip_verify: true,
@@ -438,6 +441,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-081 — the device config carries the module's Lua scripts (not the session entry).
     fn ut_from_spec_carries_scripts() {
         let spec = OcppSpec {
             name: "cs-1".into(),

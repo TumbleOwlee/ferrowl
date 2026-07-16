@@ -439,6 +439,7 @@ mod tests {
     use ferrowl_ocpp::{V1_6, Version};
 
     /// Every JSON-only action ships a handcrafted template that decodes and validates.
+    /// OC-R-091 — every raw-JSON action ships a template that decodes and validates against its version's request type.
     #[test]
     fn ut_json_templates_cover_all_json_actions_and_decode() {
         for name in json_actions() {
@@ -463,6 +464,7 @@ mod tests {
         "StopTransaction",
     ];
 
+    /// OC-R-089 — dialog-reachable actions are classified as typed (a property-table spec) or raw-JSON.
     #[test]
     fn ut_flat_and_nested_actions_have_specs() {
         assert!(action_spec("Reset").is_some());
@@ -474,6 +476,7 @@ mod tests {
 
     /// Every action a dialog can open is classified: a typed spec or an explicit JSON action,
     /// disjoint and complete (no silent JSON-by-absence).
+    /// OC-R-089 — every dialog-reachable action is exactly one of typed or raw-JSON (disjoint and complete, no silent omission).
     #[test]
     fn ut_every_dialog_action_is_classified() {
         let mut reachable: Vec<&str> = V1_6::csms_actions().iter().map(|(n, _)| *n).collect();

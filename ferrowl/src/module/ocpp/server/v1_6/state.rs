@@ -471,6 +471,7 @@ mod tests {
     use super::*;
 
     #[test]
+    /// OC-R-077 — the CSMS observes a station's connectors from inbound MeterValues traffic and tracks their state.
     fn ut_connector_meter_values_update_state() {
         let mut s = ConnectorState::default();
         let req = serde_json::json!({
@@ -491,6 +492,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-077 — the CSMS derives a connector's observed state, tracked per connection rather than pre-configured.
     fn ut_connector_derive_payload() {
         let mut s = ConnectorState::default();
         s.apply_inbound(
@@ -518,6 +520,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-067 — an accepted charging profile is mirrored into the targeted connector under the field matching its purpose.
     fn ut_apply_outbound_mirrors_accepted_profile_by_purpose() {
         let mut s = ConnectorState::default();
         let profile = |purpose: &str, limit: f64| {
@@ -556,6 +559,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-072 — ending a transaction clears only the transaction-scoped limit; the default and maximum limits persist.
     fn ut_limit_fields_are_readonly_and_stop_clears_only_tx() {
         let mut s = ConnectorState::default();
         // The mirror fields reject writes via the Lua/edit path.
@@ -577,6 +581,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-077 — the CSMS observes and derives charge-point-level state from inbound traffic.
     fn ut_cs_level_boot_and_derive() {
         let mut s = CsLevelState::default();
         s.apply_inbound(

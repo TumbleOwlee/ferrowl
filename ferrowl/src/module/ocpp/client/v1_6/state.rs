@@ -477,6 +477,7 @@ mod tests {
     use ferrowl_lua::module::ValueType as Vt;
 
     #[test]
+    /// OC-R-061 — the CS builds a MeterValues request from a connector's live transaction state that decodes as valid.
     fn ut_meter_values_payload_decodes() {
         use ferrowl_ocpp::{V1_6, Version};
         // The full measurand/unit set (incl. Frequency/Temperature/SoC) must decode as a typed
@@ -490,6 +491,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-058 — each connector carries its own metering/status/transaction/limit/tag/reservation fields.
     fn ut_connector_get_set_field_roundtrip() {
         let mut c = ConnectorState::new(1);
         // Numeric set accepts int or float; string fields accept strings.
@@ -505,6 +507,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-057 — the CS maintains charge-point-wide state plus a list of connector states.
     fn ut_cs_level_field_roundtrip_and_connectors() {
         let mut s = CsState::default();
         assert!(s.cs_set_field("Model", Vt::String("M".into())));

@@ -144,6 +144,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-073 — the CSMS answers BootNotification with a crafted response carrying the current time and a heartbeat interval.
     async fn ut_boot_response_and_inbound_event() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = CsmsHandler16::new(tx, empty_rfids());
@@ -160,6 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-073 — the CSMS answers a transaction start with a freshly minted, unique transaction id plus an accept/reject status.
     async fn ut_start_transaction_mints_unique_txids() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = CsmsHandler16::new(tx, empty_rfids());
@@ -186,6 +188,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-076 — an authorization (naming no connector) is checked against the charge-point-wide list unioned with every connector list.
     async fn ut_authorize_gated_by_rfid_list() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let store = RfidStore {
@@ -208,6 +211,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-076 — a transaction start (naming a connector) is checked against that connector's effective set only.
     async fn ut_start_transaction_gated_per_connector() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         // CONN1 is allowed only on connector 1; the inherited CS tag is allowed anywhere.
@@ -251,6 +255,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-075 — an empty effective accept-set accepts every tag.
     async fn ut_empty_rfid_list_accepts_all() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = CsmsHandler16::new(tx, empty_rfids());

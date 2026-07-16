@@ -543,6 +543,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a reservation is recorded at the EVSE level the request targets.
     fn ut_reserve_now_targets_evse_not_cs() {
         let h = handler_with(two_evses());
         drive(
@@ -560,6 +561,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a reservation with no EVSE is recorded at the charge-point level.
     fn ut_reserve_now_without_evse_is_cs_level() {
         let h = handler_with(two_evses());
         drive(
@@ -575,6 +577,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-069 — a cancellation carrying the same reservation id clears the reservation at whichever level holds it.
     fn ut_cancel_reservation_clears_matching_evse() {
         let h = handler_with(two_evses());
         drive(
@@ -591,6 +594,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-063 — an absent EVSE id means the charge point itself, so ChangeAvailability targets every connector.
     fn ut_change_availability_status_and_absent_evse_targets_all() {
         let h = handler_with(two_evses());
         drive(
@@ -612,6 +616,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-070 — a remote start mints a transaction id and sets the EVSE charging; a remote stop clears it and returns to available.
     fn ut_request_start_then_stop_transaction() {
         let h = handler_with(two_evses());
         drive(
@@ -633,6 +638,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-068 — clearing charging profiles erases the per-purpose limit(s) on the targeted EVSE.
     fn ut_clear_profile_and_unlock_by_evse() {
         let mut s = two_evses();
         s.connector_mut_by_evse(1).unwrap().limit = Some(16.0);

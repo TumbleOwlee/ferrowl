@@ -507,6 +507,7 @@ mod tests {
     use ferrowl_lua::module::ValueType as Vt;
 
     #[test]
+    /// OC-R-061 — the 2.0.1 CS builds a MeterValues request from a connector's live transaction state that decodes as valid.
     fn ut_meter_values_payload_decodes() {
         use ferrowl_ocpp::{V2_0_1, Version};
         let c = ConnectorState::new(1, 1);
@@ -518,6 +519,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-058 — each 2.0.1 connector carries its own EVSE-keyed metering/status/transaction/limit/tag/reservation fields.
     fn ut_connector_get_set_field_evse_id() {
         let mut c = ConnectorState::new(1, 1);
         assert!(c.set_field("EvseId", Vt::Int(2)));
@@ -528,6 +530,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-057 — the 2.0.1 CS maintains charge-point-wide state plus a list of connector states.
     fn ut_cs_level_and_connectors() {
         let mut s = CsState::default();
         assert!(s.cs_set_field("Model", Vt::String("M".into())));

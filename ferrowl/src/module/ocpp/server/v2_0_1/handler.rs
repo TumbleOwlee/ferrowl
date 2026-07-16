@@ -105,6 +105,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-076 — a 2.0.1 authorization is checked against the charge-point-wide list unioned with every EVSE list.
     async fn ut_authorize_gated_by_rfid_list() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let store = RfidStore {
@@ -125,6 +126,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-075 — an empty effective accept-set accepts every tag.
     async fn ut_empty_rfid_list_accepts_all() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = CsmsHandler::new(tx, rfids(RfidStore::default()));
@@ -136,6 +138,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-076 — a transaction event (naming an EVSE) is checked against that EVSE's effective set only.
     async fn ut_transaction_event_gated_per_evse() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         // EVSE1 allows ETAG only on evse 1; the inherited CS tag is allowed anywhere.

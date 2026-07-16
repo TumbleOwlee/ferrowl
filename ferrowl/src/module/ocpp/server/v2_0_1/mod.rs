@@ -82,6 +82,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// OC-R-078 — an inbound 2.0.1 Call is tagged with the charge-point/EVSE scope it belongs to.
     fn ut_inbound_connector_scope() {
         // Connectors are bucketed by EVSE id only — a nested `connectorId` is ignored, so two
         // connectors on the same EVSE map to the same (connector-less) scope.
@@ -109,6 +110,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-078 — an outbound 2.0.1 Call is tagged with the EVSE scope it targets, defaulting the EVSE id.
     fn ut_inject_scope_defaults_evse_id() {
         // A connector-scoped Lua payload gets the EVSE id when it lacks one.
         let mut p = json!({});
@@ -138,6 +140,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-065 — a 2.0.1 GetVariables request splits into component/variable targets to select which keys are read.
     fn ut_config_request_splits_component_variable() {
         let req = V2_0_1::config_request("OCPPCommCtrlr/HeartbeatInterval");
         assert_eq!(
@@ -155,6 +158,7 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-065 — a 2.0.1 GetVariables request's key list is parsed to select which configuration keys are read.
     fn ut_parse_get_variables() {
         let resp = json!({
             "getVariableResult": [
