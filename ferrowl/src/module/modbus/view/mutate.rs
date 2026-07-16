@@ -393,3 +393,162 @@ impl ModbusModuleView {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+    use crate::module::modbus::dialog::EditedRegister;
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+
+    fn spec(role: Role) -> ModuleSpec {
+        ModuleSpec {
+            name: "test".into(),
+            device: String::new(),
+            role,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        }
+    }
+
+    fn view(role: Role) -> ModbusModuleView {
+        let device = DeviceConfig::default();
+        let spec = spec(role);
+        let module = ModbusModule::new(&spec, &device);
+        ModbusModuleView::new(module, spec, device)
+    }
+
+    fn holding(addr: u16) -> Register {
+        RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(addr))
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap()
+    }
+
+    fn virtual_reg() -> Register {
+        RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Virtual)
+            .format(Format::U16((
+                Endian::Big,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap()
+    }
+
+    fn edited(name: &str, register: Register, value: Option<&str>) -> EditedRegister {
+        EditedRegister {
+            name: name.into(),
+            description: "d".into(),
+            register,
+            value: value.map(str::to_string),
+            named_values: None,
+            default: None,
+        }
+    }
+
+    fn msg(result: &CommandResult) -> String {
+        match result {
+            CommandResult::Handled(Some((_, m))) => m.clone(),
+            _ => panic!("expected a Handled message with text"),
+        }
+    }
+
+    #[test]
+    fn ut_apply_order_sets_sort_and_warns_unknown() {
+        let mut v = view(Role::Server);
+        let ordered = v.apply_order("Address", false);
+        assert!(v.sort.is_some());
+        assert!(msg(&ordered).starts_with("Ordered by"));
+        assert!(msg(&v.apply_order("Nonsense", false)).contains("Unknown column"));
+    }
+
+    /// MB-R-088 — adding a register at runtime inserts its definition and rebuilds the op list.
+    #[tokio::test]
+    async fn ut_apply_add_inserts_definition() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), None)).await;
+        assert!(v.device.definitions.contains_key("hold"));
+        assert!(v.table.definitions().iter().any(|d| d.name == "hold"));
+    }
+
+    /// MB-R-088 — editing a register updates and renames its definition.
+    #[tokio::test]
+    async fn ut_apply_edit_renames_definition() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), None)).await;
+        v.apply_edit(edited("renamed", holding(0), None), 0, "hold".into())
+            .await;
+        assert!(v.device.definitions.contains_key("renamed"));
+        assert!(!v.device.definitions.contains_key("hold"));
+    }
+
+    /// MB-R-088 — deleting a register removes its definition and rebuilds the op list.
+    #[tokio::test]
+    async fn ut_delete_register_removes_definition() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), None)).await;
+        v.delete_register_by_name("hold".into()).await;
+        assert!(!v.device.definitions.contains_key("hold"));
+        assert!(v.table.definitions().is_empty());
+    }
+
+    /// MB-R-092 — a virtual-register write is accepted on a server and rejected on a client.
+    #[tokio::test]
+    async fn ut_set_virtual_value_server_accepts_client_rejects() {
+        let mut server = view(Role::Server);
+        server.apply_add(edited("v", virtual_reg(), None)).await;
+        assert!(msg(&server.set_register_value("v", "42").await).contains("(virtual)"));
+
+        let mut client = view(Role::Client);
+        client.apply_add(edited("v", virtual_reg(), None)).await;
+        assert!(
+            msg(&client.set_register_value("v", "42").await).contains("only writable on servers")
+        );
+    }
+
+    #[tokio::test]
+    async fn ut_set_register_value_unknown_warns() {
+        let mut v = view(Role::Server);
+        assert!(msg(&v.set_register_value("nope", "1").await).contains("unknown register"));
+    }
+
+    #[tokio::test]
+    async fn ut_set_fixed_value_on_server_writes_memory() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), None)).await;
+        assert!(msg(&v.set_register_value("hold", "7").await).contains("set hold = 7"));
+    }
+
+    #[test]
+    fn ut_save_device_to_rejects_unknown_extension() {
+        let v = view(Role::Server);
+        assert!(msg(&v.save_device_to("/tmp/x.yaml")).contains("unknown format"));
+    }
+
+    #[test]
+    fn ut_save_device_to_writes_toml() {
+        let v = view(Role::Server);
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ferrowl-mutate-{}.toml", std::process::id()));
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+}
