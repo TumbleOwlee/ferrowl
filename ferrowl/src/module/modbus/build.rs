@@ -520,6 +520,54 @@ mod tests {
         assert_eq!(got, vec![(0, 3), (50, 51)]);
     }
 
+    #[test]
+    /// MB-R-082 — with no explicit read_ranges for a function code, each register is read by its own request; registers are not merged across gaps.
+    fn ut_no_read_ranges_each_register_own_request() {
+        use super::build_read_operations;
+        use crate::config::device::ReadRanges;
+
+        // Three contiguous holding registers, no explicit ranges → three separate requests.
+        let regs = vec![
+            u16reg(1, Kind::HoldingRegister, 0, Access::ReadWrite),
+            u16reg(1, Kind::HoldingRegister, 1, Access::ReadWrite),
+            u16reg(1, Kind::HoldingRegister, 2, Access::ReadWrite),
+        ];
+        let ops = build_read_operations(&regs, &ReadRanges::default());
+        let mut got: Vec<_> = ops
+            .iter()
+            .map(|o| (o.range.start(), o.range.end()))
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, vec![(0, 1), (1, 2), (2, 3)]);
+    }
+
+    #[test]
+    /// MB-R-084 — address gaps inside a configured read_range but backed by no register are declared as read-only cells.
+    fn ut_explicit_read_coverage_declares_gap_cells() {
+        use super::explicit_read_coverage;
+        use crate::config::device::ReadRanges;
+
+        // Registers at 0 and 5 (each one word) inside holding range "0-10": the uncovered gaps
+        // between/around them become Read cells so a batched read spanning them can be stored.
+        let regs = vec![
+            u16reg(1, Kind::HoldingRegister, 0, Access::ReadWrite),
+            u16reg(1, Kind::HoldingRegister, 5, Access::ReadWrite),
+        ];
+        let ranges = ReadRanges {
+            holding: Some("0-10".to_string()),
+            ..Default::default()
+        };
+        let cov = explicit_read_coverage(&regs, &ranges);
+        // Every declared gap is a read-only cell.
+        assert!(
+            cov.iter()
+                .all(|(_, kind, _)| matches!(kind, MemKind::Read(_)))
+        );
+        let mut gaps: Vec<_> = cov.iter().map(|(_, _, r)| (r.start(), r.end())).collect();
+        gaps.sort_unstable();
+        assert_eq!(gaps, vec![(1, 5), (6, 11)]);
+    }
+
     // Replicates the server `:set`/edit write path + the table decode read path.
     #[test]
     /// MB-R-090 — writing a value to a fixed-address register on a server read-modify-writes it into the store, observable on read-back.

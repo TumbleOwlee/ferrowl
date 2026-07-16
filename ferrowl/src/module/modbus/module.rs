@@ -546,6 +546,98 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-079 — a register definition's `default` value is encoded and written into the store at construction (bypassing cell access checks).
+    fn ut_default_value_written_into_store_at_construction() {
+        use super::ModbusModule;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        use ferrowl_modbus::{Key, SlaveKey};
+        use ferrowl_store::Range;
+
+        // `device_with_defs` seeds the fixed holding register "hold" at address 0 with default 7.
+        let device = device_with_defs();
+        let spec = ModuleSpec {
+            name: "srv".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        };
+        let module = ModbusModule::new(&spec, &device);
+        let key = Key {
+            id: SlaveKey {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let stored = module
+            .memory()
+            .read()
+            .read_unchecked(key, &Range::new(0, 1));
+        assert_eq!(stored, Some(vec![7]));
+    }
+
+    #[tokio::test]
+    /// MB-R-089 — reconfiguring a module's endpoint/role rebuilds the instance against the same store and preserves the stored register values.
+    async fn ut_reconfigure_preserves_stored_values() {
+        use super::ModbusModule;
+        use crate::config::device::ReadRanges;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        use ferrowl_modbus::{Key, SlaveKey};
+        use ferrowl_store::Range;
+
+        let device = device_with_defs();
+        let spec = ModuleSpec {
+            name: "srv".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        };
+        let mut module = ModbusModule::new(&spec, &device);
+        let key = Key {
+            id: SlaveKey {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+            },
+        };
+        // The store carries the default (7) at address 0.
+        assert_eq!(
+            module
+                .memory()
+                .read()
+                .read_unchecked(key.clone(), &Range::new(0, 1)),
+            Some(vec![7])
+        );
+
+        // Switch role (server → client) and endpoint; the stored value must survive.
+        let timing = ModbusModule::resolve_timing(&device);
+        module
+            .reconfigure(
+                &Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 5099,
+                },
+                Role::Client,
+                timing,
+                ReadRanges::default(),
+            )
+            .await
+            .expect("reconfigure");
+
+        assert_eq!(
+            module
+                .memory()
+                .read()
+                .read_unchecked(key, &Range::new(0, 1)),
+            Some(vec![7])
+        );
+    }
+
+    #[test]
     /// MB-R-076 — a module instance can be an RTU client, building its register set from the device config.
     fn ut_module_new_rtu_client() {
         use super::ModbusModule;
