@@ -380,3 +380,212 @@ impl ClientVersion for V1_6 {
         *tx_was_active = any_active;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 1.6 CS with the given connector ids (no default connectors).
+    fn state_with(ids: &[i64]) -> CsState {
+        let mut s = CsState::default();
+        s.connectors.clear();
+        for &id in ids {
+            assert!(s.add_connector(id));
+        }
+        s
+    }
+
+    /// OC-R-058 — the generic view sees each connector's own state through `ClientState`.
+    #[test]
+    fn ut_client_state_surface_over_connectors() {
+        let mut s = state_with(&[1, 2]);
+        assert_eq!(s.connector_count(), 2);
+        assert_eq!(s.connector_position(2), Some(1));
+        assert!(!s.cs_state_rows().is_empty());
+        assert!(!s.conn_state_rows(0).is_empty());
+        assert!(s.conn_state_rows(9).is_empty());
+        assert!(!s.config().is_empty());
+        s.remove_connector_at(0);
+        assert_eq!(s.connector_count(), 1);
+        s.clear_connectors();
+        assert_eq!(s.connector_count(), 0);
+    }
+
+    /// OC-R-059 — the 1.6 state-driven action set (built from state, no dialog).
+    #[test]
+    fn ut_state_driven_set() {
+        let sd = <V1_6 as ClientVersion>::state_driven();
+        assert!(sd.contains(&"BootNotification"));
+        assert!(sd.contains(&"StartTransaction"));
+        assert!(sd.contains(&"StopTransaction"));
+        assert_eq!(<V1_6 as ClientVersion>::config_title(), "Config");
+        assert_eq!(
+            <V1_6 as ClientVersion>::add_connector_placeholder(),
+            "Add connector id"
+        );
+    }
+
+    #[test]
+    fn ut_connector_index_and_scope() {
+        let s = state_with(&[3, 7]);
+        assert_eq!(
+            <V1_6 as ClientVersion>::connector_index(&s, Scope::connector(7)),
+            Some(1)
+        );
+        assert_eq!(
+            <V1_6 as ClientVersion>::connector_index(&s, Scope::CS),
+            Some(0)
+        );
+        assert_eq!(
+            <V1_6 as ClientVersion>::connector_index_for_state(&s, Scope::CS),
+            None
+        );
+        assert_eq!(
+            <V1_6 as ClientVersion>::scope_of(&s, 1),
+            Scope::connector(7)
+        );
+        let r = <V1_6 as ClientVersion>::connector_ref(&s, 0);
+        assert_eq!((r.evse, r.connector), (None, 3));
+    }
+
+    #[test]
+    fn ut_add_connector_parses_bare_id() {
+        let mut s = state_with(&[]);
+        assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, " 5 "), Some(5));
+        assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, "5"), None); // duplicate
+        assert_eq!(<V1_6 as ClientVersion>::add_connector(&mut s, "x"), None);
+        <V1_6 as ClientVersion>::seed_connector(
+            &mut s,
+            &ConnectorRef {
+                evse: None,
+                connector: 9,
+            },
+        );
+        assert!(s.connector(9).is_some());
+    }
+
+    #[test]
+    fn ut_conn_edit_field_maps_rows_and_bounds() {
+        assert!(matches!(
+            <V1_6 as ClientVersion>::conn_edit_field(0),
+            Some(EditField::ConnectorId)
+        ));
+        assert!(matches!(
+            <V1_6 as ClientVersion>::conn_edit_field(12),
+            Some(EditField::Status)
+        ));
+        assert!(matches!(
+            <V1_6 as ClientVersion>::conn_edit_field(13),
+            Some(EditField::Rfid)
+        ));
+        assert!(<V1_6 as ClientVersion>::conn_edit_field(14).is_none()); // Charge Limit is read-only
+    }
+
+    #[test]
+    fn ut_edit_kind_picks_widget_per_field() {
+        let s = state_with(&[1]);
+        let sc = Scope::connector(1);
+        assert!(matches!(
+            <V1_6 as ClientVersion>::edit_kind(&s, sc, false, EditField::Status),
+            Some(EditKind::Choice(_))
+        ));
+        assert!(matches!(
+            <V1_6 as ClientVersion>::edit_kind(&s, sc, false, EditField::Voltage),
+            Some(EditKind::Number(_))
+        ));
+        assert!(matches!(
+            <V1_6 as ClientVersion>::edit_kind(&s, sc, true, EditField::Model),
+            Some(EditKind::Text(_))
+        ));
+        // 1.6 has no EVSE id field.
+        assert!(<V1_6 as ClientVersion>::edit_kind(&s, sc, false, EditField::EvseId).is_none());
+    }
+
+    /// OC-R-059 — 1.6 state-driven request payloads are assembled entirely from observed state.
+    #[test]
+    fn ut_state_payload_built_from_state() {
+        let s = state_with(&[1]);
+        let sc = Scope::connector(1);
+        let payload = |n| <V1_6 as ClientVersion>::state_payload(&s, n, sc);
+        assert_eq!(payload("BootNotification")["chargePointModel"], "Ferrowl-EVSE");
+        assert_eq!(payload("Heartbeat"), serde_json::json!({}));
+        assert_eq!(payload("MeterValues")["connectorId"], 1);
+        assert_eq!(payload("StartTransaction")["connectorId"], 1);
+        assert_eq!(payload("StatusNotification")["errorCode"], "NoError");
+        assert_eq!(payload("Unknown"), serde_json::json!({}));
+    }
+
+    /// OC-R-070 — a StartTransaction response records the transaction id and enters a charging state.
+    #[test]
+    fn ut_apply_post_send_start_transaction() {
+        let mut s = state_with(&[1]);
+        <V1_6 as ClientVersion>::apply_post_send(
+            &mut s,
+            "StartTransaction",
+            Scope::connector(1),
+            None,
+            &serde_json::json!({ "transactionId": 42 }),
+        );
+        assert_eq!(s.connectors[0].transaction_id, Some(42));
+        assert_eq!(s.connectors[0].status, "Charging");
+    }
+
+    /// OC-R-072 — StopTransaction clears the transaction and its tx-scoped limit, returning to
+    /// available.
+    #[test]
+    fn ut_apply_post_send_stop_transaction() {
+        let mut s = state_with(&[1]);
+        s.connectors[0].transaction_id = Some(42);
+        s.connectors[0].limit = Some(16.0);
+        s.connectors[0].status = "Charging".to_string();
+        <V1_6 as ClientVersion>::apply_post_send(
+            &mut s,
+            "StopTransaction",
+            Scope::connector(1),
+            None,
+            &serde_json::json!({}),
+        );
+        assert_eq!(s.connectors[0].transaction_id, None);
+        assert_eq!(s.connectors[0].limit, None);
+        assert_eq!(s.connectors[0].status, "Available");
+    }
+
+    /// OC-R-060 — the heartbeat cadence comes from the BootNotification response interval.
+    #[test]
+    fn ut_apply_post_send_boot_sets_heartbeat_interval() {
+        let mut s = state_with(&[1]);
+        <V1_6 as ClientVersion>::apply_post_send(
+            &mut s,
+            "BootNotification",
+            Scope::CS,
+            None,
+            &serde_json::json!({ "interval": 90 }),
+        );
+        assert_eq!(s.heartbeat_interval_secs, Some(90));
+    }
+
+    /// OC-R-061 — auto MeterValues target only connectors with a live transaction.
+    #[test]
+    fn ut_active_meter_scopes_only_live_tx() {
+        let mut s = state_with(&[1, 2]);
+        s.connectors[0].transaction_id = Some(1);
+        assert_eq!(
+            <V1_6 as ClientVersion>::active_meter_scopes(&s),
+            vec![Scope::connector(1)]
+        );
+    }
+
+    #[test]
+    fn ut_track_meter_reset_on_tx_start() {
+        let mut s = state_with(&[1]);
+        let mut was_active = false;
+        let mut tick = 50;
+        <V1_6 as ClientVersion>::track_meter_reset(&s, &mut was_active, &mut tick);
+        assert!(!was_active); // no tx yet, tick untouched
+        assert_eq!(tick, 50);
+        s.connectors[0].transaction_id = Some(1);
+        <V1_6 as ClientVersion>::track_meter_reset(&s, &mut was_active, &mut tick);
+        assert!(was_active);
+        assert_eq!(tick, 0); // reset on transition to active
+    }
+}
