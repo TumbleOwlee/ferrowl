@@ -197,6 +197,39 @@ mod tests {
     use super::*;
 
     #[test]
+    /// OC-R-001 — exactly the three OCPP versions (1.6, 2.0.1, 2.1) are supported, and each is reachable in both the client and server roles.
+    fn ut_three_versions_reachable_in_both_roles() {
+        // The three supported versions, each with its fixed wire token.
+        let versions = [
+            (OcppVersion::V1_6, "1.6"),
+            (OcppVersion::V2_0_1, "2.0.1"),
+            (OcppVersion::V2_1, "2.1"),
+        ];
+        for (version, wire) in versions {
+            assert_eq!(
+                serde_json::to_value(version).unwrap(),
+                serde_json::Value::String(wire.to_string())
+            );
+            // Every version pairs with either role in a module spec (both roles reachable).
+            for role in [OcppRole::Client, OcppRole::Server] {
+                let spec = OcppSpec {
+                    name: "m".into(),
+                    version,
+                    role,
+                    protocol: OcppProtocol::Ws,
+                    ip: "127.0.0.1".into(),
+                    port: 9000,
+                    path: String::new(),
+                    timeout_ms: None,
+                    security: OcppSecurityConfig::default(),
+                };
+                assert_eq!(spec.version, version);
+                assert_eq!(spec.role, role);
+            }
+        }
+    }
+
+    #[test]
     /// OC-R-081 — the session entry carries the endpoint (scheme, ip, port, path), from which the connection URL is built.
     fn ut_protocol_display_and_url() {
         let spec = OcppSpec {

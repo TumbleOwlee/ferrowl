@@ -189,6 +189,23 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-002 — the 2.1 action table declares exactly 90 actions.
+    /// OC-R-007 — 2.1 is a strict superset of 2.0.1: every 2.0.1 action also exists in 2.1, and the 26 additional actions are additive.
+    fn ut_2_1_is_strict_superset_of_2_0_1() {
+        use crate::action::v2_0_1::V2_0_1;
+
+        let v201: std::collections::HashSet<_> = V2_0_1::action_names().iter().copied().collect();
+        let v21: std::collections::HashSet<_> = V2_1::action_names().iter().copied().collect();
+
+        assert_eq!(V2_1::action_names().len(), 90);
+        assert_eq!(V2_0_1::action_names().len(), 64);
+        // Every 2.0.1 action carries over into 2.1.
+        assert!(v201.is_subset(&v21));
+        // The extra 2.1 actions are purely additive: 90 − 64 = 26.
+        assert_eq!(v21.len() - v201.len(), 26);
+    }
+
+    #[test]
     /// OC-R-003 — the 2.1 CS- and CSMS-originated sets partition the table (disjoint and complete); CSMS actions carry connector scopes (OC-R-005).
     fn ut_csms_actions_partition_and_scopes() {
         use crate::action::ConnectorScope::*;
