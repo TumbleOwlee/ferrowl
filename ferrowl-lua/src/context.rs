@@ -168,6 +168,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-003 — a script is compiled into a callable function at load time; invalid Lua fails the load.
     fn ut_load_script_rejects_invalid_lua() {
         let mut ctx = Context::<String>::default();
         assert!(
@@ -177,6 +178,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-005 — loading a second script under an existing name is rejected; no silent overwrite.
     fn ut_load_script_rejects_duplicate_key() {
         let mut ctx = Context::<String>::default();
         assert!(ctx.load_script(key("a"), "local x = 1").is_ok());
@@ -192,6 +194,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-032 — a runtime error raised by a script is surfaced rather than swallowed.
     fn ut_call_runs_script_and_surfaces_runtime_error() {
         let mut ctx = Context::<String>::default();
         ctx.load_script(key("ok"), "local x = 1 + 1").unwrap();
@@ -202,6 +205,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-007 — io/os/package and the base dynamic-code loaders are removed from the globals (seen as nil).
     fn ut_sandbox_denies_filesystem_shell_and_dynamic_loading() {
         // A script in a config is untrusted input; the sandbox must not give it the filesystem,
         // the shell, or a way to pull in more code. Each of these globals must be absent.
@@ -229,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-006 — the pure-computation stdlib subset (string/table/math/…) stays reachable.
     fn ut_sandbox_keeps_pure_computation_libraries() {
         let mut ctx = Context::<String>::default();
         ctx.enable_stdlib().unwrap();
@@ -242,6 +247,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-032 — one script's error is collected and does not stop the others in the context.
     fn ut_call_all_collects_errors() {
         let mut ctx = Context::<String>::default();
         ctx.load_script(key("ok"), "local x = 1").unwrap();
@@ -251,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-014 — refresh runs a script at most once per interval, skipping one that ran more recently.
     fn ut_refresh_skips_recently_executed_script() {
         let mut ctx = Context::<String>::default();
         // A failing script that would error if executed.

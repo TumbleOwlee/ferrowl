@@ -201,6 +201,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-027 — C_OCPP Get/Set round-trip a state field and an action dispatches with its override arg.
     fn ut_get_set_roundtrip_and_dispatch() {
         let handle = MockHandle::default();
         let mut ctx = ContextBuilder::<String>::default()
@@ -323,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-027 — client C_OCPP: bare Get/Set/action hit CS level, Connector(id) scopes to a connector.
     fn ut_client_bare_is_cs_connector_is_scoped() {
         let host = ClientHost::default();
         let mut ctx = ContextBuilder::<String>::default()
@@ -415,6 +417,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-021 — server C_OCPP enumerates stations/connectors and routes Get/Set/action by identity.
     fn ut_server_enumerates_and_routes_by_identity() {
         let host = ServerHost::fixture();
         let mut ctx = ContextBuilder::<String>::default()
@@ -472,6 +475,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-032 — a malformed OCPP override table surfaces as a runtime error rather than being coerced.
     fn ut_malformed_override_table_propagates_error() {
         let handle = MockHandle::default();
         let mut ctx = ContextBuilder::<String>::default()

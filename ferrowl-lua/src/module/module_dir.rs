@@ -272,6 +272,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — C_Module enumerates the session's other modules by name.
     fn ut_list_returns_sorted_names() {
         let dir = Arc::new(MockDirectory::default());
         dir.insert(
@@ -304,6 +305,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — resolving an unknown module name raises rather than returning a null handle.
     fn ut_get_unknown_module_raises() {
         let dir = Arc::new(MockDirectory::default());
         let module = ModuleDir::init(dir as Arc<dyn ModuleDirectory>);
@@ -318,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — a resolved C_Module handle reports its target's kind and role.
     fn ut_type_and_role_return_host_values() {
         let dir = Arc::new(MockDirectory::default());
         dir.insert(
@@ -345,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — C_Module hands out a C_Register-shaped accessor only for a modbus module; others raise.
     fn ut_register_on_non_modbus_raises() {
         let dir = Arc::new(MockDirectory::default());
         dir.insert(
@@ -369,6 +373,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — C_Module hands out a C_OCPP-shaped accessor only for an ocpp module; others raise.
     fn ut_ocpp_on_non_ocpp_raises() {
         let dir = Arc::new(MockDirectory::default());
         dir.insert(
@@ -390,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — the session sim reaches a modbus module's register state through C_Module.
     fn ut_register_roundtrip_through_directory() {
         let rw = MockReadWrite::default();
         let dir = Arc::new(MockDirectory::default());
@@ -423,6 +429,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — the session sim reaches an ocpp module's state and actions through C_Module.
     fn ut_ocpp_roundtrip_through_directory() {
         let handle = MockOcppHandle::default();
         let dir = Arc::new(MockDirectory::default());
@@ -469,6 +476,7 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-020 — a C_Module handle re-resolves by name each call, so a removed module goes stale.
     fn ut_handle_becomes_stale_after_removal() {
         let dir = Arc::new(MockDirectory::default());
         dir.insert(

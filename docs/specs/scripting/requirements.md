@@ -198,6 +198,14 @@ from disk at run time (SC-R-023 stands).
 **SC-R-037** — Every template's code body shall be loadable by the Lua runtime — a
 template that fails to compile shall be a build/test failure, not a run-time one.
 
+**SC-R-038** — The `C_Test` module shall expose `Assert(cond, msg)` and
+`Fail(msg)`. `Assert` shall raise a runtime error `assertion failed: <msg>` when
+`cond` is Lua-falsy (only `nil` or `false`) and shall otherwise return with no
+effect — every other value, including `0` and the empty string, is truthy and
+passes. `Fail(msg)` shall always raise `assertion failed: <msg>`. The
+`assertion failed:` prefix is the text a headless runner keys its exit code off
+(see [`../cli-headless/requirements.md`](../cli-headless/requirements.md)).
+
 ---
 
 ## State access semantics
