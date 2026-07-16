@@ -539,6 +539,127 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-056 — the connection settings (here the endpoint) are re-read from the shared config on
+/// every connection attempt, so an edit takes effect on the next reconnect.
+async fn tcp_client_rereads_config_on_reconnect() {
+    let good_port = free_port();
+    let bad_port = free_port();
+    let srv_mem = server_mem();
+    let cli_mem = client_mem();
+
+    // A server listens on `good_port`; the client is initially pointed at `bad_port` (no listener).
+    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(good_port))), srv_mem)
+        .spawn(sink())
+        .await
+        .expect("server failed to start");
+
+    let shared_cfg = Arc::new(RwLock::new(config(bad_port)));
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: 1,
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 4),
+    }]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let client = tcp::ClientBuilder::new(shared_cfg.clone(), operations, cli_mem.clone())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn succeeds; first connect fails against the empty port");
+
+    // First connect attempt fails; while it backs off, repoint the config at the live server.
+    sleep(Duration::from_millis(200)).await;
+    shared_cfg.write().await.port = good_port;
+
+    // The 1 s initial backoff plus a poll tick must elapse before the re-read connect and read.
+    sleep(Duration::from_millis(2000)).await;
+    assert_eq!(
+        cli_mem
+            .read()
+            .read(
+                key(RegKind::HoldingRegister),
+                &CellType::Register,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
+        vec![10, 20, 30, 40]
+    );
+
+    tx.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-052 — the backoff resets to 1 s after a connection run that got at least one read through,
+/// so the reconnect logged after a successful run is "1s" even though the backoff had already grown.
+async fn tcp_client_backoff_resets_after_successful_run() {
+    let port = free_port();
+    let srv_mem = server_mem();
+    let cli_mem = client_mem();
+
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: 1,
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 4),
+    }]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let (log, lines) = capturing();
+    // No server yet: the first connect fails and the backoff grows to 2 s.
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        cli_mem.clone(),
+    )
+    .spawn(rx, log, sink())
+    .await
+    .expect("spawn succeeds; first connect fails");
+
+    // Bring the server up during the first (1 s) backoff so the second attempt connects and reads.
+    sleep(Duration::from_millis(500)).await;
+    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+        .spawn(sink())
+        .await
+        .expect("server failed to start");
+
+    // Let the client connect and get at least one read through (marks the run successful).
+    sleep(Duration::from_millis(2000)).await;
+    assert_eq!(
+        cli_mem
+            .read()
+            .read(
+                key(RegKind::HoldingRegister),
+                &CellType::Register,
+                &Range::new(0, 4)
+            )
+            .unwrap(),
+        vec![10, 20, 30, 40]
+    );
+
+    // Drop the server: the run ends with a transport error, and because it read successfully the
+    // backoff is reset to 1 s.
+    server.abort();
+    sleep(Duration::from_millis(1500)).await;
+
+    let logged = lines.lock().clone();
+    let first_success = logged
+        .iter()
+        .position(|l| l.contains("successful"))
+        .expect("expected a successful read");
+    let reconnect_after_success = logged[first_success..]
+        .iter()
+        .find(|l| l.contains("Reconnecting in"))
+        .expect("expected a reconnect log after the successful run");
+    // The backoff had already grown to 2 s from the first failed connect; the reset brings the
+    // post-success reconnect back to 1 s.
+    assert!(
+        reconnect_after_success.contains("in 1s"),
+        "post-success reconnect backoff was not reset to 1s: {reconnect_after_success}"
+    );
+
+    tx.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// MB-R-048 — each read addresses the slave id carried by the operation, independent of any slave
 /// id configured on the transport (the TCP transport configures none).
 async fn tcp_client_addresses_operation_slave_id() {

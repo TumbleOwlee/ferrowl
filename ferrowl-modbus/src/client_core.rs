@@ -608,6 +608,60 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-051 — the reconnect backoff starts at 1 s, doubles after each failed attempt, and is capped at 30 s.
+    fn ut_backoff_starts_doubles_and_caps() {
+        assert_eq!(INITIAL_BACKOFF, Duration::from_secs(1));
+        assert_eq!(MAX_BACKOFF, Duration::from_secs(30));
+        // Replays the exact production step `(backoff * 2).min(MAX_BACKOFF)` from
+        // `run_reconnect_loop`, starting at `INITIAL_BACKOFF`.
+        let mut backoff = INITIAL_BACKOFF;
+        let mut seq = vec![backoff];
+        for _ in 0..7 {
+            backoff = (backoff * 2).min(MAX_BACKOFF);
+            seq.push(backoff);
+        }
+        let secs: Vec<u64> = seq.iter().map(|d| d.as_secs()).collect();
+        assert_eq!(secs, vec![1, 2, 4, 8, 16, 30, 30, 30]);
+    }
+
+    #[tokio::test]
+    /// MB-R-054 — a non-terminate command arriving while backing off is dropped (with a log line), not queued.
+    async fn ut_backoff_drops_non_terminate_command() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(4);
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = lines.clone();
+        let log = move |s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push(s);
+            }
+        };
+        // A non-terminate command sent before the backoff elapses must be dropped, so the wait
+        // still runs to completion and returns `false` (not aborted).
+        tx.send(Command::WriteSingleRegister(1, 0, 42))
+            .await
+            .unwrap();
+        let aborted =
+            ClientCore::wait_reconnect_backoff(&mut rx, Duration::from_millis(50), &log).await;
+        assert!(!aborted);
+        assert!(lines.lock().iter().any(|l| l.contains("Command dropped")));
+    }
+
+    #[tokio::test]
+    /// MB-R-054 — Terminate (and the command channel closing) aborts the backoff wait immediately.
+    async fn ut_backoff_aborts_on_terminate_or_close() {
+        let sink = |_s: String| async move {};
+        // Terminate aborts (returns true).
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(4);
+        tx.send(Command::Terminate).await.unwrap();
+        assert!(ClientCore::wait_reconnect_backoff(&mut rx, Duration::from_secs(30), &sink).await);
+        // The channel closing aborts too.
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Command>(4);
+        drop(tx2);
+        assert!(ClientCore::wait_reconnect_backoff(&mut rx2, Duration::from_secs(30), &sink).await);
+    }
+
+    #[test]
     /// MB-R-042 — a successful coil read is mapped through to one word per bit.
     fn ut_classify_maps_bits_through_to_words_on_success() {
         // Same classify() call the ReadCoils/ReadDiscreteInputs arms make, chained with
