@@ -463,4 +463,51 @@ mod tests {
         assert!(line.starts_with("<- BootNotification ok (boot) "));
         assert!(line.contains("\"status\":\"Accepted\""));
     }
+
+    #[test]
+    fn ut_rfc3339_formats_epoch_and_known_instant() {
+        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        // 1_000_000_000 s since the epoch is 2001-09-09T01:46:40Z.
+        assert_eq!(rfc3339(1_000_000_000_000), "2001-09-09T01:46:40Z");
+    }
+
+    #[test]
+    fn ut_dir_label() {
+        assert_eq!(Dir::In.label(), "Inbound");
+        assert_eq!(Dir::Out.label(), "Outbound");
+    }
+
+    #[test]
+    fn ut_new_scoped_tags_message_with_scope() {
+        let m = OcppMessage::new_scoped(
+            Scope::connector(3),
+            Dir::Out,
+            "StatusNotification",
+            json!({}),
+            None,
+            "",
+        );
+        assert_eq!(m.scope, Scope::connector(3));
+        assert_eq!(m.direction, Dir::Out);
+    }
+
+    /// OC-R-078 — a recorded message renders into the log table with its direction and status.
+    #[test]
+    fn ut_msg_row_and_cell_styles() {
+        let ok = OcppMessage::new(Dir::In, "Boot", json!({}), Some(true), "ctx");
+        let row = msg_row(&ok);
+        assert_eq!(row.direction, "Inbound");
+        assert_eq!(row.status, "Success");
+        assert_eq!(row.context, "ctx");
+        // The status cell (index 3) is styled for success/error, others are unstyled.
+        let styles = msg_cell_styles(&row);
+        assert!(styles[3].is_some());
+        assert!(styles[0].is_none());
+        let err = msg_row(&OcppMessage::new(Dir::Out, "Boot", json!({}), Some(false), ""));
+        assert_eq!(err.status, "Error");
+        assert!(msg_cell_styles(&err)[3].is_some());
+        let neutral = msg_row(&OcppMessage::new(Dir::Out, "Boot", json!({}), None, ""));
+        assert_eq!(neutral.status, "");
+        assert!(msg_cell_styles(&neutral)[3].is_none());
+    }
 }
