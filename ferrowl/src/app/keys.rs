@@ -275,4 +275,109 @@ mod tests {
     fn leading_zero_jumps_immediately_even_with_many_tabs() {
         assert_eq!(digit_outcome(None, 0, 25), DigitOutcome::Jump(0));
     }
+
+    use crate::app::testkit::{MockView, build_app};
+
+    /// Feed `Ctrl+<lead>` then `key` through the nav handler as a two-key chord.
+    fn chord(app: &mut App<crate::app::testkit::MockScreen>, lead: char, key: KeyCode) {
+        app.handle_nav_key(KeyModifiers::CONTROL, KeyCode::Char(lead));
+        app.handle_nav_key(KeyModifiers::empty(), key);
+    }
+
+    fn app_with(names: &[&str]) -> App<crate::app::testkit::MockScreen> {
+        build_app(names.iter().map(|n| MockView::pair(n).0.boxed()).collect())
+    }
+
+    #[test]
+    /// UI-R-006 — the `:` command line removes focus from the content pane while open and restores
+    /// it on close, and every transition routes through the single focus choke point.
+    fn ut_command_line_removes_and_restores_content_focus() {
+        let mut app = app_with(&["a"]);
+        assert!(app.tabs[0].view.is_focused(), "content starts focused");
+        assert!(
+            !app.tabs[0].is_log_focused(),
+            "focus is content, not log — never both"
+        );
+
+        app.enter_command();
+        assert_eq!(app.focus, Focus::Command);
+        assert!(
+            !app.tabs[0].view.is_focused(),
+            "content unfocused while command open"
+        );
+
+        app.exit_command();
+        assert_eq!(app.focus, Focus::Content);
+        assert!(
+            app.tabs[0].view.is_focused(),
+            "content focus restored on close"
+        );
+    }
+
+    #[test]
+    /// UI-R-009 — the `Ctrl+w` chord toggles focus between the active tab's content view and its
+    /// log pane.
+    fn ut_ctrl_w_chord_toggles_content_and_log_focus() {
+        let mut app = app_with(&["a"]);
+        assert!(!app.tabs[0].is_log_focused());
+
+        chord(&mut app, 'w', KeyCode::Char('j'));
+        assert!(
+            app.tabs[0].is_log_focused(),
+            "Ctrl+w j moves focus to the log pane"
+        );
+
+        chord(&mut app, 'w', KeyCode::Char('k'));
+        assert!(
+            !app.tabs[0].is_log_focused(),
+            "Ctrl+w k moves focus back to content"
+        );
+    }
+
+    #[test]
+    /// UI-R-010 — the `Ctrl+t` chord: `l`/`h` step to the next/previous tab wrapping at the ends,
+    /// and a digit begins an index jump.
+    fn ut_ctrl_t_chord_switches_tabs_wrapping_and_by_digit() {
+        let mut app = app_with(&["a", "b", "c"]);
+        assert_eq!(app.active, 0);
+
+        chord(&mut app, 't', KeyCode::Char('l'));
+        assert_eq!(app.active, 1, "l advances");
+        chord(&mut app, 't', KeyCode::Char('l'));
+        chord(&mut app, 't', KeyCode::Char('l'));
+        assert_eq!(app.active, 0, "l wraps past the last tab");
+
+        chord(&mut app, 't', KeyCode::Char('h'));
+        assert_eq!(app.active, 2, "h wraps past the first tab");
+
+        chord(&mut app, 't', KeyCode::Char('1'));
+        assert_eq!(app.active, 1, "a digit jumps straight to that index");
+    }
+
+    #[test]
+    /// UI-R-012 — a jump to an out-of-range or already-active index is a silent no-op, and tab
+    /// switching is safe with zero or one tabs.
+    fn ut_tab_jump_out_of_range_or_active_is_a_noop_and_safe_at_edges() {
+        let mut app = app_with(&["a", "b"]);
+        app.switch_tab(9);
+        assert_eq!(app.active, 0, "out-of-range index ignored");
+        app.switch_tab(0);
+        assert_eq!(app.active, 0, "already-active index ignored");
+        app.switch_tab(1);
+        assert_eq!(app.active, 1, "valid index switches");
+
+        // One tab: every switch is a no-op, no panic.
+        let mut one = app_with(&["only"]);
+        one.switch_tab(3);
+        one.next_tab();
+        one.prev_tab();
+        assert_eq!(one.active, 0);
+
+        // Zero tabs (startup selector open): switching must not panic.
+        let mut none = build_app(vec![]);
+        none.switch_tab(0);
+        none.next_tab();
+        none.prev_tab();
+        assert_eq!(none.active, 0);
+    }
 }

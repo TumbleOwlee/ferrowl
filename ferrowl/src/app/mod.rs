@@ -164,7 +164,7 @@ impl LogRing {
 
 /// Which top-level surface receives input. The content↔log split lives inside the active [`Tab`]
 /// (its `#[derive(Focus)]` enum), so `App` only tracks the modal layer.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Focus {
     /// The active tab's content/log panes (the tab decides which of the two).
     Content,
@@ -687,6 +687,34 @@ mod tests {
         // Lines are timestamped.
         assert!(contents.trim_start().starts_with('['));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    /// UI-R-003 — the app owns an ordered tab list with one active index; switching the active tab
+    /// changes only the index, leaving the order intact.
+    fn ut_ordered_tab_list_with_single_active_index() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(
+            ["a", "b", "c"]
+                .iter()
+                .map(|n| MockView::pair(n).0.boxed())
+                .collect(),
+        );
+        let names: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+        assert_eq!(
+            app.active, 0,
+            "exactly one active tab, defaulting to the first"
+        );
+
+        app.switch_tab(2);
+        assert_eq!(app.active, 2);
+        let names_after: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(
+            names_after,
+            ["a", "b", "c"],
+            "switching does not reorder tabs"
+        );
     }
 
     #[test]
