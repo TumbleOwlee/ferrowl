@@ -297,6 +297,12 @@ pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     session_sim: SessionSim,
 }
 
+/// UI-R-007: only key **press** events drive command/navigation; release and repeat kinds are
+/// ignored. Factored out of the run loop so the filter is testable without a real event source.
+fn should_act_on(kind: KeyEventKind) -> bool {
+    kind == KeyEventKind::Press
+}
+
 /// UI-R-057: no tab and no open modal layer ⇒ nothing to interact with, so exit.
 fn is_empty_shell(tab_count: usize, modal_open: bool) -> bool {
     tab_count == 0 && !modal_open
@@ -419,7 +425,7 @@ impl<S: DrawSurface> App<S> {
             self.draw()?;
 
             match tokio::time::timeout(REDRAW_INTERVAL, rx.recv()).await {
-                Ok(Some(Event::Key(key))) if key.kind == KeyEventKind::Press => {
+                Ok(Some(Event::Key(key))) if should_act_on(key.kind) => {
                     if self.handle_key(key.modifiers, key.code).await {
                         break;
                     }
@@ -681,6 +687,15 @@ mod tests {
         // Lines are timestamped.
         assert!(contents.trim_start().starts_with('['));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    /// UI-R-007 — only key press events are acted upon; release and repeat kinds are ignored for
+    /// command/navigation purposes.
+    fn ut_only_key_press_events_are_acted_on() {
+        assert!(should_act_on(KeyEventKind::Press));
+        assert!(!should_act_on(KeyEventKind::Release));
+        assert!(!should_act_on(KeyEventKind::Repeat));
     }
 
     #[test]
