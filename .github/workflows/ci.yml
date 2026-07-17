@@ -1,0 +1,47 @@
+name: CI
+
+# Mirrors the Woodpecker quality gate (.woodpecker/check.yml) so its result is a
+# GitHub-visible status check, usable by branch protection and PR gating. The
+# toolchain (channel + rustfmt/clippy components) is resolved from
+# rust-toolchain.toml by rustup, so no explicit component installs are needed.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo clippy --workspace -- -D warnings
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo check --workspace
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo test --workspace
+
+  # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny check
