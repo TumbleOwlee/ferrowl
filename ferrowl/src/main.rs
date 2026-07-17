@@ -398,11 +398,38 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::demo_session_script;
+    use super::{build_tabs, demo_session_script};
+    use crate::cli::{CliArgs, create_module_spec_by_device};
+    use crate::config::{self, OcppModuleSpec, Session};
     use crate::registry::ModuleRegistry;
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::ModuleDirModule;
+    use ferrowl_util::convert::{Converter, FileType};
     use std::sync::Arc;
+
+    fn demo_args(modules: Vec<String>, devices: Vec<String>) -> CliArgs {
+        CliArgs {
+            command: None,
+            modules,
+            sessions: vec![],
+            devices,
+            demo: true,
+        }
+    }
+
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn save_session(tag: &str, session: &Session) -> String {
+        let path = std::env::temp_dir().join(format!("ferrowl_main_{tag}.toml"));
+        Converter::save(session, path.to_str().unwrap(), FileType::Toml).unwrap();
+        path.to_str().unwrap().to_string()
+    }
 
     // The demo session script must at least parse and run cleanly against an empty module
     // registry (no modules -> the loop body never executes, so C_Log is never touched).
@@ -420,5 +447,98 @@ mod tests {
             .expect("demo session script must parse");
         ctx.call_all()
             .expect("demo session script must run on an empty registry");
+    }
+
+    #[tokio::test]
+    /// CL-R-006 — --demo starts exactly eight tabs (two modbus, six ocpp) plus one example
+    /// session-level script.
+    async fn ut_demo_builds_eight_tabs_and_a_session_script() {
+        let tabs = build_tabs(&demo_args(vec![], vec![])).await.unwrap();
+        assert_eq!(tabs.len(), 8, "the demo set is exactly eight tabs");
+        assert!(
+            !demo_session_script().code.is_empty(),
+            "the demo session ships one example script"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-005 — under --demo, --module/--session/--device are ignored for building tabs.
+    async fn ut_demo_ignores_module_and_device() {
+        let args = demo_args(
+            vec!["name=x,device=d.toml,port=1".into()],
+            vec!["dev.toml".into()],
+        );
+        let tabs = build_tabs(&args).await.unwrap();
+        assert_eq!(
+            tabs.len(),
+            8,
+            "demo ignores --module/--device: still exactly the demo set"
+        );
+    }
+
+    #[tokio::test]
+    /// CS-R-053 — a session instance whose device config is missing is skipped, not fatal.
+    async fn ut_missing_device_is_skipped_not_fatal() {
+        let mut module = serde_json::to_value(create_module_spec_by_device(
+            "mb".into(),
+            "/no/such/dev.toml".into(),
+        ))
+        .unwrap();
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        let session = Session {
+            version: None,
+            modules: vec![module],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![save_session("skip", &session)],
+            devices: vec![],
+            demo: false,
+        };
+        let tabs = build_tabs(&args).await.unwrap();
+        assert!(tabs.is_empty(), "the missing-device instance is skipped");
+    }
+
+    #[tokio::test]
+    /// CS-R-053 — a blank device path is a quick-start on the default device, built not skipped.
+    async fn ut_blank_device_builds_on_default() {
+        let mut module = serde_json::to_value(OcppModuleSpec {
+            name: "cs".into(),
+            device: String::new(),
+            protocol: config::ocpp::OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: free_port(),
+            path: String::new(),
+        })
+        .unwrap();
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "ocpp".into());
+        let session = Session {
+            version: None,
+            modules: vec![module],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![save_session("blank", &session)],
+            devices: vec![],
+            demo: false,
+        };
+        let tabs = build_tabs(&args).await.unwrap();
+        assert_eq!(
+            tabs.len(),
+            1,
+            "a blank device path builds on the default config"
+        );
     }
 }

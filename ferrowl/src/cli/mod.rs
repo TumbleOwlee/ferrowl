@@ -691,4 +691,59 @@ mod tests {
         assert_ne!(e.kind(), ErrorKind::DisplayHelp);
         assert_eq!(e.exit_code(), 2);
     }
+
+    // --- Config envelope: module-entry type dispatch and required fields ------------------
+
+    /// Save `modules` as a session file and resolve it through [`CliArgs::module_specs`].
+    fn resolve_session(
+        tag: &str,
+        modules: Vec<serde_json::Value>,
+    ) -> Result<Vec<ModuleSpec>, String> {
+        use ferrowl_util::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules,
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let path = std::env::temp_dir().join(format!("ferrowl_cli_{tag}.toml"));
+        Converter::save(&session, path.to_str().unwrap(), FileType::Toml).unwrap();
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path.to_str().unwrap().to_string()],
+            devices: vec![],
+            demo: false,
+        };
+        args.module_specs()
+    }
+
+    #[test]
+    /// CS-R-013 — a module entry whose `type` is neither modbus nor ocpp aborts session resolution.
+    fn ut_unknown_module_type_aborts_resolution() {
+        let err = resolve_session(
+            "unknown_type",
+            vec![serde_json::json!({"type": "plc", "name": "x"})],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("unsupported module type"),
+            "expected a hard error, got: {err}"
+        );
+    }
+
+    #[test]
+    /// CS-R-051 — a module instance missing a schema-required field fails to load.
+    fn ut_module_missing_required_field_errors() {
+        let mut module =
+            serde_json::to_value(create_module_spec_by_device("x".into(), "d.toml".into()))
+                .unwrap();
+        // Drop the required `name`, keep the modbus tag.
+        module.as_object_mut().unwrap().remove("name");
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        assert!(resolve_session("missing_name", vec![module]).is_err());
+    }
 }
