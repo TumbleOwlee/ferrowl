@@ -705,6 +705,8 @@ mod tests {
     #[tokio::test]
     /// CL-R-020 — the runner builds and starts each module (without touching the terminal) and
     /// drains its log to the output stream.
+    /// CL-R-022 — the loop refreshes every module each tick and drains its newly appended log
+    /// lines to the output.
     async fn ut_run_starts_modules_and_drains_output() {
         let mut args = modbus_run_args("starts", free_port(), 1);
         let log_file = std::env::temp_dir()
