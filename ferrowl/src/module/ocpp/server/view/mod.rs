@@ -898,4 +898,55 @@ mod tests {
             "selection reset — sync_actions rebuilt the list with no selection present"
         );
     }
+
+    // --- Module lifecycle: listener rebuild / restart ---------------------------------------
+
+    #[tokio::test]
+    /// OC-R-082 — the listener configuration is rebuilt from the current module spec on every
+    /// start, so an edited security section takes effect on the next start without a stale copy.
+    async fn each_start_rebuilds_listener_from_current_spec() {
+        use crate::module::view::CommandResult;
+        let mut v = server_view();
+
+        // First start: plain ws, so the started message names no TLS fallback.
+        let CommandResult::Handled(Some((_, msg))) = v.handle_command_impl("start").await else {
+            panic!("start must report a message");
+        };
+        assert!(
+            !msg.contains("self-signed"),
+            "a plain listener must not report a self-signed certificate, got: {msg}"
+        );
+        assert!(v.backend.is_online());
+        assert!(v.backend.bound_addr().is_some());
+
+        // Edit the endpoint's security to wss (no certs → self-signed fallback), then restart.
+        // The rebound listener must reflect the *current* spec, not the stale plain copy.
+        v.spec.protocol = OcppProtocol::Wss;
+        let CommandResult::Handled(Some((_, msg))) = v.handle_command_impl("restart").await else {
+            panic!("restart must report a message");
+        };
+        assert!(
+            msg.contains("self-signed"),
+            "the restart must rebuild the listener from the edited spec, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    /// OC-R-084 — restarting a server stops the current instance, starts a new one from the
+    /// current spec, and discards every observed charging-station entry.
+    async fn restart_discards_observed_entries_and_rebinds() {
+        let mut v = server_view();
+        v.handle_command_impl("start").await;
+
+        // Observe a charging station: entry_index records it.
+        v.entry_index("CP1", Scope::CS, None);
+        assert!(!v.entries.is_empty(), "the observed entry must be recorded");
+
+        v.handle_command_impl("restart").await;
+        assert!(
+            v.entries.is_empty(),
+            "restart must discard every observed charging-station entry"
+        );
+        assert!(v.backend.is_online(), "restart must start a new instance");
+    }
 }

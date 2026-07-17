@@ -896,4 +896,117 @@ mod tests {
             "Enter in close-confirm must close the config-key editor"
         );
     }
+
+    // --- Module lifecycle: connection loss / role-version switch -----------------------------
+
+    #[tokio::test]
+    /// OC-R-062 — losing the connection halts automatic transmission and resets the heartbeat
+    /// cadence counter.
+    async fn losing_connection_resets_heartbeat_and_halts_autotransmit() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        // Simulate having been connected with the heartbeat counter part-way to its next beat. The
+        // backend was never started, so it reports offline: this tick is the online→offline edge.
+        v.runtime.was_online = true;
+        v.runtime.heartbeat_tick = 7;
+        assert!(!v.backend.is_online());
+
+        v.refresh_impl().await;
+        assert_eq!(
+            v.runtime.heartbeat_tick, 0,
+            "connection loss must reset the heartbeat cadence counter"
+        );
+        assert!(!v.runtime.was_online, "the offline state must be recorded");
+
+        // While offline the auto-Heartbeat block is skipped, so the counter never advances — all
+        // automatic transmission stays halted.
+        v.refresh_impl().await;
+        assert_eq!(
+            v.runtime.heartbeat_tick, 0,
+            "no heartbeat may be scheduled while offline"
+        );
+    }
+
+    #[tokio::test]
+    /// OC-R-085 — changing role or OCPP version replaces the view; any other change reconfigures
+    /// the running instance in place, reconnecting only if it was connected.
+    async fn role_or_version_change_replaces_view_else_reconfigures_in_place() {
+        // Role change (client → server): the view is replaced.
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let mut edited = v.spec.clone();
+        edited.role = OcppRole::Server;
+        v.deferred.setup = Some((edited, String::new()));
+        v.refresh_impl().await;
+        assert!(
+            v.take_replacement().is_some(),
+            "a role change must replace the view"
+        );
+
+        // OCPP version change: the view is replaced.
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let mut edited = v.spec.clone();
+        edited.version = OcppVersion::V2_0_1;
+        v.deferred.setup = Some((edited, String::new()));
+        v.refresh_impl().await;
+        assert!(
+            v.take_replacement().is_some(),
+            "a version change must replace the view"
+        );
+
+        // Any other change (here the endpoint port): reconfigure in place. The instance was never
+        // connected, so it must not reconnect — no replacement, spec updated, still offline.
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let mut edited = v.spec.clone();
+        edited.port = 4711;
+        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.refresh_impl().await;
+        assert!(
+            v.take_replacement().is_none(),
+            "a non-role/version change must not replace the view"
+        );
+        assert_eq!(
+            v.spec, edited,
+            "the in-place reconfigure must adopt the spec"
+        );
+        assert!(
+            !v.backend.is_online(),
+            "an instance that was not connected must not reconnect on reconfigure"
+        );
+    }
+
+    #[tokio::test]
+    /// OC-R-086 — switching a client's OCPP version keeps its Lua scripts and warns that they may
+    /// call actions the new version lacks.
+    async fn version_switch_keeps_scripts_and_warns() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        v.device.scripts = vec![ScriptDef {
+            name: "sim".into(),
+            code: "-- noop".into(),
+            enabled: true,
+        }];
+        let mut edited = v.spec.clone();
+        edited.version = OcppVersion::V2_0_1;
+        v.deferred.setup = Some((edited, String::new()));
+        v.refresh_impl().await;
+
+        let replacement = v
+            .take_replacement()
+            .expect("version switch replaces the view");
+        let scripts = replacement.scripts().expect("client keeps its scripts");
+        assert!(
+            scripts.iter().any(|s| s.name == "sim"),
+            "the Lua scripts must be carried into the new-version view"
+        );
+
+        let warned = v
+            .log
+            .write()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .iter()
+            .any(|(_, _, line)| line.contains("may call actions the new version lacks"));
+        assert!(
+            warned,
+            "the version switch must warn about version-specific actions"
+        );
+    }
 }
