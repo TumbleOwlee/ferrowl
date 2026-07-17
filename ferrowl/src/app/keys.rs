@@ -8,7 +8,7 @@ use ferrowl_ui::traits::{HandleEvents, SetFocus};
 
 use crate::app::{DIGIT_CHORD_TIMEOUT, KeyMode};
 
-use super::{App, Focus};
+use super::{App, DrawSurface, Focus};
 
 /// Result of feeding one digit into the `Ctrl+t` tab-jump chord.
 #[derive(Debug, PartialEq, Eq)]
@@ -42,7 +42,7 @@ fn digit_outcome(pending: Option<usize>, d: usize, ntabs: usize) -> DigitOutcome
     }
 }
 
-impl App {
+impl<S: DrawSurface> App<S> {
     pub(super) async fn handle_command_key(
         &mut self,
         modifiers: KeyModifiers,

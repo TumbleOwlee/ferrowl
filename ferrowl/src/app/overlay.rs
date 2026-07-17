@@ -9,9 +9,9 @@ use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::ModuleView;
 
-use super::{App, Focus, Level, Overlay, Tab};
+use super::{App, DrawSurface, Focus, Level, Overlay, Tab};
 
-impl App {
+impl<S: DrawSurface> App<S> {
     pub(super) async fn handle_dialog_key(
         &mut self,
         modifiers: KeyModifiers,

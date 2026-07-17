@@ -6,7 +6,7 @@ use ferrowl_util::convert::{Converter, FileType};
 use crate::config::Session;
 use crate::module::view::CommandResult;
 
-use super::{App, Level};
+use super::{App, DrawSurface, Level};
 
 /// Pure validation: usable index or error text. Unit-testable without an App.
 fn validate_copy_index(
@@ -29,7 +29,7 @@ fn validate_copy_index(
     Ok(idx)
 }
 
-impl App {
+impl<S: DrawSurface> App<S> {
     /// Execute a parsed `:` command. Returns `true` when the app should quit.
     pub(super) async fn run_command(&mut self, input: &str) -> bool {
         use crate::command::Cmd;

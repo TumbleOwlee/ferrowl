@@ -17,7 +17,7 @@ pub mod traits;
 pub mod widgets;
 pub use border::Border;
 pub use event_result::EventResult;
-pub use screen::AlternateScreen;
+pub use screen::{AlternateScreen, DrawSurface};
 
 use ratatui::style::Color;
 

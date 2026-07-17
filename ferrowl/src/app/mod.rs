@@ -13,8 +13,8 @@ mod render;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_lua::module::ModuleDirectory;
 use ferrowl_ring::Ring;
-use ferrowl_ui::AlternateScreen;
 use ferrowl_ui::traits::SetFocus;
+use ferrowl_ui::{AlternateScreen, DrawSurface};
 use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
@@ -267,8 +267,8 @@ pub enum KeyMode {
 
 /// Top-level application: owns the terminal and all module tabs, and runs the async
 /// event/redraw loop inside the tokio runtime.
-pub struct App {
-    screen: AlternateScreen<Stdout>,
+pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
+    screen: S,
     tabs: Vec<Tab>,
     active: usize,
     focus: Focus,
@@ -300,8 +300,27 @@ fn is_empty_shell(tab_count: usize, modal_open: bool) -> bool {
     tab_count == 0 && !modal_open
 }
 
-impl App {
+impl App<AlternateScreen<Stdout>> {
+    /// Builds the app on the real terminal (raw mode, alternate screen).
     pub fn new(
+        tabs: Vec<Tab>,
+        session_scripts: Vec<ScriptDef>,
+        session_interval: Duration,
+    ) -> std::io::Result<Self> {
+        Self::with_screen(
+            AlternateScreen::new()?,
+            tabs,
+            session_scripts,
+            session_interval,
+        )
+    }
+}
+
+impl<S: DrawSurface> App<S> {
+    /// Builds the app on an injected screen. `new` wraps this with the real
+    /// terminal; tests pass a `DrawSurface` mock.
+    pub(crate) fn with_screen(
+        screen: S,
         tabs: Vec<Tab>,
         session_scripts: Vec<ScriptDef>,
         session_interval: Duration,
@@ -323,7 +342,7 @@ impl App {
         session_sim.set_interval(session_interval);
         session_sim.set_scripts(session_scripts.clone());
         let mut app = Self {
-            screen: AlternateScreen::new()?,
+            screen,
             tabs,
             active: 0,
             focus,
@@ -660,5 +679,39 @@ mod tests {
         // Lines are timestamped.
         assert!(contents.trim_start().starts_with('['));
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A `DrawSurface` test double backed by ratatui's `TestBackend`, letting an `App` be built
+    /// and drawn headlessly (no real terminal). Records how many frames it was asked to render.
+    struct MockScreen {
+        term: ratatui::Terminal<ratatui::backend::TestBackend>,
+        draws: usize,
+    }
+
+    impl MockScreen {
+        fn new() -> Self {
+            let term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+            Self { term, draws: 0 }
+        }
+    }
+
+    impl DrawSurface for MockScreen {
+        fn draw<F: FnOnce(&mut ratatui::Frame)>(&mut self, render: F) -> std::io::Result<()> {
+            self.term
+                .draw(render)
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            self.draws += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    /// The generic screen seam lets an `App` be built on a mock surface and drawn without a real
+    /// terminal; `draw` succeeds and the mock records the frame.
+    fn ut_app_draws_onto_mock_screen() {
+        let mut app =
+            App::with_screen(MockScreen::new(), vec![], vec![], Duration::from_secs(1)).unwrap();
+        app.draw().unwrap();
+        assert_eq!(app.screen.draws, 1);
     }
 }
