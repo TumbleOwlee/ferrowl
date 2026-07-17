@@ -405,6 +405,8 @@ mod tests {
 
     #[tokio::test]
     /// CL-R-031 — a `[sim]` line flags exit-code 2 only when --exit-on-error is set.
+    /// CL-R-034 — a Lua sim error (a `[sim]` line) does not by itself fail a headless run: with
+    /// --exit-on-error off it surfaces without flagging the exit code.
     async fn ut_drain_log_flags_sim_error_prefix_only_when_requested() {
         let log = new_log();
         log.write().await.write(Level::Error, "[sim] boom");

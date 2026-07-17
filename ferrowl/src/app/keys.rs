@@ -315,6 +315,32 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-005 — an open modal layer consumes the keys its lower layers would otherwise receive:
+    /// while the keybind-help dialog is open, a `:` that would open the command line at the content
+    /// layer is swallowed, leaving help open and the command line unopened.
+    fn ut_open_help_layer_consumes_lower_layer_keys() {
+        let mut app = app_with(&["a"]);
+        assert!(!app.help_open);
+
+        // Open the topmost (help) layer.
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('?'));
+        assert!(app.help_open, "`?` opens the keybind-help layer");
+
+        // `:` would open the command line at the content layer; the open help layer eats it.
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char(':'));
+        assert!(app.help_open, "help stays open");
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "the command line must not have opened beneath the modal help layer"
+        );
+
+        // Esc dismisses help, restoring the lower layers.
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Esc);
+        assert!(!app.help_open, "Esc closes the help layer");
+    }
+
+    #[test]
     /// UI-R-009 — the `Ctrl+w` chord toggles focus between the active tab's content view and its
     /// log pane.
     fn ut_ctrl_w_chord_toggles_content_and_log_focus() {

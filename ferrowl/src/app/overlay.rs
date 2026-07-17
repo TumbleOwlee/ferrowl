@@ -135,3 +135,56 @@ impl<S: DrawSurface> App<S> {
         self.close_overlay();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::testkit::{MockSetup, MockView, build_app};
+
+    fn app_with(names: &[&str]) -> App<crate::app::testkit::MockScreen> {
+        build_app(names.iter().map(|n| MockView::pair(n).0.boxed()).collect())
+    }
+
+    async fn active_log_lines(app: &App<crate::app::testkit::MockScreen>) -> Vec<String> {
+        app.tabs[app.active]
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, line)| line)
+            .collect()
+    }
+
+    #[tokio::test]
+    /// UI-R-025 — confirming a creation dialog whose name collides with an existing tab is refused
+    /// with a warning in the active tab's log and leaves the dialog open, never overwriting or
+    /// duplicating the name; a non-colliding name creates the tab and closes the dialog.
+    async fn ut_creating_a_colliding_tab_name_is_refused_with_the_dialog_left_open() {
+        let mut app = app_with(&["a"]);
+
+        // Confirm a creation dialog that resolves to the already-used name "a".
+        app.overlay = Some(Overlay::Creation(Box::new(MockSetup::new("a"))));
+        app.focus = Focus::Dialog;
+        app.confirm_overlay().await;
+
+        assert_eq!(app.tabs.len(), 1, "a colliding name must not add a tab");
+        assert!(
+            app.overlay.is_some(),
+            "the setup dialog stays open on refusal"
+        );
+        assert!(
+            active_log_lines(&app)
+                .await
+                .iter()
+                .any(|l| l.contains("already in use")),
+            "a warning must be logged into the active tab"
+        );
+
+        // A distinct name is accepted: the tab is created and the dialog closes.
+        app.overlay = Some(Overlay::Creation(Box::new(MockSetup::new("b"))));
+        app.confirm_overlay().await;
+        assert_eq!(app.tabs.len(), 2, "a unique name creates the tab");
+        assert!(app.overlay.is_none(), "the dialog closes after creation");
+    }
+}

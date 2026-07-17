@@ -625,6 +625,33 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-043 — a tab owns a bounded ring log of timestamped, severity-tagged lines
+    /// (Info/Warning/Error), retaining only its most recent capacity.
+    fn ut_log_ring_is_bounded_and_severity_tagged() {
+        let mut ring = LogRing::init();
+        ring.write(Level::Info, "info line");
+        ring.write(Level::Warning, "warn line");
+        ring.write(Level::Error, "error line");
+
+        let recent = ring.peek_n(3);
+        // Each entry keeps its severity and a timestamp alongside the message.
+        assert_eq!(
+            recent.iter().map(|(_, lvl, _)| *lvl).collect::<Vec<_>>(),
+            vec![Level::Info, Level::Warning, Level::Error]
+        );
+        assert!(
+            recent.iter().all(|(ts, _, _)| *ts > 0),
+            "lines are timestamped"
+        );
+
+        // The ring is bounded: writing past capacity retains only the most recent LOG_SIZE lines.
+        for i in 0..(LOG_SIZE + 20) {
+            ring.write(Level::Info, &format!("l{i}"));
+        }
+        assert_eq!(ring.peek_n(LOG_SIZE + 100).len(), LOG_SIZE);
+    }
+
+    #[test]
     /// UI-R-044 — a long line is truncated to the per-line cap, and the total-written counter is
     /// monotonic across ring eviction.
     fn ut_log_truncates_long_lines_and_counts_monotonically() {
