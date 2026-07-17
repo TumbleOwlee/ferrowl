@@ -1,18 +1,14 @@
+# Nightly release orchestration.
+#
+# Single source of truth for the `nightly` GitHub Release *object*: this pipeline
+# refreshes the release and its notes. It deliberately does NOT build or attach
+# binaries — creating the release fires `.github/workflows/release.yml`, which is
+# the sole builder of release artifacts (nightly and tagged versions alike).
+#
+# The `nightly` tag itself is moved by `.github/workflows/nightly.yml` on push to
+# main; that tag push is what triggers the steps below.
 steps:
-  build:
-    image: rust:latest
-    commands:
-      - apt-get update && apt-get install -y mingw-w64 zip
-      - rustup target add x86_64-pc-windows-gnu
-      - cargo check
-      - cargo test
-      - cargo build --release
-      - cargo build --release --target x86_64-pc-windows-gnu
-    when:
-      - event: tag
-        ref: refs/tags/nightly
-
-  delete-nightly:
+  release:
     image: alpine
     environment:
       GITHUB_TOKEN:
@@ -36,6 +32,8 @@ steps:
         [ -n "$GENERATED" ] && printf '%s\n\n' "$GENERATED" >> release-notes.md
         printf 'Built from commit **%s** on **%s**.\n\n' \
           "$CI_COMMIT_SHA" "$(date -u +%Y-%m-%d)" >> release-notes.md
+        # Delete the previous nightly release so the notes and assets are rebuilt
+        # cleanly. The `nightly` git tag is left in place (owned by GitHub Actions).
         RELEASE_ID=$(curl -sf \
           -H "Authorization: token $GITHUB_TOKEN" \
           https://api.github.com/repos/$REPO/releases/tags/nightly \
@@ -44,21 +42,15 @@ steps:
           -H "Authorization: token $GITHUB_TOKEN" \
           https://api.github.com/repos/$REPO/releases/$RELEASE_ID \
           && echo "Deleted release $RELEASE_ID" || echo "No existing release to delete"
-    when:
-      - event: tag
-        ref: refs/tags/nightly
-
-  upload:
-    image: woodpeckerci/plugin-release
-    settings:
-      api_key:
-        from_secret: github_token
-      title: 'Nightly'
-      prerelease: true
-      note: release-notes.md
-      checksum:
-        - sha256
-        - md5
+        # Recreate the release shell as a prerelease. Publishing it (draft:false)
+        # emits the `release: created` event that release.yml builds artifacts on.
+        curl -sf -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          https://api.github.com/repos/$REPO/releases \
+          -d "$(jq -n --arg tag nightly --arg sha "$CI_COMMIT_SHA" \
+            --rawfile body release-notes.md \
+            '{tag_name:$tag, target_commitish:$sha, name:"Nightly", body:$body, prerelease:true, draft:false}')"
     when:
       - event: tag
         ref: refs/tags/nightly
