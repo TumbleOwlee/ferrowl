@@ -1,17 +1,15 @@
-//! The single, version-generic inbound (CSMS→CS) handler for the OCPP 2.x charging-station
-//! simulator, answered from the shared [`CsState`]. GetVariables is built from the variable store,
-//! SetVariables writes it, Reset mutates state. EVSE-scoped Calls are simulated against the
-//! connector on the targeted EVSE; every other inbound Call is default-accepted (see `UNHANDLED.md`).
+//! The inbound (CSMS→CS) handler for the OCPP 2.x charging-station simulator: a single generic
+//! [`CsStateHandler`] that owns the version-independent plumbing — recording each Call and reply,
+//! tagging them with their connector/EVSE scope, and the pre-dispatch unknown-EVSE guard — and
+//! delegates the actual decision logic to `V::respond`.
 //!
-//! 2.0.1 and 2.1 answer these Calls identically, so the decision logic lives once as
-//! [`CsStateHandler::respond`], generic over `V: TypedInbound`. The few responses whose body
-//! depends on request/state data (`GetVariables`, `SetVariables`, `Reset`, and the
-//! `SetChargingProfile` reject) are built with the version's own strongly-typed `rust_ocpp` structs
-//! via the [`TypedInbound`] trait (impl'd in each version's `inbound.rs`); the shared handler
-//! supplies the store lookup/mutation as closures, so only the typed plumbing — not the decision
-//! logic — differs per version. The version-independent helpers it calls (`unknown_evse`,
-//! `inbound_scope`, …) live in [`v2_common`](crate::module::ocpp::client::v2_common). Each inbound
-//! Call and our reply are recorded.
+//! The decision logic itself is **fully typed** and lives per version in each version's `inbound.rs`
+//! ([`Inbound`] impl for `V2_0_1` / `V2_1`): it matches the typed action enum, reads typed request
+//! fields, and builds typed `rust_ocpp` responses. 2.0.1 and 2.1 answer these Calls identically, so
+//! the two impls are near-copies — that duplication is deliberate, the price of never touching an
+//! untyped `serde_json::Value` in the response path. (The only JSON here is the encoded action the
+//! plumbing inspects generically for the scope/guard, which cannot be typed without a per-action
+//! accessor for all ~60 actions.)
 
 use std::future::Future;
 use std::sync::Arc;
@@ -24,14 +22,23 @@ use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::{CallError, CallErrorCode, Version};
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
-use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
-use crate::module::ocpp::client::v2_common::{clear_limit_by_purpose, inbound_scope, unknown_evse};
+use crate::module::ocpp::client::v2_common::{inbound_scope, unknown_evse};
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
+/// Per-version, fully-typed inbound decision logic. Given the shared state and the typed action,
+/// build the typed response (or a [`CallError`]) plus a short human-readable log context. Impl'd in
+/// each version's `inbound.rs`; the generic [`CsStateHandler`] owns everything around it.
+pub trait Inbound: Version {
+    fn respond(
+        state: &Arc<RwLock<CsState>>,
+        action: &Self::Action,
+    ) -> (Result<Self::Response, CallError>, String);
+}
+
 /// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. One struct
-/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: TypedInbound`.
+/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: Inbound`.
 pub struct CsStateHandler {
     online: Arc<AtomicBool>,
     messages: Messages,
@@ -56,342 +63,7 @@ impl HasState for CsStateHandler {
     }
 }
 
-/// Outcome of applying one `SetVariables` entry to the store, reported by the caller's `apply`
-/// closure back to the version's typed response builder.
-pub enum SetOutcome {
-    Accepted,
-    Rejected,
-}
-
-/// Per-version construction of the inbound responses whose body depends on request/state data
-/// (`GetVariables`, `SetVariables`, `Reset`, and the `SetChargingProfile` reject). Each impl (in the
-/// version's `inbound.rs`) does only the typed request-extraction and response-building for its
-/// `rust_ocpp` version; the shared [`CsStateHandler`] supplies the store lookup/mutation as closures
-/// so the decision logic is not duplicated. Every method is dispatched by action name from
-/// [`CsStateHandler::respond`], so each impl may assume its matching action variant.
-pub trait TypedInbound: Version {
-    /// Build the typed `GetVariables` response. `lookup(name)` returns the stored value of a known
-    /// variable, `None` if the store has no such key.
-    fn get_variables_response(
-        action: &Self::Action,
-        lookup: impl Fn(&str) -> Option<String>,
-    ) -> Self::Response;
-
-    /// Build the typed `SetVariables` response. `apply(name, value)` writes the store and reports
-    /// whether the write was accepted or rejected (read-only key).
-    fn set_variables_response(
-        action: &Self::Action,
-        apply: impl FnMut(&str, &str) -> SetOutcome,
-    ) -> Self::Response;
-
-    /// The typed `Reset` response (always accepted).
-    fn reset_response() -> Self::Response;
-
-    /// The typed `SetChargingProfile` response for a rejected profile.
-    fn set_charging_profile_rejected() -> Self::Response;
-}
-
-impl CsStateHandler {
-    fn respond<V: TypedInbound>(
-        &self,
-        action: &V::Action,
-    ) -> (Result<V::Response, CallError>, String) {
-        let name = V::action_name(action);
-        let request = encode_action_or_log::<V>(action);
-        match name {
-            "GetVariables" => self.with_state(|state| {
-                let resp = V::get_variables_response(action, |name| {
-                    state
-                        .config
-                        .iter()
-                        .find(|c| c.key == name)
-                        .map(|c| c.value.clone())
-                });
-                (Ok(resp), "answered from variables".to_string())
-            }),
-            "SetVariables" => self.with_state_mut(|state| {
-                let resp = V::set_variables_response(action, |name, value| {
-                    match state.config.iter_mut().find(|c| c.key == name) {
-                        Some(c) if c.readonly => SetOutcome::Rejected,
-                        Some(c) => {
-                            c.value = value.to_string();
-                            SetOutcome::Accepted
-                        }
-                        None => {
-                            state.config.push(ConfigKey {
-                                key: name.to_string(),
-                                value: value.to_string(),
-                                readonly: false,
-                            });
-                            SetOutcome::Accepted
-                        }
-                    }
-                });
-                (Ok(resp), "variables updated".to_string())
-            }),
-            "Reset" => self.with_state_mut(|state| {
-                for c in &mut state.connectors {
-                    c.status = "Available".to_string();
-                    c.transaction_id = None;
-                    c.session_energy = 0.0;
-                }
-                (Ok(V::reset_response()), "state reset".to_string())
-            }),
-            "SetChargingProfile" => {
-                let profile = &request["chargingProfile"];
-                let stack = profile["stackLevel"].as_i64().unwrap_or(0);
-                let purpose = profile["chargingProfilePurpose"]
-                    .as_str()
-                    .unwrap_or("TxProfile")
-                    .to_string();
-                let schedule = &profile["chargingSchedule"][0];
-                let period = &schedule["chargingSchedulePeriod"][0];
-                let evse = request["evseId"].as_i64();
-                self.with_state_mut(|state| {
-                    // Reject profiles whose stack level exceeds ChargeProfileMaxStackLevel (when
-                    // that key is configured with a numeric value); otherwise accept (no ceiling).
-                    let max_stack = state
-                        .config
-                        .iter()
-                        .find(|c| c.key == "ChargeProfileMaxStackLevel")
-                        .and_then(|c| c.value.parse::<i64>().ok());
-                    if let Some(max) = max_stack
-                        && stack > max
-                    {
-                        (
-                            Ok(V::set_charging_profile_rejected()),
-                            format!("rejected: stackLevel {stack} > max {max}"),
-                        )
-                    } else {
-                        // Apply the limit to the connector on the targeted EVSE (fall back to the
-                        // first), routed by charging-profile purpose into the matching field.
-                        let context = if let Some(limit) = period["limit"].as_f64() {
-                            let unit = schedule["chargingRateUnit"]
-                                .as_str()
-                                .unwrap_or("A")
-                                .to_string();
-                            let idx = evse
-                                .and_then(|e| state.connectors.iter().position(|c| c.evse_id == e))
-                                .or((!state.connectors.is_empty()).then_some(0));
-                            if let Some(i) = idx {
-                                let c = &mut state.connectors[i];
-                                match purpose.as_str() {
-                                    "TxDefaultProfile" => {
-                                        c.default_limit = Some(limit);
-                                        c.default_limit_unit = unit.clone();
-                                    }
-                                    "ChargingStationMaxProfile" => {
-                                        c.max_limit = Some(limit);
-                                        c.max_limit_unit = unit.clone();
-                                    }
-                                    "ChargingStationExternalConstraints" => {
-                                        c.external_limit = Some(limit);
-                                        c.external_limit_unit = unit.clone();
-                                    }
-                                    _ => {
-                                        c.limit = Some(limit);
-                                        c.limit_unit = unit.clone();
-                                    }
-                                }
-                            }
-                            format!("{purpose} limit {limit} {unit}")
-                        } else {
-                            "no limit in profile".to_string()
-                        };
-                        let resp = V::default_response("SetChargingProfile")
-                            .map(Ok)
-                            .expect("SetChargingProfile is a known action");
-                        (resp, context)
-                    }
-                })
-            }
-            "ReserveNow" => {
-                let tag = request["idToken"]["idToken"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                let id = request["id"].as_i64();
-                self.with_state_mut(|state| {
-                    // An evseId-less (or evseId 0) ReserveNow reserves the station itself
-                    // (CS-level); otherwise it targets the connector on that EVSE (entries are
-                    // addressed by EVSE id).
-                    let context = match request["evseId"].as_i64().filter(|&e| e != 0) {
-                        Some(e) => match state.connector_mut_by_evse(e) {
-                            Some(c) => {
-                                c.reserved_rfid = Some(tag.clone());
-                                c.reservation_id = id;
-                                format!("reserved evse {e} for {tag}")
-                            }
-                            None => format!("unknown evse {e}"),
-                        },
-                        None => {
-                            state.reserved_rfid = Some(tag.clone());
-                            state.reservation_id = id;
-                            format!("reserved CS for {tag}")
-                        }
-                    };
-                    let resp = V::default_response("ReserveNow")
-                        .map(Ok)
-                        .expect("ReserveNow is a known action");
-                    (resp, context)
-                })
-            }
-            "CancelReservation" => self.with_state_mut(|state| {
-                // Clear whichever level holds the matching reservationId.
-                let context = match request["reservationId"].as_i64() {
-                    Some(rid) if state.reservation_id == Some(rid) => {
-                        state.reserved_rfid = None;
-                        state.reservation_id = None;
-                        format!("cancelled CS reservation {rid}")
-                    }
-                    Some(rid) => match state
-                        .connectors
-                        .iter_mut()
-                        .find(|c| c.reservation_id == Some(rid))
-                    {
-                        Some(c) => {
-                            c.reserved_rfid = None;
-                            c.reservation_id = None;
-                            format!("cancelled evse {} reservation {rid}", c.evse_id)
-                        }
-                        None => "no matching reservation".to_string(),
-                    },
-                    None => "no matching reservation".to_string(),
-                };
-                let resp = V::default_response("CancelReservation")
-                    .map(Ok)
-                    .expect("CancelReservation is a known action");
-                (resp, context)
-            }),
-            "ChangeAvailability" => {
-                let status = match request["operationalStatus"].as_str() {
-                    Some("Inoperative") => "Unavailable",
-                    _ => "Available",
-                };
-                self.with_state_mut(|state| {
-                    // An evseId-less (or evseId 0) ChangeAvailability targets the whole station.
-                    let context = match request["evse"]["id"].as_i64().filter(|&e| e != 0) {
-                        Some(e) => {
-                            if let Some(c) = state.connector_mut_by_evse(e) {
-                                c.status = status.to_string();
-                            }
-                            format!("evse {e} -> {status}")
-                        }
-                        None => {
-                            for c in &mut state.connectors {
-                                c.status = status.to_string();
-                            }
-                            format!("all -> {status}")
-                        }
-                    };
-                    let resp = V::default_response("ChangeAvailability")
-                        .map(Ok)
-                        .expect("ChangeAvailability is a known action");
-                    (resp, context)
-                })
-            }
-            "RequestStartTransaction" => self.with_state_mut(|state| {
-                // Optional evseId; fall back to the first connector. Mint a transaction and charge.
-                let idx = request["evseId"]
-                    .as_i64()
-                    .filter(|&e| e != 0)
-                    .and_then(|e| state.connectors.iter().position(|c| c.evse_id == e))
-                    .or((!state.connectors.is_empty()).then_some(0));
-                let context = match idx {
-                    Some(i) => {
-                        let tx = state.connectors[i].start_tx();
-                        state.connectors[i].status = "Charging".to_string();
-                        format!("started tx {tx} on evse {}", state.connectors[i].evse_id)
-                    }
-                    None => "no connector to start".to_string(),
-                };
-                let resp = V::default_response("RequestStartTransaction")
-                    .map(Ok)
-                    .expect("RequestStartTransaction is a known action");
-                (resp, context)
-            }),
-            "RequestStopTransaction" => {
-                let tx = request["transactionId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                self.with_state_mut(|state| {
-                    let context = match state
-                        .connectors
-                        .iter_mut()
-                        .find(|c| c.transaction_id.as_deref() == Some(tx.as_str()))
-                    {
-                        Some(c) => {
-                            c.transaction_id = None;
-                            c.limit = None;
-                            c.status = "Available".to_string();
-                            format!("stopped tx {tx} on evse {}", c.evse_id)
-                        }
-                        None => format!("no active tx {tx}"),
-                    };
-                    let resp = V::default_response("RequestStopTransaction")
-                        .map(Ok)
-                        .expect("RequestStopTransaction is a known action");
-                    (resp, context)
-                })
-            }
-            "ClearChargingProfile" => {
-                let criteria = &request["chargingProfileCriteria"];
-                let purpose = criteria["chargingProfilePurpose"]
-                    .as_str()
-                    .map(str::to_owned);
-                self.with_state_mut(|state| {
-                    // evseId lives in the criteria; absent (or 0) clears every connector. The
-                    // purpose criterion (when given) selects which per-purpose limit is erased;
-                    // absent clears all.
-                    match criteria["evseId"].as_i64().filter(|&e| e != 0) {
-                        Some(e) => {
-                            if let Some(c) = state.connector_mut_by_evse(e) {
-                                clear_limit_by_purpose(c, purpose.as_deref());
-                            }
-                        }
-                        None => {
-                            for c in &mut state.connectors {
-                                clear_limit_by_purpose(c, purpose.as_deref());
-                            }
-                        }
-                    }
-                    let resp = V::default_response("ClearChargingProfile")
-                        .map(Ok)
-                        .expect("ClearChargingProfile is a known action");
-                    (resp, "charging profile cleared".to_string())
-                })
-            }
-            "UnlockConnector" => self.with_state_mut(|state| {
-                let context = match request["evseId"].as_i64().filter(|&e| e != 0) {
-                    Some(e) => {
-                        if let Some(c) = state.connector_mut_by_evse(e) {
-                            c.status = "Available".to_string();
-                        }
-                        format!("evse {e} unlocked")
-                    }
-                    None => "no evse to unlock".to_string(),
-                };
-                let resp = V::default_response("UnlockConnector")
-                    .map(Ok)
-                    .expect("UnlockConnector is a known action");
-                (resp, context)
-            }),
-            other => match V::default_response(other) {
-                Some(resp) => (Ok(resp), "default-accepted".to_string()),
-                None => (
-                    Err(CallError::new(
-                        CallErrorCode::NotImplemented,
-                        "action not handled by the charging-station simulator",
-                    )),
-                    "not implemented".to_string(),
-                ),
-            },
-        }
-    }
-}
-
-impl<V: TypedInbound> CsActionHandler<V> for CsStateHandler {
+impl<V: Inbound> CsActionHandler<V> for CsStateHandler {
     fn handle_call(
         &self,
         action: V::Action,
@@ -409,7 +81,7 @@ impl<V: TypedInbound> CsActionHandler<V> for CsStateHandler {
                 )),
                 format!("unknown evse {e}"),
             ),
-            None => self.respond::<V>(&action),
+            None => V::respond(&self.state, &action),
         };
         let reply_payload = match &result {
             Ok(resp) => encode_response_or_log::<V>(resp),
@@ -489,19 +161,19 @@ mod tests {
     }
 
     /// Build an action for version `V`, drive it through `respond`, and assert it was accepted.
-    fn drive<V: TypedInbound>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+    fn drive<V: Inbound>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        assert!(h.respond::<V>(&action).0.is_ok(), "{name} rejected");
+        assert!(V::respond(&h.state, &action).0.is_ok(), "{name} rejected");
     }
 
     /// Drive an action through `respond` and return its encoded response JSON plus the log context.
-    fn responded<V: TypedInbound>(
+    fn responded<V: Inbound>(
         h: &CsStateHandler,
         name: &str,
         payload: serde_json::Value,
     ) -> (serde_json::Value, String) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        let (resp, ctx) = h.respond::<V>(&action);
+        let (resp, ctx) = V::respond(&h.state, &action);
         (
             V::encode_response(&resp.expect("accepted")).expect("encodes"),
             ctx,
@@ -788,16 +460,16 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = h.respond::<V2_0_1>(&action);
+        let (resp, ctx) = V2_0_1::respond(&h.state, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }
 
-    // --- 2.1 parity: the same generic handler, driven with `V2_1` typed actions/responses, proving
-    // the JSON→typed bridge (`decode_result`) round-trips against the 2.1 `rust_ocpp` types too. ---
+    // --- 2.1 parity: the same generic shell, driven with `V2_1` typed actions/responses, exercising
+    // the 2.1 typed `respond` impl against the 2.1 `rust_ocpp` types. ---
 
     #[test]
-    /// OC-R-065 — the 2.1 binding answers a configuration read from the shared store via the generic handler.
+    /// OC-R-065 — the 2.1 binding answers a configuration read from the shared store.
     fn ut_v21_get_variables_reports_known_and_unknown() {
         let h = handler_with(CsState::default());
         let (json, _) = responded::<V2_1>(
@@ -819,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-066 — the 2.1 binding writes/rejects/creates configuration keys via the generic handler.
+    /// OC-R-066 — the 2.1 binding writes/rejects/creates configuration keys.
     fn ut_v21_set_variables_update_reject_and_create() {
         let h = handler_with(CsState::default());
         let (json, _) = responded::<V2_1>(
@@ -841,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-071 — the 2.1 binding resets every connector via the generic handler.
+    /// OC-R-071 — the 2.1 binding resets every connector.
     fn ut_v21_reset_returns_all_connectors_available() {
         let mut s = two_evses();
         s.connectors[0].status = "Charging".to_string();
@@ -857,7 +529,28 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-070 — the 2.1 binding mints and clears a transaction via the generic handler.
+    /// OC-R-067 — the 2.1 binding rejects a charging profile above the configured max stack level.
+    fn ut_v21_set_charging_profile_rejects_excess_stack_level() {
+        let h = handler_with(two_evses());
+        let (json, ctx) = responded::<V2_1>(
+            &h,
+            "SetChargingProfile",
+            json!({
+                "evseId": 1,
+                "chargingProfile": {
+                    "id": 1, "stackLevel": 99, "chargingProfilePurpose": "TxProfile",
+                    "chargingProfileKind": "Absolute",
+                    "chargingSchedule": [{ "id": 1, "chargingRateUnit": "A",
+                        "chargingSchedulePeriod": [{ "startPeriod": 0, "limit": 16.0 }] }]
+                }
+            }),
+        );
+        assert_eq!(json["status"], "Rejected");
+        assert!(ctx.contains("stackLevel"));
+    }
+
+    #[test]
+    /// OC-R-070 — the 2.1 binding mints and clears a transaction.
     fn ut_v21_request_start_then_stop_transaction() {
         let h = handler_with(two_evses());
         drive::<V2_1>(
@@ -877,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-064 — the 2.1 binding default-accepts an unmodeled inbound Call via the generic handler.
+    /// OC-R-064 — the 2.1 binding default-accepts an unmodeled inbound Call.
     fn ut_v21_unmodeled_action_default_accepted() {
         let h = handler_with(CsState::default());
         let action = V2_1::decode_call(
@@ -885,7 +578,7 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = h.respond::<V2_1>(&action);
+        let (resp, ctx) = V2_1::respond(&h.state, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }
