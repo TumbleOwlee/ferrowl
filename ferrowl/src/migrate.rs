@@ -650,6 +650,59 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-043 — migration stamps the output device config with the current build version.
+    fn ut_migrate_stamps_current_version() {
+        let (device, _) = convert(legacy_sample());
+        assert_eq!(device.version.as_deref(), Some(crate::config::VERSION));
+    }
+
+    #[test]
+    /// CS-R-042 — legacy fields with no current equivalent are dropped with a warning per field,
+    /// never silently, and the register carrying a dropped field still migrates.
+    fn ut_migrate_drops_legacy_fields_with_warning() {
+        let mut legacy = legacy_sample();
+        legacy.history_length = Some(50);
+        legacy.definitions.clear();
+        legacy.definitions.insert(
+            "reversed".into(),
+            LegacyRegisterDef {
+                slave_id: 1,
+                read_code: 3,
+                address: Some(LegacyAddress::Int(1)),
+                length: 1,
+                access: "ReadOnly".into(),
+                value_type: "U16".into(),
+                reverse: true, // legacy per-register field with no current equivalent
+                resolution: 1.0,
+                is_virtual: false,
+                description: String::new(),
+                on_update: None,
+                values: vec![],
+                default: None,
+            },
+        );
+        // A contiguous range with a non-zero slave_id: another dropped legacy field.
+        legacy.contiguous_memory = vec![LegacyMemoryRange {
+            slave_id: 7,
+            read_code: 3,
+            range: LegacyRange {
+                start: LegacyAddress::Int(0),
+                end: LegacyAddress::Int(1),
+            },
+        }];
+
+        let (device, warnings) = convert(legacy);
+
+        // A warning is emitted for each dropped legacy field, not swallowed.
+        assert!(warnings.iter().any(|w| w.contains("history_length")));
+        assert!(warnings.iter().any(|w| w.contains("reverse")));
+        assert!(warnings.iter().any(|w| w.contains("slave_id")));
+
+        // The register survives the dropped `reverse` field — the drop is non-fatal.
+        assert!(device.definitions.contains_key("reversed"));
+    }
+
+    #[test]
     /// CS-R-041 — a full legacy sample migrates through the transformation contract.
     fn ut_convert_full_sample() {
         let (device, warnings) = convert(legacy_sample());

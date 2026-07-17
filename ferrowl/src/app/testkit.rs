@@ -31,6 +31,7 @@ use ratatui::layout::Rect;
 
 use super::{App, LogRing};
 use crate::config::script::ScriptDef;
+use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
 };
@@ -255,6 +256,37 @@ impl ModuleView for MockView {
     fn module_host(&self) -> Option<Arc<dyn ModuleHost>> {
         self.host_kind
             .map(|kind| Arc::new(MockHost { kind }) as Arc<dyn ModuleHost>)
+    }
+}
+
+/// A [`SetupView`] test double whose `confirm` always validates to a fixed tab name backed by a
+/// fresh [`MockView`]. Lets a creation-flow test drive `confirm_overlay` to either the create or
+/// the name-collision branch without a real module setup dialog.
+pub(super) struct MockSetup {
+    name: String,
+}
+
+impl MockSetup {
+    pub(super) fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
+    }
+}
+
+impl SetupView for MockSetup {
+    fn render(&mut self, _area: Rect, _buf: &mut Buffer) {}
+    fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        EventResult::Unhandled(modifiers, code)
+    }
+    fn focus_next(&mut self) {}
+    fn focus_previous(&mut self) {}
+    fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
+        let name = self.name.clone();
+        Some((
+            self.name.clone(),
+            Box::new(move || MockView::pair(&name).0.boxed()),
+        ))
     }
 }
 

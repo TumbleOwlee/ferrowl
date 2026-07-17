@@ -38,3 +38,32 @@ impl Time {
             .as_millis())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Time;
+
+    #[test]
+    /// SC-R-017 — C_Time is measured from the moment its context is built, and building a fresh
+    /// context (a fresh module) resets the origin to zero.
+    fn ut_time_measured_from_construction_and_resets_on_rebuild() {
+        let lua = mlua::Lua::new();
+        let t1 = Time::default();
+        // Freshly built: elapsed is ~0.
+        assert!(Time::get_ms(&lua, &t1, ()).unwrap() < 40);
+
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let elapsed = Time::get_ms(&lua, &t1, ()).unwrap();
+        assert!(
+            elapsed >= 40,
+            "elapsed should have advanced, got {elapsed}ms"
+        );
+
+        // Rebuilding the context builds a new Time whose origin is reset to now.
+        let t2 = Time::default();
+        assert!(
+            Time::get_ms(&lua, &t2, ()).unwrap() < elapsed,
+            "a rebuilt clock must start from zero, not inherit the old origin"
+        );
+    }
+}

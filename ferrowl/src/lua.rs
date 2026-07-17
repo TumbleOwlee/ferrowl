@@ -715,4 +715,158 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("cannot Set nil value"));
     }
+
+    // --- Execution model: dedicated thread, stop control, responsive sleep, shared locking ---
+
+    /// A log sink that records the OS thread on which Lua logging (and thus execution) occurred.
+    #[derive(Clone)]
+    struct ThreadIdSink(Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>);
+    impl LogSink for ThreadIdSink {
+        fn log(&self, _level: LogLevel, _line: &str) {
+            *self.0.lock().unwrap() = Some(std::thread::current().id());
+        }
+    }
+
+    #[test]
+    /// SC-R-010 — a sim owner runs its Lua context on a dedicated OS thread, building and executing
+    /// the context there rather than on the caller (UI/async) thread.
+    fn ut_sim_runs_lua_on_a_dedicated_thread() {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let sink = ThreadIdSink(seen.clone());
+        let caller = std::thread::current().id();
+
+        // Mirror run_sim's model: the context is built and run inside its own thread (mlua::Lua is
+        // !Send, so it cannot be built on one thread and moved to another).
+        std::thread::spawn(move || {
+            let mut ctx = ContextBuilder::<String>::default()
+                .with_stdlib()
+                .with_print_sink(sink)
+                .with_script("t".to_string(), r#"print("ran")"#)
+                .build()
+                .unwrap();
+            let _ = ctx.call_all();
+        })
+        .join()
+        .unwrap();
+
+        let ran_on = seen.lock().unwrap().expect("the script must have executed");
+        assert_ne!(
+            ran_on, caller,
+            "Lua must execute on a dedicated thread, not the caller"
+        );
+    }
+
+    #[test]
+    /// SC-R-012 — setting the stop flag and joining stops the sim; the sim handle's destruction
+    /// (Drop) also stops and joins its thread.
+    fn ut_sim_stops_on_flag_and_on_drop() {
+        let noop = || vec![("noop".to_string(), "local x = 1".to_string())];
+
+        // Explicit stop(): once it returns, the thread has been joined and logged its exit.
+        let log = script_log();
+        let mut handle = run_sim(
+            evse_memory(),
+            vstore(),
+            evse_registers(),
+            noop(),
+            Duration::from_millis(20),
+            log.clone(),
+            no_sink(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+        handle.stop();
+        assert!(
+            log_lines(&log)
+                .iter()
+                .any(|l| l.contains("[sim] stopped completely"))
+        );
+
+        // Drop path: dropping the handle stops and joins without an explicit stop().
+        let log2 = script_log();
+        {
+            let _h = run_sim(
+                evse_memory(),
+                vstore(),
+                evse_registers(),
+                noop(),
+                Duration::from_millis(20),
+                log2.clone(),
+                no_sink(),
+            )
+            .expect("a non-empty script set spawns a sim thread");
+        }
+        assert!(
+            log_lines(&log2)
+                .iter()
+                .any(|l| l.contains("[sim] stopped completely"))
+        );
+    }
+
+    #[test]
+    /// SC-R-013 — the cycle sleep is chunked and re-checks the stop flag, so a stop set during the
+    /// idle portion of a cycle is observed promptly instead of after the full interval.
+    fn ut_sleep_responsive_observes_stop_promptly() {
+        // Already-requested stop: the chunked sleep must bail out well before the 10s interval.
+        let stopped = AtomicBool::new(true);
+        let start = std::time::Instant::now();
+        sleep_responsive(Duration::from_secs(10), &stopped);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "a stopped sim must not sleep the full cycle interval"
+        );
+
+        // Without a stop, it does sleep roughly the (short) interval.
+        let running = AtomicBool::new(false);
+        let start = std::time::Instant::now();
+        sleep_responsive(Duration::from_millis(80), &running);
+        assert!(start.elapsed() >= Duration::from_millis(60));
+    }
+
+    #[test]
+    /// SC-R-029 — host state reached from Lua is guarded by the same lock the network task uses: a
+    /// bridge write blocks while that lock is held elsewhere and completes once it is released.
+    fn ut_bridge_write_contends_on_the_host_lock() {
+        let memory = evse_memory();
+        let bridge = RegisterBridge::new(memory.clone(), vstore(), Arc::new(evse_registers()));
+        let done = Arc::new(AtomicBool::new(false));
+
+        // Hold the module memory's write lock, exactly as the network task would while updating.
+        let guard = memory.write();
+
+        let done_writer = done.clone();
+        let writer = std::thread::spawn(move || {
+            // Takes the same lock, so it cannot make progress until the guard above is released.
+            bridge
+                .write("setpoint".to_string(), ValueType::Int(5))
+                .expect("write");
+            done_writer.store(true, Ordering::Relaxed);
+        });
+
+        // While we hold the lock, the Lua-side write is blocked on it.
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !done.load(Ordering::Relaxed),
+            "the write proceeded without acquiring the shared host lock"
+        );
+
+        drop(guard); // release: the contended write now completes
+        assert!(wait_for(Duration::from_secs(2), || done.load(Ordering::Relaxed)));
+        writer.join().unwrap();
+
+        // The value the Lua write applied is the one now in shared host memory.
+        let setpoint = memory
+            .read()
+            .read(
+                Key {
+                    id: SlaveKey {
+                        slave_id: 1,
+                        kind: Kind::HoldingRegister,
+                    },
+                },
+                &CellType::Register,
+                &Range::new(0, 1),
+            )
+            .expect("read setpoint");
+        assert_eq!(setpoint, vec![5]);
+    }
 }

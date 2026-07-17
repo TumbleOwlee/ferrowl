@@ -92,6 +92,86 @@ fn it_migrate_exit_codes() {
 }
 
 #[test]
+/// CS-R-040 — the migrate subcommand converts a pre-rewrite config file into a device-config file.
+/// CS-R-043 — input and output encodings are each chosen independently from their own extension,
+/// so a JSON source migrates to a TOML destination (and vice-versa), version-stamped either way.
+/// CS-R-045 — migration produces a device config only, never a session file.
+fn it_migrate_cross_encoding_produces_device_config() {
+    let dir = std::env::temp_dir();
+
+    // A minimal pre-rewrite config with one holding register and a contiguous range.
+    let legacy_json = r#"{
+        "contiguous_memory": [{ "read_code": 3, "range": { "start": 0, "end": 4 } }],
+        "definitions": {
+            "rpm": { "read_code": 3, "address": 16, "type": "U16" }
+        }
+    }"#;
+
+    // JSON source → TOML destination: the two encodings are chosen independently.
+    let input = dir.join("ferrowl_migrate_cross_in.json");
+    std::fs::write(&input, legacy_json).unwrap();
+    let output = dir.join("ferrowl_migrate_cross_out.toml");
+    let ok = bin()
+        .args([
+            "migrate",
+            "-i",
+            input.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run migrate");
+    assert_eq!(
+        ok.status.code(),
+        Some(0),
+        "a JSON→TOML migration must exit 0; stderr: {}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+
+    let toml_out = std::fs::read_to_string(&output).unwrap();
+    // Version-stamped (CS-R-043) and shaped as a device config, not a session (CS-R-045):
+    // device configs carry `read_ranges`/`definitions`; a session would carry `[[modules]]`.
+    assert!(
+        toml_out.contains("version"),
+        "output must be version-stamped"
+    );
+    assert!(
+        toml_out.contains("[definitions.") || toml_out.contains("[read_ranges]"),
+        "output must be a device config, got:\n{toml_out}"
+    );
+    assert!(
+        !toml_out.contains("[[modules]]"),
+        "migration must not produce a session file"
+    );
+
+    // TOML source → JSON destination: the reverse direction is equally independent.
+    let input2 = dir.join("ferrowl_migrate_cross_in.toml");
+    std::fs::write(&input2, "").unwrap();
+    let output2 = dir.join("ferrowl_migrate_cross_out.json");
+    let ok2 = bin()
+        .args([
+            "migrate",
+            "-i",
+            input2.to_str().unwrap(),
+            "-o",
+            output2.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run migrate");
+    assert_eq!(
+        ok2.status.code(),
+        Some(0),
+        "a TOML→JSON migration must exit 0; stderr: {}",
+        String::from_utf8_lossy(&ok2.stderr)
+    );
+    let json_out = std::fs::read_to_string(&output2).unwrap();
+    assert!(
+        json_out.contains("\"version\""),
+        "JSON output must be version-stamped, got:\n{json_out}"
+    );
+}
+
+#[test]
 /// CL-R-042 — setup/fatal diagnostics go to stderr, keeping stdout as the drained-log stream.
 fn it_fatal_diagnostics_go_to_stderr() {
     let module =
