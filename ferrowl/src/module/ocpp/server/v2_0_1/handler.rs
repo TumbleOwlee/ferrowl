@@ -13,6 +13,7 @@ use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1, Ver
 
 use crate::module::ocpp::server::backend::{EventTx, RfidLists, ServerEvent};
 use crate::module::ocpp::server::v2_common::craft_response;
+use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// CSMS inbound handler for OCPP 2.0.1.
 pub struct CsmsHandler {
@@ -51,10 +52,10 @@ impl CsmsActionHandler<V2_0_1> for CsmsHandler {
         action: Action201,
     ) -> impl Future<Output = Result<Response201, CallError>> + Send {
         let name = V2_0_1::action_name(&action).to_string();
-        let request = V2_0_1::encode_action(&action).unwrap_or(Value::Null);
+        let request = encode_action_or_log::<V2_0_1>(&action);
         let result = self.respond(&name, &action, &request);
         let response = match &result {
-            Ok(resp) => V2_0_1::encode_response(resp).unwrap_or(Value::Null),
+            Ok(resp) => encode_response_or_log::<V2_0_1>(resp),
             Err(_) => Value::Null,
         };
         let _ = self.tx.send(ServerEvent::Inbound {

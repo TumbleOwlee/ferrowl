@@ -17,6 +17,7 @@ use ferrowl_ocpp::{Error, Version};
 
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::scope::Scope;
+use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// Number of `refresh` ticks per second (the UI ticks at ~100ms), used to convert second-based
 /// cadences (heartbeat interval, MeterValues period) into tick counts.
@@ -298,7 +299,7 @@ impl<V: Version> OcppSender<V> {
     /// never blocks the UI loop because the caller spawns it.
     pub async fn send_scoped(self, action: V::Action, scope: Scope) -> Result<Value, Error> {
         let name = V::action_name(&action).to_string();
-        let request = V::encode_action(&action).unwrap_or(Value::Null);
+        let request = encode_action_or_log::<V>(&action);
         record(
             &self.messages,
             scope,
@@ -316,7 +317,7 @@ impl<V: Version> OcppSender<V> {
         };
         match result {
             Ok(response) => {
-                let payload = V::encode_response(&response).unwrap_or(Value::Null);
+                let payload = encode_response_or_log::<V>(&response);
                 record(
                     &self.messages,
                     scope,

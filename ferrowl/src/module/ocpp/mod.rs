@@ -14,3 +14,4 @@ pub mod setup;
 pub mod setup_dialog;
 pub mod spec;
 mod widgets;
+pub(crate) mod wire_log;

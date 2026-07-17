@@ -23,9 +23,9 @@ use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version
 
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
-use crate::module::ocpp::client::v2_common::{encode_action_or_log, encode_response_or_log};
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::scope::Scope;
+use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// Scope an inbound CSMS→CS Call belongs to, for the message log: a top-level `connectorId` targets
 /// that connector, otherwise it is CS-level.

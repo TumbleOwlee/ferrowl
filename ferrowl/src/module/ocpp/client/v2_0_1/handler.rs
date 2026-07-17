@@ -28,10 +28,9 @@ use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1, Ver
 use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
-use crate::module::ocpp::client::v2_common::{
-    clear_limit_by_purpose, encode_action_or_log, inbound_scope, unknown_evse,
-};
+use crate::module::ocpp::client::v2_common::{clear_limit_by_purpose, inbound_scope, unknown_evse};
 use crate::module::ocpp::lock::HasState;
+use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// Inbound handler for an OCPP 2.0.1 charging station, backed by shared [`CsState`].
 pub struct CsStateHandler {
@@ -418,7 +417,7 @@ impl CsActionHandler<V2_0_1> for CsStateHandler {
         action: Action201,
     ) -> impl Future<Output = Result<Response201, CallError>> + Send {
         let name = V2_0_1::action_name(&action).to_string();
-        let request = V2_0_1::encode_action(&action).unwrap_or(serde_json::Value::Null);
+        let request = encode_action_or_log::<V2_0_1>(&action);
         // Reject Calls targeting an EVSE this station does not have. `with_state` drops the read
         // guard before `respond()` runs (which takes its own write lock) — holding both deadlocks.
         let unknown = self.with_state(|s| unknown_evse(&request, s));
@@ -433,7 +432,7 @@ impl CsActionHandler<V2_0_1> for CsStateHandler {
             None => self.respond(&action),
         };
         let reply_payload = match &result {
-            Ok(resp) => V2_0_1::encode_response(resp).unwrap_or(serde_json::Value::Null),
+            Ok(resp) => encode_response_or_log::<V2_0_1>(resp),
             Err(_) => serde_json::Value::Null,
         };
         let ok = result.is_ok();
