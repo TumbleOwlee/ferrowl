@@ -190,4 +190,181 @@ mod tests {
         );
         assert_eq!(validate_copy_index(Some(2), 3, 0), Ok(2));
     }
+
+    use crate::app::Focus;
+    use crate::app::testkit::{MockView, build_app};
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A fresh, empty temp directory unique to this test run (so a `:write` there can be checked
+    /// for exactly the files it produced).
+    fn fresh_dir(tag: &str) -> PathBuf {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("ferrowl_{tag}_{}_{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    /// UI-R-015 — in command mode `Esc` cancels (discards the buffer, restores content focus),
+    /// `Enter` submits the trimmed buffer, and an empty submission is a no-op.
+    async fn ut_command_mode_esc_cancels_enter_submits_trimmed_empty_noop() {
+        // Enter submits the buffer trimmed: the active view sees the command without surrounding
+        // whitespace.
+        let (v, handle) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        app.focus = Focus::Command;
+        app.command.state.set_input("  frobnicate  ".to_string());
+        let quit = app
+            .handle_command_key(KeyModifiers::empty(), KeyCode::Enter)
+            .await;
+        assert!(!quit);
+        assert_eq!(handle.commands(), vec!["frobnicate".to_string()]);
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "content focus restored after submit"
+        );
+
+        // Esc discards the buffer without submitting and restores content focus.
+        let (v, handle) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        app.focus = Focus::Command;
+        app.command.state.set_input("frobnicate".to_string());
+        app.handle_command_key(KeyModifiers::empty(), KeyCode::Esc)
+            .await;
+        assert_eq!(app.focus, Focus::Content);
+        assert_eq!(app.command.state.input(), "", "buffer discarded on cancel");
+        assert!(handle.commands().is_empty(), "Esc does not submit");
+
+        // An empty (whitespace-only) submission does nothing.
+        let (v, handle) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        app.focus = Focus::Command;
+        app.command.state.set_input("   ".to_string());
+        let quit = app
+            .handle_command_key(KeyModifiers::empty(), KeyCode::Enter)
+            .await;
+        assert!(!quit);
+        assert!(handle.commands().is_empty(), "empty submit is a no-op");
+        assert_eq!(app.focus, Focus::Content);
+    }
+
+    #[tokio::test]
+    /// UI-R-019 — `:quit` closes the active tab (stopping its module first) and quits only when it
+    /// is the last tab; `:qall` quits immediately regardless of tab count.
+    async fn ut_quit_closes_active_tab_qall_quits_immediately() {
+        let (a, ha) = MockView::pair("a");
+        let (b, _hb) = MockView::pair("b");
+        let mut app = build_app(vec![a.boxed(), b.boxed()]);
+
+        // With two tabs, :quit closes the active one (stopping it) but does not quit the app.
+        assert!(!app.run_command("quit").await);
+        assert_eq!(app.tabs.len(), 1);
+        assert!(
+            ha.commands().contains(&"stop".to_string()),
+            "the closed tab's module was stopped before removal"
+        );
+        assert_eq!(app.tabs[0].name, "b", "the surviving tab becomes active");
+
+        // On the last remaining tab, :quit quits the app.
+        assert!(app.run_command("quit").await);
+
+        // :qall quits immediately without closing tabs one by one.
+        let (x, _hx) = MockView::pair("x");
+        let (y, _hy) = MockView::pair("y");
+        let mut app = build_app(vec![x.boxed(), y.boxed()]);
+        assert!(app.run_command("qall").await);
+        assert_eq!(
+            app.tabs.len(),
+            2,
+            ":qall signals quit without removing tabs"
+        );
+    }
+
+    #[tokio::test]
+    /// CS-R-030 — `:write` saves the current instances as a session file, defaulting the target to
+    /// `session.toml` and choosing the encoding from the path extension.
+    async fn ut_write_defaults_to_session_toml_and_encodes_by_extension() {
+        let dir = fresh_dir("cs030");
+
+        // Default target is session.toml, resolved relative to the working directory.
+        let toml_path = dir.join("session.toml");
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_session_spec(json!({"type": "mock"})).boxed()]);
+        app.run_command(&format!("write {}", toml_path.to_str().unwrap()))
+            .await;
+        assert!(toml_path.exists(), "explicit .toml target written");
+
+        // The default name is exactly "session.toml".
+        assert_eq!(
+            crate::command::parse("write"),
+            crate::command::Cmd::Write(None),
+            ":write with no argument carries no path, so the default applies",
+        );
+
+        // A .json extension selects JSON encoding.
+        let json_path = dir.join("out.json");
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_session_spec(json!({"type": "mock"})).boxed()]);
+        app.run_command(&format!("write {}", json_path.to_str().unwrap()))
+            .await;
+        let text = std::fs::read_to_string(&json_path).unwrap();
+        assert!(
+            text.trim_start().starts_with('{'),
+            "JSON encoding from .json"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    /// CS-R-031 — a save persists configuration only, never live runtime state: the written
+    /// modules are exactly each view's config spec.
+    async fn ut_write_persists_config_not_runtime_state() {
+        let dir = fresh_dir("cs031");
+        let spec = json!({"type": "mock", "addr": "127.0.0.1:5020"});
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_session_spec(spec.clone()).boxed()]);
+        let path = dir.join("s.toml");
+        let ps = path.to_str().unwrap();
+        app.run_command(&format!("write {ps}")).await;
+
+        let loaded = crate::config::load_session(ps).unwrap();
+        assert_eq!(
+            loaded.modules,
+            vec![spec],
+            "saved modules are the view's config spec with no runtime fields added"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    /// CS-R-032 — a `:write` writes the session file and nothing else: no device-config file is
+    /// emitted alongside it.
+    async fn ut_write_emits_only_the_session_file() {
+        let dir = fresh_dir("cs032");
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_session_spec(json!({"type": "mock"})).boxed()]);
+        let path = dir.join("only.toml");
+        app.run_command(&format!("write {}", path.to_str().unwrap()))
+            .await;
+
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            files,
+            vec!["only.toml".to_string()],
+            "only the session file"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -718,6 +718,25 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-020 — while the command line is focused, the help popup lists both the app-level
+    /// commands and the active view's advertised module commands.
+    fn ut_command_help_lists_app_and_active_view_commands() {
+        use super::testkit::{MOCK_COMMAND, MockView, build_app};
+        let (v, _h) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        // The popup only renders while the command line holds focus.
+        app.focus = Focus::Command;
+        app.draw().unwrap();
+        let text = app.screen.text();
+        assert!(text.contains("quit"), "app-level command listed");
+        assert!(text.contains("save"), "app-level :write/:save listed");
+        assert!(
+            text.contains(MOCK_COMMAND),
+            "active view's module command merged into the popup"
+        );
+    }
+
+    #[test]
     /// UI-R-007 — only key press events are acted upon; release and repeat kinds are ignored for
     /// command/navigation purposes.
     fn ut_only_key_press_events_are_acted_on() {
