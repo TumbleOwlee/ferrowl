@@ -426,6 +426,10 @@ module's log file at most once, tracked by its sequence number, so that eviction
 from the in-memory buffer does not cause a message to be logged twice or skipped
 (see [`edge-cases.md`](./edge-cases.md) §6.11 for the burst bound).
 
+**OC-R-101** — Encoding an OCPP action or response to JSON for the message log
+shall never discard an encode failure silently: the failure shall be logged to the
+module's error channel before the payload degrades to JSON `null`.
+
 ---
 
 ## Send dialogs
