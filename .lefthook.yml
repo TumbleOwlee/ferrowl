@@ -11,7 +11,7 @@ pre-commit:
  
     clippy:
       glob: "*.rs"
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --workspace -- -D warnings
 
       fail_text: |
 
