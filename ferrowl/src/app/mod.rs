@@ -9,6 +9,8 @@ mod help;
 mod keys;
 mod overlay;
 mod render;
+#[cfg(test)]
+mod testkit;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_lua::module::ModuleDirectory;
@@ -162,7 +164,7 @@ impl LogRing {
 
 /// Which top-level surface receives input. The content↔log split lives inside the active [`Tab`]
 /// (its `#[derive(Focus)]` enum), so `App` only tracks the modal layer.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Focus {
     /// The active tab's content/log panes (the tab decides which of the two).
     Content,
@@ -295,6 +297,12 @@ pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     session_sim: SessionSim,
 }
 
+/// UI-R-007: only key **press** events drive command/navigation; release and repeat kinds are
+/// ignored. Factored out of the run loop so the filter is testable without a real event source.
+fn should_act_on(kind: KeyEventKind) -> bool {
+    kind == KeyEventKind::Press
+}
+
 /// UI-R-057: no tab and no open modal layer ⇒ nothing to interact with, so exit.
 fn is_empty_shell(tab_count: usize, modal_open: bool) -> bool {
     tab_count == 0 && !modal_open
@@ -417,7 +425,7 @@ impl<S: DrawSurface> App<S> {
             self.draw()?;
 
             match tokio::time::timeout(REDRAW_INTERVAL, rx.recv()).await {
-                Ok(Some(Event::Key(key))) if key.kind == KeyEventKind::Press => {
+                Ok(Some(Event::Key(key))) if should_act_on(key.kind) => {
                     if self.handle_key(key.modifiers, key.code).await {
                         break;
                     }
@@ -681,37 +689,159 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// A `DrawSurface` test double backed by ratatui's `TestBackend`, letting an `App` be built
-    /// and drawn headlessly (no real terminal). Records how many frames it was asked to render.
-    struct MockScreen {
-        term: ratatui::Terminal<ratatui::backend::TestBackend>,
-        draws: usize,
+    #[test]
+    /// UI-R-003 — the app owns an ordered tab list with one active index; switching the active tab
+    /// changes only the index, leaving the order intact.
+    fn ut_ordered_tab_list_with_single_active_index() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(
+            ["a", "b", "c"]
+                .iter()
+                .map(|n| MockView::pair(n).0.boxed())
+                .collect(),
+        );
+        let names: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+        assert_eq!(
+            app.active, 0,
+            "exactly one active tab, defaulting to the first"
+        );
+
+        app.switch_tab(2);
+        assert_eq!(app.active, 2);
+        let names_after: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(
+            names_after,
+            ["a", "b", "c"],
+            "switching does not reorder tabs"
+        );
     }
 
-    impl MockScreen {
-        fn new() -> Self {
-            let term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
-            Self { term, draws: 0 }
-        }
+    #[test]
+    /// UI-R-020 — while the command line is focused, the help popup lists both the app-level
+    /// commands and the active view's advertised module commands.
+    fn ut_command_help_lists_app_and_active_view_commands() {
+        use super::testkit::{MOCK_COMMAND, MockView, build_app};
+        let (v, _h) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        // The popup only renders while the command line holds focus.
+        app.focus = Focus::Command;
+        app.draw().unwrap();
+        let text = app.screen.text();
+        assert!(text.contains("quit"), "app-level command listed");
+        assert!(text.contains("save"), "app-level :write/:save listed");
+        assert!(
+            text.contains(MOCK_COMMAND),
+            "active view's module command merged into the popup"
+        );
     }
 
-    impl DrawSurface for MockScreen {
-        fn draw<F: FnOnce(&mut ratatui::Frame)>(&mut self, render: F) -> std::io::Result<()> {
-            self.term
-                .draw(render)
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
-            self.draws += 1;
-            Ok(())
-        }
+    #[test]
+    /// UI-R-007 — only key press events are acted upon; release and repeat kinds are ignored for
+    /// command/navigation purposes.
+    fn ut_only_key_press_events_are_acted_on() {
+        assert!(should_act_on(KeyEventKind::Press));
+        assert!(!should_act_on(KeyEventKind::Release));
+        assert!(!should_act_on(KeyEventKind::Repeat));
     }
 
     #[test]
     /// The generic screen seam lets an `App` be built on a mock surface and drawn without a real
     /// terminal; `draw` succeeds and the mock records the frame.
     fn ut_app_draws_onto_mock_screen() {
+        use super::testkit::MockScreen;
         let mut app =
             App::with_screen(MockScreen::new(), vec![], vec![], Duration::from_secs(1)).unwrap();
         app.draw().unwrap();
         assert_eq!(app.screen.draws, 1);
+    }
+
+    #[test]
+    /// UI-R-002 — the screen is laid out top-to-bottom: a one-row tab bar on top, then the content
+    /// area, then the log pane, with the one-row command line on the bottom.
+    fn ut_layout_is_tab_bar_top_command_line_bottom() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(vec![MockView::pair("alpha").0.boxed()]);
+        app.draw().unwrap();
+        let buf = app.screen.buffer();
+        let (w, h) = (buf.area.width, buf.area.height);
+        let row = |y: u16| -> String { (0..w).map(|x| buf[(x, y)].symbol()).collect() };
+
+        assert!(row(0).contains("[0] alpha"), "tab bar is the top row");
+        assert!(
+            !row(1).contains("[0] alpha"),
+            "the tab bar is a single row, not repeated below"
+        );
+        assert!(
+            row(h - 1).contains(":  command"),
+            "the command line is the bottom row"
+        );
+    }
+
+    #[tokio::test]
+    /// UI-R-040 — every tick polls all tabs' views to refresh, not just the active one, so
+    /// background modules stay current.
+    async fn ut_tick_refreshes_all_tabs_including_background() {
+        use super::testkit::{MockView, build_app};
+        let (a, ha) = MockView::pair("a");
+        let (b, hb) = MockView::pair("b");
+        let (c, hc) = MockView::pair("c");
+        let mut app = build_app(vec![a.boxed(), b.boxed(), c.boxed()]);
+
+        app.refresh_snapshot().await;
+        assert_eq!(ha.refreshes(), 1, "active tab refreshed");
+        assert_eq!(hb.refreshes(), 1, "background tab refreshed");
+        assert_eq!(hc.refreshes(), 1, "background tab refreshed");
+
+        app.refresh_snapshot().await;
+        assert_eq!(hb.refreshes(), 2, "each tick refreshes again");
+    }
+
+    #[test]
+    /// UI-R-041 — the UI redraws on every tick, and the idle redraw timeout is ≈100 ms.
+    fn ut_redraw_each_tick_and_idle_interval_is_100ms() {
+        use super::testkit::{MockView, build_app};
+        assert_eq!(REDRAW_INTERVAL, Duration::from_millis(100));
+        let mut app = build_app(vec![MockView::pair("a").0.boxed()]);
+        let before = app.screen.draws;
+        app.draw().unwrap();
+        app.draw().unwrap();
+        assert_eq!(app.screen.draws, before + 2, "each tick draws a frame");
+    }
+
+    #[tokio::test]
+    /// UI-R-042 — a pending view replacement is applied on the next tick, carrying over the tab's
+    /// log channel and focus and rebuilding the session-module registry.
+    async fn ut_pending_view_replacement_applied_on_next_tick() {
+        use super::testkit::{MockView, build_app};
+        use std::sync::Arc;
+
+        let replacement = {
+            let (r, _hr) = MockView::pair("replacement");
+            r.with_host("mock").boxed()
+        };
+        let (orig, _ho) = MockView::pair("original");
+        let orig = orig.with_replacement(replacement).with_host("mock").boxed();
+        let mut app = build_app(vec![orig]);
+
+        assert!(app.tabs[0].view.is_focused(), "active tab starts focused");
+        assert_eq!(app.registry.list(), vec!["original".to_string()]);
+
+        app.refresh_snapshot().await;
+
+        assert_eq!(app.tabs[0].view.name(), "replacement", "view swapped");
+        assert!(
+            app.tabs[0].view.is_focused(),
+            "focus carried onto the replacement view"
+        );
+        assert!(
+            Arc::ptr_eq(&app.tabs[0].log, &app.tabs[0].view.log()),
+            "tab's log channel tracks the replacement view"
+        );
+        assert_eq!(
+            app.registry.list(),
+            vec!["replacement".to_string()],
+            "session-module registry rebuilt from the new tab set"
+        );
     }
 }

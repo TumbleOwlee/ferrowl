@@ -83,6 +83,12 @@ about the build or the design, not runtime behavior a `shall` test could observe
 - `NF-R-010` — the "no benchmarks asserted; hot path stays on `parking_lot`" posture.
 - `NF-R-040` — crates versioned in lockstep.
 - `NF-R-041` — the testing conventions themselves.
+- `UI-R-001` — alt-screen + raw-mode entry and terminal restore on normal, error, and panic
+  exit. The restore path calls into the real terminal (`enable_raw_mode`/`disable_raw_mode`),
+  which errors or panics under `cargo test` because there is no controlling tty — the exact
+  reason `App` renders through the `DrawSurface` seam. The seam is exercised headlessly
+  (`ut_app_draws_onto_mock_screen`), but the raw-mode/panic-hook control itself is a
+  terminal-platform fact no `shall` test can observe.
 
 **2. Cross-cutting restatements whose behavior is asserted under the owning area.**
 The requirement is real but its test lives with the per-area requirement that owns
