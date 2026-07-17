@@ -20,6 +20,7 @@ use crate::module::ocpp::client::backend::{Dir, OcppMessage};
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 pub use crate::module::ocpp::scope::Scope;
+use crate::module::ocpp::wire_log::encode_response_or_log;
 
 /// A lifecycle/message event delivered from the CSMS server tasks to the view. Version-agnostic:
 /// action payloads are carried as JSON so the (version-specific) view extracts connector ids and
@@ -267,7 +268,7 @@ impl<V: Version> OcppServerSender<V> {
             .await
             .map_err(|_| Error::ChannelClosed)?;
         match reply_rx.await {
-            Ok(Ok(response)) => Ok(V::encode_response(&response).unwrap_or(Value::Null)),
+            Ok(Ok(response)) => Ok(encode_response_or_log::<V>(&response)),
             Ok(Err(call_err)) => Err(Error::Call(call_err)),
             Err(_) => Err(Error::ChannelClosed),
         }

@@ -20,6 +20,7 @@ use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::backend::{
     EventTx, RfidLists, ServerEvent, cs_authorized, scope_authorized,
 };
+use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// CSMS inbound handler for OCPP 1.6.
 pub struct CsmsHandler16 {
@@ -102,10 +103,10 @@ impl CsmsActionHandler<V1_6> for CsmsHandler16 {
         action: Action16,
     ) -> impl Future<Output = Result<Response16, CallError>> + Send {
         let name = V1_6::action_name(&action).to_string();
-        let request = V1_6::encode_action(&action).unwrap_or(Value::Null);
+        let request = encode_action_or_log::<V1_6>(&action);
         let result = self.respond(&name, &action, &request);
         let response = match &result {
-            Ok(resp) => V1_6::encode_response(resp).unwrap_or(Value::Null),
+            Ok(resp) => encode_response_or_log::<V1_6>(resp),
             Err(_) => Value::Null,
         };
         let _ = self.tx.send(ServerEvent::Inbound {
