@@ -13,9 +13,10 @@ members = [
     "ferrowl",
     "ferrowl-ui-derive",
     "ferrowl-lua-derive",
+    "ferrowl-templates",
 ]
 
-# All 12 crates are versioned in lockstep — bump this, not the members.
+# All 13 crates are versioned in lockstep — bump this, not the members.
 [workspace.package]
 version = "0.4.14"
 edition = "2024"

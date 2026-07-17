@@ -826,6 +826,7 @@ dependencies = [
  "ferrowl-ring",
  "ferrowl-store",
  "ferrowl-syntax",
+ "ferrowl-templates",
  "ferrowl-ui",
  "ferrowl-ui-derive",
  "ferrowl-util",
@@ -925,6 +926,13 @@ dependencies = [
 [[package]]
 name = "ferrowl-syntax"
 version = "0.4.14"
+
+[[package]]
+name = "ferrowl-templates"
+version = "0.4.14"
+dependencies = [
+ "ferrowl-lua",
+]
 
 [[package]]
 name = "ferrowl-ui"

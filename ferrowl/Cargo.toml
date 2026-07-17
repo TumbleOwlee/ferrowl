@@ -25,6 +25,7 @@ ferrowl-modbus = { path = "../ferrowl-modbus" }
 ferrowl-ocpp = { path = "../ferrowl-ocpp" }
 ferrowl-lua = { path = "../ferrowl-lua" }
 ferrowl-syntax = { path = "../ferrowl-syntax" }
+ferrowl-templates = { path = "../ferrowl-templates" }
 ferrowl-ui-derive = { path = "../ferrowl-ui-derive" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

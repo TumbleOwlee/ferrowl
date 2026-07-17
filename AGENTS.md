@@ -6,7 +6,7 @@ everything else.
 ## What this repo is
 
 Ferrowl — a Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP
-(Charging Station/CSMS, versions 1.6/2.0.1/2.1) devices. A Cargo workspace of 12
+(Charging Station/CSMS, versions 1.6/2.0.1/2.1) devices. A Cargo workspace of 13
 crates building one `ferrowl` binary. Product framing: [`PRD.md`](./PRD.md).
 Structure and crate map: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
@@ -173,7 +173,7 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config needed)
   function names prefixed `ut_`. For integration tests, the function names are 
   prefixed with `it_`  (notably in `ferrowl-ui` and much of `ferrowl`). Integration
   tests belong in each crate's `tests/`.
-- All 12 workspace crates are versioned in lockstep. Don't bump one independently.
+- All 13 workspace crates are versioned in lockstep. Don't bump one independently.
 - Config files are TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
 - **Never split a source file just because it is large.** A split must earn its keep — it

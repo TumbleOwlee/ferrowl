@@ -13,10 +13,10 @@ use std::path::Path;
 /// (`directory name`, `ScriptContext` variant, sort rank). The rank fixes the order contexts appear
 /// in the generated array; templates within a context are ordered by name.
 const CONTEXTS: &[(&str, &str, u8)] = &[
-    ("modbus", "ScriptContext::Modbus", 0),
-    ("ocpp-client", "ScriptContext::OcppClient", 1),
-    ("ocpp-server", "ScriptContext::OcppServer", 2),
-    ("session", "ScriptContext::Session", 3),
+    ("modbus", "TemplateContext::Modbus", 0),
+    ("ocpp/client", "TemplateContext::OcppClient", 1),
+    ("ocpp/server", "TemplateContext::OcppServer", 2),
+    ("session", "TemplateContext::Session", 3),
 ];
 
 fn main() {
@@ -48,8 +48,9 @@ fn main() {
                 .to_string();
             let raw = fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-            let (description, code) = split_header(&raw)
-                .unwrap_or_else(|| panic!("{} lacks a `-- description:` header line", path.display()));
+            let (description, code) = split_header(&raw).unwrap_or_else(|| {
+                panic!("{} lacks a `-- description:` header line", path.display())
+            });
 
             let entry = format!(
                 "    ScriptTemplate {{\n        name: {name:?},\n        description: {description:?},\n        contexts: &[{ctx_variant}],\n        code: {code:?},\n    }},\n"
