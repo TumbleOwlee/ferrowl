@@ -755,4 +755,93 @@ mod tests {
         app.draw().unwrap();
         assert_eq!(app.screen.draws, 1);
     }
+
+    #[test]
+    /// UI-R-002 — the screen is laid out top-to-bottom: a one-row tab bar on top, then the content
+    /// area, then the log pane, with the one-row command line on the bottom.
+    fn ut_layout_is_tab_bar_top_command_line_bottom() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(vec![MockView::pair("alpha").0.boxed()]);
+        app.draw().unwrap();
+        let buf = app.screen.buffer();
+        let (w, h) = (buf.area.width, buf.area.height);
+        let row = |y: u16| -> String { (0..w).map(|x| buf[(x, y)].symbol()).collect() };
+
+        assert!(row(0).contains("[0] alpha"), "tab bar is the top row");
+        assert!(
+            !row(1).contains("[0] alpha"),
+            "the tab bar is a single row, not repeated below"
+        );
+        assert!(
+            row(h - 1).contains(":  command"),
+            "the command line is the bottom row"
+        );
+    }
+
+    #[tokio::test]
+    /// UI-R-040 — every tick polls all tabs' views to refresh, not just the active one, so
+    /// background modules stay current.
+    async fn ut_tick_refreshes_all_tabs_including_background() {
+        use super::testkit::{MockView, build_app};
+        let (a, ha) = MockView::pair("a");
+        let (b, hb) = MockView::pair("b");
+        let (c, hc) = MockView::pair("c");
+        let mut app = build_app(vec![a.boxed(), b.boxed(), c.boxed()]);
+
+        app.refresh_snapshot().await;
+        assert_eq!(ha.refreshes(), 1, "active tab refreshed");
+        assert_eq!(hb.refreshes(), 1, "background tab refreshed");
+        assert_eq!(hc.refreshes(), 1, "background tab refreshed");
+
+        app.refresh_snapshot().await;
+        assert_eq!(hb.refreshes(), 2, "each tick refreshes again");
+    }
+
+    #[test]
+    /// UI-R-041 — the UI redraws on every tick, and the idle redraw timeout is ≈100 ms.
+    fn ut_redraw_each_tick_and_idle_interval_is_100ms() {
+        use super::testkit::{MockView, build_app};
+        assert_eq!(REDRAW_INTERVAL, Duration::from_millis(100));
+        let mut app = build_app(vec![MockView::pair("a").0.boxed()]);
+        let before = app.screen.draws;
+        app.draw().unwrap();
+        app.draw().unwrap();
+        assert_eq!(app.screen.draws, before + 2, "each tick draws a frame");
+    }
+
+    #[tokio::test]
+    /// UI-R-042 — a pending view replacement is applied on the next tick, carrying over the tab's
+    /// log channel and focus and rebuilding the session-module registry.
+    async fn ut_pending_view_replacement_applied_on_next_tick() {
+        use super::testkit::{MockView, build_app};
+        use std::sync::Arc;
+
+        let replacement = {
+            let (r, _hr) = MockView::pair("replacement");
+            r.with_host("mock").boxed()
+        };
+        let (orig, _ho) = MockView::pair("original");
+        let orig = orig.with_replacement(replacement).with_host("mock").boxed();
+        let mut app = build_app(vec![orig]);
+
+        assert!(app.tabs[0].view.is_focused(), "active tab starts focused");
+        assert_eq!(app.registry.list(), vec!["original".to_string()]);
+
+        app.refresh_snapshot().await;
+
+        assert_eq!(app.tabs[0].view.name(), "replacement", "view swapped");
+        assert!(
+            app.tabs[0].view.is_focused(),
+            "focus carried onto the replacement view"
+        );
+        assert!(
+            Arc::ptr_eq(&app.tabs[0].log, &app.tabs[0].view.log()),
+            "tab's log channel tracks the replacement view"
+        );
+        assert_eq!(
+            app.registry.list(),
+            vec!["replacement".to_string()],
+            "session-module registry rebuilt from the new tab set"
+        );
+    }
 }
