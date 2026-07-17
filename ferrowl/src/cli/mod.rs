@@ -603,4 +603,92 @@ mod tests {
         assert_eq!(ocpp[0].name, "cs");
         assert_eq!(ocpp[0].port, 9000);
     }
+
+    // --- Argument surface: version/help, subcommands, flag scoping, parse errors ----------
+
+    #[test]
+    /// CL-R-001 — --version and --help print and exit 0, taking precedence over starting the TUI.
+    fn ut_version_and_help_exit_zero() {
+        use clap::error::ErrorKind;
+        let v = CliArgs::try_parse_from(["ferrowl", "--version"]).unwrap_err();
+        assert_eq!(v.kind(), ErrorKind::DisplayVersion);
+        assert_eq!(v.exit_code(), 0);
+        let h = CliArgs::try_parse_from(["ferrowl", "--help"]).unwrap_err();
+        assert_eq!(h.kind(), ErrorKind::DisplayHelp);
+        assert_eq!(h.exit_code(), 0);
+    }
+
+    #[test]
+    /// CL-R-010 — the two subcommands dispatch, replacing the default (start-the-TUI) action.
+    fn ut_subcommands_dispatch() {
+        assert!(matches!(
+            CliArgs::parse_from(["ferrowl", "run"]).command,
+            Some(SubCommand::Run(_))
+        ));
+        assert!(matches!(
+            CliArgs::parse_from(["ferrowl", "migrate", "-i", "a.toml", "-o", "b.toml"]).command,
+            Some(SubCommand::Migrate(_))
+        ));
+        // No subcommand → default action (the TUI); `command` stays None.
+        assert!(CliArgs::parse_from(["ferrowl"]).command.is_none());
+    }
+
+    #[test]
+    /// CL-R-011 — the migrate subcommand requires both --input and --output.
+    fn ut_migrate_requires_input_and_output() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate", "-i", "a.toml"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate", "-o", "b.toml"]).is_err());
+        match CliArgs::parse_from(["ferrowl", "migrate", "-i", "a.toml", "-o", "b.toml"]).command {
+            Some(SubCommand::Migrate(m)) => {
+                assert_eq!(m.input, "a.toml");
+                assert_eq!(m.output, "b.toml");
+            }
+            _ => panic!("expected migrate"),
+        }
+    }
+
+    #[test]
+    /// CL-R-014 — --ocpp is accepted only on run; --device only on the top-level command.
+    fn ut_ocpp_and_device_flag_scoping() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "--ocpp", "name=cs,device=d,port=1"]).is_err());
+        assert!(
+            CliArgs::try_parse_from(["ferrowl", "run", "--ocpp", "name=cs,device=d,port=1"])
+                .is_ok()
+        );
+        assert!(CliArgs::try_parse_from(["ferrowl", "run", "--device", "d.toml"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "--device", "d.toml"]).is_ok());
+    }
+
+    #[test]
+    /// CL-R-015 — --exit-on-error exists only on the run subcommand.
+    fn ut_exit_on_error_is_run_only() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "--exit-on-error"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "run", "--exit-on-error"]).is_ok());
+    }
+
+    #[test]
+    /// CL-R-016 — top-level values supplied alongside a run subcommand do not reach the runner.
+    fn ut_run_ignores_top_level_values() {
+        let args = CliArgs::parse_from(["ferrowl", "--module", "name=m,device=d,port=1", "run"]);
+        assert_eq!(args.modules, vec!["name=m,device=d,port=1".to_string()]);
+        match args.command {
+            Some(SubCommand::Run(run)) => {
+                assert!(
+                    run.modules.is_empty(),
+                    "run must not see the top-level --module"
+                );
+            }
+            _ => panic!("expected run"),
+        }
+    }
+
+    #[test]
+    /// CL-R-035 — an argument-parsing error exits with the parser's usage exit code (2).
+    fn ut_arg_parse_error_exits_two() {
+        use clap::error::ErrorKind;
+        let e = CliArgs::try_parse_from(["ferrowl", "--bogus-flag"]).unwrap_err();
+        assert_ne!(e.kind(), ErrorKind::DisplayHelp);
+        assert_eq!(e.exit_code(), 2);
+    }
 }
