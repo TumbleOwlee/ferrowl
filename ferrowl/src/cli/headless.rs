@@ -639,4 +639,158 @@ mod tests {
             "no session source should appear in the log when no script is enabled, got:\n{contents}"
         );
     }
+
+    // --- Run lifecycle, exit codes, and the output contract ----------------------------------
+
+    /// A device config on disk for a headless module fixture.
+    fn write_device(tag: &str) -> String {
+        use ferrowl_util::convert::{Converter, FileType};
+        let p = std::env::temp_dir().join(format!("ferrowl_cl_{tag}_device.toml"));
+        Converter::save(
+            &holding_device_config(),
+            p.to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+        p.to_str().unwrap().to_string()
+    }
+
+    /// A `RunArgs` starting one modbus TCP server module on `port` for `duration` seconds.
+    fn modbus_run_args(tag: &str, port: u16, duration: u64) -> RunArgs {
+        let device = write_device(tag);
+        RunArgs {
+            sessions: vec![],
+            modules: vec![format!(
+                "name=m,device={device},transport=tcp,ip=127.0.0.1,port={port},role=server"
+            )],
+            ocpp: vec![],
+            duration: Some(duration),
+            log_file: None,
+            exit_on_error: false,
+        }
+    }
+
+    /// Grab an ephemeral port and release it, so a fixture can bind it deterministically.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    #[tokio::test]
+    /// CL-R-021 — the headless runner treats a module's device-config load failure as fatal to
+    /// startup, rather than skipping the module like the TUI.
+    async fn ut_build_modules_fails_hard_on_bad_device() {
+        let mut args = modbus_run_args("badbuild", free_port(), 1);
+        args.modules = vec![
+            "name=m,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=0,role=server"
+                .into(),
+        ];
+        assert!(build_modules(&args).await.is_err());
+    }
+
+    #[tokio::test]
+    /// CL-R-030 — a setup failure (a module's device config fails to load) makes the run exit 1.
+    async fn ut_run_returns_one_on_setup_failure() {
+        let mut args = modbus_run_args("setupfail", free_port(), 1);
+        args.modules = vec![
+            "name=m,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=0,role=server"
+                .into(),
+        ];
+        assert_eq!(run(&args).await, 1);
+    }
+
+    #[tokio::test]
+    /// CL-R-020 — the runner builds and starts each module (without touching the terminal) and
+    /// drains its log to the output stream.
+    async fn ut_run_starts_modules_and_drains_output() {
+        let mut args = modbus_run_args("starts", free_port(), 1);
+        let log_file = std::env::temp_dir()
+            .join("ferrowl_cl_starts.log")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let _ = std::fs::remove_file(&log_file);
+        args.log_file = Some(log_file.clone());
+
+        assert_eq!(run(&args).await, 0);
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.contains("m |"),
+            "expected drained lines tagged with the module name, got:\n{contents}"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-024 — a --duration run exits cleanly once the deadline is reached.
+    /// CL-R-032 — such a run, with no exit-code-2 condition, returns exit code 0.
+    async fn ut_run_duration_deadline_exits_zero() {
+        let args = modbus_run_args("deadline", free_port(), 1);
+        assert_eq!(run(&args).await, 0);
+    }
+
+    #[tokio::test]
+    /// CL-R-026 — on loop exit the runner stops every module: a second run rebinds the same port,
+    /// which only succeeds if the first run released it.
+    async fn ut_run_stops_modules_on_exit() {
+        let port = free_port();
+        assert_eq!(run(&modbus_run_args("stop1", port, 1)).await, 0);
+        // If the first run had not stopped its listener, this bind (inside start) would fail.
+        assert_eq!(run(&modbus_run_args("stop2", port, 1)).await, 0);
+    }
+
+    #[tokio::test]
+    /// CL-R-031 — with --exit-on-error set, a `[sim]`-prefixed error line makes the run exit 2.
+    async fn ut_run_exit_on_error_returns_two() {
+        use ferrowl_util::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![],
+            scripts: vec![ScriptDef {
+                name: "boom".into(),
+                code: "error(\"boom\")".into(),
+                enabled: true,
+            }],
+            interval: 0.05,
+        };
+        let path = std::env::temp_dir().join("ferrowl_cl_exit_on_error_session.toml");
+        Converter::save(&session, path.to_str().unwrap(), FileType::Toml).unwrap();
+        let args = RunArgs {
+            sessions: vec![path.to_str().unwrap().to_string()],
+            modules: vec![],
+            ocpp: vec![],
+            duration: Some(5),
+            log_file: None,
+            exit_on_error: true,
+        };
+        assert_eq!(run(&args).await, 2);
+    }
+
+    #[tokio::test]
+    /// CL-R-041 — --log-file is opened create-and-append: an existing file is appended to, not
+    /// truncated.
+    async fn ut_log_file_is_appended_not_truncated() {
+        let log_file = std::env::temp_dir()
+            .join("ferrowl_cl_append.log")
+            .to_str()
+            .unwrap()
+            .to_string();
+        std::fs::write(&log_file, "PREEXISTING\n").unwrap();
+
+        let mut args = modbus_run_args("append", free_port(), 1);
+        args.log_file = Some(log_file.clone());
+        assert_eq!(run(&args).await, 0);
+
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.starts_with("PREEXISTING\n"),
+            "the pre-existing content must be preserved, got:\n{contents}"
+        );
+        assert!(
+            contents.contains("m |"),
+            "new drained lines must be appended, got:\n{contents}"
+        );
+    }
 }
