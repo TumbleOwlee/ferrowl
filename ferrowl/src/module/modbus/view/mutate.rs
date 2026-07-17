@@ -523,6 +523,34 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-091 — a client write dispatches a Modbus write command (not a direct store write); the read-write register's store value is not updated by the `:set`.
+    async fn ut_client_fixed_write_dispatches_command_not_store() {
+        use ferrowl_modbus::{Key, SlaveKey};
+        use ferrowl_store::Range;
+
+        let mut client = view(Role::Client);
+        client.apply_add(edited("hold", holding(0), None)).await;
+
+        // The client path sends a Modbus write command; with no running instance the send fails,
+        // and either way a read-write register's store is not written directly by `:set`.
+        let result = client.set_register_value("hold", "5").await;
+        assert!(msg(&result).contains("failed")); // took the client send-command branch, not the server memory-write branch
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let stored = client
+            .module
+            .memory()
+            .read()
+            .read_unchecked(key, &Range::new(0, 1));
+        assert_ne!(stored, Some(vec![5]));
+    }
+
+    #[tokio::test]
     async fn ut_set_register_value_unknown_warns() {
         let mut v = view(Role::Server);
         assert!(msg(&v.set_register_value("nope", "1").await).contains("unknown register"));

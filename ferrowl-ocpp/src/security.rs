@@ -427,7 +427,77 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-035 — a CS presents a client certificate for mutual TLS when, and only when, both the client cert and key files are configured.
+    fn ut_cs_client_cert_only_when_both_cert_and_key_set() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cert = temp_pem("cs-cert", &cert_pem);
+        let key = temp_pem("cs-key", &key_pem);
+
+        // Both set and valid → the client-auth branch loads them and succeeds.
+        let both = CsTlsConfig {
+            ca_file: None,
+            client_cert_file: Some(cert),
+            client_key_file: Some(key),
+            insecure_skip_verify: false,
+        };
+        assert!(both.build_connector().is_ok());
+
+        // Only the cert set → the no-client-auth branch is taken; the cert is never loaded, so even
+        // a nonexistent path is ignored (no client certificate is presented).
+        let cert_only = CsTlsConfig {
+            ca_file: None,
+            client_cert_file: Some("/no/such/ferrowl-cert.pem".into()),
+            client_key_file: None,
+            insecure_skip_verify: false,
+        };
+        assert!(cert_only.build_connector().is_ok());
+
+        // Both set but missing on disk → the client-auth branch attempts to load and fails, proving
+        // the client certificate is loaded/presented exactly when both files are configured.
+        let both_missing = CsTlsConfig {
+            ca_file: None,
+            client_cert_file: Some("/no/such/ferrowl-cert.pem".into()),
+            client_key_file: Some("/no/such/ferrowl-key.pem".into()),
+            insecure_skip_verify: false,
+        };
+        assert!(both_missing.build_connector().is_err());
+    }
+
+    #[test]
+    /// OC-R-038 — a generated self-signed CSMS certificate carries the listener's host as a SAN, plus `localhost` when the host differs.
+    fn ut_self_signed_carries_host_and_localhost_sans() {
+        // DNS SAN names are encoded as ASCII (IA5String) inside the certificate DER.
+        let contains = |der: &[u8], needle: &[u8]| der.windows(needle.len()).any(|w| w == needle);
+
+        let (certs, _key) = generate_self_signed("evse.example").unwrap();
+        let der = certs[0].as_ref();
+        assert!(contains(der, b"evse.example"));
+        assert!(contains(der, b"localhost"));
+
+        // When the host already is localhost it is still present as a SAN.
+        let (certs, _key) = generate_self_signed("localhost").unwrap();
+        assert!(contains(certs[0].as_ref(), b"localhost"));
+    }
+
+    #[test]
+    /// OC-R-039 — a CSMS requiring client certificates with a configured client CA builds a server config carrying a client-cert verifier.
+    fn ut_require_client_cert_with_ca_builds_verifier() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let (ca_pem, _ca_key) = cert_and_key_pem();
+        let cfg = CsmsTlsConfig {
+            mode: CsmsTlsMode::Files {
+                cert_file: temp_pem("mtls-cert", &cert_pem),
+                key_file: temp_pem("mtls-key", &key_pem),
+            },
+            client_ca_file: Some(temp_pem("mtls-ca", &ca_pem)),
+            require_client_cert: true,
+        };
+        assert!(cfg.build_server_config("localhost").is_ok());
+    }
+
+    #[test]
     /// OC-R-041 — a self-signed CSMS builds a usable server TLS config in memory.
+    /// OC-R-037 — the CSMS server certificate may come from an ephemeral in-memory self-signed pair.
     fn ut_build_server_config_self_signed() {
         let cfg = CsmsTlsConfig {
             mode: CsmsTlsMode::SelfSigned,
@@ -453,6 +523,7 @@ mod tests {
 
     #[test]
     /// OC-R-041 — a CSMS builds its server TLS config from on-disk certificate/key files.
+    /// OC-R-037 — the CSMS server certificate may come from PEM files on disk.
     fn ut_build_server_config_from_files() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cfg = CsmsTlsConfig {
@@ -468,6 +539,7 @@ mod tests {
 
     #[test]
     /// OC-R-029 — requiring client certificates without a configured CA file is rejected.
+    /// OC-R-039 — `require_client_cert` without a `client_ca_file` fails the server's start.
     fn ut_require_client_cert_without_ca_is_rejected() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cfg = CsmsTlsConfig {

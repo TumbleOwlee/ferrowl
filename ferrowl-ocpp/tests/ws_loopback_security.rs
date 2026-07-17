@@ -192,6 +192,7 @@ async fn basic_auth_rejects_missing_credentials() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 /// OC-R-034 — a CS trusts a certificate supplied via `ca_file`, completing a TLS loopback to the CSMS.
+/// OC-R-050 — when TLS is configured, the CSMS terminates TLS on the accepted socket before the WebSocket handshake (the CS reaches the OCPP layer only through the completed TLS session).
 async fn tls_loopback_over_self_signed_cert() {
     let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
     let cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])

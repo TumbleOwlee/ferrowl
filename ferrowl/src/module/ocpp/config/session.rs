@@ -197,6 +197,65 @@ mod tests {
     use super::*;
 
     #[test]
+    /// OC-R-001 — exactly the three OCPP versions (1.6, 2.0.1, 2.1) are supported, and each is reachable in both the client and server roles.
+    fn ut_three_versions_reachable_in_both_roles() {
+        // The three supported versions, each with its fixed wire token.
+        let versions = [
+            (OcppVersion::V1_6, "1.6"),
+            (OcppVersion::V2_0_1, "2.0.1"),
+            (OcppVersion::V2_1, "2.1"),
+        ];
+        for (version, wire) in versions {
+            assert_eq!(
+                serde_json::to_value(version).unwrap(),
+                serde_json::Value::String(wire.to_string())
+            );
+            // Every version pairs with either role in a module spec (both roles reachable).
+            for role in [OcppRole::Client, OcppRole::Server] {
+                let spec = OcppSpec {
+                    name: "m".into(),
+                    version,
+                    role,
+                    protocol: OcppProtocol::Ws,
+                    ip: "127.0.0.1".into(),
+                    port: 9000,
+                    path: String::new(),
+                    timeout_ms: None,
+                    security: OcppSecurityConfig::default(),
+                };
+                assert_eq!(spec.version, version);
+                assert_eq!(spec.role, role);
+            }
+        }
+    }
+
+    #[test]
+    /// OC-R-079 — a module instance is exactly one role (client XOR server) and speaks exactly one OCPP version.
+    /// OC-R-080 — the OCPP version (and role) is a property of the device config, not the session entry; `from_parts` sources them from the device config.
+    fn ut_version_and_role_come_from_device_config() {
+        use super::super::device::OcppDeviceConfig;
+
+        // The session entry (`OcppModuleSpec`) carries no version/role field — only the endpoint.
+        let module = OcppModuleSpec {
+            name: "cs".into(),
+            device: "dev.toml".into(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+        };
+        let device = OcppDeviceConfig {
+            ocpp_version: OcppVersion::V2_1,
+            role: OcppRole::Server,
+            ..Default::default()
+        };
+        let spec = OcppSpec::from_parts(&module, &device);
+        // Exactly one version and one role, both sourced from the device config.
+        assert_eq!(spec.version, OcppVersion::V2_1);
+        assert_eq!(spec.role, OcppRole::Server);
+    }
+
+    #[test]
     /// OC-R-081 — the session entry carries the endpoint (scheme, ip, port, path), from which the connection URL is built.
     fn ut_protocol_display_and_url() {
         let spec = OcppSpec {

@@ -300,3 +300,21 @@ fn reject_unauthorized() -> ErrorResponse {
     *resp.status_mut() = StatusCode::UNAUTHORIZED;
     resp
 }
+
+#[cfg(test)]
+mod tests {
+    use super::identity_from_path;
+
+    #[test]
+    /// OC-R-044 — the charge-point identity is the last non-empty path segment of the URL.
+    fn ut_identity_is_last_non_empty_path_segment() {
+        assert_eq!(identity_from_path("/ocpp/CS001").as_deref(), Some("CS001"));
+        // A trailing slash is skipped to the previous non-empty segment.
+        assert_eq!(identity_from_path("/ocpp/CS002/").as_deref(), Some("CS002"));
+        // A single segment with no leading slash still works.
+        assert_eq!(identity_from_path("CP42").as_deref(), Some("CP42"));
+        // No non-empty segment yields no identity.
+        assert_eq!(identity_from_path("/"), None);
+        assert_eq!(identity_from_path(""), None);
+    }
+}

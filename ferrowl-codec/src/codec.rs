@@ -829,6 +829,14 @@ mod tests {
         }
     }
 
+    #[test]
+    /// MB-R-024 — decoding an `Ascii` format whose bytes are not valid UTF-8 fails with a packed-ASCII error.
+    fn ut_decode_ascii_invalid_utf8() {
+        // 0xFF is never a valid UTF-8 lead byte.
+        let r = reg(Format::Ascii((Alignment::Left, Width(1))));
+        assert!(matches!(r.decode(&[0xFFFF]), Err(CodecError::PackedAscii)));
+    }
+
     // --- Resolution scaling ---
 
     #[test]

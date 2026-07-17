@@ -82,6 +82,24 @@ mod tests {
     }
 
     #[tokio::test]
+    /// OC-R-028 — a CallError received in reply is surfaced to the caller as a rejection carrying the peer's code, description, and details verbatim.
+    async fn ut_call_error_reply_surfaces_verbatim() {
+        let p = PendingCalls::new();
+        let id = UniqueId("e".into());
+        let rx = p.register(id.clone());
+        let err = CallError {
+            code: CallErrorCode::SecurityError,
+            description: "nope".into(),
+            details: serde_json::json!({"why": "denied"}),
+        };
+        p.complete(&id, Err(err.clone()));
+        let got = rx.await.unwrap().unwrap_err();
+        assert_eq!(got.code, CallErrorCode::SecurityError);
+        assert_eq!(got.description, "nope");
+        assert_eq!(got.details, serde_json::json!({"why": "denied"}));
+    }
+
+    #[tokio::test]
     /// OC-R-022 — on teardown every pending outbound Call is failed with a rejection, so no caller waits forever.
     async fn ut_fail_all_notifies_waiters() {
         let p = PendingCalls::new();

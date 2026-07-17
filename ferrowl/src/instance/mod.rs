@@ -280,6 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-093 — sending a write command to an instance that is not running fails rather than being silently dropped.
     async fn send_command_never_started_is_not_running() {
         let instance = tcp_client_instance();
         let err = instance.send_command(Command::Terminate).await.unwrap_err();
@@ -291,6 +292,7 @@ mod tests {
     /// variant directly (both are in-crate types), which exercises exactly the same
     /// branch in `send_command` without any real I/O.
     #[tokio::test]
+    /// MB-R-093 — sending a write command to an instance whose role is a server fails with an error rather than being silently dropped.
     async fn send_command_on_server_is_invalid_operation() {
         let mut instance = tcp_client_instance();
         let task = tokio::spawn(async { Ok(()) });
@@ -308,6 +310,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-094 — stopping a client requests graceful termination and deactivates the instance.
     async fn graceful_stop_deactivates_instance() {
         let mut instance = tcp_client_instance();
         instance.start(sink(), sink()).await.expect("start");
@@ -315,6 +318,21 @@ mod tests {
 
         instance.stop().await.expect("stop");
         assert!(!instance.active());
+    }
+
+    #[tokio::test]
+    /// MB-R-094 — a stopped instance is restartable: after a graceful stop it can be started again.
+    async fn stopped_instance_is_restartable() {
+        let mut instance = tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("first start");
+        assert!(instance.active());
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
+
+        // Restart the same instance.
+        instance.start(sink(), sink()).await.expect("restart");
+        assert!(instance.active());
+        instance.stop().await.expect("cleanup stop");
     }
 
     #[tokio::test]

@@ -433,6 +433,22 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-083 — a client module does not connect automatically; a freshly built backend is offline until an explicit start.
+    fn new_client_backend_is_offline_until_started() {
+        let backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        assert!(!backend.is_online());
+    }
+
+    #[test]
+    /// OC-R-088 — message sequence numbers are strictly increasing and unique, the cursor a file-log tee uses to write each message at most once.
+    fn message_seqs_are_strictly_increasing() {
+        let a = next_seq();
+        let b = next_seq();
+        let c = next_seq();
+        assert!(a < b && b < c);
+    }
+
+    #[test]
     /// OC-R-087 — the in-memory message log is bounded to the most recent 200 messages, evicting oldest-first.
     fn push_capped_evicts_oldest_beyond_limit() {
         let mut buf = Vec::new();

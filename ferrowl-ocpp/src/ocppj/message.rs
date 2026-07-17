@@ -74,3 +74,25 @@ impl OcppJMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::UniqueId;
+
+    #[test]
+    /// OC-R-011 — every outbound Call generates a fresh UUID v4 unique id.
+    fn ut_generate_is_a_fresh_uuid_v4() {
+        let a = UniqueId::generate();
+        let b = UniqueId::generate();
+        assert_ne!(a.as_str(), b.as_str());
+        let parsed = uuid::Uuid::parse_str(a.as_str()).expect("generated id is a valid UUID");
+        assert_eq!(parsed.get_version_num(), 4);
+    }
+
+    #[test]
+    /// OC-R-011 — a unique id is an arbitrary string, preserved verbatim (so an inbound id can be echoed back on the reply).
+    fn ut_unique_id_preserves_arbitrary_string() {
+        let id = UniqueId::from("not-a-uuid-42".to_string());
+        assert_eq!(id.as_str(), "not-a-uuid-42");
+    }
+}
