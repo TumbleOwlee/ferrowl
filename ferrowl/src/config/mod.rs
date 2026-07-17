@@ -134,6 +134,19 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-052 — a field present in a file but absent from the schema is ignored on load.
+    fn ut_load_ignores_unknown_field() {
+        let path = tmp("ferrowl_cfgmod_unknown_field.toml");
+        std::fs::write(
+            &path,
+            "bogus_unknown_field = 42\n[definitions.reg]\ntype = \"U16\"\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert!(device.definitions.contains_key("reg"));
+    }
+
+    #[test]
     fn ut_config_error_display() {
         assert!(
             ConfigError::UnknownFormat("p".into())

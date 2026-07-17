@@ -282,6 +282,21 @@ mod tests {
         );
     }
 
+    #[test]
+    /// UI-R-004 — tab display names are unique at all times: repeats of a name are auto-suffixed
+    /// so no two tabs ever collide.
+    fn ut_tab_names_are_unique_after_dedupe() {
+        let names = vec![
+            "Modbus".to_string(),
+            "Modbus".to_string(),
+            "Modbus".to_string(),
+        ];
+        let out = dedupe_names(&names);
+        let unique: std::collections::HashSet<_> = out.iter().collect();
+        assert_eq!(unique.len(), out.len(), "every tab name must be distinct");
+        assert_eq!(out, vec!["Modbus", "Modbus (2)", "Modbus (3)"]);
+    }
+
     // --- End-to-end through a real Lua context ----------------------------------
 
     use ferrowl_codec::format::{BitField, Endian, Resolution};

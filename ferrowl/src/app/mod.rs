@@ -598,6 +598,34 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-044 — a long line is truncated to the per-line cap, and the total-written counter is
+    /// monotonic across ring eviction.
+    fn ut_log_truncates_long_lines_and_counts_monotonically() {
+        let mut ring = LogRing::init();
+        // A line over the cap is stored truncated to exactly LOG_MAX_LINE characters.
+        ring.write(Level::Info, &"x".repeat(LOG_MAX_LINE + 50));
+        assert_eq!(ring.peek_n(1)[0].2.chars().count(), LOG_MAX_LINE);
+
+        // Writing past the ring capacity evicts oldest entries, but `written()` keeps counting.
+        for i in 0..(LOG_SIZE as u64 + 10) {
+            ring.write(Level::Info, &format!("l{i}"));
+        }
+        assert_eq!(ring.written(), 1 + LOG_SIZE as u64 + 10);
+        // The ring itself retains only its bounded capacity.
+        assert_eq!(ring.peek_n(LOG_SIZE + 100).len(), LOG_SIZE);
+    }
+
+    #[test]
+    /// UI-R-050 — the color scheme is a single compile-time constant selected by build feature,
+    /// never switched at runtime.
+    fn ut_color_scheme_is_compile_time_constant() {
+        // Usable in a `const` context ⇒ resolved at compile time; a runtime-switchable value
+        // could not appear here. Exactly one such constant exists, chosen by build feature.
+        const SCHEME: ferrowl_ui::ColorScheme = ferrowl_ui::COLOR_SCHEME;
+        let _ = SCHEME.bg;
+    }
+
+    #[test]
     /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     fn log_ring_persists_lines_to_file_sink() {
         let dir = std::env::temp_dir();

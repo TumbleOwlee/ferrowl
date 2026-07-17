@@ -603,4 +603,147 @@ mod tests {
         assert_eq!(ocpp[0].name, "cs");
         assert_eq!(ocpp[0].port, 9000);
     }
+
+    // --- Argument surface: version/help, subcommands, flag scoping, parse errors ----------
+
+    #[test]
+    /// CL-R-001 — --version and --help print and exit 0, taking precedence over starting the TUI.
+    fn ut_version_and_help_exit_zero() {
+        use clap::error::ErrorKind;
+        let v = CliArgs::try_parse_from(["ferrowl", "--version"]).unwrap_err();
+        assert_eq!(v.kind(), ErrorKind::DisplayVersion);
+        assert_eq!(v.exit_code(), 0);
+        let h = CliArgs::try_parse_from(["ferrowl", "--help"]).unwrap_err();
+        assert_eq!(h.kind(), ErrorKind::DisplayHelp);
+        assert_eq!(h.exit_code(), 0);
+    }
+
+    #[test]
+    /// CL-R-010 — the two subcommands dispatch, replacing the default (start-the-TUI) action.
+    fn ut_subcommands_dispatch() {
+        assert!(matches!(
+            CliArgs::parse_from(["ferrowl", "run"]).command,
+            Some(SubCommand::Run(_))
+        ));
+        assert!(matches!(
+            CliArgs::parse_from(["ferrowl", "migrate", "-i", "a.toml", "-o", "b.toml"]).command,
+            Some(SubCommand::Migrate(_))
+        ));
+        // No subcommand → default action (the TUI); `command` stays None.
+        assert!(CliArgs::parse_from(["ferrowl"]).command.is_none());
+    }
+
+    #[test]
+    /// CL-R-011 — the migrate subcommand requires both --input and --output.
+    fn ut_migrate_requires_input_and_output() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate", "-i", "a.toml"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "migrate", "-o", "b.toml"]).is_err());
+        match CliArgs::parse_from(["ferrowl", "migrate", "-i", "a.toml", "-o", "b.toml"]).command {
+            Some(SubCommand::Migrate(m)) => {
+                assert_eq!(m.input, "a.toml");
+                assert_eq!(m.output, "b.toml");
+            }
+            _ => panic!("expected migrate"),
+        }
+    }
+
+    #[test]
+    /// CL-R-014 — --ocpp is accepted only on run; --device only on the top-level command.
+    fn ut_ocpp_and_device_flag_scoping() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "--ocpp", "name=cs,device=d,port=1"]).is_err());
+        assert!(
+            CliArgs::try_parse_from(["ferrowl", "run", "--ocpp", "name=cs,device=d,port=1"])
+                .is_ok()
+        );
+        assert!(CliArgs::try_parse_from(["ferrowl", "run", "--device", "d.toml"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "--device", "d.toml"]).is_ok());
+    }
+
+    #[test]
+    /// CL-R-015 — --exit-on-error exists only on the run subcommand.
+    fn ut_exit_on_error_is_run_only() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "--exit-on-error"]).is_err());
+        assert!(CliArgs::try_parse_from(["ferrowl", "run", "--exit-on-error"]).is_ok());
+    }
+
+    #[test]
+    /// CL-R-016 — top-level values supplied alongside a run subcommand do not reach the runner.
+    fn ut_run_ignores_top_level_values() {
+        let args = CliArgs::parse_from(["ferrowl", "--module", "name=m,device=d,port=1", "run"]);
+        assert_eq!(args.modules, vec!["name=m,device=d,port=1".to_string()]);
+        match args.command {
+            Some(SubCommand::Run(run)) => {
+                assert!(
+                    run.modules.is_empty(),
+                    "run must not see the top-level --module"
+                );
+            }
+            _ => panic!("expected run"),
+        }
+    }
+
+    #[test]
+    /// CL-R-035 — an argument-parsing error exits with the parser's usage exit code (2).
+    fn ut_arg_parse_error_exits_two() {
+        use clap::error::ErrorKind;
+        let e = CliArgs::try_parse_from(["ferrowl", "--bogus-flag"]).unwrap_err();
+        assert_ne!(e.kind(), ErrorKind::DisplayHelp);
+        assert_eq!(e.exit_code(), 2);
+    }
+
+    // --- Config envelope: module-entry type dispatch and required fields ------------------
+
+    /// Save `modules` as a session file and resolve it through [`CliArgs::module_specs`].
+    fn resolve_session(
+        tag: &str,
+        modules: Vec<serde_json::Value>,
+    ) -> Result<Vec<ModuleSpec>, String> {
+        use ferrowl_util::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules,
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let path = std::env::temp_dir().join(format!("ferrowl_cli_{tag}.toml"));
+        Converter::save(&session, path.to_str().unwrap(), FileType::Toml).unwrap();
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path.to_str().unwrap().to_string()],
+            devices: vec![],
+            demo: false,
+        };
+        args.module_specs()
+    }
+
+    #[test]
+    /// CS-R-013 — a module entry whose `type` is neither modbus nor ocpp aborts session resolution.
+    fn ut_unknown_module_type_aborts_resolution() {
+        let err = resolve_session(
+            "unknown_type",
+            vec![serde_json::json!({"type": "plc", "name": "x"})],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("unsupported module type"),
+            "expected a hard error, got: {err}"
+        );
+    }
+
+    #[test]
+    /// CS-R-051 — a module instance missing a schema-required field fails to load.
+    fn ut_module_missing_required_field_errors() {
+        let mut module =
+            serde_json::to_value(create_module_spec_by_device("x".into(), "d.toml".into()))
+                .unwrap();
+        // Drop the required `name`, keep the modbus tag.
+        module.as_object_mut().unwrap().remove("name");
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        assert!(resolve_session("missing_name", vec![module]).is_err());
+    }
 }
