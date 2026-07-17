@@ -799,3 +799,43 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
 
     let _ = client.terminate().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// OC-R-097 — a `ws://` CS endpoint connects in plaintext and ignores any configured TLS material (the scheme is authoritative).
+async fn ws_client_ignores_configured_tls_material() {
+    use ferrowl_ocpp::CsTlsConfig;
+
+    let server = start_server().await; // plain ws:// CSMS
+    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+
+    // TLS material is configured, but the ws:// scheme means it must be ignored and the connection
+    // made in plaintext. If it were honored, a TLS handshake over the plain socket would fail.
+    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
+        url,
+        timeout_ms: 2000,
+        basic_auth: None,
+        tls: Some(CsTlsConfig {
+            ca_file: None,
+            client_cert_file: None,
+            client_key_file: None,
+            insecure_skip_verify: true,
+        }),
+    })
+    .spawn(
+        TestCs {
+            remote_start_seen: Arc::new(AtomicBool::new(false)),
+        },
+        sink(),
+    )
+    .await
+    .expect("ws client should connect in plaintext, ignoring TLS material");
+
+    let hb = Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
+    assert!(matches!(
+        client.call(hb).await.unwrap(),
+        Response16::Heartbeat(_)
+    ));
+
+    client.terminate().await.expect("terminate");
+    server.terminate().await.expect("server terminate");
+}
