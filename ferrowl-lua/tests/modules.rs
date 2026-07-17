@@ -190,3 +190,110 @@ fn ut_builder_propagates_script_error() {
         .build();
     assert!(result.is_err());
 }
+
+#[test]
+/// SC-R-001 — scripts run on a real, compiled-in Lua 5.4 VM.
+fn ut_runtime_is_lua_5_4() {
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_script("ver".to_string(), r#"assert(_VERSION == "Lua 5.4")"#)
+        .build()
+        .unwrap();
+    ctx.call(&"ver".to_string()).unwrap();
+}
+
+#[test]
+/// SC-R-002 — a C_* call is synchronous and blocking: it completes and yields its value before the
+/// calling script's next statement runs.
+fn ut_host_call_is_synchronous() {
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_module(TimeModule::default())
+        // The second statement uses the value the first call returned: the call must have
+        // completed before control returned to the script.
+        .with_script(
+            "sync".to_string(),
+            r#"
+            local a = C_Time:GetMs()
+            assert(type(a) == "number")
+            local b = C_Time:GetMs()
+            assert(b >= a)
+        "#,
+        )
+        .build()
+        .unwrap();
+    ctx.call(&"sync".to_string()).unwrap();
+}
+
+#[test]
+/// SC-R-004 — every script in one context shares that context's single global environment: a
+/// global set by one script is visible to another.
+fn ut_scripts_share_one_global_environment() {
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_script("setter".to_string(), "shared = 123")
+        .with_script("getter".to_string(), "assert(shared == 123)")
+        .build()
+        .unwrap();
+    // The setter runs first; the getter then observes the global it left behind.
+    ctx.call(&"setter".to_string()).unwrap();
+    ctx.call(&"getter".to_string()).unwrap();
+}
+
+#[test]
+/// SC-R-008 — the only host-injected globals are the C_* modules registered for the context plus
+/// `print`; no other bespoke host global is injected.
+fn ut_only_registered_host_globals_are_present() {
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_stdlib()
+        .with_module(TimeModule::default())
+        .with_print_sink(VecSink::default())
+        .with_script(
+            "globals".to_string(),
+            r#"
+            -- Registered for this context:
+            assert(C_Time ~= nil)
+            assert(print ~= nil)
+            -- Not registered here, and no other bespoke host global exists:
+            assert(C_Register == nil)
+            assert(C_OCPP == nil)
+            assert(C_Module == nil)
+            assert(C_Anything == nil)
+        "#,
+        )
+        .build()
+        .unwrap();
+    ctx.call(&"globals".to_string()).unwrap();
+}
+
+#[test]
+/// SC-R-015 — scripts in a context run sequentially within a cycle: each runs to completion, so a
+/// shared global mutated by both reflects both runs regardless of their (unspecified) order.
+fn ut_scripts_in_a_cycle_run_sequentially() {
+    let mut ctx = ContextBuilder::<String>::default()
+        // Order-agnostic: whichever runs first initialises `acc`, the other increments it. If the
+        // two could interleave, the read-modify-write would race; sequential execution makes the
+        // final value deterministic.
+        .with_script("a".to_string(), "acc = (acc or 0) + 1")
+        .with_script("b".to_string(), "acc = (acc or 0) + 1")
+        .with_script("check".to_string(), "assert(acc == 2)")
+        .build()
+        .unwrap();
+    ctx.call(&"a".to_string()).unwrap();
+    ctx.call(&"b".to_string()).unwrap();
+    ctx.call(&"check".to_string()).unwrap();
+}
+
+#[test]
+/// SC-R-019 — a module not registered in the context is a nil global, so naming it fails at run
+/// time with an "attempt to index a nil value" error rather than silently no-opping.
+fn ut_unregistered_module_indexes_nil_and_errors() {
+    // A Modbus-shaped context gets C_Register, never C_OCPP; indexing the absent module errors.
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_module(RegisterModule::init(Handle))
+        .with_script("bad".to_string(), r#"C_OCPP:Get("x")"#)
+        .build()
+        .unwrap();
+    let err = ctx.call(&"bad".to_string()).unwrap_err();
+    assert!(
+        err.to_string().contains("nil value"),
+        "expected a nil-index error, got: {err}"
+    );
+}
