@@ -24,8 +24,8 @@ published independently.
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells, shared as `Arc<RwLock<Memory>>`. |
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
-| `ferrowl-ocpp` | Version-generic OCPP engine (a `Version` trait over 1.6 / 2.0.1 / 2.1), Charging Station and CSMS roles, over JSON-on-WebSocket, wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). |
-| `ferrowl-lua` | Embedded Lua 5.4 runtime ([mlua](https://github.com/mlua-rs/mlua)) exposing the `C_*` bridge modules to simulation scripts, in a restricted sandbox. |
+| `ferrowl-ocpp` | OCPP transport and engine core: JSON-on-WebSocket framing, connection and correlation, and the version-generic Charging Station / CSMS engine cores (a `Version` trait over 1.6 / 2.0.1 / 2.1), wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). The per-version actions, spec tables, and device state machines live in the `ferrowl` binary. |
+| `ferrowl-lua` | Embedded Lua 5.4 runtime ([mlua](https://github.com/mlua-rs/mlua)) and the `C_*` module framework — the restricted sandbox and the trait shells scripts call. It has no dependency on the Modbus or OCPP crates; the concrete `C_Register` / `C_OCPP` wiring to `ferrowl-store::Memory` and the OCPP state lives in the `ferrowl` binary. |
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua and JSON). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
@@ -82,8 +82,8 @@ their observable contracts are specified where they are used:
 | Area | Crates | Spec |
 |---|---|---|
 | Modbus | `ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus` | [`docs/specs/modbus/`](./docs/specs/modbus/) |
-| OCPP | `ferrowl-ocpp` | [`docs/specs/ocpp/`](./docs/specs/ocpp/) |
-| Scripting | `ferrowl-lua`, `ferrowl-lua-derive` | [`docs/specs/scripting/`](./docs/specs/scripting/) |
+| OCPP | `ferrowl-ocpp` (transport + engine core), most of the OCPP behavior in `ferrowl` | [`docs/specs/ocpp/`](./docs/specs/ocpp/) |
+| Scripting | `ferrowl-lua`, `ferrowl-lua-derive`, the `C_*` wiring in `ferrowl` | [`docs/specs/scripting/`](./docs/specs/scripting/) |
 | TUI | `ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax` | [`docs/specs/tui/`](./docs/specs/tui/) |
 | Config & session | `ferrowl-util`, parts of `ferrowl` | [`docs/specs/config-session/`](./docs/specs/config-session/) |
 | CLI & headless | parts of `ferrowl` | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) |
