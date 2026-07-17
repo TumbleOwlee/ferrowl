@@ -4,4 +4,5 @@
 //! ([`crate::module::ocpp::client::handler`]) and the shared `ClientVersion` body
 //! ([`crate::module::ocpp::client::v2_common`]), instantiated here for `V2_1`.
 
+pub mod inbound;
 pub mod version;

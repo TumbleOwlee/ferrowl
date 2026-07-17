@@ -2,5 +2,6 @@
 //! variable store) and the [`crate::module::ocpp::client::view::ClientVersion`] impl wiring the
 //! shared generic inbound handler ([`crate::module::ocpp::client::handler`]) into the generic view.
 
+pub mod inbound;
 pub mod state;
 pub mod version;

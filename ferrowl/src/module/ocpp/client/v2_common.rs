@@ -8,10 +8,11 @@
 //! [`crate::module::ocpp::client::v2_0_1::state::CsState`].
 //!
 //! The inbound (CSMS→CS) handler is likewise shared: the single generic `CsStateHandler` in
-//! [`crate::module::ocpp::client::handler`] carries the decision logic once, crafting the few
-//! typed responses as JSON and bridging them back to the version's response type via
-//! [`Version::decode_result`](ferrowl_ocpp::Version::decode_result). The version-independent
-//! helpers it calls (`unknown_evse`, `inbound_scope`, …) live here.
+//! [`crate::module::ocpp::client::handler`] carries the decision logic once. The few responses
+//! whose body depends on request/state data are built with each version's own strongly-typed
+//! `rust_ocpp` structs via the `TypedInbound` trait (impl'd in `v2_0_1/inbound.rs` /
+//! `v2_1/inbound.rs`), with the shared handler supplying the store lookup/mutation as closures. The
+//! version-independent helpers it calls (`unknown_evse`, `inbound_scope`, …) live here.
 
 use crate::module::ocpp::client::backend::{boot_interval, rfc3339_now};
 use crate::module::ocpp::client::config::ConfigKey;

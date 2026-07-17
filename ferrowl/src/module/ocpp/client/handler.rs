@@ -3,21 +3,22 @@
 //! SetVariables writes it, Reset mutates state. EVSE-scoped Calls are simulated against the
 //! connector on the targeted EVSE; every other inbound Call is default-accepted (see `UNHANDLED.md`).
 //!
-//! 2.0.1 and 2.1 answer these Calls identically. The three arms that would otherwise build a
-//! strongly-typed response (`GetVariables`, `SetVariables`, `Reset`) instead craft the response as
-//! JSON and bridge it back to the version's typed [`Version::Response`] via
-//! [`Version::decode_result`] — the same delegation the CSMS (server) side uses — so the decision
-//! logic exists once as [`CsStateHandler::respond`], generic over `V: Version`, rather than being
-//! copied per version. The version-independent helpers it calls (`unknown_evse`, `inbound_scope`,
-//! …) live in [`v2_common`](crate::module::ocpp::client::v2_common). Each inbound Call and our reply
-//! are recorded.
+//! 2.0.1 and 2.1 answer these Calls identically, so the decision logic lives once as
+//! [`CsStateHandler::respond`], generic over `V: TypedInbound`. The few responses whose body
+//! depends on request/state data (`GetVariables`, `SetVariables`, `Reset`, and the
+//! `SetChargingProfile` reject) are built with the version's own strongly-typed `rust_ocpp` structs
+//! via the [`TypedInbound`] trait (impl'd in each version's `inbound.rs`); the shared handler
+//! supplies the store lookup/mutation as closures, so only the typed plumbing — not the decision
+//! logic — differs per version. The version-independent helpers it calls (`unknown_evse`,
+//! `inbound_scope`, …) live in [`v2_common`](crate::module::ocpp::client::v2_common). Each inbound
+//! Call and our reply are recorded.
 
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::RwLock;
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::{CallError, CallErrorCode, Version};
@@ -30,7 +31,7 @@ use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
 /// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. One struct
-/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: Version`.
+/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: TypedInbound`.
 pub struct CsStateHandler {
     online: Arc<AtomicBool>,
     messages: Messages,
@@ -55,93 +56,78 @@ impl HasState for CsStateHandler {
     }
 }
 
-/// Bridge a hand-crafted JSON response payload back to the version's typed response, using the
-/// originating `action` to select the response variant. A decode failure here means the crafted
-/// payload does not match the version's response schema — an internal bug, surfaced as a CallError.
-fn typed<V: Version>(action: &V::Action, payload: Value) -> Result<V::Response, CallError> {
-    V::decode_result(action, payload)
-        .map_err(|e| CallError::new(CallErrorCode::InternalError, e.to_string()))
+/// Outcome of applying one `SetVariables` entry to the store, reported by the caller's `apply`
+/// closure back to the version's typed response builder.
+pub enum SetOutcome {
+    Accepted,
+    Rejected,
+}
+
+/// Per-version construction of the inbound responses whose body depends on request/state data
+/// (`GetVariables`, `SetVariables`, `Reset`, and the `SetChargingProfile` reject). Each impl (in the
+/// version's `inbound.rs`) does only the typed request-extraction and response-building for its
+/// `rust_ocpp` version; the shared [`CsStateHandler`] supplies the store lookup/mutation as closures
+/// so the decision logic is not duplicated. Every method is dispatched by action name from
+/// [`CsStateHandler::respond`], so each impl may assume its matching action variant.
+pub trait TypedInbound: Version {
+    /// Build the typed `GetVariables` response. `lookup(name)` returns the stored value of a known
+    /// variable, `None` if the store has no such key.
+    fn get_variables_response(
+        action: &Self::Action,
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Self::Response;
+
+    /// Build the typed `SetVariables` response. `apply(name, value)` writes the store and reports
+    /// whether the write was accepted or rejected (read-only key).
+    fn set_variables_response(
+        action: &Self::Action,
+        apply: impl FnMut(&str, &str) -> SetOutcome,
+    ) -> Self::Response;
+
+    /// The typed `Reset` response (always accepted).
+    fn reset_response() -> Self::Response;
+
+    /// The typed `SetChargingProfile` response for a rejected profile.
+    fn set_charging_profile_rejected() -> Self::Response;
 }
 
 impl CsStateHandler {
-    fn respond<V: Version>(&self, action: &V::Action) -> (Result<V::Response, CallError>, String) {
+    fn respond<V: TypedInbound>(
+        &self,
+        action: &V::Action,
+    ) -> (Result<V::Response, CallError>, String) {
         let name = V::action_name(action);
         let request = encode_action_or_log::<V>(action);
         match name {
             "GetVariables" => self.with_state(|state| {
-                let results: Vec<Value> = request["getVariableData"]
-                    .as_array()
-                    .map(Vec::as_slice)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|d| {
-                        let found = state
-                            .config
-                            .iter()
-                            .find(|c| Some(c.key.as_str()) == d["variable"]["name"].as_str());
-                        let mut obj = Map::new();
-                        obj.insert(
-                            "attributeStatus".into(),
-                            json!(if found.is_some() {
-                                "Accepted"
-                            } else {
-                                "UnknownVariable"
-                            }),
-                        );
-                        if let Some(at) = d.get("attributeType").filter(|v| !v.is_null()) {
-                            obj.insert("attributeType".into(), at.clone());
-                        }
-                        if let Some(c) = found {
-                            obj.insert("attributeValue".into(), json!(c.value));
-                        }
-                        obj.insert("component".into(), d["component"].clone());
-                        obj.insert("variable".into(), d["variable"].clone());
-                        Value::Object(obj)
-                    })
-                    .collect();
-                (
-                    typed::<V>(action, json!({ "getVariableResult": results })),
-                    "answered from variables".to_string(),
-                )
+                let resp = V::get_variables_response(action, |name| {
+                    state
+                        .config
+                        .iter()
+                        .find(|c| c.key == name)
+                        .map(|c| c.value.clone())
+                });
+                (Ok(resp), "answered from variables".to_string())
             }),
             "SetVariables" => self.with_state_mut(|state| {
-                let results: Vec<Value> = request["setVariableData"]
-                    .as_array()
-                    .map(Vec::as_slice)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|d| {
-                        let key = d["variable"]["name"].as_str().unwrap_or_default();
-                        let value = d["attributeValue"].as_str().unwrap_or_default().to_string();
-                        let status = match state.config.iter_mut().find(|c| c.key == key) {
-                            Some(c) if c.readonly => "Rejected",
-                            Some(c) => {
-                                c.value = value;
-                                "Accepted"
-                            }
-                            None => {
-                                state.config.push(ConfigKey {
-                                    key: key.to_string(),
-                                    value,
-                                    readonly: false,
-                                });
-                                "Accepted"
-                            }
-                        };
-                        let mut obj = Map::new();
-                        obj.insert("attributeStatus".into(), json!(status));
-                        if let Some(at) = d.get("attributeType").filter(|v| !v.is_null()) {
-                            obj.insert("attributeType".into(), at.clone());
+                let resp = V::set_variables_response(action, |name, value| {
+                    match state.config.iter_mut().find(|c| c.key == name) {
+                        Some(c) if c.readonly => SetOutcome::Rejected,
+                        Some(c) => {
+                            c.value = value.to_string();
+                            SetOutcome::Accepted
                         }
-                        obj.insert("component".into(), d["component"].clone());
-                        obj.insert("variable".into(), d["variable"].clone());
-                        Value::Object(obj)
-                    })
-                    .collect();
-                (
-                    typed::<V>(action, json!({ "setVariableResult": results })),
-                    "variables updated".to_string(),
-                )
+                        None => {
+                            state.config.push(ConfigKey {
+                                key: name.to_string(),
+                                value: value.to_string(),
+                                readonly: false,
+                            });
+                            SetOutcome::Accepted
+                        }
+                    }
+                });
+                (Ok(resp), "variables updated".to_string())
             }),
             "Reset" => self.with_state_mut(|state| {
                 for c in &mut state.connectors {
@@ -149,10 +135,7 @@ impl CsStateHandler {
                     c.transaction_id = None;
                     c.session_energy = 0.0;
                 }
-                (
-                    typed::<V>(action, json!({ "status": "Accepted" })),
-                    "state reset".to_string(),
-                )
+                (Ok(V::reset_response()), "state reset".to_string())
             }),
             "SetChargingProfile" => {
                 let profile = &request["chargingProfile"];
@@ -175,8 +158,10 @@ impl CsStateHandler {
                     if let Some(max) = max_stack
                         && stack > max
                     {
-                        let resp = typed::<V>(action, json!({ "status": "Rejected" }));
-                        (resp, format!("rejected: stackLevel {stack} > max {max}"))
+                        (
+                            Ok(V::set_charging_profile_rejected()),
+                            format!("rejected: stackLevel {stack} > max {max}"),
+                        )
                     } else {
                         // Apply the limit to the connector on the targeted EVSE (fall back to the
                         // first), routed by charging-profile purpose into the matching field.
@@ -406,7 +391,7 @@ impl CsStateHandler {
     }
 }
 
-impl<V: Version> CsActionHandler<V> for CsStateHandler {
+impl<V: TypedInbound> CsActionHandler<V> for CsStateHandler {
     fn handle_call(
         &self,
         action: V::Action,
@@ -504,13 +489,13 @@ mod tests {
     }
 
     /// Build an action for version `V`, drive it through `respond`, and assert it was accepted.
-    fn drive<V: Version>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+    fn drive<V: TypedInbound>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
         let action = V::decode_call(name, payload).expect("action decodes");
         assert!(h.respond::<V>(&action).0.is_ok(), "{name} rejected");
     }
 
     /// Drive an action through `respond` and return its encoded response JSON plus the log context.
-    fn responded<V: Version>(
+    fn responded<V: TypedInbound>(
         h: &CsStateHandler,
         name: &str,
         payload: serde_json::Value,
@@ -696,14 +681,19 @@ mod tests {
             "GetVariables",
             json!({
                 "getVariableData": [
-                    { "component": { "name": "OCPPCommCtrlr" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
+                    { "attributeType": "Actual", "component": { "name": "OCPPCommCtrlr" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
                     { "component": { "name": "X" }, "variable": { "name": "NoSuchKey" } },
                 ]
             }),
         );
         let results = json["getVariableResult"].as_array().unwrap();
         assert_eq!(results[0]["attributeStatus"], "Accepted");
+        // A known key returns its stored value with the requested attributeType echoed back.
+        assert_eq!(results[0]["attributeValue"], "300");
+        assert_eq!(results[0]["attributeType"], "Actual");
         assert_eq!(results[1]["attributeStatus"], "UnknownVariable");
+        // An unknown key carries no value.
+        assert!(results[1].get("attributeValue").is_none());
     }
 
     #[test]
@@ -815,14 +805,17 @@ mod tests {
             "GetVariables",
             json!({
                 "getVariableData": [
-                    { "component": { "name": "OCPPCommCtrlr" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
+                    { "attributeType": "Actual", "component": { "name": "OCPPCommCtrlr" }, "variable": { "name": "OCPPCommCtrlr.HeartbeatInterval" } },
                     { "component": { "name": "X" }, "variable": { "name": "NoSuchKey" } },
                 ]
             }),
         );
         let results = json["getVariableResult"].as_array().unwrap();
         assert_eq!(results[0]["attributeStatus"], "Accepted");
+        assert_eq!(results[0]["attributeValue"], "300");
+        assert_eq!(results[0]["attributeType"], "Actual");
         assert_eq!(results[1]["attributeStatus"], "UnknownVariable");
+        assert!(results[1].get("attributeValue").is_none());
     }
 
     #[test]
