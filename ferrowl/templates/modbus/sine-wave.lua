@@ -1,3 +1,4 @@
+-- description: Drive a register with a clock-derived sine wave
 -- Drive a register with a sine wave derived from the module clock.
 local REGISTER = "Power"
 local AMPLITUDE = 50

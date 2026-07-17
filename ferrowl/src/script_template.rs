@@ -17,62 +17,10 @@ pub struct ScriptTemplate {
     pub code: &'static str,
 }
 
-static TEMPLATES: &[ScriptTemplate] = &[
-    ScriptTemplate {
-        name: "register-mirror",
-        description: "Copy one register's value into another every cycle",
-        contexts: &[ScriptContext::Modbus],
-        code: include_str!("../templates/modbus/register-mirror.lua"),
-    },
-    ScriptTemplate {
-        name: "register-ramp",
-        description: "Ramp a register up and down between two bounds",
-        contexts: &[ScriptContext::Modbus],
-        code: include_str!("../templates/modbus/register-ramp.lua"),
-    },
-    ScriptTemplate {
-        name: "sine-wave",
-        description: "Drive a register with a clock-derived sine wave",
-        contexts: &[ScriptContext::Modbus],
-        code: include_str!("../templates/modbus/sine-wave.lua"),
-    },
-    ScriptTemplate {
-        name: "apply-limit",
-        description: "Reflect given limit as actual measurements.",
-        contexts: &[ScriptContext::Modbus],
-        code: include_str!("../templates/modbus/apply-limit.lua"),
-    },
-    ScriptTemplate {
-        name: "meter-values",
-        description: "Set each connector's Power and send MeterValues",
-        contexts: &[ScriptContext::OcppClient],
-        code: include_str!("../templates/ocpp-client/meter-values.lua"),
-    },
-    ScriptTemplate {
-        name: "transaction-cycle",
-        description: "Start/stop a transaction on connector 1 in a loop",
-        contexts: &[ScriptContext::OcppClient],
-        code: include_str!("../templates/ocpp-client/transaction-cycle.lua"),
-    },
-    ScriptTemplate {
-        name: "station-report",
-        description: "Sum the Power reported by every connected station",
-        contexts: &[ScriptContext::OcppServer],
-        code: include_str!("../templates/ocpp-server/station-report.lua"),
-    },
-    ScriptTemplate {
-        name: "power-report",
-        description: "Sum Power across every modbus server and OCPP connector",
-        contexts: &[ScriptContext::Session],
-        code: include_str!("../templates/session/power-report.lua"),
-    },
-    ScriptTemplate {
-        name: "module-inventory",
-        description: "List every module in the session with its type and role",
-        contexts: &[ScriptContext::Session],
-        code: include_str!("../templates/session/module-inventory.lua"),
-    },
-];
+// The `TEMPLATES` array is generated at build time by `build.rs`, which walks `templates/` and
+// derives each entry's name (file stem), context (parent directory), description (leading
+// `-- description:` header), and code (the file minus that header). See SC-R-036.
+include!(concat!(env!("OUT_DIR"), "/templates_generated.rs"));
 
 /// The templates applicable to `ctx`, in declaration order.
 pub fn templates(ctx: ScriptContext) -> Vec<&'static ScriptTemplate> {
