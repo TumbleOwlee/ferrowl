@@ -64,6 +64,26 @@ where
     }
 }
 
+/// A terminal-like surface `App` can render a frame onto. Abstracts the single
+/// method `App` calls on its screen (`draw`) so a test double backed by
+/// ratatui's `TestBackend` can be injected in place of a real terminal.
+pub trait DrawSurface {
+    /// Renders one frame via the given callback.
+    fn draw<F: FnOnce(&mut Frame)>(&mut self, render: F) -> std::io::Result<()>;
+}
+
+impl<W> DrawSurface for AlternateScreen<W>
+where
+    W: Write + Init,
+{
+    fn draw<F: FnOnce(&mut Frame)>(&mut self, render: F) -> std::io::Result<()> {
+        // Inherent method (returns a `CompletedFrame` we discard); named
+        // explicitly to avoid resolving to this trait method.
+        AlternateScreen::draw(self, render)?;
+        Ok(())
+    }
+}
+
 impl<W> Drop for AlternateScreen<W>
 where
     W: Write + Init,
