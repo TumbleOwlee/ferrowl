@@ -9,6 +9,8 @@ mod help;
 mod keys;
 mod overlay;
 mod render;
+#[cfg(test)]
+mod testkit;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ferrowl_lua::module::ModuleDirectory;
@@ -681,34 +683,11 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// A `DrawSurface` test double backed by ratatui's `TestBackend`, letting an `App` be built
-    /// and drawn headlessly (no real terminal). Records how many frames it was asked to render.
-    struct MockScreen {
-        term: ratatui::Terminal<ratatui::backend::TestBackend>,
-        draws: usize,
-    }
-
-    impl MockScreen {
-        fn new() -> Self {
-            let term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
-            Self { term, draws: 0 }
-        }
-    }
-
-    impl DrawSurface for MockScreen {
-        fn draw<F: FnOnce(&mut ratatui::Frame)>(&mut self, render: F) -> std::io::Result<()> {
-            self.term
-                .draw(render)
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
-            self.draws += 1;
-            Ok(())
-        }
-    }
-
     #[test]
     /// The generic screen seam lets an `App` be built on a mock surface and drawn without a real
     /// terminal; `draw` succeeds and the mock records the frame.
     fn ut_app_draws_onto_mock_screen() {
+        use super::testkit::MockScreen;
         let mut app =
             App::with_screen(MockScreen::new(), vec![], vec![], Duration::from_secs(1)).unwrap();
         app.draw().unwrap();
