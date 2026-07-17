@@ -281,7 +281,10 @@ mod tests {
         assert!(!browser.templates.is_empty());
         for template in &browser.templates {
             assert!(
-                template.contexts.contains(&ScriptContext::Modbus),
+                template
+                    .contexts
+                    .iter()
+                    .any(|&c| ScriptContext::from(c) == ScriptContext::Modbus),
                 "'{}' is not a modbus template",
                 template.name
             );

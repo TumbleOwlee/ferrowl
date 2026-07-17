@@ -1,3 +1,4 @@
+-- description: Start/stop a transaction on connector 1 in a loop
 -- Charge in a loop on connector 1: start a transaction, run for CHARGE_S, stop, idle for IDLE_S.
 -- Globals reset whenever the script is edited, so the cycle restarts from Idle.
 local CONNECTOR = 1

@@ -1,3 +1,4 @@
+-- description: Copy one register's value into another every cycle
 -- Mirror one register into another every cycle.
 -- Adjust the names to registers this device actually has.
 local SOURCE = "SetPoint"

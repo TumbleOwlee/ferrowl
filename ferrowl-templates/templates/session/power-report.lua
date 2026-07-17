@@ -1,3 +1,4 @@
+-- description: Sum Power across every modbus server and OCPP connector
 -- Demo: read `Power` from every modbus server and OCPP connector via C_Module.
 local total_power = 0
 local num_modbus = 0

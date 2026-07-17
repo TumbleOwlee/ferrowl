@@ -1,3 +1,4 @@
+-- description: Reflect given limit as actual measurements.
 -- Script to apply a given input limit as the current power draw
 -- Created By: @TumbleOwlee
 

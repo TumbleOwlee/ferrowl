@@ -1,3 +1,4 @@
+-- description: Set each connector's Power and send MeterValues
 -- Raise the meter reading of every connector and send MeterValues once per cycle.
 local POWER = 11000 -- W, written to each connector before reporting
 

@@ -1,3 +1,4 @@
+-- description: Ramp a register up and down between two bounds
 -- Ramp a register up and down between two bounds, one step per sim cycle.
 -- The sim restarts with fresh globals on every script edit, so `direction` restarts too.
 local REGISTER = "Power"

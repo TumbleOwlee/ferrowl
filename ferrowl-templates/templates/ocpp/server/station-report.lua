@@ -1,3 +1,4 @@
+-- description: Sum the Power reported by every connected station
 -- Report every connected charging station and the Power its connectors report.
 local total = 0
 local stations = C_OCPP:GetChargingStations()

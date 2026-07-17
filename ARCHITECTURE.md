@@ -8,7 +8,7 @@ map, not the spec.
 ## Workspace
 
 Ferrowl is a Cargo workspace (resolver `"3"`, edition 2024) building one binary,
-`ferrowl`, from twelve crates. All twelve are versioned in lockstep; none is
+`ferrowl`, from thirteen crates. All thirteen are versioned in lockstep; none is
 published independently.
 
 <p align="center">
@@ -26,12 +26,13 @@ published independently.
 | `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
 | `ferrowl-ocpp` | OCPP transport and engine core: JSON-on-WebSocket framing, connection and correlation, and the version-generic Charging Station / CSMS engine cores (a `Version` trait over 1.6 / 2.0.1 / 2.1), wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). The per-version actions, spec tables, and device state machines live in the `ferrowl` binary. |
 | `ferrowl-lua` | Embedded Lua 5.4 runtime ([mlua](https://github.com/mlua-rs/mlua)) and the `C_*` module framework — the restricted sandbox and the trait shells scripts call. It has no dependency on the Modbus or OCPP crates; the concrete `C_Register` / `C_OCPP` wiring to `ferrowl-store::Memory` and the OCPP state lives in the `ferrowl` binary. |
+| `ferrowl-templates` | The bundled Lua script-template library. A build script walks `templates/<context>/…` and generates the `TEMPLATES` array at compile time; carries its own `TemplateContext`, which the binary maps to its `ScriptContext`. |
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua and JSON). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
 
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),
-**OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`),
+**OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`),
 **UI** (`ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax`),
 **Infra** (`ferrowl-ring`, `ferrowl-util`), and the **binary** (`ferrowl`) that ties
 them together.
@@ -83,7 +84,7 @@ their observable contracts are specified where they are used:
 |---|---|---|
 | Modbus | `ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus` | [`docs/specs/modbus/`](./docs/specs/modbus/) |
 | OCPP | `ferrowl-ocpp` (transport + engine core), most of the OCPP behavior in `ferrowl` | [`docs/specs/ocpp/`](./docs/specs/ocpp/) |
-| Scripting | `ferrowl-lua`, `ferrowl-lua-derive`, the `C_*` wiring in `ferrowl` | [`docs/specs/scripting/`](./docs/specs/scripting/) |
+| Scripting | `ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`, the `C_*` wiring in `ferrowl` | [`docs/specs/scripting/`](./docs/specs/scripting/) |
 | TUI | `ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax` | [`docs/specs/tui/`](./docs/specs/tui/) |
 | Config & session | `ferrowl-util`, parts of `ferrowl` | [`docs/specs/config-session/`](./docs/specs/config-session/) |
 | CLI & headless | parts of `ferrowl` | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) |
