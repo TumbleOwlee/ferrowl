@@ -1,20 +1,17 @@
 use crate::Error;
 
 /// ScriptState of a lua execution
-#[allow(dead_code)]
 enum ExecState {
     Err(Error),
     Ok,
 }
 
 /// Meta state of a lua execution
-#[allow(dead_code)]
 pub struct ScriptState {
     state: ExecState,
     time_since: std::time::Instant,
 }
 
-#[allow(dead_code)]
 impl ScriptState {
     /// Create a new error state
     pub fn err(err: Error) -> Self {

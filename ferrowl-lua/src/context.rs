@@ -14,7 +14,6 @@ where
     scripts: HashMap<K, Script>,
 }
 
-#[allow(dead_code)]
 impl<K> Context<K>
 where
     K: Hash + Eq + Default,

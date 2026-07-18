@@ -538,7 +538,12 @@ where
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind.
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before role switch failed: {e}"),
+                        );
+                    }
                     self.deferred.replacement = Some(build_client_view(spec, path, device));
                     return;
                 }
@@ -546,14 +551,24 @@ where
                     // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
                     // generic over the *old* version and would rebind with the old subprotocol,
                     // rejecting the (now-different-version) client handshake with a 400.
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before version switch failed: {e}"),
+                        );
+                    }
                     self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 // Rebind on the (possibly changed) endpoint: the backend builds its listener
                 // config from the spec passed into `start`, so updating `self.spec` is all an
                 // edit needs.
-                let _ = self.backend.stop().await;
+                if let Err(e) = self.backend.stop().await {
+                    self.log.write().await.write(
+                        Level::Error,
+                        &format!("Stop for settings update failed: {e}"),
+                    );
+                }
                 self.spec = spec;
                 self.device = device;
                 self.device_path = path;
@@ -643,15 +658,29 @@ where
                 }
                 "stop" => {
                     self.want_running = false;
-                    let _ = self.backend.stop().await;
+                    let stop_result = self.backend.stop().await;
                     self.entries.clear();
                     self.conn_identity.clear();
                     self.cs_configs.clear();
                     self.clear_lua_states();
-                    CommandResult::Handled(Some((Level::Info, "CSMS server stopped".into())))
+                    match stop_result {
+                        Ok(()) => CommandResult::Handled(Some((
+                            Level::Info,
+                            "CSMS server stopped".into(),
+                        ))),
+                        Err(e) => CommandResult::Handled(Some((
+                            Level::Error,
+                            format!("CSMS server stop failed: {e}"),
+                        ))),
+                    }
                 }
                 "restart" => {
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log
+                            .write()
+                            .await
+                            .write(Level::Error, &format!("Restart: stop failed: {e}"));
+                    }
                     self.entries.clear();
                     self.conn_identity.clear();
                     self.cs_configs.clear();

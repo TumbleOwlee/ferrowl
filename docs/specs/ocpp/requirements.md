@@ -430,6 +430,11 @@ from the in-memory buffer does not cause a message to be logged twice or skipped
 shall never discard an encode failure silently: the failure shall be logged to the
 module's error channel before the payload degrades to JSON `null`.
 
+**OC-R-102** — When an OCPP module view stops or (re)starts its backend as part of a
+settings change, version switch, or a `stop`/`restart` command, a failure of that
+stop or start shall be reported in the module message log at Error level rather than
+silently discarded.
+
 ---
 
 ## Send dialogs

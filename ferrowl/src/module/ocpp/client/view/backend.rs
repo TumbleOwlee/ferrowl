@@ -194,12 +194,22 @@ impl<V: ClientVersion> ClientView<V> {
                 device.connectors = self.device.connectors.clone();
                 device.config = self.device.config.clone();
                 if spec.role == OcppRole::Server {
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before role switch failed: {e}"),
+                        );
+                    }
                     self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;
                 }
                 if spec.version != self.spec.version {
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before version switch failed: {e}"),
+                        );
+                    }
                     if !device.scripts.is_empty() {
                         self.log.write().await.write(
                             Level::Warning,
@@ -210,7 +220,12 @@ impl<V: ClientVersion> ClientView<V> {
                     return;
                 } else {
                     let was_online = self.backend.is_online();
-                    let _ = self.backend.stop().await;
+                    if let Err(e) = self.backend.stop().await {
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop for settings update failed: {e}"),
+                        );
+                    }
                     self.spec = spec;
                     self.device = device;
                     self.device_path = path;
@@ -220,7 +235,12 @@ impl<V: ClientVersion> ClientView<V> {
                         .write(Level::Info, "Settings updated");
                     if was_online {
                         let handler = self.make_handler();
-                        let _ = self.backend.start(&self.spec, handler).await;
+                        if let Err(e) = self.backend.start(&self.spec, handler).await {
+                            self.log.write().await.write(
+                                Level::Error,
+                                &format!("Restart after settings update failed: {e}"),
+                            );
+                        }
                     }
                 }
             }
@@ -376,7 +396,12 @@ impl<V: ClientVersion> ClientView<V> {
                 }
             }),
             "restart" => Box::pin(async move {
-                let _ = self.backend.stop().await;
+                if let Err(e) = self.backend.stop().await {
+                    self.log
+                        .write()
+                        .await
+                        .write(Level::Error, &format!("Reconnect: stop failed: {e}"));
+                }
                 let handler = self.make_handler();
                 match self.backend.start(&self.spec, handler).await {
                     Ok(()) => CommandResult::Handled(Some((Level::Info, "Reconnecting".into()))),
