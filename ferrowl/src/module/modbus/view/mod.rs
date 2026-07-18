@@ -566,12 +566,23 @@ impl ModuleView for ModbusModuleView {
             return Box::pin(async move {
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
-                let _ = self.module.stop().await;
+                let stop_err = self
+                    .module
+                    .stop()
+                    .await
+                    .err()
+                    .filter(|e| !e.is_not_running());
                 match self.module.start().await {
-                    Ok(()) => CommandResult::Handled(Some((
-                        Level::Info,
-                        format!("Restarted {role} on {endpoint}"),
-                    ))),
+                    Ok(()) => match stop_err {
+                        None => CommandResult::Handled(Some((
+                            Level::Info,
+                            format!("Restarted {role} on {endpoint}"),
+                        ))),
+                        Some(e) => CommandResult::Handled(Some((
+                            Level::Error,
+                            format!("Restarted {role} on {endpoint}, but stop of previous instance failed: {e}"),
+                        ))),
+                    },
                     Err(e) => CommandResult::Handled(Some((
                         Level::Error,
                         format!("Restart {role} failed: {e}"),
@@ -598,7 +609,12 @@ impl ModuleView for ModbusModuleView {
                         )));
                     }
                 };
-                let _ = self.module.stop().await;
+                let stop_err = self
+                    .module
+                    .stop()
+                    .await
+                    .err()
+                    .filter(|e| !e.is_not_running());
                 let new_module = ModbusModule::new(&self.spec, &device);
                 self.module = new_module;
                 self.device = device;
@@ -616,7 +632,16 @@ impl ModuleView for ModbusModuleView {
                         format!(":reload start error: {e}"),
                     )));
                 }
-                CommandResult::Handled(Some((Level::Info, format!(":reload done — '{path}'"))))
+                match stop_err {
+                    None => CommandResult::Handled(Some((
+                        Level::Info,
+                        format!(":reload done — '{path}'"),
+                    ))),
+                    Some(e) => CommandResult::Handled(Some((
+                        Level::Error,
+                        format!(":reload done — '{path}', but stop of previous instance failed: {e}"),
+                    ))),
+                }
             });
         }
 
@@ -931,10 +956,11 @@ mod tests {
         ModbusModuleView, ModbusViewOverlay, PendingAction, decode_definition, parse_set_args,
         raw_hex,
     };
+    use crate::app::Level;
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
-    use crate::module::view::ModuleView;
+    use crate::module::view::{CommandResult, ModuleView};
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder, Value};
@@ -1523,5 +1549,34 @@ mod tests {
         };
         view.apply_setup(values).await;
         assert_eq!(view.device.reconnect, Some(false));
+    }
+
+    #[tokio::test]
+    /// MB-R-098 — stopping an already-stopped instance during `:restart` is the expected
+    /// no-op, not a reportable stop failure, so the restart is surfaced as Info.
+    async fn ut_restart_from_stopped_does_not_report_stop_failure() {
+        let mut view = new_view();
+        // Bind ephemerally so the restart's start() is deterministic.
+        view.spec.endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".into(),
+            port: 0,
+        };
+        // The module is not running: stop() yields NotRunning, which must be swallowed.
+        let result = view.handle_command("restart").await;
+        match result {
+            CommandResult::Handled(Some((level, msg))) => {
+                assert!(
+                    matches!(level, Level::Info),
+                    "benign not-running stop must not surface as Error: {msg}"
+                );
+                assert!(
+                    !msg.contains("stop of previous instance failed"),
+                    "unexpected stop-failure text: {msg}"
+                );
+            }
+            _ => panic!("restart should be handled with a log line"),
+        }
+        // Tear down the server task spawned by the restart.
+        let _ = view.handle_command("stop").await;
     }
 }

@@ -1009,4 +1009,20 @@ mod tests {
             "the version switch must warn about version-specific actions"
         );
     }
+
+    #[tokio::test]
+    /// OC-R-102 — a failed backend (re)start from the client view is reported at Error level.
+    async fn ut_restart_reports_backend_start_failure() {
+        let mut v = client_view::<V2_0_1>(OcppVersion::V2_0_1);
+        // Point at a closed port so the reconnect's start() fails fast.
+        v.spec.port = 1;
+        let result = v.handle_command_impl("restart").await;
+        match result {
+            crate::module::view::CommandResult::Handled(Some((level, msg))) => {
+                assert!(matches!(level, crate::app::Level::Error), "{msg}");
+                assert!(msg.contains("Reconnect failed"), "{msg}");
+            }
+            _ => panic!("restart should be handled with a log line"),
+        }
+    }
 }

@@ -26,3 +26,12 @@ pub enum Error {
     #[error("Instance error: {0}")]
     Instance(#[from] InstanceError),
 }
+
+impl Error {
+    /// True when this is the benign "instance was not running" outcome — a stop of an
+    /// already-stopped instance, which `:restart`/`:reload` treat as a no-op rather than a
+    /// reportable failure.
+    pub fn is_not_running(&self) -> bool {
+        matches!(self, Error::Instance(InstanceError::NotRunning))
+    }
+}
