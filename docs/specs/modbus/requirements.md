@@ -425,3 +425,8 @@ is not running, shall fail with an error rather than being silently dropped.
 **MB-R-094** — Stopping a client shall first request graceful termination and only
 abort the task if it has not finished within the grace period; a stopped instance
 shall be restartable.
+
+**MB-R-098** — When a Modbus module view stops its running instance as part of a
+`:restart` or `:reload` command, a failure of that stop shall be reported in the
+module message log at Error level rather than silently discarded. A failed start on
+`:restart` is already surfaced.
