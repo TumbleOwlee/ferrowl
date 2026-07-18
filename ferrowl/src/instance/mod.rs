@@ -171,8 +171,8 @@ impl<T: KeyParams> Instance<T> {
                     h.handle.await
                 }
             }
-            _ => {
-                unreachable!("case is unreachable");
+            None => {
+                unreachable!("stop() early-returns when handle is None");
             }
         };
 
