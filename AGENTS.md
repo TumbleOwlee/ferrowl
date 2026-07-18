@@ -181,6 +181,16 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config needed)
   long file that covers one cohesive concern, or is flat generated data (e.g. a spec table),
   stays whole. Treat a line count as a prompt to *review* the file, not a mandate to divide it;
   an arbitrary boundary drawn to hit a number makes the code harder to follow, not easier.
+- **Prefer typed handling over generic JSON.** Read request fields and build responses from the
+  strongly-typed `rust_ocpp` structs and enums (`req.evse_id`, `Response201::Reset(...)`), never
+  by indexing or hand-crafting a `serde_json::Value` where a typed path exists — the compiler must
+  catch a wrong field name, missing field, or bad enum, not the wire. This holds **even when it
+  forces duplication**: if two OCPP versions (1.6 / 2.0.1 / 2.1) have distinct-but-similar types,
+  duplicate the typed code per version rather than collapse it onto a shared untyped `Value`. The
+  duplication is the accepted price of compile-time typing. The **only** sanctioned untyped JSON is
+  the manual payload a user types into the action dialog, and version-independent *plumbing* that
+  must inspect an arbitrary encoded action (e.g. a scope/EVSE guard spanning all actions) where no
+  typed accessor exists.
 
 ## Scope boundaries — check with the user before
 

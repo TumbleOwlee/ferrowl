@@ -3,15 +3,17 @@
 //! 2.1 is a strict superset of 2.0.1 and the simulator answers the same core Calls the same way, so
 //! the `ClientVersion` body lives here once as plain free functions and each version's
 //! `impl ClientVersion for V…` (in `v2_0_1/version.rs` / `v2_1/version.rs`) delegates to them —
-//! only the inbound handler type and the action-spec module actually differ per version, and those
-//! two seams stay in each version's own `impl` block. Both versions share the one
+//! only the action-spec module actually differs per version, and that seam stays in each version's
+//! own `impl` block. Both versions share the one
 //! [`crate::module::ocpp::client::v2_0_1::state::CsState`].
 //!
-//! The inbound (CSMS→CS) handler itself (`CsStateHandler`) is *not* shared here: it builds
-//! strongly-typed responses (`GetVariablesResponse`, `ResetResponse`, …) from the version's own
-//! `rust_ocpp` module, so its concrete type differs per version even though the decision logic is
-//! identical. It is defined once per version in `v2_0_1/handler.rs` and `v2_1/handler.rs`; only the
-//! version-independent helpers it calls (`unknown_evse`, `inbound_scope`, …) live here.
+//! The inbound (CSMS→CS) handler's *plumbing* is shared: the single generic `CsStateHandler` in
+//! [`crate::module::ocpp::client::handler`] records each Call/reply, tags scope, and runs the
+//! unknown-EVSE guard, then delegates to `V::respond`. The decision logic itself is fully typed and
+//! **not** shared — it lives per version in `v2_0_1/inbound.rs` / `v2_1/inbound.rs` (the `Inbound`
+//! impls), which read typed request fields and build typed `rust_ocpp` responses. The
+//! version-independent helpers those impls and the plumbing call (`unknown_evse`, `inbound_scope`,
+//! `clear_limit_by_purpose`, …) live here.
 
 use crate::module::ocpp::client::backend::{boot_interval, rfc3339_now};
 use crate::module::ocpp::client::config::ConfigKey;

@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 
 use crate::module::ocpp::action_dialog::ActionSpec;
 use crate::module::ocpp::client::backend::Messages;
-use crate::module::ocpp::client::v2_0_1::handler::CsStateHandler;
+use crate::module::ocpp::client::handler::CsStateHandler;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 use crate::module::ocpp::client::v2_common as common;
 use crate::module::ocpp::client::view::{
