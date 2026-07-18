@@ -580,7 +580,9 @@ impl ModuleView for ModbusModuleView {
                         ))),
                         Some(e) => CommandResult::Handled(Some((
                             Level::Error,
-                            format!("Restarted {role} on {endpoint}, but stop of previous instance failed: {e}"),
+                            format!(
+                                "Restarted {role} on {endpoint}, but stop of previous instance failed: {e}"
+                            ),
                         ))),
                     },
                     Err(e) => CommandResult::Handled(Some((
@@ -639,7 +641,9 @@ impl ModuleView for ModbusModuleView {
                     ))),
                     Some(e) => CommandResult::Handled(Some((
                         Level::Error,
-                        format!(":reload done — '{path}', but stop of previous instance failed: {e}"),
+                        format!(
+                            ":reload done — '{path}', but stop of previous instance failed: {e}"
+                        ),
                     ))),
                 }
             });

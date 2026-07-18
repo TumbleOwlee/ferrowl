@@ -195,10 +195,10 @@ impl<V: ClientVersion> ClientView<V> {
                 device.config = self.device.config.clone();
                 if spec.role == OcppRole::Server {
                     if let Err(e) = self.backend.stop().await {
-                        self.log
-                            .write()
-                            .await
-                            .write(Level::Error, &format!("Stop before role switch failed: {e}"));
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before role switch failed: {e}"),
+                        );
                     }
                     self.deferred.replacement = Some(build_server_view(spec, path, device));
                     return;

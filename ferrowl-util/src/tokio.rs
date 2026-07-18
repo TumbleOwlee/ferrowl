@@ -127,7 +127,6 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
 ///     join_all().await;
 /// }
 /// ```
-#[allow(dead_code)]
 pub async fn join_all() {
     loop {
         let mut context = CONTEXT.lock().await;
@@ -175,7 +174,6 @@ pub async fn join_all() {
 ///     join_all_of_context("Local").await;
 /// }
 /// ```
-#[allow(dead_code)]
 pub async fn join_all_of_context(ctx: &'static str) {
     loop {
         let mut context = CONTEXT.lock().await;

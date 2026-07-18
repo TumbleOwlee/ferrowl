@@ -539,10 +539,10 @@ where
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind.
                     if let Err(e) = self.backend.stop().await {
-                        self.log
-                            .write()
-                            .await
-                            .write(Level::Error, &format!("Stop before role switch failed: {e}"));
+                        self.log.write().await.write(
+                            Level::Error,
+                            &format!("Stop before role switch failed: {e}"),
+                        );
                     }
                     self.deferred.replacement = Some(build_client_view(spec, path, device));
                     return;
@@ -564,10 +564,10 @@ where
                 // config from the spec passed into `start`, so updating `self.spec` is all an
                 // edit needs.
                 if let Err(e) = self.backend.stop().await {
-                    self.log
-                        .write()
-                        .await
-                        .write(Level::Error, &format!("Stop for settings update failed: {e}"));
+                    self.log.write().await.write(
+                        Level::Error,
+                        &format!("Stop for settings update failed: {e}"),
+                    );
                 }
                 self.spec = spec;
                 self.device = device;
@@ -664,9 +664,10 @@ where
                     self.cs_configs.clear();
                     self.clear_lua_states();
                     match stop_result {
-                        Ok(()) => {
-                            CommandResult::Handled(Some((Level::Info, "CSMS server stopped".into())))
-                        }
+                        Ok(()) => CommandResult::Handled(Some((
+                            Level::Info,
+                            "CSMS server stopped".into(),
+                        ))),
                         Err(e) => CommandResult::Handled(Some((
                             Level::Error,
                             format!("CSMS server stop failed: {e}"),

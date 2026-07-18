@@ -22,12 +22,13 @@ where
     }
 }
 
-#[allow(dead_code)]
 impl<K> ContextBuilder<K>
 where
     K: Hash + Eq + Default,
 {
-    /// Create context builder from context result
+    /// Create context builder from context result. Test-only: production builders start from
+    /// [`ContextBuilder::default`] and chain `with_*`.
+    #[cfg(test)]
     fn from(context: Result<Context<K>>) -> Self {
         Self { context }
     }
