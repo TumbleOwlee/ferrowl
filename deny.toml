@@ -18,13 +18,7 @@ all-features = true
 version = 2
 # Every entry here needs a comment saying why it is accepted and what would let us drop it.
 # An unexplained ignore is indistinguishable from an unnoticed vulnerability.
-ignore = [
-    # proc-macro-error2 is unmaintained. Transitive and not ours to fix: it arrives via
-    # validator_derive <- validator, which both ferrowl-ocpp and rust-ocpp depend on. It is a
-    # compile-time-only proc-macro crate, so it ships no code in the binary and the
-    # unmaintained status carries no runtime exposure. Drop this once validator moves off it.
-    "RUSTSEC-2026-0173",
-]
+ignore = []
 
 [licenses]
 version = 2
@@ -65,5 +59,6 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# rust-ocpp is consumed from a fork (see ferrowl-ocpp/Cargo.toml) rather than crates.io.
+# rust-ocpp is consumed from a fork (pinned by rev in the workspace Cargo.toml) rather than
+# crates.io.
 allow-git = ["https://github.com/TumbleOwlee/rust-ocpp"]
