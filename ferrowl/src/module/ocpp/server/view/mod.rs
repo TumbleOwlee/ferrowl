@@ -49,7 +49,7 @@ use crate::module::ocpp::server::backend::{
 use crate::module::ocpp::server::detail::DetailOverlay;
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedServerStates};
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
-use crate::module::view::{CommandDescriptor, ModuleView, SharedLog};
+use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
 
 /// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
 fn rfid_store_from_device(device: &OcppDeviceConfig) -> RfidStore {
@@ -462,7 +462,15 @@ where
     }
 
     fn commands(&self) -> &[CommandDescriptor] {
-        &OCPP_SERVER_COMMANDS
+        static DESCRIPTORS: std::sync::OnceLock<Vec<CommandDescriptor>> =
+            std::sync::OnceLock::new();
+        DESCRIPTORS.get_or_init(|| {
+            OCPP_SERVER_COMMAND_SPECS
+                .iter()
+                .map(|s| s.descriptor)
+                .chain(OCPP_SERVER_EXTRA_HELP.iter().copied())
+                .collect()
+        })
     }
 
     fn keybinds(&self) -> &[CommandDescriptor] {
@@ -517,35 +525,90 @@ static OCPP_SERVER_KEYBINDS: [CommandDescriptor; 3] = [
     },
 ];
 
-static OCPP_SERVER_COMMANDS: [CommandDescriptor; 9] = [
-    CommandDescriptor {
-        name: ":start | :stop",
-        description: "bind / unbind the CSMS listener",
+/// The parsed form of every command the CSMS server view accepts; produced by [`parse_command`]
+/// over [`OCPP_SERVER_COMMAND_SPECS`]. The exhaustive `match` in `handle_command_impl` is what
+/// guarantees a table entry cannot exist without a handler.
+pub(super) enum OcppServerCmd {
+    Start,
+    Stop,
+    Restart,
+    Edit,
+    Compact,
+    WriteDevice(Option<String>),
+    Log(Option<String>),
+    Rfid(Option<String>),
+}
+
+/// Single source for this view's commands: aliases, help row, and parse target per entry.
+pub(super) static OCPP_SERVER_COMMAND_SPECS: [CommandSpec<OcppServerCmd>; 8] = [
+    CommandSpec {
+        aliases: &["start"],
+        descriptor: CommandDescriptor {
+            name: ":start",
+            description: "bind the CSMS listener",
+        },
+        build: |_| OcppServerCmd::Start,
     },
-    CommandDescriptor {
-        name: ":restart",
-        description: "rebind the listener (clears entries)",
+    CommandSpec {
+        aliases: &["stop"],
+        descriptor: CommandDescriptor {
+            name: ":stop",
+            description: "unbind the CSMS listener",
+        },
+        build: |_| OcppServerCmd::Stop,
     },
-    CommandDescriptor {
-        name: ":e | :edit",
-        description: "edit module setup",
+    CommandSpec {
+        aliases: &["restart"],
+        descriptor: CommandDescriptor {
+            name: ":restart",
+            description: "rebind the listener (clears entries)",
+        },
+        build: |_| OcppServerCmd::Restart,
     },
-    CommandDescriptor {
-        name: ":wd | :write-device [path]",
-        description: "save device config",
+    CommandSpec {
+        aliases: &["e", "edit"],
+        descriptor: CommandDescriptor {
+            name: ":e | :edit",
+            description: "edit module setup",
+        },
+        build: |_| OcppServerCmd::Edit,
     },
-    CommandDescriptor {
-        name: ":compact",
-        description: "toggle compact rows",
+    CommandSpec {
+        aliases: &["wd", "write-device"],
+        descriptor: CommandDescriptor {
+            name: ":wd | :write-device [path]",
+            description: "save device config",
+        },
+        build: |rest| OcppServerCmd::WriteDevice(rest.map(str::to_string)),
     },
-    CommandDescriptor {
-        name: ":log [file]",
-        description: "set/clear log file",
+    CommandSpec {
+        aliases: &["compact"],
+        descriptor: CommandDescriptor {
+            name: ":compact",
+            description: "toggle compact rows",
+        },
+        build: |_| OcppServerCmd::Compact,
     },
-    CommandDescriptor {
-        name: ":rfid [add|del <tag> | clear]",
-        description: "CSMS RFID accept-list",
+    CommandSpec {
+        aliases: &["log"],
+        descriptor: CommandDescriptor {
+            name: ":log [file]",
+            description: "set/clear log file",
+        },
+        build: |rest| OcppServerCmd::Log(rest.map(str::to_string)),
     },
+    CommandSpec {
+        aliases: &["rfid"],
+        descriptor: CommandDescriptor {
+            name: ":rfid [add|del <tag> | clear]",
+            description: "CSMS RFID accept-list",
+        },
+        build: |rest| OcppServerCmd::Rfid(rest.map(str::to_string)),
+    },
+];
+
+/// Display-only help rows appended after the command rows (keys, not `:` commands).
+static OCPP_SERVER_EXTRA_HELP: [CommandDescriptor; 2] = [
     CommandDescriptor {
         name: "d",
         description: "delete the selected charging station / connector",
@@ -900,6 +963,27 @@ mod tests {
     }
 
     // --- Module lifecycle: listener rebuild / restart ---------------------------------------
+
+    #[tokio::test]
+    /// ocpp/api-contract CSMS command table — `:write-device [path]` is the long spelling of
+    /// `:wd` and saves the device config the same way.
+    async fn write_device_alias_saves_like_wd() {
+        use crate::module::view::CommandResult;
+        let mut v = server_view();
+        let path = std::env::temp_dir().join(format!(
+            "ferrowl-ocpp-server-write-device-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+        let CommandResult::Handled(Some((_, msg))) =
+            v.handle_command_impl(&format!("write-device {p}")).await
+        else {
+            panic!(":write-device must be handled with a message");
+        };
+        assert!(msg.contains("Saved device config"), "unexpected: {msg}");
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[tokio::test]
     /// OC-R-082 — the listener configuration is rebuilt from the current module spec on every

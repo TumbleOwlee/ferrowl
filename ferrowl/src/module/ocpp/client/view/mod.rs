@@ -52,7 +52,7 @@ use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
-use crate::module::view::{CommandDescriptor, ModuleView, SharedLog};
+use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
 
 pub use render::{choice, number, text_input};
 
@@ -596,7 +596,14 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
     }
 
     fn commands(&self) -> &[CommandDescriptor] {
-        &OCPP_CLIENT_COMMANDS
+        static DESCRIPTORS: std::sync::OnceLock<Vec<CommandDescriptor>> =
+            std::sync::OnceLock::new();
+        DESCRIPTORS.get_or_init(|| {
+            OCPP_CLIENT_COMMAND_SPECS
+                .iter()
+                .map(|s| s.descriptor)
+                .collect()
+        })
     }
 
     fn keybinds(&self) -> &[CommandDescriptor] {
@@ -658,34 +665,76 @@ static OCPP_CLIENT_KEYBINDS: [CommandDescriptor; 4] = [
     },
 ];
 
-static OCPP_CLIENT_COMMANDS: [CommandDescriptor; 7] = [
-    CommandDescriptor {
-        name: ":e | :edit",
-        description: "edit module setup",
+/// The parsed form of every command the CS client view accepts; produced by [`parse_command`]
+/// over [`OCPP_CLIENT_COMMAND_SPECS`]. The exhaustive `match` in `handle_command_impl` is what
+/// guarantees a table entry cannot exist without a handler.
+pub(super) enum OcppClientCmd {
+    Start,
+    Stop,
+    Restart,
+    Edit,
+    Compact,
+    WriteDevice(Option<String>),
+    Log(Option<String>),
+}
+
+/// Single source for this view's commands: aliases, help row, and parse target per entry.
+pub(super) static OCPP_CLIENT_COMMAND_SPECS: [CommandSpec<OcppClientCmd>; 7] = [
+    CommandSpec {
+        aliases: &["e", "edit"],
+        descriptor: CommandDescriptor {
+            name: ":e | :edit",
+            description: "edit module setup",
+        },
+        build: |_| OcppClientCmd::Edit,
     },
-    CommandDescriptor {
-        name: ":start",
-        description: "connect to the CSMS",
+    CommandSpec {
+        aliases: &["start"],
+        descriptor: CommandDescriptor {
+            name: ":start",
+            description: "connect to the CSMS",
+        },
+        build: |_| OcppClientCmd::Start,
     },
-    CommandDescriptor {
-        name: ":stop",
-        description: "disconnect",
+    CommandSpec {
+        aliases: &["stop"],
+        descriptor: CommandDescriptor {
+            name: ":stop",
+            description: "disconnect",
+        },
+        build: |_| OcppClientCmd::Stop,
     },
-    CommandDescriptor {
-        name: ":restart",
-        description: "reconnect",
+    CommandSpec {
+        aliases: &["restart"],
+        descriptor: CommandDescriptor {
+            name: ":restart",
+            description: "reconnect",
+        },
+        build: |_| OcppClientCmd::Restart,
     },
-    CommandDescriptor {
-        name: ":compact",
-        description: "toggle compact rows",
+    CommandSpec {
+        aliases: &["compact"],
+        descriptor: CommandDescriptor {
+            name: ":compact",
+            description: "toggle compact rows",
+        },
+        build: |_| OcppClientCmd::Compact,
     },
-    CommandDescriptor {
-        name: ":wd | :write-device [path]",
-        description: "save device config",
+    CommandSpec {
+        aliases: &["wd", "write-device"],
+        descriptor: CommandDescriptor {
+            name: ":wd | :write-device [path]",
+            description: "save device config",
+        },
+        build: |rest| OcppClientCmd::WriteDevice(rest.map(str::to_string)),
     },
-    CommandDescriptor {
-        name: ":log [file]",
-        description: "set/clear log file",
+    CommandSpec {
+        aliases: &["log"],
+        descriptor: CommandDescriptor {
+            name: ":log [file]",
+            description: "set/clear log file",
+        },
+        build: |rest| OcppClientCmd::Log(rest.map(str::to_string)),
     },
 ];
 
@@ -1024,5 +1073,26 @@ mod tests {
             }
             _ => panic!("restart should be handled with a log line"),
         }
+    }
+
+    #[tokio::test]
+    /// ocpp/api-contract CS command table — `:write-device [path]` is the long spelling of
+    /// `:wd` and saves the device config the same way.
+    async fn write_device_alias_saves_like_wd() {
+        use crate::module::view::CommandResult;
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let path = std::env::temp_dir().join(format!(
+            "ferrowl-ocpp-client-write-device-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+        let CommandResult::Handled(Some((_, msg))) =
+            v.handle_command_impl(&format!("write-device {p}")).await
+        else {
+            panic!(":write-device must be handled with a message");
+        };
+        assert!(msg.contains("Saved device config"), "unexpected: {msg}");
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
     }
 }

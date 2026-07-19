@@ -131,3 +131,10 @@ The command-help popup shown while typing `:` lists a fixed set of generic
 commands plus the active view's advertised list. Generic aliases beyond those
 shown (e.g. `:q!`, `:save`, `:write`) are still accepted by the parser even
 though the popup shows only one representative spelling.
+
+### 6.8 Module commands match on the exact first token
+
+A forwarded module command is recognized by its exact first whitespace-delimited
+token: `:setfoo` is an unknown command, not a malformed `:set`. Argument
+validation applies only after the token matches (`:set` alone still reports the
+usage warning).

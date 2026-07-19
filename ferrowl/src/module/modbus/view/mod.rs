@@ -20,7 +20,8 @@ use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
 use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
 use crate::module::view::{
-    CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
+    CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
+    SharedLog, parse_command,
 };
 
 use super::ModbusModule;
@@ -528,10 +529,12 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn handle_command<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
-        let trimmed = cmd.trim();
+        let Some(parsed) = parse_command(&MODBUS_COMMAND_SPECS, cmd) else {
+            return Box::pin(std::future::ready(CommandResult::Unhandled));
+        };
 
-        if trimmed == "start" {
-            return Box::pin(async move {
+        match parsed {
+            ModbusCmd::Start => Box::pin(async move {
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
                 match self.module.start().await {
@@ -544,11 +547,9 @@ impl ModuleView for ModbusModuleView {
                         format!("Start {role} failed: {e}"),
                     ))),
                 }
-            });
-        }
+            }),
 
-        if trimmed == "stop" {
-            return Box::pin(async move {
+            ModbusCmd::Stop => Box::pin(async move {
                 let role = self.spec.role.to_string();
                 match self.module.stop().await {
                     Ok(()) => {
@@ -559,11 +560,9 @@ impl ModuleView for ModbusModuleView {
                         format!("Stop {role} failed: {e}"),
                     ))),
                 }
-            });
-        }
+            }),
 
-        if trimmed == "restart" {
-            return Box::pin(async move {
+            ModbusCmd::Restart => Box::pin(async move {
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
                 let stop_err = self
@@ -590,11 +589,9 @@ impl ModuleView for ModbusModuleView {
                         format!("Restart {role} failed: {e}"),
                     ))),
                 }
-            });
-        }
+            }),
 
-        if trimmed == "reload" {
-            return Box::pin(async move {
+            ModbusCmd::Reload => Box::pin(async move {
                 if self.spec.device.is_empty() {
                     return CommandResult::Handled(Some((
                         Level::Warning,
@@ -646,64 +643,65 @@ impl ModuleView for ModbusModuleView {
                         ),
                     ))),
                 }
-            });
-        }
+            }),
 
-        if trimmed == "edit" || trimmed == "e" {
-            let timing = ModbusModule::resolve_timing(&self.device);
-            let dialog = SetupDialog::edit(
-                &self.spec.name,
-                &self.spec.device,
-                self.spec.role,
-                &self.spec.endpoint,
-                timing,
-                &self.device.read_ranges,
-            );
-            self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
-            return Box::pin(std::future::ready(CommandResult::Handled(None)));
-        }
-
-        if trimmed == "add" || trimmed == "a" {
-            self.overlay =
-                ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(EditInputDialog::new())));
-            return Box::pin(std::future::ready(CommandResult::Handled(None)));
-        }
-
-        if trimmed == "script" {
-            self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
-                &self.device.scripts,
-                self.device.script_interval_duration(),
-                ScriptContext::Modbus,
-            )));
-            return Box::pin(std::future::ready(CommandResult::Handled(None)));
-        }
-
-        if trimmed == "compact" {
-            self.table.set_compact(!self.table.compact);
-            return Box::pin(std::future::ready(CommandResult::Handled(None)));
-        }
-
-        if trimmed == "wd" {
-            if self.spec.device.is_empty() {
-                return Box::pin(std::future::ready(CommandResult::Handled(Some((
-                    Level::Warning,
-                    "No configuration file path configured.".into(),
-                )))));
+            ModbusCmd::Edit => {
+                let timing = ModbusModule::resolve_timing(&self.device);
+                let dialog = SetupDialog::edit(
+                    &self.spec.name,
+                    &self.spec.device,
+                    self.spec.role,
+                    &self.spec.endpoint,
+                    timing,
+                    &self.device.read_ranges,
+                );
+                self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
-            let path = self.spec.device.clone();
-            let result = self.save_device_to(&path);
-            return Box::pin(std::future::ready(result));
-        }
 
-        if let Some(path) = trimmed.strip_prefix("wd ") {
-            let path = path.trim().to_string();
-            let result = self.save_device_to(&path);
-            return Box::pin(std::future::ready(result));
-        }
+            ModbusCmd::Add => {
+                self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(
+                    EditInputDialog::new(),
+                )));
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
 
-        if let Some(file) = trimmed.strip_prefix("log ") {
-            let file = file.trim().to_string();
-            return Box::pin(async move {
+            ModbusCmd::Script => {
+                self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
+                    &self.device.scripts,
+                    self.device.script_interval_duration(),
+                    ScriptContext::Modbus,
+                )));
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
+
+            ModbusCmd::Compact => {
+                self.table.set_compact(!self.table.compact);
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
+
+            ModbusCmd::WriteDevice(None) => {
+                if self.spec.device.is_empty() {
+                    return Box::pin(std::future::ready(CommandResult::Handled(Some((
+                        Level::Warning,
+                        "No configuration file path configured.".into(),
+                    )))));
+                }
+                let path = self.spec.device.clone();
+                let result = self.save_device_to(&path);
+                Box::pin(std::future::ready(result))
+            }
+
+            ModbusCmd::WriteDevice(Some(path)) => {
+                let result = self.save_device_to(&path);
+                Box::pin(std::future::ready(result))
+            }
+
+            // Bare `:log` is not a Modbus command (the spec gives Modbus only `:log <file>`);
+            // it stays unknown, matching the pre-table behavior.
+            ModbusCmd::Log(None) => Box::pin(std::future::ready(CommandResult::Unhandled)),
+
+            ModbusCmd::Log(Some(file)) => Box::pin(async move {
                 self.device.log_file = Some(file.clone());
                 match self.module.set_log_base(Some(&file)) {
                     Ok(()) => CommandResult::Handled(Some((
@@ -715,17 +713,10 @@ impl ModuleView for ModbusModuleView {
                         format!("Failed to open log file {file}: {e}"),
                     ))),
                 }
-            });
-        }
+            }),
 
-        if trimmed.starts_with("set") {
-            return Box::pin(async move {
-                let rest = cmd
-                    .trim_start()
-                    .split_once(char::is_whitespace)
-                    .map(|(_, r)| r.trim_start())
-                    .unwrap_or("");
-                let (register, value) = parse_set_args(rest);
+            ModbusCmd::Set(rest) => Box::pin(async move {
+                let (register, value) = parse_set_args(rest.as_deref().unwrap_or(""));
                 if register.is_empty() || value.is_empty() {
                     return CommandResult::Handled(Some((
                         Level::Warning,
@@ -733,32 +724,37 @@ impl ModuleView for ModbusModuleView {
                     )));
                 }
                 self.set_register_value(&register, &value).await
-            });
-        }
+            }),
 
-        // Sync commands routed via App (order) — delegate to the sync inner handler.
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        let sync_result = match parts.as_slice() {
-            ["order"] => {
-                let original = self
-                    .module
-                    .registers()
-                    .iter()
-                    .map(|(n, d, r, v)| Definition::new(n.clone(), d.clone(), r.clone(), v.clone()))
-                    .collect();
-                self.sort = None;
-                self.table.set_definitions(original);
-                CommandResult::Handled(Some((Level::Info, "Order cleared".to_string())))
+            ModbusCmd::Order(rest) => {
+                let parts: Vec<&str> = rest.as_deref().unwrap_or("").split_whitespace().collect();
+                let sync_result = match parts.as_slice() {
+                    [] => {
+                        let original = self
+                            .module
+                            .registers()
+                            .iter()
+                            .map(|(n, d, r, v)| {
+                                Definition::new(n.clone(), d.clone(), r.clone(), v.clone())
+                            })
+                            .collect();
+                        self.sort = None;
+                        self.table.set_definitions(original);
+                        CommandResult::Handled(Some((Level::Info, "Order cleared".to_string())))
+                    }
+                    [col] | [col, "asc"] => self.apply_order(col, false),
+                    [col, "desc"] => self.apply_order(col, true),
+                    _ => CommandResult::Unhandled,
+                };
+                Box::pin(std::future::ready(sync_result))
             }
-            ["order", col] | ["order", col, "asc"] => self.apply_order(col, false),
-            ["order", col, "desc"] => self.apply_order(col, true),
-            _ => CommandResult::Unhandled,
-        };
-        Box::pin(std::future::ready(sync_result))
+        }
     }
 
     fn commands(&self) -> &[CommandDescriptor] {
-        &MODBUS_COMMANDS
+        static DESCRIPTORS: std::sync::OnceLock<Vec<CommandDescriptor>> =
+            std::sync::OnceLock::new();
+        DESCRIPTORS.get_or_init(|| MODBUS_COMMAND_SPECS.iter().map(|s| s.descriptor).collect())
     }
 
     fn keybinds(&self) -> &[CommandDescriptor] {
@@ -829,54 +825,121 @@ static MODBUS_KEYBINDS: [CommandDescriptor; 5] = [
     },
 ];
 
-static MODBUS_COMMANDS: [CommandDescriptor; 12] = [
-    CommandDescriptor {
-        name: ":e | :edit",
-        description: "edit module setup",
+/// The parsed form of every command this view accepts; produced by [`parse_command`] over
+/// [`MODBUS_COMMAND_SPECS`]. The exhaustive `match` in `handle_command` is what guarantees a
+/// table entry cannot exist without a handler.
+enum ModbusCmd {
+    Start,
+    Stop,
+    Restart,
+    Reload,
+    Edit,
+    Add,
+    Script,
+    Compact,
+    WriteDevice(Option<String>),
+    Log(Option<String>),
+    Set(Option<String>),
+    Order(Option<String>),
+}
+
+/// Single source for this view's commands: aliases, help row, and parse target per entry.
+static MODBUS_COMMAND_SPECS: [CommandSpec<ModbusCmd>; 12] = [
+    CommandSpec {
+        aliases: &["e", "edit"],
+        descriptor: CommandDescriptor {
+            name: ":e | :edit",
+            description: "edit module setup",
+        },
+        build: |_| ModbusCmd::Edit,
     },
-    CommandDescriptor {
-        name: ":a | :add",
-        description: "add register to device",
+    CommandSpec {
+        aliases: &["a", "add"],
+        descriptor: CommandDescriptor {
+            name: ":a | :add",
+            description: "add register to device",
+        },
+        build: |_| ModbusCmd::Add,
     },
-    CommandDescriptor {
-        name: ":start",
-        description: "start module",
+    CommandSpec {
+        aliases: &["start"],
+        descriptor: CommandDescriptor {
+            name: ":start",
+            description: "start module",
+        },
+        build: |_| ModbusCmd::Start,
     },
-    CommandDescriptor {
-        name: ":stop",
-        description: "stop module",
+    CommandSpec {
+        aliases: &["stop"],
+        descriptor: CommandDescriptor {
+            name: ":stop",
+            description: "stop module",
+        },
+        build: |_| ModbusCmd::Stop,
     },
-    CommandDescriptor {
-        name: ":restart",
-        description: "restart module",
+    CommandSpec {
+        aliases: &["restart"],
+        descriptor: CommandDescriptor {
+            name: ":restart",
+            description: "restart module",
+        },
+        build: |_| ModbusCmd::Restart,
     },
-    CommandDescriptor {
-        name: ":reload",
-        description: "reload device config",
+    CommandSpec {
+        aliases: &["reload"],
+        descriptor: CommandDescriptor {
+            name: ":reload",
+            description: "reload device config",
+        },
+        build: |_| ModbusCmd::Reload,
     },
-    CommandDescriptor {
-        name: ":compact",
-        description: "toggle compact mode",
+    CommandSpec {
+        aliases: &["compact"],
+        descriptor: CommandDescriptor {
+            name: ":compact",
+            description: "toggle compact mode",
+        },
+        build: |_| ModbusCmd::Compact,
     },
-    CommandDescriptor {
-        name: ":set <reg> <val>",
-        description: "write register value",
+    CommandSpec {
+        aliases: &["set"],
+        descriptor: CommandDescriptor {
+            name: ":set <reg> <val>",
+            description: "write register value",
+        },
+        build: |rest| ModbusCmd::Set(rest.map(str::to_string)),
     },
-    CommandDescriptor {
-        name: ":wd | :write-device [path]",
-        description: "save device config",
+    CommandSpec {
+        aliases: &["wd", "write-device"],
+        descriptor: CommandDescriptor {
+            name: ":wd | :write-device [path]",
+            description: "save device config",
+        },
+        build: |rest| ModbusCmd::WriteDevice(rest.map(str::to_string)),
     },
-    CommandDescriptor {
-        name: ":log <file>",
-        description: "set log file",
+    CommandSpec {
+        aliases: &["log"],
+        descriptor: CommandDescriptor {
+            name: ":log <file>",
+            description: "set log file",
+        },
+        build: |rest| ModbusCmd::Log(rest.map(str::to_string)),
     },
-    CommandDescriptor {
-        name: ":script",
-        description: "manage lua scripts",
+    CommandSpec {
+        aliases: &["script"],
+        descriptor: CommandDescriptor {
+            name: ":script",
+            description: "manage lua scripts",
+        },
+        build: |_| ModbusCmd::Script,
     },
-    CommandDescriptor {
-        name: ":order [col] [asc|desc]",
-        description: "sort table by column",
+    CommandSpec {
+        aliases: &["order"],
+        descriptor: CommandDescriptor {
+            name: ":order [col] [asc|desc]",
+            description: "sort table by column",
+        },
+        build: |rest| ModbusCmd::Order(rest.map(str::to_string)),
     },
 ];
 
@@ -1587,5 +1650,42 @@ mod tests {
         }
         // Tear down the server task spawned by the restart.
         let _ = view.handle_command("stop").await;
+    }
+
+    #[tokio::test]
+    /// tui/api-contract §2.1 — `:write-device [path]` is the long spelling of `:wd` and saves
+    /// the device config the same way.
+    async fn ut_write_device_alias_saves_like_wd() {
+        let mut view = new_view();
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ferrowl-write-device-{}.toml", std::process::id()));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+        let result = view.handle_command(&format!("write-device {p}")).await;
+        match result {
+            CommandResult::Handled(Some((_, msg))) => {
+                assert!(msg.contains("Saved device config"), "unexpected: {msg}");
+            }
+            _ => panic!(":write-device should be handled with a save message"),
+        }
+        assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    /// TUI edge case 6.8 — commands match on the exact first token: `:setfoo` is unknown, not a
+    /// malformed `:set`; bare `:set` still reports the usage warning.
+    async fn ut_set_prefix_typo_is_unknown_bare_set_warns() {
+        let mut view = new_view();
+        assert!(matches!(
+            view.handle_command("setfoo 1 2").await,
+            CommandResult::Unhandled
+        ));
+        match view.handle_command("set").await {
+            CommandResult::Handled(Some((level, msg))) => {
+                assert!(matches!(level, Level::Warning));
+                assert!(msg.contains(":set requires"), "unexpected: {msg}");
+            }
+            _ => panic!("bare :set should warn about usage"),
+        }
     }
 }
