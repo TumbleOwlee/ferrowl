@@ -21,9 +21,42 @@ pub enum CommandResult {
 }
 
 /// One entry in a module's command help list.
+#[derive(Clone, Copy)]
 pub struct CommandDescriptor {
     pub name: &'static str,
     pub description: &'static str,
+}
+
+/// One command in a view's dispatch table: the accepted aliases, the help row advertising it,
+/// and the constructor for the view's parsed-command value. Alias list, help text, and parse
+/// target live in this one entry so the advertised list and the handled set cannot drift apart;
+/// the exhaustive `match` on the parsed enum is what guarantees every entry has a handler.
+pub struct CommandSpec<C> {
+    /// First-token spellings that select this command (e.g. `&["wd", "write-device"]`).
+    pub aliases: &'static [&'static str],
+    /// The help row shown for this command.
+    pub descriptor: CommandDescriptor,
+    /// Build the parsed command from the argument remainder: `None` for a bare token,
+    /// `Some(rest)` (trimmed, non-empty) when arguments followed it.
+    pub build: fn(rest: Option<&str>) -> C,
+}
+
+/// Match `input` against `specs` by its exact first whitespace-delimited token (edge case
+/// TUI 6.8: `setfoo` never matches `set`). The remainder after the token — trimmed, `None`
+/// when empty — is passed to the matching entry's `build`. Returns `None` for an unknown
+/// token; argument validation is the handler's job, applied only after the token matched.
+pub fn parse_command<C>(specs: &[CommandSpec<C>], input: &str) -> Option<C> {
+    let trimmed = input.trim();
+    let (token, rest) = match trimmed.split_once(char::is_whitespace) {
+        Some((token, rest)) => (token, rest.trim()),
+        None => (trimmed, ""),
+    };
+    let spec = specs.iter().find(|s| s.aliases.contains(&token))?;
+    Some((spec.build)(if rest.is_empty() {
+        None
+    } else {
+        Some(rest)
+    }))
 }
 
 /// Object-safe async return type for [`ModuleView::handle_command`].
@@ -131,5 +164,66 @@ impl IsFocus for Box<dyn ModuleView> {
 impl HandleEvents for Box<dyn ModuleView> {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         (**self).handle_events(modifiers, code)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq)]
+    enum Cmd {
+        Start,
+        Save(Option<String>),
+    }
+
+    fn specs() -> [CommandSpec<Cmd>; 2] {
+        [
+            CommandSpec {
+                aliases: &["start"],
+                descriptor: CommandDescriptor {
+                    name: ":start",
+                    description: "start",
+                },
+                build: |_| Cmd::Start,
+            },
+            CommandSpec {
+                aliases: &["wd", "write-device"],
+                descriptor: CommandDescriptor {
+                    name: ":wd | :write-device [path]",
+                    description: "save",
+                },
+                build: |rest| Cmd::Save(rest.map(str::to_string)),
+            },
+        ]
+    }
+
+    #[test]
+    /// Every alias of a table entry selects the same command.
+    fn ut_parse_command_matches_every_alias() {
+        let specs = specs();
+        assert_eq!(parse_command(&specs, "wd"), Some(Cmd::Save(None)));
+        assert_eq!(parse_command(&specs, "write-device"), Some(Cmd::Save(None)));
+        assert_eq!(parse_command(&specs, "start"), Some(Cmd::Start));
+    }
+
+    #[test]
+    /// The remainder after the first token is trimmed and passed to `build`; empty becomes `None`.
+    fn ut_parse_command_passes_trimmed_remainder() {
+        let specs = specs();
+        assert_eq!(
+            parse_command(&specs, "  wd   a b.toml  "),
+            Some(Cmd::Save(Some("a b.toml".into())))
+        );
+        assert_eq!(parse_command(&specs, " wd  "), Some(Cmd::Save(None)));
+    }
+
+    #[test]
+    /// TUI edge case 6.8 — commands match on the exact first token, so a prefix typo is unknown.
+    fn ut_parse_command_exact_first_token_only() {
+        let specs = specs();
+        assert_eq!(parse_command(&specs, "startx"), None);
+        assert_eq!(parse_command(&specs, "wdx path"), None);
+        assert_eq!(parse_command(&specs, ""), None);
     }
 }
