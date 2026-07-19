@@ -1559,12 +1559,17 @@ mod tests {
     /// MB-R-098 — stopping an already-stopped instance during `:restart` is the expected
     /// no-op, not a reportable stop failure, so the restart is surfaced as Info.
     async fn ut_restart_from_stopped_does_not_report_stop_failure() {
-        let mut view = new_view();
-        // Bind ephemerally so the restart's start() is deterministic.
-        view.spec.endpoint = Endpoint::Tcp {
+        // Bind ephemerally so the restart's start() is deterministic. The endpoint must be
+        // ephemeral *before* module construction: `ModbusModule::new` snapshots the spec, so
+        // mutating `view.spec` afterwards would leave the module bound to the fixture port.
+        let device = empty_device();
+        let mut spec = tcp_server_spec();
+        spec.endpoint = Endpoint::Tcp {
             ip: "127.0.0.1".into(),
             port: 0,
         };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
         // The module is not running: stop() yields NotRunning, which must be swallowed.
         let result = view.handle_command("restart").await;
         match result {
