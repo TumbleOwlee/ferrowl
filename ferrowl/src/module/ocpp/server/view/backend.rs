@@ -20,10 +20,11 @@ use crate::module::ocpp::server::backend::{
 };
 use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::lua::{run_server_script_once, run_server_sim};
-use crate::module::view::{CommandFuture, CommandResult, RefreshFuture};
+use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_command};
 
 use super::{
-    Entry, EntryState, EntryStateT, ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
+    Entry, EntryState, EntryStateT, OCPP_SERVER_COMMAND_SPECS, OcppServerCmd, ServerOverlay,
+    ServerVersion, ServerView, fill_device_rfids,
 };
 
 /// The start/restart log line, built from the TLS mode the backend reports it actually bound
@@ -641,8 +642,11 @@ where
 
     pub(super) fn handle_command_impl<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
         Box::pin(async move {
-            match cmd.trim() {
-                "start" => {
+            let Some(parsed) = parse_command(&OCPP_SERVER_COMMAND_SPECS, cmd) else {
+                return CommandResult::Unhandled;
+            };
+            match parsed {
+                OcppServerCmd::Start => {
                     self.want_running = true;
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
@@ -656,7 +660,7 @@ where
                         ))),
                     }
                 }
-                "stop" => {
+                OcppServerCmd::Stop => {
                     self.want_running = false;
                     let stop_result = self.backend.stop().await;
                     self.entries.clear();
@@ -674,7 +678,7 @@ where
                         ))),
                     }
                 }
-                "restart" => {
+                OcppServerCmd::Restart => {
                     if let Err(e) = self.backend.stop().await {
                         self.log
                             .write()
@@ -698,7 +702,7 @@ where
                         ))),
                     }
                 }
-                "edit" | "e" => {
+                OcppServerCmd::Edit => {
                     self.overlay = ServerOverlay::Setup(Box::new(
                         crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
                             &self.spec,
@@ -707,7 +711,7 @@ where
                     ));
                     CommandResult::Handled(None)
                 }
-                "wd" => {
+                OcppServerCmd::WriteDevice(None) => {
                     if self.device_path.is_empty() {
                         CommandResult::Handled(Some((
                             Level::Warning,
@@ -717,79 +721,75 @@ where
                         self.save_device_to(&self.device_path.clone())
                     }
                 }
-                cmd if cmd.starts_with("wd ") => {
-                    let path = cmd["wd ".len()..].trim().to_string();
-                    self.save_device_to(&path)
-                }
-                "compact" => {
+                OcppServerCmd::WriteDevice(Some(path)) => self.save_device_to(&path),
+                OcppServerCmd::Compact => {
                     self.set_compact(!self.compact);
                     CommandResult::Handled(None)
                 }
-                "log" => {
+                OcppServerCmd::Log(None) => {
                     self.device.log_file = None;
                     CommandResult::Handled(Some((Level::Info, "File logging disabled".into())))
                 }
-                cmd if cmd.starts_with("log ") => {
-                    let path = cmd["log ".len()..].trim().to_string();
-                    if path.is_empty() {
-                        self.device.log_file = None;
-                        CommandResult::Handled(Some((Level::Info, "File logging disabled".into())))
-                    } else {
-                        self.device.log_file = Some(path.clone());
-                        CommandResult::Handled(Some((Level::Info, format!("Logging to {path}"))))
-                    }
+                OcppServerCmd::Log(Some(path)) => {
+                    self.device.log_file = Some(path.clone());
+                    CommandResult::Handled(Some((Level::Info, format!("Logging to {path}"))))
                 }
-                "rfid" => {
-                    let msg = with_rfids(&self.rfids, |s| {
-                        if s.cs.is_empty() {
-                            "CS RFID accept-list empty (all tags accepted)".to_string()
-                        } else {
-                            format!("Accepted CS RFIDs: {}", s.cs.join(", "))
-                        }
-                    });
-                    CommandResult::Handled(Some((Level::Info, msg)))
-                }
-                "rfid clear" => {
-                    with_rfids_mut(&self.rfids, |s| s.cs.clear());
-                    CommandResult::Handled(Some((
-                        Level::Info,
-                        "CS RFID accept-list cleared (all accepted)".into(),
-                    )))
-                }
-                cmd if cmd.starts_with("rfid add ") => {
-                    let tag = cmd["rfid add ".len()..].trim().to_string();
-                    if tag.is_empty() {
-                        return CommandResult::Handled(Some((
-                            Level::Warning,
-                            "Usage: :rfid add <tag>".into(),
-                        )));
-                    }
-                    if with_rfids_mut(&self.rfids, |s| s.add(Scope::CS, tag.clone())) {
-                        CommandResult::Handled(Some((Level::Info, format!("Added CS RFID {tag}"))))
-                    } else {
-                        CommandResult::Handled(Some((
-                            Level::Warning,
-                            format!("{tag} already in accept-list"),
-                        )))
-                    }
-                }
-                cmd if cmd.starts_with("rfid del ") => {
-                    let tag = cmd["rfid del ".len()..].trim().to_string();
-                    if with_rfids_mut(&self.rfids, |s| s.remove(Scope::CS, &tag)) {
-                        CommandResult::Handled(Some((
-                            Level::Info,
-                            format!("Removed CS RFID {tag}"),
-                        )))
-                    } else {
-                        CommandResult::Handled(Some((
-                            Level::Warning,
-                            format!("{tag} not in accept-list"),
-                        )))
-                    }
-                }
-                _ => CommandResult::Unhandled,
+                OcppServerCmd::Rfid(sub) => self.handle_rfid(sub.as_deref()),
             }
         })
+    }
+
+    /// The `:rfid` subcommands: bare lists the accept-list, `clear` empties it, `add <tag>` /
+    /// `del <tag>` mutate it. Anything else stays unhandled (an unknown command).
+    fn handle_rfid(&mut self, sub: Option<&str>) -> CommandResult {
+        match sub {
+            None => {
+                let msg = with_rfids(&self.rfids, |s| {
+                    if s.cs.is_empty() {
+                        "CS RFID accept-list empty (all tags accepted)".to_string()
+                    } else {
+                        format!("Accepted CS RFIDs: {}", s.cs.join(", "))
+                    }
+                });
+                CommandResult::Handled(Some((Level::Info, msg)))
+            }
+            Some("clear") => {
+                with_rfids_mut(&self.rfids, |s| s.cs.clear());
+                CommandResult::Handled(Some((
+                    Level::Info,
+                    "CS RFID accept-list cleared (all accepted)".into(),
+                )))
+            }
+            Some(rest) if rest.starts_with("add ") => {
+                let tag = rest["add ".len()..].trim().to_string();
+                if tag.is_empty() {
+                    return CommandResult::Handled(Some((
+                        Level::Warning,
+                        "Usage: :rfid add <tag>".into(),
+                    )));
+                }
+                if with_rfids_mut(&self.rfids, |s| s.add(Scope::CS, tag.clone())) {
+                    CommandResult::Handled(Some((Level::Info, format!("Added CS RFID {tag}"))))
+                } else {
+                    CommandResult::Handled(Some((
+                        Level::Warning,
+                        format!("{tag} already in accept-list"),
+                    )))
+                }
+            }
+            Some(rest) if rest.starts_with("del ") => {
+                let tag = rest["del ".len()..].trim().to_string();
+                if with_rfids_mut(&self.rfids, |s| s.remove(Scope::CS, &tag)) {
+                    CommandResult::Handled(Some((Level::Info, format!("Removed CS RFID {tag}"))))
+                } else {
+                    CommandResult::Handled(Some((
+                        Level::Warning,
+                        format!("{tag} not in accept-list"),
+                    )))
+                }
+            }
+            Some(_) => CommandResult::Unhandled,
+        }
     }
 }
 

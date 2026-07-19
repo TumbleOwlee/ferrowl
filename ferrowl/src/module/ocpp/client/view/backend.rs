@@ -13,9 +13,12 @@ use crate::module::ocpp::config::session::OcppRole;
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::build_server_view;
-use crate::module::view::{CommandFuture, CommandResult, RefreshFuture};
+use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_command};
 
-use super::{ClientState, ClientVersion, ClientView, config_rows, conn_rows, msg_row, nv_rows};
+use super::{
+    ClientState, ClientVersion, ClientView, OCPP_CLIENT_COMMAND_SPECS, OcppClientCmd, config_rows,
+    conn_rows, msg_row, nv_rows,
+};
 
 impl<V: ClientVersion> ClientView<V> {
     pub(super) fn start_sim(&mut self) {
@@ -373,8 +376,11 @@ impl<V: ClientVersion> ClientView<V> {
     }
 
     pub(super) fn handle_command_impl<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
-        match cmd.trim() {
-            "start" => Box::pin(async move {
+        let Some(parsed) = parse_command(&OCPP_CLIENT_COMMAND_SPECS, cmd) else {
+            return Box::pin(std::future::ready(CommandResult::Unhandled));
+        };
+        match parsed {
+            OcppClientCmd::Start => Box::pin(async move {
                 let handler = self.make_handler();
                 match self.backend.start(&self.spec, handler).await {
                     Ok(()) => CommandResult::Handled(Some((
@@ -386,7 +392,7 @@ impl<V: ClientVersion> ClientView<V> {
                     }
                 }
             }),
-            "stop" => Box::pin(async move {
+            OcppClientCmd::Stop => Box::pin(async move {
                 match self.backend.stop().await {
                     Ok(()) => CommandResult::Handled(Some((Level::Info, "Disconnected".into()))),
                     Err(e) => CommandResult::Handled(Some((
@@ -395,7 +401,7 @@ impl<V: ClientVersion> ClientView<V> {
                     ))),
                 }
             }),
-            "restart" => Box::pin(async move {
+            OcppClientCmd::Restart => Box::pin(async move {
                 if let Err(e) = self.backend.stop().await {
                     self.log
                         .write()
@@ -411,7 +417,7 @@ impl<V: ClientVersion> ClientView<V> {
                     ))),
                 }
             }),
-            "edit" | "e" => {
+            OcppClientCmd::Edit => {
                 self.overlay = super::ClientOverlay::Setup(Box::new(
                     crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
                         &self.spec,
@@ -420,11 +426,11 @@ impl<V: ClientVersion> ClientView<V> {
                 ));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
-            "compact" => {
+            OcppClientCmd::Compact => {
                 self.set_compact(!self.compact);
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
-            "wd" => {
+            OcppClientCmd::WriteDevice(None) => {
                 let result = if self.device_path.is_empty() {
                     CommandResult::Handled(Some((
                         Level::Warning,
@@ -435,33 +441,26 @@ impl<V: ClientVersion> ClientView<V> {
                 };
                 Box::pin(std::future::ready(result))
             }
-            cmd if cmd.starts_with("wd ") => {
-                let path = cmd["wd ".len()..].trim().to_string();
+            OcppClientCmd::WriteDevice(Some(path)) => {
                 let result = self.save_device_to(&path);
                 Box::pin(std::future::ready(result))
             }
-            "log" => {
-                self.device.log_file = None;
-                Box::pin(std::future::ready(CommandResult::Handled(Some((
-                    Level::Info,
-                    "File logging disabled".into(),
-                )))))
-            }
-            cmd if cmd.starts_with("log ") => {
-                let path = cmd["log ".len()..].trim().to_string();
-                let msg = if path.is_empty() {
-                    self.device.log_file = None;
-                    "File logging disabled".to_string()
-                } else {
-                    self.device.log_file = Some(path.clone());
-                    format!("Logging to {path}")
+            OcppClientCmd::Log(file) => {
+                let msg = match file {
+                    None => {
+                        self.device.log_file = None;
+                        "File logging disabled".to_string()
+                    }
+                    Some(path) => {
+                        self.device.log_file = Some(path.clone());
+                        format!("Logging to {path}")
+                    }
                 };
                 Box::pin(std::future::ready(CommandResult::Handled(Some((
                     Level::Info,
                     msg,
                 )))))
             }
-            _ => Box::pin(std::future::ready(CommandResult::Unhandled)),
         }
     }
 }
