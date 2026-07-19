@@ -2268,7 +2268,7 @@ dependencies = [
 [[package]]
 name = "rust-ocpp"
 version = "3.0.4"
-source = "git+https://github.com/TumbleOwlee/rust-ocpp?branch=main#d9d8364e7d802dacfd8a4bfc479ce89a3210dece"
+source = "git+https://github.com/TumbleOwlee/rust-ocpp?rev=d9d8364e7d802dacfd8a4bfc479ce89a3210dece#d9d8364e7d802dacfd8a4bfc479ce89a3210dece"
 dependencies = [
  "chrono",
  "lazy_static",

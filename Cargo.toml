@@ -61,7 +61,9 @@ ratatui = { version = "0.30.0", features = [
     "unstable-widget-ref",
 ] }
 rcgen = "0.14.8"
-rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", branch = "main", default-features = false }
+# Pinned by rev, not branch: `cargo update` must not silently move us to whatever the fork's
+# `main` points at. Bump the rev deliberately when pulling in upstream changes.
+rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "d9d8364e7d802dacfd8a4bfc479ce89a3210dece", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
     "ring",
     "std",
