@@ -855,7 +855,9 @@ mod tests {
         use super::ModbusModule;
 
         let device = device_with_script(vec![script(r#"C_Register:Set("marker", 7)"#, true)]);
-        let mut module = ModbusModule::new(&test_spec("sim6", 15207), &device);
+        // Port 0: this is the one sim test that actually calls `start()`, so a fixed port
+        // would fail whenever something else occupies it.
+        let mut module = ModbusModule::new(&test_spec("sim6", 0), &device);
         assert!(module.lua_running());
 
         module.start().await.expect("start");
