@@ -173,6 +173,14 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config needed)
   function names prefixed `ut_`. For integration tests, the function names are 
   prefixed with `it_`  (notably in `ferrowl-ui` and much of `ferrowl`). Integration
   tests belong in each crate's `tests/`.
+- **Tests bind ephemeral ports only.** Any test that starts a network listener (Modbus
+  TCP, OCPP WebSocket, a raw occupier socket) binds port 0 and reads the assigned port
+  back — never a fixed port number. A fixed port makes the test fail whenever anything
+  else on the machine holds it (a running `ferrowl --demo`, a parallel checkout's tests);
+  ephemeral binding removes the collision class entirely. Fixed ports in specs that are
+  never `start()`ed are inert, but prefer port 0 there too so the intent stays obvious.
+  Deliberately *occupying* a port to test bind-failure handling still binds the occupier
+  ephemerally first, then points the server at that port (see `tcp_loopback.rs`).
 - All 13 workspace crates are versioned in lockstep. Don't bump one independently.
 - Config files are TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
