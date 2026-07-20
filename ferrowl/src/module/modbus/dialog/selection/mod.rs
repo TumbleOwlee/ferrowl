@@ -3,9 +3,9 @@
 
 use super::{
     AccessOption, AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption,
-    SubDialogs, ValueType, access_index, alignment_index, endian_index, format_index,
-    is_integer_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
-    with_numeric_parts,
+    SubDialogs, ValueType, WordOrder, access_index, alignment_index, endian_index, format_index,
+    is_integer_format, is_multi_register_format, kind_index, numeric_parts, parse_address,
+    parse_bitmask, set_input, with_numeric_parts, word_order_index,
 };
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::EditedRegister;
@@ -105,6 +105,9 @@ where
     // Number endianess selection
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
+    // Register (word) order selection (only for multi-register numeric formats)
+    #[focus(when = {self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0)})]
+    pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
     // Number resolution input
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
@@ -251,7 +254,7 @@ impl EditSelectionDialog<NamedValue> {
                 set_input(&mut dialog.text_width, &width.0.to_string());
             }
             numeric => {
-                let (endian, resolution, bitfield) = numeric_parts(numeric);
+                let (endian, word_order, resolution, bitfield) = numeric_parts(numeric);
                 dialog.value_type.state.set_selection(0);
                 dialog
                     .number_format
@@ -261,6 +264,10 @@ impl EditSelectionDialog<NamedValue> {
                     .number_endian
                     .state
                     .set_selection(endian_index(&endian));
+                dialog
+                    .number_word_order
+                    .state
+                    .set_selection(word_order_index(&word_order));
                 set_input(&mut dialog.number_resolution, &resolution.0.to_string());
                 // Show the mask only when it actually selects a sub-field.
                 if !bitfield.is_full() {
@@ -297,6 +304,7 @@ impl EditSelectionDialog<NamedValue> {
             ValueType::Number => {
                 let selected = self.number_format.state.get_value();
                 let endian = self.number_endian.state.get_value().0;
+                let word_order = self.number_word_order.state.get_value().0;
                 let resolution = Resolution(
                     self.number_resolution
                         .state
@@ -312,7 +320,7 @@ impl EditSelectionDialog<NamedValue> {
                 } else {
                     BitField::default()
                 };
-                with_numeric_parts(&selected.0, endian, resolution, bitfield)
+                with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
             }
             ValueType::Text => {
                 let alignment = self.text_alignment.state.get_value().0;
@@ -403,6 +411,7 @@ impl EditSelectionDialog<NamedValue> {
         d.value_type.state = self.value_type.state.clone();
         d.number_format.state = self.number_format.state.clone();
         d.number_endian.state = self.number_endian.state.clone();
+        d.number_word_order.state = self.number_word_order.state.clone();
         d.number_resolution.state = self.number_resolution.state.clone();
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
@@ -502,6 +511,7 @@ mod apply_tests {
     use crate::config::device::{NamedValue, Scalar};
     use ferrowl_codec::format::{
         BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+        WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
 
@@ -534,7 +544,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(10),
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
         );
         let edited = EditSelectionDialog::from_register(
             "state",
@@ -559,7 +574,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(0),
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
         );
         let dialog = EditSelectionDialog::from_register(
             "s",
@@ -578,7 +598,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(0),
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
         );
         let mut dialog = EditSelectionDialog::from_register(
             "s",
@@ -613,6 +638,7 @@ mod focus_tests {
     use crate::config::device::{NamedValue, Scalar};
     use ferrowl_codec::format::{
         BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+        WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
 
@@ -624,6 +650,7 @@ mod focus_tests {
             .address(Address::Fixed(0))
             .format(RegisterFormat::U16((
                 RegisterEndian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -667,7 +694,9 @@ mod default_and_conversion_tests {
     use super::{EditSelectionDialog, EditSelectionDialogFocus};
     use crate::config::device::{NamedValue, Scalar};
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::format::{
+        BitField, Endian, Format, Resolution, WordOrder as RegisterWordOrder,
+    };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
     use ferrowl_ui::traits::HandleEvents;
 
@@ -679,6 +708,7 @@ mod default_and_conversion_tests {
             .address(Address::Fixed(7))
             .format(Format::U16((
                 Endian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))

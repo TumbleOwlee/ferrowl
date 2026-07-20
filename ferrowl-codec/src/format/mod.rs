@@ -4,35 +4,37 @@ mod alignment;
 mod bitfield;
 mod endian;
 mod scalar;
+mod word_order;
 
 pub use alignment::Alignment;
 pub use bitfield::BitField;
 pub use endian::Endian;
 pub use scalar::{Resolution, Width};
+pub use word_order::WordOrder;
 
 use serde::{Deserialize, Serialize};
 
 /// How the raw register words of a value are interpreted.
 ///
-/// Integer variants carry the byte order ([`Endian`]), display scale
-/// ([`Resolution`]) and a [`BitField`] selector; float variants carry just
-/// endian and resolution; [`Ascii`](Self::Ascii) carries its [`Alignment`] and
-/// [`Width`] in registers.
+/// Integer variants carry the byte order ([`Endian`]), the register order
+/// ([`WordOrder`]), display scale ([`Resolution`]) and a [`BitField`] selector;
+/// float variants carry endian, word order and resolution; [`Ascii`](Self::Ascii)
+/// carries its [`Alignment`] and [`Width`] in registers.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Format {
     Ascii((Alignment, Width)),
-    U8((Endian, Resolution, BitField)),
-    U16((Endian, Resolution, BitField)),
-    U32((Endian, Resolution, BitField)),
-    U64((Endian, Resolution, BitField)),
-    U128((Endian, Resolution, BitField)),
-    I8((Endian, Resolution, BitField)),
-    I16((Endian, Resolution, BitField)),
-    I32((Endian, Resolution, BitField)),
-    I64((Endian, Resolution, BitField)),
-    I128((Endian, Resolution, BitField)),
-    F32((Endian, Resolution)),
-    F64((Endian, Resolution)),
+    U8((Endian, WordOrder, Resolution, BitField)),
+    U16((Endian, WordOrder, Resolution, BitField)),
+    U32((Endian, WordOrder, Resolution, BitField)),
+    U64((Endian, WordOrder, Resolution, BitField)),
+    U128((Endian, WordOrder, Resolution, BitField)),
+    I8((Endian, WordOrder, Resolution, BitField)),
+    I16((Endian, WordOrder, Resolution, BitField)),
+    I32((Endian, WordOrder, Resolution, BitField)),
+    I64((Endian, WordOrder, Resolution, BitField)),
+    I128((Endian, WordOrder, Resolution, BitField)),
+    F32((Endian, WordOrder, Resolution)),
+    F64((Endian, WordOrder, Resolution)),
 }
 
 impl std::fmt::Display for Format {
@@ -47,18 +49,18 @@ impl std::fmt::Display for Format {
             Format::Ascii((alignment, _)) => {
                 write!(fmt, "ASCII ({})", alignment)
             }
-            Format::U8((e, _, _)) => fmt_variant!(U8, e),
-            Format::U16((e, _, _)) => fmt_variant!(U16, e),
-            Format::U32((e, _, _)) => fmt_variant!(U32, e),
-            Format::U64((e, _, _)) => fmt_variant!(U64, e),
-            Format::U128((e, _, _)) => fmt_variant!(U128, e),
-            Format::I8((e, _, _)) => fmt_variant!(I8, e),
-            Format::I16((e, _, _)) => fmt_variant!(I16, e),
-            Format::I32((e, _, _)) => fmt_variant!(I32, e),
-            Format::I64((e, _, _)) => fmt_variant!(I64, e),
-            Format::I128((e, _, _)) => fmt_variant!(I128, e),
-            Format::F32((e, _)) => fmt_variant!(F32, e),
-            Format::F64((e, _)) => fmt_variant!(F64, e),
+            Format::U8((e, _, _, _)) => fmt_variant!(U8, e),
+            Format::U16((e, _, _, _)) => fmt_variant!(U16, e),
+            Format::U32((e, _, _, _)) => fmt_variant!(U32, e),
+            Format::U64((e, _, _, _)) => fmt_variant!(U64, e),
+            Format::U128((e, _, _, _)) => fmt_variant!(U128, e),
+            Format::I8((e, _, _, _)) => fmt_variant!(I8, e),
+            Format::I16((e, _, _, _)) => fmt_variant!(I16, e),
+            Format::I32((e, _, _, _)) => fmt_variant!(I32, e),
+            Format::I64((e, _, _, _)) => fmt_variant!(I64, e),
+            Format::I128((e, _, _, _)) => fmt_variant!(I128, e),
+            Format::F32((e, _, _)) => fmt_variant!(F32, e),
+            Format::F64((e, _, _)) => fmt_variant!(F64, e),
         }
     }
 }
@@ -79,17 +81,19 @@ impl Format {
     pub fn resolution(&self) -> Option<Resolution> {
         match self {
             Self::Ascii((_, _)) => None,
-            Self::U8((_, resolution, _))
-            | Self::U16((_, resolution, _))
-            | Self::I8((_, resolution, _))
-            | Self::I16((_, resolution, _))
-            | Self::U32((_, resolution, _))
-            | Self::I32((_, resolution, _))
-            | Self::U64((_, resolution, _))
-            | Self::I64((_, resolution, _))
-            | Self::U128((_, resolution, _))
-            | Self::I128((_, resolution, _)) => Some(resolution.clone()),
-            Self::F32((_, resolution)) | Self::F64((_, resolution)) => Some(resolution.clone()),
+            Self::U8((_, _, resolution, _))
+            | Self::U16((_, _, resolution, _))
+            | Self::I8((_, _, resolution, _))
+            | Self::I16((_, _, resolution, _))
+            | Self::U32((_, _, resolution, _))
+            | Self::I32((_, _, resolution, _))
+            | Self::U64((_, _, resolution, _))
+            | Self::I64((_, _, resolution, _))
+            | Self::U128((_, _, resolution, _))
+            | Self::I128((_, _, resolution, _)) => Some(resolution.clone()),
+            Self::F32((_, _, resolution)) | Self::F64((_, _, resolution)) => {
+                Some(resolution.clone())
+            }
         }
     }
 
@@ -97,17 +101,36 @@ impl Format {
     /// (full mask, shift 0) for float and ASCII formats.
     pub fn bitfield(&self) -> BitField {
         match self {
-            Self::U8((_, _, bf))
-            | Self::U16((_, _, bf))
-            | Self::U32((_, _, bf))
-            | Self::U64((_, _, bf))
-            | Self::U128((_, _, bf))
-            | Self::I8((_, _, bf))
-            | Self::I16((_, _, bf))
-            | Self::I32((_, _, bf))
-            | Self::I64((_, _, bf))
-            | Self::I128((_, _, bf)) => bf.clone(),
+            Self::U8((_, _, _, bf))
+            | Self::U16((_, _, _, bf))
+            | Self::U32((_, _, _, bf))
+            | Self::U64((_, _, _, bf))
+            | Self::U128((_, _, _, bf))
+            | Self::I8((_, _, _, bf))
+            | Self::I16((_, _, _, bf))
+            | Self::I32((_, _, _, bf))
+            | Self::I64((_, _, _, bf))
+            | Self::I128((_, _, _, bf)) => bf.clone(),
             Self::F32(_) | Self::F64(_) | Self::Ascii(_) => BitField::default(),
+        }
+    }
+
+    /// The register (word) order for numeric formats, or the `Normal` no-op
+    /// default for ASCII.
+    pub fn word_order(&self) -> WordOrder {
+        match self {
+            Self::U8((_, w, _, _))
+            | Self::U16((_, w, _, _))
+            | Self::U32((_, w, _, _))
+            | Self::U64((_, w, _, _))
+            | Self::U128((_, w, _, _))
+            | Self::I8((_, w, _, _))
+            | Self::I16((_, w, _, _))
+            | Self::I32((_, w, _, _))
+            | Self::I64((_, w, _, _))
+            | Self::I128((_, w, _, _)) => *w,
+            Self::F32((_, w, _)) | Self::F64((_, w, _)) => *w,
+            Self::Ascii(_) => WordOrder::Normal,
         }
     }
 
@@ -119,7 +142,7 @@ impl Format {
 
 #[cfg(test)]
 mod tests {
-    use super::{Alignment, BitField, Endian, Format, Resolution, Width};
+    use super::{Alignment, BitField, Endian, Format, Resolution, Width, WordOrder};
 
     fn res() -> Resolution {
         Resolution(1.0)
@@ -133,27 +156,75 @@ mod tests {
     /// MB-R-011 — per-format register widths (1/1/1/1, 2/2/2, 4/4/4, 8/8, Ascii = width).
     fn ut_format_width() {
         assert_eq!(Format::Ascii((Alignment::Left, Width(4))).width(), 4);
-        assert_eq!(Format::U8((Endian::Big, res(), bf())).width(), 1);
-        assert_eq!(Format::U16((Endian::Big, res(), bf())).width(), 1);
-        assert_eq!(Format::I8((Endian::Big, res(), bf())).width(), 1);
-        assert_eq!(Format::I16((Endian::Big, res(), bf())).width(), 1);
-        assert_eq!(Format::U32((Endian::Big, res(), bf())).width(), 2);
-        assert_eq!(Format::I32((Endian::Big, res(), bf())).width(), 2);
-        assert_eq!(Format::F32((Endian::Big, res())).width(), 2);
-        assert_eq!(Format::U64((Endian::Big, res(), bf())).width(), 4);
-        assert_eq!(Format::I64((Endian::Big, res(), bf())).width(), 4);
-        assert_eq!(Format::F64((Endian::Big, res())).width(), 4);
-        assert_eq!(Format::U128((Endian::Big, res(), bf())).width(), 8);
-        assert_eq!(Format::I128((Endian::Big, res(), bf())).width(), 8);
+        assert_eq!(
+            Format::U8((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            1
+        );
+        assert_eq!(
+            Format::U16((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            1
+        );
+        assert_eq!(
+            Format::I8((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            1
+        );
+        assert_eq!(
+            Format::I16((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            1
+        );
+        assert_eq!(
+            Format::U32((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            2
+        );
+        assert_eq!(
+            Format::I32((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            2
+        );
+        assert_eq!(
+            Format::F32((Endian::Big, WordOrder::Normal, res())).width(),
+            2
+        );
+        assert_eq!(
+            Format::U64((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            4
+        );
+        assert_eq!(
+            Format::I64((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            4
+        );
+        assert_eq!(
+            Format::F64((Endian::Big, WordOrder::Normal, res())).width(),
+            4
+        );
+        assert_eq!(
+            Format::U128((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            8
+        );
+        assert_eq!(
+            Format::I128((Endian::Big, WordOrder::Normal, res(), bf())).width(),
+            8
+        );
     }
 
     #[test]
     /// MB-R-011 — byte length is twice the register width.
     fn ut_format_length() {
-        assert_eq!(Format::U8((Endian::Big, res(), bf())).length(), 2);
-        assert_eq!(Format::U32((Endian::Big, res(), bf())).length(), 4);
-        assert_eq!(Format::U64((Endian::Big, res(), bf())).length(), 8);
-        assert_eq!(Format::U128((Endian::Big, res(), bf())).length(), 16);
+        assert_eq!(
+            Format::U8((Endian::Big, WordOrder::Normal, res(), bf())).length(),
+            2
+        );
+        assert_eq!(
+            Format::U32((Endian::Big, WordOrder::Normal, res(), bf())).length(),
+            4
+        );
+        assert_eq!(
+            Format::U64((Endian::Big, WordOrder::Normal, res(), bf())).length(),
+            8
+        );
+        assert_eq!(
+            Format::U128((Endian::Big, WordOrder::Normal, res(), bf())).length(),
+            16
+        );
         assert_eq!(Format::Ascii((Alignment::Left, Width(3))).length(), 6);
     }
 
@@ -163,16 +234,20 @@ mod tests {
         // Integer carries its BitField; float/ASCII report the no-op default.
         let bitfield = BitField { mask: 0xFF00 };
         assert_eq!(
-            Format::U16((Endian::Big, res(), bitfield.clone())).bitfield(),
+            Format::U16((Endian::Big, WordOrder::Normal, res(), bitfield.clone())).bitfield(),
             bitfield
         );
         assert_eq!(
-            Format::U16((Endian::Big, res(), bitfield))
+            Format::U16((Endian::Big, WordOrder::Normal, res(), bitfield))
                 .bitfield()
                 .shift(),
             8
         );
-        assert!(Format::F32((Endian::Big, res())).bitfield().is_full());
+        assert!(
+            Format::F32((Endian::Big, WordOrder::Normal, res()))
+                .bitfield()
+                .is_full()
+        );
         assert!(
             Format::Ascii((Alignment::Left, Width(1)))
                 .bitfield()
@@ -190,21 +265,21 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            Format::U8((Endian::Big, r.clone(), bf()))
+            Format::U8((Endian::Big, WordOrder::Normal, r.clone(), bf()))
                 .resolution()
                 .unwrap()
                 .0,
             0.5
         );
         assert_eq!(
-            Format::I16((Endian::Little, r.clone(), bf()))
+            Format::I16((Endian::Little, WordOrder::Normal, r.clone(), bf()))
                 .resolution()
                 .unwrap()
                 .0,
             0.5
         );
         assert_eq!(
-            Format::F32((Endian::Big, r.clone()))
+            Format::F32((Endian::Big, WordOrder::Normal, r.clone()))
                 .resolution()
                 .unwrap()
                 .0,
@@ -218,15 +293,15 @@ mod tests {
         let r = Resolution(0.25);
         let e = Endian::Big;
         for f in [
-            Format::U16((e.clone(), r.clone(), bf())),
-            Format::I8((e.clone(), r.clone(), bf())),
-            Format::U32((e.clone(), r.clone(), bf())),
-            Format::I32((e.clone(), r.clone(), bf())),
-            Format::U64((e.clone(), r.clone(), bf())),
-            Format::I64((e.clone(), r.clone(), bf())),
-            Format::U128((e.clone(), r.clone(), bf())),
-            Format::I128((e.clone(), r.clone(), bf())),
-            Format::F64((e.clone(), r.clone())),
+            Format::U16((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::I8((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::U32((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::I32((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::U64((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::I64((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::U128((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::I128((e.clone(), WordOrder::Normal, r.clone(), bf())),
+            Format::F64((e.clone(), WordOrder::Normal, r.clone())),
         ] {
             assert_eq!(f.resolution().unwrap().0, 0.25);
         }
@@ -238,20 +313,24 @@ mod tests {
         let m = BitField { mask: 0x0FF0 };
         let e = Endian::Big;
         for f in [
-            Format::U8((e.clone(), res(), m.clone())),
-            Format::U32((e.clone(), res(), m.clone())),
-            Format::U64((e.clone(), res(), m.clone())),
-            Format::U128((e.clone(), res(), m.clone())),
-            Format::I8((e.clone(), res(), m.clone())),
-            Format::I16((e.clone(), res(), m.clone())),
-            Format::I32((e.clone(), res(), m.clone())),
-            Format::I64((e.clone(), res(), m.clone())),
-            Format::I128((e.clone(), res(), m.clone())),
+            Format::U8((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::U32((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::U64((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::U128((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::I8((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::I16((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::I32((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::I64((e.clone(), WordOrder::Normal, res(), m.clone())),
+            Format::I128((e.clone(), WordOrder::Normal, res(), m.clone())),
         ] {
             assert_eq!(f.bitfield(), m);
         }
         // Float variant reports the no-op default.
-        assert!(Format::F64((e, res())).bitfield().is_full());
+        assert!(
+            Format::F64((e, WordOrder::Normal, res()))
+                .bitfield()
+                .is_full()
+        );
     }
 
     #[test]
@@ -263,49 +342,52 @@ mod tests {
         );
         let e = Endian::Big;
         assert_eq!(
-            Format::U8((e.clone(), res(), bf())).to_string(),
+            Format::U8((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "U8 (Big Endian)"
         );
         assert_eq!(
-            Format::U16((e.clone(), res(), bf())).to_string(),
+            Format::U16((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "U16 (Big Endian)"
         );
         assert_eq!(
-            Format::U32((e.clone(), res(), bf())).to_string(),
+            Format::U32((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "U32 (Big Endian)"
         );
         assert_eq!(
-            Format::U64((e.clone(), res(), bf())).to_string(),
+            Format::U64((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "U64 (Big Endian)"
         );
         assert_eq!(
-            Format::U128((e.clone(), res(), bf())).to_string(),
+            Format::U128((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "U128 (Big Endian)"
         );
         assert_eq!(
-            Format::I8((e.clone(), res(), bf())).to_string(),
+            Format::I8((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "I8 (Big Endian)"
         );
         assert_eq!(
-            Format::I16((e.clone(), res(), bf())).to_string(),
+            Format::I16((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "I16 (Big Endian)"
         );
         assert_eq!(
-            Format::I32((e.clone(), res(), bf())).to_string(),
+            Format::I32((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "I32 (Big Endian)"
         );
         assert_eq!(
-            Format::I64((e.clone(), res(), bf())).to_string(),
+            Format::I64((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "I64 (Big Endian)"
         );
         assert_eq!(
-            Format::I128((e.clone(), res(), bf())).to_string(),
+            Format::I128((e.clone(), WordOrder::Normal, res(), bf())).to_string(),
             "I128 (Big Endian)"
         );
         assert_eq!(
-            Format::F32((e.clone(), res())).to_string(),
+            Format::F32((e.clone(), WordOrder::Normal, res())).to_string(),
             "F32 (Big Endian)"
         );
-        assert_eq!(Format::F64((e, res())).to_string(), "F64 (Big Endian)");
+        assert_eq!(
+            Format::F64((e, WordOrder::Normal, res())).to_string(),
+            "F64 (Big Endian)"
+        );
     }
 }

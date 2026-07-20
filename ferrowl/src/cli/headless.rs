@@ -518,7 +518,7 @@ mod tests {
 
     fn holding_device_config() -> config::DeviceConfig {
         use crate::module::modbus::config::device::{
-            AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType,
+            AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType, WordOrderCfg,
         };
         use ferrowl_codec::Kind;
 
@@ -533,6 +533,7 @@ mod tests {
                 access: AccessCfg::ReadWrite,
                 value_type: ValueType::U16,
                 endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
                 resolution: 1.0,
                 bitmask: None,
                 length: 1,

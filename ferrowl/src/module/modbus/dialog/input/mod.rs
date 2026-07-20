@@ -1,12 +1,15 @@
 //! Free-text register edit dialog: every register property as an input field.
 
-use super::{AccessOption, Alignment, Endian, Format, KindOption, ValueType, parse_address};
+use super::{
+    AccessOption, Alignment, Endian, Format, KindOption, ValueType, WordOrder, parse_address,
+};
 use crate::config::device::{NamedValue, Scalar};
 use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmEvent};
 use derive_builder::Builder;
 use ferrowl_codec::format::{
     BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution, Width,
+    WordOrder as RegisterWordOrder,
 };
 use ferrowl_codec::{Address, Kind, Register, RegisterBuilder, encode};
 use ferrowl_ui::{
@@ -53,6 +56,9 @@ pub struct EditInputDialog {
     // Number endianess selection
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
+    // Register (word) order selection (only for multi-register numeric formats)
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0) })]
+    pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
     // Number resolution input
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
@@ -241,7 +247,7 @@ impl EditInputDialog {
                 set_input(&mut dialog.text_width, &width.0.to_string());
             }
             numeric => {
-                let (endian, resolution, bitfield) = numeric_parts(numeric);
+                let (endian, word_order, resolution, bitfield) = numeric_parts(numeric);
                 dialog.value_type.state.set_selection(0);
                 dialog
                     .number_format
@@ -251,6 +257,10 @@ impl EditInputDialog {
                     .number_endian
                     .state
                     .set_selection(endian_index(&endian));
+                dialog
+                    .number_word_order
+                    .state
+                    .set_selection(word_order_index(&word_order));
                 set_input(&mut dialog.number_resolution, &resolution.0.to_string());
                 // Show the mask only when it actually selects a sub-field.
                 if !bitfield.is_full() {
@@ -272,12 +282,18 @@ impl EditInputDialog {
         let address = parse_address(self.address.state.input())?;
 
         let format = if self.is_boolean_kind() {
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default()))
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
         } else {
             match self.value_type.state.get_value() {
                 ValueType::Number => {
                     let selected = self.number_format.state.get_value();
                     let endian = self.number_endian.state.get_value().0;
+                    let word_order = self.number_word_order.state.get_value().0;
                     let resolution = Resolution(
                         self.number_resolution
                             .state
@@ -293,7 +309,7 @@ impl EditInputDialog {
                     } else {
                         BitField::default()
                     };
-                    with_numeric_parts(&selected.0, endian, resolution, bitfield)
+                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
                 }
                 ValueType::Text => {
                     let alignment = self.text_alignment.state.get_value().0;
@@ -394,6 +410,7 @@ impl EditInputDialog {
         d.value_type.state = self.value_type.state.clone();
         d.number_format.state = self.number_format.state.clone();
         d.number_endian.state = self.number_endian.state.clone();
+        d.number_word_order.state = self.number_word_order.state.clone();
         d.number_resolution.state = self.number_resolution.state.clone();
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
@@ -497,8 +514,8 @@ impl super::RegisterDialog for EditInputDialog {
 
 use super::{
     AddNamedValueDialog, ConfirmDeleteDialog, SubDialogs, access_index, alignment_index,
-    endian_index, format_index, is_integer_format, kind_index, numeric_parts, parse_bitmask,
-    set_input, with_numeric_parts,
+    endian_index, format_index, is_integer_format, is_multi_register_format, kind_index,
+    numeric_parts, parse_bitmask, set_input, with_numeric_parts, word_order_index,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::traits::HandleEvents;
@@ -510,7 +527,7 @@ mod apply_tests {
     use super::EditInputDialog;
     use ferrowl_codec::format::{
         Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
-        Resolution, Width,
+        Resolution, Width, WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
 
@@ -538,7 +555,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(100),
             7,
-            RegisterFormat::U32((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+            RegisterFormat::U32((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
         );
         let edited = EditInputDialog::from_register("temp", "a sensor", &original, "42", None)
             .apply()
@@ -555,13 +577,39 @@ mod apply_tests {
     }
 
     #[test]
+    /// MB-R-099 — a reversed register order is seeded on open and preserved through apply.
+    fn ut_reversed_word_order_round_trips_through_apply() {
+        let original = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(10),
+            1,
+            RegisterFormat::U32((
+                RegisterEndian::Big,
+                RegisterWordOrder::Reversed,
+                Resolution(1.0),
+                BitField::default(),
+            )),
+        );
+        let edited = EditInputDialog::from_register("w", "", &original, "1", None)
+            .apply()
+            .expect("valid register should apply");
+        assert_eq!(edited.register.format(), original.format());
+    }
+
+    #[test]
     fn ut_virtual_address_and_read_only_round_trip() {
         let original = reg(
             Kind::InputRegister,
             Access::ReadOnly,
             Address::Virtual,
             1,
-            RegisterFormat::U16((RegisterEndian::Little, Resolution(0.5), BitField::default())),
+            RegisterFormat::U16((
+                RegisterEndian::Little,
+                RegisterWordOrder::Normal,
+                Resolution(0.5),
+                BitField::default(),
+            )),
         );
         let edited = EditInputDialog::from_register("v", "", &original, "3", None)
             .apply()
@@ -581,6 +629,7 @@ mod apply_tests {
             1,
             RegisterFormat::U16((
                 RegisterEndian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField { mask: 0xFF00 },
             )),
@@ -613,7 +662,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(1),
             1,
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default())),
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
         );
         let edited = EditInputDialog::from_register("c", "", &original, "1", None)
             .apply()
@@ -622,7 +676,12 @@ mod apply_tests {
         // Boolean kinds (Coil/DiscreteInput) always serialize as a default big-endian U16.
         assert_eq!(
             *edited.register.format(),
-            RegisterFormat::U16((RegisterEndian::Big, Resolution(1.0), BitField::default()))
+            RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default()
+            ))
         );
     }
 
@@ -643,6 +702,7 @@ mod focus_tests {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_codec::format::{
         BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+        WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
     use ferrowl_ui::traits::HandleEvents;
@@ -655,6 +715,7 @@ mod focus_tests {
             .address(Address::Fixed(0))
             .format(RegisterFormat::U32((
                 RegisterEndian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -672,6 +733,7 @@ mod focus_tests {
             .address(Address::Fixed(0))
             .format(RegisterFormat::U16((
                 RegisterEndian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -736,6 +798,36 @@ mod focus_tests {
                 "cycle missing {expected:?}: {seen:?}"
             );
         }
+    }
+
+    #[test]
+    /// MB-R-099 — the register-order pane is in the cycle for a multi-register format (U32)
+    /// but gated off for a single-register one (U16).
+    fn ut_focus_cycle_gates_word_order_on_register_width() {
+        let mut multi = numeric_dialog(); // U32
+        assert!(
+            forward_cycle(&mut multi).contains(&EditInputDialogFocus::NumberWordOrder),
+            "multi-register cycle should visit NumberWordOrder"
+        );
+
+        let single = RegisterBuilder::default()
+            .slave_id(1u8)
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::U16((
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )))
+            .build()
+            .unwrap();
+        let mut single = EditInputDialog::from_register("name", "", &single, "4", None);
+        assert!(
+            !forward_cycle(&mut single).contains(&EditInputDialogFocus::NumberWordOrder),
+            "single-register cycle should skip NumberWordOrder"
+        );
     }
 
     #[test]

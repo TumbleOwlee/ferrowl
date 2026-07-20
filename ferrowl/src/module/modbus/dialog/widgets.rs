@@ -7,10 +7,10 @@
 //! through the dialog build code. No user input flows into these builders — user input is
 //! parsed in the dialogs' `validate()`/`apply()` paths and surfaced as dialog error messages.
 
-use super::{AccessOption, Alignment, Endian, Format, KindOption};
+use super::{AccessOption, Alignment, Endian, Format, KindOption, WordOrder};
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
-    Resolution,
+    Resolution, WordOrder as RegisterWordOrder,
 };
 use ferrowl_codec::{Access, Kind};
 use ferrowl_ui::state::ButtonState;
@@ -200,7 +200,14 @@ pub(super) fn access_options() -> Vec<AccessOption> {
 
 /// The numeric format options, in display order.
 pub(super) fn format_options() -> Vec<Format> {
-    let n = || (RegisterEndian::Big, Resolution(1.0), BitField::default());
+    let n = || {
+        (
+            RegisterEndian::Big,
+            RegisterWordOrder::Normal,
+            Resolution(1.0),
+            BitField::default(),
+        )
+    };
     vec![
         Format(RegisterFormat::U8(n())),
         Format(RegisterFormat::U16(n())),
@@ -212,14 +219,30 @@ pub(super) fn format_options() -> Vec<Format> {
         Format(RegisterFormat::I32(n())),
         Format(RegisterFormat::I64(n())),
         Format(RegisterFormat::I128(n())),
-        Format(RegisterFormat::F32((RegisterEndian::Big, Resolution(1.0)))),
-        Format(RegisterFormat::F64((RegisterEndian::Big, Resolution(1.0)))),
+        Format(RegisterFormat::F32((
+            RegisterEndian::Big,
+            RegisterWordOrder::Normal,
+            Resolution(1.0),
+        ))),
+        Format(RegisterFormat::F64((
+            RegisterEndian::Big,
+            RegisterWordOrder::Normal,
+            Resolution(1.0),
+        ))),
     ]
 }
 
 /// The endianness options, in display order.
 pub(super) fn endian_options() -> Vec<Endian> {
     vec![Endian(RegisterEndian::Big), Endian(RegisterEndian::Little)]
+}
+
+/// The register (word) order options, in display order.
+pub(super) fn word_order_options() -> Vec<WordOrder> {
+    vec![
+        WordOrder(RegisterWordOrder::Normal),
+        WordOrder(RegisterWordOrder::Reversed),
+    ]
 }
 
 /// The text-alignment options, in display order.

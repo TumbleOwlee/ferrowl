@@ -29,7 +29,7 @@ use serde::Deserialize;
 use crate::cli::MigrateArgs;
 use crate::config::device::{
     AccessCfg, AlignmentCfg, DeviceConfig, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
-    ValueType,
+    ValueType, WordOrderCfg,
 };
 
 // ── Legacy structure definitions ─────────────────────────────────────────────
@@ -338,6 +338,7 @@ fn convert_def(
         access,
         value_type,
         endian,
+        word_order: WordOrderCfg::default(),
         resolution: src.resolution,
         bitmask: None,
         length: src.length,

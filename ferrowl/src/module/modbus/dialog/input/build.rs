@@ -52,6 +52,11 @@ impl EditInputDialog {
                 widgets::endian_options(),
                 0,
             ))
+            .number_word_order(widgets::selection(
+                ("Order", HorizontalAlignment::Center),
+                widgets::word_order_options(),
+                0,
+            ))
             .number_resolution(widgets::input_filled::<f64>(
                 ("Resolution", HorizontalAlignment::Center),
                 "1.0",

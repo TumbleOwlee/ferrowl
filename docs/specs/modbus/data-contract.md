@@ -69,6 +69,31 @@ whole byte stream across its registers.
 So for a `U32` whose two words on the wire are `0xAABB 0xCCDD`: `Big` decodes
 `0xAABBCCDD`, `Little` decodes `0xDDCCBBAA`.
 
+### 2.2a Register order
+
+Independent of byte order, every integer and float format also carries a **register
+order** of `Normal` or `Reversed`. It reorders the format's 16-bit *words*: `Normal`
+leaves them in natural order; `Reversed` reverses the whole word sequence (for a
+`U64`'s four words `[w0,w1,w2,w3]` → `[w3,w2,w1,w0]`).
+
+Register order composes with byte order as a separate axis: on decode the word
+sequence is reordered **first**, then the byte-order rule of §2.2 is applied; on
+encode the byte-order rule runs first and the words are reordered last. The two stay
+exact inverses. The default `Normal` reproduces the byte-order rule applied alone.
+
+The two axes give the four layouts for a `U32` whose wire words are `0xAABB 0xCCDD`:
+
+| Byte order | Register order | Decodes to |
+|---|---|---|
+| `Big` | `Normal` | `0xAABBCCDD` |
+| `Little` | `Normal` | `0xDDCCBBAA` |
+| `Big` | `Reversed` | `0xCCDDAABB` |
+| `Little` | `Reversed` | `0xBBAADDCC` |
+
+For a single-register format (`U8`/`I8`/`U16`/`I16`) register order is a no-op —
+reversing a one-word sequence changes nothing. `Ascii` has no register order, just as
+it has no byte order.
+
 ### 2.3 Floats
 
 `F32` and `F64` are the raw IEEE 754 bit pattern, subject to the same byte-order

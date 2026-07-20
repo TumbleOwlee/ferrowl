@@ -197,6 +197,7 @@ reversed entries are skipped silently.
 | `access` | enum | `ReadWrite` | `ReadOnly`, `WriteOnly`, `ReadWrite` |
 | `type` | enum | — (required) | `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`, `Ascii` |
 | `endian` | enum | `Big` | `Big`, `Little` |
+| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric types only) |
 | `resolution` | f64 | `1.0` | display scale (`displayed = raw × resolution`) |
 | `bitmask` | optional string | unset ⇒ full mask | `0x`-prefixed hex or decimal; integer types only |
 | `length` | usize | `1` | ASCII width in registers (ignored for numeric types) |

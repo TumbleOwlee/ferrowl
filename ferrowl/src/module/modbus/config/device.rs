@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use ferrowl_codec::{
     Address, Format, Kind, Register, RegisterBuilder,
-    format::{BitField, Endian, Resolution, Width},
+    format::{BitField, Endian, Resolution, Width, WordOrder},
 };
 use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::script::ScriptDef;
 
 mod value_types;
-pub use value_types::{AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, parse_bitmask};
+pub use value_types::{
+    AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, WordOrderCfg, parse_bitmask,
+};
 
 /// Fallback timing (ms) when neither the module spec nor the device config sets a value.
 pub const DEFAULT_TIMEOUT_MS: usize = 3000;
@@ -179,6 +181,11 @@ pub struct RegisterDef {
     pub value_type: ValueType,
     #[serde(default)]
     pub endian: EndianCfg,
+    /// Register (word) order for multi-register numeric types, independent of `endian`.
+    /// Defaults to `Normal`; `Reversed` reverses the word sequence. Inert for
+    /// single-register and ASCII types.
+    #[serde(default)]
+    pub word_order: WordOrderCfg,
     #[serde(default = "default_resolution")]
     pub resolution: f64,
     /// Optional bit-field mask for integer types, as a hex (`"0xFF00"`) or decimal
@@ -252,20 +259,21 @@ impl RegisterDef {
     pub fn format(&self) -> Format {
         let res = Resolution(self.resolution);
         let endian: Endian = self.endian.into();
+        let wo: WordOrder = self.word_order.into();
         let bf = self.bitfield();
         match self.value_type {
-            ValueType::U8 => Format::U8((endian, res, bf)),
-            ValueType::U16 => Format::U16((endian, res, bf)),
-            ValueType::U32 => Format::U32((endian, res, bf)),
-            ValueType::U64 => Format::U64((endian, res, bf)),
-            ValueType::U128 => Format::U128((endian, res, bf)),
-            ValueType::I8 => Format::I8((endian, res, bf)),
-            ValueType::I16 => Format::I16((endian, res, bf)),
-            ValueType::I32 => Format::I32((endian, res, bf)),
-            ValueType::I64 => Format::I64((endian, res, bf)),
-            ValueType::I128 => Format::I128((endian, res, bf)),
-            ValueType::F32 => Format::F32((endian, res)),
-            ValueType::F64 => Format::F64((endian, res)),
+            ValueType::U8 => Format::U8((endian, wo, res, bf)),
+            ValueType::U16 => Format::U16((endian, wo, res, bf)),
+            ValueType::U32 => Format::U32((endian, wo, res, bf)),
+            ValueType::U64 => Format::U64((endian, wo, res, bf)),
+            ValueType::U128 => Format::U128((endian, wo, res, bf)),
+            ValueType::I8 => Format::I8((endian, wo, res, bf)),
+            ValueType::I16 => Format::I16((endian, wo, res, bf)),
+            ValueType::I32 => Format::I32((endian, wo, res, bf)),
+            ValueType::I64 => Format::I64((endian, wo, res, bf)),
+            ValueType::I128 => Format::I128((endian, wo, res, bf)),
+            ValueType::F32 => Format::F32((endian, wo, res)),
+            ValueType::F64 => Format::F64((endian, wo, res)),
             ValueType::Ascii => Format::Ascii((self.alignment.into(), Width(self.length))),
         }
     }
@@ -316,6 +324,7 @@ mod tests {
                 access: AccessCfg::ReadWrite,
                 value_type: ValueType::U16,
                 endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
                 resolution: 1.0,
                 bitmask: None,
                 length: 1,
@@ -336,6 +345,7 @@ mod tests {
                 access: AccessCfg::ReadWrite,
                 value_type: ValueType::I16,
                 endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
                 resolution: 1.0,
                 bitmask: None,
                 length: 1,
@@ -546,6 +556,7 @@ mod tests {
             access: AccessCfg::ReadWrite,
             value_type,
             endian: EndianCfg::Little,
+            word_order: WordOrderCfg::default(),
             resolution: 1.0,
             bitmask: None,
             length: 4,

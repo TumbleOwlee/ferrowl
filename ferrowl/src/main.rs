@@ -31,7 +31,7 @@ use tokio::runtime::Runtime;
 use crate::app::{App, Level, Tab};
 use crate::cli::{CliArgs, SubCommand};
 use crate::config::device::{
-    AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType,
+    AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar, ValueType, WordOrderCfg,
 };
 use crate::config::ocpp::{OcppProtocol, OcppRole, OcppVersion};
 use crate::config::{
@@ -55,6 +55,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
             access: AccessCfg::ReadWrite,
             value_type,
             endian: EndianCfg::Big,
+            word_order: WordOrderCfg::default(),
             resolution: 1.0,
             bitmask: None,
             length: 1,

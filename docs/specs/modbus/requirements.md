@@ -70,6 +70,18 @@ sit in the low byte for big-endian and the high byte for little-endian.
 `Big` or `Little`. Big-endian shall interpret the register words' byte stream in
 wire order; little-endian shall interpret it fully reversed.
 
+**MB-R-099** — Every integer and float format shall additionally carry a register
+order of `Normal` or `Reversed`, independent of its byte order (MB-R-013). The
+register order shall act on the sequence of the format's 16-bit words: `Normal`
+leaves them in natural order; `Reversed` reverses the whole word sequence. It shall
+be applied to the words **before** the byte-order rule on decode and **after** it on
+encode, so decode and encode remain exact inverses. It shall default to `Normal`,
+under which behavior is identical to the byte-order rule applied alone.
+
+**MB-R-100** — For a single-register format (width 1: `U8`, `I8`, `U16`, `I16`),
+register order shall be a no-op, since reversing a one-word sequence yields the same
+sequence.
+
 **MB-R-014** — Every integer format shall carry a bit-field mask; the field shift
 shall be *derived* from the mask as its trailing-zero count and shall never be
 configured independently.
