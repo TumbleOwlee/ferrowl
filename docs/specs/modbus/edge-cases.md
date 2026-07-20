@@ -22,6 +22,8 @@ mistaken for an oversight and silently "fixed".
 | `Ascii` with `length = 0` | zero-width: encodes to no words, decodes to the empty string |
 | A `bitmask` string in the device config that does not parse | silently falls back to the full (no-op) mask — no error, no warning |
 | A malformed or reversed entry in a `read_ranges` string | silently skipped — no error, no warning |
+| `word_order = Reversed` on a single-register format (`U8`/`I8`/`U16`/`I16`) | inert no-op: reversing a one-word sequence changes nothing |
+| `word_order` on an `Ascii` format | ignored — ASCII carries no register order, as it carries no byte order |
 
 ---
 
