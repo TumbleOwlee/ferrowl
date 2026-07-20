@@ -24,7 +24,7 @@ pub use crate::access::Access;
 pub use crate::address::Address;
 pub use crate::codec::{decode, encode, encode_value};
 pub use crate::error::CodecError;
-pub use crate::format::{Alignment, BitField, Endian, Format};
+pub use crate::format::{Alignment, BitField, Endian, Format, WordOrder};
 pub use crate::kind::Kind;
 pub use crate::traits::{IntoVec, ParseFromU8};
 pub use crate::value::Value;
@@ -103,11 +103,16 @@ impl Register {
 
 #[cfg(test)]
 mod tests {
-    use crate::format::{Endian, Format, Resolution, Width};
+    use crate::format::{Endian, Format, Resolution, Width, WordOrder};
     use crate::{Access, Address, Alignment, BitField, Kind, RegisterBuilder};
 
     fn u16_be() -> Format {
-        Format::U16((Endian::Big, Resolution(1.0), BitField::default()))
+        Format::U16((
+            Endian::Big,
+            WordOrder::Normal,
+            Resolution(1.0),
+            BitField::default(),
+        ))
     }
 
     #[test]
@@ -134,13 +139,28 @@ mod tests {
     fn ut_format_width_is_consecutive_address_count() {
         // U16 = 1 word, F32 = 2 words, U64 = 4 words, U128 = 8 words, Ascii = its width.
         assert_eq!(u16_be().width(), 1);
-        assert_eq!(Format::F32((Endian::Big, Resolution(1.0))).width(), 2);
         assert_eq!(
-            Format::U64((Endian::Big, Resolution(1.0), BitField::default())).width(),
+            Format::F32((Endian::Big, WordOrder::Normal, Resolution(1.0))).width(),
+            2
+        );
+        assert_eq!(
+            Format::U64((
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default()
+            ))
+            .width(),
             4
         );
         assert_eq!(
-            Format::U128((Endian::Big, Resolution(1.0), BitField::default())).width(),
+            Format::U128((
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default()
+            ))
+            .width(),
             8
         );
         assert_eq!(Format::Ascii((Alignment::Left, Width(5))).width(), 5);
