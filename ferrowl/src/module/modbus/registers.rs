@@ -6,7 +6,7 @@ use ferrowl_modbus::{Command, Key, SlaveKey};
 use ferrowl_store::{CellKind as MemKind, CellType, Range};
 
 use crate::config::device::{
-    AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType,
+    AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType, WordOrderCfg,
 };
 
 /// Modbus memory type backing a register.
@@ -95,9 +95,10 @@ pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
     // Integer formats carry (endian, resolution, bitfield); the bitfield is
     // written back as a hex string (or cleared when it's the full no-op mask).
     macro_rules! integer {
-        ($vt:ident, $e:expr, $r:expr, $bf:expr) => {{
+        ($vt:ident, $e:expr, $w:expr, $r:expr, $bf:expr) => {{
             def.value_type = DevValueType::$vt;
             def.endian = endian_cfg($e);
+            def.word_order = word_order_cfg($w);
             def.resolution = $r.0;
             def.bitmask = if $bf.is_full() {
                 None
@@ -106,28 +107,29 @@ pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
             };
         }};
     }
-    // Float formats carry only (endian, resolution); they never have a bitfield.
+    // Float formats carry (endian, word order, resolution); they never have a bitfield.
     macro_rules! float {
-        ($vt:ident, $e:expr, $r:expr) => {{
+        ($vt:ident, $e:expr, $w:expr, $r:expr) => {{
             def.value_type = DevValueType::$vt;
             def.endian = endian_cfg($e);
+            def.word_order = word_order_cfg($w);
             def.resolution = $r.0;
             def.bitmask = None;
         }};
     }
     match register.format() {
-        Format::U8((e, r, bf)) => integer!(U8, e, r, bf),
-        Format::U16((e, r, bf)) => integer!(U16, e, r, bf),
-        Format::U32((e, r, bf)) => integer!(U32, e, r, bf),
-        Format::U64((e, r, bf)) => integer!(U64, e, r, bf),
-        Format::U128((e, r, bf)) => integer!(U128, e, r, bf),
-        Format::I8((e, r, bf)) => integer!(I8, e, r, bf),
-        Format::I16((e, r, bf)) => integer!(I16, e, r, bf),
-        Format::I32((e, r, bf)) => integer!(I32, e, r, bf),
-        Format::I64((e, r, bf)) => integer!(I64, e, r, bf),
-        Format::I128((e, r, bf)) => integer!(I128, e, r, bf),
-        Format::F32((e, r)) => float!(F32, e, r),
-        Format::F64((e, r)) => float!(F64, e, r),
+        Format::U8((e, w, r, bf)) => integer!(U8, e, w, r, bf),
+        Format::U16((e, w, r, bf)) => integer!(U16, e, w, r, bf),
+        Format::U32((e, w, r, bf)) => integer!(U32, e, w, r, bf),
+        Format::U64((e, w, r, bf)) => integer!(U64, e, w, r, bf),
+        Format::U128((e, w, r, bf)) => integer!(U128, e, w, r, bf),
+        Format::I8((e, w, r, bf)) => integer!(I8, e, w, r, bf),
+        Format::I16((e, w, r, bf)) => integer!(I16, e, w, r, bf),
+        Format::I32((e, w, r, bf)) => integer!(I32, e, w, r, bf),
+        Format::I64((e, w, r, bf)) => integer!(I64, e, w, r, bf),
+        Format::I128((e, w, r, bf)) => integer!(I128, e, w, r, bf),
+        Format::F32((e, w, r)) => float!(F32, e, w, r),
+        Format::F64((e, w, r)) => float!(F64, e, w, r),
         Format::Ascii((align, width)) => {
             def.value_type = DevValueType::Ascii;
             def.alignment = match align {
@@ -147,11 +149,18 @@ fn endian_cfg(e: &ferrowl_codec::format::Endian) -> EndianCfg {
     }
 }
 
+fn word_order_cfg(w: &ferrowl_codec::format::WordOrder) -> WordOrderCfg {
+    match w {
+        ferrowl_codec::format::WordOrder::Normal => WordOrderCfg::Normal,
+        ferrowl_codec::format::WordOrder::Reversed => WordOrderCfg::Reversed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::script::ScriptDef;
-    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Address, Format, RegisterBuilder};
 
     fn reg(kind: Kind, address: Address) -> Register {
@@ -162,6 +171,7 @@ mod tests {
             .address(address)
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -249,6 +259,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-099 — sync writes the codec register's order back into the config def.
     fn ut_sync_register_def_writes_back_edited_fields() {
         let mut def = RegisterDef {
             slave_id: 0,
@@ -258,6 +269,7 @@ mod tests {
             access: AccessCfg::ReadOnly,
             value_type: DevValueType::U16,
             endian: EndianCfg::Big,
+            word_order: WordOrderCfg::Normal,
             resolution: 1.0,
             bitmask: None,
             length: 4,
@@ -272,7 +284,11 @@ mod tests {
             .access(Access::WriteOnly)
             .kind(Kind::Coil)
             .address(Address::Virtual)
-            .format(Format::F32((Endian::Little, Resolution(0.5))))
+            .format(Format::F32((
+                Endian::Little,
+                WordOrder::Reversed,
+                Resolution(0.5),
+            )))
             .build()
             .unwrap();
         sync_register_def(&mut def, &register);
@@ -282,6 +298,7 @@ mod tests {
         assert!(def.is_virtual && def.address.is_none());
         assert!(matches!(def.value_type, DevValueType::F32));
         assert!(matches!(def.endian, EndianCfg::Little));
+        assert!(matches!(def.word_order, WordOrderCfg::Reversed));
         assert_eq!(def.resolution, 0.5);
         assert!(def.bitmask.is_none());
     }

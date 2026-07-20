@@ -288,7 +288,7 @@ impl TableView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
 
     fn definition() -> Definition {
@@ -299,6 +299,7 @@ mod tests {
             .address(Address::Fixed(0))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -339,6 +340,7 @@ mod tests {
             .address(Address::Fixed(0))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))

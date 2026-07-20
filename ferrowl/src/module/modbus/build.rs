@@ -312,7 +312,7 @@ pub(crate) fn build_instance(
 
 #[cfg(test)]
 mod tests {
-    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
@@ -355,7 +355,12 @@ mod tests {
             slave,
             kind,
             addr,
-            Format::U16((Endian::Big, Resolution(1.0), BitField::default())),
+            Format::U16((
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )),
             access,
         )
     }
@@ -370,7 +375,12 @@ mod tests {
             1,
             Kind::HoldingRegister,
             0,
-            Format::U16((Endian::Big, Resolution(0.5), BitField::default())),
+            Format::U16((
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(0.5),
+                BitField::default(),
+            )),
             Access::ReadWrite,
         )
         .2;
@@ -442,7 +452,12 @@ mod tests {
                     1,
                     Kind::HoldingRegister,
                     i * 8,
-                    Format::U128((Endian::Big, Resolution(1.0), BitField::default())),
+                    Format::U128((
+                        Endian::Big,
+                        WordOrder::Normal,
+                        Resolution(1.0),
+                        BitField::default(),
+                    )),
                     Access::ReadOnly,
                 )
             })
@@ -467,14 +482,24 @@ mod tests {
                 1,
                 Kind::HoldingRegister,
                 20,
-                Format::U128((Endian::Big, Resolution(1.0), BitField::default())), // width 8 -> 20..28
+                Format::U128((
+                    Endian::Big,
+                    WordOrder::Normal,
+                    Resolution(1.0),
+                    BitField::default(),
+                )), // width 8 -> 20..28
                 Access::ReadWrite,
             ),
             entry(
                 1,
                 Kind::HoldingRegister,
                 30,
-                Format::U16((Endian::Big, Resolution(1.0), BitField::default())), // 30..31
+                Format::U16((
+                    Endian::Big,
+                    WordOrder::Normal,
+                    Resolution(1.0),
+                    BitField::default(),
+                )), // 30..31
                 Access::ReadWrite,
             ),
         ];
@@ -592,6 +617,7 @@ mod tests {
             .address(Address::Fixed(0))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))

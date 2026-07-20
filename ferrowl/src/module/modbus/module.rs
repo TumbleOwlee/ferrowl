@@ -446,7 +446,7 @@ mod tests {
         use crate::config::DeviceConfig;
         use crate::config::device::{
             AccessCfg, AlignmentCfg, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
-            ValueType,
+            ValueType, WordOrderCfg,
         };
         use std::collections::BTreeMap;
 
@@ -458,6 +458,7 @@ mod tests {
             access: AccessCfg::ReadWrite,
             value_type: ValueType::U16,
             endian: EndianCfg::Big,
+            word_order: WordOrderCfg::default(),
             resolution: 1.0,
             bitmask: None,
             length: 1,
@@ -672,7 +673,7 @@ mod tests {
         use crate::config::DeviceConfig;
         use crate::config::device::{
             AccessCfg, AlignmentCfg, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
-            ValueType,
+            ValueType, WordOrderCfg,
         };
         use std::collections::BTreeMap;
 
@@ -687,6 +688,7 @@ mod tests {
                 access: AccessCfg::ReadWrite,
                 value_type: ValueType::U16,
                 endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
                 resolution: 1.0,
                 bitmask: None,
                 length: 1,

@@ -136,11 +136,16 @@ pub(super) fn value_to_type(value: Value) -> ValueType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_codec::format::{Alignment, BitField, Endian, Resolution, Width};
+    use ferrowl_codec::format::{Alignment, BitField, Endian, Resolution, Width, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
 
-    fn int_fmt(kind: fn((Endian, Resolution, BitField)) -> Format) -> Format {
-        kind((Endian::Big, Resolution(1.0), BitField::default()))
+    fn int_fmt(kind: fn((Endian, WordOrder, Resolution, BitField)) -> Format) -> Format {
+        kind((
+            Endian::Big,
+            WordOrder::Normal,
+            Resolution(1.0),
+            BitField::default(),
+        ))
     }
 
     #[test]
@@ -197,7 +202,7 @@ mod tests {
 
     #[test]
     fn ut_typed_value_float_and_ascii_formats() {
-        let f32f = Format::F32((Endian::Big, Resolution(1.0)));
+        let f32f = Format::F32((Endian::Big, WordOrder::Normal, Resolution(1.0)));
         assert!(matches!(
             typed_value_from_type(ValueType::Float(1.25), &f32f).unwrap(),
             Value::F32((v, _)) if v == 1.25

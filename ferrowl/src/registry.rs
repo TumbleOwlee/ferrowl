@@ -299,7 +299,7 @@ mod tests {
 
     // --- End-to-end through a real Lua context ----------------------------------
 
-    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::{ModuleDirModule, ValueType};
@@ -314,6 +314,7 @@ mod tests {
             .address(ferrowl_codec::Address::Fixed(addr))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))

@@ -62,6 +62,7 @@ impl ModbusModuleView {
             access: crate::config::device::AccessCfg::ReadWrite,
             value_type: crate::config::device::ValueType::U16,
             endian: crate::config::device::EndianCfg::default(),
+            word_order: crate::config::device::WordOrderCfg::default(),
             resolution: 1.0,
             bitmask: None,
             length: 1,
@@ -399,7 +400,7 @@ mod tests {
     use super::*;
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::dialog::EditedRegister;
-    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
 
     fn spec(role: Role) -> ModuleSpec {
@@ -429,6 +430,7 @@ mod tests {
             .address(Address::Fixed(addr))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -444,6 +446,7 @@ mod tests {
             .address(Address::Virtual)
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))

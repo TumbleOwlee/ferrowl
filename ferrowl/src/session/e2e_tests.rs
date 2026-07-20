@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 
-use ferrowl_codec::format::{BitField, Endian, Resolution};
+use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
 use ferrowl_codec::{Access, Format, Kind, Register, RegisterBuilder};
 use ferrowl_lua::module::{ModuleDirectory, ModuleHost, ValueType};
 use ferrowl_modbus::{Key, SlaveKey};
@@ -74,6 +74,7 @@ fn holding(addr: u16) -> Register {
         .address(ferrowl_codec::Address::Fixed(addr))
         .format(Format::U16((
             Endian::Big,
+            WordOrder::Normal,
             Resolution(1.0),
             BitField::default(),
         )))

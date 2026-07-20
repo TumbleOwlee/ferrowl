@@ -4,7 +4,7 @@
 
 use ferrowl_codec::{
     Access,
-    format::{Alignment, BitField, Endian, Resolution},
+    format::{Alignment, BitField, Endian, Resolution, WordOrder},
 };
 use serde::{Deserialize, Serialize};
 
@@ -154,6 +154,15 @@ pub enum EndianCfg {
     Little,
 }
 
+/// Config-file spelling of register (word) order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub enum WordOrderCfg {
+    #[default]
+    Normal,
+    Reversed,
+}
+
 /// Config-file spelling of ASCII alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
@@ -193,6 +202,15 @@ impl From<EndianCfg> for Endian {
         match e {
             EndianCfg::Big => Endian::Big,
             EndianCfg::Little => Endian::Little,
+        }
+    }
+}
+
+impl From<WordOrderCfg> for WordOrder {
+    fn from(w: WordOrderCfg) -> Self {
+        match w {
+            WordOrderCfg::Normal => WordOrder::Normal,
+            WordOrderCfg::Reversed => WordOrder::Reversed,
         }
     }
 }

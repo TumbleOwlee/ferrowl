@@ -316,7 +316,7 @@ fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_codec::format::{BitField, Endian, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::SlaveKey;
     use ferrowl_store::{CellKind as MemKind, CellType, Memory};
@@ -331,6 +331,7 @@ mod tests {
             .address(Address::Fixed(addr))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -380,6 +381,7 @@ mod tests {
                 .address(ferrowl_codec::Address::Virtual)
                 .format(Format::U16((
                     Endian::Big,
+                    WordOrder::Normal,
                     Resolution(1.0),
                     BitField::default(),
                 )))
@@ -673,6 +675,7 @@ mod tests {
                 .address(ferrowl_codec::Address::Virtual)
                 .format(Format::U16((
                     Endian::Big,
+                    WordOrder::Normal,
                     Resolution(1.0),
                     BitField::default(),
                 )))
@@ -703,6 +706,7 @@ mod tests {
                 .address(ferrowl_codec::Address::Virtual)
                 .format(Format::U16((
                     Endian::Big,
+                    WordOrder::Normal,
                     Resolution(1.0),
                     BitField::default(),
                 )))

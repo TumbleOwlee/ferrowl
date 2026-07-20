@@ -1029,7 +1029,7 @@ mod tests {
     use crate::module::modbus::table::Definition;
     use crate::module::view::{CommandResult, ModuleView};
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder, Value};
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
@@ -1083,6 +1083,7 @@ mod tests {
             .address(Address::Fixed(0))
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -1099,6 +1100,7 @@ mod tests {
             .address(Address::Virtual)
             .format(Format::U16((
                 Endian::Big,
+                WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
@@ -1388,7 +1390,7 @@ mod tests {
     fn device_with_defs() -> DeviceConfig {
         use crate::config::device::{
             AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar,
-            ValueType as CfgValueType,
+            ValueType as CfgValueType, WordOrderCfg,
         };
 
         let base = |address: u16, values: Vec<NamedValue>| RegisterDef {
@@ -1399,6 +1401,7 @@ mod tests {
             access: AccessCfg::ReadWrite,
             value_type: CfgValueType::U16,
             endian: EndianCfg::Big,
+            word_order: WordOrderCfg::default(),
             resolution: 1.0,
             bitmask: None,
             length: 1,

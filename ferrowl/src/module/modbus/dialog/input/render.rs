@@ -1,6 +1,6 @@
 //! Layout and widget rendering for the free-text register edit dialog.
 
-use super::{EditInputDialog, ValueType, is_integer_format};
+use super::{EditInputDialog, ValueType, is_integer_format, is_multi_register_format};
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::widgets::GetValue;
 use ratatui::{
@@ -24,7 +24,7 @@ impl EditInputDialog {
         }
 
         let horizontal_layout: [Rect; 3] =
-            Layout::horizontal([Constraint::Min(1), Constraint::Max(70), Constraint::Min(1)])
+            Layout::horizontal([Constraint::Min(1), Constraint::Max(76), Constraint::Min(1)])
                 .areas(area);
 
         let vertical_layout: [Rect; 3] = Layout::vertical([
@@ -139,37 +139,53 @@ impl EditInputDialog {
         if !self.is_boolean_kind() {
             match self.value_type.state.values()[self.value_type.state.selection()] {
                 ValueType::Number => {
-                    // Integer formats get a 4th column for the bitmask; floats keep 3.
+                    // Columns: Format, Endian, [Register order if multi-register],
+                    // Resolution, [Bitmask if integer].
                     let integer = is_integer_format(&self.number_format.get_value().0);
-                    let columns = if integer { 4 } else { 3 };
+                    let multi = is_multi_register_format(&self.number_format.get_value().0);
+                    let columns = 3 + multi as usize + integer as usize;
                     let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
                         .split(vertical_layout[vertical_index]);
 
+                    let mut col = 0;
                     StatefulWidget::render(
                         &self.number_format.widget,
-                        cells[0],
+                        cells[col],
                         buf,
                         &mut self.number_format.state,
                     );
+                    col += 1;
 
                     StatefulWidget::render(
                         &self.number_endian.widget,
-                        cells[1],
+                        cells[col],
                         buf,
                         &mut self.number_endian.state,
                     );
+                    col += 1;
+
+                    if multi {
+                        StatefulWidget::render(
+                            &self.number_word_order.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_word_order.state,
+                        );
+                        col += 1;
+                    }
 
                     StatefulWidget::render(
                         &self.number_resolution.widget,
-                        cells[2],
+                        cells[col],
                         buf,
                         &mut self.number_resolution.state,
                     );
+                    col += 1;
 
                     if integer {
                         StatefulWidget::render(
                             &self.number_bitmask.widget,
-                            cells[3],
+                            cells[col],
                             buf,
                             &mut self.number_bitmask.state,
                         );
@@ -298,7 +314,9 @@ mod render_tests {
     //! Render-to-buffer characterization: the dialog draws its box title, fields, and
     //! validation-error text without panicking, in both Add and Edit configurations.
     use super::EditInputDialog;
-    use ferrowl_codec::format::{BitField, Endian, Format, Resolution};
+    use ferrowl_codec::format::{
+        BitField, Endian, Format, Resolution, WordOrder as RegisterWordOrder,
+    };
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -347,6 +365,7 @@ mod render_tests {
             .address(Address::Fixed(0))
             .format(Format::U16((
                 Endian::Big,
+                RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
             )))
