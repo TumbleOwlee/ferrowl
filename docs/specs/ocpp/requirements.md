@@ -405,6 +405,17 @@ into the CS state, overriding the built-in defaults only when the field is
 present in the file. Absence of a field falls back to its built-in default, so
 a file predating this field still loads.
 
+**OC-R-104** — In OCPP 1.6, a CS's charge-point-wide state shall additionally
+carry four optional identity fields: SIM ICCID, SIM IMSI, meter serial number,
+and meter type. Each shall be persisted by `:wd`/`:write-device` and seeded on
+device-config load the same way as the existing boot identity fields
+(OC-R-103), overriding the built-in default (empty/unset) only when the field
+is present in the file. A field left empty shall be omitted from
+`BootNotification` entirely; a field holding a value shall be included under
+its wire name (`iccid`, `imsi`, `meterSerialNumber`, `meterType`). These fields
+shall not apply to OCPP 2.0.1 or 2.1, which have no equivalent
+`BootNotification` fields.
+
 **OC-R-082** — The connection or listener configuration shall be rebuilt from the
 current module spec on every start, so an edited endpoint or security section
 always takes effect on the next start without a stale copy.

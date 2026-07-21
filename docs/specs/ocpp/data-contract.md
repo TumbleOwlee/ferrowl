@@ -167,6 +167,7 @@ the Lua sim thread.
 | Field | Notes |
 |---|---|
 | model, vendor, firmware version, serial number | boot identity, sent in `BootNotification` |
+| ICCID, IMSI, meter serial number, meter type (1.6 only) | optional identity fields, sent in `BootNotification` only when non-empty; no 2.x equivalent |
 | configuration / variable store | list of `(key, value, readonly)`; answers `GetConfiguration` (1.6) / `GetVariables` (2.x) and is mutated by `ChangeConfiguration` / `SetVariables`. Seeded from the device config, or from the version's built-in defaults when that is empty |
 | heartbeat interval | seconds, taken from the CSMS's `BootNotification` response. Unset until a boot round-trips |
 | reservation | id tag + reservation id of a charge-point-wide reservation |

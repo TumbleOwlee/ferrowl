@@ -242,6 +242,10 @@ than `ws`/`wss` is an error.
 | `vendor` | optional string | unset | **client only**: CS boot identity vendor |
 | `firmware_version` | optional string | unset | **client only**: CS boot identity firmware version |
 | `serial_number` | optional string | unset | **client only**: CS boot identity serial number |
+| `iccid` | optional string | unset | **client only, 1.6 only**: SIM ICCID, seeded/written like `model`/`vendor`. Inert for 2.0.1/2.1 |
+| `imsi` | optional string | unset | **client only, 1.6 only**: SIM IMSI |
+| `meter_serial_number` | optional string | unset | **client only, 1.6 only**: installed meter's serial number |
+| `meter_type` | optional string | unset | **client only, 1.6 only**: installed meter's type/model |
 | `security` | `OcppSecurityConfig` | all-unset | §9 |
 
 A device config file written before any of these fields existed still loads: every
