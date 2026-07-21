@@ -266,6 +266,14 @@ pub(crate) fn edit_kind(s: &CsState, scope: Scope, cs: bool, field: EditField) -
         EditField::Vendor => EditKind::Text(text_input(&s.vendor)),
         EditField::FirmwareVersion => EditKind::Text(text_input(&s.firmware_version)),
         EditField::SerialNumber => EditKind::Text(text_input(&s.serial_number)),
+        // OC-R-104's meter/modem identity fields are 1.6-only; the row map never produces them
+        // for 2.0.1/2.1.
+        EditField::Iccid
+        | EditField::Imsi
+        | EditField::MeterSerialNumber
+        | EditField::MeterType => {
+            return None;
+        }
     })
 }
 

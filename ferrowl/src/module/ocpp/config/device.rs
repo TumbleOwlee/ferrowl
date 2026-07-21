@@ -214,6 +214,21 @@ pub struct OcppDeviceConfig {
     /// the server role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
+    /// SIM ICCID (OC-R-104). Unset = keep the built-in default (empty). OCPP 1.6 only; ignored
+    /// for 2.0.1/2.1 and the server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iccid: Option<String>,
+    /// SIM IMSI (OC-R-104). OCPP 1.6 only; ignored for 2.0.1/2.1 and the server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imsi: Option<String>,
+    /// Installed meter's serial number (OC-R-104). OCPP 1.6 only; ignored for 2.0.1/2.1 and the
+    /// server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meter_serial_number: Option<String>,
+    /// Installed meter's type/model (OC-R-104). OCPP 1.6 only; ignored for 2.0.1/2.1 and the
+    /// server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meter_type: Option<String>,
     /// Websocket transport security: Basic Auth and/or TLS/mTLS. Default (all `None`/`false`) is
     /// the pre-existing plain `ws://` behaviour.
     #[serde(default, skip_serializing_if = "OcppSecurityConfig::is_empty")]
@@ -249,6 +264,10 @@ impl OcppDeviceConfig {
             vendor: None,
             firmware_version: None,
             serial_number: None,
+            iccid: None,
+            imsi: None,
+            meter_serial_number: None,
+            meter_type: None,
             security: spec.security.clone(),
         }
     }
@@ -324,6 +343,10 @@ mod tests {
             vendor: Some("Acme".into()),
             firmware_version: Some("2.3.1".into()),
             serial_number: Some("SN-0042".into()),
+            iccid: Some("8912345678901234567".into()),
+            imsi: Some("290123456789012".into()),
+            meter_serial_number: Some("MTR-0042".into()),
+            meter_type: Some("MT-X".into()),
             security: OcppSecurityConfig {
                 username: Some("cp001".into()),
                 password: Some("s3cret".into()),

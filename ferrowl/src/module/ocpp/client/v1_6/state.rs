@@ -75,6 +75,16 @@ pub struct CsState {
     pub vendor: String,
     pub firmware_version: String,
     pub serial_number: String,
+    /// SIM ICCID (OC-R-104). Empty = unset; omitted from `BootNotification` when empty.
+    pub iccid: String,
+    /// SIM IMSI (OC-R-104). Empty = unset; omitted from `BootNotification` when empty.
+    pub imsi: String,
+    /// Installed meter's serial number (OC-R-104). Empty = unset; omitted from
+    /// `BootNotification` when empty.
+    pub meter_serial_number: String,
+    /// Installed meter's type/model (OC-R-104). Empty = unset; omitted from `BootNotification`
+    /// when empty.
+    pub meter_type: String,
     /// idTag of the latest accepted charge-point-wide ReserveNow (`connectorId` 0), cleared on a
     /// matching CancelReservation. Per-connector reservations live on [`ConnectorState`].
     pub reserved_rfid: Option<String>,
@@ -100,6 +110,10 @@ impl Default for CsState {
             vendor: "Ferrowl".to_string(),
             firmware_version: "1.0.0".to_string(),
             serial_number: "FERROWL-0001".to_string(),
+            iccid: String::new(),
+            imsi: String::new(),
+            meter_serial_number: String::new(),
+            meter_type: String::new(),
             reserved_rfid: None,
             reservation_id: None,
             heartbeat_interval_secs: None,
@@ -207,6 +221,10 @@ impl CsState {
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "—".to_string()),
             ),
+            nv("ICCID", self.iccid.clone()),
+            nv("IMSI", self.imsi.clone()),
+            nv("Meter Serial Number", self.meter_serial_number.clone()),
+            nv("Meter Type", self.meter_type.clone()),
         ]
     }
 
@@ -218,6 +236,10 @@ impl CsState {
             "Vendor" => Vt::String(self.vendor.clone()),
             "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
             "SerialNumber" => Vt::String(self.serial_number.clone()),
+            "Iccid" => Vt::String(self.iccid.clone()),
+            "Imsi" => Vt::String(self.imsi.clone()),
+            "MeterSerialNumber" => Vt::String(self.meter_serial_number.clone()),
+            "MeterType" => Vt::String(self.meter_type.clone()),
             "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
             "ReservationId" => match self.reservation_id {
                 Some(id) => Vt::Int(id as i128),
@@ -235,6 +257,10 @@ impl CsState {
             ("Vendor", Vt::String(s)) => self.vendor = s,
             ("FirmwareVersion", Vt::String(s)) => self.firmware_version = s,
             ("SerialNumber", Vt::String(s)) => self.serial_number = s,
+            ("Iccid", Vt::String(s)) => self.iccid = s,
+            ("Imsi", Vt::String(s)) => self.imsi = s,
+            ("MeterSerialNumber", Vt::String(s)) => self.meter_serial_number = s,
+            ("MeterType", Vt::String(s)) => self.meter_type = s,
             _ => return false,
         }
         true
@@ -512,6 +538,17 @@ mod tests {
         let mut s = CsState::default();
         assert!(s.cs_set_field("Model", Vt::String("M".into())));
         assert!(matches!(s.cs_get_field("Model"), Some(Vt::String(ref v)) if v == "M"));
+        // OC-R-104 — the four 1.6-only meter/modem identity fields roundtrip the same way.
+        assert!(s.cs_set_field("Iccid", Vt::String("8912".into())));
+        assert!(s.cs_set_field("Imsi", Vt::String("2901".into())));
+        assert!(s.cs_set_field("MeterSerialNumber", Vt::String("MTR-1".into())));
+        assert!(s.cs_set_field("MeterType", Vt::String("MT-X".into())));
+        assert!(matches!(s.cs_get_field("Iccid"), Some(Vt::String(ref v)) if v == "8912"));
+        assert!(matches!(s.cs_get_field("Imsi"), Some(Vt::String(ref v)) if v == "2901"));
+        assert!(
+            matches!(s.cs_get_field("MeterSerialNumber"), Some(Vt::String(ref v)) if v == "MTR-1")
+        );
+        assert!(matches!(s.cs_get_field("MeterType"), Some(Vt::String(ref v)) if v == "MT-X"));
         // Connector fields are not CS-level; they live on ConnectorState.
         assert!(s.cs_get_field("Power").is_none());
         // One default connector; adding is idempotent by id.
