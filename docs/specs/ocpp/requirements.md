@@ -394,8 +394,16 @@ actions and are therefore version-locked.
 
 **OC-R-081** — The session entry shall carry only the instance name, the device
 config path, and the endpoint (scheme, ip, port, path). Version, role, timeout,
-security, scripts, connectors, and configuration keys shall live in the device
-config.
+security, scripts, connectors, configuration keys, and (client role) CS boot
+identity shall live in the device config.
+
+**OC-R-103** — A charging-station (client) device config shall persist the CS
+boot identity (model, vendor, firmware version, serial number) the same way it
+persists connectors and configuration keys: `:wd`/`:write-device` shall write
+the station's current values, and loading the device config shall seed them
+into the CS state, overriding the built-in defaults only when the field is
+present in the file. Absence of a field falls back to its built-in default, so
+a file predating this field still loads.
 
 **OC-R-082** — The connection or listener configuration shall be rebuilt from the
 current module spec on every start, so an edited endpoint or security section

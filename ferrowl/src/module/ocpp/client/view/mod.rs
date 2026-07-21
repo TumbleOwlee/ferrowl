@@ -493,6 +493,20 @@ impl<V: ClientVersion> ClientView<V> {
                     .collect();
             });
         }
+        // Seed CS boot identity from the device config (OC-R-103); a field left unset keeps the
+        // built-in default rather than being overwritten with an empty string.
+        with_state_mut(&state, |s| {
+            for (name, value) in [
+                ("Model", &device.model),
+                ("Vendor", &device.vendor),
+                ("FirmwareVersion", &device.firmware_version),
+                ("SerialNumber", &device.serial_number),
+            ] {
+                if let Some(value) = value {
+                    s.cs_set(name, ferrowl_lua::module::ValueType::String(value.clone()));
+                }
+            }
+        });
         let cp = spec.name.clone();
         let (conn_rows, state_rows, config_rows) = with_state(&state, |s| {
             (
@@ -1093,6 +1107,44 @@ mod tests {
         };
         assert!(msg.contains("Saved device config"), "unexpected: {msg}");
         assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    /// OC-R-103 — `:wd` persists CS boot identity, and reloading the written device config seeds
+    /// it back into a fresh view instead of the built-in defaults.
+    async fn ut_write_device_persists_and_reloads_boot_identity() {
+        use crate::module::view::CommandResult;
+        use ferrowl_lua::module::ValueType;
+        use ferrowl_util::convert::{Converter, FileType};
+
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        with_state_mut(&v.state, |s| {
+            s.cs_set("Vendor", ValueType::String("Acme".into()));
+            s.cs_set("Model", ValueType::String("Acme-EVSE".into()));
+        });
+
+        let path = std::env::temp_dir().join(format!(
+            "ferrowl-ocpp-client-boot-identity-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+        let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await
+        else {
+            panic!(":wd must be handled with a message");
+        };
+
+        let device: OcppDeviceConfig =
+            Converter::load(&p, FileType::Toml).expect("reload saved device config");
+        assert_eq!(device.vendor.as_deref(), Some("Acme"));
+        assert_eq!(device.model.as_deref(), Some("Acme-EVSE"));
+
+        let reloaded = ClientView::<V1_6>::new(v.spec.clone(), p.clone(), device);
+        with_state(&reloaded.state, |s| {
+            assert!(matches!(s.cs_get("Vendor"), Some(ValueType::String(v)) if v == "Acme"));
+            assert!(matches!(s.cs_get("Model"), Some(ValueType::String(v)) if v == "Acme-EVSE"));
+        });
+
         let _ = std::fs::remove_file(&path);
     }
 }

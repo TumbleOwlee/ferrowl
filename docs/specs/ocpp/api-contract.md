@@ -186,8 +186,9 @@ as `GenericError`.
 ## 6. Module instance spec (session / `--ocpp`)
 
 One OCPP module instance. This is the per-instance, on-the-wire endpoint; the
-version, role, timeout, security, scripts, connectors, and configuration keys all
-live in the referenced device config (§8), never here.
+version, role, timeout, security, scripts, connectors, configuration keys, and
+(client role) CS boot identity all live in the referenced device config (§8),
+never here.
 
 | Field | Type | Default | Valid values |
 |---|---|---|---|
@@ -237,6 +238,10 @@ than `ws`/`wss` is an error.
 | `connector_rfids` | list of `ConnectorRfids` | empty | **server only**: per-connector accept-lists |
 | `connectors` | list of `ConnectorRef` | empty | **client only**: connector-table seed. Empty = CS-level only. Unbounded |
 | `config` | list of `ConfigKeyDef` | empty | **client only**: persisted configuration/variable key store. Empty = built-in defaults |
+| `model` | optional string | unset | **client only**: CS boot identity model, seeded/written like `connectors`/`config` |
+| `vendor` | optional string | unset | **client only**: CS boot identity vendor |
+| `firmware_version` | optional string | unset | **client only**: CS boot identity firmware version |
+| `serial_number` | optional string | unset | **client only**: CS boot identity serial number |
 | `security` | `OcppSecurityConfig` | all-unset | §9 |
 
 A device config file written before any of these fields existed still loads: every

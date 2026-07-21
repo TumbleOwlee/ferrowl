@@ -198,6 +198,22 @@ pub struct OcppDeviceConfig {
     /// role (CSMS config is per-connected-station and transient).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<ConfigKeyDef>,
+    /// CS boot identity model, seeded into state on load and written by `:wd` (OC-R-103). Unset =
+    /// keep the built-in default. Ignored for the server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// CS boot identity vendor (OC-R-103). Unset = keep the built-in default. Ignored for the
+    /// server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    /// CS boot identity firmware version (OC-R-103). Unset = keep the built-in default. Ignored
+    /// for the server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_version: Option<String>,
+    /// CS boot identity serial number (OC-R-103). Unset = keep the built-in default. Ignored for
+    /// the server role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_number: Option<String>,
     /// Websocket transport security: Basic Auth and/or TLS/mTLS. Default (all `None`/`false`) is
     /// the pre-existing plain `ws://` behaviour.
     #[serde(default, skip_serializing_if = "OcppSecurityConfig::is_empty")]
@@ -229,6 +245,10 @@ impl OcppDeviceConfig {
             connector_rfids: Vec::new(),
             connectors: Vec::new(),
             config: Vec::new(),
+            model: None,
+            vendor: None,
+            firmware_version: None,
+            serial_number: None,
             security: spec.security.clone(),
         }
     }
@@ -300,6 +320,10 @@ mod tests {
                     readonly: true,
                 },
             ],
+            model: Some("Ferrowl-EVSE-Pro".into()),
+            vendor: Some("Acme".into()),
+            firmware_version: Some("2.3.1".into()),
+            serial_number: Some("SN-0042".into()),
             security: OcppSecurityConfig {
                 username: Some("cp001".into()),
                 password: Some("s3cret".into()),
