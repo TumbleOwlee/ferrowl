@@ -123,6 +123,11 @@ impl<V: ClientVersion> ClientView<V> {
         device.vendor = self.with_state(|s| cs_string_field(s, "Vendor"));
         device.firmware_version = self.with_state(|s| cs_string_field(s, "FirmwareVersion"));
         device.serial_number = self.with_state(|s| cs_string_field(s, "SerialNumber"));
+        // Persist the 1.6-only meter/modem identity fields (OC-R-104); a no-op on 2.0.1/2.1.
+        device.iccid = self.with_state(|s| cs_string_field(s, "Iccid"));
+        device.imsi = self.with_state(|s| cs_string_field(s, "Imsi"));
+        device.meter_serial_number = self.with_state(|s| cs_string_field(s, "MeterSerialNumber"));
+        device.meter_type = self.with_state(|s| cs_string_field(s, "MeterType"));
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
                 Level::Info,
@@ -214,6 +219,10 @@ impl<V: ClientVersion> ClientView<V> {
                 device.vendor = self.device.vendor.clone();
                 device.firmware_version = self.device.firmware_version.clone();
                 device.serial_number = self.device.serial_number.clone();
+                device.iccid = self.device.iccid.clone();
+                device.imsi = self.device.imsi.clone();
+                device.meter_serial_number = self.device.meter_serial_number.clone();
+                device.meter_type = self.device.meter_type.clone();
                 if spec.role == OcppRole::Server {
                     if let Err(e) = self.backend.stop().await {
                         self.log.write().await.write(

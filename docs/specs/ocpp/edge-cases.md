@@ -104,6 +104,7 @@ mistaken for an oversight and silently "fixed".
 | RFID accept-lists all empty | every tag is accepted (open mode) |
 | A tag listed only on connector A, presented at connector B | rejected at B — connector lists are not inherited sideways. But it **does** authorize a connector-less authorization request, which unions every list |
 | Message buffer exceeds 200 messages | the oldest are evicted from memory. Messages are teed to the persistent log file on each refresh tick, so an evicted message is still logged provided it survived until the next tick (see §6.11) |
+| 1.6 ICCID/IMSI/meter serial/meter type left empty | field omitted from `BootNotification` entirely, not sent as an empty string — the wire field requires length ≥ 1 when present |
 
 ---
 

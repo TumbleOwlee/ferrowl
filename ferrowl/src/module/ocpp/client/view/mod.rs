@@ -285,16 +285,27 @@ pub enum EditField {
     Vendor,
     FirmwareVersion,
     SerialNumber,
+    // CS-level, 1.6 only (OC-R-104)
+    Iccid,
+    Imsi,
+    MeterSerialNumber,
+    MeterType,
 }
 
 impl EditField {
-    /// Map a CS-level state-table row (see `CsState::cs_rows`). Reserved RFID (row 4) is read-only.
+    /// Map a CS-level state-table row (see `CsState::cs_rows`). Reserved RFID (row 4) and
+    /// Reservation ID (row 5) are read-only. Rows 6-9 (OC-R-104) exist only on 1.6's state table;
+    /// 2.0.1/2.1 never render that many CS-level rows, so those indices are never queried there.
     pub fn from_cs_row(row: usize) -> Option<EditField> {
         Some(match row {
             0 => EditField::Model,
             1 => EditField::Vendor,
             2 => EditField::FirmwareVersion,
             3 => EditField::SerialNumber,
+            6 => EditField::Iccid,
+            7 => EditField::Imsi,
+            8 => EditField::MeterSerialNumber,
+            9 => EditField::MeterType,
             _ => return None,
         })
     }
@@ -320,6 +331,10 @@ impl EditField {
             EditField::Vendor => "Vendor",
             EditField::FirmwareVersion => "Firmware Version",
             EditField::SerialNumber => "Serial Number",
+            EditField::Iccid => "ICCID",
+            EditField::Imsi => "IMSI",
+            EditField::MeterSerialNumber => "Meter Serial Number",
+            EditField::MeterType => "Meter Type",
         }
     }
 }
@@ -501,6 +516,10 @@ impl<V: ClientVersion> ClientView<V> {
                 ("Vendor", &device.vendor),
                 ("FirmwareVersion", &device.firmware_version),
                 ("SerialNumber", &device.serial_number),
+                ("Iccid", &device.iccid),
+                ("Imsi", &device.imsi),
+                ("MeterSerialNumber", &device.meter_serial_number),
+                ("MeterType", &device.meter_type),
             ] {
                 if let Some(value) = value {
                     s.cs_set(name, ferrowl_lua::module::ValueType::String(value.clone()));
@@ -1143,6 +1162,52 @@ mod tests {
         with_state(&reloaded.state, |s| {
             assert!(matches!(s.cs_get("Vendor"), Some(ValueType::String(v)) if v == "Acme"));
             assert!(matches!(s.cs_get("Model"), Some(ValueType::String(v)) if v == "Acme-EVSE"));
+        });
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    /// OC-R-104 — `:wd` persists the 1.6-only meter/modem identity fields, and reloading the
+    /// written device config seeds them back into a fresh view.
+    async fn ut_write_device_persists_and_reloads_meter_identity() {
+        use crate::module::view::CommandResult;
+        use ferrowl_lua::module::ValueType;
+        use ferrowl_util::convert::{Converter, FileType};
+
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        with_state_mut(&v.state, |s| {
+            s.cs_set("Iccid", ValueType::String("8912".into()));
+            s.cs_set("Imsi", ValueType::String("2901".into()));
+            s.cs_set("MeterSerialNumber", ValueType::String("MTR-1".into()));
+            s.cs_set("MeterType", ValueType::String("MT-X".into()));
+        });
+
+        let path = std::env::temp_dir().join(format!(
+            "ferrowl-ocpp-client-meter-identity-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+        let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await
+        else {
+            panic!(":wd must be handled with a message");
+        };
+
+        let device: OcppDeviceConfig =
+            Converter::load(&p, FileType::Toml).expect("reload saved device config");
+        assert_eq!(device.iccid.as_deref(), Some("8912"));
+        assert_eq!(device.imsi.as_deref(), Some("2901"));
+        assert_eq!(device.meter_serial_number.as_deref(), Some("MTR-1"));
+        assert_eq!(device.meter_type.as_deref(), Some("MT-X"));
+
+        let reloaded = ClientView::<V1_6>::new(v.spec.clone(), p.clone(), device);
+        with_state(&reloaded.state, |s| {
+            assert!(matches!(s.cs_get("Iccid"), Some(ValueType::String(v)) if v == "8912"));
+            assert!(matches!(s.cs_get("Imsi"), Some(ValueType::String(v)) if v == "2901"));
+            assert!(
+                matches!(s.cs_get("MeterSerialNumber"), Some(ValueType::String(v)) if v == "MTR-1")
+            );
+            assert!(matches!(s.cs_get("MeterType"), Some(ValueType::String(v)) if v == "MT-X"));
         });
 
         let _ = std::fs::remove_file(&path);

@@ -235,6 +235,10 @@ impl ClientVersion for V1_6 {
             EditField::Vendor => EditKind::Text(text_input(&s.vendor)),
             EditField::FirmwareVersion => EditKind::Text(text_input(&s.firmware_version)),
             EditField::SerialNumber => EditKind::Text(text_input(&s.serial_number)),
+            EditField::Iccid => EditKind::Text(text_input(&s.iccid)),
+            EditField::Imsi => EditKind::Text(text_input(&s.imsi)),
+            EditField::MeterSerialNumber => EditKind::Text(text_input(&s.meter_serial_number)),
+            EditField::MeterType => EditKind::Text(text_input(&s.meter_type)),
             // 1.6 has no EVSE id field; the row map never produces it.
             EditField::EvseId => return None,
         })
@@ -285,6 +289,10 @@ impl ClientVersion for V1_6 {
                 EditField::Vendor => s.vendor = value,
                 EditField::FirmwareVersion => s.firmware_version = value,
                 EditField::SerialNumber => s.serial_number = value,
+                EditField::Iccid => s.iccid = value,
+                EditField::Imsi => s.imsi = value,
+                EditField::MeterSerialNumber => s.meter_serial_number = value,
+                EditField::MeterType => s.meter_type = value,
                 _ => {}
             },
         }
@@ -299,12 +307,28 @@ impl ClientVersion for V1_6 {
         let rfid = conn.map(|c| c.rfid.clone()).unwrap_or_default();
         match name {
             "Authorize" => serde_json::json!({ "idTag": rfid }),
-            "BootNotification" => serde_json::json!({
-                "chargePointModel": s.model,
-                "chargePointVendor": s.vendor,
-                "chargePointSerialNumber": s.serial_number,
-                "firmwareVersion": s.firmware_version,
-            }),
+            "BootNotification" => {
+                let mut payload = serde_json::json!({
+                    "chargePointModel": s.model,
+                    "chargePointVendor": s.vendor,
+                    "chargePointSerialNumber": s.serial_number,
+                    "firmwareVersion": s.firmware_version,
+                });
+                // OC-R-104 — optional identity fields are included only when set; the wire field
+                // requires length >= 1 when present, so an empty value must be omitted, not sent
+                // as "".
+                for (key, value) in [
+                    ("iccid", &s.iccid),
+                    ("imsi", &s.imsi),
+                    ("meterSerialNumber", &s.meter_serial_number),
+                    ("meterType", &s.meter_type),
+                ] {
+                    if !value.is_empty() {
+                        payload[key] = serde_json::json!(value);
+                    }
+                }
+                payload
+            }
             "Heartbeat" => serde_json::json!({}),
             "MeterValues" => serde_json::json!({
                 "connectorId": cid,
@@ -519,6 +543,34 @@ mod tests {
         assert_eq!(payload("StartTransaction")["connectorId"], 1);
         assert_eq!(payload("StatusNotification")["errorCode"], "NoError");
         assert_eq!(payload("Unknown"), serde_json::json!({}));
+    }
+
+    #[test]
+    /// OC-R-104 — the four optional meter/modem identity fields are omitted from
+    /// `BootNotification` when unset and included under their wire names when set, and the
+    /// resulting payload still decodes as a valid 1.6 BootNotification request.
+    fn ut_boot_notification_omits_empty_meter_fields() {
+        use ferrowl_ocpp::{V1_6 as Codec, Version};
+
+        let s = state_with(&[1]);
+        let sc = Scope::connector(1);
+        let empty = <V1_6 as ClientVersion>::state_payload(&s, "BootNotification", sc);
+        for key in ["iccid", "imsi", "meterSerialNumber", "meterType"] {
+            assert!(empty.get(key).is_none(), "{key} should be omitted");
+        }
+        assert!(Codec::decode_call("BootNotification", empty).is_ok());
+
+        let mut s = state_with(&[1]);
+        s.iccid = "8912".to_string();
+        s.imsi = "2901".to_string();
+        s.meter_serial_number = "MTR-1".to_string();
+        s.meter_type = "MT-X".to_string();
+        let filled = <V1_6 as ClientVersion>::state_payload(&s, "BootNotification", sc);
+        assert_eq!(filled["iccid"], "8912");
+        assert_eq!(filled["imsi"], "2901");
+        assert_eq!(filled["meterSerialNumber"], "MTR-1");
+        assert_eq!(filled["meterType"], "MT-X");
+        assert!(Codec::decode_call("BootNotification", filled).is_ok());
     }
 
     #[test]
