@@ -6,7 +6,7 @@ use crate::app::Level;
 use crate::module::ocpp::client::backend::{DEFAULT_HEARTBEAT_SECS, TICKS_PER_SEC};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::{
-    merge_overrides, run_client_script_once, run_client_sim,
+    ClientFields, merge_overrides, run_client_script_once, run_client_sim,
 };
 use crate::module::ocpp::config::device::{ConfigKeyDef, OcppDeviceConfig};
 use crate::module::ocpp::config::session::OcppRole;
@@ -19,6 +19,15 @@ use super::{
     ClientState, ClientVersion, ClientView, OCPP_CLIENT_COMMAND_SPECS, OcppClientCmd, config_rows,
     conn_rows, msg_row, nv_rows,
 };
+
+/// Read a CS-level string field (boot identity) by its `ClientFields` name, for persisting on
+/// `:wd` (OC-R-103). `None` if the field is missing or not a string.
+fn cs_string_field<S: ClientFields>(s: &S, name: &str) -> Option<String> {
+    match s.cs_get(name) {
+        Some(ferrowl_lua::module::ValueType::String(v)) => Some(v),
+        _ => None,
+    }
+}
 
 impl<V: ClientVersion> ClientView<V> {
     pub(super) fn start_sim(&mut self) {
@@ -109,6 +118,11 @@ impl<V: ClientVersion> ClientView<V> {
                 })
                 .collect()
         });
+        // Persist CS boot identity (OC-R-103).
+        device.model = self.with_state(|s| cs_string_field(s, "Model"));
+        device.vendor = self.with_state(|s| cs_string_field(s, "Vendor"));
+        device.firmware_version = self.with_state(|s| cs_string_field(s, "FirmwareVersion"));
+        device.serial_number = self.with_state(|s| cs_string_field(s, "SerialNumber"));
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
                 Level::Info,
@@ -196,6 +210,10 @@ impl<V: ClientVersion> ClientView<V> {
                 device.log_file = self.device.log_file.clone();
                 device.connectors = self.device.connectors.clone();
                 device.config = self.device.config.clone();
+                device.model = self.device.model.clone();
+                device.vendor = self.device.vendor.clone();
+                device.firmware_version = self.device.firmware_version.clone();
+                device.serial_number = self.device.serial_number.clone();
                 if spec.role == OcppRole::Server {
                     if let Err(e) = self.backend.stop().await {
                         self.log.write().await.write(
