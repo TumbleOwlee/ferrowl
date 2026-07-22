@@ -813,7 +813,7 @@ checksum = "dd2e7510819d6fbf51a5545c8f922716ecfb14df168a3242f7d33e0239efe6a1"
 
 [[package]]
 name = "ferrowl"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-codec"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "derive_builder",
  "getset",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-lua"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "ferrowl-lua-derive",
  "mlua",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-lua-derive"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "ferrowl-lua",
  "proc-macro2",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-modbus"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ocpp"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "base64",
  "futures-util",
@@ -906,16 +906,16 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "validator",
- "webpki-roots 1.0.8",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
 name = "ferrowl-ring"
-version = "0.4.14"
+version = "0.5.0"
 
 [[package]]
 name = "ferrowl-store"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "itertools 0.15.0",
  "serde",
@@ -925,18 +925,18 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-syntax"
-version = "0.4.14"
+version = "0.5.0"
 
 [[package]]
 name = "ferrowl-templates"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "ferrowl-lua",
 ]
 
 [[package]]
 name = "ferrowl-ui"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "crossterm",
  "derive_builder",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-ui-derive"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "convert_case 0.11.0",
  "crossterm",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "ferrowl-util"
-version = "0.4.14"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "clap",
@@ -3205,14 +3205,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.8",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf"
+checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
 ]
