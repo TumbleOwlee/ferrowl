@@ -42,13 +42,16 @@ impl<V: ClientVersion> ClientView<V> {
         let [left, _right] =
             Layout::horizontal([Constraint::Length(66), Constraint::Min(1)]).areas(body);
         let n_conn = self.conn_table.state.values().len() as u16;
-        let n_actions = self.actions.state.values().len() as u16;
+        let n_actions = std::cmp::min(
+            self.actions.state.values().len() as u16,
+            std::cmp::max(3, area.height * 3 / 10),
+        );
         // Config block only when the CS row is selected (13 table + 3 input).
         let config_len = if self.cs_selected() { 16 } else { 0 };
         Layout::vertical([
             Constraint::Length(3),                         // Add-connector input (top)
             Constraint::Length((n_conn + 3).clamp(6, 12)), // Connectors (compact, ≥3 entries)
-            Constraint::Min(16),                           // State (≥5 entries + header)
+            Constraint::Min(6),                            // State (≥1 entries + header)
             Constraint::Length(3),                         // Scripts button
             Constraint::Max(2 + n_actions),                // Actions
             Constraint::Length(config_len),                // Config block (CS only)
