@@ -240,6 +240,15 @@ transport.
 shall disconnect the client, end its task with success, and emit a client-
 disconnected status.
 
+**MB-R-101** — On the RTU transport, a poll operation addressed to slave id 0 (the
+broadcast address) shall fail locally without reaching the wire. The client shall
+treat that failure as a Modbus exception per MB-R-043 — retried, then skipped after
+3 consecutive occurrences — and shall not disconnect.
+
+**MB-R-102** — On the RTU transport, a write command addressed to slave id 0 shall
+be transmitted without awaiting a response, logged as executed, and shall not
+disconnect the client.
+
 ---
 
 ## Reconnect
@@ -282,9 +291,11 @@ own.
 holding registers, read input registers, write single coil, write single register,
 write multiple coils, write multiple registers, and read/write multiple registers.
 
-**MB-R-059** — A server shall reject report-server-id, mask-write-register,
-read-device-identification, and any custom function code with the Modbus exception
-`IllegalFunction`.
+**MB-R-059** — A server shall reject every function code other than those of
+MB-R-058 — including report-server-id, mask-write-register,
+read-device-identification, diagnostics, get-comm-event-counter,
+get-comm-event-log, read/write file record, read-FIFO-queue, and any custom
+function code — with the Modbus exception `IllegalFunction`.
 
 **MB-R-060** — A server read whose range is not fully covered by declared regions,
 or whose cells are not readable as the requested cell type, shall be answered with
@@ -310,6 +321,10 @@ exception `IllegalDataAddress` and shall apply no write.
 
 **MB-R-065** — A server shall serve any slave id for which memory regions are
 declared; it shall not filter requests by a configured slave id.
+
+**MB-R-103** — An RTU server shall apply an inbound request addressed to slave id 0
+(the broadcast address) to the store exactly as it would any other request, but
+shall emit no response frame for it — including no exception response.
 
 **MB-R-066** — A server shall log a "request received" line for every inbound
 request, including for rejected function codes.
