@@ -43,7 +43,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
-base64 = "0.22.1"
+base64 = "0.23.0"
 clap = { version = "4.5.54", features = ["derive"] }
 convert_case = "0.11.0"
 crossterm = "0.29.0"
