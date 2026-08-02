@@ -23,7 +23,7 @@ published independently.
 | `ferrowl-lua-derive` | Proc macro `#[derive(Module)]`, which bridges a Rust host type into a Lua `C_*` module. |
 | `ferrowl-codec` | Register descriptions (slave id, function code, address, access, format) and the codec between raw `u16` words and typed values. |
 | `ferrowl-store` | In-memory model of a Modbus register space — access-checked value cells, shared as `Arc<RwLock<Memory>>`. |
-| `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, on [tokio-modbus](https://github.com/slowtec/tokio-modbus). |
+| `ferrowl-modbus` | Modbus client and server tasks over TCP and RTU, on [rust-modbus](https://github.com/TumbleOwlee/rust-modbus). |
 | `ferrowl-ocpp` | OCPP transport and engine core: JSON-on-WebSocket framing, connection and correlation, and the version-generic Charging Station / CSMS engine cores (a `Version` trait over 1.6 / 2.0.1 / 2.1), wrapping [rust-ocpp](https://github.com/codelabsab/rust-ocpp). The per-version actions, spec tables, and device state machines live in the `ferrowl` binary. |
 | `ferrowl-lua` | Embedded Lua 5.4 runtime ([mlua](https://github.com/mlua-rs/mlua)) and the `C_*` module framework — the restricted sandbox and the trait shells scripts call. It has no dependency on the Modbus or OCPP crates; the concrete `C_Register` / `C_OCPP` wiring to `ferrowl-store::Memory` and the OCPP state lives in the `ferrowl` binary. |
 | `ferrowl-templates` | The bundled Lua script-template library. A build script walks `templates/<context>/…` and generates the `TEMPLATES` array at compile time; carries its own `TemplateContext`, which the binary maps to its `ScriptContext`. |

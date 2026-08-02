@@ -14,6 +14,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_codec::format::{BitField, Format as RegisterFormat, Resolution, Width};
 use ferrowl_codec::{Address, Register, RegisterBuilder};
+use ferrowl_modbus::UnitId;
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
     traits::HandleEvents,
@@ -344,7 +345,7 @@ impl EditSelectionDialog<NamedValue> {
             .map_err(|_| "Slave ID must be 0–255.".to_string())?;
 
         let register = RegisterBuilder::default()
-            .slave_id(slave_id)
+            .slave_id(UnitId(slave_id))
             .access(self.access.state.get_value().0.clone())
             .kind(self.kind.state.get_value().0)
             .address(address)
@@ -514,10 +515,11 @@ mod apply_tests {
         WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn reg(kind: Kind, address: Address, format: RegisterFormat) -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(kind)
             .address(address)
@@ -641,10 +643,11 @@ mod focus_tests {
         WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn dialog_with_values() -> EditSelectionDialog<NamedValue> {
         let original: Register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
@@ -698,11 +701,12 @@ mod default_and_conversion_tests {
         BitField, Endian, Format, Resolution, WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
     use ferrowl_ui::traits::HandleEvents;
 
     fn u16_register() -> Register {
         RegisterBuilder::default()
-            .slave_id(3u8)
+            .slave_id(UnitId(3))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(7))

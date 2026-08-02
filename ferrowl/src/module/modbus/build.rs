@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use ferrowl_codec::{Access, Address, Kind, Register};
-use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetConfig};
+use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetConfig, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Range};
 use tokio::sync::RwLock;
 
@@ -65,7 +65,7 @@ fn fn_code_key(fc: FunctionCode) -> u8 {
 /// Readable register spans grouped by `(slave, function-code key)`, each value carrying the
 /// function code and a list of `(start, end)` spans. Used for both operation and memory planning.
 type ReadableSpanGroups =
-    std::collections::BTreeMap<(u8, u8), (FunctionCode, Kind, Vec<(usize, usize)>)>;
+    std::collections::BTreeMap<(UnitId, u8), (FunctionCode, Kind, Vec<(usize, usize)>)>;
 
 fn group_readable_spans(
     registers: &[(String, String, Register, Vec<NamedValue>)],
@@ -314,6 +314,7 @@ pub(crate) fn build_instance(
 mod tests {
     use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Format, Kind, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 
@@ -330,7 +331,7 @@ mod tests {
         Vec<crate::config::device::NamedValue>,
     ) {
         let register = RegisterBuilder::default()
-            .slave_id(slave)
+            .slave_id(UnitId(slave))
             .access(access)
             .kind(kind)
             .address(Address::Fixed(addr))
@@ -600,7 +601,7 @@ mod tests {
         let mut memory: Memory<Key<SlaveKey>> = Memory::default();
         let key = Key {
             id: SlaveKey {
-                slave_id: 1u8,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -611,7 +612,7 @@ mod tests {
         );
 
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))

@@ -1,6 +1,6 @@
 //! Error types for Modbus protocol and transport failures.
 
-use tokio_modbus::ExceptionCode;
+use rust_modbus::ExceptionCode;
 
 /// Errors from Modbus protocol operations.
 #[derive(Debug, thiserror::Error)]
@@ -8,7 +8,7 @@ pub enum ModbusError {
     #[error("Modbus exception: {0:?}")]
     Exception(ExceptionCode),
     #[error("Modbus error: {0}")]
-    Error(tokio_modbus::Error),
+    Error(rust_modbus::Error),
     #[error("Modbus timeout: {0}")]
     Timeout(tokio::time::error::Elapsed),
 }
@@ -17,7 +17,7 @@ pub enum ModbusError {
 #[derive(Debug, thiserror::Error)]
 pub enum SerialError {
     #[error("Serial error: {0}")]
-    Error(tokio_serial::Error),
+    Error(rust_modbus::Error),
     #[error("Serial configuration error: {0}")]
     Configuration(String),
 }
@@ -30,7 +30,7 @@ pub enum TcpError {
     #[error("TCP configuration error: {0}")]
     Configuration(String),
     #[error("TCP error: {0}")]
-    Error(tokio::io::Error),
+    Error(rust_modbus::Error),
     #[error("TCP timeout: {0}")]
     Timeout(tokio::time::error::Elapsed),
 }
@@ -45,13 +45,13 @@ pub enum Error {
     #[error("{0}")]
     Tcp(#[from] TcpError),
     #[error("Server error: {0}")]
-    Server(std::io::Error),
+    Server(rust_modbus::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Error, ModbusError, SerialError, TcpError};
-    use tokio_modbus::ExceptionCode;
+    use rust_modbus::ExceptionCode;
 
     #[test]
     fn ut_serial_error_configuration_display() {

@@ -1031,6 +1031,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder, Value};
+    use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
     use ferrowl_ui::EventResult;
@@ -1077,7 +1078,7 @@ mod tests {
 
     fn fixed_def() -> Definition {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
@@ -1094,7 +1095,7 @@ mod tests {
 
     fn virtual_def() -> Definition {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
@@ -1116,7 +1117,7 @@ mod tests {
         let mut memory = Memory::<Key<SlaveKey>>::default();
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -1184,7 +1185,7 @@ mod tests {
         let mut memory = Memory::<Key<SlaveKey>>::default();
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };

@@ -18,8 +18,9 @@ behavior, stated limitations).
 **MB-R-001** — A register shall be described by exactly five properties: a slave
 id, an access direction, a register table (kind), an address, and a data format.
 
-**MB-R-002** — Slave id shall be an 8-bit value (0–255). It shall default to 0
-when unspecified.
+**MB-R-002** — Slave id shall be an 8-bit value (0–255). It shall default to 1
+when unspecified, 0 being reserved as the RTU broadcast address (MB-R-101,
+MB-R-103).
 
 **MB-R-003** — A register's address shall be either a fixed 16-bit Modbus address
 (0–65535) or *virtual* (no wire address). It shall default to virtual when
@@ -240,6 +241,15 @@ transport.
 shall disconnect the client, end its task with success, and emit a client-
 disconnected status.
 
+**MB-R-101** — On the RTU transport, a poll operation addressed to slave id 0 (the
+broadcast address) shall fail locally without reaching the wire. The client shall
+treat that failure as a Modbus exception per MB-R-043 — retried, then skipped after
+3 consecutive occurrences — and shall not disconnect.
+
+**MB-R-102** — On the RTU transport, a write command addressed to slave id 0 shall
+be transmitted without awaiting a response, logged as executed, and shall not
+disconnect the client.
+
 ---
 
 ## Reconnect
@@ -282,9 +292,11 @@ own.
 holding registers, read input registers, write single coil, write single register,
 write multiple coils, write multiple registers, and read/write multiple registers.
 
-**MB-R-059** — A server shall reject report-server-id, mask-write-register,
-read-device-identification, and any custom function code with the Modbus exception
-`IllegalFunction`.
+**MB-R-059** — A server shall reject every function code other than those of
+MB-R-058 — including report-server-id, mask-write-register,
+read-device-identification, diagnostics, get-comm-event-counter,
+get-comm-event-log, read/write file record, read-FIFO-queue, and any custom
+function code — with the Modbus exception `IllegalFunction`.
 
 **MB-R-060** — A server read whose range is not fully covered by declared regions,
 or whose cells are not readable as the requested cell type, shall be answered with
@@ -310,6 +322,10 @@ exception `IllegalDataAddress` and shall apply no write.
 
 **MB-R-065** — A server shall serve any slave id for which memory regions are
 declared; it shall not filter requests by a configured slave id.
+
+**MB-R-103** — An RTU server shall apply an inbound request addressed to slave id 0
+(the broadcast address) to the store exactly as it would any other request, but
+shall emit no response frame for it — including no exception response.
 
 **MB-R-066** — A server shall log a "request received" line for every inbound
 request, including for rejected function codes.
@@ -339,8 +355,8 @@ start, and the error shall be surfaced to the caller rather than retried.
 
 **MB-R-072** — An RTU client shall open the serial port at `path` with the
 configured `baud_rate`, and shall apply `parity`, `data_bits`, and `stop_bits`
-when they are set, leaving the serial library's own default in place when they are
-not.
+when they are set. An unset parameter shall take the Modbus serial-line default —
+8 data bits, even parity, one stop bit.
 
 **MB-R-073** — `data_bits` shall accept exactly 5, 6, 7, or 8; `stop_bits` shall
 accept exactly 1 or 2; `parity` shall accept exactly `even`, `odd`, or `none`,

@@ -1,16 +1,15 @@
 //! Transport-agnostic Modbus server request handler shared by the TCP and RTU servers.
 
-use crate::{Key, KeyParams, LogFn, SlaveId};
+use crate::{Key, KeyParams, LogFn};
 
 use ferrowl_store::{CellType, Memory, Range};
 use parking_lot::RwLock;
+use rust_modbus::{
+    Connection, ExceptionCode, FunctionCode, Quantity, RegisterValue, RequestPdu, ResponsePdu,
+    Service, UnitId,
+};
 use std::fmt::Display;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
-use tokio_modbus::FunctionCode;
-use tokio_modbus::Request;
-use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 
 /// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
 /// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
@@ -18,7 +17,7 @@ use tokio_modbus::prelude::{ExceptionCode, Response, SlaveRequest};
 #[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/cnt) + server state
 async fn handle_read<T, L>(
     name: &str,
-    slave: SlaveId,
+    slave: UnitId,
     fc: FunctionCode,
     cell: CellType,
     addr: u16,
@@ -77,7 +76,7 @@ where
 #[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/values) + server state
 async fn handle_write_multi<T, L>(
     name: &str,
-    slave: SlaveId,
+    slave: UnitId,
     fc: FunctionCode,
     cell: CellType,
     addr: u16,
@@ -136,7 +135,7 @@ where
 #[allow(clippy::too_many_arguments)] // request context (name/slave/fc/cell/addr/value/stored) + server state
 async fn handle_write_single<T, L, V>(
     name: &str,
-    slave: SlaveId,
+    slave: UnitId,
     fc: FunctionCode,
     cell: CellType,
     addr: u16,
@@ -190,133 +189,146 @@ where
 /// Every arm logs a "request received" line. When `verbose` is set (TCP), each arm additionally
 /// logs per-request success/failure; RTU passes `verbose = false` and stays quiet on the outcome.
 pub(crate) async fn handle_request<T, L>(
-    slave: SlaveId,
-    request: Request<'static>,
+    slave: UnitId,
+    request: RequestPdu,
     memory: &Arc<RwLock<Memory<Key<T>>>>,
     log: &L,
     verbose: bool,
-) -> Result<Response, ExceptionCode>
+) -> Result<ResponsePdu, ExceptionCode>
 where
     T: KeyParams,
     L: LogFn + Clone,
 {
     match request {
-        Request::ReadCoils(addr, cnt) => {
+        RequestPdu::ReadCoils { address, quantity } => {
             let v = handle_read(
                 "ReadCoils",
                 slave,
                 FunctionCode::ReadCoils,
                 CellType::Coil,
-                addr,
-                cnt,
+                address.0,
+                quantity.0,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::ReadCoils(v.into_iter().map(|b| b != 0).collect()))
+            Ok(ResponsePdu::ReadCoils {
+                coils: v.into_iter().map(|b| b != 0).collect(),
+            })
         }
-        Request::ReadDiscreteInputs(addr, cnt) => {
+        RequestPdu::ReadDiscreteInputs { address, quantity } => {
             let v = handle_read(
                 "ReadDiscreteInputs",
                 slave,
                 FunctionCode::ReadDiscreteInputs,
                 CellType::Coil,
-                addr,
-                cnt,
+                address.0,
+                quantity.0,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::ReadDiscreteInputs(
-                v.into_iter().map(|b| b != 0).collect(),
-            ))
+            Ok(ResponsePdu::ReadDiscreteInputs {
+                inputs: v.into_iter().map(|b| b != 0).collect(),
+            })
         }
-        Request::ReadInputRegisters(addr, cnt) => {
+        RequestPdu::ReadInputRegisters { address, quantity } => {
             let v = handle_read(
                 "ReadInputRegisters",
                 slave,
                 FunctionCode::ReadInputRegisters,
                 CellType::Register,
-                addr,
-                cnt,
+                address.0,
+                quantity.0,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::ReadInputRegisters(v))
+            Ok(ResponsePdu::ReadInputRegisters {
+                registers: v.into_iter().map(RegisterValue).collect(),
+            })
         }
-        Request::ReadHoldingRegisters(addr, cnt) => {
+        RequestPdu::ReadHoldingRegisters { address, quantity } => {
             let v = handle_read(
                 "ReadHoldingRegisters",
                 slave,
                 FunctionCode::ReadHoldingRegisters,
                 CellType::Register,
-                addr,
-                cnt,
+                address.0,
+                quantity.0,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::ReadHoldingRegisters(v))
+            Ok(ResponsePdu::ReadHoldingRegisters {
+                registers: v.into_iter().map(RegisterValue).collect(),
+            })
         }
-        Request::WriteMultipleRegisters(addr, values) => {
+        RequestPdu::WriteMultipleRegisters { address, registers } => {
+            let values: Vec<u16> = registers.iter().map(|v| v.0).collect();
             let len = handle_write_multi(
                 "WriteMultipleRegisters",
                 slave,
                 FunctionCode::WriteMultipleRegisters,
                 CellType::Register,
-                addr,
+                address.0,
                 &values,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::WriteMultipleRegisters(addr, len))
+            Ok(ResponsePdu::WriteMultipleRegisters {
+                address,
+                quantity: Quantity(len),
+            })
         }
-        Request::WriteSingleRegister(addr, value) => {
+        RequestPdu::WriteSingleRegister { address, value } => {
             handle_write_single(
                 "WriteSingleRegister",
                 slave,
                 FunctionCode::WriteSingleRegister,
                 CellType::Register,
-                addr,
-                value,
-                value,
+                address.0,
+                value.0,
+                value.0,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::WriteSingleRegister(addr, value))
+            Ok(ResponsePdu::WriteSingleRegister { address, value })
         }
-        Request::WriteMultipleCoils(addr, values) => {
-            let values: Vec<u16> = values.iter().map(|v| *v as u16).collect();
+        RequestPdu::WriteMultipleCoils { address, coils } => {
+            let values: Vec<u16> = coils.iter().map(|v| *v as u16).collect();
             let len = handle_write_multi(
                 "WriteMultipleCoils",
                 slave,
                 FunctionCode::WriteMultipleCoils,
                 CellType::Coil,
-                addr,
+                address.0,
                 &values,
                 memory,
                 log,
                 verbose,
             )
             .await?;
-            Ok(Response::WriteMultipleCoils(addr, len))
+            Ok(ResponsePdu::WriteMultipleCoils {
+                address,
+                quantity: Quantity(len),
+            })
         }
-        Request::WriteSingleCoil(addr, value) => {
+        RequestPdu::WriteSingleCoil { address, value } => {
             handle_write_single(
                 "WriteSingleCoil",
                 slave,
                 FunctionCode::WriteSingleCoil,
                 CellType::Coil,
-                addr,
+                address.0,
                 value,
                 value as u16,
                 memory,
@@ -324,25 +336,16 @@ where
                 verbose,
             )
             .await?;
-            Ok(Response::WriteSingleCoil(addr, value))
+            Ok(ResponsePdu::WriteSingleCoil { address, value })
         }
-        Request::ReportServerId => {
-            log.invoke(format!(
-                "ReportServerId request received for slave ID {}. Unsupported function.",
-                slave,
-            ))
-            .await;
-            Err(ExceptionCode::IllegalFunction)
-        }
-        Request::MaskWriteRegister(_, _, _) => {
-            log.invoke(format!(
-                "MaskWriteRegister request received for slave ID {}. Unsupported function.",
-                slave,
-            ))
-            .await;
-            Err(ExceptionCode::IllegalFunction)
-        }
-        Request::ReadWriteMultipleRegisters(read_addr, cnt, write_addr, values) => {
+        RequestPdu::ReadWriteMultipleRegisters {
+            read_address,
+            read_quantity,
+            write_address,
+            registers,
+        } => {
+            let (read_addr, cnt, write_addr) = (read_address.0, read_quantity.0, write_address.0);
+            let values: Vec<u16> = registers.iter().map(|v| v.0).collect();
             log.invoke(format!(
                 "ReadWriteMultipleRegisrters request received for slave ID {}, read address {}, count {}, write address {}, and values {:?}.",
                 slave, read_addr, cnt, write_addr, values
@@ -420,22 +423,21 @@ where
                         ))
                         .await;
                     }
-                    Ok(Response::ReadWriteMultipleRegisters(v))
+                    Ok(ResponsePdu::ReadWriteMultipleRegisters {
+                        registers: v.into_iter().map(RegisterValue).collect(),
+                    })
                 }
             }
         }
-        Request::ReadDeviceIdentification(_, _) => {
+        // MB-R-059: everything the server does not implement — report-server-id,
+        // mask-write-register, diagnostics, comm-event, file record, FIFO queue,
+        // read-device-identification (MEI), and any custom code — is one refusal, so a
+        // function code the frame layer learns to decode later cannot silently acquire a
+        // different answer here. MB-R-066 still requires the received line.
+        other => {
             log.invoke(format!(
-                "ReadDeviceIdentification request received for slave ID {}. Unsupported function.",
-                slave,
-            ))
-            .await;
-            Err(ExceptionCode::IllegalFunction)
-        }
-        Request::Custom(func, _) => {
-            log.invoke(format!(
-                "Custom function {} request received for slave ID {}. Unsupported function.",
-                func, slave,
+                "{} request received for slave ID {slave}. Unsupported function.",
+                other.function(),
             ))
             .await;
             Err(ExceptionCode::IllegalFunction)
@@ -471,25 +473,33 @@ where
     }
 }
 
-impl<T, L> tokio_modbus::server::Service for Server<T, L>
+impl<T, L> Service for Server<T, L>
 where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    type Request = SlaveRequest<'static>;
-    type Exception = ExceptionCode;
-    type Response = Response;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, ExceptionCode>> + Send>>;
+    // Taken by `&self` and awaited inside the connection's own task, so the handler suspends
+    // normally on the store's lock and the log sink rather than blocking a worker thread. The
+    // connection itself is not part of the answer: every request is served from the shared
+    // store, whichever link carried it (MB-R-057).
+    async fn on_request(
+        &self,
+        _conn: &Connection,
+        unit: UnitId,
+        request: RequestPdu,
+    ) -> Result<ResponsePdu, ExceptionCode> {
+        handle_request(unit, request, &self.memory, &self.log, self.verbose).await
+    }
 
-    // `tokio_modbus`'s `process()` loop (TCP and RTU alike) already `.await`s this future from
-    // inside its own per-connection tokio task, so there is no need to bridge into async here —
-    // returning the future directly lets it suspend normally instead of blocking a worker thread.
-    fn call(&self, request: Self::Request) -> Self::Future {
-        let SlaveRequest { slave, request } = request;
-        let memory = self.memory.clone();
-        let log = self.log.clone();
-        let verbose = self.verbose;
-        Box::pin(async move { handle_request(slave, request, &memory, &log, verbose).await })
+    // A framing or I/O failure on the wire never reaches `on_request`. TCP reports it (the
+    // former `on_process_error` callback); RTU stays quiet on per-request outcomes, and
+    // `verbose` is exactly that distinction (MB-R-067).
+    async fn on_error(&self, _conn: &Connection, error: &rust_modbus::Error) {
+        if self.verbose {
+            self.log
+                .invoke(format!("Server processing failed. [{error}]"))
+                .await;
+        }
     }
 }
 
@@ -499,6 +509,11 @@ mod tests {
     use crate::SlaveKey;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::CellKind as MemKind;
+    use rust_modbus::{
+        Address, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
+        FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
+        RecordNumber, Rtu, Server as ModbusServer, Tcp,
+    };
     use std::sync::Mutex;
 
     /// Build a memory map for slave `1`, holding registers `[0,4)`, seeded with `seed` at addr 0,
@@ -506,7 +521,7 @@ mod tests {
     fn seeded_memory(seed: &[u16]) -> Arc<RwLock<Memory<Key<SlaveKey>>>> {
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: RegKind::HoldingRegister,
             },
         };
@@ -536,29 +551,105 @@ mod tests {
         (log, buf)
     }
 
-    // Regression: `Server::call` used to bridge into async via `block_in_place` +
+    // Regression: the service used to bridge into async via `block_in_place` +
     // `Handle::block_on` purely to lock `memory`, which panics ("can call blocking only when
     // running on the multi-threaded runtime") on the default current-thread flavor below. Now
-    // that the lock is synchronous (`parking_lot`) and `call` returns a real future that
-    // `tokio_modbus`'s `process()` loop just `.await`s, this must succeed on a current-thread
-    // runtime with no dedicated worker threads to bridge onto.
+    // that the lock is synchronous (`parking_lot`) and `on_request` is an ordinary async fn the
+    // connection task just `.await`s, this must succeed on a current-thread runtime with no
+    // dedicated worker threads to bridge onto.
     #[tokio::test]
     /// MB-R-057 — the server answers an inbound request directly from the shared store.
     async fn ut_server_call_works_on_current_thread_runtime() {
-        use tokio_modbus::server::Service;
-
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
         let server = Server::new(mem, log, true);
 
-        let resp = server
-            .call(SlaveRequest {
-                slave: 1,
-                request: Request::ReadHoldingRegisters(0, 2),
-            })
+        // Served over an in-memory duplex link, which is the same code path a socket takes:
+        // the accept loop is the only thing a real listener adds.
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        let mut client: RmClient<_, Tcp> = RmClient::new(FrameTransport::new(client_end));
+        let registers = client
+            .read_holding_registers(UnitId(1), Address(0), Quantity(2))
             .await
             .unwrap();
-        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![10, 20]));
+        assert_eq!(registers, vec![RegisterValue(10), RegisterValue(20)]);
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-103 — an RTU server applies a request addressed to slave id 0 to the store exactly as
+    /// it would any other, and emits no response frame for it.
+    async fn ut_rtu_broadcast_request_is_applied_and_unanswered() {
+        // Both the broadcast address and slave 1 have declared regions: the broadcast write
+        // lands in slave 0's, and the follow-up read of slave 1 is what proves no stray
+        // broadcast response was left sitting in the stream ahead of it.
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        for slave in [UnitId(0), UnitId(1)] {
+            let key = Key {
+                id: SlaveKey {
+                    slave_id: slave,
+                    kind: RegKind::HoldingRegister,
+                },
+            };
+            mem.add_ranges(
+                key.clone(),
+                &MemKind::ReadWrite(CellType::Register),
+                &[Range::new(0, 4)],
+            );
+            mem.write(key, &CellType::Register, &Range::new(0, 2), &[10, 20])
+                .unwrap();
+        }
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+        let server = Server::new(mem.clone(), log, true);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Rtu>::new(server_end)));
+
+        let mut client: RmClient<_, Rtu> = RmClient::new(FrameTransport::new(client_end));
+        // Returns as soon as the frame is written — nothing is awaited, because nothing answers.
+        client
+            .write_single_register(UnitId(0), Address(1), RegisterValue(0x1234))
+            .await
+            .unwrap();
+
+        // The store took the write all the same.
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(0),
+                kind: RegKind::HoldingRegister,
+            },
+        };
+        let mut applied = Vec::new();
+        for _ in 0..50 {
+            applied = mem
+                .read()
+                .read(key.clone(), &CellType::Register, &Range::new(0, 2))
+                .unwrap();
+            if applied == vec![10, 0x1234] {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(applied, vec![10, 0x1234]);
+
+        // The next exchange lines up, so the broadcast put no frame on the wire.
+        let registers = client
+            .read_holding_registers(UnitId(1), Address(0), Quantity(2))
+            .await
+            .unwrap();
+        assert_eq!(registers, vec![RegisterValue(10), RegisterValue(20)]);
+
+        handle.shutdown().await;
+        let _ = serving.await;
     }
 
     #[tokio::test]
@@ -566,11 +657,21 @@ mod tests {
     async fn ut_handle_read_holding_returns_seeded_values() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
-        let resp =
-            handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, true)
-                .await
-                .unwrap();
-        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![10, 20]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(10), RegisterValue(20)])
+        );
     }
 
     #[tokio::test]
@@ -580,8 +681,11 @@ mod tests {
         let (log, _) = recording_log();
         // Slave 2 has no registered ranges, so the lookup fails.
         let err = handle_request::<SlaveKey, _>(
-            2,
-            Request::ReadHoldingRegisters(0, 2),
+            UnitId(2),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
             &mem,
             &log,
             false,
@@ -596,19 +700,33 @@ mod tests {
     async fn ut_handle_write_single_register_persists() {
         let mem = seeded_memory(&[]);
         let (log, _) = recording_log();
-        handle_request::<SlaveKey, _>(1, Request::WriteSingleRegister(1, 99), &mem, &log, false)
-            .await
-            .unwrap();
-        let resp = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadHoldingRegisters(1, 1),
+        handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::WriteSingleRegister {
+                address: Address(1),
+                value: RegisterValue(99),
+            },
             &mem,
             &log,
             false,
         )
         .await
         .unwrap();
-        assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v == vec![99]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(1),
+                quantity: Quantity(1),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(99)])
+        );
     }
 
     #[tokio::test]
@@ -618,9 +736,18 @@ mod tests {
 
         // verbose = true: a "received" line plus a "successful" line.
         let (log, buf) = recording_log();
-        handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, true)
-            .await
-            .unwrap();
+        handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            true,
+        )
+        .await
+        .unwrap();
         let verbose = buf.lock().unwrap().clone();
         assert_eq!(verbose.len(), 2);
         assert!(verbose[0].contains("received"));
@@ -628,9 +755,18 @@ mod tests {
 
         // verbose = false: only the "received" line.
         let (log, buf) = recording_log();
-        handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, false)
-            .await
-            .unwrap();
+        handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
         let quiet = buf.lock().unwrap().clone();
         assert_eq!(quiet.len(), 1);
         assert!(quiet[0].contains("received"));
@@ -645,7 +781,10 @@ mod tests {
         seed: &[u16],
     ) -> Arc<RwLock<Memory<Key<SlaveKey>>>> {
         let key = Key {
-            id: SlaveKey { slave_id: 1, kind },
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind,
+            },
         };
         let mut mem = Memory::<Key<SlaveKey>>::default();
         mem.add_ranges(key.clone(), &MemKind::ReadWrite(ty), &[Range::new(0, len)]);
@@ -666,8 +805,11 @@ mod tests {
         let coils = vec![true, false, true, true, false];
 
         let resp = handle_request::<SlaveKey, _>(
-            1,
-            Request::WriteMultipleCoils(1, coils.clone().into()),
+            UnitId(1),
+            RequestPdu::WriteMultipleCoils {
+                address: Address(1),
+                coils: coils.clone(),
+            },
             &mem,
             &log,
             false,
@@ -676,12 +818,27 @@ mod tests {
         .unwrap();
         // Regression: the write range length must equal values.len(), not 1. Before the fix
         // `Memory::write` rejected any multi-coil write (range.length() != values.len()).
-        assert!(matches!(resp, Response::WriteMultipleCoils(1, 5)));
+        assert!(matches!(
+            resp,
+            ResponsePdu::WriteMultipleCoils {
+                address: Address(1),
+                quantity: Quantity(5)
+            }
+        ));
 
-        let read = handle_request::<SlaveKey, _>(1, Request::ReadCoils(1, 5), &mem, &log, false)
-            .await
-            .unwrap();
-        assert!(matches!(read, Response::ReadCoils(v) if v == coils));
+        let read = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadCoils {
+                address: Address(1),
+                quantity: Quantity(5),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(read, ResponsePdu::ReadCoils { coils: v } if v == coils));
     }
 
     #[tokio::test]
@@ -691,8 +848,11 @@ mod tests {
         let (log, _) = recording_log();
         // addr 6 + 5 coils overruns the registered [0, 8) region.
         let err = handle_request::<SlaveKey, _>(
-            1,
-            Request::WriteMultipleCoils(6, vec![true; 5].into()),
+            UnitId(1),
+            RequestPdu::WriteMultipleCoils {
+                address: Address(6),
+                coils: vec![true; 5],
+            },
             &mem,
             &log,
             false,
@@ -709,10 +869,21 @@ mod tests {
     async fn ut_read_coils_returns_seeded_bits() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[1, 0, 1, 0]);
         let (log, _) = recording_log();
-        let resp = handle_request::<SlaveKey, _>(1, Request::ReadCoils(0, 4), &mem, &log, false)
-            .await
-            .unwrap();
-        assert!(matches!(resp, Response::ReadCoils(v) if v == vec![true, false, true, false]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadCoils {
+                address: Address(0),
+                quantity: Quantity(4),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(resp, ResponsePdu::ReadCoils { coils: v } if v == vec![true, false, true, false])
+        );
     }
 
     #[tokio::test]
@@ -720,9 +891,18 @@ mod tests {
     async fn ut_read_coils_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
-        let err = handle_request::<SlaveKey, _>(1, Request::ReadCoils(10, 2), &mem, &log, false)
-            .await
-            .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadCoils {
+                address: Address(10),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
@@ -731,11 +911,21 @@ mod tests {
     async fn ut_read_discrete_inputs_returns_seeded_bits() {
         let mem = seeded(RegKind::DiscreteInput, CellType::Coil, 3, &[0, 1, 1]);
         let (log, _) = recording_log();
-        let resp =
-            handle_request::<SlaveKey, _>(1, Request::ReadDiscreteInputs(0, 3), &mem, &log, false)
-                .await
-                .unwrap();
-        assert!(matches!(resp, Response::ReadDiscreteInputs(v) if v == vec![false, true, true]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadDiscreteInputs {
+                address: Address(0),
+                quantity: Quantity(3),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(resp, ResponsePdu::ReadDiscreteInputs { inputs: v } if v == vec![false, true, true])
+        );
     }
 
     #[tokio::test]
@@ -743,10 +933,18 @@ mod tests {
     async fn ut_read_discrete_inputs_unknown_slave_is_illegal_data_address() {
         let mem = seeded(RegKind::DiscreteInput, CellType::Coil, 3, &[]);
         let (log, _) = recording_log();
-        let err =
-            handle_request::<SlaveKey, _>(2, Request::ReadDiscreteInputs(0, 3), &mem, &log, false)
-                .await
-                .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(2),
+            RequestPdu::ReadDiscreteInputs {
+                address: Address(0),
+                quantity: Quantity(3),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
@@ -757,11 +955,21 @@ mod tests {
     async fn ut_read_input_registers_returns_seeded_values() {
         let mem = seeded(RegKind::InputRegister, CellType::Register, 3, &[7, 8, 9]);
         let (log, _) = recording_log();
-        let resp =
-            handle_request::<SlaveKey, _>(1, Request::ReadInputRegisters(0, 3), &mem, &log, false)
-                .await
-                .unwrap();
-        assert!(matches!(resp, Response::ReadInputRegisters(v) if v == vec![7, 8, 9]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadInputRegisters {
+                address: Address(0),
+                quantity: Quantity(3),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(resp, ResponsePdu::ReadInputRegisters { registers: v } if v == vec![RegisterValue(7), RegisterValue(8), RegisterValue(9)])
+        );
     }
 
     #[tokio::test]
@@ -769,10 +977,18 @@ mod tests {
     async fn ut_read_input_registers_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::InputRegister, CellType::Register, 3, &[]);
         let (log, _) = recording_log();
-        let err =
-            handle_request::<SlaveKey, _>(1, Request::ReadInputRegisters(2, 5), &mem, &log, false)
-                .await
-                .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadInputRegisters {
+                address: Address(2),
+                quantity: Quantity(5),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
@@ -782,8 +998,11 @@ mod tests {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadHoldingRegisters(3, 4),
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(3),
+                quantity: Quantity(4),
+            },
             &mem,
             &log,
             false,
@@ -800,15 +1019,38 @@ mod tests {
     async fn ut_write_single_coil_persists() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
-        let resp =
-            handle_request::<SlaveKey, _>(1, Request::WriteSingleCoil(2, true), &mem, &log, false)
-                .await
-                .unwrap();
-        assert!(matches!(resp, Response::WriteSingleCoil(2, true)));
-        let read = handle_request::<SlaveKey, _>(1, Request::ReadCoils(2, 1), &mem, &log, false)
-            .await
-            .unwrap();
-        assert!(matches!(read, Response::ReadCoils(v) if v == vec![true]));
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::WriteSingleCoil {
+                address: Address(2),
+                value: true,
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            resp,
+            ResponsePdu::WriteSingleCoil {
+                address: Address(2),
+                value: true
+            }
+        ));
+        let read = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadCoils {
+                address: Address(2),
+                quantity: Quantity(1),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(read, ResponsePdu::ReadCoils { coils: v } if v == vec![true]));
     }
 
     #[tokio::test]
@@ -816,10 +1058,18 @@ mod tests {
     async fn ut_write_single_coil_out_of_range_is_illegal_data_address() {
         let mem = seeded(RegKind::Coil, CellType::Coil, 4, &[]);
         let (log, _) = recording_log();
-        let err =
-            handle_request::<SlaveKey, _>(1, Request::WriteSingleCoil(9, true), &mem, &log, false)
-                .await
-                .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::WriteSingleCoil {
+                address: Address(9),
+                value: true,
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
@@ -829,8 +1079,11 @@ mod tests {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
-            1,
-            Request::WriteSingleRegister(99, 1),
+            UnitId(1),
+            RequestPdu::WriteSingleRegister {
+                address: Address(99),
+                value: RegisterValue(1),
+            },
             &mem,
             &log,
             false,
@@ -848,25 +1101,39 @@ mod tests {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 8, &[]);
         let (log, _) = recording_log();
         let resp = handle_request::<SlaveKey, _>(
-            1,
-            Request::WriteMultipleRegisters(1, vec![11, 22, 33].into()),
+            UnitId(1),
+            RequestPdu::WriteMultipleRegisters {
+                address: Address(1),
+                registers: vec![11, 22, 33].into_iter().map(RegisterValue).collect(),
+            },
             &mem,
             &log,
             false,
         )
         .await
         .unwrap();
-        assert!(matches!(resp, Response::WriteMultipleRegisters(1, 3)));
+        assert!(matches!(
+            resp,
+            ResponsePdu::WriteMultipleRegisters {
+                address: Address(1),
+                quantity: Quantity(3)
+            }
+        ));
         let read = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadHoldingRegisters(1, 3),
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(1),
+                quantity: Quantity(3),
+            },
             &mem,
             &log,
             false,
         )
         .await
         .unwrap();
-        assert!(matches!(read, Response::ReadHoldingRegisters(v) if v == vec![11, 22, 33]));
+        assert!(
+            matches!(read, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(11), RegisterValue(22), RegisterValue(33)])
+        );
     }
 
     #[tokio::test]
@@ -875,8 +1142,11 @@ mod tests {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
-            1,
-            Request::WriteMultipleRegisters(3, vec![1, 2, 3].into()),
+            UnitId(1),
+            RequestPdu::WriteMultipleRegisters {
+                address: Address(3),
+                registers: vec![1, 2, 3].into_iter().map(RegisterValue).collect(),
+            },
             &mem,
             &log,
             false,
@@ -900,25 +1170,37 @@ mod tests {
         let (log, _) = recording_log();
         // Read [0,2), write [2,4) = [77, 88].
         let resp = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadWriteMultipleRegisters(0, 2, 2, vec![77, 88].into()),
+            UnitId(1),
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address: Address(0),
+                read_quantity: Quantity(2),
+                write_address: Address(2),
+                registers: vec![77, 88].into_iter().map(RegisterValue).collect(),
+            },
             &mem,
             &log,
             false,
         )
         .await
         .unwrap();
-        assert!(matches!(resp, Response::ReadWriteMultipleRegisters(v) if v == vec![5, 6]));
+        assert!(
+            matches!(resp, ResponsePdu::ReadWriteMultipleRegisters { registers: v } if v == vec![RegisterValue(5), RegisterValue(6)])
+        );
         let read = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadHoldingRegisters(2, 2),
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(2),
+                quantity: Quantity(2),
+            },
             &mem,
             &log,
             false,
         )
         .await
         .unwrap();
-        assert!(matches!(read, Response::ReadHoldingRegisters(v) if v == vec![77, 88]));
+        assert!(
+            matches!(read, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(77), RegisterValue(88)])
+        );
     }
 
     #[tokio::test]
@@ -932,8 +1214,13 @@ mod tests {
         );
         let (log, _) = recording_log();
         let err = handle_request::<SlaveKey, _>(
-            1,
-            Request::ReadWriteMultipleRegisters(0, 2, 10, vec![1, 2].into()),
+            UnitId(1),
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address: Address(0),
+                read_quantity: Quantity(2),
+                write_address: Address(10),
+                registers: vec![1, 2].into_iter().map(RegisterValue).collect(),
+            },
             &mem,
             &log,
             false,
@@ -951,7 +1238,7 @@ mod tests {
         for &slave in &[3u8, 9u8] {
             let key = Key {
                 id: SlaveKey {
-                    slave_id: slave,
+                    slave_id: UnitId(slave),
                     kind: RegKind::HoldingRegister,
                 },
             };
@@ -974,15 +1261,20 @@ mod tests {
         // Both slaves are answered from their own declared regions.
         for &slave in &[3u8, 9u8] {
             let resp = handle_request::<SlaveKey, _>(
-                slave,
-                Request::ReadHoldingRegisters(0, 2),
+                UnitId(slave),
+                RequestPdu::ReadHoldingRegisters {
+                    address: Address(0),
+                    quantity: Quantity(2),
+                },
                 &mem,
                 &log,
                 false,
             )
             .await
             .unwrap();
-            assert!(matches!(resp, Response::ReadHoldingRegisters(v) if v[0] == slave as u16));
+            assert!(
+                matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v[0] == RegisterValue(slave as u16))
+            );
         }
     }
 
@@ -998,9 +1290,18 @@ mod tests {
 
         // A supported request logs "request received".
         let (log, buf) = recording_log();
-        handle_request::<SlaveKey, _>(1, Request::ReadHoldingRegisters(0, 2), &mem, &log, false)
-            .await
-            .unwrap();
+        handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+        )
+        .await
+        .unwrap();
         assert!(
             buf.lock()
                 .unwrap()
@@ -1010,9 +1311,10 @@ mod tests {
 
         // A rejected function code still logs "request received" before the IllegalFunction reply.
         let (log, buf) = recording_log();
-        let err = handle_request::<SlaveKey, _>(1, Request::ReportServerId, &mem, &log, false)
-            .await
-            .unwrap_err();
+        let err =
+            handle_request::<SlaveKey, _>(UnitId(1), RequestPdu::ReportServerId, &mem, &log, false)
+                .await
+                .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalFunction);
         assert!(
             buf.lock()
@@ -1029,9 +1331,10 @@ mod tests {
     async fn ut_report_server_id_is_illegal_function() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
-        let err = handle_request::<SlaveKey, _>(1, Request::ReportServerId, &mem, &log, false)
-            .await
-            .unwrap_err();
+        let err =
+            handle_request::<SlaveKey, _>(UnitId(1), RequestPdu::ReportServerId, &mem, &log, false)
+                .await
+                .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalFunction);
     }
 
@@ -1044,7 +1347,7 @@ mod tests {
             ($mem:expr, $req:expr) => {{
                 let mem = $mem;
                 let (log, buf) = recording_log();
-                handle_request::<SlaveKey, _>(1, $req, &mem, &log, true)
+                handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true)
                     .await
                     .unwrap();
                 assert!(
@@ -1055,31 +1358,52 @@ mod tests {
         }
         ok!(
             seeded(RegKind::Coil, CellType::Coil, 8, &[1, 0, 1, 0, 1, 0, 1, 0]),
-            Request::ReadCoils(0, 4)
+            RequestPdu::ReadCoils {
+                address: Address(0),
+                quantity: Quantity(4)
+            }
         );
         ok!(
             seeded(RegKind::Coil, CellType::Coil, 8, &[]),
-            Request::WriteSingleCoil(0, true)
+            RequestPdu::WriteSingleCoil {
+                address: Address(0),
+                value: true
+            }
         );
         ok!(
             seeded(RegKind::Coil, CellType::Coil, 8, &[]),
-            Request::WriteMultipleCoils(0, vec![true, false, true].into())
+            RequestPdu::WriteMultipleCoils {
+                address: Address(0),
+                coils: vec![true, false, true]
+            }
         );
         ok!(
             seeded(RegKind::DiscreteInput, CellType::Coil, 4, &[1, 1, 1, 1]),
-            Request::ReadDiscreteInputs(0, 4)
+            RequestPdu::ReadDiscreteInputs {
+                address: Address(0),
+                quantity: Quantity(4)
+            }
         );
         ok!(
             seeded(RegKind::InputRegister, CellType::Register, 4, &[1, 2, 3, 4]),
-            Request::ReadInputRegisters(0, 4)
+            RequestPdu::ReadInputRegisters {
+                address: Address(0),
+                quantity: Quantity(4)
+            }
         );
         ok!(
             seeded(RegKind::HoldingRegister, CellType::Register, 8, &[]),
-            Request::WriteSingleRegister(0, 9)
+            RequestPdu::WriteSingleRegister {
+                address: Address(0),
+                value: RegisterValue(9)
+            }
         );
         ok!(
             seeded(RegKind::HoldingRegister, CellType::Register, 8, &[]),
-            Request::WriteMultipleRegisters(0, vec![1, 2, 3].into())
+            RequestPdu::WriteMultipleRegisters {
+                address: Address(0),
+                registers: vec![1, 2, 3].into_iter().map(RegisterValue).collect()
+            }
         );
         ok!(
             seeded(
@@ -1088,7 +1412,12 @@ mod tests {
                 8,
                 &[5, 6, 7, 8]
             ),
-            Request::ReadWriteMultipleRegisters(0, 2, 2, vec![7, 8].into())
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address: Address(0),
+                read_quantity: Quantity(2),
+                write_address: Address(2),
+                registers: vec![7, 8].into_iter().map(RegisterValue).collect()
+            }
         );
     }
 
@@ -1099,7 +1428,7 @@ mod tests {
             ($mem:expr, $req:expr) => {{
                 let mem = $mem;
                 let (log, buf) = recording_log();
-                let _ = handle_request::<SlaveKey, _>(1, $req, &mem, &log, true).await;
+                let _ = handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true).await;
                 assert!(
                     buf.lock().unwrap().iter().any(|l| l.contains("failed")),
                     "missing failure log line"
@@ -1108,35 +1437,59 @@ mod tests {
         }
         fail!(
             seeded(RegKind::Coil, CellType::Coil, 4, &[]),
-            Request::ReadCoils(10, 2)
+            RequestPdu::ReadCoils {
+                address: Address(10),
+                quantity: Quantity(2)
+            }
         );
         fail!(
             seeded(RegKind::Coil, CellType::Coil, 4, &[]),
-            Request::WriteSingleCoil(9, true)
+            RequestPdu::WriteSingleCoil {
+                address: Address(9),
+                value: true
+            }
         );
         fail!(
             seeded(RegKind::Coil, CellType::Coil, 4, &[]),
-            Request::WriteMultipleCoils(6, vec![true; 5].into())
+            RequestPdu::WriteMultipleCoils {
+                address: Address(6),
+                coils: vec![true; 5]
+            }
         );
         fail!(
             seeded(RegKind::DiscreteInput, CellType::Coil, 4, &[]),
-            Request::ReadDiscreteInputs(10, 2)
+            RequestPdu::ReadDiscreteInputs {
+                address: Address(10),
+                quantity: Quantity(2)
+            }
         );
         fail!(
             seeded(RegKind::InputRegister, CellType::Register, 4, &[]),
-            Request::ReadInputRegisters(10, 2)
+            RequestPdu::ReadInputRegisters {
+                address: Address(10),
+                quantity: Quantity(2)
+            }
         );
         fail!(
             seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]),
-            Request::ReadHoldingRegisters(10, 2)
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(10),
+                quantity: Quantity(2)
+            }
         );
         fail!(
             seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]),
-            Request::WriteSingleRegister(99, 1)
+            RequestPdu::WriteSingleRegister {
+                address: Address(99),
+                value: RegisterValue(1)
+            }
         );
         fail!(
             seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]),
-            Request::WriteMultipleRegisters(3, vec![1, 2, 3].into())
+            RequestPdu::WriteMultipleRegisters {
+                address: Address(3),
+                registers: vec![1, 2, 3].into_iter().map(RegisterValue).collect()
+            }
         );
         // Write address out of range -> writable check fails (verbose failure branch).
         fail!(
@@ -1146,21 +1499,62 @@ mod tests {
                 4,
                 &[1, 2, 3, 4]
             ),
-            Request::ReadWriteMultipleRegisters(0, 2, 10, vec![1, 2].into())
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address: Address(0),
+                read_quantity: Quantity(2),
+                write_address: Address(10),
+                registers: vec![1, 2].into_iter().map(RegisterValue).collect()
+            }
         );
     }
 
     #[tokio::test]
-    /// MB-R-059 — mask-write-register, read-device-identification, and custom function codes are rejected with `IllegalFunction`.
+    /// MB-R-059 — every function code outside the nine the server implements is rejected with
+    /// `IllegalFunction`, whatever the frame layer is able to decode.
     async fn ut_unsupported_function_codes_are_illegal() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
         for req in [
-            Request::MaskWriteRegister(0, 0, 0),
-            Request::ReadDeviceIdentification(tokio_modbus::prelude::ReadCode::Basic, 0),
-            Request::Custom(0x65, vec![].into()),
+            RequestPdu::MaskWriteRegister {
+                address: Address(0),
+                and_mask: Mask(0),
+                or_mask: Mask(0),
+            },
+            RequestPdu::EncapsulatedInterfaceTransport(MeiRequest::ReadDeviceIdentification {
+                read_device_id_code: ReadDeviceIdCode::Basic,
+                object_id: 0,
+            }),
+            RequestPdu::ReportServerId,
+            RequestPdu::ReadExceptionStatus,
+            RequestPdu::GetCommEventCounter,
+            RequestPdu::GetCommEventLog,
+            RequestPdu::Diagnostics {
+                sub_function: DiagnosticSubFunction::ReturnQueryData,
+                data: vec![0x1234],
+            },
+            RequestPdu::ReadFileRecord {
+                records: vec![FileRecordRead {
+                    file_number: FileNumber(1),
+                    record_number: RecordNumber(0),
+                    record_length: RecordLength(1),
+                }],
+            },
+            RequestPdu::WriteFileRecord {
+                records: vec![FileRecordWrite {
+                    file_number: FileNumber(1),
+                    record_number: RecordNumber(0),
+                    values: vec![RegisterValue(1)],
+                }],
+            },
+            RequestPdu::ReadFifoQueue {
+                address: Address(0),
+            },
+            RequestPdu::Custom {
+                code: 0x65,
+                data: vec![],
+            },
         ] {
-            let err = handle_request::<SlaveKey, _>(1, req, &mem, &log, false)
+            let err = handle_request::<SlaveKey, _>(UnitId(1), req, &mem, &log, false)
                 .await
                 .unwrap_err();
             assert_eq!(err, ExceptionCode::IllegalFunction);

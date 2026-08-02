@@ -1,6 +1,6 @@
 //! Commands sent to a running client task.
 
-use tokio_modbus::SlaveId;
+use rust_modbus::UnitId;
 
 use crate::scalar::{Address, Coil, Word};
 
@@ -8,8 +8,8 @@ use crate::scalar::{Address, Coil, Word};
 pub enum Command {
     /// Stop the client loop.
     Terminate,
-    WriteSingleCoil(SlaveId, Address, Coil),
-    WriteMultipleCoils(SlaveId, Address, Vec<Coil>),
-    WriteSingleRegister(SlaveId, Address, Word),
-    WriteMultipleRegister(SlaveId, Address, Vec<Word>),
+    WriteSingleCoil(UnitId, Address, Coil),
+    WriteMultipleCoils(UnitId, Address, Vec<Coil>),
+    WriteSingleRegister(UnitId, Address, Word),
+    WriteMultipleRegister(UnitId, Address, Vec<Word>),
 }

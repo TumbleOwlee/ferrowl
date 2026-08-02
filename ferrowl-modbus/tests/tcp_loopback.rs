@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
-use ferrowl_modbus::{Command, FunctionCode, Key, Operation, SlaveKey};
+use ferrowl_modbus::{Address, Command, FunctionCode, Key, Operation, SlaveKey, UnitId, Word};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
@@ -20,7 +20,10 @@ use tokio::time::sleep;
 type Mem = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 
 fn key(kind: RegKind) -> Key<SlaveKey> {
-    Key::new(SlaveKey { slave_id: 1, kind })
+    Key::new(SlaveKey {
+        slave_id: UnitId(1),
+        kind,
+    })
 }
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
@@ -169,22 +172,22 @@ async fn tcp_client_polls_server_and_executes_commands() {
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
         Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadCoils,
             range: Range::new(0, 4),
         },
         Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadDiscreteInputs,
             range: Range::new(0, 4),
         },
         Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadInputRegisters,
             range: Range::new(0, 4),
         },
         Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadHoldingRegisters,
             range: Range::new(0, 4),
         },
@@ -240,16 +243,30 @@ async fn tcp_client_polls_server_and_executes_commands() {
     }
 
     // Exercise every write command against the server.
-    tx.send(Command::WriteSingleRegister(1, 0, 99))
+    tx.send(Command::WriteSingleRegister(
+        UnitId(1),
+        Address(0),
+        Word(99),
+    ))
+    .await
+    .unwrap();
+    tx.send(Command::WriteMultipleRegister(
+        UnitId(1),
+        Address(1),
+        vec![5, 6].into_iter().map(Word).collect(),
+    ))
+    .await
+    .unwrap();
+    tx.send(Command::WriteSingleCoil(UnitId(1), Address(5), true))
         .await
         .unwrap();
-    tx.send(Command::WriteMultipleRegister(1, 1, vec![5, 6]))
-        .await
-        .unwrap();
-    tx.send(Command::WriteSingleCoil(1, 5, true)).await.unwrap();
-    tx.send(Command::WriteMultipleCoils(1, 6, vec![true, false]))
-        .await
-        .unwrap();
+    tx.send(Command::WriteMultipleCoils(
+        UnitId(1),
+        Address(6),
+        vec![true, false],
+    ))
+    .await
+    .unwrap();
     sleep(Duration::from_millis(600)).await;
 
     {
@@ -294,7 +311,7 @@ async fn tcp_client_handles_server_rejections() {
         .expect("server failed to start");
 
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 2),
     }]));
@@ -312,16 +329,26 @@ async fn tcp_client_handles_server_rejections() {
     sleep(Duration::from_millis(800)).await;
 
     // Writes the server rejects -> the "invalid" command branches.
-    tx.send(Command::WriteSingleRegister(1, 0, 1))
+    tx.send(Command::WriteSingleRegister(UnitId(1), Address(0), Word(1)))
         .await
         .unwrap();
-    tx.send(Command::WriteMultipleRegister(1, 0, vec![1, 2]))
+    tx.send(Command::WriteMultipleRegister(
+        UnitId(1),
+        Address(0),
+        vec![1, 2].into_iter().map(Word).collect(),
+    ))
+    .await
+    .unwrap();
+    tx.send(Command::WriteSingleCoil(UnitId(1), Address(0), true))
         .await
         .unwrap();
-    tx.send(Command::WriteSingleCoil(1, 0, true)).await.unwrap();
-    tx.send(Command::WriteMultipleCoils(1, 0, vec![true]))
-        .await
-        .unwrap();
+    tx.send(Command::WriteMultipleCoils(
+        UnitId(1),
+        Address(0),
+        vec![true],
+    ))
+    .await
+    .unwrap();
     sleep(Duration::from_millis(600)).await;
 
     tx.send(Command::Terminate).await.unwrap();
@@ -372,7 +399,7 @@ async fn tcp_server_serves_concurrent_clients() {
     // Two independent clients connect at the same time and both read from the one server.
     let ops = || {
         Arc::new(RwLock::new(vec![Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadHoldingRegisters,
             range: Range::new(0, 4),
         }]))
@@ -442,7 +469,7 @@ async fn tcp_client_reconnect_false_dies_on_refused_connect() {
     // instead of retrying forever.
     let port = free_port();
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 2),
     }]));
@@ -474,7 +501,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     let cli_mem = client_mem();
 
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -566,7 +593,7 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
 
     // Start with a single operation reading the holding registers.
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -596,7 +623,7 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
 
     // Add an input-register operation at runtime — no reconnect.
     operations.write().await.push(Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadInputRegisters,
         range: Range::new(0, 4),
     });
@@ -636,7 +663,7 @@ async fn tcp_client_rereads_config_on_reconnect() {
 
     let shared_cfg = Arc::new(RwLock::new(config(bad_port)));
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -678,7 +705,7 @@ async fn tcp_client_backoff_resets_after_successful_run() {
     let cli_mem = client_mem();
 
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -749,7 +776,7 @@ async fn tcp_client_addresses_operation_slave_id() {
     // Server memory declared only under slave id 7. A request for any other slave finds no region.
     let k7 = || {
         Key::new(SlaveKey {
-            slave_id: 7,
+            slave_id: UnitId(7),
             kind: RegKind::HoldingRegister,
         })
     };
@@ -783,7 +810,7 @@ async fn tcp_client_addresses_operation_slave_id() {
     let cli_mem: Mem = Arc::new(MemLock::new(cm));
 
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 7,
+        slave_id: UnitId(7),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -830,7 +857,7 @@ async fn tcp_client_delays_before_first_poll() {
         ..config(port)
     };
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));
@@ -894,7 +921,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
         ..config_no_reconnect(port)
     };
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 2),
     }]));
@@ -927,7 +954,7 @@ async fn tcp_client_success_resets_retry_counter() {
         .expect("server failed to start");
 
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 4),
     }]));

@@ -346,6 +346,7 @@ mod render_tests {
         BitField, Endian, Format, Resolution, WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
@@ -385,7 +386,7 @@ mod render_tests {
     #[test]
     fn ut_render_edit_dialog_shows_edit_title_and_delete_button() {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))

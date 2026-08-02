@@ -45,11 +45,14 @@ Registers), nor any other code.
 | 16 | Write Multiple Registers | applied to the store |
 | 23 | Read/Write Multiple Registers | applied to the store, atomically (server-only) |
 
-Explicitly **rejected** with exception `IllegalFunction` (`0x01`):
+Every other code — that is, everything outside 1, 2, 3, 4, 5, 6, 15, 16 and 23 —
+is **rejected** with exception `IllegalFunction` (`0x01`). Among them:
 
 - Report Server Id (17)
 - Mask Write Register (22)
 - Read Device Identification (43 / MEI)
+- Diagnostics (8), Get Comm Event Counter (11), Get Comm Event Log (12)
+- Read File Record (20), Write File Record (21), Read FIFO Queue (24)
 - any custom/user-defined function code
 
 ### 1.3 Exception codes emitted by the server
@@ -190,7 +193,7 @@ reversed entries are skipped silently.
 
 | Field | Type | Default | Valid values |
 |---|---|---|---|
-| `slave_id` | u8 | `0` | 0–255 |
+| `slave_id` | u8 | `1` | 0–255 |
 | `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
 | `address` | optional u16 | unset ⇒ virtual | 0–65535 |
 | `virtual` | bool | `false` | `true` forces virtual even with an `address` set |

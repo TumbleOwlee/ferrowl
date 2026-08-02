@@ -61,6 +61,8 @@ mistaken for an oversight and silently "fixed".
 | `interval_ms = 0` | treated as a 1 ms tick, not a busy loop |
 | Ticks missed while a slow request is in flight | the schedule is delayed; no burst of catch-up requests |
 | `delay_ms` | applied on **every** (re)connection, not only the first |
+| Read operation addressed to slave id 0 on RTU | fails locally, never sent; follows the exception-retry path (MB-R-101). On TCP, unit 0 is an ordinary unit and is sent normally |
+| Write command addressed to slave id 0 on RTU | fire-and-forget: written and not awaited, always logged as executed even if no device applied it (MB-R-102) |
 
 ---
 
@@ -71,10 +73,11 @@ mistaken for an oversight and silently "fixed".
 | Read of an address range not declared in the store | exception `IllegalDataAddress` |
 | Write to an address range that is not writable | exception `IllegalDataAddress` |
 | Coil request against register cells, or the reverse | exception `IllegalDataAddress` |
-| Unsupported function code (report-server-id, mask-write-register, read-device-identification, custom) | exception `IllegalFunction`, request logged |
+| Any function code outside the nine of MB-R-058 (report-server-id, mask-write-register, read-device-identification, diagnostics, comm-event, file record, FIFO queue, custom) | exception `IllegalFunction`, request logged |
 | Read/write-multiple-registers whose read range is unreadable or write range is unwritable | exception `IllegalDataAddress`, and **no** write is applied |
 | Read/write-multiple-registers under concurrent load | the read-check, write-check, read and write happen under a single exclusive hold; no request can interleave |
 | Request for a slave id with no declared regions | the store lookup fails → exception `IllegalDataAddress`. The server does not filter by slave id up front |
+| RTU request addressed to slave id 0 | applied to the store, answered with silence — a store failure that would otherwise be an `IllegalDataAddress` exception is invisible to the sender (MB-R-103) |
 | Malformed frame / framing error on the wire | rejected by the protocol layer before it reaches the request handler; the TCP server logs a processing failure and drops the connection, and the accept loop keeps running |
 | TCP client disconnects mid-request | the connection's serve task ends; the accept loop and the store are unaffected |
 | RTU serial port disappears mid-serve | the serve loop ends and the server task ends with an error. There is **no** RTU server reconnect (see §5.4) |
@@ -111,12 +114,12 @@ The config is therefore only ever reached through its serde path (session and
 device config files, and the `--module` key/value form), which is unaffected. No
 Modbus RTU flag is exposed as a top-level CLI flag.
 
-### 5.3 The RTU `slave` config field is inert in application use
+### 5.3 The RTU `slave` config field is inert
 
-The RTU config carries a `slave` field (default 1), used to attach the serial
-context to a slave on connect. An application-built RTU client always passes `0`
-for it, because the client re-targets the slave before every single request using
-the slave id carried by the operation or command. The field therefore has no
+The RTU config carries a `slave` field (default 1). It is read by no code path:
+the client carries a slave id on every individual request, taken from the
+operation or command, and never attaches the link to one slave. The field is kept
+only so existing session and device config files keep parsing, and has no
 observable effect on a running module.
 
 An RTU **server** ignores the field entirely: it answers for whichever slave ids

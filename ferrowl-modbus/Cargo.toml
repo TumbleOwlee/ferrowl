@@ -19,12 +19,7 @@ itertools = { workspace = true }
 serde = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
-tokio-modbus = { workspace = true, features = [
-    "futures-util",
-    "rtu-server",
-    "tcp-server",
-] }
-tokio-serial = { workspace = true }
+rust-modbus = { workspace = true, features = ["std", "rtu", "serde"] }
 clap = { workspace = true }
 
 [dev-dependencies]
@@ -35,6 +30,7 @@ clap = { workspace = true }
 # request path is synchronous end-to-end and also passes on a current-thread runtime).
 # `ferrowl-store`/`ferrowl-codec` let that test build and seed memory directly.
 tokio = { workspace = true, features = [
+    "io-util",
     "rt",
     "rt-multi-thread",
     "macros",

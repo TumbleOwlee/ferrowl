@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrowl_codec::{Address, Kind, Register};
-use ferrowl_modbus::{Key, Operation, SlaveKey};
+use ferrowl_modbus::{Key, Operation, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::RwLock;
@@ -114,7 +114,7 @@ impl ModbusModule {
             if let Some(range) = def.mem_range() {
                 let key = Key {
                     id: SlaveKey {
-                        slave_id: def.slave_id,
+                        slave_id: UnitId(def.slave_id),
                         kind: def.register().kind().clone(),
                     },
                 };
@@ -128,7 +128,7 @@ impl ModbusModule {
                 {
                     let write_key = Key {
                         id: SlaveKey {
-                            slave_id: def.slave_id,
+                            slave_id: UnitId(def.slave_id),
                             kind: def.register().kind().clone(),
                         },
                     };
@@ -412,6 +412,7 @@ impl ModbusModule {
 #[cfg(test)]
 mod tests {
     use ferrowl_codec::Kind;
+    use ferrowl_modbus::UnitId;
 
     #[test]
     /// MB-R-087 — effective timing uses the device config's values when set, otherwise the built-in defaults.
@@ -568,7 +569,7 @@ mod tests {
         let module = ModbusModule::new(&spec, &device);
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -601,7 +602,7 @@ mod tests {
         let mut module = ModbusModule::new(&spec, &device);
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -753,7 +754,7 @@ mod tests {
             .read(
                 Key {
                     id: SlaveKey {
-                        slave_id: 1,
+                        slave_id: UnitId(1),
                         kind: Kind::HoldingRegister,
                     },
                 },

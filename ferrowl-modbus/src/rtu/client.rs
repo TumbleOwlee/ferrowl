@@ -10,8 +10,8 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
-use tokio_modbus::prelude::{Slave, rtu};
-use tokio_serial::SerialStream;
+
+use rust_modbus::{Client as ModbusClient, Rtu, SerialStream, open_serial};
 
 /// Builds and spawns a Modbus RTU client task that polls `operations` into
 /// the shared `memory` and executes incoming [`Command`]s.
@@ -78,25 +78,28 @@ impl<T: KeyParams> ClientBuilder<T> {
 }
 
 /// A connected Modbus RTU client. Connection setup is serial-specific; the read/command loop is
-/// shared via the internal `ClientCore`.
+/// shared via the internal `ClientCore`, over a serial port carrying RTU framing.
 pub struct Client {
-    pub(crate) core: ClientCore,
+    pub(crate) core: ClientCore<SerialStream, Rtu>,
 }
 
 impl Client {
-    /// Opens the configured serial port and attaches it to the configured
-    /// slave address.
+    /// Opens the configured serial port under RTU framing.
+    ///
+    /// The port is not bound to a slave address: each request carries the slave id of the
+    /// operation or command that issued it (MB-R-048).
     pub async fn connect(config: &Config) -> Result<Self, Error> {
-        let builder = serial_config_from(
-            &config.path,
+        let serial = serial_config_from(
             config.baud_rate,
             config.data_bits,
             config.stop_bits,
             config.parity.as_deref(),
         )?;
-        match SerialStream::open(&builder).map(|s| rtu::attach_slave(s, Slave(config.slave))) {
-            Ok(context) => Ok(Self {
-                core: ClientCore { context },
+        match open_serial::<Rtu>(&config.path, serial) {
+            Ok(transport) => Ok(Self {
+                core: ClientCore {
+                    client: ModbusClient::new(transport),
+                },
             }),
             Err(e) => Err(SerialError::Error(e).into()),
         }

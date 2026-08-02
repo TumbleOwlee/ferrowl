@@ -30,4 +30,4 @@ pub use run_config::RunConfig;
 pub use scalar::{Address, Coil, Word};
 pub use transport::Transport;
 
-pub use tokio_modbus::{FunctionCode, SlaveId};
+pub use rust_modbus::{FunctionCode, Quantity, UnitId};

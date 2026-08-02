@@ -290,10 +290,11 @@ mod tests {
     use super::*;
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn definition() -> Definition {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
@@ -334,7 +335,7 @@ mod tests {
 
     fn named(name: &str, slave: u8) -> Definition {
         let register = RegisterBuilder::default()
-            .slave_id(slave)
+            .slave_id(UnitId(slave))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))

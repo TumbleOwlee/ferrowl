@@ -209,6 +209,7 @@ impl<T: KeyParams> Instance<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_modbus::UnitId;
 
     use std::sync::Arc;
 
@@ -247,7 +248,7 @@ mod tests {
 
     fn tcp_client_instance() -> Instance<SlaveKey> {
         let operations = Arc::new(RwLock::new(vec![Operation {
-            slave_id: 1,
+            slave_id: UnitId(1),
             fn_code: FunctionCode::ReadHoldingRegisters,
             range: Range::new(0, 2),
         }]));

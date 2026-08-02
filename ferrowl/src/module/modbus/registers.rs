@@ -2,7 +2,7 @@
 //! bindings and live table values.
 
 use ferrowl_codec::{Access, Address, Kind, Register};
-use ferrowl_modbus::{Command, Key, SlaveKey};
+use ferrowl_modbus::{Address as WireAddress, Command, Key, SlaveKey, UnitId, Word};
 use ferrowl_store::{CellKind as MemKind, CellType, Range};
 
 use crate::config::device::{
@@ -51,7 +51,12 @@ pub(crate) fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<
 }
 
 /// Build the appropriate write command for a client, based on the register kind/width.
-pub(crate) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u16]) -> Command {
+pub(crate) fn write_command(
+    register: &Register,
+    slave: UnitId,
+    addr: WireAddress,
+    raw: &[u16],
+) -> Command {
     match register.kind() {
         Kind::Coil | Kind::DiscreteInput => {
             if raw.len() == 1 {
@@ -62,9 +67,9 @@ pub(crate) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u1
         }
         Kind::HoldingRegister | Kind::InputRegister => {
             if raw.len() == 1 {
-                Command::WriteSingleRegister(slave, addr, raw[0])
+                Command::WriteSingleRegister(slave, addr, Word(raw[0]))
             } else {
-                Command::WriteMultipleRegister(slave, addr, raw.to_vec())
+                Command::WriteMultipleRegister(slave, addr, raw.iter().copied().map(Word).collect())
             }
         }
     }
@@ -75,7 +80,7 @@ pub(crate) fn write_command(register: &Register, slave: u8, addr: u16, raw: &[u1
 pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
     use ferrowl_codec::Format;
 
-    def.slave_id = *register.slave_id();
+    def.slave_id = register.slave_id().0;
     def.access = match register.access() {
         Access::ReadOnly => AccessCfg::ReadOnly,
         Access::WriteOnly => AccessCfg::WriteOnly,
@@ -162,10 +167,11 @@ mod tests {
     use crate::config::script::ScriptDef;
     use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Address, Format, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn reg(kind: Kind, address: Address) -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(kind)
             .address(address)
@@ -184,21 +190,21 @@ mod tests {
     fn ut_write_command_selects_by_kind_and_width() {
         let coil = reg(Kind::Coil, Address::Fixed(0));
         assert!(matches!(
-            write_command(&coil, 1, 0, &[1]),
-            Command::WriteSingleCoil(1, 0, true)
+            write_command(&coil, UnitId(1), WireAddress(0), &[1]),
+            Command::WriteSingleCoil(UnitId(1), WireAddress(0), true)
         ));
         assert!(matches!(
-            write_command(&coil, 1, 0, &[0, 1]),
-            Command::WriteMultipleCoils(1, 0, _)
+            write_command(&coil, UnitId(1), WireAddress(0), &[0, 1]),
+            Command::WriteMultipleCoils(UnitId(1), WireAddress(0), _)
         ));
         let hr = reg(Kind::HoldingRegister, Address::Fixed(0));
         assert!(matches!(
-            write_command(&hr, 1, 5, &[7]),
-            Command::WriteSingleRegister(1, 5, 7)
+            write_command(&hr, UnitId(1), WireAddress(5), &[7]),
+            Command::WriteSingleRegister(UnitId(1), WireAddress(5), Word(7))
         ));
         assert!(matches!(
-            write_command(&hr, 1, 5, &[7, 8]),
-            Command::WriteMultipleRegister(1, 5, _)
+            write_command(&hr, UnitId(1), WireAddress(5), &[7, 8]),
+            Command::WriteMultipleRegister(UnitId(1), WireAddress(5), _)
         ));
     }
 
@@ -280,7 +286,7 @@ mod tests {
             default: None,
         };
         let register = RegisterBuilder::default()
-            .slave_id(9u8)
+            .slave_id(UnitId(9))
             .access(Access::WriteOnly)
             .kind(Kind::Coil)
             .address(Address::Virtual)

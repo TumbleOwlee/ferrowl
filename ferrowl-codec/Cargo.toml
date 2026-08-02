@@ -15,4 +15,4 @@ getset = { workspace = true }
 itertools = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tokio-modbus = { workspace = true }
+rust-modbus = { workspace = true, features = ["serde"] }
