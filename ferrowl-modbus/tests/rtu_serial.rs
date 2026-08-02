@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrowl_modbus::rtu;
-use ferrowl_modbus::{Command, Error, FunctionCode, Key, Operation, SerialError, SlaveKey};
+use ferrowl_modbus::{Command, Error, FunctionCode, Key, Operation, SerialError, SlaveKey, UnitId};
 use ferrowl_store::{Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -59,7 +59,7 @@ async fn rtu_server_open_failure_fails_start() {
 /// reconnect disabled it ends the client task with the error.
 async fn rtu_client_open_failure_reconnect_false_dies() {
     let operations = Arc::new(RwLock::new(vec![Operation {
-        slave_id: 1,
+        slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 2),
     }]));

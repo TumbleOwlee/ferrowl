@@ -34,7 +34,15 @@ crossterm = { workspace = true }
 ratatui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt", "signal"] }
+# `rt-multi-thread` is named here rather than inherited: the binary builds a multi-threaded
+# runtime itself, and it used to arrive only as a transitive feature of the Modbus library.
+tokio = { workspace = true, features = [
+    "sync",
+    "time",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+] }
 derive_builder = { workspace = true }
 parking_lot = { workspace = true }
 futures-util = { workspace = true }

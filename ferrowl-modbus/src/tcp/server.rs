@@ -8,12 +8,11 @@ use ferrowl_store::Memory;
 
 // External
 use parking_lot::RwLock as MemLock;
+use rust_modbus::{Server as ModbusServer, TcpListener};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_modbus::server::tcp::{Server as TcpServer, accept_tcp_connection};
 
 /// Builds and spawns a Modbus TCP server task answering requests from the
 /// shared `memory`.
@@ -54,32 +53,11 @@ where
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
     match TcpListener::bind(addr).await {
         Ok(listener) => {
-            let server = TcpServer::new(listener);
-            let memory = memory.clone();
-            let log = log.clone();
+            // One service instance answers every accepted connection, so all of them share the
+            // one store (MB-R-070). TCP servers log per-request outcomes (verbose = true).
+            let server = ModbusServer::new(Server::new(memory, log, true));
             Ok(tokio::task::spawn(async move {
-                // TCP servers log per-request outcomes (verbose = true).
-                let new_request_handler =
-                    |_socket_addr| Ok(Some(Server::new(memory.clone(), log.clone(), true)));
-                let on_connected = |stream, socket_addr| async move {
-                    accept_tcp_connection(stream, socket_addr, new_request_handler)
-                };
-                let on_process_log = log.clone();
-                // `on_process_error` is a sync callback (not awaited by `tokio_modbus`), so the
-                // log line is emitted on a detached task instead of blocking a worker thread to
-                // await it inline.
-                let on_process_error = move |err| {
-                    let on_process_log = on_process_log.clone();
-                    tokio::task::spawn(async move {
-                        on_process_log
-                            .invoke(format!("Server processing failed. [{}]", err))
-                            .await;
-                    });
-                };
-                server
-                    .serve(&on_connected, on_process_error)
-                    .await
-                    .map_err(Error::Server)
+                server.serve(listener).await.map_err(Error::Server)
             }))
         }
         Err(e) => Err(Error::Server(e)),

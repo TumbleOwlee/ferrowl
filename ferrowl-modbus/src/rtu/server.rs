@@ -9,11 +9,10 @@ use ferrowl_store::Memory;
 
 // External
 use parking_lot::RwLock as MemLock;
+use rust_modbus::{Rtu, Server as ModbusServer, open_serial};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_modbus::server::rtu::Server as RtuServer;
-use tokio_serial::SerialStream;
 
 /// Builds and spawns a Modbus RTU server task answering requests from the
 /// shared `memory`.
@@ -49,23 +48,20 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    let builder = serial_config_from(
-        &config.path,
+    let serial = serial_config_from(
         config.baud_rate,
         config.data_bits,
         config.stop_bits,
         config.parity.as_deref(),
     )?;
-    match SerialStream::open(&builder) {
-        Ok(serial_stream) => {
-            let rtu_server = RtuServer::new(serial_stream);
+    match open_serial::<Rtu>(&config.path, serial) {
+        Ok(transport) => {
             // RTU servers stay quiet on per-request outcomes (verbose = false).
-            let server = Server::new(memory, log, false);
-            Ok(tokio::task::spawn(async {
-                rtu_server
-                    .serve_forever(server)
-                    .await
-                    .map_err(Error::Server)
+            let server = ModbusServer::new(Server::new(memory, log, false));
+            // One port, one link, no accept loop (MB-R-074). The default `ServerConfig` filters
+            // by no unit id, so every slave id with declared regions is served (MB-R-065).
+            Ok(tokio::task::spawn(async move {
+                server.serve_link(transport).await.map_err(Error::Server)
             }))
         }
         Err(e) => Err(SerialError::Error(e).into()),

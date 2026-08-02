@@ -7,6 +7,7 @@ use ferrowl_codec::{
     Address, Format, Kind, Register, RegisterBuilder,
     format::{BitField, Endian, Resolution, Width, WordOrder},
 };
+use ferrowl_modbus::UnitId;
 use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
@@ -295,7 +296,7 @@ impl RegisterDef {
 
     pub fn register(&self) -> Register {
         RegisterBuilder::default()
-            .slave_id(self.slave_id)
+            .slave_id(UnitId(self.slave_id))
             .access(self.access.into())
             .kind(self.kind())
             .address(self.address())

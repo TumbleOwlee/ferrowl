@@ -1,8 +1,10 @@
-//! Primitive wire-scalar aliases used across the Modbus API.
+//! Primitive wire-scalar types used across the Modbus API.
+//!
+//! Addresses and register values are the protocol library's own newtypes, so one
+//! cannot be passed where the other is meant. A coil stays a bare `bool`: the
+//! library takes and returns `bool` for single-bit data.
 
-/// A Modbus register address.
-pub type Address = u16;
-/// A raw 16-bit register value.
-pub type Word = u16;
+pub use rust_modbus::{Address, RegisterValue as Word};
+
 /// A coil (single-bit) value.
 pub type Coil = bool;

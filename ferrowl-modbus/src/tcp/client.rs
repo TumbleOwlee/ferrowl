@@ -4,6 +4,7 @@ use crate::{Command, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
+use rust_modbus::{Client as ModbusClient, TcpConfig, connect_tcp};
 use tokio::task::JoinHandle;
 
 use std::net::SocketAddr;
@@ -76,9 +77,9 @@ impl<T: KeyParams> ClientBuilder<T> {
 }
 
 /// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
-/// shared via the internal `ClientCore`.
+/// shared via the internal `ClientCore`, over a socket carrying Modbus TCP framing.
 pub struct Client {
-    pub(crate) core: ClientCore,
+    pub(crate) core: ClientCore<tokio::net::TcpStream, rust_modbus::Tcp>,
 }
 
 impl Client {
@@ -90,12 +91,14 @@ impl Client {
             .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
         match tokio::time::timeout(
             std::time::Duration::from_millis(config.timeout_ms as u64),
-            tokio_modbus::client::tcp::connect(addr),
+            connect_tcp(addr, TcpConfig::default()),
         )
         .await
         {
-            Ok(Ok(context)) => Ok(Self {
-                core: ClientCore { context },
+            Ok(Ok(transport)) => Ok(Self {
+                core: ClientCore {
+                    client: ModbusClient::<_, _>::new(transport),
+                },
             }),
             Ok(Err(e)) => Err(TcpError::Error(e).into()),
             Err(e) => Err(TcpError::Timeout(e).into()),

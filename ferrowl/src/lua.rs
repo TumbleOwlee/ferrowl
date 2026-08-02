@@ -319,13 +319,14 @@ mod tests {
     use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::SlaveKey;
+    use ferrowl_modbus::UnitId;
     use ferrowl_store::{CellKind as MemKind, CellType, Memory};
     use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(addr))
@@ -344,7 +345,7 @@ mod tests {
         let mut memory: Memory<Key<SlaveKey>> = Memory::default();
         let key = Key {
             id: SlaveKey {
-                slave_id: 1u8,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -375,7 +376,7 @@ mod tests {
         registers.insert(
             "calc".to_string(),
             RegisterBuilder::default()
-                .slave_id(1u8)
+                .slave_id(UnitId(1))
                 .access(Access::ReadWrite)
                 .kind(Kind::HoldingRegister)
                 .address(ferrowl_codec::Address::Virtual)
@@ -456,7 +457,7 @@ mod tests {
             .read(
                 Key {
                     id: SlaveKey {
-                        slave_id: 1,
+                        slave_id: UnitId(1),
                         kind: Kind::HoldingRegister,
                     },
                 },
@@ -546,7 +547,7 @@ mod tests {
                 .read(
                     Key {
                         id: SlaveKey {
-                            slave_id: 1,
+                            slave_id: UnitId(1),
                             kind: Kind::HoldingRegister,
                         },
                     },
@@ -669,7 +670,7 @@ mod tests {
         registers.insert(
             "calc".to_string(),
             RegisterBuilder::default()
-                .slave_id(1u8)
+                .slave_id(UnitId(1))
                 .access(Access::ReadWrite)
                 .kind(Kind::HoldingRegister)
                 .address(ferrowl_codec::Address::Virtual)
@@ -700,7 +701,7 @@ mod tests {
         registers.insert(
             "calc".to_string(),
             RegisterBuilder::default()
-                .slave_id(1u8)
+                .slave_id(UnitId(1))
                 .access(Access::ReadWrite)
                 .kind(Kind::HoldingRegister)
                 .address(ferrowl_codec::Address::Virtual)
@@ -863,7 +864,7 @@ mod tests {
             .read(
                 Key {
                     id: SlaveKey {
-                        slave_id: 1,
+                        slave_id: UnitId(1),
                         kind: Kind::HoldingRegister,
                     },
                 },

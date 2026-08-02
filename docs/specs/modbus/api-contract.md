@@ -193,7 +193,7 @@ reversed entries are skipped silently.
 
 | Field | Type | Default | Valid values |
 |---|---|---|---|
-| `slave_id` | u8 | `0` | 0–255 |
+| `slave_id` | u8 | `1` | 0–255 |
 | `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
 | `address` | optional u16 | unset ⇒ virtual | 0–65535 |
 | `virtual` | bool | `false` | `true` forces virtual even with an `address` set |

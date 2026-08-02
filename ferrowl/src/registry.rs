@@ -177,6 +177,7 @@ fn _assert_host_types_send_sync() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_modbus::UnitId;
 
     struct StubHost {
         kind: &'static str,
@@ -308,7 +309,7 @@ mod tests {
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(ferrowl_codec::Address::Fixed(addr))
@@ -328,7 +329,7 @@ mod tests {
         let mut memory: Memory<Key<SlaveKey>> = Memory::default();
         let key = Key {
             id: SlaveKey {
-                slave_id: 1u8,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };
@@ -378,7 +379,7 @@ mod tests {
 
         let key = Key {
             id: SlaveKey {
-                slave_id: 1u8,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };

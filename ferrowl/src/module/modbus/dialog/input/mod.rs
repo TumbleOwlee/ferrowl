@@ -12,6 +12,7 @@ use ferrowl_codec::format::{
     WordOrder as RegisterWordOrder,
 };
 use ferrowl_codec::{Address, Kind, Register, RegisterBuilder, encode};
+use ferrowl_modbus::UnitId;
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
     traits::SetFocus,
@@ -335,7 +336,7 @@ impl EditInputDialog {
             .map_err(|_| "Slave ID must be 0–255.".to_string())?;
 
         let register = RegisterBuilder::default()
-            .slave_id(slave_id)
+            .slave_id(UnitId(slave_id))
             .access(self.access.state.get_value().0.clone())
             .kind(self.kind.state.get_value().0)
             .address(address)
@@ -530,6 +531,7 @@ mod apply_tests {
         Resolution, Width, WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn reg(
         kind: Kind,
@@ -539,7 +541,7 @@ mod apply_tests {
         format: RegisterFormat,
     ) -> Register {
         RegisterBuilder::default()
-            .slave_id(slave)
+            .slave_id(UnitId(slave))
             .access(access)
             .kind(kind)
             .address(address)
@@ -568,7 +570,7 @@ mod apply_tests {
 
         assert_eq!(edited.name, "temp");
         assert_eq!(edited.description, "a sensor");
-        assert_eq!(*edited.register.slave_id(), 7);
+        assert_eq!(*edited.register.slave_id(), UnitId(7));
         assert_eq!(*edited.register.kind(), Kind::HoldingRegister);
         assert_eq!(*edited.register.access(), Access::ReadWrite);
         assert_eq!(*edited.register.address(), Address::Fixed(100));
@@ -705,11 +707,12 @@ mod focus_tests {
         WordOrder as RegisterWordOrder,
     };
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
     use ferrowl_ui::traits::HandleEvents;
 
     fn numeric_dialog() -> EditInputDialog {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
@@ -727,7 +730,7 @@ mod focus_tests {
 
     fn coil_dialog() -> EditInputDialog {
         let register: Register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::Coil)
             .address(Address::Fixed(0))
@@ -811,7 +814,7 @@ mod focus_tests {
         );
 
         let single = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))

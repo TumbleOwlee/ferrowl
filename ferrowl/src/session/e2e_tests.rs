@@ -14,7 +14,7 @@ use parking_lot::RwLock;
 use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
 use ferrowl_codec::{Access, Format, Kind, Register, RegisterBuilder};
 use ferrowl_lua::module::{ModuleDirectory, ModuleHost, ValueType};
-use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ocpp::V1_6;
 use ferrowl_store::{CellKind as MemKind, Memory, Range};
 
@@ -68,7 +68,7 @@ fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
 
 fn holding(addr: u16) -> Register {
     RegisterBuilder::default()
-        .slave_id(1u8)
+        .slave_id(UnitId(1))
         .access(Access::ReadWrite)
         .kind(Kind::HoldingRegister)
         .address(ferrowl_codec::Address::Fixed(addr))
@@ -85,7 +85,7 @@ fn holding(addr: u16) -> Register {
 fn modbus_memory_key() -> Key<SlaveKey> {
     Key {
         id: SlaveKey {
-            slave_id: 1u8,
+            slave_id: UnitId(1),
             kind: Kind::HoldingRegister,
         },
     }

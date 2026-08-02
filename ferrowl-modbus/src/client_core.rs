@@ -1,33 +1,35 @@
 //! Transport-agnostic Modbus client loop shared by the TCP and RTU clients.
 //!
-//! Both transports produce the same concrete `tokio_modbus::client::Context`; only how the
-//! context is *constructed* differs (socket connect vs serial open). Everything after that —
-//! the read/run loop and command execution — is identical and lives here.
+//! The two transports differ only in the stream and framing they instantiate this with (a
+//! socket under `Tcp`, a serial port under `Rtu`) and in how that connection is *established*.
+//! Everything after that — the read/run loop and command execution — is identical and lives
+//! here, generic over both.
 
 use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunConfig};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
+use rust_modbus::{
+    Address, Client, ClientFraming, ExceptionCode, FunctionCode, Quantity, RegisterValue, UnitId,
+};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::sleep;
-use tokio_modbus::FunctionCode;
-use tokio_modbus::client::Context;
-use tokio_modbus::prelude::{Client as ModbusClient, Reader, Slave, SlaveContext, Writer};
 
 /// Outcome of one connection attempt, as reported by a transport's `connect` closure passed to
 /// [`ClientCore::run_reconnect_loop`]. Bundles the just-read config snapshot (`reconnect` plus
 /// the timing fields `run` needs) alongside the connection result itself, since `reconnect` must
 /// be known even when the connect attempt failed.
-pub(crate) struct ConnectAttempt {
+pub(crate) struct ConnectAttempt<S, F> {
     pub(crate) reconnect: bool,
     pub(crate) timeout_ms: usize,
     pub(crate) delay_ms: usize,
     pub(crate) interval_ms: usize,
-    pub(crate) client: Result<ClientCore, Error>,
+    pub(crate) client: Result<ClientCore<S, F>, Error>,
 }
 
 /// Number of consecutive Modbus exceptions tolerated before the client skips the operation.
@@ -38,50 +40,56 @@ pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 /// Reconnect backoff cap; doubles from [`INITIAL_BACKOFF`] up to this.
 pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-/// Owns a connected Modbus client context and drives the read/command loop. Transport-neutral:
-/// the TCP and RTU `Client` types each construct the `Context` then hand it here.
-pub(crate) struct ClientCore {
-    pub(crate) context: Context,
+/// Logs the "about to read" intent line shared by every read function code.
+async fn log_read_intent<L>(log: &L, name: &str, slave_id: UnitId, start: usize, end: usize)
+where
+    L: LogFn,
+{
+    log.invoke(format!(
+        "Perform {name} request for slave ID {slave_id} and range [{start}, {end})."
+    ))
+    .await;
 }
 
-impl ClientCore {
-    /// Logs the "about to read" intent line shared by every read function code.
-    async fn log_read_intent<L>(
-        log: &L,
-        name: &str,
-        slave_id: tokio_modbus::SlaveId,
-        start: usize,
-        end: usize,
-    ) where
-        L: LogFn,
-    {
-        log.invoke(format!(
-            "Perform {name} request for slave ID {slave_id} and range [{start}, {end})."
-        ))
-        .await;
-    }
+/// Converts a coil/discrete-input bit vector to the `u16` shape the shared memory store uses.
+pub(crate) fn bits_to_words(bits: Vec<bool>) -> Vec<u16> {
+    bits.into_iter().map(|b| if b { 1 } else { 0 }).collect()
+}
 
-    /// Converts a coil/discrete-input bit vector to the `u16` shape the shared memory store uses.
-    fn bits_to_words(bits: Vec<bool>) -> Vec<u16> {
-        bits.into_iter().map(|b| if b { 1 } else { 0 }).collect()
-    }
+/// Unwraps register values into the bare `u16` shape the shared memory store uses.
+pub(crate) fn words(registers: Vec<RegisterValue>) -> Vec<u16> {
+    registers.into_iter().map(|v| v.0).collect()
+}
 
-    /// Classifies a completed timeout+request result into the single `ModbusError` shape shared
-    /// by every read and write outcome.
-    fn classify<V>(
-        result: Result<
-            Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
-            tokio::time::error::Elapsed,
-        >,
-    ) -> Result<V, ModbusError> {
-        match result {
-            Ok(Ok(Ok(v))) => Ok(v),
-            Ok(Ok(Err(e))) => Err(ModbusError::Exception(e)),
-            Ok(Err(e)) => Err(ModbusError::Error(e)),
-            Err(e) => Err(ModbusError::Timeout(e)),
+/// Classifies a completed timeout+request result into the single `ModbusError` shape shared
+/// by every read and write outcome.
+/// A device's refusal arrives as `Error::Exception`, alongside — not inside — the transport
+/// failures, so the exception path (retry, no disconnect) is separated here rather than by
+/// the shape of the `Result`.
+pub(crate) fn classify<V>(
+    result: Result<Result<V, rust_modbus::Error>, tokio::time::error::Elapsed>,
+) -> Result<V, ModbusError> {
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(rust_modbus::Error::Exception { exception, .. })) => {
+            Err(ModbusError::Exception(exception))
         }
+        Ok(Err(e)) => Err(ModbusError::Error(e)),
+        Err(e) => Err(ModbusError::Timeout(e)),
     }
+}
 
+/// Owns a connected Modbus client and drives the read/command loop. Transport-neutral: the TCP
+/// and RTU `Client` types each establish the connection, then hand the client here.
+pub(crate) struct ClientCore<S, F> {
+    pub(crate) client: Client<S, F>,
+}
+
+impl<S, F> ClientCore<S, F>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+    F: ClientFraming,
+{
     async fn read<L>(
         &mut self,
         op: &Operation,
@@ -96,58 +104,68 @@ impl ClientCore {
         let Ok(count) = u16::try_from(end - start) else {
             return (
                 "Unknown",
-                Err(ModbusError::Exception(
-                    tokio_modbus::ExceptionCode::IllegalDataValue,
-                )),
+                Err(ModbusError::Exception(ExceptionCode::IllegalDataValue)),
             );
         };
+        // MB-R-101: on a framing that has a broadcast address (RTU; never TCP), a read
+        // addressed to it cannot be answered by anyone. Refused here, in the same local-
+        // exception shape as an over-long range, so it follows the retry path of MB-R-043
+        // instead of surfacing as a transport error that would disconnect the client.
+        if F::is_broadcast(op.slave_id) {
+            log.invoke(format!(
+                "Read request for slave ID {} skipped: address 0 is the broadcast address, which no device answers.",
+                op.slave_id
+            ))
+            .await;
+            return (
+                "Broadcast",
+                Err(ModbusError::Exception(ExceptionCode::IllegalDataAddress)),
+            );
+        }
+        let (address, quantity) = (Address(start as u16), Quantity(count));
         match op.fn_code {
             FunctionCode::ReadCoils => {
-                Self::log_read_intent(log, "ReadCoils", op.slave_id, start, end).await;
-                self.context.set_slave(Slave(op.slave_id));
+                log_read_intent(log, "ReadCoils", op.slave_id, start, end).await;
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_coils(start as u16, count),
+                    self.client.read_coils(op.slave_id, address, quantity),
                 )
                 .await;
-                ("ReadCoils", Self::classify(res).map(Self::bits_to_words))
+                ("ReadCoils", classify(res).map(bits_to_words))
             }
             FunctionCode::ReadDiscreteInputs => {
-                Self::log_read_intent(log, "ReadDiscreteInputs", op.slave_id, start, end).await;
-                self.context.set_slave(Slave(op.slave_id));
+                log_read_intent(log, "ReadDiscreteInputs", op.slave_id, start, end).await;
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_discrete_inputs(start as u16, count),
+                    self.client
+                        .read_discrete_inputs(op.slave_id, address, quantity),
                 )
                 .await;
-                (
-                    "ReadDiscreteInputs",
-                    Self::classify(res).map(Self::bits_to_words),
-                )
+                ("ReadDiscreteInputs", classify(res).map(bits_to_words))
             }
             FunctionCode::ReadInputRegisters => {
-                Self::log_read_intent(log, "ReadInputRegisters", op.slave_id, start, end).await;
-                self.context.set_slave(Slave(op.slave_id));
+                log_read_intent(log, "ReadInputRegisters", op.slave_id, start, end).await;
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_input_registers(start as u16, count),
+                    self.client
+                        .read_input_registers(op.slave_id, address, quantity),
                 )
                 .await;
-                ("ReadInputRegisters", Self::classify(res))
+                ("ReadInputRegisters", classify(res).map(words))
             }
             FunctionCode::ReadHoldingRegisters => {
-                Self::log_read_intent(log, "ReadHoldingRegisters", op.slave_id, start, end).await;
-                self.context.set_slave(Slave(op.slave_id));
+                log_read_intent(log, "ReadHoldingRegisters", op.slave_id, start, end).await;
                 let res = tokio::time::timeout(
                     Duration::from_millis(timeout_ms as u64),
-                    self.context.read_holding_registers(start as u16, count),
+                    self.client
+                        .read_holding_registers(op.slave_id, address, quantity),
                 )
                 .await;
-                ("ReadHoldingRegisters", Self::classify(res))
+                ("ReadHoldingRegisters", classify(res).map(words))
             }
             _ => (
                 "Unknown",
-                Self::classify(Ok(Ok(Err(tokio_modbus::ExceptionCode::IllegalFunction)))),
+                Err(ModbusError::Exception(ExceptionCode::IllegalFunction)),
             ),
         }
     }
@@ -159,10 +177,7 @@ impl ClientCore {
     /// "failed" for the exception case).
     async fn handle_write_result<V, L>(
         &mut self,
-        result: Result<
-            Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
-            tokio::time::error::Elapsed,
-        >,
+        result: Result<Result<V, rust_modbus::Error>, tokio::time::error::Elapsed>,
         label: &str,
         detail: &str,
         invalid_word: &str,
@@ -171,7 +186,7 @@ impl ClientCore {
     where
         L: LogFn,
     {
-        match Self::classify(result) {
+        match classify(result) {
             Ok(_) => {
                 log.invoke(format!(
                     "{label} request to {detail} successfully executed."
@@ -187,7 +202,6 @@ impl ClientCore {
                 Ok(())
             }
             Err(ModbusError::Error(e)) => {
-                let _ = self.context.disconnect().await;
                 log.invoke(format!(
                     "{label} request to {detail} failed. Disconnecting client. [{e:?}]"
                 ))
@@ -195,7 +209,6 @@ impl ClientCore {
                 Err(ModbusError::Error(e).into())
             }
             Err(ModbusError::Timeout(e)) => {
-                let _ = self.context.disconnect().await;
                 log.invoke(format!(
                     "{label} request to {detail} timed out. Disconnecting client. [{e:?}]"
                 ))
@@ -273,14 +286,12 @@ impl ClientCore {
                     *retries = 0;
                 }
                 (s, Err(ModbusError::Timeout(e))) => {
-                    let _ = self.context.disconnect().await;
                     log.invoke(format!(
                             "{s} request to read [{start}, {end}) timed out. Disconnecting client. [{e:?}]"
                         )).await;
                     return Err(ModbusError::Timeout(e).into());
                 }
                 (s, Err(ModbusError::Error(e))) => {
-                    let _ = self.context.disconnect().await;
                     log.invoke(format!(
                         "{s} request to read [{start}, {end}) failed. Disconnecting client. [{e:?}]"
                     ))
@@ -303,22 +314,22 @@ impl ClientCore {
         Ok(())
     }
 
-    /// Runs the read/command loop against the connected `context` until a graceful
+    /// Runs the read/command loop against the connected client until a graceful
     /// `Command::Terminate` (or the command channel closing) or a transport error. Returns
     /// whether at least one read succeeded during this run alongside the outcome, so the
     /// caller's reconnect backoff can reset after a connection that was live for a while rather
     /// than one that never got a read through.
-    pub(crate) async fn run<T, L, S>(
+    pub(crate) async fn run<T, L, St>(
         mut self,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<MemLock<Memory<Key<T>>>>,
         receiver: &mut Receiver<Command>,
-        config: RunConfig<L, S>,
+        config: RunConfig<L, St>,
     ) -> (bool, Result<(), Error>)
     where
         T: KeyParams,
         L: LogFn,
-        S: LogFn,
+        St: LogFn,
     {
         let RunConfig {
             log,
@@ -355,17 +366,15 @@ impl ClientCore {
                 // that the same as an explicit `Terminate`.
                 cmd = receiver.recv() => match cmd.unwrap_or(Command::Terminate) {
                     Command::Terminate => {
-                        let _ = self.context.disconnect().await;
                         log.invoke("Client gracefully terminated.".to_string())
                             .await;
                         status.invoke("Client disconnected".to_string()).await;
                         return (had_success, Ok(()));
                     }
                     Command::WriteSingleCoil(slave, addr, coil) => {
-                        self.context.set_slave(Slave(slave));
                         let result = tokio::time::timeout(
                             Duration::from_millis(timeout_ms as u64),
-                            self.context.write_single_coil(addr, coil),
+                            self.client.write_single_coil(slave, addr, coil),
                         )
                         .await;
                         if let Err(e) = self
@@ -376,10 +385,9 @@ impl ClientCore {
                         }
                     }
                     Command::WriteMultipleCoils(slave, addr, coils) => {
-                        self.context.set_slave(Slave(slave));
                         let result = tokio::time::timeout(
                             Duration::from_millis(timeout_ms as u64),
-                            self.context.write_multiple_coils(addr, &coils),
+                            self.client.write_multiple_coils(slave, addr, &coils),
                         )
                         .await;
                         if let Err(e) = self
@@ -390,10 +398,9 @@ impl ClientCore {
                         }
                     }
                     Command::WriteSingleRegister(slave, addr, value) => {
-                        self.context.set_slave(Slave(slave));
                         let result = tokio::time::timeout(
                             Duration::from_millis(timeout_ms as u64),
-                            self.context.write_single_register(addr, value),
+                            self.client.write_single_register(slave, addr, value),
                         )
                         .await;
                         if let Err(e) = self
@@ -404,10 +411,9 @@ impl ClientCore {
                         }
                     }
                     Command::WriteMultipleRegister(slave, addr, values) => {
-                        self.context.set_slave(Slave(slave));
                         let result = tokio::time::timeout(
                             Duration::from_millis(timeout_ms as u64),
-                            self.context.write_multiple_registers(addr, &values),
+                            self.client.write_multiple_registers(slave, addr, &values),
                         )
                         .await;
                         if let Err(e) = self
@@ -429,20 +435,20 @@ impl ClientCore {
     /// the loop cleanly at any point; with `reconnect` unset for the current config snapshot, a
     /// transport error ends the loop instead of backing off. `connect` alone differs between the
     /// TCP and RTU transports (socket dial vs. serial open); everything else here is shared.
-    pub(crate) async fn run_reconnect_loop<T, L, S, F, Fut>(
+    pub(crate) async fn run_reconnect_loop<T, L, St, C, Fut>(
         mut receiver: Receiver<Command>,
         log: L,
-        status: S,
+        status: St,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<MemLock<Memory<Key<T>>>>,
-        mut connect: F,
+        mut connect: C,
     ) -> Result<(), Error>
     where
         T: KeyParams,
         L: LogFn + Clone,
-        S: LogFn + Clone,
-        F: FnMut() -> Fut,
-        Fut: Future<Output = ConnectAttempt>,
+        St: LogFn + Clone,
+        C: FnMut() -> Fut,
+        Fut: Future<Output = ConnectAttempt<S, F>>,
     {
         let mut backoff = INITIAL_BACKOFF;
         loop {
@@ -467,7 +473,7 @@ impl ClientCore {
                     }
                     log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
                         .await;
-                    if Self::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                    if wait_reconnect_backoff(&mut receiver, backoff, &log).await {
                         status.invoke("Client disconnected".to_string()).await;
                         return Ok(());
                     }
@@ -498,7 +504,7 @@ impl ClientCore {
                     }
                     log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
                         .await;
-                    if Self::wait_reconnect_backoff(&mut receiver, backoff, &log).await {
+                    if wait_reconnect_backoff(&mut receiver, backoff, &log).await {
                         status.invoke("Client disconnected".to_string()).await;
                         return Ok(());
                     }
@@ -507,57 +513,53 @@ impl ClientCore {
             }
         }
     }
+}
 
-    /// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command
-    /// channel closing (returns `true`). Any other command received while disconnected is
-    /// dropped with a log line rather than queued for after reconnect.
-    pub(crate) async fn wait_reconnect_backoff<L>(
-        receiver: &mut Receiver<Command>,
-        backoff: Duration,
-        log: &L,
-    ) -> bool
-    where
-        L: LogFn,
-    {
-        let deadline = tokio::time::Instant::now() + backoff;
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep_until(deadline) => return false,
-                cmd = receiver.recv() => match cmd {
-                    None | Some(Command::Terminate) => return true,
-                    Some(_) => {
-                        log.invoke(
-                            "Command dropped: client is disconnected and reconnecting.".to_string(),
-                        )
-                        .await;
-                    }
-                },
-            }
+/// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command
+/// channel closing (returns `true`). Any other command received while disconnected is
+/// dropped with a log line rather than queued for after reconnect.
+pub(crate) async fn wait_reconnect_backoff<L>(
+    receiver: &mut Receiver<Command>,
+    backoff: Duration,
+    log: &L,
+) -> bool
+where
+    L: LogFn,
+{
+    let deadline = tokio::time::Instant::now() + backoff;
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => return false,
+            cmd = receiver.recv() => match cmd {
+                None | Some(Command::Terminate) => return true,
+                Some(_) => {
+                    log.invoke(
+                        "Command dropped: client is disconnected and reconnecting.".to_string(),
+                    )
+                    .await;
+                }
+            },
         }
     }
 }
 
-// `poll_once`/`run`/`handle_write_result` all drive a real `tokio_modbus::client::Context`
-// (constructed from an actual TCP socket or serial port), so exercising them meaningfully needs a
-// live transport; that end-to-end coverage lives in `tests/tcp_loopback.rs` (round-robin advance,
+// `poll_once`/`run`/`handle_write_result` all drive a real connected `Client` (over an actual
+// TCP socket or serial port), so exercising them meaningfully needs a live transport; that
+// end-to-end coverage lives in `tests/tcp_loopback.rs` (round-robin advance,
 // retry-then-skip past `MAX_RETRIES`, every write outcome, reconnect/backoff, graceful
 // termination). What's unit-testable in isolation here is the pure classification/conversion
 // logic those methods build on.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_modbus::ExceptionCode;
 
-    type ReadResult<V> = Result<
-        Result<Result<V, tokio_modbus::ExceptionCode>, tokio_modbus::Error>,
-        tokio::time::error::Elapsed,
-    >;
+    type ReadResult<V> = Result<Result<V, rust_modbus::Error>, tokio::time::error::Elapsed>;
 
     #[test]
     /// MB-R-042 — coil/discrete-input reads map to one word per bit: `1` for set, `0` for clear.
     fn ut_bits_to_words_maps_true_false_to_one_zero() {
         assert_eq!(
-            ClientCore::bits_to_words(vec![true, false, true, true]),
+            bits_to_words(vec![true, false, true, true]),
             vec![1u16, 0, 1, 1]
         );
     }
@@ -565,20 +567,23 @@ mod tests {
     #[test]
     /// MB-R-042 — an empty coil/discrete read maps to no words.
     fn ut_bits_to_words_empty_is_empty() {
-        assert_eq!(ClientCore::bits_to_words(vec![]), Vec::<u16>::new());
+        assert_eq!(bits_to_words(vec![]), Vec::<u16>::new());
     }
 
     #[test]
     fn ut_classify_success_unwraps_value() {
-        let res: ReadResult<u16> = Ok(Ok(Ok(42)));
-        assert_eq!(ClientCore::classify(res).unwrap(), 42);
+        let res: ReadResult<u16> = Ok(Ok(42));
+        assert_eq!(classify(res).unwrap(), 42);
     }
 
     #[test]
     /// MB-R-043 — a read returning a Modbus exception is classified as an exception (retried, not a disconnect).
     fn ut_classify_exception_maps_to_modbus_exception() {
-        let res: ReadResult<u16> = Ok(Ok(Err(ExceptionCode::IllegalDataAddress)));
-        let e = ClientCore::classify(res).unwrap_err();
+        let res: ReadResult<u16> = Ok(Err(rust_modbus::Error::Exception {
+            function: FunctionCode::ReadHoldingRegisters,
+            exception: ExceptionCode::IllegalDataAddress,
+        }));
+        let e = classify(res).unwrap_err();
         assert!(matches!(
             e,
             ModbusError::Exception(ExceptionCode::IllegalDataAddress)
@@ -588,9 +593,10 @@ mod tests {
     #[test]
     /// MB-R-045 — a transport error is classified as an error (disconnects the client).
     fn ut_classify_transport_error_maps_to_modbus_error() {
-        let io_err = std::io::Error::other("boom");
-        let res: ReadResult<u16> = Ok(Err(tokio_modbus::Error::Transport(io_err)));
-        let e = ClientCore::classify(res).unwrap_err();
+        let res: ReadResult<u16> = Ok(Err(rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::ConnectionReset,
+        }));
+        let e = classify(res).unwrap_err();
         assert!(matches!(e, ModbusError::Error(_)));
     }
 
@@ -603,7 +609,7 @@ mod tests {
             .await
             .unwrap_err();
         let res: ReadResult<u16> = Err(elapsed);
-        let e = ClientCore::classify(res).unwrap_err();
+        let e = classify(res).unwrap_err();
         assert!(matches!(e, ModbusError::Timeout(_)));
     }
 
@@ -638,11 +644,14 @@ mod tests {
         };
         // A non-terminate command sent before the backoff elapses must be dropped, so the wait
         // still runs to completion and returns `false` (not aborted).
-        tx.send(Command::WriteSingleRegister(1, 0, 42))
-            .await
-            .unwrap();
-        let aborted =
-            ClientCore::wait_reconnect_backoff(&mut rx, Duration::from_millis(50), &log).await;
+        tx.send(Command::WriteSingleRegister(
+            UnitId(1),
+            Address(0),
+            RegisterValue(42),
+        ))
+        .await
+        .unwrap();
+        let aborted = wait_reconnect_backoff(&mut rx, Duration::from_millis(50), &log).await;
         assert!(!aborted);
         assert!(lines.lock().iter().any(|l| l.contains("Command dropped")));
     }
@@ -654,22 +663,20 @@ mod tests {
         // Terminate aborts (returns true).
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(4);
         tx.send(Command::Terminate).await.unwrap();
-        assert!(ClientCore::wait_reconnect_backoff(&mut rx, Duration::from_secs(30), &sink).await);
+        assert!(wait_reconnect_backoff(&mut rx, Duration::from_secs(30), &sink).await);
         // The channel closing aborts too.
         let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Command>(4);
         drop(tx2);
-        assert!(ClientCore::wait_reconnect_backoff(&mut rx2, Duration::from_secs(30), &sink).await);
+        assert!(wait_reconnect_backoff(&mut rx2, Duration::from_secs(30), &sink).await);
     }
 
     #[test]
     /// MB-R-042 — a successful coil read is mapped through to one word per bit.
     fn ut_classify_maps_bits_through_to_words_on_success() {
         // Same classify() call the ReadCoils/ReadDiscreteInputs arms make, chained with
-        // `.map(Self::bits_to_words)` as `read()` does.
-        let res: ReadResult<Vec<bool>> = Ok(Ok(Ok(vec![true, false])));
-        let words = ClientCore::classify(res)
-            .map(ClientCore::bits_to_words)
-            .unwrap();
+        // `.map(bits_to_words)` as `read()` does.
+        let res: ReadResult<Vec<bool>> = Ok(Ok(vec![true, false]));
+        let words = classify(res).map(bits_to_words).unwrap();
         assert_eq!(words, vec![1u16, 0]);
     }
 }

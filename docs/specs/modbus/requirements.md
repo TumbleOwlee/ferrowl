@@ -18,8 +18,9 @@ behavior, stated limitations).
 **MB-R-001** — A register shall be described by exactly five properties: a slave
 id, an access direction, a register table (kind), an address, and a data format.
 
-**MB-R-002** — Slave id shall be an 8-bit value (0–255). It shall default to 0
-when unspecified.
+**MB-R-002** — Slave id shall be an 8-bit value (0–255). It shall default to 1
+when unspecified, 0 being reserved as the RTU broadcast address (MB-R-101,
+MB-R-103).
 
 **MB-R-003** — A register's address shall be either a fixed 16-bit Modbus address
 (0–65535) or *virtual* (no wire address). It shall default to virtual when
@@ -354,8 +355,8 @@ start, and the error shall be surfaced to the caller rather than retried.
 
 **MB-R-072** — An RTU client shall open the serial port at `path` with the
 configured `baud_rate`, and shall apply `parity`, `data_bits`, and `stop_bits`
-when they are set, leaving the serial library's own default in place when they are
-not.
+when they are set. An unset parameter shall take the Modbus serial-line default —
+8 data bits, even parity, one stop bit.
 
 **MB-R-073** — `data_bits` shall accept exactly 5, 6, 7, or 8; `stop_bits` shall
 accept exactly 1 or 2; `parity` shall accept exactly `even`, `odd`, or `none`,

@@ -2,7 +2,7 @@
 //! reconfiguration, and writing register values.
 
 use ferrowl_codec::{Access, Address, Kind};
-use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_modbus::{Address as WireAddress, Key, SlaveKey};
 use ferrowl_store::Range;
 use ferrowl_ui::widgets::Header;
 
@@ -373,7 +373,7 @@ impl ModbusModuleView {
                         .unwrap_or_default();
                     register.merge_write(&old, &raw)
                 };
-                let command = write_command(&register, slave, addr, &merged);
+                let command = write_command(&register, slave, WireAddress(addr), &merged);
                 let result = self.module.send_command(command).await;
                 match result {
                     Ok(()) => {
@@ -402,6 +402,7 @@ mod tests {
     use crate::module::modbus::dialog::EditedRegister;
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn spec(role: Role) -> ModuleSpec {
         ModuleSpec {
@@ -424,7 +425,7 @@ mod tests {
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(addr))
@@ -440,7 +441,7 @@ mod tests {
 
     fn virtual_reg() -> Register {
         RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
@@ -541,7 +542,7 @@ mod tests {
 
         let key = Key {
             id: SlaveKey {
-                slave_id: 1,
+                slave_id: UnitId(1),
                 kind: Kind::HoldingRegister,
             },
         };

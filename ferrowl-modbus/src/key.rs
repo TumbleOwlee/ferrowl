@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 
 use ferrowl_codec::Kind;
-use tokio_modbus::{FunctionCode, SlaveId};
+use rust_modbus::{FunctionCode, UnitId};
 
 /// Parameters identifying a memory region for a request.
 ///
@@ -13,7 +13,7 @@ use tokio_modbus::{FunctionCode, SlaveId};
 /// partitioned. See [`SlaveKey`] for the default.
 pub trait KeyParams: Hash + Eq + Clone + Default + Debug + Send + Sync + 'static {
     /// Derives the key for a request addressed at `slave_id` with `fn_code`.
-    fn from_slave_fn(slave_id: SlaveId, fn_code: FunctionCode) -> Self;
+    fn from_slave_fn(slave_id: UnitId, fn_code: FunctionCode) -> Self;
 }
 
 /// Memory key wrapping [`KeyParams`]; used as the device key of the shared
@@ -32,14 +32,27 @@ impl<T: KeyParams> Key<T> {
 /// Default concrete key params: slave address + register kind. Each
 /// (slave, register table) pair gets its own memory region; the kind is
 /// derived from the request's function code.
-#[derive(Hash, Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Hash, Debug, PartialEq, Eq, Clone)]
 pub struct SlaveKey {
-    pub slave_id: SlaveId,
+    pub slave_id: UnitId,
     pub kind: Kind,
 }
 
+// Hand-written because `UnitId` is a transparent wrapper with no `Default` of its
+// own. The default unit is 1, not 0: on RTU, 0 is the broadcast address, which no
+// server answers and no client may read from (MB-R-101, MB-R-103), so it is the one
+// value an unconfigured key must not take.
+impl Default for SlaveKey {
+    fn default() -> Self {
+        Self {
+            slave_id: UnitId(1),
+            kind: Kind::default(),
+        }
+    }
+}
+
 impl KeyParams for SlaveKey {
-    fn from_slave_fn(slave_id: SlaveId, fn_code: FunctionCode) -> Self {
+    fn from_slave_fn(slave_id: UnitId, fn_code: FunctionCode) -> Self {
         Self {
             slave_id,
             kind: match fn_code {
@@ -61,12 +74,12 @@ impl KeyParams for SlaveKey {
 mod tests {
     use super::{Key, KeyParams, SlaveKey};
     use ferrowl_codec::Kind;
-    use tokio_modbus::FunctionCode;
+    use rust_modbus::{FunctionCode, UnitId};
 
     #[test]
     fn ut_key_new_stores_fields() {
         let sk = SlaveKey {
-            slave_id: 7,
+            slave_id: UnitId(7),
             kind: Kind::HoldingRegister,
         };
         let key = Key::new(sk.clone());
@@ -83,8 +96,8 @@ mod tests {
     #[test]
     /// MB-R-027 — coil-family function codes derive the coil register table.
     fn ut_slave_kind_from_slave_fn_coil() {
-        let sk = SlaveKey::from_slave_fn(3, FunctionCode::ReadCoils);
-        assert_eq!(sk.slave_id, 3);
+        let sk = SlaveKey::from_slave_fn(UnitId(3), FunctionCode::ReadCoils);
+        assert_eq!(sk.slave_id, UnitId(3));
         assert_eq!(sk.kind, Kind::Coil);
     }
 }

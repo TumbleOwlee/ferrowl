@@ -19,12 +19,7 @@ itertools = { workspace = true }
 serde = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
-tokio-modbus = { workspace = true, features = [
-    "futures-util",
-    "rtu-server",
-    "tcp-server",
-] }
-tokio-serial = { workspace = true }
+rust-modbus = { workspace = true, features = ["std", "rtu", "serde"] }
 clap = { workspace = true }
 
 [dev-dependencies]

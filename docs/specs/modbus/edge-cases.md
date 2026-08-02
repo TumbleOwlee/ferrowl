@@ -114,12 +114,12 @@ The config is therefore only ever reached through its serde path (session and
 device config files, and the `--module` key/value form), which is unaffected. No
 Modbus RTU flag is exposed as a top-level CLI flag.
 
-### 5.3 The RTU `slave` config field is inert in application use
+### 5.3 The RTU `slave` config field is inert
 
-The RTU config carries a `slave` field (default 1), used to attach the serial
-context to a slave on connect. An application-built RTU client always passes `0`
-for it, because the client re-targets the slave before every single request using
-the slave id carried by the operation or command. The field therefore has no
+The RTU config carries a `slave` field (default 1). It is read by no code path:
+the client carries a slave id on every individual request, taken from the
+operation or command, and never attaches the link to one slave. The field is kept
+only so existing session and device config files keep parsing, and has no
 observable effect on a running module.
 
 An RTU **server** ignores the field entirely: it answers for whichever slave ids

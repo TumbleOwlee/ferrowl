@@ -17,8 +17,8 @@ pub mod value;
 
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
+pub use rust_modbus::UnitId;
 use serde::{Deserialize, Serialize};
-use tokio_modbus::SlaveId;
 
 pub use crate::access::Access;
 pub use crate::address::Address;
@@ -41,8 +41,8 @@ pub use crate::value::Value;
 #[getset(set = "pub")]
 pub struct Register {
     #[getset(get = "pub")]
-    #[builder(default = "0")]
-    slave_id: SlaveId,
+    #[builder(default = "UnitId(1)")]
+    slave_id: UnitId,
     #[getset(get = "pub")]
     #[builder(default = "Access::ReadWrite")]
     access: Access,
@@ -104,7 +104,7 @@ impl Register {
 #[cfg(test)]
 mod tests {
     use crate::format::{Endian, Format, Resolution, Width, WordOrder};
-    use crate::{Access, Address, Alignment, BitField, Kind, RegisterBuilder};
+    use crate::{Access, Address, Alignment, BitField, Kind, RegisterBuilder, UnitId};
 
     fn u16_be() -> Format {
         Format::U16((
@@ -119,7 +119,7 @@ mod tests {
     /// MB-R-001 — a register is described by exactly five properties: slave id, access, kind, address, format.
     fn ut_register_carries_five_properties() {
         let r = RegisterBuilder::default()
-            .slave_id(7)
+            .slave_id(UnitId(7))
             .access(Access::ReadOnly)
             .kind(Kind::InputRegister)
             .address(Address::Fixed(100))
@@ -127,7 +127,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(*r.slave_id(), 7);
+        assert_eq!(*r.slave_id(), UnitId(7));
         assert_eq!(*r.access(), Access::ReadOnly);
         assert_eq!(*r.kind(), Kind::InputRegister);
         assert_eq!(*r.address(), Address::Fixed(100));

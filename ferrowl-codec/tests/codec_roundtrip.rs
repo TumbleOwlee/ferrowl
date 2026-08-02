@@ -4,8 +4,8 @@
 
 use ferrowl_codec::format::{Resolution, Width, WordOrder};
 use ferrowl_codec::{
-    Access, Alignment, BitField, Endian, Format, Kind, RegisterBuilder, Value, decode, encode,
-    encode_value,
+    Access, Alignment, BitField, Endian, Format, Kind, RegisterBuilder, UnitId, Value, decode,
+    encode, encode_value,
 };
 
 fn res() -> Resolution {
@@ -17,14 +17,14 @@ fn int(endian: Endian) -> Format {
 }
 
 #[test]
-/// MB-R-002 — an unspecified slave id defaults to 0 (access defaults to `ReadWrite`, MB-R-005;
+/// MB-R-002 — an unspecified slave id defaults to 1 (access defaults to `ReadWrite`, MB-R-005;
 /// kind defaults to holding register, MB-R-097).
 fn it_register_builder_applies_documented_defaults() {
     let reg = RegisterBuilder::default()
         .format(int(Endian::Big))
         .build()
         .expect("only `format` is required to build a Register");
-    assert_eq!(*reg.slave_id(), 0);
+    assert_eq!(*reg.slave_id(), UnitId(1));
     assert_eq!(*reg.access(), Access::ReadWrite);
     assert_eq!(*reg.kind(), Kind::HoldingRegister);
 }

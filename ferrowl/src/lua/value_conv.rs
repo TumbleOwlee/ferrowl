@@ -138,6 +138,7 @@ mod tests {
     use super::*;
     use ferrowl_codec::format::{Alignment, BitField, Endian, Resolution, Width, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
 
     fn int_fmt(kind: fn((Endian, WordOrder, Resolution, BitField)) -> Format) -> Format {
         kind((
@@ -219,7 +220,7 @@ mod tests {
     /// nil fails.
     fn ut_virtual_value_from_type() {
         let register = RegisterBuilder::default()
-            .slave_id(1u8)
+            .slave_id(UnitId(1))
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
