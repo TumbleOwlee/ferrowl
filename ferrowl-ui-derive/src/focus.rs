@@ -331,11 +331,12 @@ pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream>
     let focus_ty = input.ident.to_string().to_case(Case::Pascal) + "Focus";
     let focus_field = Field {
         attrs: Vec::new(),
-        mutability: syn::FieldMutability::None,
+        modifiers: Default::default(),
         vis: Visibility::Inherited,
         ident: Some(Ident::new("focus", Span::call_site())),
         colon_token: Some(Default::default()),
         ty: syn::parse_str::<Type>(&focus_ty)?,
+        default: None,
     };
     let view_focused_attrs = if uses_builder {
         vec![syn::parse_quote!(#[builder(default)])]
@@ -344,11 +345,12 @@ pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream>
     };
     let view_focused_field = Field {
         attrs: view_focused_attrs,
-        mutability: syn::FieldMutability::None,
+        modifiers: Default::default(),
         vis: Visibility::Inherited,
         ident: Some(Ident::new("view_focused", Span::call_site())),
         colon_token: Some(Default::default()),
         ty: syn::parse_str::<Type>("bool")?,
+        default: None,
     };
 
     named.named.push(focus_field);
