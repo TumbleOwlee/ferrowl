@@ -510,8 +510,9 @@ mod tests {
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::CellKind as MemKind;
     use rust_modbus::{
-        Address, Client as RmClient, DiagnosticSubFunction, FrameTransport, Mask, MeiRequest,
-        ReadDeviceIdCode, Server as ModbusServer, Tcp,
+        Address, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
+        FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
+        RecordNumber, Rtu, Server as ModbusServer, Tcp,
     };
     use std::sync::Mutex;
 
@@ -571,6 +572,76 @@ mod tests {
         let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
 
         let mut client: RmClient<_, Tcp> = RmClient::new(FrameTransport::new(client_end));
+        let registers = client
+            .read_holding_registers(UnitId(1), Address(0), Quantity(2))
+            .await
+            .unwrap();
+        assert_eq!(registers, vec![RegisterValue(10), RegisterValue(20)]);
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-103 — an RTU server applies a request addressed to slave id 0 to the store exactly as
+    /// it would any other, and emits no response frame for it.
+    async fn ut_rtu_broadcast_request_is_applied_and_unanswered() {
+        // Both the broadcast address and slave 1 have declared regions: the broadcast write
+        // lands in slave 0's, and the follow-up read of slave 1 is what proves no stray
+        // broadcast response was left sitting in the stream ahead of it.
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        for slave in [UnitId(0), UnitId(1)] {
+            let key = Key {
+                id: SlaveKey {
+                    slave_id: slave,
+                    kind: RegKind::HoldingRegister,
+                },
+            };
+            mem.add_ranges(
+                key.clone(),
+                &MemKind::ReadWrite(CellType::Register),
+                &[Range::new(0, 4)],
+            );
+            mem.write(key, &CellType::Register, &Range::new(0, 2), &[10, 20])
+                .unwrap();
+        }
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+        let server = Server::new(mem.clone(), log, true);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Rtu>::new(server_end)));
+
+        let mut client: RmClient<_, Rtu> = RmClient::new(FrameTransport::new(client_end));
+        // Returns as soon as the frame is written — nothing is awaited, because nothing answers.
+        client
+            .write_single_register(UnitId(0), Address(1), RegisterValue(0x1234))
+            .await
+            .unwrap();
+
+        // The store took the write all the same.
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(0),
+                kind: RegKind::HoldingRegister,
+            },
+        };
+        let mut applied = Vec::new();
+        for _ in 0..50 {
+            applied = mem
+                .read()
+                .read(key.clone(), &CellType::Register, &Range::new(0, 2))
+                .unwrap();
+            if applied == vec![10, 0x1234] {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(applied, vec![10, 0x1234]);
+
+        // The next exchange lines up, so the broadcast put no frame on the wire.
         let registers = client
             .read_holding_registers(UnitId(1), Address(0), Quantity(2))
             .await
@@ -1460,6 +1531,20 @@ mod tests {
             RequestPdu::Diagnostics {
                 sub_function: DiagnosticSubFunction::ReturnQueryData,
                 data: vec![0x1234],
+            },
+            RequestPdu::ReadFileRecord {
+                records: vec![FileRecordRead {
+                    file_number: FileNumber(1),
+                    record_number: RecordNumber(0),
+                    record_length: RecordLength(1),
+                }],
+            },
+            RequestPdu::WriteFileRecord {
+                records: vec![FileRecordWrite {
+                    file_number: FileNumber(1),
+                    record_number: RecordNumber(0),
+                    values: vec![RegisterValue(1)],
+                }],
             },
             RequestPdu::ReadFifoQueue {
                 address: Address(0),

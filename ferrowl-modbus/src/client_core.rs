@@ -552,8 +552,126 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SlaveKey;
+    use ferrowl_store::Range;
+    use rust_modbus::{FrameTransport, Rtu};
+    use tokio::io::{AsyncReadExt, DuplexStream};
 
     type ReadResult<V> = Result<Result<V, rust_modbus::Error>, tokio::time::error::Elapsed>;
+
+    /// An RTU-framed client over an in-memory duplex link, plus the peer end of that link.
+    /// Nothing ever answers on the peer end: the broadcast tests below are about what the
+    /// client does *without* a response.
+    fn rtu_client_over_duplex() -> (ClientCore<DuplexStream, Rtu>, DuplexStream) {
+        let (client_end, peer) = tokio::io::duplex(256);
+        let core = ClientCore {
+            client: Client::new(FrameTransport::<_, Rtu>::new(client_end)),
+        };
+        (core, peer)
+    }
+
+    /// A `LogFn` that records every line into a shared buffer for assertions.
+    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = lines.clone();
+        let log = move |s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push(s);
+            }
+        };
+        (log, lines)
+    }
+
+    /// Reads whatever the peer end received within a short window, or nothing if the wire
+    /// stayed silent.
+    async fn drain_peer(peer: &mut DuplexStream) -> Vec<u8> {
+        let mut buf = [0u8; 64];
+        match tokio::time::timeout(Duration::from_millis(100), peer.read(&mut buf)).await {
+            Ok(Ok(n)) => buf[..n].to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-101 — an RTU read addressed to slave id 0 fails locally, never reaching the wire,
+    /// and fails as a Modbus exception so it follows the retry path of MB-R-043 rather than
+    /// disconnecting the client.
+    async fn ut_rtu_broadcast_read_is_refused_locally() {
+        let (mut core, mut peer) = rtu_client_over_duplex();
+        let (log, lines) = recording_log();
+        let op = Operation {
+            slave_id: UnitId(0),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 2),
+        };
+
+        let (label, result) = core.read(&op, 200, &log).await;
+
+        assert_eq!(label, "Broadcast");
+        assert!(matches!(
+            result,
+            Err(ModbusError::Exception(ExceptionCode::IllegalDataAddress))
+        ));
+        assert!(
+            lines.lock().iter().any(|l| l.contains("broadcast address")),
+            "the refusal is logged: {:?}",
+            lines.lock()
+        );
+        assert!(
+            drain_peer(&mut peer).await.is_empty(),
+            "a broadcast read must not reach the wire"
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-102 — an RTU write addressed to slave id 0 is transmitted without awaiting a
+    /// response, logged as executed, and does not disconnect the client.
+    async fn ut_rtu_broadcast_write_is_fire_and_forget() {
+        let (core, mut peer) = rtu_client_over_duplex();
+        let (log, lines) = recording_log();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(4);
+        tx.send(Command::WriteSingleRegister(
+            UnitId(0),
+            Address(1),
+            RegisterValue(7),
+        ))
+        .await
+        .unwrap();
+        tx.send(Command::Terminate).await.unwrap();
+
+        // No operations, so the poll ticker has nothing to do: the run is the two commands.
+        let (_had_success, result) = core
+            .run::<SlaveKey, _, _>(
+                Arc::new(RwLock::new(Vec::new())),
+                Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default())),
+                &mut rx,
+                RunConfig {
+                    log,
+                    status: |_s: String| async move {},
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 60_000,
+                },
+            )
+            .await;
+
+        // Nothing answered, yet the write neither timed out nor ended the run: the client
+        // stayed up all the way to the graceful terminate.
+        assert!(result.is_ok(), "a broadcast write must not disconnect");
+        assert!(
+            lines
+                .lock()
+                .iter()
+                .any(|l| l.contains("WriteSingleRegister") && l.contains("successfully executed")),
+            "the write is logged as executed: {:?}",
+            lines.lock()
+        );
+        assert!(
+            !drain_peer(&mut peer).await.is_empty(),
+            "a broadcast write is still transmitted"
+        );
+    }
 
     #[test]
     /// MB-R-042 — coil/discrete-input reads map to one word per bit: `1` for set, `0` for clear.
