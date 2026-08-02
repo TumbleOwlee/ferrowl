@@ -72,7 +72,7 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-syn = "2.0.117"
+syn = "3.0.3"
 thiserror = "2.0"
 tokio = "1.49.0"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
