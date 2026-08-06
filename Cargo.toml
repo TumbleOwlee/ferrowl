@@ -43,7 +43,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 anyhow = "1.0.104"
 async-trait = "0.1.91"
-base64 = "0.23.0"
+base64 = "0.23.1"
 clap = { version = "4.6.5", features = ["derive"] }
 convert_case = "0.11.0"
 crossterm = "0.29.0"
@@ -63,7 +63,7 @@ ratatui = { version = "0.30.2", features = [
 rcgen = "0.14.8"
 # Pinned by rev, not branch: `cargo update` must not silently move us to whatever the fork's
 # `main` points at. Bump the rev deliberately when pulling in upstream changes.
-rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "025c73ad29c4d4667b7a385b203e422270ff7c2f", default-features = false }
+rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "873eb8202c3a1d965899f32bd4247db178546f06", default-features = false }
 rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "1343bbbac095ed4f41709bda6ed0a3e5cf443190", default-features = false }
 rustls = { version = "0.23", default-features = false, features = [
     "ring",
