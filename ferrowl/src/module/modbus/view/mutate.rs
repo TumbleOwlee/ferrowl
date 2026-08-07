@@ -241,7 +241,13 @@ impl ModbusModuleView {
 
         if let Err(e) = self
             .module
-            .reconfigure(&values.endpoint, values.role, timing, values.read_ranges)
+            .reconfigure(
+                &values.endpoint,
+                values.role,
+                timing,
+                values.read_ranges,
+                self.device.tls.clone(),
+            )
             .await
         {
             self.module

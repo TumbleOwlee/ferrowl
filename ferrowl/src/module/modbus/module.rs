@@ -152,7 +152,7 @@ impl ModbusModule {
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
         let timing = Self::resolve_timing(device);
-        let net_config = endpoint_to_config(&spec.endpoint, &timing);
+        let net_config = endpoint_to_config(&spec.endpoint, &timing, device.tls.clone());
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
         let mut module = Self {
@@ -381,6 +381,7 @@ impl ModbusModule {
         role: Role,
         timing: Timing,
         read_ranges: ReadRanges,
+        tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
     ) -> Result<(), Error> {
         // Best-effort stop of any running instance; the caller is expected to `start()` afterwards.
         let _ = self.instance.stop().await;
@@ -393,7 +394,7 @@ impl ModbusModule {
                 .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
         }
         self.rebuild_operations().await;
-        let net_config = endpoint_to_config(endpoint, &timing);
+        let net_config = endpoint_to_config(endpoint, &timing, tls);
         self.instance = build_instance(
             role,
             net_config,
@@ -488,6 +489,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(500),
             reconnect: None,
+            tls: None,
             log_file: Some(
                 std::env::temp_dir()
                     .join("ferrowl_module_test.log")
@@ -626,6 +628,7 @@ mod tests {
                 Role::Client,
                 timing,
                 ReadRanges::default(),
+                device.tls.clone(),
             )
             .await
             .expect("reconfigure");
@@ -710,6 +713,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(50),
             reconnect: None,
+            tls: None,
             log_file: None,
             read_ranges: ReadRanges {
                 holding: Some("0-10".into()),
