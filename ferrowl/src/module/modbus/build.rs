@@ -260,6 +260,8 @@ pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetCon
             delay_ms: timing.delay_ms,
             interval_ms: timing.interval_ms,
             reconnect: timing.reconnect,
+            // Threaded end-to-end from device config in stage s5 (MB-R-104 wiring).
+            tls: None,
         }),
         Endpoint::Rtu {
             path,
