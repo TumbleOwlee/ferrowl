@@ -43,6 +43,7 @@ fn network_log_level(s: &str) -> Level {
     if lower.contains("disconnecting")
         || lower.contains("reconnect disabled")
         || lower.contains("timed out")
+        || lower.contains("tls handshake")
     {
         Level::Error
     } else if lower.contains("disconnected")
@@ -442,6 +443,18 @@ mod tests {
         assert_eq!(timing.delay_ms, 500);
         assert!(!timing.reconnect);
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
+    }
+
+    #[test]
+    /// MB-R-111 (server logging half) — a TLS handshake failure line classifies as
+    /// `Level::Error`, matching the peer/failure-detail format `on_tls_handshake_failed`
+    /// logs (`"TLS handshake with {peer} failed: {detail}."`).
+    fn ut_network_log_level_classifies_tls_handshake_failure_as_error() {
+        use super::network_log_level;
+        use crate::app::Level;
+
+        let line = "TLS handshake with 127.0.0.1:5502 failed: bad certificate.";
+        assert_eq!(network_log_level(line), Level::Error);
     }
 
     fn device_with_defs() -> crate::config::DeviceConfig {

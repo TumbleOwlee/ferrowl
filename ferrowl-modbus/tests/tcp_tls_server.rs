@@ -412,6 +412,66 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
 }
 
 #[tokio::test]
+/// MB-R-111 (server logging half) — a rejected mTLS handshake (no client
+/// certificate presented) is logged with the peer address and a failure reason.
+async fn require_client_cert_rejection_is_logged() {
+    let (server_cert_pem, server_key_pem) = self_signed_pem();
+    let server_cert_file = write_pem("mtls-log-server-cert", &server_cert_pem);
+    let server_key_file = write_pem("mtls-log-server-key", &server_key_pem);
+
+    let (ca_pem, client_cert_pem, client_key_pem) = ca_and_signed_client_pem();
+    let ca_file = write_pem("mtls-log-ca", &ca_pem);
+
+    let port = free_port();
+    let cfg = Arc::new(RwLock::new(config(
+        port,
+        tcp::ModbusTlsConfig {
+            cert_file: Some(server_cert_file.clone()),
+            key_file: Some(server_key_file),
+            require_client_cert: true,
+            client_ca_file: Some(ca_file),
+            ..Default::default()
+        },
+    )));
+    let (log, captured) = capturing();
+    let server = tcp::ServerBuilder::new(cfg, memory())
+        .spawn(log)
+        .await
+        .expect("mTLS server should start");
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    // No client certificate presented at all: rejected (see the TLS 1.3 client-side
+    // completion quirk note in `require_client_cert_enforced`).
+    let _ = raw_connect(addr, Some(&server_cert_pem), None).await;
+
+    // Run a well-behaved connection afterward so the rejected handshake's task has
+    // definitely finished (and its log line landed) before we inspect `captured`.
+    let client_cert_chain = rust_modbus::load_pem_cert_chain(client_cert_pem.as_bytes()).unwrap();
+    let client_key = rust_modbus::load_pem_private_key(client_key_pem.as_bytes()).unwrap();
+    raw_connect(
+        addr,
+        Some(&server_cert_pem),
+        Some(ClientIdentity {
+            cert_chain: client_cert_chain,
+            key: client_key,
+        }),
+    )
+    .await
+    .expect("accept loop should still serve a well-behaved client after a prior rejection");
+
+    let lines = captured.lock();
+    assert!(
+        lines.iter().any(|line| line.contains("TLS handshake")
+            && line.contains("127.0.0.1:")
+            && line.contains("failed")),
+        "expected a TLS handshake failure log line naming the peer, got: {lines:?}"
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
 /// MB-R-108 — `require_client_cert` without a `client_ca_file` fails the server's
 /// start with a TLS configuration error, before any bind is attempted.
 async fn require_client_cert_without_ca_fails_server_start() {
