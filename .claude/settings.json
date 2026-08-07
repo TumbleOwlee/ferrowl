@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'cards=$(find .claude/tasks/inprogress .claude/tasks/inreview -name \"*.md\" 2>/dev/null); if [ -n \"$cards\" ]; then echo \"[task board] unfinished cards — a gated run was interrupted:\"; echo \"$cards\"; echo \"Ask to resume: reconcile every card against git before acting on it (AGENTS.md, Resume an interrupted run).\"; fi; exit 0'"
+          }
+        ]
+      }
+    ]
+  }
+}

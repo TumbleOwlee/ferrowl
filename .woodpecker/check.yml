@@ -32,3 +32,10 @@ steps:
     commands:
       - cargo install cargo-deny --locked
       - cargo deny check
+
+  coverage:
+    image: rust:latest
+    commands:
+      - rustup component add llvm-tools-preview
+      - cargo install cargo-llvm-cov --locked
+      - cargo llvm-cov --workspace --fail-under-lines 80

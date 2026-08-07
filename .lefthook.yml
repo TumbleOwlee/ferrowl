@@ -33,3 +33,19 @@ pre-commit:
           echo "      (see AGENTS.md 'Spec-driven'). This is a reminder, not a failure."
         fi
         exit 0
+
+    # Warning only: every test that pins observable behavior cites its requirement ID
+    # in a doc comment directly below the #[test] attribute (see AGENTS.md).
+    test-id-reminder:
+      glob: "*.rs"
+      run: |
+        staged="$(git diff --cached --name-only | grep -E '\.rs$' || true)"
+        [ -z "$staged" ] && exit 0
+        if printf '%s\n' "$staged" | xargs grep -l '#\[\(tokio::\)\?test\]' 2>/dev/null | head -1 > /dev/null; then
+          if ! git diff --cached -U1 -- $staged | grep -qE '^\+\s*///\s*(MB|OC|SC|UI|CS|CL|NF)-R-[0-9]+'; then
+            echo "note: tests changed but no requirement ID appears in an added doc comment."
+            echo "      Tests pinning observable behavior cite their requirement (see AGENTS.md)."
+            echo "      Reminder, not a failure."
+          fi
+        fi
+        exit 0

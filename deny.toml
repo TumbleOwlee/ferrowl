@@ -59,6 +59,9 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# rust-ocpp is consumed from a fork (pinned by rev in the workspace Cargo.toml) rather than
-# crates.io.
-allow-git = ["https://github.com/TumbleOwlee/rust-ocpp"]
+# rust-ocpp and rust-modbus are consumed from forks (pinned by rev in the workspace
+# Cargo.toml) rather than crates.io.
+allow-git = [
+    "https://github.com/TumbleOwlee/rust-ocpp",
+    "https://github.com/TumbleOwlee/rust-modbus",
+]

@@ -11,5 +11,15 @@
 
 # Claude Code artifacts
 .agents/
-.claude/
 skills-lock.json
+
+# Claude Code local state
+.claude/settings.local.json
+
+# Per-issue git worktrees (one per agent, created and removed by the workflow)
+.claude/worktrees/
+
+# Agent task board: the directories are tracked, the cards are local state
+.claude/tasks/**
+!.claude/tasks/**/
+!.claude/tasks/**/.gitkeep
