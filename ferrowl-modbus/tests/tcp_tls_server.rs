@@ -472,6 +472,41 @@ async fn require_client_cert_rejection_is_logged() {
 }
 
 #[tokio::test]
+/// MB-R-108 — with `require_client_cert` unset (false), a configured `client_ca_file`
+/// is ignored: a client presenting no certificate at all is still accepted.
+async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
+    let (server_cert_pem, server_key_pem) = self_signed_pem();
+    let server_cert_file = write_pem("no-require-server-cert", &server_cert_pem);
+    let server_key_file = write_pem("no-require-server-key", &server_key_pem);
+
+    let (ca_pem, ..) = ca_and_signed_client_pem();
+    let ca_file = write_pem("no-require-ca", &ca_pem);
+
+    let port = free_port();
+    let cfg = Arc::new(RwLock::new(config(
+        port,
+        tcp::ModbusTlsConfig {
+            cert_file: Some(server_cert_file),
+            key_file: Some(server_key_file),
+            client_ca_file: Some(ca_file),
+            // require_client_cert left at its default (false).
+            ..Default::default()
+        },
+    )));
+    let server = tcp::ServerBuilder::new(cfg, memory())
+        .spawn(sink())
+        .await
+        .expect("server should start: a client_ca_file without require_client_cert is valid");
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    raw_connect(addr, Some(&server_cert_pem), None)
+        .await
+        .expect("a client presenting no certificate should be accepted");
+
+    server.abort();
+}
+
+#[tokio::test]
 /// MB-R-108 — `require_client_cert` without a `client_ca_file` fails the server's
 /// start with a TLS configuration error, before any bind is attempted.
 async fn require_client_cert_without_ca_fails_server_start() {
