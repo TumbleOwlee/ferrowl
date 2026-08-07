@@ -24,8 +24,10 @@ crates building one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure:
   separately. Folding it in widens approved work, skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement IDs stable, append-only. Cite in commits and PRs.
+- One requirement, one physical line, never wrapped — find any by `grep -rn <ID or keyword> docs/specs/`, or with the exact file:line to edit: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch every ID needed into one call). Read one section of a large spec file instead of the whole thing: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
 <!-- CORE:END spec-driven -->
 
+<!-- CORE:BEGIN tdd -->
 ## TDD — fixed order, every stage
 
 1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
@@ -40,6 +42,7 @@ crates building one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure:
   API) — never a debug print of your own implementation.
 - Coverage floor 80% of lines, CI-gated. A floor, not a target — never
   inflate it with tests that execute code without asserting.
+<!-- CORE:END tdd -->
 
 ## Workflow
 
@@ -161,6 +164,7 @@ Rules:
   the feature branch ("the code I depend on is on the branch I branch from").
 - No `blocked/` directory — blocking derives from `blocked-by`, stated once.
 - Card is evidence of intent, never fact. Git is fact. See *Resume*.
+- `done/` is a resting spot for a run in progress, not a permanent record — every card for the run is deleted once the PR is merged. See *Merge*.
 
 ### Gate 1 — spec diff. Orchestrator runs this itself. Stop for approval.
 
@@ -180,6 +184,14 @@ existing spec + current goal.
 - **Board:** create `open/<slug>.md` + `artifacts/<slug>/` before the dialog
   — no worktree yet, nothing to put in one. On approval: write
   `artifacts/<slug>/spec-diff.md`, record `gate1` on parent card.
+- **`spec-diff.md` shape:** one `## <ID>` heading per new or changed
+  requirement (its full normative text under it, old → new if changed), then
+  one `## Other spec changes` heading for `edge-cases.md`/
+  `api-contract.md`/`data-contract.md` entries that carry no single ID. Same
+  reason `plan.md` is headed per stage:
+  `.claude/scripts/extract-section.sh '## <ID>' artifacts/<slug>/spec-diff.md`
+  lets a wave-scoped reviewer pull only the IDs its stages touch, never the
+  whole file.
 
 ### Gate 1b — tracking issue. Orchestrator runs this itself. Stop for approval.
 
@@ -205,14 +217,7 @@ Spawn the planning agent with a brief: approved spec text, affected area(s),
 anything user volunteered at gate 1. Nothing else — gate 1 did no code
 research; agent explores the repo itself. Never mention the issue.
 
-Returns: stages of numbered file-level steps; ID→test table; **Verification**
-section naming the method (unit tests alone / driving the demo TUI / a real
-CSMS); expected commits; expected coverage impact. Existing-code references
-are terse and inline at the step needing them — `(file:line)`, never a
-paragraph or separate section — minimum words, zero information loss, since
-whichever agent implements a stage may lack the planner's own exploration
-context. A reference needed by 2+ stages is stated once in the dependency
-tree, not repeated at every step that uses it.
+Returns `plan.md` (shape: `spec-planner.md`'s `## Output`) — verification methods for this project: unit tests alone / driving the demo TUI / a real CSMS, plus expected coverage impact. Any later reader — implementer, reviewer, resumed session — pulls exactly one section with `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' artifacts/<slug>/plan.md`, never the whole file.
 
 May pause with one concise plan-scoped question — answer, it continues. If it
 reports a **spec gap** instead (approved text doesn't cover something the
@@ -314,17 +319,11 @@ report the final spec diff.
 Before proposing a PR: independent review in a **separate agent** that didn't
 write the code (a reviewer sharing the implementer's context reproduces its
 blind spots). Give it the diff, approved spec text, the artifact dir, the
-worktree path — never the issue number, same as every agent in this workflow.
-It reads its own rules (`.claude/AGENTS.core.md`) itself. Reports:
-
-- **Spec fidelity** — every approved requirement implemented, nothing
-  unapproved implemented (scope creep is a finding even if the code is
-  good), no ID pinned by a test that doesn't actually exercise it.
-- **Standards** — conventions below, test naming, ID citation, error
-  handling.
-- **TDD honesty** — tests passing against an empty implementation,
-  assertions on the implementation's own output, coverage padded by
-  non-asserting tests.
+worktree path, and the stage ids in scope (all of them, at gate 3) — never the
+issue number, same as every agent in this workflow. It reads its own rules
+(`.claude/AGENTS.core.md`) itself. Reports on three axes — spec fidelity,
+standards, TDD honesty; full criteria: `spec-reviewer.md`'s `## Three axes,
+reported separately`.
 
 Re-run the verification yourself, report findings + fixes. User-decision
 findings are raised, not silently fixed.
@@ -356,6 +355,14 @@ git worktree list   # nothing under .claude/worktrees/ should remain
 Per-wave worktrees are already removed at wave end; this sweep catches
 stragglers from a stopped agent. Parent card → `done/` — no card for this
 run stays outside `done/`.
+
+Merged and worktrees clean → **delete every card for this run** (stage cards,
+wave-gate cards, parent card): `done/` was only ever a resting spot, never
+the archive. Then ask the user for final "work done" approval — a distinct
+question from gate 4's PR approval. Approved → also delete
+`artifacts/<slug>/` (`spec-diff.md`, `plan.md`, `review.md`) for a clean
+slate. Declined → leave cards and artifacts in place; whatever prompted the
+decline gets sorted out before either is removed.
 
 ### Resume an interrupted run
 

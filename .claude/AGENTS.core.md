@@ -1,6 +1,4 @@
-Excerpt of AGENTS.md — spec-driven core, build/test/lint, conventions, scope
-boundaries. Full gates and task board: ../AGENTS.md. Regenerate by re-copying
-these sections if they change.
+Excerpt of AGENTS.md — spec-driven core, TDD order, build/test/lint, conventions, scope boundaries. Full gates and task board: ../AGENTS.md. Regenerate by re-copying these sections if they change.
 
 ## Spec-driven
 
@@ -15,6 +13,22 @@ these sections if they change.
   separately. Folding it in widens approved work, skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement IDs stable, append-only. Cite in commits and PRs.
+- One requirement, one physical line, never wrapped — find any by `grep -rn <ID or keyword> docs/specs/`, or with the exact file:line to edit: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch every ID needed into one call). Read one section of a large spec file instead of the whole thing: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
+
+## TDD — fixed order, every stage
+
+1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
+2. Run it, watch it fail for the right reason, report the failure. Wrong
+   assertion / test-side compile error / premature pass proves nothing.
+3. Minimum implementation that passes.
+4. Refactor green.
+
+- Implementation without a preceding failing test: not done. Test written
+  after the fact to fit code: not done.
+- Expected values from the authoritative source (standard/protocol/upstream
+  API) — never a debug print of your own implementation.
+- Coverage floor 80% of lines, CI-gated. A floor, not a target — never
+  inflate it with tests that execute code without asserting.
 
 ## Build / test / lint
 
