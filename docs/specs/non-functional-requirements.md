@@ -30,7 +30,7 @@ IDs are stable and append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 ## Security posture
 
-**NF-R-030** — OCPP shall support TLS (including mutual TLS) and HTTP Basic Auth. Modbus has no transport security, matching the protocol's own lack of one.
+**NF-R-030** — OCPP shall support TLS (including mutual TLS) and HTTP Basic Auth. Modbus/TCP shall optionally support TLS, including mutual TLS, via an opt-in `tls` config field (MB-R-104–MB-R-111). Modbus RTU has no transport security, matching the protocol's own lack of one.
 
 **NF-R-031** — Lua sim scripts shall run in a restricted sandbox: only the pure-computation standard libraries (`string`, `table`, `math`, `utf8`, `coroutine`) are reachable; `io`, `os`, `package`, `debug`, FFI, and the base dynamic-code loaders (`load`, `loadfile`, `dofile`, `require`) are not. A script therefore has no access to the host filesystem, shell, environment, or dynamic code loading. (Specified in [`scripting/`](./scripting/).) There is no CPU-time or memory ceiling — a separate, known limitation.
 
