@@ -875,6 +875,7 @@ dependencies = [
  "itertools 0.15.0",
  "parking_lot",
  "rcgen",
+ "ring",
  "rust-modbus",
  "rustls-pki-types",
  "serde",

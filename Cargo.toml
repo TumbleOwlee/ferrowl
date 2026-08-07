@@ -65,6 +65,10 @@ rcgen = "0.14.8"
 # `main` points at. Bump the rev deliberately when pulling in upstream changes.
 rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "b72a7e643bf656a232dc906862ba4af82cae74a7", default-features = false }
 rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "1343bbbac095ed4f41709bda6ed0a3e5cf443190", default-features = false }
+# Already pulled in transitively by rustls's "ring" feature below; named directly so
+# ferrowl-modbus can hash a rejected TLS peer certificate (MB-R-111) without pinning its
+# own, possibly-divergent, copy.
+ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = [
     "ring",
     "std",

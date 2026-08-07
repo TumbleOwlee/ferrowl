@@ -518,8 +518,8 @@ where
                 peer_cert: Some(cert),
             } => {
                 format!(
-                    "{source}; the client presented a certificate ({} byte(s)) that was rejected",
-                    cert.len()
+                    "{source}; the client presented a certificate (fingerprint {}) that was rejected",
+                    sha256_fingerprint(cert)
                 )
             }
             rust_modbus::Error::TlsHandshake {
@@ -532,6 +532,22 @@ where
             .invoke(format!("TLS handshake with {peer} failed: {detail}."))
             .await;
     }
+}
+
+/// A SHA-256 fingerprint of a certificate's raw DER bytes, colon-separated hex
+/// (the conventional certificate-fingerprint display) — the crate exposes only the
+/// raw DER, no parsed subject, so a fingerprint is the strongest identity a log line
+/// can carry without adding an x509 parser dependency. A byte length is not: two
+/// distinct certificates of the same length are indistinguishable by length alone
+/// (MB-R-111).
+fn sha256_fingerprint(cert: &rustls_pki_types::CertificateDer<'_>) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, cert.as_ref());
+    digest
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[cfg(test)]
@@ -602,7 +618,15 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("127.0.0.1:5502"), "line: {}", lines[0]);
         assert!(lines[0].contains("bad certificate"), "line: {}", lines[0]);
-        assert!(lines[0].contains('4'), "line: {}", lines[0]); // cert byte count
+        // SHA-256 of [1, 2, 3, 4], colon-separated hex (computed from the SHA-256
+        // standard, not from this crate's own output).
+        assert!(
+            lines[0].contains(
+                "9f:64:a7:47:e1:b9:7f:13:1f:ab:b6:b4:47:29:6c:9b:6f:02:01:e7:9f:b3:c5:35:6e:6c:77:e8:9b:6a:80:6a"
+            ),
+            "line: {}",
+            lines[0]
+        );
     }
 
     // Regression: the service used to bridge into async via `block_in_place` +

@@ -24,6 +24,7 @@ clap = { workspace = true }
 rustls-pki-types = { workspace = true }
 tokio-rustls = { workspace = true }
 rcgen = { workspace = true }
+ring = { workspace = true }
 
 [dev-dependencies]
 # Async test harness for the `handle_request` server logic (the crate's own tokio dep is
