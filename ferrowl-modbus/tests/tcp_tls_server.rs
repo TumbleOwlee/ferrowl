@@ -290,9 +290,8 @@ async fn lone_cert_or_key_file_fails_server_start() {
 }
 
 #[tokio::test]
-/// MB-R-108, MB-R-111 (server connection-scoping half) — `require_client_cert`
-/// accepts a client signed by the configured CA, rejects one presenting none or one
-/// signed by an unrelated CA, and the accept loop survives every rejection.
+/// MB-R-108 — `require_client_cert` accepts a client signed by the configured CA,
+/// and rejects one presenting none or one signed by an unrelated CA.
 async fn require_client_cert_enforced() {
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem("mtls-server-cert", &server_cert_pem);
@@ -339,8 +338,9 @@ async fn require_client_cert_enforced() {
     // No client certificate presented at all: the handshake either fails outright,
     // or (TLS 1.3 client-side completion quirk — see s2's client tests) appears to
     // succeed to the client while the server has already rejected it; either way the
-    // connection carries no usable session, so this only proves the accept loop
-    // survives, checked below by a subsequent good connection.
+    // connection carries no usable session. Survival of the accept loop past this
+    // rejection is asserted separately, in
+    // `require_client_cert_rejection_does_not_kill_accept_loop`.
     let _ = raw_connect(addr, Some(&server_cert_pem), None).await;
 
     // Signed by an unrelated CA: rejected the same way.
@@ -356,9 +356,45 @@ async fn require_client_cert_enforced() {
     )
     .await;
 
-    // The accept loop survived both rejections: a subsequent well-behaved client
-    // still connects (MB-R-111 server half: one bad handshake never takes down the
-    // accept loop or other connections).
+    server.abort();
+}
+
+#[tokio::test]
+/// MB-R-111 (server connection-scoping half) — a rejected mTLS handshake (missing
+/// or wrong-CA client certificate) never takes down the accept loop: a subsequent
+/// well-behaved client still connects.
+async fn require_client_cert_rejection_does_not_kill_accept_loop() {
+    let (server_cert_pem, server_key_pem) = self_signed_pem();
+    let server_cert_file = write_pem("mtls-server-cert", &server_cert_pem);
+    let server_key_file = write_pem("mtls-server-key", &server_key_pem);
+
+    let (ca_pem, client_cert_pem, client_key_pem) = ca_and_signed_client_pem();
+    let ca_file = write_pem("mtls-ca", &ca_pem);
+
+    let port = free_port();
+    let cfg = Arc::new(RwLock::new(config(
+        port,
+        tcp::ModbusTlsConfig {
+            cert_file: Some(server_cert_file.clone()),
+            key_file: Some(server_key_file),
+            require_client_cert: true,
+            client_ca_file: Some(ca_file),
+            ..Default::default()
+        },
+    )));
+    let server = tcp::ServerBuilder::new(cfg, memory())
+        .spawn(sink())
+        .await
+        .expect("mTLS server should start");
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    // No client certificate presented at all: rejected (see the TLS 1.3 client-side
+    // completion quirk note in `require_client_cert_enforced`).
+    let _ = raw_connect(addr, Some(&server_cert_pem), None).await;
+
+    // The accept loop survived the rejection: a subsequent well-behaved client
+    // still connects.
     let client_cert_chain = rust_modbus::load_pem_cert_chain(client_cert_pem.as_bytes()).unwrap();
     let client_key = rust_modbus::load_pem_private_key(client_key_pem.as_bytes()).unwrap();
     raw_connect(
@@ -370,7 +406,7 @@ async fn require_client_cert_enforced() {
         }),
     )
     .await
-    .expect("accept loop should still serve a well-behaved client after prior rejections");
+    .expect("accept loop should still serve a well-behaved client after a prior rejection");
 
     server.abort();
 }
