@@ -71,6 +71,9 @@ impl SetupView for ModbusSetupView {
             device.reconnect = Some(reconnect);
         }
         device.read_ranges = values.read_ranges.clone();
+        if let Some(tls) = values.tls.clone() {
+            device.tls = tls;
+        }
 
         let spec = ModuleSpec {
             name: values.name,

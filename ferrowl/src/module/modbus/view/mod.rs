@@ -654,6 +654,7 @@ impl ModuleView for ModbusModuleView {
                     &self.spec.endpoint,
                     timing,
                     &self.device.read_ranges,
+                    self.device.tls.as_ref(),
                 );
                 self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
@@ -1618,6 +1619,7 @@ mod tests {
             interval_ms: None,
             reconnect: None,
             read_ranges: Default::default(),
+            tls: None,
         };
         view.apply_setup(values).await;
         assert_eq!(view.device.reconnect, Some(false));

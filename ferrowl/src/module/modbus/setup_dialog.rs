@@ -32,11 +32,14 @@ use crate::config::{DeviceConfig, Endpoint, Role};
 use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
+use ferrowl_modbus::tcp::ModbusTlsConfig;
 
 use super::build::Timing;
 
 mod choices;
 use choices::{DialogMode, Parity, ReconnectChoice, Transport, U8Choice};
+mod tls;
+use tls::{SelfSignedChoice, SkipVerifyChoice, TlsInputs, TlsLevel, validate_tls};
 
 /// The validated per-instance settings.
 pub struct SetupValues {
@@ -52,6 +55,12 @@ pub struct SetupValues {
     pub reconnect: Option<bool>,
     /// Explicit per-function-code read ranges (client only), applied to the device config.
     pub read_ranges: ReadRanges,
+    /// The device config's `tls` setting (MB-R-104). `None` when the TLS section is hidden
+    /// (RTU transport, MB-R-112) — a hidden section must never clobber a device config's
+    /// existing setting. `Some(None)` means shown-and-explicitly-off; `Some(Some(cfg))` means
+    /// shown at a level above Off. Mirrors `reconnect`'s hidden-vs-explicit shape one level
+    /// deeper (the value itself, not just whether to touch it, is optional).
+    pub tls: Option<Option<ModbusTlsConfig>>,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
@@ -112,6 +121,37 @@ pub struct SetupDialog {
     pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
+    /// TLS level, offered only for TCP (MB-R-112: RTU carries no `tls` field at all).
+    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
+    /// Server-only "generate an ephemeral self-signed certificate" toggle.
+    #[focus(when = {self.show_self_signed()})]
+    pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
+    /// Client-only "accept any server certificate" toggle.
+    #[focus(when = {self.show_skip_verify()})]
+    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
+    /// Client-only extra trust anchor for a self-signed server certificate.
+    #[focus(when = {self.show_ca_file()})]
+    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Server-only certificate chain presented to connecting clients.
+    #[focus(when = {self.show_server_cert()})]
+    pub cert_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Server-only private key matching `cert_file`.
+    #[focus(when = {self.show_server_cert()})]
+    pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Client-only client certificate presented for mutual TLS.
+    #[focus(when = {self.show_client_cert()})]
+    pub client_cert_file:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Client-only private key matching `client_cert_file`.
+    #[focus(when = {self.show_client_cert()})]
+    pub client_key_file:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Server-only CA used to verify client certificates (selecting mTLS as server implies
+    /// `require_client_cert = true` in the resolved config).
+    #[focus(when = {self.show_client_ca()})]
+    pub client_ca_file:
+        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     #[focus]
     pub timeout: Widget<InputFieldState, InputField<String>>,
     #[focus]
@@ -150,6 +190,7 @@ impl SetupDialog {
         endpoint: &Endpoint,
         timing: Timing,
         ranges: &ReadRanges,
+        tls: Option<&ModbusTlsConfig>,
     ) -> Self {
         let mut dialog = Self::build(name, config_path, DialogMode::Edit, timing, ranges);
         dialog
@@ -179,6 +220,36 @@ impl SetupDialog {
                 select_u8(&mut dialog.data_bits.state, *data_bits);
                 select_u8(&mut dialog.stop_bits.state, *stop_bits);
             }
+        }
+        if let Some(tls) = tls {
+            let level = TlsLevel::from_config(tls, role);
+            dialog.tls_level.state.set_selection(level.index());
+            dialog
+                .self_signed
+                .state
+                .set_selection(if tls.self_signed { 1 } else { 0 });
+            dialog
+                .skip_verify
+                .state
+                .set_selection(if tls.insecure_skip_verify { 1 } else { 0 });
+            set_suggest_input(&mut dialog.ca_file, tls.ca_file.as_deref().unwrap_or(""));
+            set_suggest_input(
+                &mut dialog.cert_file,
+                tls.cert_file.as_deref().unwrap_or(""),
+            );
+            set_suggest_input(&mut dialog.key_file, tls.key_file.as_deref().unwrap_or(""));
+            set_suggest_input(
+                &mut dialog.client_cert_file,
+                tls.client_cert_file.as_deref().unwrap_or(""),
+            );
+            set_suggest_input(
+                &mut dialog.client_key_file,
+                tls.client_key_file.as_deref().unwrap_or(""),
+            );
+            set_suggest_input(
+                &mut dialog.client_ca_file,
+                tls.client_ca_file.as_deref().unwrap_or(""),
+            );
         }
         dialog
     }
@@ -272,6 +343,72 @@ impl SetupDialog {
                 vec![U8Choice(1), U8Choice(2)],
                 &selection_style,
             ))
+            .tls_level(selection(
+                "TLS",
+                None,
+                vec![TlsLevel::Off, TlsLevel::Tls, TlsLevel::MutualTls],
+                &selection_style,
+            ))
+            .self_signed(selection(
+                "Self-Signed",
+                None,
+                vec![SelfSignedChoice::Off, SelfSignedChoice::On],
+                &selection_style,
+            ))
+            .skip_verify(selection(
+                "Skip Verify",
+                None,
+                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
+                &selection_style,
+            ))
+            .ca_file(suggest_input(
+                "CA File",
+                None,
+                "ca.pem",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
+            .cert_file(suggest_input(
+                "Cert File",
+                None,
+                "server.crt",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
+            .key_file(suggest_input(
+                "Key File",
+                None,
+                "server.key",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
+            .client_cert_file(suggest_input(
+                "Client Cert",
+                None,
+                "client.crt",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
+            .client_key_file(suggest_input(
+                "Client Key",
+                None,
+                "client.key",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
+            .client_ca_file(suggest_input(
+                "Client CA",
+                None,
+                "client_ca.pem",
+                &input_style,
+                false,
+                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            ))
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
             .interval(input("Interval ms", None, "", &input_style, false))
@@ -343,6 +480,73 @@ impl SetupDialog {
             }
         }
         dialog
+    }
+
+    // --- TLS-field visibility ------------------------------------------------------------------
+    // Single source of truth consumed by the `#[focus(when)]` gates, the render branches and the
+    // dialog-height computation, so keyboard focus, painting and layout can never disagree about
+    // which fields exist. Mirrors `ferrowl::module::ocpp::setup_dialog`'s own `show_*` methods.
+
+    /// The TLS level selection row (any TCP endpoint; never RTU, MB-R-112).
+    fn tls_shown(&self) -> bool {
+        self.transport.get_value() == Transport::Tcp
+    }
+
+    /// The currently selected TLS level.
+    fn tls_level(&self) -> TlsLevel {
+        self.tls_level.get_value()
+    }
+
+    /// Server-only self-signed toggle (TCP server at TLS level or above).
+    fn show_self_signed(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Server
+            && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Client-only skip-verify toggle (TCP client at TLS level or above).
+    fn show_skip_verify(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Client
+            && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Client trust-anchor input (TCP client at TLS level or above).
+    fn show_ca_file(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Client
+            && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Server certificate/key inputs (TCP server at TLS level or above).
+    fn show_server_cert(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Server
+            && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Client mTLS certificate/key inputs.
+    fn show_client_cert(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Client
+            && self.tls_level() == TlsLevel::MutualTls
+    }
+
+    /// Server mTLS client-CA input.
+    fn show_client_ca(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Server
+            && self.tls_level() == TlsLevel::MutualTls
+    }
+
+    /// First certificate row: server cert/key, or the client trust anchor.
+    fn show_cert_row_a(&self) -> bool {
+        self.show_ca_file() || self.show_server_cert()
+    }
+
+    /// Second certificate row: client mTLS cert/key, or the server client-CA.
+    fn show_cert_row_b(&self) -> bool {
+        self.show_client_cert() || self.show_client_ca()
     }
 
     /// Route a key: the close-confirm popup captures all keys while open; Esc opens it;
@@ -469,6 +673,38 @@ impl SetupDialog {
             discrete: opt(self.discrete_ranges.state.input()),
         };
 
+        // TLS is hidden entirely for RTU (MB-R-112): report no value at all, so a save on an
+        // RTU instance never clobbers a device config's existing `tls` setting.
+        let tls = if matches!(endpoint, Endpoint::Tcp { .. }) {
+            let level = self.tls_level.state.get_value();
+            if level == TlsLevel::Off {
+                Some(None)
+            } else {
+                let mut cfg = level.build_config(
+                    role,
+                    TlsInputs {
+                        ca_file: self.ca_file.state.input(),
+                        cert_file: self.cert_file.state.input(),
+                        key_file: self.key_file.state.input(),
+                        client_cert_file: self.client_cert_file.state.input(),
+                        client_key_file: self.client_key_file.state.input(),
+                        client_ca_file: self.client_ca_file.state.input(),
+                    },
+                );
+                if role == Role::Server {
+                    cfg.self_signed = self.self_signed.state.get_value() == SelfSignedChoice::On;
+                }
+                if role == Role::Client {
+                    cfg.insecure_skip_verify =
+                        self.skip_verify.state.get_value() == SkipVerifyChoice::On;
+                }
+                validate_tls(&cfg, role, level, &|p| std::path::Path::new(p).exists())?;
+                Some(Some(cfg))
+            }
+        } else {
+            None
+        };
+
         Ok(SetupValues {
             name,
             config_path,
@@ -479,6 +715,7 @@ impl SetupDialog {
             interval_ms,
             reconnect,
             read_ranges,
+            tls,
         })
     }
 
@@ -493,9 +730,13 @@ impl SetupDialog {
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
         // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 3 } else { 1 };
+        let show_tls = self.tls_shown();
+        let show_cert_row_a = self.show_cert_row_a();
+        let show_cert_row_b = self.show_cert_row_b();
+        let tls_rows: u16 = show_tls as u16 + show_cert_row_a as u16 + show_cert_row_b as u16;
         // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
-        // + error(4) + keybinds(1) + optional config-path row (New mode).
-        let box_height = 27 + endpoint_rows * 3;
+        // + error(4) + keybinds(1) + optional config-path row (New mode) + optional TLS rows.
+        let box_height = 27 + endpoint_rows * 3 + tls_rows * 3;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -525,7 +766,7 @@ impl SetupDialog {
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, vcenter, buf);
         block.render(vcenter, buf);
 
-        let constraints = vec![
+        let mut constraints = vec![
             Constraint::Length(3),                 // name
             Constraint::Length(3),                 // config path
             Constraint::Length(3),                 // transport + role
@@ -533,9 +774,18 @@ impl SetupDialog {
             Constraint::Length(3),                 // timeout + delay + interval
             Constraint::Length(3),                 // holding + input ranges
             Constraint::Length(3),                 // coil + discrete ranges
-            Constraint::Length(4),                 // error
-            Constraint::Length(1),                 // keybinds
         ];
+        if show_tls {
+            constraints.push(Constraint::Length(3)); // TLS level (+ self-signed/skip-verify)
+        }
+        if show_cert_row_a {
+            constraints.push(Constraint::Length(3)); // ca_file, or cert_file + key_file
+        }
+        if show_cert_row_b {
+            constraints.push(Constraint::Length(3)); // client_cert_file + client_key_file, or client_ca_file
+        }
+        constraints.push(Constraint::Length(4)); // error
+        constraints.push(Constraint::Length(1)); // keybinds
         let rows = Layout::vertical(constraints).split(inner);
 
         let mut idx = 0;
@@ -660,6 +910,82 @@ impl SetupDialog {
             idx += 1;
         }
 
+        if show_tls {
+            let is_server = self.role.state.get_value() == Role::Server;
+            let show_side = if is_server {
+                self.show_self_signed()
+            } else {
+                self.show_skip_verify()
+            };
+            if show_side {
+                let [level_area, side_area] =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .areas(rows[idx]);
+                StatefulWidget::render(
+                    &self.tls_level.widget,
+                    level_area,
+                    buf,
+                    &mut self.tls_level.state,
+                );
+                if is_server {
+                    StatefulWidget::render(
+                        &self.self_signed.widget,
+                        side_area,
+                        buf,
+                        &mut self.self_signed.state,
+                    );
+                } else {
+                    StatefulWidget::render(
+                        &self.skip_verify.widget,
+                        side_area,
+                        buf,
+                        &mut self.skip_verify.state,
+                    );
+                }
+            } else {
+                StatefulWidget::render(
+                    &self.tls_level.widget,
+                    rows[idx],
+                    buf,
+                    &mut self.tls_level.state,
+                );
+            }
+            idx += 1;
+        }
+
+        if show_cert_row_a {
+            if self.show_ca_file() {
+                StatefulWidget::render(
+                    &self.ca_file.widget,
+                    rows[idx],
+                    buf,
+                    &mut self.ca_file.state,
+                );
+            } else {
+                render_suggest_pair(&mut self.cert_file, &mut self.key_file, rows[idx], buf);
+            }
+            idx += 1;
+        }
+
+        if show_cert_row_b {
+            if self.show_client_cert() {
+                render_suggest_pair(
+                    &mut self.client_cert_file,
+                    &mut self.client_key_file,
+                    rows[idx],
+                    buf,
+                );
+            } else {
+                StatefulWidget::render(
+                    &self.client_ca_file.widget,
+                    rows[idx],
+                    buf,
+                    &mut self.client_ca_file.state,
+                );
+            }
+            idx += 1;
+        }
+
         let error_area = rows[idx];
         idx += 1;
         if !self.error.state.is_empty() {
@@ -681,6 +1007,24 @@ impl SetupDialog {
         self.path
             .widget
             .render_overlay(area, buf, &mut self.path.state);
+        self.ca_file
+            .widget
+            .render_overlay(area, buf, &mut self.ca_file.state);
+        self.cert_file
+            .widget
+            .render_overlay(area, buf, &mut self.cert_file.state);
+        self.key_file
+            .widget
+            .render_overlay(area, buf, &mut self.key_file.state);
+        self.client_cert_file
+            .widget
+            .render_overlay(area, buf, &mut self.client_cert_file.state);
+        self.client_key_file
+            .widget
+            .render_overlay(area, buf, &mut self.client_key_file.state);
+        self.client_ca_file
+            .widget
+            .render_overlay(area, buf, &mut self.client_ca_file.state);
 
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
@@ -692,6 +1036,19 @@ impl SetupDialog {
 fn render_pair(
     left: &mut Widget<InputFieldState, InputField<String>>,
     right: &mut Widget<InputFieldState, InputField<String>>,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let [left_area, right_area] =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
+    StatefulWidget::render(&left.widget, left_area, buf, &mut left.state);
+    StatefulWidget::render(&right.widget, right_area, buf, &mut right.state);
+}
+
+/// Render two path-suggesting input fields side by side in `area`.
+fn render_suggest_pair(
+    left: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    right: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -922,10 +1279,90 @@ mod tests {
             &endpoint,
             timing,
             &ReadRanges::default(),
+            None,
         );
         assert_eq!(dialog.reconnect.state.get_value(), ReconnectChoice::Off);
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.reconnect, Some(false));
+    }
+
+    #[test]
+    /// UI-R-024 — a TCP setup dialog exposes the TLS section.
+    fn ut_tcp_dialog_shows_tls_section() {
+        let dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        assert_eq!(dialog.transport.state.get_value(), Transport::Tcp);
+        assert!(dialog.tls_shown());
+    }
+
+    #[test]
+    /// UI-R-024 — an RTU setup dialog never shows the TLS section (MB-R-112).
+    fn ut_rtu_dialog_hides_tls_section() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        dialog.transport.state.set_selection(1); // Rtu
+        assert_eq!(dialog.transport.state.get_value(), Transport::Rtu);
+        assert!(!dialog.tls_shown());
+    }
+
+    #[test]
+    /// UI-R-024 — resolving an RTU dialog reports no TLS value at all, so applying it can never
+    /// clobber a device config's existing `tls` setting (MB-R-112).
+    fn ut_resolve_rtu_reports_no_tls() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.transport.state.set_selection(1); // Rtu
+        set_suggest_input(&mut dialog.path, "/dev/ttyUSB0");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.tls, None);
+    }
+
+    #[test]
+    /// UI-R-024 — resolving a TCP dialog at TLS level Off reports an explicit no-TLS setting.
+    fn ut_resolve_tcp_tls_off_reports_some_none() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.tls, Some(None));
+    }
+
+    #[test]
+    /// UI-R-024 — resolving a TCP dialog at TLS level Tls (server, self-signed) builds a config
+    /// with `self_signed` set and drops the mTLS-only client-CA field.
+    fn ut_resolve_tcp_tls_server_self_signed_builds_config() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        dialog.self_signed.state.set_selection(1); // On
+        set_suggest_input(&mut dialog.client_ca_file, "client_ca.pem");
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap().unwrap();
+        assert!(cfg.self_signed);
+        assert_eq!(cfg.client_ca_file, None);
+        assert!(!cfg.require_client_cert);
     }
 
     #[test]
