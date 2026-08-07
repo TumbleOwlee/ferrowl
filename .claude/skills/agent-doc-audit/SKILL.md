@@ -32,6 +32,7 @@ Before proposing a split, the section earning it has to justify the extra file. 
 - Hedging / filler words (basically, essentially, in order to, it's worth noting).
 - Any explanation of *what* code does where a reader could get that from names alone — only *why* (non-obvious constraint, workaround, invariant) earns a sentence.
 - Repeated instructions across two files where one could `@`-include or cross-reference the other instead of restating.
+- Every trim: check zero information loss. Fewer words for the same fact — never a dropped constraint, edge case, or rule. A trim that loses a fact is a bug, not a fix.
 
 `.claude/scripts/token-rank.sh <file>...` (if the project has it) gives rough per-file cost to prioritize which candidates matter most. Trim-first, split-second: a bloated section split in two is two bloated files — flag the trim regardless of whether the split also happens.
 
@@ -44,5 +45,7 @@ Two tables, most-costly first (`token-rank.sh` order where available):
 **Prose flags** — file, heading, one-line problem (restatement / hedge / filler / duplicate-of-<file>), no fix text needed — the problem statement is the fix.
 
 One line each, no praise, no summary paragraph. If a proposed split's new file would end up under ~10 lines, say so and recommend a heading instead of a file — splitting past that point adds cross-reference upkeep for a slice `extract-section.sh` could already pull cheaply from the shared file.
+
+Report only improvements found. A table with nothing to put in it collapses to "none" — never a reason why, never "already good," never a paragraph explaining the scan came up empty.
 
 Do not create or edit anything here. If the user approves a specific split, make the new file's headings match exactly what the citing agent instructions already name (or update those instructions in the same change, never leave them pointing at a heading that moved).
