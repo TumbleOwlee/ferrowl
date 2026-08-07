@@ -29,20 +29,12 @@ pub struct ModbusTlsConfig {
 
 /// Read a PEM file's raw bytes, mapping a missing/unreadable file to the TLS
 /// configuration-error tier (MB-R-107/108, edge-cases.md "malformed PEM").
-///
-/// Unused until s2 (client.rs) and s3 (server.rs) wire it into their connect/serve
-/// paths; allowed dead here rather than deferred, since both consume it without
-/// otherwise touching this file.
-#[allow(dead_code)]
 pub(crate) fn read_pem(path: &str) -> Result<Vec<u8>, TcpError> {
     std::fs::read(path).map_err(|e| TcpError::Configuration(format!("failed to read {path}: {e}")))
 }
 
 /// Map any `rust_modbus` failure encountered while assembling TLS material (a bad
 /// PEM, an untrusted root, ...) onto the same configuration-error tier.
-///
-/// Unused until s2/s3 wire it in — see `read_pem` above.
-#[allow(dead_code)]
 pub(crate) fn map_tls_err(e: rust_modbus::Error) -> TcpError {
     TcpError::Configuration(e.to_string())
 }
