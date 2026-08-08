@@ -2,7 +2,7 @@
 
 mod client;
 mod server;
-mod tls;
+pub(crate) mod tls;
 
 use clap::Args;
 use serde::{Deserialize, Serialize};

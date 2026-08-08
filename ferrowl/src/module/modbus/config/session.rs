@@ -89,6 +89,13 @@ pub enum Endpoint {
         ip: String,
         port: u16,
     },
+    /// RTU framing carried over a TCP socket (MB-R-113); `rename_all = "lowercase"` alone
+    /// would tag this `"rtuovertcp"`, not the required `"rtu_over_tcp"`.
+    #[serde(rename = "rtu_over_tcp")]
+    RtuOverTcp {
+        ip: String,
+        port: u16,
+    },
     Rtu {
         path: String,
         #[serde(default = "default_baud")]
@@ -107,6 +114,9 @@ impl std::fmt::Display for Endpoint {
         match self {
             Endpoint::Tcp { ip, port } => {
                 write!(fmt, "{}:{}", ip, port)
+            }
+            Endpoint::RtuOverTcp { ip, port } => {
+                write!(fmt, "{}:{} (rtu/tcp)", ip, port)
             }
             Endpoint::Rtu {
                 path,
@@ -261,6 +271,14 @@ mod tests {
             .to_string(),
             "127.0.0.1:502"
         );
+        assert_eq!(
+            Endpoint::RtuOverTcp {
+                ip: "127.0.0.1".into(),
+                port: 502
+            }
+            .to_string(),
+            "127.0.0.1:502 (rtu/tcp)"
+        );
         // RTU with all optional fields present.
         assert_eq!(
             Endpoint::Rtu {
@@ -290,5 +308,22 @@ mod tests {
     #[test]
     fn ut_default_baud() {
         assert_eq!(default_baud(), 19200);
+    }
+
+    #[test]
+    /// MB-R-113 — the `RtuOverTcp` endpoint variant tags as `rtu_over_tcp` on the
+    /// wire (not `rtuovertcp`, which `rename_all = "lowercase"` alone would produce),
+    /// and carries exactly `ip`/`port`, the same fields as `Tcp`.
+    fn ut_endpoint_rtu_over_tcp_serde_tag() {
+        let ep = Endpoint::RtuOverTcp {
+            ip: "10.0.0.1".into(),
+            port: 502,
+        };
+        let v = serde_json::to_value(&ep).unwrap();
+        assert_eq!(v["transport"], "rtu_over_tcp");
+        assert_eq!(v["ip"], "10.0.0.1");
+        assert_eq!(v["port"], 502);
+        let back: Endpoint = serde_json::from_value(v).unwrap();
+        assert_eq!(back, ep);
     }
 }

@@ -5,7 +5,9 @@ use crate::{Command, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
-use rust_modbus::{Client as ModbusClient, FrameTransport, TcpConfig, connect_tcp, connect_tls};
+use rust_modbus::{
+    Client as ModbusClient, FrameTransport, TcpConfig, connect_tcp_framed, connect_tls_framed,
+};
 use tokio::task::JoinHandle;
 
 use std::net::SocketAddr;
@@ -13,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
-/// Builds and spawns a Modbus TCP client task that polls `operations` into
+/// Builds and spawns a Modbus RTU-over-TCP client task that polls `operations` into
 /// the shared `memory` and executes incoming [`Command`]s.
 pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
@@ -77,15 +79,15 @@ impl<T: KeyParams> ClientBuilder<T> {
     }
 }
 
-/// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
-/// shared via the internal `ClientCore`, over a socket carrying Modbus TCP framing.
+/// A connected Modbus RTU-over-TCP client. Connection setup mirrors plain TCP (MB-R-113); the
+/// read/command loop is shared via the internal `ClientCore`, over a socket carrying RTU framing.
 pub struct Client {
-    pub(crate) core: ClientCore<ClientStream, rust_modbus::Tcp>,
+    pub(crate) core: ClientCore<ClientStream, rust_modbus::RtuOverTcp>,
 }
 
 impl Client {
     /// Opens a TCP connection to `config.ip:config.port`, bounded by the
-    /// configured timeout. Plain TCP unless `config.tls` is set (MB-R-104), in which
+    /// configured timeout. Plain TCP unless `config.tls` is set (MB-R-115), in which
     /// case the same timeout bounds the TCP connect and the TLS handshake together.
     pub async fn connect(config: &Config) -> Result<Self, Error> {
         let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
@@ -98,12 +100,14 @@ impl Client {
             .transpose()?;
         let attempt = async {
             match tls_config {
-                None => connect_tcp(addr, TcpConfig::default())
+                None => connect_tcp_framed::<rust_modbus::RtuOverTcp>(addr, TcpConfig::default())
                     .await
                     .map(|t| ClientStream::Plain(t.into_inner())),
-                Some(tls) => connect_tls(addr, TcpConfig::default(), tls)
-                    .await
-                    .map(|t| ClientStream::Tls(Box::new(t.into_inner()))),
+                Some(tls) => {
+                    connect_tls_framed::<rust_modbus::RtuOverTcp>(addr, TcpConfig::default(), tls)
+                        .await
+                        .map(|t| ClientStream::Tls(Box::new(t.into_inner())))
+                }
             }
         };
         match tokio::time::timeout(
