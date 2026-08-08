@@ -135,9 +135,9 @@ behavior, stated limitations).
 
 **MB-R-049** — Receiving the terminate command, or the command channel closing, shall disconnect the client, end its task with success, and emit a client- disconnected status.
 
-**MB-R-101** — On the RTU or RtuOverTcp transport, a poll operation addressed to slave id 0 (the broadcast address) shall fail locally without reaching the wire. The client shall treat that failure as a Modbus exception per MB-R-043 — retried, then skipped after 3 consecutive occurrences — and shall not disconnect.
+**MB-R-101** — On the RTU, RtuOverTcp, Ascii, or AsciiOverTcp transport, a poll operation addressed to slave id 0 (the broadcast address) shall fail locally without reaching the wire. The client shall treat that failure as a Modbus exception per MB-R-043 — retried, then skipped after 3 consecutive occurrences — and shall not disconnect.
 
-**MB-R-102** — On the RTU or RtuOverTcp transport, a write command addressed to slave id 0 shall be transmitted without awaiting a response, logged as executed, and shall not disconnect the client.
+**MB-R-102** — On the RTU, RtuOverTcp, Ascii, or AsciiOverTcp transport, a write command addressed to slave id 0 shall be transmitted without awaiting a response, logged as executed, and shall not disconnect the client.
 
 ---
 
@@ -179,11 +179,11 @@ behavior, stated limitations).
 
 **MB-R-065** — A server shall serve any slave id for which memory regions are declared; it shall not filter requests by a configured slave id.
 
-**MB-R-103** — An RTU or RtuOverTcp server shall apply an inbound request addressed to slave id 0 (the broadcast address) to the store exactly as it would any other request, but shall emit no response frame for it — including no exception response.
+**MB-R-103** — An RTU, RtuOverTcp, Ascii, or AsciiOverTcp server shall apply an inbound request addressed to slave id 0 (the broadcast address) to the store exactly as it would any other request, but shall emit no response frame for it — including no exception response.
 
 **MB-R-066** — A server shall log a "request received" line for every inbound request, including for rejected function codes.
 
-**MB-R-067** — A server shall additionally log the per-request outcome (success or failure), for TCP, RTU, and RtuOverTcp alike.
+**MB-R-067** — A server shall additionally log the per-request outcome (success or failure), for TCP, RTU, RtuOverTcp, Udp, Ascii, and AsciiOverTcp alike.
 
 ---
 
@@ -235,9 +235,31 @@ behavior, stated limitations).
 
 ---
 
+## Transport — Ascii
+
+**MB-R-121** — The Modbus transport config shall offer a fifth option, `Ascii` (config/CLI tag value `ascii`), carrying exactly the same connection parameters as the RTU option (`path`, `baud_rate`, `parity`, `data_bits`, `stop_bits`) — reusing `rtu::Config` verbatim, no separate struct.
+
+**MB-R-122** — An `Ascii` client shall open the serial port exactly as an RTU client (MB-R-072–MB-R-073 apply verbatim: `baud_rate`/`parity`/`data_bits`/`stop_bits` handling and defaults, validation of `data_bits`/`stop_bits`/`parity`), but requests and responses on it shall use Modbus ASCII framing — `:` start character, hexadecimal-encoded PDU bytes, LRC checksum, CR LF terminator — instead of RTU binary framing.
+
+**MB-R-123** — An `Ascii` server shall open the serial port once and serve it as a single persistent point-to-point connection, with no accept loop (as MB-R-074), using ASCII framing for its requests and responses.
+
+**MB-R-124** — Failure to open the serial port for `Ascii` shall be handled exactly as MB-R-075: it shall fail the server's start with a serial error, and for a client it shall be treated as a failed connection attempt, subject to the reconnect rules (MB-R-050–MB-R-055).
+
+---
+
+## Transport — AsciiOverTcp
+
+**MB-R-125** — The Modbus transport config shall offer a sixth option, `AsciiOverTcp` (config/CLI tag value `ascii_over_tcp`), carrying exactly the same connection parameters as the TCP option (`ip`, `port`, `timeout_ms`, `delay_ms`, `interval_ms`, `reconnect`, `tls`) and no RTU/ASCII serial parameters (`baud_rate`, `parity`, `data_bits`, `stop_bits`).
+
+**MB-R-126** — An `AsciiOverTcp` connection shall be established exactly as a TCP connection (MB-R-068–MB-R-071 apply verbatim: `ip:port` connect/bind bounded by `timeout_ms`, address-parse failure, accept loop, bind failure), but requests and responses on it shall use Modbus ASCII framing (`:` start, hex-encoded PDU, LRC checksum, CR LF terminator) instead of Modbus TCP or RTU framing.
+
+**MB-R-127** — TLS (MB-R-104–MB-R-111) shall apply to an `AsciiOverTcp` connection exactly as it does to a Modbus-TCP-framed or `RtuOverTcp` one: the same `tls` field, certificate resolution, self-signed fallback, mTLS rules, and handshake-failure logging, with only the post-handshake framing differing.
+
+---
+
 ## Module lifecycle and device configuration
 
-**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, RtuOverTcp, or Udp, and shall own one shared register store, one register set, and one log.
+**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, RtuOverTcp, Udp, Ascii, or AsciiOverTcp, and shall own one shared register store, one register set, and one log.
 
 **MB-R-077** — A module's register store shall be built from its device config's register definitions: each fixed-address register shall declare the range `[address, address + format width)` under the key (slave id, kind).
 
