@@ -429,3 +429,68 @@ async fn rtu_over_tcp_client_fire_and_forget_broadcast_write() {
     assert!(joined.is_ok());
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-103 — a server never sends a response frame for a request addressed to slave id 0
+/// (broadcast), over RtuOverTcp. Client-independent: uses a raw `rust_modbus::Client` directly
+/// against the real socket (bypassing ferrowl's own fire-and-forget client, which never even
+/// tries to read a response and so could not catch a server that wrongly sent one), then reads
+/// the raw bytes off the wire with a timeout and asserts nothing arrived.
+async fn rtu_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
+    use rust_modbus::{
+        Address as RmAddress, Client as RmClient, RegisterValue, RtuOverTcp, TcpConfig,
+        connect_tcp_framed,
+    };
+    use tokio::io::AsyncReadExt;
+
+    let port = free_port();
+    let mut srv_mem_raw = Memory::<Key<SlaveKey>>::default();
+    let broadcast_key = Key::new(SlaveKey {
+        slave_id: UnitId(0),
+        kind: RegKind::HoldingRegister,
+    });
+    srv_mem_raw.add_ranges(
+        broadcast_key,
+        &MemKind::ReadWrite(CellType::Register),
+        &[Range::new(0, 4)],
+    );
+    let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
+
+    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+    )
+    .spawn(sink())
+    .await
+    .expect("server failed to start");
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let transport = connect_tcp_framed::<RtuOverTcp>(addr, TcpConfig::default())
+        .await
+        .expect("raw client failed to connect");
+    let mut client: RmClient<_, RtuOverTcp> = RmClient::new(transport);
+
+    // Broadcast write: rust_modbus's own Client already knows (via `ClientFraming::is_broadcast`)
+    // not to wait for a response here, so this returns as soon as the frame is written.
+    client
+        .write_single_register(UnitId(0), RmAddress(1), RegisterValue(0x1234))
+        .await
+        .expect("broadcast write send failed");
+
+    // Reclaim the raw stream and read directly off the wire: if the server incorrectly sent a
+    // response frame anyway, it would be sitting here.
+    let mut stream = client.into_inner().into_inner();
+    let mut buf = [0u8; 64];
+    let read = tokio::time::timeout(Duration::from_millis(300), stream.read(&mut buf)).await;
+    match read {
+        Err(_) => {}    // Timed out waiting for bytes: no response frame arrived. Correct.
+        Ok(Ok(0)) => {} // Connection closed with no bytes sent: also no response frame. Correct.
+        Ok(Ok(n)) => panic!(
+            "server sent {n} unexpected byte(s) after a broadcast write: {:?}",
+            &buf[..n]
+        ),
+        Ok(Err(e)) => panic!("unexpected read error: {e}"),
+    }
+
+    server.abort();
+}
