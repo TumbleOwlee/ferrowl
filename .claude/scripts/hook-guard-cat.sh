@@ -1,10 +1,11 @@
 #!/bin/sh
-# PreToolUse guard on the Bash tool: blocks an unpiped `cat` of a markdown
-# file, or of any file over LARGE_LINES lines, and redirects to the
-# extract-section.sh convention (markdown) or the Read tool / sed -n range
-# (anything else) — AGENTS.md's Conventions section already says this;
-# this hook makes the bypass fail instead of silently dumping a whole file
-# into context.
+# PreToolUse guard on the Bash tool: catches shell-output bypasses of
+# AGENTS.md's Conventions ("never read a whole file when only part is
+# needed" / "filter shell output before it lands in context") and denies
+# them instead of letting the dump land silently. Three shapes:
+#   - unpiped `cat` of a markdown file, or of any file over LARGE_LINES lines
+#   - unpiped `git show`/`git diff` with no --stat and no pathspec
+#   - unpiped `find` with -type f/d and no -name/-path/-iname/-regex
 #
 # Reads a PreToolUse hook payload on stdin, writes a deny-decision JSON
 # object on stdout when it blocks, nothing when it doesn't.
@@ -59,6 +60,34 @@ for seg in $segments; do
       done
       ;;
   esac
+
+  case "$seg" in
+    *git\ show\ *|*git\ diff\ *)
+      case "$seg" in
+        *--stat*) ;;   # already narrowed to a summary
+        *' -- '*) ;;   # already scoped to a pathspec
+        *:*) ;;        # git show <ref>:<path> blob form
+        *)
+          offender="$seg"
+          reason="Unfiltered 'git show'/'git diff' bypasses this repo's Conventions (AGENTS.md: filter shell output before it lands in context). Add --stat first, or scope with a pathspec ('-- <path>'), or pipe through head/grep — rather than dumping the full diff/show."
+          ;;
+      esac
+      ;;
+  esac
+  [ -z "$offender" ] || break
+
+  case "$seg" in
+    *find\ *-type\ [fd]*)
+      case "$seg" in
+        *-name*|*-path*|*-iname*|*-regex*) ;;  # already narrowed
+        *)
+          offender="$seg"
+          reason="Unfiltered 'find -type f/d' bypasses this repo's Conventions (AGENTS.md: filter shell output before it lands in context). Narrow with -name/-path/-iname/-regex, or pipe through head/grep — rather than listing every match."
+          ;;
+      esac
+      ;;
+  esac
+  [ -z "$offender" ] || break
 done
 IFS=$old_ifs
 
