@@ -7,7 +7,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME, EventResult,
+    Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
         SuggestInputState, SuggestInputStateBuilder,
@@ -24,7 +24,7 @@ use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
-    widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
+    widgets::{Block, Clear, Widget as UiWidget},
 };
 
 use crate::config::device::ReadRanges;
@@ -730,7 +730,7 @@ impl SetupDialog {
 
         let is_new = self.mode == DialogMode::New;
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
-        // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
+        // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
         let show_cert_row_a = self.show_cert_row_a();
@@ -791,15 +791,10 @@ impl SetupDialog {
         let rows = Layout::vertical(constraints).split(inner);
 
         let mut idx = 0;
-        StatefulWidget::render(&self.name.widget, rows[idx], buf, &mut self.name.state);
+        render_field!(self, name, rows[idx], buf);
         idx += 1;
 
-        StatefulWidget::render(
-            &self.config_path.widget,
-            rows[idx],
-            buf,
-            &mut self.config_path.state,
-        );
+        render_field!(self, config_path, rows[idx], buf);
         idx += 1;
 
         let [transport_area, tls_area, role_area] = Layout::horizontal([
@@ -809,21 +804,11 @@ impl SetupDialog {
         ])
         .areas(rows[idx]);
         idx += 1;
-        StatefulWidget::render(
-            &self.transport.widget,
-            transport_area,
-            buf,
-            &mut self.transport.state,
-        );
+        render_field!(self, transport, transport_area, buf);
         if !is_rtu {
-            StatefulWidget::render(
-                &self.tls_level.widget,
-                tls_area,
-                buf,
-                &mut self.tls_level.state,
-            );
+            render_field!(self, tls_level, tls_area, buf);
         }
-        StatefulWidget::render(&self.role.widget, role_area, buf, &mut self.role.state);
+        render_field!(self, role, role_area, buf);
 
         if show_tls {
             let is_server = self.role.state.get_value() == Role::Server;
@@ -832,55 +817,30 @@ impl SetupDialog {
             } else {
                 self.show_skip_verify()
             };
-            let [side_area] = Layout::horizontal([Constraint::Percentage(100)]).areas(rows[idx]);
+            let side_area = rows[idx];
             if show_side {
                 if is_server {
-                    StatefulWidget::render(
-                        &self.self_signed.widget,
-                        side_area,
-                        buf,
-                        &mut self.self_signed.state,
-                    );
+                    render_field!(self, self_signed, side_area, buf);
                 } else {
-                    StatefulWidget::render(
-                        &self.skip_verify.widget,
-                        side_area,
-                        buf,
-                        &mut self.skip_verify.state,
-                    );
+                    render_field!(self, skip_verify, side_area, buf);
                 }
                 idx += 1;
             }
 
             if show_cert_row_a {
                 if self.show_ca_file() {
-                    StatefulWidget::render(
-                        &self.ca_file.widget,
-                        rows[idx],
-                        buf,
-                        &mut self.ca_file.state,
-                    );
+                    render_field!(self, ca_file, rows[idx], buf);
                 } else {
-                    render_suggest_pair(&mut self.cert_file, &mut self.key_file, rows[idx], buf);
+                    render_row!(self, rows[idx], buf; cert_file, key_file);
                 }
                 idx += 1;
             }
 
             if show_cert_row_b {
                 if self.show_client_cert() {
-                    render_suggest_pair(
-                        &mut self.client_cert_file,
-                        &mut self.client_key_file,
-                        rows[idx],
-                        buf,
-                    );
+                    render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
                 } else {
-                    StatefulWidget::render(
-                        &self.client_ca_file.widget,
-                        rows[idx],
-                        buf,
-                        &mut self.client_ca_file.state,
-                    );
+                    render_field!(self, client_ca_file, rows[idx], buf);
                 }
                 idx += 1;
             }
@@ -891,112 +851,37 @@ impl SetupDialog {
         if is_rtu {
             let [row0, row1] = Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
                 .areas(endpoint_area);
-            let [path_area, baud_area] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas(row0);
-            StatefulWidget::render(&self.path.widget, path_area, buf, &mut self.path.state);
-            StatefulWidget::render(&self.baud.widget, baud_area, buf, &mut self.baud.state);
-            let [parity_area, data_area, stop_area] = Layout::horizontal([
-                Constraint::Percentage(35),
-                Constraint::Percentage(30),
-                Constraint::Percentage(35),
-            ])
-            .areas(row1);
-            StatefulWidget::render(
-                &self.parity.widget,
-                parity_area,
-                buf,
-                &mut self.parity.state,
-            );
-            StatefulWidget::render(
-                &self.data_bits.widget,
-                data_area,
-                buf,
-                &mut self.data_bits.state,
-            );
-            StatefulWidget::render(
-                &self.stop_bits.widget,
-                stop_area,
-                buf,
-                &mut self.stop_bits.state,
+            render_row!(self, row0, buf; path, baud);
+            render_row!(self, row1, buf;
+                parity => Constraint::Percentage(35),
+                data_bits => Constraint::Percentage(30),
+                stop_bits => Constraint::Percentage(35)
             );
         } else {
-            render_pair(&mut self.ip, &mut self.port, endpoint_area, buf);
+            render_row!(self, endpoint_area, buf; ip, port);
         }
 
-        {
-            // Client: timeout | delay | interval | reconnect. Server hides reconnect, so the
-            // remaining three widen to thirds instead of leaving a blank quarter.
-            let is_client = self.role.state.get_value() == Role::Client;
-            let (timeout_area, delay_area, interval_area, reconnect_area) = if is_client {
-                let [t, d, i, r] = Layout::horizontal([
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                ])
-                .areas(rows[idx]);
-                (t, d, i, Some(r))
-            } else {
-                let [t, d, i] = Layout::horizontal([
-                    Constraint::Percentage(34),
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(33),
-                ])
-                .areas(rows[idx]);
-                (t, d, i, None)
-            };
-            idx += 1;
-            StatefulWidget::render(
-                &self.timeout.widget,
-                timeout_area,
-                buf,
-                &mut self.timeout.state,
-            );
-            StatefulWidget::render(&self.delay.widget, delay_area, buf, &mut self.delay.state);
-            StatefulWidget::render(
-                &self.interval.widget,
-                interval_area,
-                buf,
-                &mut self.interval.state,
-            );
-            if let Some(reconnect_area) = reconnect_area {
-                StatefulWidget::render(
-                    &self.reconnect.widget,
-                    reconnect_area,
-                    buf,
-                    &mut self.reconnect.state,
-                );
-            }
-
-            render_pair(
-                &mut self.holding_ranges,
-                &mut self.input_ranges,
-                rows[idx],
-                buf,
-            );
-            idx += 1;
-            render_pair(
-                &mut self.coil_ranges,
-                &mut self.discrete_ranges,
-                rows[idx],
-                buf,
-            );
-            idx += 1;
+        // Client: timeout | delay | interval | reconnect. Server hides reconnect, so the
+        // remaining three widen to thirds instead of leaving a blank quarter.
+        if self.role.state.get_value() == Role::Client {
+            render_row!(self, rows[idx], buf; timeout, delay, interval, reconnect);
+        } else {
+            render_row!(self, rows[idx], buf; timeout, delay, interval);
         }
+        idx += 1;
+
+        render_row!(self, rows[idx], buf; holding_ranges, input_ranges);
+        idx += 1;
+        render_row!(self, rows[idx], buf; coil_ranges, discrete_ranges);
+        idx += 1;
 
         let error_area = rows[idx];
         idx += 1;
         if !self.error.state.is_empty() {
-            StatefulWidget::render(&self.error.widget, error_area, buf, &mut self.error.state);
+            render_field!(self, error, error_area, buf);
         }
 
-        StatefulWidget::render(
-            &self.keybinds.widget,
-            rows[idx],
-            buf,
-            &mut self.keybinds.state,
-        );
+        render_field!(self, keybinds, rows[idx], buf);
 
         // Suggestion popups draw last, over everything else in the dialog (and may overflow
         // the dialog box itself), so both must be rendered after all sibling widgets above.
@@ -1029,32 +914,6 @@ impl SetupDialog {
             d.render(vcenter, buf);
         }
     }
-}
-
-/// Render two input fields side by side in `area`.
-fn render_pair(
-    left: &mut Widget<InputFieldState, InputField<String>>,
-    right: &mut Widget<InputFieldState, InputField<String>>,
-    area: Rect,
-    buf: &mut Buffer,
-) {
-    let [left_area, right_area] =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
-    StatefulWidget::render(&left.widget, left_area, buf, &mut left.state);
-    StatefulWidget::render(&right.widget, right_area, buf, &mut right.state);
-}
-
-/// Render two path-suggesting input fields side by side in `area`.
-fn render_suggest_pair(
-    left: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    right: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    area: Rect,
-    buf: &mut Buffer,
-) {
-    let [left_area, right_area] =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area);
-    StatefulWidget::render(&left.widget, left_area, buf, &mut left.state);
-    StatefulWidget::render(&right.widget, right_area, buf, &mut right.state);
 }
 
 /// Select the entry matching `current` (if present) in a numeric choice selection.

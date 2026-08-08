@@ -16,7 +16,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_lua::module::ValueType;
 use ferrowl_syntax::Language;
 use ferrowl_ui::{
-    COLOR_SCHEME, EventResult,
+    COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
         ButtonState, CodeInputFieldState, CodeInputFieldStateBuilder, InputFieldState,
         SelectionState, SelectionStateBuilder, TableState,
@@ -533,33 +533,29 @@ impl ActionDialog {
             self.json
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Json);
-            StatefulWidget::render(&self.json.widget, json_area, buf, &mut self.json.state);
+            render_field!(self, json, json_area, buf);
         } else {
             self.table
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Table);
-            StatefulWidget::render(&self.table.widget, body, buf, &mut self.table.state);
+            render_field!(self, table, body, buf);
         }
 
         // Buttons: [Toggle] [Send] (Toggle hidden for JSON-only dialogs).
         let show_toggle = self.assemble.is_some();
         if show_toggle {
-            let [tb, sb] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas(buttons);
             self.toggle
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Toggle);
             self.send
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Send);
-            StatefulWidget::render(&self.toggle.widget, tb, buf, &mut self.toggle.state);
-            StatefulWidget::render(&self.send.widget, sb, buf, &mut self.send.state);
+            render_row!(self, buttons, buf; toggle, send);
         } else {
             self.send
                 .state
                 .set_focused(self.focus == ActionDialogFocus::Send);
-            StatefulWidget::render(&self.send.widget, buttons, buf, &mut self.send.state);
+            render_field!(self, send, buttons, buf);
         }
 
         if let Some(editor) = self.editor.as_mut() {
