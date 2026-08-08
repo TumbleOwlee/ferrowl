@@ -8,6 +8,7 @@
 //! parameterized over [`KeyParams`] (default: [`SlaveKey`]).
 
 pub mod ascii;
+pub mod ascii_over_tcp;
 mod client_core;
 mod command;
 mod common;
