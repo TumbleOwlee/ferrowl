@@ -3,8 +3,10 @@
 # next heading of equal or shallower depth (or EOF). Batch every heading
 # needed from one file into a single call. Don't know the exact heading
 # text? Run list-sections.sh on the file first instead of grepping for it.
+# Generic: works on any markdown file, not just docs/specs/ — use it instead
+# of `cat`/Read-whole-file for any *.md wherever only some sections matter.
 #
-# Usage: sh scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>
+# Usage: sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>
 set -eu
 
 if [ "$#" -lt 2 ]; then
