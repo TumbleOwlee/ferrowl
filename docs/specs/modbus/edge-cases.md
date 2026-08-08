@@ -146,9 +146,9 @@ task; it does not retry the bind or the port open. Restarting it is the operator
 A TCP server spawns one task per accepted connection with no cap on the number of
 concurrent connections and no idle timeout.
 
-### 6.6 Only TCP and RTU
+### 6.6 Only three transports
 
-There is no Modbus ASCII, no Modbus-over-UDP, and no RTU-over-TCP gateway mode.
+There is no Modbus ASCII and no Modbus-over-UDP. `RtuOverTcp` reuses the TCP config verbatim (no new/removed fields); its only difference from plain TCP is wire framing.
 
 ### 6.7 Display resolution is one-way
 

@@ -68,8 +68,7 @@ No other exception code is ever produced by the server.
 
 ## 2. Transports
 
-Exactly two transports are supported: **TCP** and **RTU** (serial). There is no
-Modbus ASCII, no Modbus-over-UDP, and no RTU-over-TCP gateway mode.
+Exactly three transports are supported: **TCP**, **RTU** (serial), and **RtuOverTcp** (RTU framing over a TCP socket). There is no Modbus ASCII and no Modbus-over-UDP.
 
 ---
 
@@ -89,6 +88,9 @@ Fields of the TCP transport config, shared by the client and server roles.
 
 When these fields are absent from a serialized config, `reconnect` defaults to
 `true`; the remaining fields have no serde defaults and must be present.
+
+The `RtuOverTcp` transport (tag value `rtu_over_tcp`) uses this exact same
+field table — no additions or removals.
 
 ---
 
@@ -122,7 +124,7 @@ One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
 | `name` | string | — (required) | tab / instance name |
 | `device` | string | — (required) | path to the device config file |
 | `role` | `client` \| `server` | `server` | |
-| `endpoint` | tagged union, tag `transport` | — (required) | `tcp` or `rtu` |
+| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, or `rtu_over_tcp` |
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -146,6 +148,10 @@ Note the RTU baud default here (`19200`) differs from the transport-level defaul
 spec carries **no** `slave` field — a client addresses each request with the slave
 id of the register being polled or written.
 
+### endpoint with `transport = "rtu_over_tcp"`
+
+Takes the same fields as `transport = "tcp"` (§3), by reference.
+
 ### `--module` key/value form
 
 `--module name=…,device=…,transport=…,…` accepts the same keys, with:
@@ -155,7 +161,8 @@ id of the register being polled or written.
 - `transport` defaulting to `tcp`
 - `role` defaulting to `server`
 - `ip` defaulting to `127.0.0.1`
-- `port` **required** for `transport=tcp`; `path` **required** for `transport=rtu`
+- `port` **required** for `transport=tcp` and `transport=rtu_over_tcp`; `path`
+  **required** for `transport=rtu`
 
 ---
 
