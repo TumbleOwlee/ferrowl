@@ -2,10 +2,11 @@
 # PreToolUse guard on the Bash tool: catches shell-output bypasses of
 # AGENTS.md's Conventions ("never read a whole file when only part is
 # needed" / "filter shell output before it lands in context") and denies
-# them instead of letting the dump land silently. Three shapes:
+# them instead of letting the dump land silently. Four shapes:
 #   - unpiped `cat` of a markdown file, or of any file over LARGE_LINES lines
 #   - unpiped `git show`/`git diff` with no --stat and no pathspec
 #   - unpiped `find` with -type f/d and no -name/-path/-iname/-regex
+#   - raw `gh issue view` (AGENTS.workflow.md gate 1b: always issue-view.sh)
 #
 # Reads a PreToolUse hook payload on stdin, writes a deny-decision JSON
 # object on stdout when it blocks, nothing when it doesn't.
@@ -85,6 +86,14 @@ for seg in $segments; do
           reason="Unfiltered 'find -type f/d' bypasses this repo's Conventions (AGENTS.md: filter shell output before it lands in context). Narrow with -name/-path/-iname/-regex, or pipe through head/grep — rather than listing every match."
           ;;
       esac
+      ;;
+  esac
+  [ -z "$offender" ] || break
+
+  case "$seg" in
+    *gh\ issue\ view*)
+      offender="$seg"
+      reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.workflow.md gate 1b: read any issue with 'sh .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: sh .claude/scripts/issue-view.sh <number>"
       ;;
   esac
   [ -z "$offender" ] || break
