@@ -15,6 +15,7 @@ mod key;
 mod log;
 mod operation;
 pub mod rtu;
+pub mod rtu_over_tcp;
 mod run_config;
 mod scalar;
 mod server_core;
