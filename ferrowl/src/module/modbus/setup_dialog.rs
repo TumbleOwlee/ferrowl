@@ -105,25 +105,11 @@ pub struct SetupDialog {
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
-    #[focus]
-    pub role: Widget<SelectionState<Role>, Selection<Role>>,
-    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
-    pub ip: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
-    pub port: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub baud: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub parity: Widget<SelectionState<Parity>, Selection<Parity>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
-    pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     /// TLS level, offered only for TCP (MB-R-112: RTU carries no `tls` field at all).
     #[focus(when = {self.transport.get_value() == Transport::Tcp})]
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
+    #[focus]
+    pub role: Widget<SelectionState<Role>, Selection<Role>>,
     /// Server-only "generate an ephemeral self-signed certificate" toggle.
     #[focus(when = {self.show_self_signed()})]
     pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
@@ -152,6 +138,20 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_ca()})]
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    pub ip: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    pub port: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    pub baud: Widget<InputFieldState, InputField<String>>,
+    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    pub parity: Widget<SelectionState<Parity>, Selection<Parity>>,
+    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
+    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus]
     pub timeout: Widget<InputFieldState, InputField<String>>,
     #[focus]
@@ -333,13 +333,13 @@ impl SetupDialog {
             ))
             .data_bits(selection(
                 "Data Bits",
-                Some(HorizontalAlignment::Right),
+                Some(HorizontalAlignment::Center),
                 vec![U8Choice(8), U8Choice(7), U8Choice(6), U8Choice(5)],
                 &selection_style,
             ))
             .stop_bits(selection(
                 "Stop Bits",
-                None,
+                Some(HorizontalAlignment::Right),
                 vec![U8Choice(1), U8Choice(2)],
                 &selection_style,
             ))
@@ -489,7 +489,7 @@ impl SetupDialog {
 
     /// The TLS level selection row (any TCP endpoint; never RTU, MB-R-112).
     fn tls_shown(&self) -> bool {
-        self.transport.get_value() == Transport::Tcp
+        self.transport.get_value() == Transport::Tcp && self.tls_level.get_value() != TlsLevel::Off
     }
 
     /// The currently selected TLS level.
@@ -516,6 +516,7 @@ impl SetupDialog {
         self.tls_shown()
             && self.role.get_value() == Role::Client
             && self.tls_level() >= TlsLevel::Tls
+            && self.skip_verify.get_value() == SkipVerifyChoice::Off
     }
 
     /// Server certificate/key inputs (TCP server at TLS level or above).
@@ -523,6 +524,7 @@ impl SetupDialog {
         self.tls_shown()
             && self.role.get_value() == Role::Server
             && self.tls_level() >= TlsLevel::Tls
+            && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
     /// Client mTLS certificate/key inputs.
@@ -729,7 +731,7 @@ impl SetupDialog {
         let is_new = self.mode == DialogMode::New;
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
         // RTU needs three endpoint rows (path/baud, parity/data-bits, stop-bits); TCP one.
-        let endpoint_rows: u16 = if is_rtu { 3 } else { 1 };
+        let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
         let show_cert_row_a = self.show_cert_row_a();
         let show_cert_row_b = self.show_cert_row_b();
@@ -800,9 +802,12 @@ impl SetupDialog {
         );
         idx += 1;
 
-        let [transport_area, role_area] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(rows[idx]);
+        let [transport_area, tls_area, role_area] = Layout::horizontal([
+            Constraint::Percentage(if is_rtu { 50 } else { 35 }),
+            Constraint::Percentage(if is_rtu { 0 } else { 30 }),
+            Constraint::Percentage(if is_rtu { 50 } else { 35 }),
+        ])
+        .areas(rows[idx]);
         idx += 1;
         StatefulWidget::render(
             &self.transport.widget,
@@ -810,25 +815,93 @@ impl SetupDialog {
             buf,
             &mut self.transport.state,
         );
+        if !is_rtu {
+            StatefulWidget::render(
+                &self.tls_level.widget,
+                tls_area,
+                buf,
+                &mut self.tls_level.state,
+            );
+        }
         StatefulWidget::render(&self.role.widget, role_area, buf, &mut self.role.state);
+
+        if show_tls {
+            let is_server = self.role.state.get_value() == Role::Server;
+            let show_side = if is_server {
+                self.show_self_signed()
+            } else {
+                self.show_skip_verify()
+            };
+            let [side_area] = Layout::horizontal([Constraint::Percentage(100)]).areas(rows[idx]);
+            if show_side {
+                if is_server {
+                    StatefulWidget::render(
+                        &self.self_signed.widget,
+                        side_area,
+                        buf,
+                        &mut self.self_signed.state,
+                    );
+                } else {
+                    StatefulWidget::render(
+                        &self.skip_verify.widget,
+                        side_area,
+                        buf,
+                        &mut self.skip_verify.state,
+                    );
+                }
+                idx += 1;
+            }
+
+            if show_cert_row_a {
+                if self.show_ca_file() {
+                    StatefulWidget::render(
+                        &self.ca_file.widget,
+                        rows[idx],
+                        buf,
+                        &mut self.ca_file.state,
+                    );
+                } else {
+                    render_suggest_pair(&mut self.cert_file, &mut self.key_file, rows[idx], buf);
+                }
+                idx += 1;
+            }
+
+            if show_cert_row_b {
+                if self.show_client_cert() {
+                    render_suggest_pair(
+                        &mut self.client_cert_file,
+                        &mut self.client_key_file,
+                        rows[idx],
+                        buf,
+                    );
+                } else {
+                    StatefulWidget::render(
+                        &self.client_ca_file.widget,
+                        rows[idx],
+                        buf,
+                        &mut self.client_ca_file.state,
+                    );
+                }
+                idx += 1;
+            }
+        }
 
         let endpoint_area = rows[idx];
         idx += 1;
         if is_rtu {
-            let [row0, row1, row2] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
-            ])
-            .areas(endpoint_area);
+            let [row0, row1] = Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
+                .areas(endpoint_area);
             let [path_area, baud_area] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(row0);
             StatefulWidget::render(&self.path.widget, path_area, buf, &mut self.path.state);
             StatefulWidget::render(&self.baud.widget, baud_area, buf, &mut self.baud.state);
-            let [parity_area, data_area] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas(row1);
+            let [parity_area, data_area, stop_area] = Layout::horizontal([
+                Constraint::Percentage(35),
+                Constraint::Percentage(30),
+                Constraint::Percentage(35),
+            ])
+            .areas(row1);
             StatefulWidget::render(
                 &self.parity.widget,
                 parity_area,
@@ -841,10 +914,12 @@ impl SetupDialog {
                 buf,
                 &mut self.data_bits.state,
             );
-            let [left, _] =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas(row2);
-            StatefulWidget::render(&self.stop_bits.widget, left, buf, &mut self.stop_bits.state);
+            StatefulWidget::render(
+                &self.stop_bits.widget,
+                stop_area,
+                buf,
+                &mut self.stop_bits.state,
+            );
         } else {
             render_pair(&mut self.ip, &mut self.port, endpoint_area, buf);
         }
@@ -907,82 +982,6 @@ impl SetupDialog {
                 rows[idx],
                 buf,
             );
-            idx += 1;
-        }
-
-        if show_tls {
-            let is_server = self.role.state.get_value() == Role::Server;
-            let show_side = if is_server {
-                self.show_self_signed()
-            } else {
-                self.show_skip_verify()
-            };
-            if show_side {
-                let [level_area, side_area] =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .areas(rows[idx]);
-                StatefulWidget::render(
-                    &self.tls_level.widget,
-                    level_area,
-                    buf,
-                    &mut self.tls_level.state,
-                );
-                if is_server {
-                    StatefulWidget::render(
-                        &self.self_signed.widget,
-                        side_area,
-                        buf,
-                        &mut self.self_signed.state,
-                    );
-                } else {
-                    StatefulWidget::render(
-                        &self.skip_verify.widget,
-                        side_area,
-                        buf,
-                        &mut self.skip_verify.state,
-                    );
-                }
-            } else {
-                StatefulWidget::render(
-                    &self.tls_level.widget,
-                    rows[idx],
-                    buf,
-                    &mut self.tls_level.state,
-                );
-            }
-            idx += 1;
-        }
-
-        if show_cert_row_a {
-            if self.show_ca_file() {
-                StatefulWidget::render(
-                    &self.ca_file.widget,
-                    rows[idx],
-                    buf,
-                    &mut self.ca_file.state,
-                );
-            } else {
-                render_suggest_pair(&mut self.cert_file, &mut self.key_file, rows[idx], buf);
-            }
-            idx += 1;
-        }
-
-        if show_cert_row_b {
-            if self.show_client_cert() {
-                render_suggest_pair(
-                    &mut self.client_cert_file,
-                    &mut self.client_key_file,
-                    rows[idx],
-                    buf,
-                );
-            } else {
-                StatefulWidget::render(
-                    &self.client_ca_file.widget,
-                    rows[idx],
-                    buf,
-                    &mut self.client_ca_file.state,
-                );
-            }
             idx += 1;
         }
 
