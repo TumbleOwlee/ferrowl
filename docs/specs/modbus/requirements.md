@@ -221,9 +221,23 @@ behavior, stated limitations).
 
 ---
 
+## Transport — UDP
+
+**MB-R-116** — The Modbus transport config shall offer a fourth option, `Udp` (config/CLI tag value `udp`), carrying `ip`, `port`, `timeout_ms`, `delay_ms`, `interval_ms`, and `reconnect` — the same connection parameters as the TCP option except `tls`, which `Udp` does not carry: the underlying transport (`connect_udp`/`UdpConfig`) performs no handshake and offers no TLS/DTLS option to configure. `Udp` carries no RTU serial parameters (`baud_rate`, `parity`, `data_bits`, `stop_bits`).
+
+**MB-R-117** — A `Udp` client shall associate with `ip:port` by binding an ephemeral local UDP socket and connecting it to that peer (no network handshake); an `ip`/`port` pair that does not parse as a socket address shall fail with the same error as MB-R-069. `timeout_ms` shall bound each individual request (MB-R-040), not the local bind/associate step, which performs no I/O to time out.
+
+**MB-R-118** — The Reconnect rules (MB-R-050–MB-R-056) shall apply to a `Udp` client verbatim, substituting "local bind/associate attempt" for "connection attempt" throughout: a failed bind/associate or a transport error during a run does not end the client task while `reconnect` is enabled, backs off per MB-R-051–MB-R-052, and MB-R-101–MB-R-103 (RTU/RtuOverTcp broadcast slave id 0 handling) do not extend to `Udp` — a `Udp` client addresses slave id 0 as an ordinary slave id, subject to the same exception/timeout handling as any other (MB-R-043, MB-R-045, MB-R-047).
+
+**MB-R-119** — A `Udp` server shall bind `ip:port` once and serve inbound datagrams from any peer, each independently against the same shared store (MB-R-057–MB-R-065); there is no accept loop and no per-peer connection lifecycle — no `on_connect`/`on_disconnect` notification is emitted for a `Udp` peer. MB-R-101–MB-R-103 (RTU/RtuOverTcp broadcast slave id 0 handling) do not extend to `Udp` — a `Udp` server answers a request addressed to slave id 0 exactly as it would any other slave id (MB-R-065), including sending its response.
+
+**MB-R-120** — Failure to bind the `Udp` listen address shall fail the server's start, and the error shall be surfaced to the caller rather than retried (as MB-R-071 for TCP). A datagram that fails to receive or decode shall be logged as a failed request (MB-R-066–MB-R-067) and shall cost nothing beyond itself — it neither ends serving nor affects any other datagram.
+
+---
+
 ## Module lifecycle and device configuration
 
-**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, or RtuOverTcp, and shall own one shared register store, one register set, and one log.
+**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, RtuOverTcp, or Udp, and shall own one shared register store, one register set, and one log.
 
 **MB-R-077** — A module's register store shall be built from its device config's register definitions: each fixed-address register shall declare the range `[address, address + format width)` under the key (slave id, kind).
 

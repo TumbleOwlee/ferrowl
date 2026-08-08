@@ -21,6 +21,7 @@ mod scalar;
 mod server_core;
 pub mod tcp;
 mod transport;
+pub mod udp;
 
 pub use command::Command;
 pub use error::{Error, ModbusError, SerialError, TcpError};

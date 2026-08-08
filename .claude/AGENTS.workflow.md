@@ -16,7 +16,10 @@ do it. Size sets stage count, never gate existence.
 - Replaces any generic workflow skill (`/workflow`) — don't run one.
   `docs/specs/` is already the PRD and design record.
 - Branch off `main`, never commit to `main`. `<type>/<slug>`, type ∈ {`feat`,
-  `fix`, `docs`}.
+  `fix`, `docs`}. **Enforced, not just advisory:** the same `PreToolUse` hook
+  (`.claude/scripts/hook-guard-cat.sh`) denies `git commit` while the
+  checkout is on `main`, and `git push` targeting `main` — the safety net
+  for an agent that missed the worktree step, not just a written rule.
 - **Gate 1 = orchestrator's own conversation with the user, not an agent's.**
   Abstract: existing spec + current goal, nothing about current code. No
   worktree/branch until gate 2 approved.

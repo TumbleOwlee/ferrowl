@@ -7,17 +7,23 @@
 #   - unpiped `git show`/`git diff` with no --stat and no pathspec
 #   - unpiped `find` with -type f/d and no -name/-path/-iname/-regex
 #   - raw `gh issue view` (AGENTS.workflow.md gate 1b: always issue-view.sh)
+#   - `git commit` while the checkout is on `main` (branch off main, never
+#     commit to it — the safety net for an agent that missed the worktree)
+#   - `git push` whose destination is `main`, explicit or (on bare `git
+#     push`) implied by the current branch already being `main`
 #
 # Reads a PreToolUse hook payload on stdin, writes a deny-decision JSON
 # object on stdout when it blocks, nothing when it doesn't.
 set -eu
 
 LARGE_LINES=80
+PROTECTED_BRANCH=main
 
 input=$(cat)
 name=$(printf '%s' "$input" | jq -r '.tool_name // empty')
 [ "$name" = "Bash" ] || exit 0
 
+cwd=$(printf '%s' "$input" | jq -r '.cwd // "."')
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 [ -n "$cmd" ] || exit 0
 
@@ -94,6 +100,49 @@ for seg in $segments; do
     *gh\ issue\ view*)
       offender="$seg"
       reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.workflow.md gate 1b: read any issue with 'sh .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: sh .claude/scripts/issue-view.sh <number>"
+      ;;
+  esac
+  [ -z "$offender" ] || break
+
+  case "$seg" in
+    *git\ commit*)
+      case "$seg" in
+        *--dry-run*) ;;  # doesn't create a commit
+        *)
+          dir="$cwd"
+          case "$seg" in
+            *-C\ *) dir=$(printf '%s' "$seg" | sed -n 's/.*-C[[:space:]]*\([^[:space:]]*\).*/\1/p') ;;
+          esac
+          branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+          if [ "$branch" = "$PROTECTED_BRANCH" ]; then
+            offender="$seg"
+            reason="'git commit' while the checkout in $dir is on '$PROTECTED_BRANCH' (AGENTS.workflow.md: branch off main, never commit to main). Create/use a git worktree first: git worktree add .claude/worktrees/<slug> -b <type>/<slug> $PROTECTED_BRANCH — this looks like the worktree step was missed."
+          fi
+          ;;
+      esac
+      ;;
+  esac
+  [ -z "$offender" ] || break
+
+  case "$seg" in
+    *git\ push*)
+      dir="$cwd"
+      case "$seg" in
+        *-C\ *) dir=$(printf '%s' "$seg" | sed -n 's/.*-C[[:space:]]*\([^[:space:]]*\).*/\1/p') ;;
+      esac
+      case "$seg" in
+        *" $PROTECTED_BRANCH"|*":$PROTECTED_BRANCH")
+          offender="$seg"
+          reason="'git push' targeting '$PROTECTED_BRANCH' directly (AGENTS.workflow.md: squash merge to main via PR only, never a direct push). Push the feature branch and open a PR instead."
+          ;;
+        *)
+          branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+          if [ "$branch" = "$PROTECTED_BRANCH" ]; then
+            offender="$seg"
+            reason="Bare 'git push' while the checkout in $dir is on '$PROTECTED_BRANCH' would push straight to it (AGENTS.workflow.md: branch off main, never commit to main). Create/use a git worktree first: git worktree add .claude/worktrees/<slug> -b <type>/<slug> $PROTECTED_BRANCH — this looks like the worktree step was missed."
+          fi
+          ;;
+      esac
       ;;
   esac
   [ -z "$offender" ] || break

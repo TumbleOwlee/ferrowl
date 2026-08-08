@@ -82,7 +82,8 @@ impl<T: KeyParams> ClientBuilder<T> {
 /// A connected Modbus RTU-over-TCP client. Connection setup mirrors plain TCP (MB-R-113); the
 /// read/command loop is shared via the internal `ClientCore`, over a socket carrying RTU framing.
 pub struct Client {
-    pub(crate) core: ClientCore<ClientStream, rust_modbus::RtuOverTcp>,
+    pub(crate) core:
+        ClientCore<FrameTransport<ClientStream, rust_modbus::RtuOverTcp>, rust_modbus::RtuOverTcp>,
 }
 
 impl Client {

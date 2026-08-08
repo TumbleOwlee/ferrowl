@@ -94,6 +94,27 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    pub fn with_udp_client(config: ClientConfig<T, ferrowl_modbus::udp::Config>) -> Self {
+        Self {
+            builder: Builder::UdpClient(ferrowl_modbus::udp::ClientBuilder::new(
+                config.config,
+                config.operations,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
+    pub fn with_udp_server(config: ServerConfig<T, ferrowl_modbus::udp::Config>) -> Self {
+        Self {
+            builder: Builder::UdpServer(ferrowl_modbus::udp::ServerBuilder::new(
+                config.config,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
     /// Spawns the endpoint's background task. Fails with
     /// [`InstanceError::AlreadyActive`] if it is still running.
     pub async fn start<L, S>(&mut self, log: L, status: S) -> Result<(), Error>
@@ -167,6 +188,29 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::RtuOverTcpServer(builder) => {
+                let res = builder.spawn(log).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    }
+                }
+            }
+            Builder::UdpClient(builder) => {
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    }
+                }
+            }
+            Builder::UdpServer(builder) => {
                 let res = builder.spawn(log).await;
                 match res {
                     Err(e) => {
@@ -402,6 +446,62 @@ mod tests {
         let err = instance.start(sink(), sink()).await.unwrap_err();
         assert!(matches!(err, Error::Instance(InstanceError::AlreadyActive)));
         instance.stop().await.expect("cleanup stop");
+    }
+
+    /// An OS-assigned free UDP port (bind to :0, read the port, drop the socket).
+    async fn free_udp_port() -> u16 {
+        tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn dead_udp_config(port: u16) -> ferrowl_modbus::udp::Config {
+        ferrowl_modbus::udp::Config {
+            ip: "127.0.0.1".to_string(),
+            port,
+            timeout_ms: 200,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        }
+    }
+
+    /// MB-R-117 — a Udp client instance starts (association is local-only, no I/O to fail
+    /// against a dead peer), reports active, and stops gracefully like every other transport.
+    #[tokio::test]
+    async fn udp_client_starts_and_stops() {
+        let port = free_udp_port().await;
+        let mut instance = Instance::with_udp_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_udp_config(port))),
+            operations: Arc::new(RwLock::new(vec![])),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
+    }
+
+    /// MB-R-119 — a Udp server instance binds, reports active, and stops gracefully like
+    /// every other transport.
+    #[tokio::test]
+    async fn udp_server_starts_and_stops() {
+        let port = free_udp_port().await;
+        let mut instance = Instance::with_udp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(dead_udp_config(port))),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
     }
 
     #[tokio::test]

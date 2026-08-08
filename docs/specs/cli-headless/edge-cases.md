@@ -28,7 +28,7 @@ Lua/assertion semantics live in [`../scripting/`](../scripting/).
   `--ocpp` without `name`, `device`, or `port` → parse error.
 - **Non-numeric `port`/`data_bits`/`stop_bits`/`baud`** → parse error.
 - **Invalid enum value** — `role` other than `client`/`server`, `transport` other
-  than `tcp`/`rtu`/`rtu_over_tcp`, `protocol` other than `ws`/`wss` → parse error.
+  than `tcp`/`rtu`/`rtu_over_tcp`/`udp`, `protocol` other than `ws`/`wss` → parse error.
 - In `ferrowl run`, any such descriptor error is a setup failure: the run exits
   **1** with an `Error:` diagnostic on stderr before the loop starts. In the TUI
   path it aborts startup with `Error:` on stderr and no TUI.

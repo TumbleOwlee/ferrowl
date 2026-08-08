@@ -1,11 +1,10 @@
 use crate::client_core::{ClientCore, ConnectAttempt};
-use crate::tcp::Config;
-use crate::tcp::tls::{ClientStream, build_client_tls_config};
+use crate::udp::Config;
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
-use rust_modbus::{Client as ModbusClient, FrameTransport, TcpConfig, connect_tcp, connect_tls};
+use rust_modbus::{Client as ModbusClient, UdpConfig, UdpTransport, connect_udp};
 use tokio::task::JoinHandle;
 
 use std::net::SocketAddr;
@@ -13,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
-/// Builds and spawns a Modbus TCP client task that polls `operations` into
+/// Builds and spawns a Modbus UDP client task that polls `operations` into
 /// the shared `memory` and executes incoming [`Command`]s.
 pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
@@ -34,15 +33,15 @@ impl<T: KeyParams> ClientBuilder<T> {
         }
     }
 
-    /// Connects to the configured endpoint and spawns the client loop as a tokio task. `log`
+    /// Associates with the configured peer and spawns the client loop as a tokio task. `log`
     /// receives log lines, `status` receives connection status updates, and `receiver` delivers
     /// write/terminate [`Command`]s.
     ///
-    /// With `config.reconnect` set (the default), a lost or refused connection does not end the
-    /// task: it logs, waits an exponential backoff (capped, reset after a run that got at least
-    /// one read through), and reconnects. `Command::Terminate` (or the channel closing) aborts a
-    /// backoff wait immediately. With `config.reconnect` unset, a transport error ends the task
-    /// exactly as before this behavior was added.
+    /// With `config.reconnect` set (the default), a lost association does not end the task: it
+    /// logs, waits an exponential backoff (capped, reset after a run that got at least one read
+    /// through), and retries. `Command::Terminate` (or the channel closing) aborts a backoff
+    /// wait immediately. With `config.reconnect` unset, a transport error ends the task exactly
+    /// as before this behavior was added.
     pub async fn spawn<L, S>(
         &self,
         receiver: Receiver<Command>,
@@ -77,48 +76,31 @@ impl<T: KeyParams> ClientBuilder<T> {
     }
 }
 
-/// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
-/// shared via the internal `ClientCore`, over a socket carrying Modbus TCP framing.
+/// A connected Modbus UDP client. Associating with the peer is local-only (no handshake,
+/// MB-R-117); the read/command loop is shared via the internal `ClientCore`, over
+/// `UdpTransport<Tcp>` (MBAP framing) directly — no `FrameTransport` wrapping (unlike every
+/// other transport): `UdpTransport` already implements `rust_modbus::ClientTransport` itself.
 pub struct Client {
-    pub(crate) core: ClientCore<FrameTransport<ClientStream, rust_modbus::Tcp>, rust_modbus::Tcp>,
+    pub(crate) core: ClientCore<UdpTransport<rust_modbus::Tcp>, rust_modbus::Tcp>,
 }
 
 impl Client {
-    /// Opens a TCP connection to `config.ip:config.port`, bounded by the
-    /// configured timeout. Plain TCP unless `config.tls` is set (MB-R-104), in which
-    /// case the same timeout bounds the TCP connect and the TLS handshake together.
+    /// Binds an ephemeral local socket and associates it with `config.ip:config.port`
+    /// (MB-R-117). Unlike `tcp::Client::connect`, this is **not** wrapped in
+    /// `tokio::time::timeout(config.timeout_ms, ...)`: the bind/associate step performs no I/O
+    /// to time out — `timeout_ms` bounds each individual request instead, already enforced
+    /// generically by `ClientCore::read`/`handle_write_result` (MB-R-040).
     pub async fn connect(config: &Config) -> Result<Self, Error> {
         let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
             .parse()
             .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
-        let tls_config = config
-            .tls
-            .as_ref()
-            .map(build_client_tls_config)
-            .transpose()?;
-        let attempt = async {
-            match tls_config {
-                None => connect_tcp(addr, TcpConfig::default())
-                    .await
-                    .map(|t| ClientStream::Plain(t.into_inner())),
-                Some(tls) => connect_tls(addr, TcpConfig::default(), tls)
-                    .await
-                    .map(|t| ClientStream::Tls(Box::new(t.into_inner()))),
-            }
-        };
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(config.timeout_ms as u64),
-            attempt,
-        )
-        .await
-        {
-            Ok(Ok(stream)) => Ok(Self {
-                core: ClientCore {
-                    client: ModbusClient::<_, _>::new(FrameTransport::new(stream)),
-                },
-            }),
-            Ok(Err(e)) => Err(TcpError::Error(e).into()),
-            Err(e) => Err(TcpError::Timeout(e).into()),
-        }
+        let transport: UdpTransport<rust_modbus::Tcp> = connect_udp(addr, UdpConfig::default())
+            .await
+            .map_err(|e| Error::from(TcpError::Error(e)))?;
+        Ok(Self {
+            core: ClientCore {
+                client: ModbusClient::new(transport),
+            },
+        })
     }
 }

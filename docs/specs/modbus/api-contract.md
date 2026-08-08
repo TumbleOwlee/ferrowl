@@ -68,7 +68,7 @@ No other exception code is ever produced by the server.
 
 ## 2. Transports
 
-Exactly three transports are supported: **TCP**, **RTU** (serial), and **RtuOverTcp** (RTU framing over a TCP socket). There is no Modbus ASCII and no Modbus-over-UDP.
+Exactly four transports are supported: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over a TCP socket), and **UDP** (Modbus TCP/MBAP framing over a UDP datagram). There is no Modbus ASCII.
 
 ---
 
@@ -91,6 +91,10 @@ When these fields are absent from a serialized config, `reconnect` defaults to
 
 The `RtuOverTcp` transport (tag value `rtu_over_tcp`) uses this exact same
 field table — no additions or removals.
+
+The `Udp` transport (tag value `udp`) uses this same field table minus `tls`,
+which it does not carry (MB-R-116): the upstream UDP transport performs no
+handshake and offers no TLS/DTLS option to configure.
 
 ---
 
@@ -124,7 +128,7 @@ One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
 | `name` | string | — (required) | tab / instance name |
 | `device` | string | — (required) | path to the device config file |
 | `role` | `client` \| `server` | `server` | |
-| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, or `rtu_over_tcp` |
+| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, or `udp` |
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -152,6 +156,10 @@ id of the register being polled or written.
 
 Takes the same fields as `transport = "tcp"` (§3), by reference.
 
+### endpoint with `transport = "udp"`
+
+Takes the same fields as `transport = "tcp"` (§3), by reference.
+
 ### `--module` key/value form
 
 `--module name=…,device=…,transport=…,…` accepts the same keys, with:
@@ -161,8 +169,8 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 - `transport` defaulting to `tcp`
 - `role` defaulting to `server`
 - `ip` defaulting to `127.0.0.1`
-- `port` **required** for `transport=tcp` and `transport=rtu_over_tcp`; `path`
-  **required** for `transport=rtu`
+- `port` **required** for `transport=tcp`, `transport=rtu_over_tcp`, or
+  `transport=udp`; `path` **required** for `transport=rtu`
 
 ---
 

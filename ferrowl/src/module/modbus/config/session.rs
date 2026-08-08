@@ -107,6 +107,12 @@ pub enum Endpoint {
         #[serde(default)]
         stop_bits: Option<u8>,
     },
+    /// MB-R-116 — same field set as `Tcp`; its own variant since it carries a distinct
+    /// `ferrowl_modbus::udp::Config` (no `tls`) once resolved.
+    Udp {
+        ip: String,
+        port: u16,
+    },
 }
 
 impl std::fmt::Display for Endpoint {
@@ -117,6 +123,9 @@ impl std::fmt::Display for Endpoint {
             }
             Endpoint::RtuOverTcp { ip, port } => {
                 write!(fmt, "{}:{} (rtu/tcp)", ip, port)
+            }
+            Endpoint::Udp { ip, port } => {
+                write!(fmt, "{}:{} (udp)", ip, port)
             }
             Endpoint::Rtu {
                 path,
@@ -325,5 +334,34 @@ mod tests {
         assert_eq!(v["port"], 502);
         let back: Endpoint = serde_json::from_value(v).unwrap();
         assert_eq!(back, ep);
+    }
+
+    #[test]
+    /// MB-R-116 — the `Udp` endpoint variant tags as `udp` (`rename_all = "lowercase"`
+    /// needs no override here, unlike `rtu_over_tcp`) and carries exactly `ip`/`port`.
+    fn ut_endpoint_udp_serde_tag() {
+        let ep = Endpoint::Udp {
+            ip: "10.0.0.1".into(),
+            port: 502,
+        };
+        let v = serde_json::to_value(&ep).unwrap();
+        assert_eq!(v["transport"], "udp");
+        assert_eq!(v["ip"], "10.0.0.1");
+        assert_eq!(v["port"], 502);
+        let back: Endpoint = serde_json::from_value(v).unwrap();
+        assert_eq!(back, ep);
+    }
+
+    #[test]
+    /// MB-R-116 — `Endpoint::Udp` displays as `ip:port (udp)`.
+    fn ut_endpoint_udp_display() {
+        assert_eq!(
+            Endpoint::Udp {
+                ip: "127.0.0.1".into(),
+                port: 502
+            }
+            .to_string(),
+            "127.0.0.1:502 (udp)"
+        );
     }
 }
