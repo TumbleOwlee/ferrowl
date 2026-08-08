@@ -277,3 +277,155 @@ async fn rtu_over_tcp_client_polls_server_and_executes_commands() {
 
     server.abort();
 }
+
+#[tokio::test]
+/// MB-R-114, MB-R-069 — an `ip`/`port` pair that does not parse as a socket address fails with a
+/// TCP address error, for both the RTU-over-TCP client and the server, same as plain TCP.
+async fn rtu_over_tcp_unparseable_address_is_error() {
+    use ferrowl_modbus::{Error, TcpError};
+
+    let mut bad = config(502);
+    bad.ip = "not.an.ip.address".to_string();
+
+    // Client side (`Client` isn't `Debug`, so match the result rather than `unwrap_err`).
+    assert!(matches!(
+        ferrowl_modbus::rtu_over_tcp::Client::connect(&bad).await,
+        Err(Error::Tcp(TcpError::Address(_)))
+    ));
+
+    // Server side.
+    let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
+    let server_err =
+        ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
+            .spawn(sink())
+            .await
+            .unwrap_err();
+    assert!(matches!(server_err, Error::Tcp(TcpError::Address(_))));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-114, MB-R-071 — failure to bind the RTU-over-TCP listen address fails the server's start
+/// and surfaces the error, same as plain TCP.
+async fn rtu_over_tcp_server_bind_conflict_is_error() {
+    let port = free_port();
+    // Occupy the port so the server's bind fails.
+    let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
+    let res =
+        ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), mem)
+            .spawn(sink())
+            .await;
+    assert!(res.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-101 — over RTU-over-TCP framing (which shares RTU's broadcast address), a read addressed
+/// to slave id 0 is skipped by the client without disconnecting: the client_core mechanism is
+/// framing-generic (`F::is_broadcast`), so this proves the wiring carries the RTU broadcast
+/// behavior over the RtuOverTcp transport end-to-end.
+async fn rtu_over_tcp_client_skips_broadcast_poll_without_disconnect() {
+    let port = free_port();
+    let srv_mem = server_mem();
+
+    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+    )
+    .spawn(sink())
+    .await
+    .expect("server failed to start");
+
+    // Slave id 0 is the broadcast address: no server answers a read addressed to it.
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: UnitId(0),
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 2),
+    }]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let client = ferrowl_modbus::rtu_over_tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        client_mem(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("client failed to connect");
+
+    // Several poll cycles at a broadcast address that never gets a response.
+    sleep(Duration::from_millis(600)).await;
+
+    // The client is still alive and responsive to Terminate: the broadcast poll never
+    // disconnected it.
+    tx.send(Command::Terminate).await.unwrap();
+    let joined = tokio::time::timeout(Duration::from_secs(5), client)
+        .await
+        .expect("client did not terminate in time")
+        .expect("client task panicked");
+    assert!(joined.is_ok());
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-102 — over RTU-over-TCP framing, a write addressed to slave id 0 (broadcast) is
+/// transmitted fire-and-forget: the server applies it (MB-R-103) without the client waiting for
+/// (or the server sending) a response.
+async fn rtu_over_tcp_client_fire_and_forget_broadcast_write() {
+    let port = free_port();
+    let mut srv_mem_raw = Memory::<Key<SlaveKey>>::default();
+    let broadcast_key = Key::new(SlaveKey {
+        slave_id: UnitId(0),
+        kind: RegKind::HoldingRegister,
+    });
+    srv_mem_raw.add_ranges(
+        broadcast_key.clone(),
+        &MemKind::ReadWrite(CellType::Register),
+        &[Range::new(0, 4)],
+    );
+    let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
+
+    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem.clone(),
+    )
+    .spawn(sink())
+    .await
+    .expect("server failed to start");
+
+    let operations = Arc::new(RwLock::new(vec![]));
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let client = ferrowl_modbus::rtu_over_tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        client_mem(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("client failed to connect");
+
+    tx.send(Command::WriteSingleRegister(
+        UnitId(0),
+        Address(1),
+        Word(0x1234),
+    ))
+    .await
+    .unwrap();
+    sleep(Duration::from_millis(300)).await;
+
+    // MB-R-103: the store took the broadcast write even though nothing answered it.
+    {
+        let g = srv_mem.read();
+        assert_eq!(
+            g.read(broadcast_key, &CellType::Register, &Range::new(1, 1))
+                .unwrap(),
+            vec![0x1234]
+        );
+    }
+
+    tx.send(Command::Terminate).await.unwrap();
+    let joined = tokio::time::timeout(Duration::from_secs(5), client)
+        .await
+        .expect("client did not terminate in time")
+        .expect("client task panicked");
+    assert!(joined.is_ok());
+    server.abort();
+}

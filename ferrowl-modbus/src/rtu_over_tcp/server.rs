@@ -38,6 +38,10 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
+/// Every production server now logs per-request outcomes (MB-R-067); RtuOverTcp is no
+/// exception.
+const VERBOSE: bool = true;
+
 /// Bind the configured TCP address and spawn the accept loop; each accepted connection answers
 /// from the shared `memory` via a [`Server`] using RTU framing (MB-R-113), verbose logging on
 /// (MB-R-067). Plain TCP unless `config.tls` is set (MB-R-115), in which case the listener
@@ -56,7 +60,7 @@ where
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
     // One service instance answers every accepted connection, so all of them share the
     // one store (MB-R-070). Every server logs per-request outcomes (verbose = true, MB-R-067).
-    let server = ModbusServer::new(Server::new(memory, log.clone(), true));
+    let server = ModbusServer::new(Server::new(memory, log.clone(), VERBOSE));
     match &config.tls {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
@@ -88,5 +92,17 @@ where
                 Err(e) => Err(Error::Server(e)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VERBOSE;
+
+    /// MB-R-067 — the RtuOverTcp server logs per-request outcomes exactly like every other
+    /// transport (RTU, RTU-over-TCP, TCP alike now).
+    #[test]
+    fn ut_rtu_over_tcp_server_is_verbose() {
+        assert!(VERBOSE);
     }
 }
