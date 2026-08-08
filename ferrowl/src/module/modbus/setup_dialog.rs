@@ -1286,16 +1286,83 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a TCP setup dialog exposes the TLS section.
-    fn ut_tcp_dialog_shows_tls_section() {
-        let dialog = SetupDialog::create(Timing {
+    /// UI-R-024 — a TCP setup dialog always offers the TLS level selector, but the detail
+    /// section (self-signed/cert/etc.) only appears once a level above Off is actually picked
+    /// — the level selector alone must never imply the rest of the section is showing.
+    fn ut_tcp_dialog_shows_tls_level_selector_but_not_detail_section_at_off() {
+        let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
         });
         assert_eq!(dialog.transport.state.get_value(), Transport::Tcp);
+        assert_eq!(dialog.tls_level.state.get_value(), TlsLevel::Off);
+        // Level selector itself: always rendered for TCP, regardless of the chosen level.
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(text.contains("TLS"), "missing TLS level selector:\n{text}");
+        // Detail section: hidden at Off, so the toggle/cert rows aren't allocated or drawn.
+        assert!(!dialog.tls_shown());
+        assert!(
+            !text.contains("Self-Signed"),
+            "self-signed toggle shown at TLS level Off:\n{text}"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — picking a TLS level above Off reveals the detail section (MB-R-104's fields
+    /// become settable only once the user has actually opted into TLS).
+    fn ut_tls_shown_once_level_selected_above_off() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        assert!(!dialog.tls_shown());
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
         assert!(dialog.tls_shown());
+    }
+
+    #[test]
+    /// UI-R-024 — a server that turns on Self-Signed no longer needs (or shows) the
+    /// cert/key file row; toggling it back off restores the row.
+    fn ut_self_signed_hides_server_cert_row() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        // Default role is Server.
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        assert!(dialog.show_cert_row_a());
+        dialog.self_signed.state.set_selection(1); // On
+        assert!(!dialog.show_cert_row_a());
+        dialog.self_signed.state.set_selection(0); // Off
+        assert!(dialog.show_cert_row_a());
+    }
+
+    #[test]
+    /// UI-R-024 — a client that turns on Skip Verify no longer needs (or shows) the CA-file
+    /// row; toggling it back off restores the row.
+    fn ut_skip_verify_hides_ca_file_row() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        dialog.role.state.set_selection(1); // Client
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        assert!(dialog.show_cert_row_a());
+        dialog.skip_verify.state.set_selection(1); // On
+        assert!(!dialog.show_cert_row_a());
+        dialog.skip_verify.state.set_selection(0); // Off
+        assert!(dialog.show_cert_row_a());
     }
 
     #[test]
