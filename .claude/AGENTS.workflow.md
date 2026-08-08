@@ -173,6 +173,10 @@ title — plain-language summary a maintainer can scan, not a slug or ID.
 
 Neither planning nor implementing agent is ever told this issue exists.
 Orchestrator is sole owner, including later updates from gate 2 findings.
+**Never edit the issue body after filing** — always `gh issue comment` (or
+the Jira equivalent) to append the delta. An edited body destroys the
+history of what was originally filed vs. refined later; a comment preserves
+that trail and keeps the issue trackable.
 
 ### Gate 2 — implementation plan. Stop for approval.
 
