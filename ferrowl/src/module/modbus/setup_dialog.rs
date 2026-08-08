@@ -203,6 +203,15 @@ impl SetupDialog {
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
+            // TODO(s4): the dialog's own `Transport` selector has no RtuOverTcp choice yet
+            // (that is s4's job — a real third selector value plus `tls_shown` gating). Until
+            // then, editing an RtuOverTcp instance's ip/port prefills identically to Tcp so the
+            // crate compiles against the now-3-variant `Endpoint`; s4 replaces this arm.
+            Endpoint::RtuOverTcp { ip, port } => {
+                dialog.transport.state.set_selection(0);
+                set_input(&mut dialog.ip, ip);
+                set_input(&mut dialog.port, &port.to_string());
+            }
             Endpoint::Rtu {
                 path,
                 baud_rate,
