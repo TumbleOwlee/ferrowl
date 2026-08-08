@@ -7,6 +7,7 @@
 //! incoming requests directly from memory. Memory is keyed by [`Key`]
 //! parameterized over [`KeyParams`] (default: [`SlaveKey`]).
 
+pub mod ascii;
 mod client_core;
 mod command;
 mod common;
