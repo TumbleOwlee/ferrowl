@@ -229,6 +229,13 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
                 .parse()
                 .map_err(|_| "invalid 'port'")?,
         },
+        "rtu_over_tcp" => Endpoint::RtuOverTcp {
+            ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+            port: get("port")
+                .ok_or("rtu_over_tcp module requires 'port'")?
+                .parse()
+                .map_err(|_| "invalid 'port'")?,
+        },
         "rtu" => Endpoint::Rtu {
             path: get("path").ok_or("rtu module requires 'path'")?,
             baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
@@ -237,7 +244,11 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
             data_bits: parse_opt(get("data_bits"), "data_bits")?,
             stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
         },
-        other => return Err(format!("invalid transport '{other}' (expected tcp|rtu)")),
+        other => {
+            return Err(format!(
+                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp)"
+            ));
+        }
     };
 
     Ok(ModuleSpec {
@@ -355,6 +366,31 @@ mod tests {
                 stop_bits: None,
             }
         );
+    }
+
+    #[test]
+    /// CL-R-002 — a --module RtuOverTcp descriptor parses like TCP (same ip/port
+    /// keys), tagged `rtu_over_tcp`.
+    fn ut_parse_rtu_over_tcp_module() {
+        let spec = parse_module_spec(
+            "name=m,device=d.toml,transport=rtu_over_tcp,ip=10.0.0.5,port=502,role=client",
+        )
+        .unwrap();
+        assert_eq!(spec.role, Role::Client);
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::RtuOverTcp {
+                ip: "10.0.0.5".into(),
+                port: 502
+            }
+        );
+    }
+
+    #[test]
+    /// CL-R-002 — an unknown `transport` value is still a parse error, listing all
+    /// three valid options.
+    fn ut_parse_invalid_transport_still_errors() {
+        assert!(parse_module_spec("name=m,device=d,transport=usb").is_err());
     }
 
     #[test]
