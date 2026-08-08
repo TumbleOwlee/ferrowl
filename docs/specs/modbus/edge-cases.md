@@ -146,9 +146,9 @@ task; it does not retry the bind or the port open. Restarting it is the operator
 A TCP server spawns one task per accepted connection with no cap on the number of
 concurrent connections and no idle timeout.
 
-### 6.6 Only three transports
+### 6.6 Only four transports
 
-There is no Modbus ASCII and no Modbus-over-UDP. `RtuOverTcp` reuses the TCP config verbatim (no new/removed fields); its only difference from plain TCP is wire framing.
+There is no Modbus ASCII. `RtuOverTcp` reuses the TCP config verbatim (no new/removed fields); its only difference from plain TCP is wire framing. `Udp` reuses the TCP config too, except it drops `tls`: the upstream UDP transport performs no handshake and offers no DTLS option, so there is nothing for a `tls` field to configure. Unlike `RtuOverTcp`, `Udp` also does not inherit RTU/RtuOverTcp's broadcast slave id 0 handling (MB-R-101–MB-R-103) — on `Udp`, slave id 0 is an ordinary slave id.
 
 ### 6.7 Display resolution is one-way
 

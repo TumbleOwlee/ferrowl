@@ -98,9 +98,9 @@ without `=` is an error. Later duplicate keys overwrite earlier ones.
 | `device` | yes* | — | Path to the device-config file. |
 | `type` | — | — | **Alias for `device`**: used only if `device` is absent. |
 | `role` | — | `server` | `client` or `server`. Any other value is an error. |
-| `transport` | — | `tcp` | `tcp`, `rtu`, or `rtu_over_tcp`. Any other value is an error. |
-| `ip` | — | `127.0.0.1` | TCP only: peer/bind IP. |
-| `port` | yes (tcp) | — | TCP only: port. Required for `transport=tcp` or `transport=rtu_over_tcp`; must parse as a number. |
+| `transport` | — | `tcp` | `tcp`, `rtu`, `rtu_over_tcp`, or `udp`. Any other value is an error. |
+| `ip` | — | `127.0.0.1` | TCP/UDP only: peer/bind IP. |
+| `port` | yes (tcp) | — | TCP/UDP only: port. Required for `transport=tcp`, `transport=rtu_over_tcp`, or `transport=udp`; must parse as a number. |
 | `path` | yes (rtu) | — | RTU only: serial device path. Required for `transport=rtu`. |
 | `baud` / `baud_rate` | — | `19200` | RTU only: baud rate (`baud` and `baud_rate` are aliases). |
 | `parity` | — | unset | RTU only: parity string (passed through). |

@@ -10,7 +10,8 @@ use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunCo
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
-    Address, Client, ClientFraming, ExceptionCode, FunctionCode, Quantity, RegisterValue, UnitId,
+    Address, Client, ClientFraming, ExceptionCode, FrameTransport, FunctionCode, Quantity,
+    RegisterValue, UnitId,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -82,7 +83,7 @@ pub(crate) fn classify<V>(
 /// Owns a connected Modbus client and drives the read/command loop. Transport-neutral: the TCP
 /// and RTU `Client` types each establish the connection, then hand the client here.
 pub(crate) struct ClientCore<S, F> {
-    pub(crate) client: Client<S, F>,
+    pub(crate) client: Client<FrameTransport<S, F>, F>,
 }
 
 impl<S, F> ClientCore<S, F>
