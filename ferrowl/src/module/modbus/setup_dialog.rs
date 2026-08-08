@@ -139,9 +139,9 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_ca()})]
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp)})]
     pub port: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
@@ -206,6 +206,11 @@ impl SetupDialog {
             }
             Endpoint::RtuOverTcp { ip, port } => {
                 dialog.transport.state.set_selection(2); // Tcp=0, Rtu=1, RtuOverTcp=2
+                set_input(&mut dialog.ip, ip);
+                set_input(&mut dialog.port, &port.to_string());
+            }
+            Endpoint::Udp { ip, port } => {
+                dialog.transport.state.set_selection(3); // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
@@ -299,9 +304,14 @@ impl SetupDialog {
             .transport(selection(
                 "Transport",
                 None,
-                // Tcp=0, Rtu=1, RtuOverTcp=2 — appended last to keep Rtu's existing index
-                // stable rather than reordering around it.
-                vec![Transport::Tcp, Transport::Rtu, Transport::RtuOverTcp],
+                // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3 — each appended last to keep prior
+                // indices stable rather than reordering around them.
+                vec![
+                    Transport::Tcp,
+                    Transport::Rtu,
+                    Transport::RtuOverTcp,
+                    Transport::Udp,
+                ],
                 &selection_style,
             ))
             .role(selection(
@@ -648,6 +658,21 @@ impl SetupDialog {
                     502
                 };
                 Endpoint::RtuOverTcp { ip, port }
+            }
+            Transport::Udp => {
+                let mut ip = self.ip.state.input().trim().to_string();
+                if ip.is_empty() {
+                    ip = "127.0.0.1".to_string();
+                }
+                let port = self.port.state.input();
+                let port = if !port.is_empty() {
+                    port.trim()
+                        .parse::<u16>()
+                        .map_err(|_| "Port must be a number (0-65535).".to_string())?
+                } else {
+                    502
+                };
+                Endpoint::Udp { ip, port }
             }
             Transport::Rtu => {
                 let mut path = self.path.state.input().trim().to_string();
@@ -1336,6 +1361,34 @@ mod tests {
                 port: 1502
             }
         );
+    }
+
+    #[test]
+    /// MB-R-116 — resolving a Udp dialog produces `Endpoint::Udp` with the entered ip/port,
+    /// for either role.
+    fn ut_resolve_udp_endpoint() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.transport.state.set_selection(3); // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3
+        set_input(&mut dialog.ip, "10.0.0.9");
+        set_input(&mut dialog.port, "1502");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(
+            outcome.values.endpoint,
+            Endpoint::Udp {
+                ip: "10.0.0.9".into(),
+                port: 1502
+            }
+        );
+
+        dialog.role.state.set_selection(1); // Role::Server=0, Role::Client=1
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.role, Role::Client);
     }
 
     #[test]
