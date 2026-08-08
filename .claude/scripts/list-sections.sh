@@ -2,8 +2,9 @@
 # List a markdown file's headings, one per line, exactly as extract-section.sh
 # expects them verbatim as its first argument. Lets an agent discover what's
 # extractable without grepping or reading the whole file first.
+# Generic: works on any markdown file, not just docs/specs/.
 #
-# Usage: sh scripts/list-sections.sh path/to/file.md [path/to/file2.md ...]
+# Usage: sh .claude/scripts/list-sections.sh path/to/file.md [path/to/file2.md ...]
 set -eu
 
 if [ "$#" -lt 1 ]; then

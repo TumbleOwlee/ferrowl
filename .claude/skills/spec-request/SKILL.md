@@ -7,13 +7,13 @@ description: PO-facing entrypoint — derive spec text from a requirement via di
 
 **Concise, compact, facts only.**
 
-`AGENTS.md` is authority for gate 1 and gate 1b — read `### Gate 1` and `### Gate 1b` and follow them exactly. This skill is only the invocation entrypoint; it does not restate that procedure. Conflict between this file and `AGENTS.md` → `AGENTS.md` wins.
+`.claude/AGENTS.workflow.md` is authority for gate 1 and gate 1b — read `### Gate 1` and `### Gate 1b` and follow them exactly. This skill is only the invocation entrypoint; it does not restate that procedure. Conflict between this file and `.claude/AGENTS.workflow.md` → `.claude/AGENTS.workflow.md` wins.
 
 Single-session, no resume: skip gate 1's **Board** bullet entirely — no `open/<slug>.md`, `artifacts/<slug>/`, `spec-diff.md`, or task card. The ticket from gate 1b is the only artifact produced; approved spec text lives in its self-contained body, not `docs/specs/` (main only holds spec for code that already exists).
 
 ## Where each step lives
 
-Pull one `AGENTS.md` section at a time, never the whole file: `sh .claude/scripts/extract-section.sh '<heading>' AGENTS.md`.
+Pull one section at a time, never the whole file: `sh .claude/scripts/extract-section.sh '<heading>' .claude/AGENTS.workflow.md`.
 
 | Step | Heading |
 |---|---|

@@ -59,6 +59,24 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
 
 ## Conventions
 
+- **Never read a whole file when only part of it is needed.** For any
+  markdown file (not just `docs/specs/` — skill `SKILL.md`s, other repos'
+  docs, anything `.md`), use `sh .claude/scripts/extract-section.sh '<heading>'
+  ['<heading>' ...] <file>` (unknown heading text: `sh
+  .claude/scripts/list-sections.sh <file>` first) instead of `cat`/Read on the
+  whole file. For any other large file where only a line range is needed, use
+  `sed -n '<start>,<end>p' <file>` instead of a full `cat`/Read. This applies
+  equally whether the read happens via the Read tool or a Bash `cat` — both
+  cost the same context.
+- **Filter shell output before it lands in context, not after.** `find`,
+  `git show`, `git diff`, `cargo test`, `cargo llvm-cov` and similar can
+  produce far more than is needed. Narrow at the shell — `find` with
+  `-name`/`-path`, `git show --stat` (or a path filter) before full content,
+  `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output — rather
+  than dumping everything and reading past what's unneeded.
+- **Don't re-run a read-only command for output already in context this
+  session.** `git diff`, `git log`, `git show` etc. against the same
+  refs/paths already shown once — scroll back instead of re-running.
 - Unit tests live in `#[cfg(test)] mod tests` at the bottom of the file under
   test, function names prefixed `ut_`. Integration tests belong in each
   crate's `tests/`, function names prefixed `it_` (notably in `ferrowl-ui`
@@ -97,6 +115,11 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   dialog, and version-independent *plumbing* that must inspect an arbitrary
   encoded action (e.g. a scope/EVSE guard spanning all actions) where no
   typed accessor exists.
+- **No hard line wrap on anything posted externally** — issue bodies, PR
+  bodies, PR/review comments. The host (GitHub) soft-wraps for display; a
+  manually inserted `\n` mid-sentence survives rendering as a real line
+  break and fragments the text. Paragraphs as single unbroken lines; only
+  headings, list items, and code blocks get their own line.
 
 ## Scope boundaries — check with the user before
 
