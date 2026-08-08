@@ -105,8 +105,9 @@ pub struct SetupDialog {
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
-    /// TLS level, offered only for TCP (MB-R-112: RTU carries no `tls` field at all).
-    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    /// TLS level, offered for TCP and RtuOverTcp (MB-R-115) — not RTU (MB-R-112: RTU carries
+    /// no `tls` field at all).
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
     #[focus]
     pub role: Widget<SelectionState<Role>, Selection<Role>>,
@@ -138,9 +139,9 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_ca()})]
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Tcp})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
     pub port: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {self.transport.get_value() == Transport::Rtu})]
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
@@ -203,12 +204,8 @@ impl SetupDialog {
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
-            // TODO(s4): the dialog's own `Transport` selector has no RtuOverTcp choice yet
-            // (that is s4's job — a real third selector value plus `tls_shown` gating). Until
-            // then, editing an RtuOverTcp instance's ip/port prefills identically to Tcp so the
-            // crate compiles against the now-3-variant `Endpoint`; s4 replaces this arm.
             Endpoint::RtuOverTcp { ip, port } => {
-                dialog.transport.state.set_selection(0);
+                dialog.transport.state.set_selection(2); // Tcp=0, Rtu=1, RtuOverTcp=2
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
@@ -302,7 +299,9 @@ impl SetupDialog {
             .transport(selection(
                 "Transport",
                 None,
-                vec![Transport::Tcp, Transport::Rtu],
+                // Tcp=0, Rtu=1, RtuOverTcp=2 — appended last to keep Rtu's existing index
+                // stable rather than reordering around it.
+                vec![Transport::Tcp, Transport::Rtu, Transport::RtuOverTcp],
                 &selection_style,
             ))
             .role(selection(
@@ -496,9 +495,12 @@ impl SetupDialog {
     // dialog-height computation, so keyboard focus, painting and layout can never disagree about
     // which fields exist. Mirrors `ferrowl::module::ocpp::setup_dialog`'s own `show_*` methods.
 
-    /// The TLS level selection row (any TCP endpoint; never RTU, MB-R-112).
+    /// The TLS level selection row (TCP or RtuOverTcp, MB-R-115; never RTU, MB-R-112).
     fn tls_shown(&self) -> bool {
-        self.transport.get_value() == Transport::Tcp && self.tls_level.get_value() != TlsLevel::Off
+        matches!(
+            self.transport.get_value(),
+            Transport::Tcp | Transport::RtuOverTcp
+        ) && self.tls_level.get_value() != TlsLevel::Off
     }
 
     /// The currently selected TLS level.
@@ -632,6 +634,21 @@ impl SetupDialog {
                 };
                 Endpoint::Tcp { ip, port }
             }
+            Transport::RtuOverTcp => {
+                let mut ip = self.ip.state.input().trim().to_string();
+                if ip.is_empty() {
+                    ip = "127.0.0.1".to_string();
+                }
+                let port = self.port.state.input();
+                let port = if !port.is_empty() {
+                    port.trim()
+                        .parse::<u16>()
+                        .map_err(|_| "Port must be a number (0-65535).".to_string())?
+                } else {
+                    502
+                };
+                Endpoint::RtuOverTcp { ip, port }
+            }
             Transport::Rtu => {
                 let mut path = self.path.state.input().trim().to_string();
                 if path.is_empty() {
@@ -685,8 +702,9 @@ impl SetupDialog {
         };
 
         // TLS is hidden entirely for RTU (MB-R-112): report no value at all, so a save on an
-        // RTU instance never clobbers a device config's existing `tls` setting.
-        let tls = if matches!(endpoint, Endpoint::Tcp { .. }) {
+        // RTU instance never clobbers a device config's existing `tls` setting. RtuOverTcp
+        // carries TLS exactly like Tcp (MB-R-115).
+        let tls = if matches!(endpoint, Endpoint::Tcp { .. } | Endpoint::RtuOverTcp { .. }) {
             let level = self.tls_level.state.get_value();
             if level == TlsLevel::Off {
                 Some(None)
@@ -738,6 +756,8 @@ impl SetupDialog {
         }
 
         let is_new = self.mode == DialogMode::New;
+        // Deliberately not `!= Transport::Tcp`: RtuOverTcp uses the 1-row TCP-shaped ip/port
+        // layout, not RTU's 2-row serial layout, so it must stay excluded from `is_rtu` here.
         let is_rtu = self.transport.state.get_value() == Transport::Rtu;
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
@@ -1262,6 +1282,60 @@ mod tests {
         set_suggest_input(&mut dialog.path, "/dev/ttyUSB0");
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.tls, None);
+    }
+
+    #[test]
+    /// UI-R-024 — an RtuOverTcp setup dialog shows the same fields as TCP (ip/port,
+    /// TLS level selector) and none of RTU's serial fields (MB-R-113).
+    fn ut_rtu_over_tcp_dialog_shows_tcp_like_fields() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        dialog.transport.state.set_selection(2); // Tcp=0, Rtu=1, RtuOverTcp=2
+        assert_eq!(dialog.transport.state.get_value(), Transport::RtuOverTcp);
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("IP"),
+            "missing IP field for RtuOverTcp:\n{text}"
+        );
+        assert!(
+            text.contains("TLS"),
+            "missing TLS selector for RtuOverTcp:\n{text}"
+        );
+        assert!(
+            !text.contains("Baud"),
+            "RTU serial field leaked into RtuOverTcp:\n{text}"
+        );
+    }
+
+    #[test]
+    /// MB-R-113 — resolving an RtuOverTcp dialog produces `Endpoint::RtuOverTcp`
+    /// with the entered ip/port.
+    fn ut_resolve_rtu_over_tcp_endpoint() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.transport.state.set_selection(2);
+        set_input(&mut dialog.ip, "10.0.0.9");
+        set_input(&mut dialog.port, "1502");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(
+            outcome.values.endpoint,
+            Endpoint::RtuOverTcp {
+                ip: "10.0.0.9".into(),
+                port: 1502
+            }
+        );
     }
 
     #[test]

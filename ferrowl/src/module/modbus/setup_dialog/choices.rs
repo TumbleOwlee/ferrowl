@@ -18,6 +18,9 @@ pub enum DialogMode {
 pub enum Transport {
     Tcp,
     Rtu,
+    /// RTU framing carried over a TCP socket (MB-R-113) — shares the `Tcp` field set
+    /// (ip/port, TLS), not RTU's serial fields.
+    RtuOverTcp,
 }
 
 impl ToLabel for Transport {
@@ -25,6 +28,7 @@ impl ToLabel for Transport {
         match self {
             Transport::Tcp => "TCP",
             Transport::Rtu => "RTU",
+            Transport::RtuOverTcp => "RTU over TCP",
         }
         .to_string()
     }
@@ -117,6 +121,7 @@ mod tests {
     fn ut_labels() {
         assert_eq!(Transport::Tcp.to_label(), "TCP");
         assert_eq!(Transport::Rtu.to_label(), "RTU");
+        assert_eq!(Transport::RtuOverTcp.to_label(), "RTU over TCP");
         assert_eq!(Parity::Even.to_label(), "Even");
         assert_eq!(ReconnectChoice::On.to_label(), "On");
         assert_eq!(U8Choice(8).to_label(), "8");
