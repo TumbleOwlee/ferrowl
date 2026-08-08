@@ -237,7 +237,7 @@ behavior, stated limitations).
 
 ## Module lifecycle and device configuration
 
-**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, or RtuOverTcp, and shall own one shared register store, one register set, and one log.
+**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, RtuOverTcp, or Udp, and shall own one shared register store, one register set, and one log.
 
 **MB-R-077** — A module's register store shall be built from its device config's register definitions: each fixed-address register shall declare the range `[address, address + format width)` under the key (slave id, kind).
 
