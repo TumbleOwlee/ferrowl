@@ -293,6 +293,14 @@ pub(crate) fn endpoint_to_config(
             interval_ms: timing.interval_ms,
             reconnect: timing.reconnect,
         }),
+        Endpoint::Udp { ip, port } => NetConfig::Udp(ferrowl_modbus::udp::Config {
+            ip: ip.clone(),
+            port: *port,
+            timeout_ms: timing.timeout_ms,
+            delay_ms: timing.delay_ms,
+            interval_ms: timing.interval_ms,
+            reconnect: timing.reconnect,
+        }),
     }
 }
 
@@ -334,6 +342,15 @@ pub(crate) fn build_instance(
                 memory,
             })
         }
+        (Role::Client, NetConfig::Udp(cfg)) => Instance::with_udp_client(ClientConfig {
+            config: Arc::new(RwLock::new(cfg)),
+            operations,
+            memory,
+        }),
+        (Role::Server, NetConfig::Udp(cfg)) => Instance::with_udp_server(ServerConfig {
+            config: Arc::new(RwLock::new(cfg)),
+            memory,
+        }),
     }
 }
 
@@ -734,6 +751,35 @@ mod tests {
         match net_config {
             NetConfig::RtuOverTcp(cfg) => assert_eq!(cfg.tls, tls),
             _ => panic!("expected an RtuOverTcp config"),
+        }
+    }
+
+    /// MB-R-116 — a `Udp` endpoint resolves to a `Transport::Udp` config carrying the same
+    /// timing fields every other transport gets from `Timing`, and no `tls`.
+    #[test]
+    fn ut_endpoint_to_config_udp() {
+        use super::{Timing, endpoint_to_config};
+        use crate::config::Endpoint;
+        use ferrowl_modbus::Transport as NetConfig;
+
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let endpoint = Endpoint::Udp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let net_config = endpoint_to_config(&endpoint, &timing, None);
+        match net_config {
+            NetConfig::Udp(cfg) => {
+                assert_eq!(cfg.ip, "127.0.0.1");
+                assert_eq!(cfg.port, 502);
+                assert_eq!(cfg.timeout_ms, 1000);
+            }
+            _ => panic!("expected a Udp config"),
         }
     }
 }

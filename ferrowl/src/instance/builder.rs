@@ -1,6 +1,6 @@
 //! Transport/role-specific builder held by an [`Instance`](crate::instance::Instance).
 
-use ferrowl_modbus::{KeyParams, rtu, rtu_over_tcp, tcp};
+use ferrowl_modbus::{KeyParams, rtu, rtu_over_tcp, tcp, udp};
 
 /// The underlying ferrowl-modbus builder for each transport/role combination.
 pub enum Builder<T: KeyParams> {
@@ -10,4 +10,6 @@ pub enum Builder<T: KeyParams> {
     RtuServer(rtu::ServerBuilder<T>),
     RtuOverTcpClient(rtu_over_tcp::ClientBuilder<T>),
     RtuOverTcpServer(rtu_over_tcp::ServerBuilder<T>),
+    UdpClient(udp::ClientBuilder<T>),
+    UdpServer(udp::ServerBuilder<T>),
 }
