@@ -80,7 +80,7 @@ impl<T: KeyParams> ClientBuilder<T> {
 /// A connected Modbus TCP client. Connection setup is TCP-specific; the read/command loop is
 /// shared via the internal `ClientCore`, over a socket carrying Modbus TCP framing.
 pub struct Client {
-    pub(crate) core: ClientCore<ClientStream, rust_modbus::Tcp>,
+    pub(crate) core: ClientCore<FrameTransport<ClientStream, rust_modbus::Tcp>, rust_modbus::Tcp>,
 }
 
 impl Client {

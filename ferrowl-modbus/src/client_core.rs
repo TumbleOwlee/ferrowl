@@ -10,13 +10,12 @@ use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunCo
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
-    Address, Client, ClientFraming, ExceptionCode, FrameTransport, FunctionCode, Quantity,
+    Address, Client, ClientFraming, ClientTransport, ExceptionCode, FunctionCode, Quantity,
     RegisterValue, UnitId,
 };
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::sleep;
@@ -83,12 +82,12 @@ pub(crate) fn classify<V>(
 /// Owns a connected Modbus client and drives the read/command loop. Transport-neutral: the TCP
 /// and RTU `Client` types each establish the connection, then hand the client here.
 pub(crate) struct ClientCore<S, F> {
-    pub(crate) client: Client<FrameTransport<S, F>, F>,
+    pub(crate) client: Client<S, F>,
 }
 
 impl<S, F> ClientCore<S, F>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send,
+    S: ClientTransport<F>,
     F: ClientFraming,
 {
     async fn read<L>(
@@ -563,7 +562,10 @@ mod tests {
     /// An RTU-framed client over an in-memory duplex link, plus the peer end of that link.
     /// Nothing ever answers on the peer end: the broadcast tests below are about what the
     /// client does *without* a response.
-    fn rtu_client_over_duplex() -> (ClientCore<DuplexStream, Rtu>, DuplexStream) {
+    fn rtu_client_over_duplex() -> (
+        ClientCore<FrameTransport<DuplexStream, Rtu>, Rtu>,
+        DuplexStream,
+    ) {
         let (client_end, peer) = tokio::io::duplex(256);
         let core = ClientCore {
             client: Client::new(FrameTransport::<_, Rtu>::new(client_end)),

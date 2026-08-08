@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
-use rust_modbus::{Client as ModbusClient, Rtu, SerialStream, open_serial};
+use rust_modbus::{Client as ModbusClient, FrameTransport, Rtu, SerialStream, open_serial};
 
 /// Builds and spawns a Modbus RTU client task that polls `operations` into
 /// the shared `memory` and executes incoming [`Command`]s.
@@ -80,7 +80,7 @@ impl<T: KeyParams> ClientBuilder<T> {
 /// A connected Modbus RTU client. Connection setup is serial-specific; the read/command loop is
 /// shared via the internal `ClientCore`, over a serial port carrying RTU framing.
 pub struct Client {
-    pub(crate) core: ClientCore<SerialStream, Rtu>,
+    pub(crate) core: ClientCore<FrameTransport<SerialStream, Rtu>, Rtu>,
 }
 
 impl Client {
