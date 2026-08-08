@@ -234,6 +234,9 @@ impl ModbusModuleView {
             self.device.reconnect = Some(reconnect);
         }
         self.device.read_ranges = values.read_ranges.clone();
+        if let Some(tls) = values.tls.clone() {
+            self.device.tls = tls;
+        }
 
         let timing = ModbusModule::resolve_timing(&self.device);
         let role = self.spec.role.to_string();
@@ -241,7 +244,13 @@ impl ModbusModuleView {
 
         if let Err(e) = self
             .module
-            .reconfigure(&values.endpoint, values.role, timing, values.read_ranges)
+            .reconfigure(
+                &values.endpoint,
+                values.role,
+                timing,
+                values.read_ranges,
+                self.device.tls.clone(),
+            )
             .await
         {
             self.module

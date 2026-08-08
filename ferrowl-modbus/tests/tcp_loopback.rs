@@ -62,6 +62,7 @@ fn config(port: u16) -> tcp::Config {
         delay_ms: 0,
         interval_ms: 0,
         reconnect: true,
+        tls: None,
     }
 }
 

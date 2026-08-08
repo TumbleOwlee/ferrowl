@@ -11,7 +11,7 @@ pub use server::ServerBuilder;
 
 /// Modbus RTU serial settings; doubles as the clap argument group for RTU
 /// mode.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, Args)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Args)]
 pub struct Config {
     /// The device path to use for communication.
     pub path: String,
@@ -84,5 +84,16 @@ mod tests {
         let json = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0,"reconnect":false}"#;
         let cfg: Config = serde_json::from_str(json).unwrap();
         assert!(!cfg.reconnect);
+    }
+
+    #[test]
+    /// MB-R-112 — the RTU config carries no `tls` field: an extra `"tls"` key is
+    /// silently ignored on deserialize, proving TLS is unreachable on RTU.
+    fn ut_rtu_config_ignores_unknown_tls_key() {
+        let without_tls = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0}"#;
+        let with_tls = r#"{"path":"/dev/ttyUSB0","baud_rate":115200,"slave":1,"parity":null,"data_bits":null,"stop_bits":null,"timeout_ms":3000,"delay_ms":0,"interval_ms":0,"tls":{"self_signed":true}}"#;
+        let cfg_without: Config = serde_json::from_str(without_tls).unwrap();
+        let cfg_with: Config = serde_json::from_str(with_tls).unwrap();
+        assert_eq!(cfg_without, cfg_with);
     }
 }

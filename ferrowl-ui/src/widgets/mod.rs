@@ -205,3 +205,72 @@ where
         StatefulWidget::render(&self.widget, area, buf, state)
     }
 }
+
+/// Render a single `$self.$field: Widget<S, W>` in `$area`. A generic function taking
+/// `&mut Widget<S, W>` hits trait-solver overflow on the blanket `StatefulWidget for &Widget<S,
+/// W>` impl above (ambiguous recursion through `W`), so this boilerplate is a macro instead —
+/// each call site expands with `W` already concrete, sidestepping the overflow entirely.
+#[macro_export]
+macro_rules! render_field {
+    ($self:ident, $field:ident, $area:expr, $buf:expr) => {
+        ::ratatui::widgets::StatefulWidget::render(
+            &$self.$field.widget,
+            $area,
+            $buf,
+            &mut $self.$field.state,
+        )
+    };
+}
+
+/// Render any number of `$self.$field` widgets left-to-right across `$area`, either evenly
+/// split (`field1, field2, ...`) or each sized by its own `Constraint`
+/// (`field1 => Constraint::Length(12), field2 => Constraint::Min(1), ...`).
+#[macro_export]
+macro_rules! render_row {
+    ($self:ident, $area:expr, $buf:expr; $($field:ident),+ $(,)?) => {{
+        let __areas = ::ratatui::layout::Layout::horizontal(::std::vec![
+            ::ratatui::layout::Constraint::Fill(1);
+            [$(::std::stringify!($field)),+].len()
+        ])
+        .split($area);
+        let mut __i = 0;
+        $(
+            $crate::render_field!($self, $field, __areas[__i], $buf);
+            __i += 1;
+        )+
+    }};
+    ($self:ident, $area:expr, $buf:expr; $($field:ident => $constraint:expr),+ $(,)?) => {{
+        let __areas = ::ratatui::layout::Layout::horizontal([$($constraint),+]).split($area);
+        let mut __i = 0;
+        $(
+            $crate::render_field!($self, $field, __areas[__i], $buf);
+            __i += 1;
+        )+
+    }};
+}
+
+/// Render any number of `$self.$field` widgets top-to-bottom across `$area`, either evenly
+/// split or each sized by its own `Constraint` — the vertical counterpart of `render_row!`.
+#[macro_export]
+macro_rules! render_col {
+    ($self:ident, $area:expr, $buf:expr; $($field:ident),+ $(,)?) => {{
+        let __areas = ::ratatui::layout::Layout::vertical(::std::vec![
+            ::ratatui::layout::Constraint::Fill(1);
+            [$(::std::stringify!($field)),+].len()
+        ])
+        .split($area);
+        let mut __i = 0;
+        $(
+            $crate::render_field!($self, $field, __areas[__i], $buf);
+            __i += 1;
+        )+
+    }};
+    ($self:ident, $area:expr, $buf:expr; $($field:ident => $constraint:expr),+ $(,)?) => {{
+        let __areas = ::ratatui::layout::Layout::vertical([$($constraint),+]).split($area);
+        let mut __i = 0;
+        $(
+            $crate::render_field!($self, $field, __areas[__i], $buf);
+            __i += 1;
+        )+
+    }};
+}

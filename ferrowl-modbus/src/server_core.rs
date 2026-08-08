@@ -501,6 +501,53 @@ where
                 .await;
         }
     }
+
+    // No `Connection` names the peer here — the handshake never got far enough to be
+    // accepted (MB-R-111, server logging half). `Error::TlsHandshake.peer_cert` only
+    // carries the raw offered DER, never a parsed subject, so the certificate's byte
+    // length is the most specific identity this can report without adding an x509
+    // parser dependency.
+    async fn on_tls_handshake_failed(
+        &self,
+        peer: std::net::SocketAddr,
+        error: &rust_modbus::Error,
+    ) {
+        let detail = match error {
+            rust_modbus::Error::TlsHandshake {
+                source,
+                peer_cert: Some(cert),
+            } => {
+                format!(
+                    "{source}; the client presented a certificate (fingerprint {}) that was rejected",
+                    sha256_fingerprint(cert)
+                )
+            }
+            rust_modbus::Error::TlsHandshake {
+                source,
+                peer_cert: None,
+            } => source.to_string(),
+            other => other.to_string(),
+        };
+        self.log
+            .invoke(format!("TLS handshake with {peer} failed: {detail}."))
+            .await;
+    }
+}
+
+/// A SHA-256 fingerprint of a certificate's raw DER bytes, colon-separated hex
+/// (the conventional certificate-fingerprint display) — the crate exposes only the
+/// raw DER, no parsed subject, so a fingerprint is the strongest identity a log line
+/// can carry without adding an x509 parser dependency. A byte length is not: two
+/// distinct certificates of the same length are indistinguishable by length alone
+/// (MB-R-111).
+fn sha256_fingerprint(cert: &rustls_pki_types::CertificateDer<'_>) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, cert.as_ref());
+    digest
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[cfg(test)]
@@ -549,6 +596,37 @@ mod tests {
             }
         };
         (log, buf)
+    }
+
+    #[tokio::test]
+    /// MB-R-111 (server logging half) — a TLS handshake failure logs the peer address
+    /// and the underlying failure, including the rejected client certificate's size
+    /// when one was offered (the crate only exposes the raw DER, no parsed subject).
+    async fn ut_on_tls_handshake_failed_logs_peer_and_error() {
+        let mem = seeded_memory(&[]);
+        let (log, buf) = recording_log();
+        let server = Server::new(mem, log, true);
+
+        let peer: std::net::SocketAddr = "127.0.0.1:5502".parse().unwrap();
+        let error = rust_modbus::Error::TlsHandshake {
+            source: tokio_rustls::rustls::Error::General("bad certificate".to_string()),
+            peer_cert: Some(rustls_pki_types::CertificateDer::from(vec![1, 2, 3, 4])),
+        };
+        server.on_tls_handshake_failed(peer, &error).await;
+
+        let lines = buf.lock().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("127.0.0.1:5502"), "line: {}", lines[0]);
+        assert!(lines[0].contains("bad certificate"), "line: {}", lines[0]);
+        // SHA-256 of [1, 2, 3, 4], colon-separated hex (computed from the SHA-256
+        // standard, not from this crate's own output).
+        assert!(
+            lines[0].contains(
+                "9f:64:a7:47:e1:b9:7f:13:1f:ab:b6:b4:47:29:6c:9b:6f:02:01:e7:9f:b3:c5:35:6e:6c:77:e8:9b:6a:80:6a"
+            ),
+            "line: {}",
+            lines[0]
+        );
     }
 
     // Regression: the service used to bridge into async via `block_in_place` +

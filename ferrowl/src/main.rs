@@ -117,6 +117,7 @@ fn demo_modbus_tab(name: String, role: Role) -> Tab {
         delay_ms: None,
         interval_ms: None,
         reconnect: None,
+        tls: None,
         log_file: None,
         read_ranges: Default::default(),
         definitions,

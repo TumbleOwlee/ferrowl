@@ -21,7 +21,7 @@ use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, rout
 use crate::module::ocpp::server::backend::Scope;
 use crate::module::ocpp::widgets;
 use ferrowl_ui::{
-    COLOR_SCHEME,
+    COLOR_SCHEME, render_col, render_field,
     state::{InputFieldState, TableState},
     style::InputFieldStyle,
     traits::{HandleEvents, SetFocus},
@@ -138,7 +138,7 @@ pub struct DetailOverlay {
     cfg: CfgTable,
     /// CS-level "Configuration" table with a Component column (2.0.1), used when `component_col`.
     #[focus(when = self.is_cs && self.component_col)]
-    cfg4: CfgTableC,
+    cfg_component: CfgTableC,
     /// Whether the config table carries a Component column (2.0.1) vs a flat key (1.6).
     component_col: bool,
     #[focus(when = self.is_cs)]
@@ -172,7 +172,7 @@ impl DetailOverlay {
             state: kv_table("State"),
             side: kv_table("Metering"),
             cfg: cfg_table(),
-            cfg4: cfg4_table(),
+            cfg_component: cfg_component_table(),
             component_col,
             key_input: key_input(),
             config: Vec::new(),
@@ -267,7 +267,7 @@ impl DetailOverlay {
                     }
                 })
                 .collect();
-            self.cfg4.state.set_values(rows);
+            self.cfg_component.state.set_values(rows);
         } else {
             let rows: Vec<CfgRow> = self
                 .config
@@ -313,14 +313,14 @@ impl DetailOverlay {
         self.state.widget.set_row_margin(margin);
         self.side.widget.set_row_margin(margin);
         self.cfg.widget.set_row_margin(margin);
-        self.cfg4.widget.set_row_margin(margin);
+        self.cfg_component.widget.set_row_margin(margin);
         self.rfid.widget.set_row_margin(margin);
     }
 
     /// The selected row index of the active config table.
     fn config_selected(&self) -> Option<usize> {
         if self.component_col {
-            self.cfg4.state.table_state().selected()
+            self.cfg_component.state.table_state().selected()
         } else {
             self.cfg.state.table_state().selected()
         }
@@ -414,7 +414,7 @@ impl DetailOverlay {
             (KeyModifiers::NONE, KeyCode::Char('d'))
                 if matches!(
                     self.focus,
-                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::CfgComponent
                 ) =>
             {
                 self.delete_selected_config()
@@ -422,7 +422,7 @@ impl DetailOverlay {
             (KeyModifiers::NONE, KeyCode::Char('u'))
                 if matches!(
                     self.focus,
-                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::CfgComponent
                 ) =>
             {
                 if let Some(key) = self.selected_config_key() {
@@ -432,7 +432,7 @@ impl DetailOverlay {
             (KeyModifiers::NONE, KeyCode::Enter)
                 if matches!(
                     self.focus,
-                    DetailOverlayFocus::Cfg | DetailOverlayFocus::Cfg4
+                    DetailOverlayFocus::Cfg | DetailOverlayFocus::CfgComponent
                 ) =>
             {
                 if let Some(key) = self.selected_config_key() {
@@ -457,8 +457,8 @@ impl DetailOverlay {
             DetailOverlayFocus::State => {
                 let _ = self.state.state.handle_events(modifiers, code);
             }
-            DetailOverlayFocus::Cfg4 => {
-                let _ = self.cfg4.state.handle_events(modifiers, code);
+            DetailOverlayFocus::CfgComponent => {
+                let _ = self.cfg_component.state.handle_events(modifiers, code);
             }
             DetailOverlayFocus::Cfg => {
                 let _ = self.cfg.state.handle_events(modifiers, code);
@@ -518,9 +518,9 @@ impl DetailOverlay {
         self.cfg
             .state
             .set_focused(self.focus == DetailOverlayFocus::Cfg);
-        self.cfg4
+        self.cfg_component
             .state
-            .set_focused(self.focus == DetailOverlayFocus::Cfg4);
+            .set_focused(self.focus == DetailOverlayFocus::CfgComponent);
         self.rfid
             .state
             .set_focused(self.focus == DetailOverlayFocus::Rfid);
@@ -536,51 +536,26 @@ impl DetailOverlay {
             let [left, right] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas(mid);
-            let [config_area, fetch_area] =
-                Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(left);
-            let [rfid_area, rfid_input_area] =
-                Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(right);
             self.key_input
                 .state
                 .set_focused(self.focus == DetailOverlayFocus::KeyInput);
-            StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
+            render_field!(self, state, state_area, buf);
             if self.component_col {
-                StatefulWidget::render(&self.cfg4.widget, config_area, buf, &mut self.cfg4.state);
+                render_col!(self, left, buf; cfg_component => Constraint::Min(1), key_input => Constraint::Length(3));
             } else {
-                StatefulWidget::render(&self.cfg.widget, config_area, buf, &mut self.cfg.state);
+                render_col!(self, left, buf; cfg => Constraint::Min(1), key_input => Constraint::Length(3));
             }
-            StatefulWidget::render(
-                &self.key_input.widget,
-                fetch_area,
-                buf,
-                &mut self.key_input.state,
-            );
-            StatefulWidget::render(&self.rfid.widget, rfid_area, buf, &mut self.rfid.state);
-            StatefulWidget::render(
-                &self.rfid_input.widget,
-                rfid_input_area,
-                buf,
-                &mut self.rfid_input.state,
-            );
+            render_col!(self, right, buf; rfid => Constraint::Min(1), rfid_input => Constraint::Length(3));
         } else {
             // Connector: State above the RFID list (+ add input) on the left, Metering on the right.
             let [left, right] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Min(1)]).areas(inner);
-            let [state_area, rfid_area, rfid_input_area] = Layout::vertical([
-                Constraint::Percentage(45),
-                Constraint::Min(1),
-                Constraint::Length(3),
-            ])
-            .areas(left);
-            StatefulWidget::render(&self.state.widget, state_area, buf, &mut self.state.state);
-            StatefulWidget::render(&self.rfid.widget, rfid_area, buf, &mut self.rfid.state);
-            StatefulWidget::render(
-                &self.rfid_input.widget,
-                rfid_input_area,
-                buf,
-                &mut self.rfid_input.state,
+            render_col!(self, left, buf;
+                state => Constraint::Percentage(45),
+                rfid => Constraint::Min(1),
+                rfid_input => Constraint::Length(3)
             );
-            StatefulWidget::render(&self.side.widget, right, buf, &mut self.side.state);
+            render_field!(self, side, right, buf);
         }
 
         if let Some((_key, field)) = self.set_dialog.as_mut() {
@@ -618,7 +593,7 @@ fn cfg_table() -> CfgTable {
     widgets::table("Configuration")
 }
 
-fn cfg4_table() -> CfgTableC {
+fn cfg_component_table() -> CfgTableC {
     widgets::table("Configuration")
 }
 
@@ -722,14 +697,14 @@ mod tests {
         d.merge_config("OCPPCommCtrlr/HeartbeatInterval".into(), "30".into(), true);
         // A key without a `/` keeps an empty component.
         d.merge_config("Bare".into(), "x".into(), false);
-        let rows = d.cfg4.state.values();
+        let rows = d.cfg_component.state.values();
         assert_eq!(rows[0].component, "OCPPCommCtrlr");
         assert_eq!(rows[0].key, "HeartbeatInterval");
         assert_eq!(rows[0].readonly, "yes");
         assert_eq!(rows[1].component, "");
         assert_eq!(rows[1].key, "Bare");
         // The selected key fed to fetch/set is the full combined `Component/Variable`.
-        d.focus = DetailOverlayFocus::Cfg4;
+        d.focus = DetailOverlayFocus::CfgComponent;
         let req = d.input(KeyModifiers::NONE, KeyCode::Char('u'));
         assert!(
             matches!(req, Some(DetailRequest::Fetch(k)) if k == "OCPPCommCtrlr/HeartbeatInterval")
@@ -795,10 +770,10 @@ mod tests {
     #[test]
     /// UI-R-022 — the CS detail focus cycle includes the component column.
     fn focus_cycle_cs_component_col() {
-        // CS with a Component column: State -> Cfg4 -> KeyInput -> Rfid -> RfidInput -> wrap.
+        // CS with a Component column: State -> CfgComponent -> KeyInput -> Rfid -> RfidInput -> wrap.
         let mut d = DetailOverlay::new("CP".into(), Scope::CS, true);
         for expected in [
-            DetailOverlayFocus::Cfg4,
+            DetailOverlayFocus::CfgComponent,
             DetailOverlayFocus::KeyInput,
             DetailOverlayFocus::Rfid,
             DetailOverlayFocus::RfidInput,
@@ -812,7 +787,7 @@ mod tests {
             DetailOverlayFocus::RfidInput,
             DetailOverlayFocus::Rfid,
             DetailOverlayFocus::KeyInput,
-            DetailOverlayFocus::Cfg4,
+            DetailOverlayFocus::CfgComponent,
             DetailOverlayFocus::State,
         ] {
             d.focus_previous();

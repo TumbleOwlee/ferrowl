@@ -43,6 +43,7 @@ fn network_log_level(s: &str) -> Level {
     if lower.contains("disconnecting")
         || lower.contains("reconnect disabled")
         || lower.contains("timed out")
+        || lower.contains("tls handshake")
     {
         Level::Error
     } else if lower.contains("disconnected")
@@ -152,7 +153,7 @@ impl ModbusModule {
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
         let timing = Self::resolve_timing(device);
-        let net_config = endpoint_to_config(&spec.endpoint, &timing);
+        let net_config = endpoint_to_config(&spec.endpoint, &timing, device.tls.clone());
         let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
 
         let mut module = Self {
@@ -381,6 +382,7 @@ impl ModbusModule {
         role: Role,
         timing: Timing,
         read_ranges: ReadRanges,
+        tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
     ) -> Result<(), Error> {
         // Best-effort stop of any running instance; the caller is expected to `start()` afterwards.
         let _ = self.instance.stop().await;
@@ -393,7 +395,7 @@ impl ModbusModule {
                 .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
         }
         self.rebuild_operations().await;
-        let net_config = endpoint_to_config(endpoint, &timing);
+        let net_config = endpoint_to_config(endpoint, &timing, tls);
         self.instance = build_instance(
             role,
             net_config,
@@ -443,6 +445,18 @@ mod tests {
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
     }
 
+    #[test]
+    /// MB-R-111 (server logging half) — a TLS handshake failure line classifies as
+    /// `Level::Error`, matching the peer/failure-detail format `on_tls_handshake_failed`
+    /// logs (`"TLS handshake with {peer} failed: {detail}."`).
+    fn ut_network_log_level_classifies_tls_handshake_failure_as_error() {
+        use super::network_log_level;
+        use crate::app::Level;
+
+        let line = "TLS handshake with 127.0.0.1:5502 failed: bad certificate.";
+        assert_eq!(network_log_level(line), Level::Error);
+    }
+
     fn device_with_defs() -> crate::config::DeviceConfig {
         use crate::config::DeviceConfig;
         use crate::config::device::{
@@ -488,6 +502,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(500),
             reconnect: None,
+            tls: None,
             log_file: Some(
                 std::env::temp_dir()
                     .join("ferrowl_module_test.log")
@@ -626,6 +641,7 @@ mod tests {
                 Role::Client,
                 timing,
                 ReadRanges::default(),
+                device.tls.clone(),
             )
             .await
             .expect("reconfigure");
@@ -710,6 +726,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(50),
             reconnect: None,
+            tls: None,
             log_file: None,
             read_ranges: ReadRanges {
                 holding: Some("0-10".into()),

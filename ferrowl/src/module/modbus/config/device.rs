@@ -46,6 +46,11 @@ pub struct DeviceConfig {
     /// servers. See `ModbusModule::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<bool>,
+    /// TLS settings for this device's TCP endpoint (MB-R-104). Ignored entirely when
+    /// the module's endpoint is RTU (MB-R-112). `None` (the default) keeps the
+    /// endpoint on plain TCP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
     /// Base path for per-module log files (tab name appended as suffix). `None` disables.
     #[serde(skip)]
     pub log_file: Option<String>,
@@ -380,6 +385,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(800),
             reconnect: Some(false),
+            tls: None,
             // `log_file` is `#[serde(skip)]` (runtime-only), so it never survives a
             // config roundtrip — leave it None to match the loaded value.
             log_file: None,
@@ -438,6 +444,31 @@ mod tests {
     /// CS-R-004 — a device config round-trips through JSON with no field loss.
     fn ut_device_roundtrip_json() {
         roundtrip(FileType::Json, "json");
+    }
+
+    #[test]
+    /// MB-R-104 — a device config's `tls` block round-trips, and an absent `tls` key
+    /// deserializes to `None`.
+    fn ut_device_config_tls_serde_roundtrip() {
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
+
+        let mut cfg = sample();
+        cfg.tls = Some(ModbusTlsConfig {
+            ca_file: Some("ca.pem".to_string()),
+            cert_file: Some("cert.pem".to_string()),
+            key_file: Some("key.pem".to_string()),
+            require_client_cert: true,
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: DeviceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg, back);
+
+        let path = std::env::temp_dir().join("ferrowl_device_no_tls.toml");
+        let path = path.to_str().unwrap();
+        std::fs::write(path, "definitions = {}\n").unwrap();
+        let loaded: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
+        assert_eq!(loaded.tls, None);
     }
 
     /// A device config file saved before `reconnect` existed (no such key at all) must still

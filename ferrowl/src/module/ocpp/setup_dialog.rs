@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME, EventResult,
+    Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
         SuggestInputState, SuggestInputStateBuilder,
@@ -22,7 +22,7 @@ use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
-    widgets::{Block, Clear, StatefulWidget, Widget as UiWidget},
+    widgets::{Block, Clear, Widget as UiWidget},
 };
 
 use crate::dialog::NonEmpty;
@@ -589,186 +589,68 @@ impl OcppSetupDialog {
         ])
         .split(inner);
 
-        StatefulWidget::render(&self.name.widget, rows[0], buf, &mut self.name.state);
-        StatefulWidget::render(
-            &self.config_path.widget,
-            rows[1],
-            buf,
-            &mut self.config_path.state,
-        );
-
-        let [vl, vr] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .areas(rows[2]);
-        StatefulWidget::render(&self.version.widget, vl, buf, &mut self.version.state);
-        StatefulWidget::render(&self.role.widget, vr, buf, &mut self.role.state);
+        render_field!(self, name, rows[0], buf);
+        render_field!(self, config_path, rows[1], buf);
+        render_row!(self, rows[2], buf; version, role);
 
         if self.path_hidden() {
             // No URL path for the server role — let ip take the freed space.
-            let [proto, ip, port] = Layout::horizontal([
-                Constraint::Length(12),
-                Constraint::Min(1),
-                Constraint::Length(13),
-            ])
-            .areas(rows[3]);
-            StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
-            StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
-            StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
+            render_row!(self, rows[3], buf;
+                protocol => Constraint::Length(12),
+                ip => Constraint::Min(1),
+                port => Constraint::Length(13)
+            );
         } else {
-            let [proto, ip, port, path] = Layout::horizontal([
-                Constraint::Length(12),
-                Constraint::Min(1),
-                Constraint::Length(13),
-                Constraint::Length(24),
-            ])
-            .areas(rows[3]);
-            StatefulWidget::render(&self.protocol.widget, proto, buf, &mut self.protocol.state);
-            StatefulWidget::render(&self.ip.widget, ip, buf, &mut self.ip.state);
-            StatefulWidget::render(&self.port.widget, port, buf, &mut self.port.state);
-            StatefulWidget::render(&self.path.widget, path, buf, &mut self.path.state);
+            render_row!(self, rows[3], buf;
+                protocol => Constraint::Length(12),
+                ip => Constraint::Min(1),
+                port => Constraint::Length(13),
+                path => Constraint::Length(24)
+            );
         }
 
         let is_client = role == OcppRole::Client;
         if show_security_row {
             if show_credentials {
                 if is_client {
-                    let [sec, user, pass, skip] = Layout::horizontal([
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                    ])
-                    .areas(rows[4]);
-                    StatefulWidget::render(
-                        &self.security.widget,
-                        sec,
-                        buf,
-                        &mut self.security.state,
-                    );
-                    StatefulWidget::render(
-                        &self.username.widget,
-                        user,
-                        buf,
-                        &mut self.username.state,
-                    );
-                    StatefulWidget::render(
-                        &self.password.widget,
-                        pass,
-                        buf,
-                        &mut self.password.state,
-                    );
-                    StatefulWidget::render(
-                        &self.skip_verify.widget,
-                        skip,
-                        buf,
-                        &mut self.skip_verify.state,
-                    );
+                    render_row!(self, rows[4], buf; security, username, password, skip_verify);
                 } else {
-                    let [sec, user, pass] = Layout::horizontal([
-                        Constraint::Percentage(34),
-                        Constraint::Percentage(33),
-                        Constraint::Percentage(33),
-                    ])
-                    .areas(rows[4]);
-                    StatefulWidget::render(
-                        &self.security.widget,
-                        sec,
-                        buf,
-                        &mut self.security.state,
-                    );
-                    StatefulWidget::render(
-                        &self.username.widget,
-                        user,
-                        buf,
-                        &mut self.username.state,
-                    );
-                    StatefulWidget::render(
-                        &self.password.widget,
-                        pass,
-                        buf,
-                        &mut self.password.state,
-                    );
+                    render_row!(self, rows[4], buf; security, username, password);
                 }
             } else if is_client {
-                let [sec, skip] =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .areas(rows[4]);
-                StatefulWidget::render(&self.security.widget, sec, buf, &mut self.security.state);
-                StatefulWidget::render(
-                    &self.skip_verify.widget,
-                    skip,
-                    buf,
-                    &mut self.skip_verify.state,
-                );
+                render_row!(self, rows[4], buf; security, skip_verify);
             } else {
                 // Server without credential fields: the selection is the row's only widget,
                 // so it takes the full width instead of leaving two thirds blank.
-                StatefulWidget::render(
-                    &self.security.widget,
-                    rows[4],
-                    buf,
-                    &mut self.security.state,
-                );
+                render_field!(self, security, rows[4], buf);
             }
         }
 
         if show_hint {
             self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
-            StatefulWidget::render(&self.hint.widget, rows[5], buf, &mut self.hint.state);
+            render_field!(self, hint, rows[5], buf);
         }
 
         if show_cert_a {
             if show_server_cert {
-                let [left, right] =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .areas(rows[6]);
-                StatefulWidget::render(
-                    &self.cert_file.widget,
-                    left,
-                    buf,
-                    &mut self.cert_file.state,
-                );
-                StatefulWidget::render(&self.key_file.widget, right, buf, &mut self.key_file.state);
+                render_row!(self, rows[6], buf; cert_file, key_file);
             } else {
-                StatefulWidget::render(&self.ca_file.widget, rows[6], buf, &mut self.ca_file.state);
+                render_field!(self, ca_file, rows[6], buf);
             }
         }
 
         if show_cert_b {
             if show_client_ca {
-                StatefulWidget::render(
-                    &self.client_ca_file.widget,
-                    rows[7],
-                    buf,
-                    &mut self.client_ca_file.state,
-                );
+                render_field!(self, client_ca_file, rows[7], buf);
             } else {
-                let [left, right] =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .areas(rows[7]);
-                StatefulWidget::render(
-                    &self.client_cert_file.widget,
-                    left,
-                    buf,
-                    &mut self.client_cert_file.state,
-                );
-                StatefulWidget::render(
-                    &self.client_key_file.widget,
-                    right,
-                    buf,
-                    &mut self.client_key_file.state,
-                );
+                render_row!(self, rows[7], buf; client_cert_file, client_key_file);
             }
         }
 
         if has_error {
-            StatefulWidget::render(&self.error.widget, rows[8], buf, &mut self.error.state);
+            render_field!(self, error, rows[8], buf);
         }
-        StatefulWidget::render(
-            &self.keybinds.widget,
-            rows[9],
-            buf,
-            &mut self.keybinds.state,
-        );
+        render_field!(self, keybinds, rows[9], buf);
 
         // Must be called after every sibling widget above has been rendered, so a popup paints on
         // top rather than being overwritten (painter's-algorithm buffer model).

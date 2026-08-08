@@ -80,13 +80,23 @@ mistaken for an oversight and silently "fixed".
 | RTU request addressed to slave id 0 | applied to the store, answered with silence — a store failure that would otherwise be an `IllegalDataAddress` exception is invisible to the sender (MB-R-103) |
 | Malformed frame / framing error on the wire | rejected by the protocol layer before it reaches the request handler; the TCP server logs a processing failure and drops the connection, and the accept loop keeps running |
 | TCP client disconnects mid-request | the connection's serve task ends; the accept loop and the store are unaffected |
-| RTU serial port disappears mid-serve | the serve loop ends and the server task ends with an error. There is **no** RTU server reconnect (see §5.4) |
+| RTU serial port disappears mid-serve | the serve loop ends and the server task ends with an error. There is **no** RTU server reconnect (see §6.4) |
 
 ---
 
-## 5. Known limitations — intentional constraints
+## 5. TLS boundaries
 
-### 5.1 No max-registers-per-request bound at the protocol layer
+| Condition | Behavior |
+|---|---|
+| `self_signed` set together with explicit `cert_file`/`key_file` | the explicit files win; no error, self-generation is skipped |
+| `tls` set in an RTU device config | ignored — the RTU `Config` has no `tls` field (MB-R-112), so the key is unreachable rather than rejected |
+| A `cert_file`/`key_file`/`ca_file`/`client_cert_file`/`client_key_file`/`client_ca_file` path that is malformed PEM or unreadable | server or client start fails with a TLS configuration error, the same tier as MB-R-107/MB-R-108 |
+
+---
+
+## 6. Known limitations — intentional constraints
+
+### 6.1 No max-registers-per-request bound at the protocol layer
 
 Neither the client core nor the server core enforces the Modbus per-request limits
 (125 registers / 2000 bits). The **only** enforcement is in the application-level
@@ -103,7 +113,7 @@ Consequences:
 - A write command is never split: a register wider than the limit would be sent as
   a single write. Unreachable in practice — the widest format is 8 registers.
 
-### 5.2 The RTU `Config` cannot be flattened into a `clap` command
+### 6.2 The RTU `Config` cannot be flattened into a `clap` command
 
 The RTU connection config doubles as a `clap` argument group, but its short flags
 collide: `-s` is claimed by both `slave` and `stop_bits`, and `-d` by both
@@ -114,7 +124,7 @@ The config is therefore only ever reached through its serde path (session and
 device config files, and the `--module` key/value form), which is unaffected. No
 Modbus RTU flag is exposed as a top-level CLI flag.
 
-### 5.3 The RTU `slave` config field is inert
+### 6.3 The RTU `slave` config field is inert
 
 The RTU config carries a `slave` field (default 1). It is read by no code path:
 the client carries a slave id on every individual request, taken from the
@@ -125,22 +135,22 @@ observable effect on a running module.
 An RTU **server** ignores the field entirely: it answers for whichever slave ids
 have declared memory regions, not for a single configured one.
 
-### 5.4 No server-side reconnect
+### 6.4 No server-side reconnect
 
 `reconnect` is client-only. A server whose listener or serial port fails ends its
 task; it does not retry the bind or the port open. Restarting it is the operator's
 (or the module lifecycle's) job.
 
-### 5.5 Unbounded TCP server connections
+### 6.5 Unbounded TCP server connections
 
 A TCP server spawns one task per accepted connection with no cap on the number of
 concurrent connections and no idle timeout.
 
-### 5.6 Only TCP and RTU
+### 6.6 Only TCP and RTU
 
 There is no Modbus ASCII, no Modbus-over-UDP, and no RTU-over-TCP gateway mode.
 
-### 5.7 Display resolution is one-way
+### 6.7 Display resolution is one-way
 
 `resolution` scales a value for *display only*. Encoding does not divide by it, so
 value input is in raw, unscaled units. Entering `10` on a register with
@@ -148,7 +158,7 @@ value input is in raw, unscaled units. Entering `10` on a register with
 consistent — display always scales, input never does — but it means the string you
 type is not the string you read back.
 
-### 5.8 Declaration failures are silent
+### 6.8 Declaration failures are silent
 
 Declaring a memory region reports success or failure, but the module-construction
 and runtime register-edit paths ignore that result. A declaration that is rejected
@@ -160,7 +170,7 @@ gap already declared as a read-only cell. The overlap is (existing `Read` cell,
 requested `ReadWrite` region), which is not one of the widening combinations, so
 the declaration is rejected and dropped.
 
-### 5.9 Client writes are fire-and-forget
+### 6.9 Client writes are fire-and-forget
 
 A client-side write is dispatched to the client task's command channel and the
 caller is told "sent" as soon as it is queued. The Modbus response (including an
@@ -169,7 +179,7 @@ caller, and the store is not updated from it. The polled value is what eventuall
 reflects the truth — except for write-only registers, whose written value is
 mirrored into the store locally because it is not otherwise observable.
 
-### 5.10 The register's `access` does not gate store access
+### 6.10 The register's `access` does not gate store access
 
 A register's `access` (`ReadOnly` / `WriteOnly` / `ReadWrite`) does **not**
 determine the direction of its backing memory cells; the register's *kind* does

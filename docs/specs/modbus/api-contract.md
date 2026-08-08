@@ -85,6 +85,7 @@ Fields of the TCP transport config, shared by the client and server roles.
 | `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
 | `reconnect` | bool | `true` | — | client-only: auto-reconnect with backoff. Ignored by the server. |
+| `tls` | optional `ModbusTlsConfig` | unset | client+server | see requirements.md MB-R-104ff |
 
 When these fields are absent from a serialized config, `reconnect` defaults to
 `true`; the remaining fields have no serde defaults and must be present.

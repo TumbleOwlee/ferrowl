@@ -252,3 +252,21 @@ behavior, stated limitations).
 **MB-R-094** — Stopping a client shall first request graceful termination and only abort the task if it has not finished within the grace period; a stopped instance shall be restartable.
 
 **MB-R-098** — When a Modbus module view stops its running instance as part of a `:restart` or `:reload` command, a failure of that stop — other than the instance not currently being running, which is the expected no-op — shall be reported in the module message log at Error level rather than silently discarded. A failed start on `:restart` is already surfaced.
+
+**MB-R-104** — The Modbus TCP connection config shall carry an optional `tls` field of type `ModbusTlsConfig`, unset by default. When unset, the endpoint shall use plain TCP. When set, the client shall connect over TLS and the server shall listen over TLS, for that endpoint, instead of plain TCP.
+
+**MB-R-105** — `ModbusTlsConfig` shall carry exactly nine fields: `ca_file`, `cert_file`, `key_file`, `client_cert_file`, `client_key_file`, `client_ca_file` (each an optional string, unset by default), and `require_client_cert`, `self_signed`, `insecure_skip_verify` (each a bool, defaulting to `false`).
+
+**MB-R-106** — With `tls` set, a server shall resolve its presented certificate as: the PEM files at `cert_file`/`key_file` when both are set (explicit files always win); otherwise an ephemeral self-signed certificate when `self_signed` is set; otherwise an ephemeral self-signed certificate with the fallback logged, when none of `cert_file`, `key_file`, `self_signed` is set.
+
+**MB-R-107** — `cert_file` or `key_file` set alone (not both) shall fail the server's start with a TLS configuration error, rather than silently falling through to a self-signed certificate.
+
+**MB-R-108** — With `tls` set on a server and `require_client_cert` set, a connection presenting no client certificate, or one not signed by the CA in `client_ca_file`, shall fail the TLS handshake and never reach the request handler. `require_client_cert` set without `client_ca_file` shall fail the server's start with a TLS configuration error. With `require_client_cert` unset, `client_ca_file` shall be ignored and no client certificate requested.
+
+**MB-R-109** — With `tls` set on a client, the server certificate shall be verified against the native root store plus the extra trust anchor at `ca_file` when set — unless `insecure_skip_verify` is set, in which case any server certificate shall be accepted unauthenticated and `ca_file` shall be ignored rather than combined with it.
+
+**MB-R-110** — With `tls` set on a client, `client_cert_file` and `client_key_file` set together shall present that certificate/key pair as the client's TLS identity for mutual TLS; either set alone shall present no client certificate.
+
+**MB-R-111** — A TLS handshake failure shall be distinguished from a connection-refused/transport error and from a request timeout. On the client it shall be treated as a failed connection attempt, subject to the reconnect rules (MB-R-050–MB-R-055). On the server it shall end only that one connection attempt, without affecting the accept loop or other connections, and shall log the failure at Error level with the peer's socket address plus (where the handshake progressed far enough to expose one) its offered certificate identity, and the error description — never silently dropped.
+
+**MB-R-112** — The RTU connection config shall carry no `tls` field; TLS applies to the TCP transport only.

@@ -251,7 +251,11 @@ pub struct Timing {
     pub reconnect: bool,
 }
 
-pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetConfig {
+pub(crate) fn endpoint_to_config(
+    endpoint: &Endpoint,
+    timing: &Timing,
+    tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
+) -> NetConfig {
     match endpoint {
         Endpoint::Tcp { ip, port } => NetConfig::Tcp(ferrowl_modbus::tcp::Config {
             ip: ip.clone(),
@@ -260,6 +264,7 @@ pub(crate) fn endpoint_to_config(endpoint: &Endpoint, timing: &Timing) -> NetCon
             delay_ms: timing.delay_ms,
             interval_ms: timing.interval_ms,
             reconnect: timing.reconnect,
+            tls,
         }),
         Endpoint::Rtu {
             path,
@@ -647,5 +652,35 @@ mod tests {
             .expect("read should succeed");
         assert_eq!(read, vec![50]);
         assert_eq!(format!("{}", register.decode(&read).unwrap()), "50");
+    }
+
+    /// MB-R-104 — `endpoint_to_config` threads the `tls` value through for a TCP
+    /// endpoint (and never reads it for RTU — MB-R-112).
+    #[test]
+    fn ut_endpoint_to_config_carries_tls_for_tcp_endpoint() {
+        use super::{Timing, endpoint_to_config};
+        use crate::config::Endpoint;
+        use ferrowl_modbus::Transport as NetConfig;
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
+
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let tls = Some(ModbusTlsConfig {
+            self_signed: true,
+            ..Default::default()
+        });
+        let endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let net_config = endpoint_to_config(&endpoint, &timing, tls.clone());
+        match net_config {
+            NetConfig::Tcp(cfg) => assert_eq!(cfg.tls, tls),
+            NetConfig::Rtu(_) => panic!("expected a TCP config"),
+        }
     }
 }
