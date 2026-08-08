@@ -67,7 +67,12 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   whole file. For any other large file where only a line range is needed, use
   `sed -n '<start>,<end>p' <file>` instead of a full `cat`/Read. This applies
   equally whether the read happens via the Read tool or a Bash `cat` — both
-  cost the same context.
+  cost the same context. **Enforced, not just advisory:** a `PreToolUse` hook
+  (`.claude/scripts/hook-guard-cat.sh`) denies an unpiped Bash `cat` of a
+  `.md` file, or of any file over 80 lines, with a message pointing at
+  `extract-section.sh`/`sed -n`/the Read tool. A denial here means the
+  convention was about to be bypassed, not a bug to route around — follow the
+  message's redirect rather than retrying the same `cat` differently.
 - **Filter shell output before it lands in context, not after.** `find`,
   `git show`, `git diff`, `cargo test`, `cargo llvm-cov` and similar can
   produce far more than is needed. Narrow at the shell — `find` with
