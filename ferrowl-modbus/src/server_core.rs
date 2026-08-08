@@ -184,10 +184,12 @@ where
     }
 }
 
-/// Handle one inbound Modbus server request against `memory`, shared by the TCP and RTU servers.
+/// Handle one inbound Modbus server request against `memory`, shared by every server transport
+/// (TCP, RTU, RTU-over-TCP).
 ///
-/// Every arm logs a "request received" line. When `verbose` is set (TCP), each arm additionally
-/// logs per-request success/failure; RTU passes `verbose = false` and stays quiet on the outcome.
+/// Every arm logs a "request received" line. When `verbose` is set, each arm additionally logs
+/// per-request success/failure; every production caller now passes `verbose = true` (MB-R-067) —
+/// `verbose = false` remains reachable only for tests exercising the quiet path.
 pub(crate) async fn handle_request<T, L>(
     slave: UnitId,
     request: RequestPdu,
@@ -445,10 +447,11 @@ where
     }
 }
 
-/// Per-connection Modbus server service shared by the TCP and RTU servers: every request is
-/// answered directly from the shared `memory` via [`handle_request`]. `verbose` toggles the
-/// per-request success/failure logging — TCP sets it, RTU leaves it off. (The transport-specific
-/// bind/accept vs serial-open setup stays in `tcp::server`/`rtu::server`.)
+/// Per-connection Modbus server service shared by every server transport (TCP, RTU,
+/// RTU-over-TCP): every request is answered directly from the shared `memory` via
+/// [`handle_request`]. `verbose` toggles the per-request success/failure logging — every
+/// production caller sets it (MB-R-067). (The transport-specific bind/accept vs serial-open
+/// setup stays in `tcp::server`/`rtu::server`/`rtu_over_tcp::server`.)
 pub(crate) struct Server<T, L>
 where
     T: KeyParams,
@@ -491,9 +494,9 @@ where
         handle_request(unit, request, &self.memory, &self.log, self.verbose).await
     }
 
-    // A framing or I/O failure on the wire never reaches `on_request`. TCP reports it (the
-    // former `on_process_error` callback); RTU stays quiet on per-request outcomes, and
-    // `verbose` is exactly that distinction (MB-R-067).
+    // A framing or I/O failure on the wire never reaches `on_request`; this reports it (the
+    // former `on_process_error` callback) whenever `verbose` is set — every production caller
+    // now sets it (MB-R-067).
     async fn on_error(&self, _conn: &Connection, error: &rust_modbus::Error) {
         if self.verbose {
             self.log
@@ -808,7 +811,9 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-067 — a TCP (verbose) server logs the per-request outcome; without verbose only the "received" line.
+    /// `verbose` gates outcome logging directly: on, the per-request success/failure is logged
+    /// alongside the "received" line; off, only "received" is logged. Every production caller
+    /// now passes `verbose = true` (MB-R-067) — this exercises both branches of the mechanism.
     async fn ut_handle_verbose_logs_outcome_quiet_when_off() {
         let mem = seeded_memory(&[1, 2]);
 
