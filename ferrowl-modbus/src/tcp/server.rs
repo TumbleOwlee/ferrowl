@@ -38,9 +38,13 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
+/// Every production server logs per-request outcomes (MB-R-067); TCP is no exception.
+const VERBOSE: bool = true;
+
 /// Bind the configured TCP address and spawn the accept loop; each accepted connection answers from
-/// the shared `memory` via a [`Server`] (verbose logging on). Plain TCP unless `config.tls` is set
-/// (MB-R-104), in which case the listener terminates TLS on each accepted connection.
+/// the shared `memory` via a [`Server`] (verbose logging on, MB-R-067). Plain TCP unless
+/// `config.tls` is set (MB-R-104), in which case the listener terminates TLS on each accepted
+/// connection.
 async fn run<T, L>(
     config: &Config,
     memory: Arc<MemLock<Memory<Key<T>>>>,
@@ -54,8 +58,8 @@ where
         .parse()
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
     // One service instance answers every accepted connection, so all of them share the
-    // one store (MB-R-070). TCP servers log per-request outcomes (verbose = true).
-    let server = ModbusServer::new(Server::new(memory, log.clone(), true));
+    // one store (MB-R-070). Every server logs per-request outcomes (verbose = true, MB-R-067).
+    let server = ModbusServer::new(Server::new(memory, log.clone(), VERBOSE));
     match &config.tls {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
@@ -84,5 +88,16 @@ where
                 Err(e) => Err(Error::Server(e)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VERBOSE;
+
+    /// MB-R-067 — the TCP server logs per-request outcomes exactly like every other transport.
+    #[test]
+    fn ut_tcp_server_is_verbose() {
+        assert!(VERBOSE);
     }
 }

@@ -34,9 +34,13 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
+/// Every production server logs per-request outcomes (MB-R-067); UDP is no exception.
+const VERBOSE: bool = true;
+
 /// Bind the configured UDP address and spawn `serve_udp` (MB-R-119); each datagram answers
-/// from the shared `memory` via a [`Server`] (verbose logging on, mirroring the TCP server).
-/// No accept loop, no TLS branch (MB-R-116 — `udp::Config` carries no `tls` field at all).
+/// from the shared `memory` via a [`Server`] (verbose logging on, MB-R-067, mirroring the TCP
+/// server). No accept loop, no TLS branch (MB-R-116 — `udp::Config` carries no `tls` field at
+/// all).
 async fn run<T, L>(
     config: &Config,
     memory: Arc<MemLock<Memory<Key<T>>>>,
@@ -49,12 +53,23 @@ where
     let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
         .parse()
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
-    let server = ModbusServer::new(Server::new(memory, log.clone(), true));
+    let server = ModbusServer::new(Server::new(memory, log.clone(), VERBOSE));
     match UdpSocket::bind(addr).await {
         Ok(socket) => Ok(tokio::task::spawn(async move {
             server.serve_udp(socket).await.map_err(Error::Server)
         })),
         // MB-R-120 — a bind failure surfaces as an error from `spawn`, not retried.
         Err(e) => Err(Error::Server(e.into())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VERBOSE;
+
+    /// MB-R-067 — the UDP server logs per-request outcomes exactly like every other transport.
+    #[test]
+    fn ut_udp_server_is_verbose() {
+        assert!(VERBOSE);
     }
 }
