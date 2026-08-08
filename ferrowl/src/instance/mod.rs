@@ -73,6 +73,27 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    pub fn with_rtu_over_tcp_client(config: ClientConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+        Self {
+            builder: Builder::RtuOverTcpClient(ferrowl_modbus::rtu_over_tcp::ClientBuilder::new(
+                config.config,
+                config.operations,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
+    pub fn with_rtu_over_tcp_server(config: ServerConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+        Self {
+            builder: Builder::RtuOverTcpServer(ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+                config.config,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
     /// Spawns the endpoint's background task. Fails with
     /// [`InstanceError::AlreadyActive`] if it is still running.
     pub async fn start<L, S>(&mut self, log: L, status: S) -> Result<(), Error>
@@ -123,6 +144,29 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::RtuServer(builder) => {
+                let res = builder.spawn(log).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    }
+                }
+            }
+            Builder::RtuOverTcpClient(builder) => {
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    }
+                }
+            }
+            Builder::RtuOverTcpServer(builder) => {
                 let res = builder.spawn(log).await;
                 match res {
                     Err(e) => {
@@ -334,6 +378,29 @@ mod tests {
         // Restart the same instance.
         instance.start(sink(), sink()).await.expect("restart");
         assert!(instance.active());
+        instance.stop().await.expect("cleanup stop");
+    }
+
+    /// MB-R-114 — an RtuOverTcp client instance starts, connects, and stops exactly
+    /// like a TCP client instance (reuses `tcp::Config`, MB-R-113).
+    fn rtu_over_tcp_client_instance() -> Instance<SlaveKey> {
+        let operations = Arc::new(RwLock::new(vec![]));
+        Instance::with_rtu_over_tcp_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_tcp_config())),
+            operations,
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        })
+    }
+
+    #[tokio::test]
+    async fn rtu_over_tcp_start_twice_is_already_active() {
+        let mut instance = rtu_over_tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("first start");
+        assert!(instance.active());
+        let err = instance.start(sink(), sink()).await.unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::AlreadyActive)));
         instance.stop().await.expect("cleanup stop");
     }
 

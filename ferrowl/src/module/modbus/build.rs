@@ -266,6 +266,15 @@ pub(crate) fn endpoint_to_config(
             reconnect: timing.reconnect,
             tls,
         }),
+        Endpoint::RtuOverTcp { ip, port } => NetConfig::RtuOverTcp(ferrowl_modbus::tcp::Config {
+            ip: ip.clone(),
+            port: *port,
+            timeout_ms: timing.timeout_ms,
+            delay_ms: timing.delay_ms,
+            interval_ms: timing.interval_ms,
+            reconnect: timing.reconnect,
+            tls,
+        }),
         Endpoint::Rtu {
             path,
             baud_rate,
@@ -312,6 +321,19 @@ pub(crate) fn build_instance(
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
+        (Role::Client, NetConfig::RtuOverTcp(cfg)) => {
+            Instance::with_rtu_over_tcp_client(ClientConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                operations,
+                memory,
+            })
+        }
+        (Role::Server, NetConfig::RtuOverTcp(cfg)) => {
+            Instance::with_rtu_over_tcp_server(ServerConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                memory,
+            })
+        }
     }
 }
 
@@ -680,7 +702,38 @@ mod tests {
         let net_config = endpoint_to_config(&endpoint, &timing, tls.clone());
         match net_config {
             NetConfig::Tcp(cfg) => assert_eq!(cfg.tls, tls),
-            NetConfig::Rtu(_) => panic!("expected a TCP config"),
+            _ => panic!("expected a TCP config"),
+        }
+    }
+
+    #[test]
+    /// MB-R-115 — `endpoint_to_config` threads `tls` through for an RtuOverTcp
+    /// endpoint exactly as it does for Tcp (MB-R-104), producing
+    /// `NetConfig::RtuOverTcp(tcp::Config { .. })`.
+    fn ut_endpoint_to_config_carries_tls_for_rtu_over_tcp_endpoint() {
+        use super::{Timing, endpoint_to_config};
+        use crate::config::Endpoint;
+        use ferrowl_modbus::Transport as NetConfig;
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
+
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let tls = Some(ModbusTlsConfig {
+            self_signed: true,
+            ..Default::default()
+        });
+        let endpoint = Endpoint::RtuOverTcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let net_config = endpoint_to_config(&endpoint, &timing, tls.clone());
+        match net_config {
+            NetConfig::RtuOverTcp(cfg) => assert_eq!(cfg.tls, tls),
+            _ => panic!("expected an RtuOverTcp config"),
         }
     }
 }
