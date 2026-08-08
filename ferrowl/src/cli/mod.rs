@@ -244,9 +244,16 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
             data_bits: parse_opt(get("data_bits"), "data_bits")?,
             stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
         },
+        "udp" => Endpoint::Udp {
+            ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+            port: get("port")
+                .ok_or("udp module requires 'port'")?
+                .parse()
+                .map_err(|_| "invalid 'port'")?,
+        },
         other => {
             return Err(format!(
-                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp)"
+                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp|udp)"
             ));
         }
     };
@@ -388,9 +395,30 @@ mod tests {
 
     #[test]
     /// CL-R-002 — an unknown `transport` value is still a parse error, listing all
-    /// three valid options.
+    /// four valid options.
     fn ut_parse_invalid_transport_still_errors() {
         assert!(parse_module_spec("name=m,device=d,transport=usb").is_err());
+    }
+
+    #[test]
+    /// MB-R-116 — `transport=udp` parses for either role (no restriction this run).
+    fn ut_parse_module_spec_udp_ok() {
+        let spec =
+            parse_module_spec("name=m,device=d.toml,transport=udp,ip=127.0.0.1,port=502").unwrap();
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::Udp {
+                ip: "127.0.0.1".into(),
+                port: 502
+            }
+        );
+
+        let client_spec = parse_module_spec(
+            "name=m,device=d.toml,role=client,transport=udp,ip=127.0.0.1,port=502",
+        )
+        .unwrap();
+        assert_eq!(client_spec.role, Role::Client);
+        assert!(matches!(client_spec.endpoint, Endpoint::Udp { .. }));
     }
 
     #[test]
