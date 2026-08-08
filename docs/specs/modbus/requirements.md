@@ -213,22 +213,11 @@ behavior, stated limitations).
 
 ## Transport — RtuOverTcp
 
-**MB-R-113** — The Modbus transport config shall offer a third option, `RtuOverTcp`
-(config/CLI tag value `rtu_over_tcp`), carrying exactly the same connection
-parameters as the TCP option (`ip`, `port`, `timeout_ms`, `delay_ms`,
-`interval_ms`, `reconnect`, `tls`) and no RTU serial parameters
-(`baud_rate`, `parity`, `data_bits`, `stop_bits`).
+**MB-R-113** — The Modbus transport config shall offer a third option, `RtuOverTcp` (config/CLI tag value `rtu_over_tcp`), carrying exactly the same connection parameters as the TCP option (`ip`, `port`, `timeout_ms`, `delay_ms`, `interval_ms`, `reconnect`, `tls`) and no RTU serial parameters (`baud_rate`, `parity`, `data_bits`, `stop_bits`).
 
-**MB-R-114** — An `RtuOverTcp` connection shall be established exactly as a TCP connection
-(MB-R-068–MB-R-071 apply verbatim: `ip:port` connect/bind bounded by
-`timeout_ms`, address-parse failure, accept loop, bind failure), but
-requests and responses on it shall use RTU-style framing (unit id + CRC, no
-MBAP header) instead of Modbus TCP framing.
+**MB-R-114** — An `RtuOverTcp` connection shall be established exactly as a TCP connection (MB-R-068–MB-R-071 apply verbatim: `ip:port` connect/bind bounded by `timeout_ms`, address-parse failure, accept loop, bind failure), but requests and responses on it shall use RTU-style framing (unit id + CRC, no MBAP header) instead of Modbus TCP framing.
 
-**MB-R-115** — TLS (MB-R-104–MB-R-111) shall apply to an `RtuOverTcp` connection exactly as
-it does to a Modbus-TCP-framed one: the same `tls` field, certificate
-resolution, self-signed fallback, mTLS rules, and handshake-failure
-logging, with only the post-handshake framing differing.
+**MB-R-115** — TLS (MB-R-104–MB-R-111) shall apply to an `RtuOverTcp` connection exactly as it does to a Modbus-TCP-framed one: the same `tls` field, certificate resolution, self-signed fallback, mTLS rules, and handshake-failure logging, with only the post-handshake framing differing.
 
 ---
 
