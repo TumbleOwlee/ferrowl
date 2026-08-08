@@ -1,10 +1,12 @@
 //! Modbus UDP client and server.
 
+mod client;
 mod server;
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
+pub use client::{Client, ClientBuilder};
 pub use server::ServerBuilder;
 
 /// Modbus UDP connection settings (MB-R-116): the same fields as `tcp::Config` except
