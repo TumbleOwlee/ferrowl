@@ -68,7 +68,7 @@ No other exception code is ever produced by the server.
 
 ## 2. Transports
 
-Exactly four transports are supported: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over a TCP socket), and **UDP** (Modbus TCP/MBAP framing over a UDP datagram). There is no Modbus ASCII.
+Exactly six transports are supported: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over a TCP socket), **UDP** (Modbus TCP/MBAP framing over a UDP datagram), **Ascii** (ASCII framing over a serial line), and **AsciiOverTcp** (ASCII framing over a TCP socket).
 
 ---
 
@@ -96,6 +96,9 @@ The `Udp` transport (tag value `udp`) uses this same field table minus `tls`,
 which it does not carry (MB-R-116): the upstream UDP transport performs no
 handshake and offers no TLS/DTLS option to configure.
 
+The `AsciiOverTcp` transport (tag value `ascii_over_tcp`) uses this exact
+same field table — no additions or removals (MB-R-125).
+
 ---
 
 ## 4. Modbus RTU connection config
@@ -116,6 +119,9 @@ handshake and offers no TLS/DTLS option to configure.
 An out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial
 configuration error **before** the port is opened.
 
+The `Ascii` transport (tag value `ascii`) uses this exact same field table —
+no additions or removals (MB-R-121).
+
 ---
 
 ## 5. Module instance spec (session / `--module`)
@@ -128,7 +134,7 @@ One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
 | `name` | string | — (required) | tab / instance name |
 | `device` | string | — (required) | path to the device config file |
 | `role` | `client` \| `server` | `server` | |
-| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, or `udp` |
+| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, or `ascii_over_tcp` |
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -160,6 +166,14 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 
 Takes the same fields as `transport = "tcp"` (§3), by reference.
 
+### endpoint with `transport = "ascii"`
+
+Takes the same fields as `transport = "rtu"` (above), by reference.
+
+### endpoint with `transport = "ascii_over_tcp"`
+
+Takes the same fields as `transport = "tcp"` (§3), by reference.
+
 ### `--module` key/value form
 
 `--module name=…,device=…,transport=…,…` accepts the same keys, with:
@@ -169,8 +183,9 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 - `transport` defaulting to `tcp`
 - `role` defaulting to `server`
 - `ip` defaulting to `127.0.0.1`
-- `port` **required** for `transport=tcp`, `transport=rtu_over_tcp`, or
-  `transport=udp`; `path` **required** for `transport=rtu`
+- `port` **required** for `transport=tcp`, `transport=rtu_over_tcp`,
+  `transport=udp`, or `transport=ascii_over_tcp`; `path` **required** for
+  `transport=rtu` or `transport=ascii`
 
 ---
 

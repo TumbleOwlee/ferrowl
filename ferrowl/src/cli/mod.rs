@@ -251,9 +251,24 @@ pub fn parse_module_spec(input: &str) -> Result<ModuleSpec, String> {
                 .parse()
                 .map_err(|_| "invalid 'port'")?,
         },
+        "ascii" => Endpoint::Ascii {
+            path: get("path").ok_or("ascii module requires 'path'")?,
+            baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
+                .unwrap_or(19200),
+            parity: get("parity"),
+            data_bits: parse_opt(get("data_bits"), "data_bits")?,
+            stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
+        },
+        "ascii_over_tcp" => Endpoint::AsciiOverTcp {
+            ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+            port: get("port")
+                .ok_or("ascii_over_tcp module requires 'port'")?
+                .parse()
+                .map_err(|_| "invalid 'port'")?,
+        },
         other => {
             return Err(format!(
-                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp|udp)"
+                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp|udp|ascii|ascii_over_tcp)"
             ));
         }
     };
@@ -395,9 +410,48 @@ mod tests {
 
     #[test]
     /// CL-R-002 — an unknown `transport` value is still a parse error, listing all
-    /// four valid options.
+    /// six valid options.
     fn ut_parse_invalid_transport_still_errors() {
         assert!(parse_module_spec("name=m,device=d,transport=usb").is_err());
+    }
+
+    #[test]
+    /// CL-R-002 — a --module Ascii descriptor parses like RTU (same path/baud/parity/
+    /// data_bits/stop_bits keys), tagged `ascii`.
+    fn ut_parse_ascii_module() {
+        let spec = parse_module_spec(
+            "name=m,device=d.toml,transport=ascii,path=/dev/ttyUSB0,baud=9600,role=client",
+        )
+        .unwrap();
+        assert_eq!(spec.role, Role::Client);
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::Ascii {
+                path: "/dev/ttyUSB0".into(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None
+            }
+        );
+    }
+
+    #[test]
+    /// CL-R-002 — a --module AsciiOverTcp descriptor parses like TCP (same ip/port keys),
+    /// tagged `ascii_over_tcp`.
+    fn ut_parse_ascii_over_tcp_module() {
+        let spec = parse_module_spec(
+            "name=m,device=d.toml,transport=ascii_over_tcp,ip=10.0.0.5,port=502,role=client",
+        )
+        .unwrap();
+        assert_eq!(spec.role, Role::Client);
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::AsciiOverTcp {
+                ip: "10.0.0.5".into(),
+                port: 502
+            }
+        );
     }
 
     #[test]

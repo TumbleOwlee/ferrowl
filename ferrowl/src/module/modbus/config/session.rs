@@ -113,6 +113,28 @@ pub enum Endpoint {
         ip: String,
         port: u16,
     },
+    /// ASCII framing carried over a TCP socket (MB-R-125); same field set as `Tcp`/
+    /// `RtuOverTcp`, no separate struct. `rename_all = "lowercase"` alone would tag this
+    /// `"asciiovertcp"`, not the required `"ascii_over_tcp"`.
+    #[serde(rename = "ascii_over_tcp")]
+    AsciiOverTcp {
+        ip: String,
+        port: u16,
+    },
+    /// ASCII framing over a serial line (MB-R-121); same field set as `Rtu`, no separate
+    /// struct. `rename_all = "lowercase"` alone already produces the correct tag `"ascii"`
+    /// here (unlike the compound-name variants above), so no `#[serde(rename)]` needed.
+    Ascii {
+        path: String,
+        #[serde(default = "default_baud")]
+        baud_rate: u32,
+        #[serde(default)]
+        parity: Option<String>,
+        #[serde(default)]
+        data_bits: Option<u8>,
+        #[serde(default)]
+        stop_bits: Option<u8>,
+    },
 }
 
 impl std::fmt::Display for Endpoint {
@@ -126,6 +148,9 @@ impl std::fmt::Display for Endpoint {
             }
             Endpoint::Udp { ip, port } => {
                 write!(fmt, "{}:{} (udp)", ip, port)
+            }
+            Endpoint::AsciiOverTcp { ip, port } => {
+                write!(fmt, "{}:{} (ascii/tcp)", ip, port)
             }
             Endpoint::Rtu {
                 path,
@@ -147,6 +172,33 @@ impl std::fmt::Display for Endpoint {
                 write!(
                     fmt,
                     "{},{},{},{},{}",
+                    path,
+                    baud_rate,
+                    parity.as_ref().map_or("-", |v| v),
+                    data_bits,
+                    stop_bits
+                )
+            }
+            Endpoint::Ascii {
+                path,
+                baud_rate,
+                parity,
+                data_bits,
+                stop_bits,
+            } => {
+                let data_bits = if let Some(d) = data_bits {
+                    format!("{}", d)
+                } else {
+                    "-".to_string()
+                };
+                let stop_bits = if let Some(s) = stop_bits {
+                    format!("{}", s)
+                } else {
+                    "-".to_string()
+                };
+                write!(
+                    fmt,
+                    "{},{},{},{},{} (ascii)",
                     path,
                     baud_rate,
                     parity.as_ref().map_or("-", |v| v),
@@ -312,6 +364,25 @@ mod tests {
             .to_string(),
             "/dev/x,19200,-,-,-"
         );
+        assert_eq!(
+            Endpoint::AsciiOverTcp {
+                ip: "127.0.0.1".into(),
+                port: 502
+            }
+            .to_string(),
+            "127.0.0.1:502 (ascii/tcp)"
+        );
+        assert_eq!(
+            Endpoint::Ascii {
+                path: "/dev/ttyUSB0".into(),
+                baud_rate: 9600,
+                parity: Some("even".into()),
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            }
+            .to_string(),
+            "/dev/ttyUSB0,9600,even,8,1 (ascii)"
+        );
     }
 
     #[test]
@@ -363,5 +434,40 @@ mod tests {
             .to_string(),
             "127.0.0.1:502 (udp)"
         );
+    }
+
+    #[test]
+    /// MB-R-125 — the `AsciiOverTcp` endpoint variant tags as `ascii_over_tcp` on the wire
+    /// (`rename_all = "lowercase"` alone would produce `asciiovertcp`) and carries exactly
+    /// `ip`/`port`, the same fields as `Tcp`/`RtuOverTcp`.
+    fn ut_endpoint_ascii_over_tcp_serde_tag() {
+        let ep = Endpoint::AsciiOverTcp {
+            ip: "10.0.0.1".into(),
+            port: 502,
+        };
+        let v = serde_json::to_value(&ep).unwrap();
+        assert_eq!(v["transport"], "ascii_over_tcp");
+        assert_eq!(v["ip"], "10.0.0.1");
+        assert_eq!(v["port"], 502);
+        let back: Endpoint = serde_json::from_value(v).unwrap();
+        assert_eq!(back, ep);
+    }
+
+    #[test]
+    /// MB-R-121 — the `Ascii` endpoint variant tags as `ascii` and carries exactly the same
+    /// fields as `Rtu` (path/baud_rate/parity/data_bits/stop_bits).
+    fn ut_endpoint_ascii_serde_tag() {
+        let ep = Endpoint::Ascii {
+            path: "/dev/ttyUSB0".into(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        let v = serde_json::to_value(&ep).unwrap();
+        assert_eq!(v["transport"], "ascii");
+        assert_eq!(v["path"], "/dev/ttyUSB0");
+        let back: Endpoint = serde_json::from_value(v).unwrap();
+        assert_eq!(back, ep);
     }
 }

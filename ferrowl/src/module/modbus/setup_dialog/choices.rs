@@ -24,6 +24,13 @@ pub enum Transport {
     /// MB-R-116 — shares `Tcp`'s ip/port field set, no TLS. Appended last (index 3) to
     /// keep `Tcp=0, Rtu=1, RtuOverTcp=2` stable, same convention as `RtuOverTcp`'s addition.
     Udp,
+    /// ASCII framing over a serial line (MB-R-121) — shares `Rtu`'s field set (path/
+    /// baud/parity/data_bits/stop_bits). Appended last (index 4) to keep prior indices stable.
+    Ascii,
+    /// ASCII framing carried over a TCP socket (MB-R-125) — shares `Tcp`/`RtuOverTcp`/
+    /// `Udp`'s ip/port field set, with TLS (MB-R-127) like `Tcp`/`RtuOverTcp`. Appended
+    /// last (index 5).
+    AsciiOverTcp,
 }
 
 impl ToLabel for Transport {
@@ -33,6 +40,8 @@ impl ToLabel for Transport {
             Transport::Rtu => "RTU",
             Transport::RtuOverTcp => "RTU over TCP",
             Transport::Udp => "UDP",
+            Transport::Ascii => "ASCII",
+            Transport::AsciiOverTcp => "ASCII over TCP",
         }
         .to_string()
     }
@@ -127,6 +136,8 @@ mod tests {
         assert_eq!(Transport::Rtu.to_label(), "RTU");
         assert_eq!(Transport::RtuOverTcp.to_label(), "RTU over TCP");
         assert_eq!(Transport::Udp.to_label(), "UDP");
+        assert_eq!(Transport::Ascii.to_label(), "ASCII");
+        assert_eq!(Transport::AsciiOverTcp.to_label(), "ASCII over TCP");
         assert_eq!(Parity::Even.to_label(), "Even");
         assert_eq!(ReconnectChoice::On.to_label(), "On");
         assert_eq!(U8Choice(8).to_label(), "8");

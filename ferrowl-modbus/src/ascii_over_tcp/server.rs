@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-/// Builds and spawns a Modbus TCP server task answering requests from the
+/// Builds and spawns a Modbus ASCII-over-TCP server task answering requests from the
 /// shared `memory`.
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
@@ -38,13 +38,14 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
-/// Every production server logs per-request outcomes (MB-R-067); TCP is no exception.
+/// Every production server logs per-request outcomes (MB-R-067); AsciiOverTcp is no
+/// exception.
 const VERBOSE: bool = true;
 
-/// Bind the configured TCP address and spawn the accept loop; each accepted connection answers from
-/// the shared `memory` via a [`Server`] (verbose logging on, MB-R-067). Plain TCP unless
-/// `config.tls` is set (MB-R-104), in which case the listener terminates TLS on each accepted
-/// connection.
+/// Bind the configured TCP address and spawn the accept loop; each accepted connection answers
+/// from the shared `memory` via a [`Server`] using ASCII framing (MB-R-126), verbose logging on
+/// (MB-R-067). Plain TCP unless `config.tls` is set (MB-R-127), in which case the listener
+/// terminates TLS on each accepted connection.
 async fn run<T, L>(
     config: &Config,
     memory: Arc<MemLock<Memory<Key<T>>>>,
@@ -63,7 +64,10 @@ where
     match &config.tls {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
-                server.serve(listener).await.map_err(Error::Server)
+                server
+                    .serve_framed::<rust_modbus::Ascii>(listener)
+                    .await
+                    .map_err(Error::Server)
             })),
             Err(e) => Err(Error::Server(e)),
         },
@@ -81,7 +85,7 @@ where
             match TlsListener::bind(addr, tls_config).await {
                 Ok(listener) => Ok(tokio::task::spawn(async move {
                     server
-                        .serve_tls::<rust_modbus::Tcp>(listener)
+                        .serve_tls::<rust_modbus::Ascii>(listener)
                         .await
                         .map_err(Error::Server)
                 })),
@@ -95,9 +99,10 @@ where
 mod tests {
     use super::VERBOSE;
 
-    /// MB-R-067 — the TCP server logs per-request outcomes exactly like every other transport.
+    /// MB-R-067 — the AsciiOverTcp server logs per-request outcomes exactly like every other
+    /// transport (RTU, RTU-over-TCP, TCP, Ascii alike now).
     #[test]
-    fn ut_tcp_server_is_verbose() {
+    fn ut_ascii_over_tcp_server_is_verbose() {
         assert!(VERBOSE);
     }
 }
