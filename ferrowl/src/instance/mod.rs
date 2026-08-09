@@ -115,6 +115,53 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    pub fn with_ascii_client(config: ClientConfig<T, ferrowl_modbus::rtu::Config>) -> Self {
+        Self {
+            builder: Builder::AsciiClient(ferrowl_modbus::ascii::ClientBuilder::new(
+                config.config,
+                config.operations,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
+    pub fn with_ascii_server(config: ServerConfig<T, ferrowl_modbus::rtu::Config>) -> Self {
+        Self {
+            builder: Builder::AsciiServer(ferrowl_modbus::ascii::ServerBuilder::new(
+                config.config,
+                config.memory,
+            )),
+            handle: None,
+        }
+    }
+
+    pub fn with_ascii_over_tcp_client(
+        config: ClientConfig<T, ferrowl_modbus::tcp::Config>,
+    ) -> Self {
+        Self {
+            builder: Builder::AsciiOverTcpClient(
+                ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
+                    config.config,
+                    config.operations,
+                    config.memory,
+                ),
+            ),
+            handle: None,
+        }
+    }
+
+    pub fn with_ascii_over_tcp_server(
+        config: ServerConfig<T, ferrowl_modbus::tcp::Config>,
+    ) -> Self {
+        Self {
+            builder: Builder::AsciiOverTcpServer(
+                ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(config.config, config.memory),
+            ),
+            handle: None,
+        }
+    }
+
     /// Spawns the endpoint's background task. Fails with
     /// [`InstanceError::AlreadyActive`] if it is still running.
     pub async fn start<L, S>(&mut self, log: L, status: S) -> Result<(), Error>
@@ -211,6 +258,52 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::UdpServer(builder) => {
+                let res = builder.spawn(log).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    }
+                }
+            }
+            Builder::AsciiClient(builder) => {
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    }
+                }
+            }
+            Builder::AsciiServer(builder) => {
+                let res = builder.spawn(log).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    }
+                }
+            }
+            Builder::AsciiOverTcpClient(builder) => {
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
+                match res {
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(handle) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    }
+                }
+            }
+            Builder::AsciiOverTcpServer(builder) => {
                 let res = builder.spawn(log).await;
                 match res {
                     Err(e) => {
@@ -494,6 +587,115 @@ mod tests {
         let port = free_udp_port().await;
         let mut instance = Instance::with_udp_server(config::ServerConfig {
             config: Arc::new(RwLock::new(dead_udp_config(port))),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
+    }
+
+    /// A serial path that cannot be opened, so `SerialStream::open` fails — mirrors
+    /// `ascii_serial.rs`'s `bad_config` at the `Instance` layer.
+    fn dead_rtu_config(reconnect: bool) -> ferrowl_modbus::rtu::Config {
+        ferrowl_modbus::rtu::Config {
+            path: "/nonexistent/ferrowl-no-such-serial-port".to_string(),
+            baud_rate: 115200,
+            slave: 1,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect,
+        }
+    }
+
+    /// MB-R-122 — an Ascii client instance surfaces a serial-open failure from `start`
+    /// exactly like an RTU client instance (MB-R-075/124), ending the task (reconnect off).
+    #[tokio::test]
+    async fn ascii_client_open_failure_ends_task() {
+        let mut instance = Instance::with_ascii_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_rtu_config(false))),
+            operations: Arc::new(RwLock::new(vec![])),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance
+            .start(sink(), sink())
+            .await
+            .expect("spawn succeeds; the open error surfaces from the task");
+
+        for _ in 0..50 {
+            if !instance.active() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        assert!(!instance.active());
+    }
+
+    /// MB-R-123 — an Ascii server instance fails `start` on a serial-open failure exactly
+    /// like an RTU server instance (MB-R-075/124).
+    #[tokio::test]
+    async fn ascii_server_open_failure_fails_start() {
+        let mut instance = Instance::with_ascii_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(dead_rtu_config(false))),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        let err = instance.start(sink(), sink()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Net(ferrowl_modbus::Error::Serial(
+                ferrowl_modbus::SerialError::Error(_)
+            ))
+        ));
+    }
+
+    /// MB-R-126 — an AsciiOverTcp client instance starts, connects, and stops exactly like a
+    /// TCP/RtuOverTcp client instance (reuses `tcp::Config`, MB-R-125).
+    fn ascii_over_tcp_client_instance() -> Instance<SlaveKey> {
+        let operations = Arc::new(RwLock::new(vec![]));
+        Instance::with_ascii_over_tcp_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_tcp_config())),
+            operations,
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        })
+    }
+
+    #[tokio::test]
+    async fn ascii_over_tcp_start_twice_is_already_active() {
+        let mut instance = ascii_over_tcp_client_instance();
+        instance.start(sink(), sink()).await.expect("first start");
+        assert!(instance.active());
+        let err = instance.start(sink(), sink()).await.unwrap_err();
+        assert!(matches!(err, Error::Instance(InstanceError::AlreadyActive)));
+        instance.stop().await.expect("cleanup stop");
+    }
+
+    /// MB-R-126 — an AsciiOverTcp server instance binds, reports active, and stops gracefully
+    /// like every other transport.
+    #[tokio::test]
+    async fn ascii_over_tcp_server_starts_and_stops() {
+        let port = free_port();
+        let mut instance = Instance::with_ascii_over_tcp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(tcp::Config {
+                ip: "127.0.0.1".to_string(),
+                port,
+                timeout_ms: 200,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+                tls: None,
+            })),
             memory: Arc::new(MemLock::new(
                 ferrowl_store::Memory::<Key<SlaveKey>>::default(),
             )),
