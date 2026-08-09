@@ -321,6 +321,46 @@ data_bits = 8
 stop_bits = 1
 ```
 
+Four more transports round out the six supported: `rtu_over_tcp`, `udp` and `ascii_over_tcp`
+reuse the TCP field set above (`udp` minus `tls` — the underlying UDP transport has no handshake
+to secure, so there is nothing for `tls` to configure; `rtu_over_tcp` and `ascii_over_tcp` carry
+`tls` exactly as plain TCP does, see below); `ascii` reuses the RTU field set above. Each only
+changes wire framing versus its TCP/RTU counterpart:
+
+| `transport` | Carries the fields of | Framing |
+|---|---|---|
+| `tcp` | (its own table above) | Modbus TCP / MBAP header |
+| `rtu` | (its own table above) | RTU binary (unit id + CRC) |
+| `rtu_over_tcp` | `tcp` | RTU binary (unit id + CRC), over a TCP socket |
+| `udp` | `tcp` minus `tls` | Modbus TCP / MBAP header, over a UDP datagram |
+| `ascii` | `rtu` | ASCII (`:` start, hex PDU, LRC checksum, CR LF end) |
+| `ascii_over_tcp` | `tcp` | ASCII (`:` start, hex PDU, LRC checksum, CR LF end), over a TCP socket |
+
+```toml
+[modules.endpoint]
+transport = "rtu_over_tcp"
+ip = "127.0.0.1"
+port = 5020
+```
+
+`tcp`, `rtu_over_tcp` and `ascii_over_tcp` endpoints additionally accept an optional `tls` table.
+Unset means plain TCP; set, the client connects (and the server listens) over TLS instead. With
+neither `cert_file`/`key_file` nor `self_signed` given, the server falls back to an ephemeral
+self-signed certificate:
+
+```toml
+[modules.endpoint.tls]
+cert_file = "certs/server.pem"     # server: certificate chain (paired with key_file)
+key_file = "certs/server.key"      # server: private key
+self_signed = true                 # server: ephemeral self-signed cert when cert_file/key_file are unset
+ca_file = "certs/ca.pem"           # client: extra trust anchor, alongside the native root store
+client_cert_file = "certs/client.pem"  # client: mutual-TLS client certificate (paired with client_key_file)
+client_key_file = "certs/client.key"   # client: mutual-TLS client private key
+client_ca_file = "certs/ca.pem"    # server: CA that client certs must chain to (with require_client_cert)
+require_client_cert = false        # server: reject connections without a valid client cert
+insecure_skip_verify = false       # client: accept any server certificate unauthenticated (testing only)
+```
+
 An **OCPP** module session entry is tagged `type = "ocpp"` and carries only the name, the
 device-config path and the websocket endpoint (`protocol` is `ws` or `wss`); the OCPP version,
 role, timeout and Lua scripts live in the referenced device file.
