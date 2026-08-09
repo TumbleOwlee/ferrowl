@@ -40,10 +40,15 @@ cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
 ```
 
-Narrow the loop while iterating — don't run the whole workspace for one test:
+Narrow the loop while iterating — don't run the whole workspace for one test.
+This still applies once a test name is on the command line: `cargo test
+--workspace <name>` still builds and runs every crate's test binary (each
+prints its own `test result: ok. 0 passed` for the ones that don't match),
+even though only one crate's tests can match:
 
 ```sh
 cargo test -p ferrowl-modbus              # one crate
+cargo test -p ferrowl-modbus <name>       # one test in one crate — not `cargo test --workspace <name>`
 cargo test -p ferrowl-codec ut_decode     # one test (unit tests are named ut_*)
 cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
