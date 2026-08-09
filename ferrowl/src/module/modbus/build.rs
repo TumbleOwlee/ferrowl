@@ -301,6 +301,35 @@ pub(crate) fn endpoint_to_config(
             interval_ms: timing.interval_ms,
             reconnect: timing.reconnect,
         }),
+        Endpoint::AsciiOverTcp { ip, port } => {
+            NetConfig::AsciiOverTcp(ferrowl_modbus::tcp::Config {
+                ip: ip.clone(),
+                port: *port,
+                timeout_ms: timing.timeout_ms,
+                delay_ms: timing.delay_ms,
+                interval_ms: timing.interval_ms,
+                reconnect: timing.reconnect,
+                tls,
+            })
+        }
+        Endpoint::Ascii {
+            path,
+            baud_rate,
+            parity,
+            data_bits,
+            stop_bits,
+        } => NetConfig::Ascii(ferrowl_modbus::rtu::Config {
+            path: path.clone(),
+            baud_rate: *baud_rate,
+            slave: 0,
+            parity: parity.clone(),
+            data_bits: *data_bits,
+            stop_bits: *stop_bits,
+            timeout_ms: timing.timeout_ms,
+            delay_ms: timing.delay_ms,
+            interval_ms: timing.interval_ms,
+            reconnect: timing.reconnect,
+        }),
     }
 }
 
@@ -351,6 +380,28 @@ pub(crate) fn build_instance(
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
+        (Role::Client, NetConfig::Ascii(cfg)) => Instance::with_ascii_client(ClientConfig {
+            config: Arc::new(RwLock::new(cfg)),
+            operations,
+            memory,
+        }),
+        (Role::Server, NetConfig::Ascii(cfg)) => Instance::with_ascii_server(ServerConfig {
+            config: Arc::new(RwLock::new(cfg)),
+            memory,
+        }),
+        (Role::Client, NetConfig::AsciiOverTcp(cfg)) => {
+            Instance::with_ascii_over_tcp_client(ClientConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                operations,
+                memory,
+            })
+        }
+        (Role::Server, NetConfig::AsciiOverTcp(cfg)) => {
+            Instance::with_ascii_over_tcp_server(ServerConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                memory,
+            })
+        }
     }
 }
 
@@ -780,6 +831,69 @@ mod tests {
                 assert_eq!(cfg.timeout_ms, 1000);
             }
             _ => panic!("expected a Udp config"),
+        }
+    }
+
+    #[test]
+    /// MB-R-127 — `endpoint_to_config` threads `tls` through for an AsciiOverTcp endpoint
+    /// exactly as it does for Tcp/RtuOverTcp, producing `NetConfig::AsciiOverTcp(tcp::Config { .. })`.
+    fn ut_endpoint_to_config_carries_tls_for_ascii_over_tcp_endpoint() {
+        use super::{Timing, endpoint_to_config};
+        use crate::config::Endpoint;
+        use ferrowl_modbus::Transport as NetConfig;
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
+
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let tls = Some(ModbusTlsConfig {
+            self_signed: true,
+            ..Default::default()
+        });
+        let endpoint = Endpoint::AsciiOverTcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let net_config = endpoint_to_config(&endpoint, &timing, tls.clone());
+        match net_config {
+            NetConfig::AsciiOverTcp(cfg) => assert_eq!(cfg.tls, tls),
+            _ => panic!("expected an AsciiOverTcp config"),
+        }
+    }
+
+    /// MB-R-121 — an `Ascii` endpoint resolves to a `Transport::Ascii` config carrying the
+    /// same timing fields every other transport gets from `Timing`, and (MB-R-112-equivalent)
+    /// no `tls` — `rtu::Config` has no such field.
+    #[test]
+    fn ut_endpoint_to_config_ascii() {
+        use super::{Timing, endpoint_to_config};
+        use crate::config::Endpoint;
+        use ferrowl_modbus::Transport as NetConfig;
+
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let endpoint = Endpoint::Ascii {
+            path: "/dev/ttyUSB0".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        let net_config = endpoint_to_config(&endpoint, &timing, None);
+        match net_config {
+            NetConfig::Ascii(cfg) => {
+                assert_eq!(cfg.path, "/dev/ttyUSB0");
+                assert_eq!(cfg.baud_rate, 9600);
+                assert_eq!(cfg.timeout_ms, 1000);
+            }
+            _ => panic!("expected an Ascii config"),
         }
     }
 }
