@@ -105,9 +105,9 @@ pub struct SetupDialog {
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<ConfigPath, FsPathProvider>>,
     #[focus]
     pub transport: Widget<SelectionState<Transport>, Selection<Transport>>,
-    /// TLS level, offered for TCP and RtuOverTcp (MB-R-115) — not RTU (MB-R-112: RTU carries
-    /// no `tls` field at all).
-    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp)})]
+    /// TLS level, offered for TCP, RtuOverTcp (MB-R-115), and AsciiOverTcp (MB-R-127) — not
+    /// RTU or Ascii (MB-R-112/121: neither carries a `tls` field at all).
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::AsciiOverTcp)})]
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
     #[focus]
     pub role: Widget<SelectionState<Role>, Selection<Role>>,
@@ -139,19 +139,19 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_ca()})]
     pub client_ca_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp)})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp)})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
     pub port: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub baud: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub parity: Widget<SelectionState<Parity>, Selection<Parity>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
-    #[focus(when = {self.transport.get_value() == Transport::Rtu})]
+    #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus]
     pub timeout: Widget<InputFieldState, InputField<String>>,
@@ -198,6 +198,7 @@ impl SetupDialog {
             .role
             .state
             .set_selection(if role == Role::Client { 1 } else { 0 });
+        // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3, Ascii=4, AsciiOverTcp=5
         match endpoint {
             Endpoint::Tcp { ip, port } => {
                 dialog.transport.state.set_selection(0);
@@ -205,12 +206,17 @@ impl SetupDialog {
                 set_input(&mut dialog.port, &port.to_string());
             }
             Endpoint::RtuOverTcp { ip, port } => {
-                dialog.transport.state.set_selection(2); // Tcp=0, Rtu=1, RtuOverTcp=2
+                dialog.transport.state.set_selection(2);
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
             Endpoint::Udp { ip, port } => {
-                dialog.transport.state.set_selection(3); // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3
+                dialog.transport.state.set_selection(3);
+                set_input(&mut dialog.ip, ip);
+                set_input(&mut dialog.port, &port.to_string());
+            }
+            Endpoint::AsciiOverTcp { ip, port } => {
+                dialog.transport.state.set_selection(5);
                 set_input(&mut dialog.ip, ip);
                 set_input(&mut dialog.port, &port.to_string());
             }
@@ -222,6 +228,23 @@ impl SetupDialog {
                 stop_bits,
             } => {
                 dialog.transport.state.set_selection(1);
+                set_suggest_input(&mut dialog.path, path);
+                set_input(&mut dialog.baud, &baud_rate.to_string());
+                dialog
+                    .parity
+                    .state
+                    .set_selection(Parity::from_config(parity.as_deref()).index());
+                select_u8(&mut dialog.data_bits.state, *data_bits);
+                select_u8(&mut dialog.stop_bits.state, *stop_bits);
+            }
+            Endpoint::Ascii {
+                path,
+                baud_rate,
+                parity,
+                data_bits,
+                stop_bits,
+            } => {
+                dialog.transport.state.set_selection(4);
                 set_suggest_input(&mut dialog.path, path);
                 set_input(&mut dialog.baud, &baud_rate.to_string());
                 dialog
@@ -304,13 +327,15 @@ impl SetupDialog {
             .transport(selection(
                 "Transport",
                 None,
-                // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3 — each appended last to keep prior
-                // indices stable rather than reordering around them.
+                // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3, Ascii=4, AsciiOverTcp=5 — each appended
+                // last to keep prior indices stable rather than reordering around them.
                 vec![
                     Transport::Tcp,
                     Transport::Rtu,
                     Transport::RtuOverTcp,
                     Transport::Udp,
+                    Transport::Ascii,
+                    Transport::AsciiOverTcp,
                 ],
                 &selection_style,
             ))
@@ -505,11 +530,12 @@ impl SetupDialog {
     // dialog-height computation, so keyboard focus, painting and layout can never disagree about
     // which fields exist. Mirrors `ferrowl::module::ocpp::setup_dialog`'s own `show_*` methods.
 
-    /// The TLS level selection row (TCP or RtuOverTcp, MB-R-115; never RTU, MB-R-112).
+    /// The TLS level selection row (TCP, RtuOverTcp (MB-R-115), or AsciiOverTcp (MB-R-127);
+    /// never RTU or Ascii, MB-R-112/121).
     fn tls_shown(&self) -> bool {
         matches!(
             self.transport.get_value(),
-            Transport::Tcp | Transport::RtuOverTcp
+            Transport::Tcp | Transport::RtuOverTcp | Transport::AsciiOverTcp
         ) && self.tls_level.get_value() != TlsLevel::Off
     }
 
@@ -674,6 +700,21 @@ impl SetupDialog {
                 };
                 Endpoint::Udp { ip, port }
             }
+            Transport::AsciiOverTcp => {
+                let mut ip = self.ip.state.input().trim().to_string();
+                if ip.is_empty() {
+                    ip = "127.0.0.1".to_string();
+                }
+                let port = self.port.state.input();
+                let port = if !port.is_empty() {
+                    port.trim()
+                        .parse::<u16>()
+                        .map_err(|_| "Port must be a number (0-65535).".to_string())?
+                } else {
+                    502
+                };
+                Endpoint::AsciiOverTcp { ip, port }
+            }
             Transport::Rtu => {
                 let mut path = self.path.state.input().trim().to_string();
                 if path.is_empty() {
@@ -689,6 +730,28 @@ impl SetupDialog {
                     19200
                 };
                 Endpoint::Rtu {
+                    path,
+                    baud_rate,
+                    parity: self.parity.state.get_value().to_config(),
+                    data_bits: Some(self.data_bits.state.get_value().0),
+                    stop_bits: Some(self.stop_bits.state.get_value().0),
+                }
+            }
+            Transport::Ascii => {
+                let mut path = self.path.state.input().trim().to_string();
+                if path.is_empty() {
+                    path = "/dev/ttyUSB0".to_string();
+                }
+                let baud_rate = self.baud.state.input();
+                let baud_rate = if !baud_rate.is_empty() {
+                    baud_rate
+                        .trim()
+                        .parse::<u32>()
+                        .map_err(|_| "Baud rate must be a number.".to_string())?
+                } else {
+                    19200
+                };
+                Endpoint::Ascii {
                     path,
                     baud_rate,
                     parity: self.parity.state.get_value().to_config(),
@@ -726,10 +789,14 @@ impl SetupDialog {
             discrete: opt(self.discrete_ranges.state.input()),
         };
 
-        // TLS is hidden entirely for RTU (MB-R-112): report no value at all, so a save on an
-        // RTU instance never clobbers a device config's existing `tls` setting. RtuOverTcp
-        // carries TLS exactly like Tcp (MB-R-115).
-        let tls = if matches!(endpoint, Endpoint::Tcp { .. } | Endpoint::RtuOverTcp { .. }) {
+        // TLS is hidden entirely for RTU (MB-R-112) and Ascii (MB-R-121): report no value at
+        // all, so a save on an RTU/Ascii instance never clobbers a device config's existing
+        // `tls` setting — neither carries a `tls` field. RtuOverTcp carries TLS exactly like
+        // Tcp (MB-R-115), and so does AsciiOverTcp (MB-R-127).
+        let tls = if matches!(
+            endpoint,
+            Endpoint::Tcp { .. } | Endpoint::RtuOverTcp { .. } | Endpoint::AsciiOverTcp { .. }
+        ) {
             let level = self.tls_level.state.get_value();
             if level == TlsLevel::Off {
                 Some(None)
@@ -781,9 +848,13 @@ impl SetupDialog {
         }
 
         let is_new = self.mode == DialogMode::New;
-        // Deliberately not `!= Transport::Tcp`: RtuOverTcp uses the 1-row TCP-shaped ip/port
-        // layout, not RTU's 2-row serial layout, so it must stay excluded from `is_rtu` here.
-        let is_rtu = self.transport.state.get_value() == Transport::Rtu;
+        // Deliberately not `!= Transport::Tcp`: RtuOverTcp and AsciiOverTcp use the 1-row
+        // TCP-shaped ip/port layout, not RTU's/Ascii's 2-row serial layout, so both must stay
+        // excluded from `is_rtu` here, while Ascii must be included alongside Rtu.
+        let is_rtu = matches!(
+            self.transport.state.get_value(),
+            Transport::Rtu | Transport::Ascii
+        );
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
@@ -1389,6 +1460,134 @@ mod tests {
         dialog.role.state.set_selection(1); // Role::Server=0, Role::Client=1
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.role, Role::Client);
+    }
+
+    #[test]
+    /// MB-R-121 — selecting an Ascii endpoint sets the transport selector to index 4.
+    fn ut_edit_ascii_sets_transport_selection() {
+        let timing = Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let endpoint = Endpoint::Ascii {
+            path: "/dev/ttyUSB0".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        let dialog = SetupDialog::edit(
+            "dev",
+            "",
+            Role::Client,
+            &endpoint,
+            timing,
+            &ReadRanges::default(),
+            None,
+        );
+        assert_eq!(dialog.transport.state.get_value(), Transport::Ascii);
+    }
+
+    #[test]
+    /// MB-R-125 — selecting an AsciiOverTcp endpoint sets the transport selector to index 5.
+    fn ut_edit_ascii_over_tcp_sets_transport_selection() {
+        let timing = Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        let endpoint = Endpoint::AsciiOverTcp {
+            ip: "10.0.0.9".to_string(),
+            port: 1502,
+        };
+        let dialog = SetupDialog::edit(
+            "dev",
+            "",
+            Role::Client,
+            &endpoint,
+            timing,
+            &ReadRanges::default(),
+            None,
+        );
+        assert_eq!(dialog.transport.state.get_value(), Transport::AsciiOverTcp);
+    }
+
+    #[test]
+    /// MB-R-121 — resolving an Ascii dialog produces `Endpoint::Ascii` with the entered
+    /// path/baud/parity/data_bits/stop_bits, mirroring the Rtu resolve test.
+    fn ut_values_ascii_produces_endpoint() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.transport.state.set_selection(4); // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3, Ascii=4
+        assert_eq!(dialog.transport.state.get_value(), Transport::Ascii);
+        set_suggest_input(&mut dialog.path, "/dev/ttyUSB1");
+        set_input(&mut dialog.baud, "9600");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(
+            outcome.values.endpoint,
+            Endpoint::Ascii {
+                path: "/dev/ttyUSB1".into(),
+                baud_rate: 9600,
+                parity: dialog.parity.state.get_value().to_config(),
+                data_bits: Some(dialog.data_bits.state.get_value().0),
+                stop_bits: Some(dialog.stop_bits.state.get_value().0),
+            }
+        );
+    }
+
+    #[test]
+    /// MB-R-125 — resolving an AsciiOverTcp dialog produces `Endpoint::AsciiOverTcp` with the
+    /// entered ip/port, mirroring the RtuOverTcp/Udp resolve tests.
+    fn ut_values_ascii_over_tcp_produces_endpoint() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.transport.state.set_selection(5); // ..Udp=3, Ascii=4, AsciiOverTcp=5
+        assert_eq!(dialog.transport.state.get_value(), Transport::AsciiOverTcp);
+        set_input(&mut dialog.ip, "10.0.0.9");
+        set_input(&mut dialog.port, "1502");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(
+            outcome.values.endpoint,
+            Endpoint::AsciiOverTcp {
+                ip: "10.0.0.9".into(),
+                port: 1502
+            }
+        );
+    }
+
+    #[test]
+    /// MB-R-127 — TLS is offered (tls_shown() true once a level is picked) for AsciiOverTcp
+    /// exactly as for Tcp/RtuOverTcp, never for Ascii (MB-R-121: rtu::Config carries no tls
+    /// field).
+    fn ut_tls_shown_for_ascii_over_tcp_not_ascii() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        dialog.transport.state.set_selection(5); // AsciiOverTcp
+        assert_eq!(dialog.transport.state.get_value(), Transport::AsciiOverTcp);
+        assert!(!dialog.tls_shown());
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        assert!(dialog.tls_shown());
+
+        dialog.transport.state.set_selection(4); // Ascii
+        assert_eq!(dialog.transport.state.get_value(), Transport::Ascii);
+        assert!(!dialog.tls_shown());
     }
 
     #[test]
