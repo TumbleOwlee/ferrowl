@@ -388,7 +388,7 @@ impl SetupDialog {
             ))
             .tls_level(selection(
                 "TLS",
-                None,
+                Some(HorizontalAlignment::Center),
                 vec![TlsLevel::Off, TlsLevel::Tls, TlsLevel::MutualTls],
                 &selection_style,
             ))
@@ -855,6 +855,7 @@ impl SetupDialog {
             self.transport.state.get_value(),
             Transport::Rtu | Transport::Ascii
         );
+        let is_udp = matches!(self.transport.state.get_value(), Transport::Udp);
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
@@ -922,18 +923,16 @@ impl SetupDialog {
         render_field!(self, config_path, rows[idx], buf);
         idx += 1;
 
-        let [transport_area, tls_area, role_area] = Layout::horizontal([
-            Constraint::Percentage(if is_rtu { 50 } else { 35 }),
-            Constraint::Percentage(if is_rtu { 0 } else { 30 }),
-            Constraint::Percentage(if is_rtu { 50 } else { 35 }),
-        ])
-        .areas(rows[idx]);
-        idx += 1;
-        render_field!(self, transport, transport_area, buf);
-        if !is_rtu {
-            render_field!(self, tls_level, tls_area, buf);
+        if is_rtu || is_udp {
+            render_row!(self, rows[idx], buf; transport, role);
+        } else {
+            render_row!(self, rows[idx], buf;
+                transport => Constraint::Percentage(40),
+                tls_level => Constraint::Percentage(20),
+                role => Constraint::Percentage(40)
+            );
         }
-        render_field!(self, role, role_area, buf);
+        idx += 1;
 
         if show_tls {
             let is_server = self.role.state.get_value() == Role::Server;
