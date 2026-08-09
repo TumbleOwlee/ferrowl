@@ -1,0 +1,48 @@
+name: Version bump
+
+# Pushing a tag marks a release cut. Immediately afterwards the workspace version should
+# move past the released version so subsequent commits aren't mistaken for that release.
+# This bumps the patch component of workspace.package.version in Cargo.toml, refreshes
+# Cargo.lock to match, and opens a PR — replacing the manual "update: increment version"
+# commit that previously did this by hand.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Bump patch version
+        id: version
+        run: |
+          current=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
+          IFS='.' read -r major minor patch <<< "$current"
+          next="$major.$minor.$((patch + 1))"
+          sed -i "s/^version = \"$current\"/version = \"$next\"/" Cargo.toml
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh Cargo.lock
+        run: cargo check --workspace
+
+      - name: Open version bump PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "update: increment version to ${{ steps.version.outputs.version }}"
+          title: "update: increment version to ${{ steps.version.outputs.version }}"
+          body: "Automated patch version bump following tag `${{ github.ref_name }}`."
+          branch: "chore/version-bump-${{ steps.version.outputs.version }}"
+          base: main
+          add-paths: |
+            Cargo.toml
+            Cargo.lock
