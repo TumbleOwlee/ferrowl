@@ -783,7 +783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2280,7 +2280,7 @@ dependencies = [
 [[package]]
 name = "rust-modbus"
 version = "0.1.0"
-source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=7adcfcdae2000a125e8b5a958be27bfd1590f05f#7adcfcdae2000a125e8b5a958be27bfd1590f05f"
+source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=ff9f3053546a075a784af202a08c100f4ef3a5d0#ff9f3053546a075a784af202a08c100f4ef3a5d0"
 dependencies = [
  "crc",
  "rustls",
@@ -2373,7 +2373,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
