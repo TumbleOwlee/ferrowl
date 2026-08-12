@@ -42,13 +42,13 @@ unsafe_code = "forbid"
 # same one. Members add features on top; they never restate a version.
 [workspace.dependencies]
 anyhow = "1.0.104"
-async-trait = "0.1.91"
+async-trait = "0.1.92"
 base64 = "0.23.1"
 clap = { version = "4.6.6", features = ["derive"] }
 convert_case = "0.11.0"
 crossterm = "0.29.0"
 derive_builder = "0.20.2"
-futures-util = "0.3.33"
+futures-util = "0.3.34"
 getset = "0.1.7"
 itertools = "0.15.0"
 mlua = { version = "0.12.0", features = ["anyhow", "lua54", "vendored"] }
@@ -60,7 +60,7 @@ ratatui = { version = "0.30.2", features = [
     "all-widgets",
     "unstable-widget-ref",
 ] }
-rcgen = "0.14.8"
+rcgen = "0.14.9"
 # Pinned by rev, not branch: `cargo update` must not silently move us to whatever the fork's
 # `main` points at. Bump the rev deliberately when pulling in upstream changes.
 rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "ff9f3053546a075a784af202a08c100f4ef3a5d0", default-features = false }
