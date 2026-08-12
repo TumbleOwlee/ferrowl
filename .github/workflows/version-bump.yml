@@ -36,7 +36,7 @@ jobs:
         run: cargo check --workspace
 
       - name: Open version bump PR
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "update: increment version to ${{ steps.version.outputs.version }}"
           title: "update: increment version to ${{ steps.version.outputs.version }}"
