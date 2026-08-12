@@ -2314,7 +2314,7 @@ dependencies = [
 [[package]]
 name = "rust-modbus"
 version = "0.1.0"
-source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=ff9f3053546a075a784af202a08c100f4ef3a5d0#ff9f3053546a075a784af202a08c100f4ef3a5d0"
+source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=d1472c78efd8775ac27c5015f008f389982e1470#d1472c78efd8775ac27c5015f008f389982e1470"
 dependencies = [
  "crc",
  "rustls",
@@ -2331,7 +2331,7 @@ dependencies = [
 [[package]]
 name = "rust-ocpp"
 version = "3.0.4"
-source = "git+https://github.com/TumbleOwlee/rust-ocpp?rev=1343bbbac095ed4f41709bda6ed0a3e5cf443190#1343bbbac095ed4f41709bda6ed0a3e5cf443190"
+source = "git+https://github.com/TumbleOwlee/rust-ocpp?rev=36813f46ab7d0a50100f1e0fe099aaf0c4e10791#36813f46ab7d0a50100f1e0fe099aaf0c4e10791"
 dependencies = [
  "chrono",
  "lazy_static",
