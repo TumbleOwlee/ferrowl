@@ -490,8 +490,10 @@ where
         _conn: &Connection,
         unit: UnitId,
         request: RequestPdu,
-    ) -> Result<ResponsePdu, ExceptionCode> {
-        handle_request(unit, request, &self.memory, &self.log, self.verbose).await
+    ) -> Result<Option<ResponsePdu>, ExceptionCode> {
+        handle_request(unit, request, &self.memory, &self.log, self.verbose)
+            .await
+            .map(Some)
     }
 
     // A framing or I/O failure on the wire never reaches `on_request`; this reports it (the
