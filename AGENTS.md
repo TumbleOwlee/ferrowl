@@ -67,6 +67,7 @@ than reading it whole, same as any other spec-driven doc.
 | TUI widgets, dialogs, `:` commands, keybindings, code editor | [`docs/specs/tui/`](./docs/specs/tui/) | `UI-R-*` |
 | Config/session file format, save/load, `migrate` | [`docs/specs/config-session/`](./docs/specs/config-session/) | `CS-R-*` |
 | CLI flags, `ferrowl run` headless, exit codes | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) | `CL-R-*` |
+| Bridge mode: downstream/upstream Modbus relay (TCP/RTU) | [`docs/specs/bridge/`](./docs/specs/bridge/) | `BR-R-*` |
 | Platforms, performance, security, versioning, testing conventions | [`docs/specs/non-functional-requirements.md`](./docs/specs/non-functional-requirements.md) | `NF-R-*` |
 | Crate graph, data flow, concurrency model | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | — |
 | Contribution workflow, conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | — |
