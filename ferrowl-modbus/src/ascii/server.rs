@@ -40,6 +40,10 @@ impl<T: KeyParams> ServerBuilder<T> {
 /// Every production server logs per-request outcomes (MB-R-067); Ascii is no exception.
 const VERBOSE: bool = true;
 
+/// MB-R-128 — this is a physical Rtu/Ascii serial link: an unmapped slave id is answered with
+/// silence, not an exception.
+const PHYSICAL_SERIAL: bool = true;
+
 /// Open the configured serial port and spawn the Ascii serve loop, answering from the shared
 /// `memory` via a [`Server`] (verbose logging on, MB-R-067).
 async fn run<T, L>(
@@ -59,7 +63,7 @@ where
     )?;
     match open_serial::<Ascii>(&config.path, serial) {
         Ok(transport) => {
-            let server = ModbusServer::new(Server::new(memory, log, VERBOSE));
+            let server = ModbusServer::new(Server::new(memory, log, VERBOSE, PHYSICAL_SERIAL));
             // One port, one link, no accept loop (MB-R-123). The default `ServerConfig` filters
             // by no unit id, so every slave id with declared regions is served (MB-R-065).
             Ok(tokio::task::spawn(async move {
@@ -72,12 +76,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::VERBOSE;
+    use super::{PHYSICAL_SERIAL, VERBOSE};
 
     /// MB-R-067 — the Ascii server logs per-request outcomes exactly like every
     /// other transport.
     #[test]
     fn ut_ascii_server_is_verbose() {
         assert!(VERBOSE);
+    }
+
+    /// MB-R-128 — the Ascii server is wired as physical-serial: an unmapped slave id is answered
+    /// with silence.
+    #[test]
+    fn ut_ascii_server_is_physical_serial() {
+        assert!(PHYSICAL_SERIAL);
     }
 }
