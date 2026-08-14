@@ -47,6 +47,34 @@ pub enum SubCommand {
     /// Run configured modules without the TUI (headless/CI mode). See [`crate::cli::headless::run`]
     /// for the exit-code contract.
     Run(RunArgs),
+
+    /// Relay Modbus requests between an upstream (server) and a downstream (client) interface,
+    /// without the TUI (BR-R-001). See [`crate::cli::bridge::run`] for the exit-code contract.
+    Bridge(BridgeArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct BridgeArgs {
+    /// BR-R-003 — required; the interface bridge mode listens on (server role, BR-R-005).
+    #[arg(long, value_name = "KEY=VAL,...")]
+    pub upstream: Option<String>,
+
+    /// BR-R-003 — required; the interface bridge mode connects to (client role, BR-R-006).
+    #[arg(long, value_name = "KEY=VAL,...")]
+    pub downstream: Option<String>,
+
+    /// BR-R-014 — same semantics as `run`'s --duration (CL-R-013 family).
+    #[arg(long, value_name = "SECS")]
+    pub duration: Option<u64>,
+
+    /// BR-R-012 — same semantics as `run`'s --log-file (CL-R-041).
+    #[arg(long = "log-file", value_name = "FILE")]
+    pub log_file: Option<String>,
+
+    /// BR-R-013 — same semantics as `run`'s --exit-on-error, keyed off `[bridge]`-prefixed
+    /// lines instead of `[sim]` (Shared design decision 3).
+    #[arg(long = "exit-on-error")]
+    pub exit_on_error: bool,
 }
 
 #[derive(Args, Debug)]
@@ -330,6 +358,144 @@ fn parse_opt<T: std::str::FromStr>(
     value
         .map(|v| v.parse::<T>().map_err(|_| format!("invalid '{field}'")))
         .transpose()
+}
+
+/// Parse a single `--upstream`/`--downstream` value (`key=val,key=val,...`) into a
+/// [`ferrowl_modbus::bridge::BridgeEndpointSpec`] (BR-R-004). Mirrors [`parse_module_spec`].
+// Not yet called by production code: wired into `cli::bridge::run` in a later stage. `pub`
+// (not `pub(crate)`) so it can be exercised directly by this module's own tests in the
+// meantime.
+#[allow(dead_code)]
+pub fn parse_bridge_descriptor(
+    input: &str,
+) -> Result<ferrowl_modbus::bridge::BridgeEndpointSpec, String> {
+    // A plain `,`-split would break `unit_ids=1,3,5-8` (BR-R-015's own list/range grammar
+    // uses the same comma the descriptor uses between keys): a comma-separated segment with
+    // no `=` is a continuation of the previous key's value, not a new key.
+    let mut map: HashMap<String, String> = HashMap::new();
+    let mut last_key: Option<String> = None;
+    for part in input.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        match part.split_once('=') {
+            Some((key, value)) => {
+                let key = key.trim().to_string();
+                map.insert(key.clone(), value.trim().to_string());
+                last_key = Some(key);
+            }
+            None => {
+                let key = last_key
+                    .as_ref()
+                    .ok_or_else(|| format!("expected key=value, got '{part}'"))?;
+                let entry = map
+                    .get_mut(key)
+                    .expect("last_key always names a present map entry");
+                entry.push(',');
+                entry.push_str(part);
+            }
+        }
+    }
+    let get = |k: &str| map.get(k).cloned();
+
+    let unit_ids = get("unit_ids")
+        .map(|s| ferrowl_modbus::bridge::UnitIdFilter::parse(&s))
+        .transpose()?;
+
+    let timeout_ms = parse_opt(get("timeout_ms"), "timeout_ms")?.unwrap_or(3000usize);
+    let reconnect = match get("reconnect").as_deref() {
+        None => true,
+        Some("true") => true,
+        Some("false") => false,
+        Some(other) => {
+            return Err(format!(
+                "invalid 'reconnect' value '{other}' (expected true|false)"
+            ));
+        }
+    };
+
+    let transport = get("transport").unwrap_or_else(|| "tcp".to_string());
+    let kind = match transport.as_str() {
+        "tcp" => {
+            let tls = build_descriptor_tls(&get)?;
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(ferrowl_modbus::tcp::Config {
+                ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+                port: get("port")
+                    .ok_or("tcp descriptor requires 'port'")?
+                    .parse()
+                    .map_err(|_| "invalid 'port'")?,
+                timeout_ms,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect,
+                tls,
+            })
+        }
+        "rtu" => ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(ferrowl_modbus::rtu::Config {
+            path: get("path").ok_or("rtu descriptor requires 'path'")?,
+            baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
+                .unwrap_or(19200),
+            slave: 1, // BR-R-004/edge-cases.md — inert for bridge, same as an ordinary RTU server.
+            parity: get("parity"),
+            data_bits: parse_opt(get("data_bits"), "data_bits")?,
+            stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
+            timeout_ms,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect,
+        }),
+        other => return Err(format!("invalid transport '{other}' (expected tcp|rtu)")),
+    };
+    Ok(ferrowl_modbus::bridge::BridgeEndpointSpec { kind, unit_ids })
+}
+
+/// BR-R-011 — the `tls` field set (MB-R-104–111 field names), tcp-only. This mini-language is
+/// flat (`key=val,key=val`), unlike JSON's nested `"tls": {...}` object, so each field is its
+/// own top-level descriptor key exactly as spelled in [`ferrowl_modbus::tcp::ModbusTlsConfig`]
+/// (no `tls_` prefix — the field names are already unambiguous against the other descriptor
+/// keys). "Opt-in" (MB-R-104): `tls` stays `None` unless at least one of these nine keys is
+/// present in the descriptor.
+fn build_descriptor_tls(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<ferrowl_modbus::tcp::ModbusTlsConfig>, String> {
+    let any_present = [
+        "ca_file",
+        "cert_file",
+        "key_file",
+        "client_cert_file",
+        "client_key_file",
+        "client_ca_file",
+        "require_client_cert",
+        "self_signed",
+        "insecure_skip_verify",
+    ]
+    .iter()
+    .any(|k| get(k).is_some());
+    if !any_present {
+        return Ok(None);
+    }
+    let parse_bool = |k: &str| -> Result<bool, String> {
+        match get(k).as_deref() {
+            None => Ok(false),
+            Some("true") => Ok(true),
+            Some("false") => Ok(false),
+            Some(other) => Err(format!(
+                "invalid '{k}' value '{other}' (expected true|false)"
+            )),
+        }
+    };
+    Ok(Some(ferrowl_modbus::tcp::ModbusTlsConfig {
+        ca_file: get("ca_file"),
+        cert_file: get("cert_file"),
+        key_file: get("key_file"),
+        client_cert_file: get("client_cert_file"),
+        client_key_file: get("client_key_file"),
+        client_ca_file: get("client_ca_file"),
+        require_client_cert: parse_bool("require_client_cert")?,
+        self_signed: parse_bool("self_signed")?,
+        insecure_skip_verify: parse_bool("insecure_skip_verify")?,
+    }))
 }
 
 #[cfg(test)]
@@ -863,5 +1029,122 @@ mod tests {
             .unwrap()
             .insert("type".into(), "modbus".into());
         assert!(resolve_session("missing_name", vec![module]).is_err());
+    }
+
+    // --- Bridge mode: SubCommand::Bridge and descriptor parsing ---------------------------
+
+    #[test]
+    /// BR-R-001, BR-R-003, BR-R-014 — the bridge subcommand parses upstream/downstream/
+    /// duration flags.
+    fn ut_bridge_subcommand_parses() {
+        let args = CliArgs::parse_from([
+            "ferrowl",
+            "bridge",
+            "--upstream",
+            "transport=tcp,ip=0.0.0.0,port=502",
+            "--downstream",
+            "transport=tcp,ip=10.0.0.5,port=502",
+            "--duration",
+            "5",
+        ]);
+        match args.command {
+            Some(SubCommand::Bridge(bridge)) => {
+                assert_eq!(
+                    bridge.upstream.as_deref(),
+                    Some("transport=tcp,ip=0.0.0.0,port=502")
+                );
+                assert_eq!(
+                    bridge.downstream.as_deref(),
+                    Some("transport=tcp,ip=10.0.0.5,port=502")
+                );
+                assert_eq!(bridge.duration, Some(5));
+            }
+            _ => panic!("expected SubCommand::Bridge"),
+        }
+    }
+
+    #[test]
+    /// BR-R-003 — clap accepts `bridge` with neither --upstream nor --downstream; the
+    /// required-endpoint check happens at runtime, not at the clap layer.
+    fn ut_bridge_upstream_and_downstream_both_optional_at_clap_layer() {
+        assert!(CliArgs::try_parse_from(["ferrowl", "bridge"]).is_ok());
+    }
+
+    #[test]
+    /// BR-R-004 — a bare `port=502` descriptor defaults transport/ip/timeout/reconnect/tls/
+    /// unit_ids.
+    fn ut_parse_bridge_descriptor_tcp_defaults() {
+        let spec = parse_bridge_descriptor("port=502").unwrap();
+        assert!(spec.unit_ids.is_none());
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                assert_eq!(cfg.ip, "127.0.0.1");
+                assert_eq!(cfg.port, 502);
+                assert_eq!(cfg.timeout_ms, 3000);
+                assert!(cfg.reconnect);
+                assert!(cfg.tls.is_none());
+            }
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => panic!("expected Tcp"),
+        }
+    }
+
+    #[test]
+    /// BR-R-004, BR-R-015 — every rtu descriptor key round-trips.
+    fn ut_parse_bridge_descriptor_rtu_full() {
+        let spec = parse_bridge_descriptor(
+            "transport=rtu,path=/dev/ttyUSB0,baud=9600,parity=even,data_bits=7,stop_bits=2,\
+             timeout_ms=500,reconnect=false,unit_ids=1,3",
+        )
+        .unwrap();
+        assert_eq!(
+            spec.unit_ids,
+            Some(ferrowl_modbus::bridge::UnitIdFilter::parse("1,3").unwrap())
+        );
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(cfg) => {
+                assert_eq!(cfg.path, "/dev/ttyUSB0");
+                assert_eq!(cfg.baud_rate, 9600);
+                assert_eq!(cfg.parity.as_deref(), Some("even"));
+                assert_eq!(cfg.data_bits, Some(7));
+                assert_eq!(cfg.stop_bits, Some(2));
+                assert_eq!(cfg.timeout_ms, 500);
+                assert!(!cfg.reconnect);
+            }
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(_) => panic!("expected Rtu"),
+        }
+    }
+
+    #[test]
+    /// BR-R-011 — `tls` stays `None` unless at least one tls key is present.
+    fn ut_parse_bridge_descriptor_tls_opt_in() {
+        let no_tls = parse_bridge_descriptor("port=502").unwrap();
+        match no_tls.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => assert!(cfg.tls.is_none()),
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+        }
+
+        let with_tls = parse_bridge_descriptor("port=502,self_signed=true").unwrap();
+        match with_tls.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                let tls = cfg.tls.expect("tls present");
+                assert!(tls.self_signed);
+            }
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// BR-R-004 — an unknown transport, a tcp descriptor missing `port`, and an rtu descriptor
+    /// missing `path` all error.
+    fn ut_parse_bridge_descriptor_rejects_invalid_transport_and_missing_required() {
+        assert!(parse_bridge_descriptor("transport=usb,port=502").is_err());
+        assert!(parse_bridge_descriptor("transport=tcp").is_err());
+        assert!(parse_bridge_descriptor("transport=rtu").is_err());
+    }
+
+    #[test]
+    /// BR-R-004 — an invalid `reconnect` value errors.
+    fn ut_parse_bridge_descriptor_rejects_bad_reconnect_value() {
+        assert!(parse_bridge_descriptor("port=502,reconnect=maybe").is_err());
     }
 }
