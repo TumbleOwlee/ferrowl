@@ -9,6 +9,7 @@
 
 pub mod ascii;
 pub mod ascii_over_tcp;
+pub mod bridge;
 mod client_core;
 mod command;
 mod common;
