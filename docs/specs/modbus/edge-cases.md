@@ -76,7 +76,9 @@ mistaken for an oversight and silently "fixed".
 | Any function code outside the nine of MB-R-058 (report-server-id, mask-write-register, read-device-identification, diagnostics, comm-event, file record, FIFO queue, custom) | exception `IllegalFunction`, request logged |
 | Read/write-multiple-registers whose read range is unreadable or write range is unwritable | exception `IllegalDataAddress`, and **no** write is applied |
 | Read/write-multiple-registers under concurrent load | the read-check, write-check, read and write happen under a single exclusive hold; no request can interleave |
-| Request for a slave id with no declared regions | the store lookup fails → exception `IllegalDataAddress`. The server does not filter by slave id up front |
+| Request for a slave id with no declared regions, on `Tcp`/`RtuOverTcp`/`AsciiOverTcp`/`Udp` | the store lookup fails → exception `IllegalDataAddress`. The server does not filter by slave id up front |
+| Request for a slave id with no declared regions, on `Rtu`/`Ascii` (physical serial) | store lookup fails, answered with silence — a real multi-drop bus may carry another device that owns that id and will answer instead; the server must not contend on the wire (MB-R-128) |
+| Request for a slave id with ≥1 declared region but address outside all of them, on `Rtu`/`Ascii` | unchanged: exception `IllegalDataAddress` — this id is this server's own, a bad range on it is a genuine error |
 | RTU request addressed to slave id 0 | applied to the store, answered with silence — a store failure that would otherwise be an `IllegalDataAddress` exception is invisible to the sender (MB-R-103) |
 | Malformed frame / framing error on the wire | rejected by the protocol layer before it reaches the request handler; the TCP server logs a processing failure and drops the connection, and the accept loop keeps running |
 | TCP client disconnects mid-request | the connection's serve task ends; the accept loop and the store are unaffected |

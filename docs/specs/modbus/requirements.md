@@ -181,6 +181,8 @@ behavior, stated limitations).
 
 **MB-R-103** — An RTU, RtuOverTcp, Ascii, or AsciiOverTcp server shall apply an inbound request addressed to slave id 0 (the broadcast address) to the store exactly as it would any other request, but shall emit no response frame for it — including no exception response.
 
+**MB-R-128** — On the `Rtu` or `Ascii` transport (not `RtuOverTcp`/`AsciiOverTcp`), a request addressed to a slave id for which no memory region is declared in any table shall be applied to the store exactly as any other request (the store lookup fails per MB-R-065), but shall emit no response frame for it — including no exception response — matching the broadcast handling of MB-R-103. A request addressed to a slave id for which at least one region is declared, but whose address range falls outside all declared regions for that id, shall still receive the ordinary `IllegalDataAddress` exception per MB-R-065.
+
 **MB-R-066** — A server shall log a "request received" line for every inbound request, including for rejected function codes.
 
 **MB-R-067** — A server shall additionally log the per-request outcome (success or failure), for TCP, RTU, RtuOverTcp, Udp, Ascii, and AsciiOverTcp alike.
