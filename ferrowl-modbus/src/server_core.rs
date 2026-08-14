@@ -184,13 +184,27 @@ where
     }
 }
 
-/// Handle one inbound Modbus server request against `memory`, shared by every server transport
-/// (TCP, RTU, RTU-over-TCP).
-///
-/// Every arm logs a "request received" line. When `verbose` is set, each arm additionally logs
-/// per-request success/failure; every production caller now passes `verbose = true` (MB-R-067) —
-/// `verbose = false` remains reachable only for tests exercising the quiet path.
-pub(crate) async fn handle_request<T, L>(
+/// MB-R-128 — `true` when `slave` has no declared region in any register table: every key
+/// `T::all_kinds_for(slave)` produces is absent from `memory`. A region declared for a
+/// *different* table than a particular failing request's own still makes this `false` — see
+/// the Shared section for why that single check is sufficient without inspecting which
+/// `MemoryError` variant the failing request itself hit.
+fn slave_has_no_region<T>(slave: UnitId, memory: &Arc<RwLock<Memory<Key<T>>>>) -> bool
+where
+    T: KeyParams,
+{
+    let guard = memory.read();
+    T::all_kinds_for(slave)
+        .into_iter()
+        .all(|id| !guard.contains_key(&Key { id }))
+}
+
+/// The original body of [`handle_request`], answering unconditionally (i.e. before MB-R-128's
+/// silence translation is applied). Kept as its own function, rather than inlined into
+/// `handle_request`, so every arm's `?` short-circuits *this* function's `Result` — not
+/// `handle_request`'s `Result<Option<ResponsePdu>, ExceptionCode>` — which would otherwise skip
+/// the translation step entirely on the first early return.
+async fn answer_request<T, L>(
     slave: UnitId,
     request: RequestPdu,
     memory: &Arc<RwLock<Memory<Key<T>>>>,
@@ -447,6 +461,42 @@ where
     }
 }
 
+/// Handle one inbound Modbus server request against `memory`, shared by every server transport
+/// (TCP, RTU, RTU-over-TCP).
+///
+/// Every arm logs a "request received" line. When `verbose` is set, each arm additionally logs
+/// per-request success/failure; every production caller now passes `verbose = true` (MB-R-067) —
+/// `verbose = false` remains reachable only for tests exercising the quiet path. `physical_serial`
+/// gates MB-R-128: on a real `Rtu`/`Ascii` link, a request addressed to a slave id with no
+/// declared region in any table is applied to the store and answered with silence (`Ok(None)`)
+/// rather than the ordinary `IllegalDataAddress` exception (MB-R-057).
+pub(crate) async fn handle_request<T, L>(
+    slave: UnitId,
+    request: RequestPdu,
+    memory: &Arc<RwLock<Memory<Key<T>>>>,
+    log: &L,
+    verbose: bool,
+    physical_serial: bool,
+) -> Result<Option<ResponsePdu>, ExceptionCode>
+where
+    T: KeyParams,
+    L: LogFn + Clone,
+{
+    let result = answer_request(slave, request, memory, log, verbose).await;
+    match result {
+        Ok(pdu) => Ok(Some(pdu)),
+        // MB-R-128 — silence, not an exception, when the slave id itself is wholly unmapped on
+        // a physical Rtu/Ascii link; an address merely outside a declared region for a mapped
+        // slave still falls through to the ordinary exception below.
+        Err(ExceptionCode::IllegalDataAddress)
+            if physical_serial && slave_has_no_region(slave, memory) =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Per-connection Modbus server service shared by every server transport (TCP, RTU,
 /// RTU-over-TCP): every request is answered directly from the shared `memory` via
 /// [`handle_request`]. `verbose` toggles the per-request success/failure logging — every
@@ -460,6 +510,7 @@ where
     memory: Arc<RwLock<Memory<Key<T>>>>,
     log: L,
     verbose: bool,
+    physical_serial: bool,
 }
 
 impl<T, L> Server<T, L>
@@ -467,11 +518,17 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    pub(crate) fn new(memory: Arc<RwLock<Memory<Key<T>>>>, log: L, verbose: bool) -> Self {
+    pub(crate) fn new(
+        memory: Arc<RwLock<Memory<Key<T>>>>,
+        log: L,
+        verbose: bool,
+        physical_serial: bool,
+    ) -> Self {
         Self {
             memory,
             log,
             verbose,
+            physical_serial,
         }
     }
 }
@@ -490,8 +547,16 @@ where
         _conn: &Connection,
         unit: UnitId,
         request: RequestPdu,
-    ) -> Result<ResponsePdu, ExceptionCode> {
-        handle_request(unit, request, &self.memory, &self.log, self.verbose).await
+    ) -> Result<Option<ResponsePdu>, ExceptionCode> {
+        handle_request(
+            unit,
+            request,
+            &self.memory,
+            &self.log,
+            self.verbose,
+            self.physical_serial,
+        )
+        .await
     }
 
     // A framing or I/O failure on the wire never reaches `on_request`; this reports it (the
@@ -560,7 +625,7 @@ mod tests {
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::CellKind as MemKind;
     use rust_modbus::{
-        Address, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
+        Address, Ascii, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
         FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
         RecordNumber, Rtu, Server as ModbusServer, Tcp,
     };
@@ -608,7 +673,7 @@ mod tests {
     async fn ut_on_tls_handshake_failed_logs_peer_and_error() {
         let mem = seeded_memory(&[]);
         let (log, buf) = recording_log();
-        let server = Server::new(mem, log, true);
+        let server = Server::new(mem, log, true, false);
 
         let peer: std::net::SocketAddr = "127.0.0.1:5502".parse().unwrap();
         let error = rust_modbus::Error::TlsHandshake {
@@ -643,7 +708,7 @@ mod tests {
     async fn ut_server_call_works_on_current_thread_runtime() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();
-        let server = Server::new(mem, log, true);
+        let server = Server::new(mem, log, true, false);
 
         // Served over an in-memory duplex link, which is the same code path a socket takes:
         // the accept loop is the only thing a real listener adds.
@@ -688,7 +753,7 @@ mod tests {
         }
         let mem = Arc::new(RwLock::new(mem));
         let (log, _) = recording_log();
-        let server = Server::new(mem.clone(), log, true);
+        let server = Server::new(mem.clone(), log, true, true);
 
         let (server_end, client_end) = tokio::io::duplex(256);
         let modbus = ModbusServer::new(server);
@@ -747,9 +812,11 @@ mod tests {
             &mem,
             &log,
             true,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(10), RegisterValue(20)])
         );
@@ -769,6 +836,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -790,9 +858,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         let resp = handle_request::<SlaveKey, _>(
             UnitId(1),
             RequestPdu::ReadHoldingRegisters {
@@ -802,9 +872,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(99)])
         );
@@ -828,9 +900,11 @@ mod tests {
             &mem,
             &log,
             true,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         let verbose = buf.lock().unwrap().clone();
         assert_eq!(verbose.len(), 2);
         assert!(verbose[0].contains("received"));
@@ -847,9 +921,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         let quiet = buf.lock().unwrap().clone();
         assert_eq!(quiet.len(), 1);
         assert!(quiet[0].contains("received"));
@@ -896,9 +972,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         // Regression: the write range length must equal values.len(), not 1. Before the fix
         // `Memory::write` rejected any multi-coil write (range.length() != values.len()).
         assert!(matches!(
@@ -918,9 +996,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(matches!(read, ResponsePdu::ReadCoils { coils: v } if v == coils));
     }
 
@@ -938,6 +1018,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -961,9 +1042,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadCoils { coils: v } if v == vec![true, false, true, false])
         );
@@ -982,6 +1065,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1003,9 +1087,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadDiscreteInputs { inputs: v } if v == vec![false, true, true])
         );
@@ -1024,6 +1110,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1047,9 +1134,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadInputRegisters { registers: v } if v == vec![RegisterValue(7), RegisterValue(8), RegisterValue(9)])
         );
@@ -1068,6 +1157,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1088,6 +1178,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1111,9 +1202,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(matches!(
             resp,
             ResponsePdu::WriteSingleCoil {
@@ -1130,9 +1223,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(matches!(read, ResponsePdu::ReadCoils { coils: v } if v == vec![true]));
     }
 
@@ -1149,6 +1244,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1169,6 +1265,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1192,9 +1289,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(matches!(
             resp,
             ResponsePdu::WriteMultipleRegisters {
@@ -1211,9 +1310,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(read, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(11), RegisterValue(22), RegisterValue(33)])
         );
@@ -1232,6 +1333,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1263,9 +1365,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(resp, ResponsePdu::ReadWriteMultipleRegisters { registers: v } if v == vec![RegisterValue(5), RegisterValue(6)])
         );
@@ -1278,9 +1382,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             matches!(read, ResponsePdu::ReadHoldingRegisters { registers: v } if v == vec![RegisterValue(77), RegisterValue(88)])
         );
@@ -1306,6 +1412,7 @@ mod tests {
             },
             &mem,
             &log,
+            false,
             false,
         )
         .await
@@ -1352,9 +1459,11 @@ mod tests {
                 &mem,
                 &log,
                 false,
+                false,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .expect("request answered");
             assert!(
                 matches!(resp, ResponsePdu::ReadHoldingRegisters { registers: v } if v[0] == RegisterValue(slave as u16))
             );
@@ -1382,9 +1491,11 @@ mod tests {
             &mem,
             &log,
             false,
+            false,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("request answered");
         assert!(
             buf.lock()
                 .unwrap()
@@ -1394,10 +1505,16 @@ mod tests {
 
         // A rejected function code still logs "request received" before the IllegalFunction reply.
         let (log, buf) = recording_log();
-        let err =
-            handle_request::<SlaveKey, _>(UnitId(1), RequestPdu::ReportServerId, &mem, &log, false)
-                .await
-                .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReportServerId,
+            &mem,
+            &log,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalFunction);
         assert!(
             buf.lock()
@@ -1414,10 +1531,16 @@ mod tests {
     async fn ut_report_server_id_is_illegal_function() {
         let mem = seeded(RegKind::HoldingRegister, CellType::Register, 4, &[]);
         let (log, _) = recording_log();
-        let err =
-            handle_request::<SlaveKey, _>(UnitId(1), RequestPdu::ReportServerId, &mem, &log, false)
-                .await
-                .unwrap_err();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReportServerId,
+            &mem,
+            &log,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err, ExceptionCode::IllegalFunction);
     }
 
@@ -1430,9 +1553,10 @@ mod tests {
             ($mem:expr, $req:expr) => {{
                 let mem = $mem;
                 let (log, buf) = recording_log();
-                handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true)
+                handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true, false)
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .expect("request answered");
                 assert!(
                     buf.lock().unwrap().iter().any(|l| l.contains("successful")),
                     "missing success log line"
@@ -1511,7 +1635,8 @@ mod tests {
             ($mem:expr, $req:expr) => {{
                 let mem = $mem;
                 let (log, buf) = recording_log();
-                let _ = handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true).await;
+                let _ =
+                    handle_request::<SlaveKey, _>(UnitId(1), $req, &mem, &log, true, false).await;
                 assert!(
                     buf.lock().unwrap().iter().any(|l| l.contains("failed")),
                     "missing failure log line"
@@ -1637,10 +1762,240 @@ mod tests {
                 data: vec![],
             },
         ] {
-            let err = handle_request::<SlaveKey, _>(UnitId(1), req, &mem, &log, false)
+            let err = handle_request::<SlaveKey, _>(UnitId(1), req, &mem, &log, false, false)
                 .await
                 .unwrap_err();
             assert_eq!(err, ExceptionCode::IllegalFunction);
         }
+    }
+
+    #[test]
+    /// MB-R-128 — a slave id is "wholly unmapped" only when every register table is unregistered
+    /// for it; a region in any one table (even a different one than the request under test)
+    /// disqualifies it.
+    fn ut_slave_has_no_region_true_when_wholly_unmapped() {
+        let mem: Arc<RwLock<Memory<Key<SlaveKey>>>> = Arc::new(RwLock::new(Memory::default()));
+        assert!(slave_has_no_region(UnitId(9), &mem));
+    }
+
+    #[test]
+    /// MB-R-128 — a region declared in one table (Coil) still counts as "at least one region is
+    /// declared" for the slave id as a whole, even though this test's own interest is elsewhere.
+    fn ut_slave_has_no_region_false_when_any_table_is_mapped() {
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        mem.add_ranges(
+            Key {
+                id: SlaveKey {
+                    slave_id: UnitId(9),
+                    kind: RegKind::Coil,
+                },
+            },
+            &MemKind::ReadWrite(CellType::Coil),
+            &[Range::new(0, 4)],
+        );
+        let mem = Arc::new(RwLock::new(mem));
+        assert!(!slave_has_no_region(UnitId(9), &mem));
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — a physical-serial server withholds the response for a wholly-unmapped slave id.
+    async fn ut_handle_request_silent_when_wholly_unmapped_and_physical_serial() {
+        let mem = seeded_memory(&[10, 20]); // slave 1 only
+        let (log, _) = recording_log();
+        let resp = handle_request::<SlaveKey, _>(
+            UnitId(9),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+            true, // physical_serial
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp, None);
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — the same wholly-unmapped slave id gets the ordinary exception, not silence, on
+    /// every non-`Rtu`/`Ascii` transport (edge-cases.md row 1 regression).
+    async fn ut_handle_request_exception_when_wholly_unmapped_and_not_physical_serial() {
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(9),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+            false, // physical_serial
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — a slave id with a region declared in a different table still gets the ordinary
+    /// exception on a physical-serial server; only a *wholly* unmapped slave id is silenced.
+    async fn ut_handle_request_exception_when_region_declared_in_other_table_even_physical_serial()
+    {
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        mem.add_ranges(
+            Key {
+                id: SlaveKey {
+                    slave_id: UnitId(9),
+                    kind: RegKind::Coil,
+                },
+            },
+            &MemKind::ReadWrite(CellType::Coil),
+            &[Range::new(0, 4)],
+        );
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+        // Request targets HoldingRegister — unmapped for slave 9 — but slave 9 has a Coil region.
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(9),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            &mem,
+            &log,
+            false,
+            true, // physical_serial
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — end-to-end over a real `Rtu` frame: a request to an unmapped, non-broadcast
+    /// slave id is applied to the store and answered with silence. Unlike MB-R-103's broadcast
+    /// case, the client here has no way to know in advance that nothing will answer, so (unlike
+    /// `ut_rtu_broadcast_request_is_applied_and_unanswered`) it genuinely waits out its response
+    /// timeout — that timeout, not an early return, is what proves no frame came back.
+    async fn ut_rtu_unmapped_slave_request_is_applied_and_unanswered() {
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        let key1 = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: RegKind::HoldingRegister,
+            },
+        };
+        mem.add_ranges(
+            key1.clone(),
+            &MemKind::ReadWrite(CellType::Register),
+            &[Range::new(0, 4)],
+        );
+        mem.write(key1, &CellType::Register, &Range::new(0, 2), &[10, 20])
+            .unwrap();
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+        let server = Server::new(mem.clone(), log, true, true); // physical_serial
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Rtu>::new(server_end)));
+
+        let mut client: RmClient<_, Rtu> = RmClient::with_config(
+            FrameTransport::new(client_end),
+            rust_modbus::ClientConfig {
+                response_timeout: std::time::Duration::from_millis(50),
+            },
+        );
+        // Slave 5 has no declared region at all — the client waits out its response timeout
+        // because nothing answers (the timeout itself is the proof no response frame arrived;
+        // MB-R-090 desynchronizes the client afterward, so a follow-up request over the same
+        // link is not a meaningful further check).
+        let err = client
+            .write_single_register(UnitId(5), Address(1), RegisterValue(0x1234))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, rust_modbus::Error::Timeout { .. }));
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — identical to the `Rtu` case above but over `Ascii` framing (the requirement
+    /// names both transports explicitly).
+    async fn ut_ascii_unmapped_slave_request_is_applied_and_unanswered() {
+        let mut mem = Memory::<Key<SlaveKey>>::default();
+        let key1 = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: RegKind::HoldingRegister,
+            },
+        };
+        mem.add_ranges(
+            key1.clone(),
+            &MemKind::ReadWrite(CellType::Register),
+            &[Range::new(0, 4)],
+        );
+        mem.write(key1, &CellType::Register, &Range::new(0, 2), &[10, 20])
+            .unwrap();
+        let mem = Arc::new(RwLock::new(mem));
+        let (log, _) = recording_log();
+        let server = Server::new(mem.clone(), log, true, true);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Ascii>::new(server_end)));
+
+        let mut client: RmClient<_, Ascii> = RmClient::with_config(
+            FrameTransport::new(client_end),
+            rust_modbus::ClientConfig {
+                response_timeout: std::time::Duration::from_millis(50),
+            },
+        );
+        let err = client
+            .write_single_register(UnitId(5), Address(1), RegisterValue(0x1234))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, rust_modbus::Error::Timeout { .. }));
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-128 — over `Tcp` (representative of the four non-Rtu/Ascii transports), an unmapped
+    /// slave id still gets an ordinary exception response end-to-end — silence must not leak past
+    /// the `physical_serial` gate.
+    async fn ut_tcp_unmapped_slave_still_answers_exception() {
+        let mem = seeded_memory(&[10, 20]); // slave 1 only
+        let (log, _) = recording_log();
+        let server = Server::new(mem, log, true, false); // physical_serial = false
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        let mut client: RmClient<_, Tcp> = RmClient::new(FrameTransport::new(client_end));
+        let err = client
+            .read_holding_registers(UnitId(9), Address(0), Quantity(2))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            rust_modbus::Error::Exception {
+                exception: ExceptionCode::IllegalDataAddress,
+                ..
+            }
+        ));
+
+        handle.shutdown().await;
+        let _ = serving.await;
     }
 }

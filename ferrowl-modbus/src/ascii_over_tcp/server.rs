@@ -42,6 +42,11 @@ impl<T: KeyParams> ServerBuilder<T> {
 /// exception.
 const VERBOSE: bool = true;
 
+/// MB-R-128 — this transport is never physical Rtu/Ascii serial (RtuOverTcp/AsciiOverTcp ride
+/// TCP; Tcp and Udp have no serial concept at all): an unmapped slave id keeps the ordinary
+/// exception, same as MB-R-065/MB-R-060.
+const PHYSICAL_SERIAL: bool = false;
+
 /// Bind the configured TCP address and spawn the accept loop; each accepted connection answers
 /// from the shared `memory` via a [`Server`] using ASCII framing (MB-R-126), verbose logging on
 /// (MB-R-067). Plain TCP unless `config.tls` is set (MB-R-127), in which case the listener
@@ -60,7 +65,7 @@ where
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
     // One service instance answers every accepted connection, so all of them share the
     // one store (MB-R-070). Every server logs per-request outcomes (verbose = true, MB-R-067).
-    let server = ModbusServer::new(Server::new(memory, log.clone(), VERBOSE));
+    let server = ModbusServer::new(Server::new(memory, log.clone(), VERBOSE, PHYSICAL_SERIAL));
     match &config.tls {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
@@ -97,12 +102,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::VERBOSE;
+    use super::{PHYSICAL_SERIAL, VERBOSE};
 
     /// MB-R-067 — the AsciiOverTcp server logs per-request outcomes exactly like every other
     /// transport (RTU, RTU-over-TCP, TCP, Ascii alike now).
     #[test]
     fn ut_ascii_over_tcp_server_is_verbose() {
         assert!(VERBOSE);
+    }
+
+    /// MB-R-128 — AsciiOverTcp is never physical-serial: an unmapped slave id keeps the ordinary
+    /// exception.
+    #[test]
+    fn ut_ascii_over_tcp_server_is_not_physical_serial() {
+        assert!(!PHYSICAL_SERIAL);
     }
 }

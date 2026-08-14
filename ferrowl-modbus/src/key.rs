@@ -14,6 +14,11 @@ use rust_modbus::{FunctionCode, UnitId};
 pub trait KeyParams: Hash + Eq + Clone + Default + Debug + Send + Sync + 'static {
     /// Derives the key for a request addressed at `slave_id` with `fn_code`.
     fn from_slave_fn(slave_id: UnitId, fn_code: FunctionCode) -> Self;
+
+    /// Every key this scheme can produce for `slave_id`, one per register table — used by
+    /// MB-R-128 to test whether *any* region is declared for a slave id, independent of which
+    /// table a particular failing request's own key names.
+    fn all_kinds_for(slave_id: UnitId) -> Vec<Self>;
 }
 
 /// Memory key wrapping [`KeyParams`]; used as the device key of the shared
@@ -68,6 +73,18 @@ impl KeyParams for SlaveKey {
             },
         }
     }
+
+    fn all_kinds_for(slave_id: UnitId) -> Vec<Self> {
+        [
+            Kind::Coil,
+            Kind::DiscreteInput,
+            Kind::HoldingRegister,
+            Kind::InputRegister,
+        ]
+        .into_iter()
+        .map(|kind| SlaveKey { slave_id, kind })
+        .collect()
+    }
 }
 
 #[cfg(test)]
@@ -99,5 +116,25 @@ mod tests {
         let sk = SlaveKey::from_slave_fn(UnitId(3), FunctionCode::ReadCoils);
         assert_eq!(sk.slave_id, UnitId(3));
         assert_eq!(sk.kind, Kind::Coil);
+    }
+
+    #[test]
+    /// MB-R-128 — `all_kinds_for` enumerates the four register tables (`Kind`'s only variants —
+    /// ferrowl-codec/src/kind.rs) for one slave id, giving every key that slave id could ever
+    /// occupy in a `Memory`.
+    fn ut_slave_key_all_kinds_for_covers_every_table() {
+        let keys = SlaveKey::all_kinds_for(UnitId(7));
+        assert_eq!(keys.len(), 4);
+        for kind in [
+            Kind::Coil,
+            Kind::DiscreteInput,
+            Kind::HoldingRegister,
+            Kind::InputRegister,
+        ] {
+            assert!(keys.contains(&SlaveKey {
+                slave_id: UnitId(7),
+                kind
+            }));
+        }
     }
 }
