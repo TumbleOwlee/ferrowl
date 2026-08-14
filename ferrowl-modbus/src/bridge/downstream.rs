@@ -15,10 +15,21 @@ pub const ERROR_PREFIX: &str = "[bridge]";
 /// while reconnecting in the background on failure (BR-R-010, mirrors MB-R-050–056).
 /// Cloning shares the same underlying connection state — every clone forwards onto the
 /// same physical link.
-#[derive(Clone)]
 pub struct DownstreamHandle<S, F> {
     state: Arc<Mutex<Option<Client<S, F>>>>,
     reconnect_needed: Arc<Notify>,
+}
+
+// Written by hand rather than `#[derive(Clone)]`: a derive would add `S: Clone, F: Clone`
+// bounds even though only the `Arc`s are ever cloned — neither the connected transport nor
+// the framing marker needs to be `Clone` for this to be sound.
+impl<S, F> Clone for DownstreamHandle<S, F> {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            reconnect_needed: self.reconnect_needed.clone(),
+        }
+    }
 }
 
 impl<S, F> DownstreamHandle<S, F>
