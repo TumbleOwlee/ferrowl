@@ -239,6 +239,13 @@ where
             None => Err(MemoryError::UnknownKey),
         }
     }
+
+    /// Returns `true` if `id` has at least one declared region, regardless of whether any
+    /// particular address range is covered — used by a caller (e.g. ferrowl-modbus's MB-R-128)
+    /// that needs to test registration itself, not a specific range's coverage.
+    pub fn contains_key(&self, id: &K) -> bool {
+        self.slices.contains_key(id)
+    }
 }
 
 /// Walk the slices intersecting `range` in ascending order, calling `f` with each slice and the
@@ -824,5 +831,17 @@ mod tests {
                 .unwrap(),
             vec![70, 80, 90]
         );
+    }
+
+    #[test]
+    /// MB-R-128 — `contains_key` reports registration itself, independent of any particular
+    /// address range: `true` once any range has been declared for `id`, `false` for an id with
+    /// no `add_ranges` call at all.
+    fn ut_memory_contains_key() {
+        let mut memory: Memory<u8> = Memory::default();
+        assert!(!memory.contains_key(&1u8));
+        memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]);
+        assert!(memory.contains_key(&1u8));
+        assert!(!memory.contains_key(&2u8));
     }
 }
