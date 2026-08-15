@@ -277,7 +277,8 @@ pub fn run_server_sim<V: ServerVersion>(
             .with_module(TimeModule::default())
             .with_module(TestModule)
             .with_module(LogModule::init(LuaLogSink(log.clone())))
-            .with_print_sink(LuaLogSink(log.clone()));
+            .with_print_sink(LuaLogSink(log.clone()))
+            .with_stop_flag(thread_stop.clone());
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
@@ -410,5 +411,39 @@ mod tests {
     fn ut_connectors_of_unknown_station_is_empty() {
         let (host, _q) = host_with_station();
         assert!(host.connectors("ghost").is_empty());
+    }
+
+    fn log() -> SharedLog {
+        Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
+    }
+
+    #[test]
+    /// SC-R-012 — stopping a runaway OCPP server sim completes promptly via the execution hook
+    /// (SC-R-034) instead of blocking the join on a between-cycles-only stop check.
+    fn ut_stop_interrupts_runaway_server_script_promptly() {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let mut handle = run_server_sim(
+            states,
+            queue,
+            vec![("runaway".to_string(), "while true do end".to_string())],
+            // `interval` is refresh_all's per-script throttle window (SC-R-014), not the loop's
+            // own sleep (fixed 50ms via sleep_responsive) — Duration::ZERO makes the just-loaded
+            // script eligible to run on the very first cycle, deterministically.
+            Duration::ZERO,
+            log(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        // Let the sim thread actually enter the runaway script's busy loop before requesting a
+        // stop, so the assertion below exercises "interrupted mid-execution", not "never started".
+        std::thread::sleep(Duration::from_millis(100));
+
+        let start = std::time::Instant::now();
+        handle.stop();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "stop() blocked instead of the hook interrupting the runaway script"
+        );
     }
 }

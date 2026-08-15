@@ -276,7 +276,8 @@ where
             .with_module(TimeModule::default())
             .with_module(TestModule)
             .with_module(LogModule::init(LuaLogSink(log.clone())))
-            .with_print_sink(LuaLogSink(log.clone()));
+            .with_print_sink(LuaLogSink(log.clone()))
+            .with_stop_flag(thread_stop.clone());
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
@@ -504,6 +505,40 @@ mod tests {
 
     fn queue() -> ScopedActionQueue {
         Arc::new(Mutex::new(VecDeque::new()))
+    }
+
+    fn log() -> SharedLog {
+        Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
+    }
+
+    #[test]
+    /// SC-R-012 — stopping a runaway OCPP client sim completes promptly via the execution hook
+    /// (SC-R-034) instead of blocking the join on a between-cycles-only stop check.
+    fn ut_stop_interrupts_runaway_client_script_promptly() {
+        let state = Arc::new(RwLock::new(Cs201::default()));
+        let q = queue();
+        let mut handle = run_client_sim(
+            state,
+            q,
+            vec![("runaway".to_string(), "while true do end".to_string())],
+            // `interval` here is refresh_all's per-script throttle window (SC-R-014), not the
+            // loop's own sleep (that's a fixed 50ms via sleep_responsive) — Duration::ZERO makes
+            // the just-loaded script eligible to run on the very first cycle, deterministically.
+            Duration::ZERO,
+            log(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        // Let the sim thread actually enter the runaway script's busy loop before requesting a
+        // stop, so the assertion below exercises "interrupted mid-execution", not "never started".
+        std::thread::sleep(Duration::from_millis(100));
+
+        let start = std::time::Instant::now();
+        handle.stop();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "stop() blocked instead of the hook interrupting the runaway script"
+        );
     }
 
     #[test]

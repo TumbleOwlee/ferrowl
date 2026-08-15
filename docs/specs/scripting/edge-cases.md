@@ -61,25 +61,28 @@ it is not mistaken for an oversight and silently "fixed".
 
 ## 5. Known limitations and findings
 
-### 5.1 No execution ceiling — an infinite loop hangs, and joining it blocks
+### 5.1 Execution ceiling — an infinite loop is interrupted mid-cycle
 
-There is no execution-time limit, no instruction-count hook, and no memory
-ceiling configured on the VM. A script that loops forever never returns control
-to the sim loop, so:
+Every Lua context installs an execution hook (SC-R-034, `every_nth_instruction`
+firing every 1,000 instructions) that both checks the stop flag and enforces a
+fixed 1,000 ms wall-clock cap. A script that loops forever is therefore
+interrupted the first time the hook fires after either condition is met:
 
-- That module's dedicated sim thread spins forever, pinning one CPU core. Other
-  modules' sim threads and the UI keep running **on their own**.
-- **But** the stop flag is only observed *between* cycles. Because the runaway
-  script never lets its cycle finish, the stop-and-join that a script edit, a tab
-  close, a module reconfigure, or app shutdown performs will **block on the join
-  forever** — freezing whichever thread requested the stop (which, for an edit or
-  a tab close, is the UI thread). So the blast radius of a runaway script is
-  larger than just its own thread: it is any subsequent operation that must join
-  that thread.
+- If a stop-and-join is pending (a script edit, a tab close, a module
+  reconfigure, or app shutdown), the hook raises to unwind the runaway script,
+  so the sim thread's cycle ends and the join completes promptly instead of
+  blocking forever. Prior to this hook, the stop flag was only observed
+  *between* cycles, so a runaway script's blast radius extended to any thread
+  that had to join it — typically the UI thread for an edit or tab close.
+- Independently of any stop request, the 1,000 ms wall-clock cap aborts a
+  cycle (or an on-demand run, SC-R-035) that runs long, bounding worst-case
+  CPU pinning to just over that cap even with no operator action.
 
-Working as implemented given the absence of any budget; recorded so it is not
-mistaken for a hang bug. A real fix requires an instruction/time budget on the VM
-so a stop request can interrupt a running cycle.
+Both the hook interval and the wall-clock cap are fixed constants (SC-R-034),
+not configurable. There remains no memory ceiling on a script: a script that
+allocates without bound (e.g. building an ever-growing table) is not stopped
+by this hook, since the hook checks instruction count and wall-clock time
+only.
 
 ### 5.2 Lua register writes are store-only (client)
 
