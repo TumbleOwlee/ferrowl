@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use clap::{Args, Parser, Subcommand};
 
+pub mod bridge;
 pub mod headless;
 
 use crate::config::ocpp::OcppProtocol;
@@ -362,10 +363,6 @@ fn parse_opt<T: std::str::FromStr>(
 
 /// Parse a single `--upstream`/`--downstream` value (`key=val,key=val,...`) into a
 /// [`ferrowl_modbus::bridge::BridgeEndpointSpec`] (BR-R-004). Mirrors [`parse_module_spec`].
-// Not yet called by production code: wired into `cli::bridge::run` in a later stage. `pub`
-// (not `pub(crate)`) so it can be exercised directly by this module's own tests in the
-// meantime.
-#[allow(dead_code)]
 pub fn parse_bridge_descriptor(
     input: &str,
 ) -> Result<ferrowl_modbus::bridge::BridgeEndpointSpec, String> {
