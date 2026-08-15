@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::ascii_over_tcp;
 use ferrowl_modbus::tcp;
-use ferrowl_modbus::{Command, FunctionCode, Key, Operation, SlaveKey, UnitId};
+use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -89,13 +89,18 @@ async fn ascii_over_tcp_client_server_tls_roundtrip() {
         self_signed: true,
         ..Default::default()
     };
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port, server_tls))),
         srv_mem,
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before starting the client so
+    // its first connect attempt does not race the server into a full backoff wait.
+    sleep(std::time::Duration::from_millis(100)).await;
 
     // Client: trusts whatever certificate the server presents (this test is about the
     // AsciiOverTcp handshake plumbing, not certificate validation, which MB-R-109's

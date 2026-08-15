@@ -9,11 +9,11 @@ use std::sync::Arc;
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge;
 use ferrowl_modbus::tcp;
-use ferrowl_modbus::{Address, Key, SlaveKey, UnitId};
+use ferrowl_modbus::{Address, Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{ExceptionCode, Quantity, RequestPdu};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 fn key(kind: RegKind) -> Key<SlaveKey> {
     Key::new(SlaveKey {
@@ -69,8 +69,9 @@ async fn it_tcp_downstream_connects_and_forwards() {
     .unwrap();
     let srv_mem = Arc::new(MemLock::new(mem));
 
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let _server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("server failed to start");
 

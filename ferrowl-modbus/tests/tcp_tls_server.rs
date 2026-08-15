@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
-use ferrowl_modbus::{Key, SlaveKey, UnitId};
+use ferrowl_modbus::{Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
@@ -21,7 +21,7 @@ use rcgen::{CertificateParams, Issuer, KeyPair};
 use rust_modbus::{
     ClientIdentity, RootStore, ServerCertVerification, TcpConfig, TlsClientConfig, connect_tls,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 type Mem = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 
@@ -147,10 +147,16 @@ async fn self_signed_fallback_is_used_and_logged() {
     let port = free_port();
     let cfg = Arc::new(RwLock::new(config(port, tcp::ModbusTlsConfig::default())));
     let (log, captured) = capturing();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(log)
+        .spawn(srv_rx, log, sink())
         .await
         .expect("server should start with the self-signed fallback");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     raw_connect(addr, None, None)
@@ -182,10 +188,16 @@ async fn explicit_self_signed_is_used_without_fallback_log() {
         },
     )));
     let (log, captured) = capturing();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(log)
+        .spawn(srv_rx, log, sink())
         .await
         .expect("server should start with an explicit self-signed cert");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     raw_connect(addr, None, None)
@@ -223,10 +235,16 @@ async fn explicit_files_win_over_self_signed() {
         },
     )));
     let (log, captured) = capturing();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(log)
+        .spawn(srv_rx, log, sink())
         .await
         .expect("server should start from the explicit files");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     raw_connect(addr, Some(&cert_pem), None)
@@ -247,7 +265,9 @@ async fn explicit_files_win_over_self_signed() {
 
 #[tokio::test]
 /// MB-R-107 — `cert_file` or `key_file` set alone (not both) fails the server's start
-/// with a TLS configuration error, before any bind is attempted.
+/// with a TLS configuration error, before any bind is attempted. `spawn()` itself always
+/// returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces from the joined
+/// task instead, and never retries (a TLS configuration error can never fix itself).
 async fn lone_cert_or_key_file_fails_server_start() {
     let (cert_pem, _key_pem) = self_signed_pem();
     let cert_file = write_pem("lone-cert", &cert_pem);
@@ -259,9 +279,15 @@ async fn lone_cert_or_key_file_fails_server_start() {
             ..Default::default()
         },
     )));
-    let result = tcp::ServerBuilder::new(cert_only, memory())
-        .spawn(sink())
-        .await;
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = tcp::ServerBuilder::new(cert_only, memory())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, on a TLS configuration error")
+        .expect("task must not panic");
     assert!(matches!(
         result,
         Err(ferrowl_modbus::Error::Tcp(
@@ -278,9 +304,15 @@ async fn lone_cert_or_key_file_fails_server_start() {
             ..Default::default()
         },
     )));
-    let result = tcp::ServerBuilder::new(key_only, memory())
-        .spawn(sink())
-        .await;
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = tcp::ServerBuilder::new(key_only, memory())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, on a TLS configuration error")
+        .expect("task must not panic");
     assert!(matches!(
         result,
         Err(ferrowl_modbus::Error::Tcp(
@@ -314,10 +346,16 @@ async fn require_client_cert_enforced() {
             ..Default::default()
         },
     )));
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("mTLS server should start");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
 
@@ -382,10 +420,16 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
             ..Default::default()
         },
     )));
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("mTLS server should start");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
 
@@ -434,10 +478,16 @@ async fn require_client_cert_rejection_is_logged() {
         },
     )));
     let (log, captured) = capturing();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(log)
+        .spawn(srv_rx, log, sink())
         .await
         .expect("mTLS server should start");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
 
@@ -493,10 +543,16 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
             ..Default::default()
         },
     )));
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("server should start: a client_ca_file without require_client_cert is valid");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     raw_connect(addr, Some(&server_cert_pem), None)
@@ -508,7 +564,9 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
 
 #[tokio::test]
 /// MB-R-108 — `require_client_cert` without a `client_ca_file` fails the server's
-/// start with a TLS configuration error, before any bind is attempted.
+/// start with a TLS configuration error, before any bind is attempted. `spawn()` itself
+/// always returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces from the
+/// joined task instead, and never retries (a TLS configuration error can never fix itself).
 async fn require_client_cert_without_ca_fails_server_start() {
     let (cert_pem, key_pem) = self_signed_pem();
     let cert_file = write_pem("no-ca-cert", &cert_pem);
@@ -523,7 +581,15 @@ async fn require_client_cert_without_ca_fails_server_start() {
             ..Default::default()
         },
     )));
-    let result = tcp::ServerBuilder::new(cfg, memory()).spawn(sink()).await;
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = tcp::ServerBuilder::new(cfg, memory())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, on a TLS configuration error")
+        .expect("task must not panic");
     assert!(matches!(
         result,
         Err(ferrowl_modbus::Error::Tcp(
@@ -534,7 +600,9 @@ async fn require_client_cert_without_ca_fails_server_start() {
 
 #[tokio::test]
 /// edge-cases.md "TLS boundaries" — a malformed/unreadable PEM path fails the
-/// server's start with a TLS configuration error, the same tier as MB-R-107/108.
+/// server's start with a TLS configuration error, the same tier as MB-R-107/108. `spawn()`
+/// itself always returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces
+/// from the joined task instead, and never retries.
 async fn malformed_pem_fails_server_start() {
     let bad_cert = write_pem("garbage-cert", "not a pem file at all");
     let (_cert_pem, key_pem) = self_signed_pem();
@@ -548,7 +616,15 @@ async fn malformed_pem_fails_server_start() {
             ..Default::default()
         },
     )));
-    let result = tcp::ServerBuilder::new(cfg, memory()).spawn(sink()).await;
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = tcp::ServerBuilder::new(cfg, memory())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, on a TLS configuration error")
+        .expect("task must not panic");
     assert!(matches!(
         result,
         Err(ferrowl_modbus::Error::Tcp(

@@ -75,6 +75,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::RwLock as TokioRwLock;
+    use tokio::sync::mpsc;
 
     fn sink() -> impl LogFn + Clone {
         |_s: String| async move {}
@@ -141,11 +142,12 @@ mod tests {
         )
         .unwrap();
         let srv_mem = Arc::new(MemLock::new(mem));
+        let (_srv_tx, srv_rx) = mpsc::channel::<crate::ServerCommand>(1);
         let _downstream_server = crate::tcp::ServerBuilder::new(
             Arc::new(TokioRwLock::new(config(downstream_port))),
             srv_mem,
         )
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("downstream server failed to start");
 
