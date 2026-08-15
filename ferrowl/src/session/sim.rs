@@ -116,7 +116,8 @@ impl SessionSim {
                 .with_module(TimeModule::default())
                 .with_module(TestModule)
                 .with_module(LogModule::init(LuaLogSink(log.clone())))
-                .with_print_sink(LuaLogSink(log.clone()));
+                .with_print_sink(LuaLogSink(log.clone()))
+                .with_stop_flag(thread_stop.clone());
             for (name, code) in &enabled {
                 builder = builder.with_script(name.clone(), code);
             }
@@ -317,6 +318,31 @@ mod tests {
             enabled: false,
         }]);
         assert!(sim.handle.is_none());
+    }
+
+    #[test]
+    /// SC-R-012 — stopping the session sim while a script is in a runaway loop completes promptly
+    /// via the execution hook (SC-R-034), instead of the between-cycles-only check blocking the
+    /// join forever.
+    fn ut_stop_interrupts_runaway_session_script_promptly() {
+        let rw = MockReadWrite::default();
+        let directory = directory_with_mock(rw);
+        let log = log();
+        let mut sim = SessionSim::new(directory, log);
+        sim.set_interval(Duration::from_secs(10));
+        sim.set_scripts(vec![script("runaway", "while true do end")]);
+        assert!(sim.handle.is_some());
+
+        // Let the sim thread actually enter the runaway script's busy loop before requesting a
+        // stop, so the assertion below exercises "interrupted mid-execution", not "never started".
+        std::thread::sleep(Duration::from_millis(100));
+
+        let start = std::time::Instant::now();
+        sim.stop();
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "stop() blocked instead of the hook interrupting the runaway script"
+        );
     }
 
     #[test]
