@@ -9,9 +9,11 @@ pub struct ClientHandle {
     pub sender: Sender<ferrowl_modbus::Command>,
 }
 
-/// Handle of a running server task.
+/// Handle of a running server task plus the channel its commands go through
+/// (MB-R-133).
 pub struct ServerHandle {
     pub handle: JoinHandle<Result<(), ferrowl_modbus::Error>>,
+    pub sender: Sender<ferrowl_modbus::ServerCommand>,
 }
 
 /// Handle of a running instance, by role.
