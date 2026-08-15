@@ -32,8 +32,8 @@ pub enum AttemptOutcome<E> {
     Done,
     /// The attempt failed. `reconnect` is this attempt's freshly-read config flag (callers
     /// re-read it every attempt so an edit takes effect without a restart). `reset` says
-    /// whether the backoff should drop back to `initial` before the *next* wait (something
-    /// useful happened during this run before it failed).
+    /// whether the backoff should drop back to `initial` before the wait that follows *this*
+    /// failure (something useful happened during this run before it failed).
     Failed {
         error: E,
         reconnect: bool,
@@ -72,16 +72,16 @@ where
                 if !reconnect {
                     return Err(error);
                 }
-                // This attempt's own wait still reflects whatever backoff was already in
-                // flight; `reset` decides only what the *next* wait starts from.
+                // `reset` applies before the wait it governs: a run that got something useful
+                // done before failing drops straight back to `initial` for *this* wait, not
+                // just the next one.
+                if reset {
+                    backoff = policy.initial;
+                }
                 if wait_abortable(backoff).await {
                     return Ok(());
                 }
-                backoff = if reset {
-                    policy.initial
-                } else {
-                    (backoff * 2).min(policy.max)
-                };
+                backoff = (backoff * 2).min(policy.max);
             }
         }
     }
@@ -144,8 +144,9 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-051/MB-R-132 — a `reset: true` outcome drops the *next* wait back to `initial`; a
-    /// `reset: false` outcome afterwards keeps doubling from there.
+    /// MB-R-051/MB-R-132 — a `reset: true` outcome drops the wait that follows *that* failure
+    /// back to `initial`; a `reset: false` outcome keeps doubling from wherever backoff last
+    /// landed.
     async fn ut_run_with_backoff_resets_on_reset_flag() {
         let resets = [false, true, false];
         let index = Arc::new(Mutex::new(0usize));
@@ -184,7 +185,7 @@ mod tests {
             .iter()
             .map(Duration::as_secs)
             .collect();
-        assert_eq!(secs, vec![1, 2, 1, 2]);
+        assert_eq!(secs, vec![1, 1, 2, 4]);
     }
 
     #[tokio::test]
