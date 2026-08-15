@@ -906,6 +906,7 @@ dependencies = [
  "clap",
  "ferrowl-codec",
  "ferrowl-store",
+ "ferrowl-util",
  "itertools 0.15.0",
  "parking_lot",
  "rcgen",

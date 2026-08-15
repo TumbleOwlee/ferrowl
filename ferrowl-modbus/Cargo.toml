@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 ferrowl-store = { path = "../ferrowl-store" }
 ferrowl-codec = { path = "../ferrowl-codec" }
+ferrowl-util = { path = "../ferrowl-util" }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }

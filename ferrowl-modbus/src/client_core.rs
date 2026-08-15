@@ -16,6 +16,7 @@ use rust_modbus::{
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::sleep;
@@ -34,11 +35,6 @@ pub(crate) struct ConnectAttempt<S, F> {
 
 /// Number of consecutive Modbus exceptions tolerated before the client skips the operation.
 pub(crate) const MAX_RETRIES: u32 = 3;
-
-/// Starting (and post-success reset) reconnect backoff.
-pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-/// Reconnect backoff cap; doubles from [`INITIAL_BACKOFF`] up to this.
-pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Logs the "about to read" intent line shared by every read function code.
 async fn log_read_intent<L>(log: &L, name: &str, slave_id: UnitId, start: usize, end: usize)
@@ -435,13 +431,17 @@ where
     /// the loop cleanly at any point; with `reconnect` unset for the current config snapshot, a
     /// transport error ends the loop instead of backing off. `connect` alone differs between the
     /// TCP and RTU transports (socket dial vs. serial open); everything else here is shared.
+    ///
+    /// Built on the shared [`ferrowl_util::backoff::run_with_backoff`] driver (MB-R-051): this
+    /// function supplies the `attempt` (connect, then run) and `wait_abortable` (backoff wait,
+    /// abortable by `Command::Terminate`/channel close) closures the driver calls.
     pub(crate) async fn run_reconnect_loop<T, L, St, C, Fut>(
-        mut receiver: Receiver<Command>,
+        receiver: Receiver<Command>,
         log: L,
         status: St,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<MemLock<Memory<Key<T>>>>,
-        mut connect: C,
+        connect: C,
     ) -> Result<(), Error>
     where
         T: KeyParams,
@@ -450,68 +450,107 @@ where
         C: FnMut() -> Fut,
         Fut: Future<Output = ConnectAttempt<S, F>>,
     {
-        let mut backoff = INITIAL_BACKOFF;
-        loop {
-            let attempt = connect().await;
-            let reconnect = attempt.reconnect;
-            let run_config = RunConfig {
-                log: log.clone(),
-                status: status.clone(),
-                timeout_ms: attempt.timeout_ms,
-                delay_ms: attempt.delay_ms,
-                interval_ms: attempt.interval_ms,
-            };
+        // Shared (not moved) between the two closures below, which the driver never calls
+        // concurrently — `attempt` and `wait_abortable` always run one fully to completion
+        // before the other starts, so lock contention can't happen. An async `Mutex` (rather
+        // than `&mut` reborrowed per call) is required for both: an `FnMut` closure that returns
+        // a future holding a per-call reborrow of a captured `&mut` upvar cannot compile (the
+        // reborrow's lifetime is tied to that one call, but the returned future needs to outlive
+        // it) — the driver calls `attempt`/`wait_abortable` repeatedly, so both need interior
+        // mutability instead of a plain `&mut`. `tokio::sync::Mutex` rather than `std::cell::
+        // RefCell`: the whole loop is spawned onto a multi-threaded runtime (`tokio::spawn`
+        // requires `Send`), and a `RefCell` guard held across an `.await` is not `Send`.
+        let receiver = Mutex::new(receiver);
+        let connect = Mutex::new(connect);
 
-            let core = match attempt.client {
-                Ok(core) => core,
-                Err(e) => {
-                    if !reconnect {
-                        log.invoke(format!("{e} Reconnect disabled; client stopping."))
-                            .await;
-                        status.invoke("Client disconnected".to_string()).await;
-                        return Err(e);
-                    }
-                    log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
-                        .await;
-                    if wait_reconnect_backoff(&mut receiver, backoff, &log).await {
-                        status.invoke("Client disconnected".to_string()).await;
-                        return Ok(());
-                    }
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
-                    continue;
+        let attempt = || {
+            let log = log.clone();
+            let status = status.clone();
+            let operations = operations.clone();
+            let memory = memory.clone();
+            let receiver = &receiver;
+            let connect = &connect;
+            async move {
+                let conn_attempt = {
+                    let mut guard = connect.lock().await;
+                    (*guard)()
                 }
-            };
-
-            let (had_success, result) = core
-                .run::<T, _, _>(
-                    operations.clone(),
-                    memory.clone(),
-                    &mut receiver,
-                    run_config,
-                )
                 .await;
-            match result {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    if !reconnect {
-                        // run() already logged the underlying disconnect; just surface the
-                        // status change before the task ends.
-                        status.invoke("Client disconnected".to_string()).await;
-                        return Err(e);
+                let reconnect = conn_attempt.reconnect;
+                let run_config = RunConfig {
+                    log: log.clone(),
+                    status: status.clone(),
+                    timeout_ms: conn_attempt.timeout_ms,
+                    delay_ms: conn_attempt.delay_ms,
+                    interval_ms: conn_attempt.interval_ms,
+                };
+
+                let core = match conn_attempt.client {
+                    Ok(core) => core,
+                    Err(e) => {
+                        if !reconnect {
+                            log.invoke(format!("{e} Reconnect disabled; client stopping."))
+                                .await;
+                            status.invoke("Client disconnected".to_string()).await;
+                        } else {
+                            log.invoke(format!("{e}")).await;
+                        }
+                        return ferrowl_util::backoff::AttemptOutcome::Failed {
+                            error: e,
+                            reconnect,
+                            reset: false,
+                        };
                     }
-                    if had_success {
-                        backoff = INITIAL_BACKOFF;
+                };
+
+                let mut guard = receiver.lock().await;
+                let (had_success, result) = core
+                    .run::<T, _, _>(operations, memory, &mut guard, run_config)
+                    .await;
+                drop(guard);
+                match result {
+                    Ok(()) => ferrowl_util::backoff::AttemptOutcome::Done,
+                    Err(e) => {
+                        if !reconnect {
+                            // run() already logged the underlying disconnect; just surface the
+                            // status change before the task ends.
+                            status.invoke("Client disconnected".to_string()).await;
+                        } else {
+                            log.invoke(format!("{e}")).await;
+                        }
+                        ferrowl_util::backoff::AttemptOutcome::Failed {
+                            error: e,
+                            reconnect,
+                            reset: had_success,
+                        }
                     }
-                    log.invoke(format!("{e} Reconnecting in {}s.", backoff.as_secs()))
-                        .await;
-                    if wait_reconnect_backoff(&mut receiver, backoff, &log).await {
-                        status.invoke("Client disconnected".to_string()).await;
-                        return Ok(());
-                    }
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
                 }
             }
-        }
+        };
+
+        let wait_abortable = |backoff: Duration| {
+            let log = log.clone();
+            let status = status.clone();
+            let receiver = &receiver;
+            async move {
+                log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
+                    .await;
+                let mut guard = receiver.lock().await;
+                let aborted = wait_reconnect_backoff(&mut guard, backoff, &log).await;
+                drop(guard);
+                if aborted {
+                    status.invoke("Client disconnected".to_string()).await;
+                }
+                aborted
+            }
+        };
+
+        ferrowl_util::backoff::run_with_backoff(
+            ferrowl_util::backoff::BackoffPolicy::default(),
+            attempt,
+            wait_abortable,
+        )
+        .await
     }
 }
 
@@ -732,23 +771,6 @@ mod tests {
         let res: ReadResult<u16> = Err(elapsed);
         let e = classify(res).unwrap_err();
         assert!(matches!(e, ModbusError::Timeout(_)));
-    }
-
-    #[test]
-    /// MB-R-051 — the reconnect backoff starts at 1 s, doubles after each failed attempt, and is capped at 30 s.
-    fn ut_backoff_starts_doubles_and_caps() {
-        assert_eq!(INITIAL_BACKOFF, Duration::from_secs(1));
-        assert_eq!(MAX_BACKOFF, Duration::from_secs(30));
-        // Replays the exact production step `(backoff * 2).min(MAX_BACKOFF)` from
-        // `run_reconnect_loop`, starting at `INITIAL_BACKOFF`.
-        let mut backoff = INITIAL_BACKOFF;
-        let mut seq = vec![backoff];
-        for _ in 0..7 {
-            backoff = (backoff * 2).min(MAX_BACKOFF);
-            seq.push(backoff);
-        }
-        let secs: Vec<u64> = seq.iter().map(|d| d.as_secs()).collect();
-        assert_eq!(secs, vec![1, 2, 4, 8, 16, 30, 30, 30]);
     }
 
     #[tokio::test]
