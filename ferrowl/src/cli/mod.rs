@@ -49,31 +49,43 @@ pub enum SubCommand {
     /// for the exit-code contract.
     Run(RunArgs),
 
-    /// Relay Modbus requests between an upstream (server) and a downstream (client) interface,
-    /// without the TUI (BR-R-001). See [`crate::cli::bridge::run`] for the exit-code contract.
+    /// Relay Modbus requests between two interfaces without the TUI: an upstream interface that
+    /// bridge mode serves (answering requests, like a real device) and a downstream interface it
+    /// connects to as a client, forwarding every request it receives on the upstream side and
+    /// relaying the answer back. Useful for placing a TCP-only master in front of a serial-only
+    /// device, or vice versa.
     Bridge(BridgeArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct BridgeArgs {
-    /// BR-R-003 — required; the interface bridge mode listens on (server role, BR-R-005).
+    /// Required. The interface bridge mode listens on and answers requests from, e.g.
+    /// --upstream transport=tcp,ip=0.0.0.0,port=502
+    /// or --upstream transport=rtu,path=/dev/ttyUSB0,baud=19200
     #[arg(long, value_name = "KEY=VAL,...")]
     pub upstream: Option<String>,
 
-    /// BR-R-003 — required; the interface bridge mode connects to (client role, BR-R-006).
+    /// Required. The interface bridge mode connects to and forwards every upstream request to,
+    /// e.g. --downstream transport=tcp,ip=10.0.0.5,port=502
+    /// or --downstream transport=rtu,path=/dev/ttyUSB1,baud=19200
+    /// Both descriptors accept `transport` (`tcp` default, or `rtu`), `timeout_ms`, `reconnect`
+    /// (true/false); `tcp` also takes `ip`, `port`, and TLS keys; `rtu` also takes `path`, `baud`,
+    /// `parity`, `data_bits`, `stop_bits`. `--upstream` additionally accepts `unit_ids` (e.g.
+    /// `unit_ids=1,3,5-8`) to restrict which slave ids the bridge answers for.
     #[arg(long, value_name = "KEY=VAL,...")]
     pub downstream: Option<String>,
 
-    /// BR-R-014 — same semantics as `run`'s --duration (CL-R-013 family).
+    /// Run for this many seconds then exit cleanly (code 0). Omit to run until Ctrl-C.
     #[arg(long, value_name = "SECS")]
     pub duration: Option<u64>,
 
-    /// BR-R-012 — same semantics as `run`'s --log-file (CL-R-041).
+    /// Append every drained log line to this file too (in addition to stdout).
     #[arg(long = "log-file", value_name = "FILE")]
     pub log_file: Option<String>,
 
-    /// BR-R-013 — same semantics as `run`'s --exit-on-error, keyed off `[bridge]`-prefixed
-    /// lines instead of `[sim]` (Shared design decision 3).
+    /// Exit with code 2 if a drained log line starts with the `[bridge]` prefix bridge errors are
+    /// logged under. This is plain log-string detection, not a structured error channel, so it
+    /// only catches errors that are actually logged.
     #[arg(long = "exit-on-error")]
     pub exit_on_error: bool,
 }
