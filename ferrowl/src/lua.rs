@@ -201,7 +201,8 @@ pub fn run_sim(
             .with_print_sink(LuaLogSink {
                 log: log.clone(),
                 sink: sink.clone(),
-            });
+            })
+            .with_stop_flag(thread_stop.clone());
         for (name, code) in &scripts {
             builder = builder.with_script(name.clone(), code);
         }
@@ -804,6 +805,38 @@ mod tests {
             log_lines(&log2)
                 .iter()
                 .any(|l| l.contains("[sim] stopped completely"))
+        );
+    }
+
+    #[test]
+    /// SC-R-012 — a stop request is observed *during* a runaway cycle via the execution hook
+    /// (SC-R-034), not only between cycles: `stop()` returns promptly instead of blocking on the
+    /// join forever.
+    fn ut_sim_stop_interrupts_runaway_script_promptly() {
+        let log = script_log();
+        let mut handle = run_sim(
+            evse_memory(),
+            vstore(),
+            evse_registers(),
+            vec![("runaway".to_string(), "while true do end".to_string())],
+            Duration::from_secs(10), // long interval: a between-cycle-only check would never fire
+            log.clone(),
+            no_sink(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        // Let the sim thread actually enter the runaway script's busy loop before requesting a
+        // stop, so the assertion below exercises "interrupted mid-execution", not "never started".
+        std::thread::sleep(Duration::from_millis(100));
+
+        let start = std::time::Instant::now();
+        handle.stop();
+        // Tight enough to distinguish "the stop flag itself interrupted the runaway script" from
+        // the unconditional ~1,000ms wall-clock cap alone (SC-R-034(b), which every context gets
+        // for free regardless of whether a stop flag is attached) still bounding it eventually.
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "stop() blocked on the join instead of the hook interrupting the runaway script"
         );
     }
 
