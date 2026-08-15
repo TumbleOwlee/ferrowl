@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrowl_modbus::rtu;
-use ferrowl_modbus::{Command, Error, FunctionCode, Key, Operation, SerialError, SlaveKey, UnitId};
+use ferrowl_modbus::{
+    Command, Error, FunctionCode, Key, Operation, SerialError, ServerCommand, SlaveKey, UnitId,
+};
 use ferrowl_store::{Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -44,14 +46,58 @@ fn bad_config(reconnect: bool) -> rtu::Config {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-075 — failure to open the serial port fails an RTU server's start with a serial error.
-/// MB-R-074 — the RTU server opens the port once at start (there is no accept loop deferring it), so
-/// an unopenable port surfaces at `spawn` rather than being retried per connection.
-async fn rtu_server_open_failure_fails_start() {
-    let res = rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
-        .spawn(sink())
-        .await;
-    assert!(matches!(res, Err(Error::Serial(SerialError::Error(_)))));
+/// MB-R-075 (revised), MB-R-130 — with `reconnect` enabled (the default), a serial-open failure
+/// does not fail an RTU server's start: `spawn()` returns `Ok(handle)`, and the task keeps
+/// retrying the open on the shared backoff policy instead of ending.
+async fn rtu_server_open_failure_retries_while_reconnect_enabled() {
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    sleep(Duration::from_millis(200)).await;
+    assert!(
+        !handle.is_finished(),
+        "an open failure with reconnect enabled must keep retrying, not end the task"
+    );
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-075 (revised), MB-R-134 — with `reconnect` disabled, a serial-open failure fails the
+/// RTU server: `spawn()` still returns `Ok(handle)`, but the joined task carries the serial
+/// error, same shape as before this stage, just surfaced from the task instead of `spawn()`
+/// itself. MB-R-074 — the RTU server opens the port once at start (no accept loop deferring
+/// it), so this is the same open-failure path as ever, just relocated.
+async fn rtu_server_open_failure_reconnect_false_ends_task() {
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, with reconnect disabled")
+        .expect("task must not panic");
+    assert!(matches!(result, Err(Error::Serial(SerialError::Error(_)))));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-133 — a `ServerCommand::Terminate` sent while the RTU server is backing off from a
+/// serial-open failure ends the task gracefully (`Ok(())`), not with the open error.
+async fn rtu_server_terminate_while_backing_off_ends_task_ok() {
+    let (tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let handle = rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now");
+    sleep(Duration::from_millis(100)).await;
+    tx.send(ServerCommand::Terminate).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("Terminate did not end the retrying server in time")
+        .expect("task must not panic");
+    assert!(result.is_ok());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
