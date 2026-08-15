@@ -558,7 +558,6 @@ where
     /// own reconnect loop reads back after the serve loop ends, and `reset_on` picks which
     /// event sets it (see [`ResetOn`]). Additive — a caller that never calls this keeps the
     /// `Server::new` default, which is inert (nothing outside this `Server` ever observes it).
-    #[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
     pub(crate) fn with_reset_on(mut self, activity: Arc<AtomicBool>, reset_on: ResetOn) -> Self {
         self.activity = activity;
         self.reset_on = reset_on;
@@ -668,7 +667,6 @@ fn sha256_fingerprint(cert: &rustls_pki_types::CertificateDer<'_>) -> String {
 }
 
 /// How a driven serve loop ended (MB-R-130/MB-R-131/MB-R-133).
-#[allow(dead_code)] // wired onto a real serve loop by s4/s5/s6, not this shared core
 pub(crate) enum ServeEnd {
     /// A `ServerCommand::Terminate`, or the command channel closing, ended the loop gracefully
     /// (MB-R-133) — includes the ordinary "serving future returned `Ok(())`" case, since both
@@ -686,7 +684,6 @@ pub(crate) enum ServeEnd {
 /// (a graceful stop the caller didn't ask for — treated the same as `Terminated`, since either
 /// way no retry is wanted) or `Err(e)` (MB-R-130/MB-R-131, [`ServeEnd::Failed`]) — returns
 /// immediately without ever touching `handle`.
-#[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
 pub(crate) async fn drive_serve<Fut>(
     serve_fut: Fut,
     handle: rust_modbus::ServerHandle,
@@ -718,7 +715,6 @@ where
 /// channel closing (mirrors [`crate::client_core::wait_reconnect_backoff`], simplified:
 /// `ServerCommand` has only one variant, so there is no "drop a non-terminate command" case to
 /// log).
-#[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
 pub(crate) async fn wait_reconnect_backoff(
     receiver: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
     backoff: std::time::Duration,
