@@ -16,6 +16,7 @@ v2_0_1 = ["rust-ocpp/v2_0_1"]
 v2_1 = ["rust-ocpp/v2_1"]
 
 [dependencies]
+ferrowl-util = { path = "../ferrowl-util" }
 rust-ocpp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

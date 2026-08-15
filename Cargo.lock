@@ -925,6 +925,7 @@ name = "ferrowl-ocpp"
 version = "0.6.1"
 dependencies = [
  "base64 0.23.1",
+ "ferrowl-util",
  "futures-util",
  "parking_lot",
  "rcgen",

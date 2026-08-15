@@ -106,6 +106,10 @@ pub enum Error {
     Call(CallError),
     #[error("internal channel closed")]
     ChannelClosed,
+    /// OC-R-048 — a connection that completed its WebSocket handshake was subsequently dropped
+    /// (peer close, read error, or write failure), as opposed to a failed dial.
+    #[error("the connection to the peer was dropped")]
+    Disconnected,
 }
 
 /// A protocol-level rejection a handler returns; serialized to an OCPP-J `CallError` frame

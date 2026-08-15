@@ -100,15 +100,17 @@ async fn basic_auth_accepts_matching_credentials() {
     .expect("server failed to bind");
 
     let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: Some(auth),
-        tls: None,
-    })
-    .spawn(TestCs, sink())
-    .await
-    .expect("client failed to connect with matching credentials");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: Some(auth),
+            tls: None,
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("client failed to connect with matching credentials");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -135,20 +137,26 @@ async fn basic_auth_rejects_mismatched_credentials() {
     .expect("server failed to bind");
 
     let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let result = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: Some(BasicAuth {
-            username: "cp001".to_owned(),
-            password: "wrong".to_owned(),
-        }),
-        tls: None,
-    })
-    .spawn(TestCs, sink())
-    .await;
+    // OC-R-048/OC-R-105: `spawn` always succeeds now (the dial moved inside the retried task);
+    // `reconnect: false` ends the task on the first failed dial instead of retrying forever, and
+    // the credential-mismatch error surfaces from `join()`.
+    let mut result =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: Some(BasicAuth {
+                username: "cp001".to_owned(),
+                password: "wrong".to_owned(),
+            }),
+            tls: None,
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
 
     assert!(
-        result.is_err(),
+        result.join().await.is_err(),
         "connect should fail the websocket handshake on a credential mismatch"
     );
 
@@ -173,17 +181,20 @@ async fn basic_auth_rejects_missing_credentials() {
     .expect("server failed to bind");
 
     let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let result = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(TestCs, sink())
-    .await;
+    let mut result =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
 
     assert!(
-        result.is_err(),
+        result.join().await.is_err(),
         "connect should fail the websocket handshake with no Authorization header at all"
     );
 
@@ -221,20 +232,22 @@ async fn tls_loopback_over_self_signed_cert() {
     .expect("TLS server failed to bind");
 
     let url = format!("wss://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: Some(CsTlsConfig {
-            ca_file: Some(cert_file),
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: false,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await
-    .expect("client failed to connect over TLS");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Some(CsTlsConfig {
+                ca_file: Some(cert_file),
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: false,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("client failed to connect over TLS");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -275,22 +288,25 @@ async fn tls_loopback_rejects_untrusted_cert() {
     // No `ca_file`: only the webpki root store is trusted, so the self-signed cert must be
     // rejected.
     let url = format!("wss://{}/ocpp/CS001", server.local_addr());
-    let result = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: false,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await;
+    let mut result =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: false,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
 
     assert!(
-        result.is_err(),
+        result.join().await.is_err(),
         "connect should fail TLS verification against an untrusted self-signed cert"
     );
 
@@ -316,20 +332,22 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
     .expect("TLS server failed to bind with a self-signed cert");
 
     let url = format!("wss://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: true,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await
-    .expect("client with insecure_skip_verify should connect to a self-signed CSMS");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: true,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("client with insecure_skip_verify should connect to a self-signed CSMS");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -357,22 +375,25 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
     .expect("TLS server failed to bind with a self-signed cert");
 
     let url = format!("wss://{}/ocpp/CS001", server.local_addr());
-    let result = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: false,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await;
+    let mut result =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: false,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
 
     assert!(
-        result.is_err(),
+        result.join().await.is_err(),
         "connect should fail without insecure_skip_verify: a per-start self-signed cert can't be pinned"
     );
 
@@ -404,43 +425,48 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     .expect("TLS server failed to bind");
 
     let url = format!("wss://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url: url.clone(),
-        timeout_ms: 2000,
-        basic_auth: Some(auth),
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: true,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await
-    .expect("correct credentials should connect");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url: url.clone(),
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: Some(auth),
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: true,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("correct credentials should connect");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
     client.terminate().await.expect("client terminate failed");
 
-    let wrong = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: Some(BasicAuth {
-            username: "cp001".to_owned(),
-            password: "wrong".to_owned(),
-        }),
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: true,
-        }),
-    })
-    .spawn(TestCs, sink())
-    .await;
+    let mut wrong =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: Some(BasicAuth {
+                username: "cp001".to_owned(),
+                password: "wrong".to_owned(),
+            }),
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: true,
+            }),
+        })))
+        .spawn(TestCs, sink(), sink())
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
     assert!(
-        wrong.is_err(),
+        wrong.join().await.is_err(),
         "mismatched credentials should be rejected even over a self-signed TLS connection"
     );
 

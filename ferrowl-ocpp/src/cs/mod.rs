@@ -7,12 +7,16 @@ mod core;
 
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tokio::sync::{mpsc, oneshot};
+use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
+use tokio::net::TcpStream;
+use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::action::Version;
 use crate::error::{Error, WsError};
@@ -25,59 +29,211 @@ pub use config::Config;
 /// Capacity of the command channel between a [`Client`] handle and its task.
 const COMMAND_CHANNEL_CAP: usize = 32;
 
+/// The concrete websocket stream type a successful dial produces.
+type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Dial the configured CSMS (advertising `V::subprotocol()`). Extracted out of `spawn`'s old
+/// synchronous connect so it can be retried from inside the reconnect loop (OC-R-048/OC-R-105).
+async fn dial<V: Version>(config: &Config) -> Result<Ws, Error> {
+    let mut request = config
+        .url
+        .as_str()
+        .into_client_request()
+        .map_err(WsError::from)?;
+    request.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        HeaderValue::from_static(V::subprotocol()),
+    );
+    if let Some(auth) = &config.basic_auth {
+        request
+            .headers_mut()
+            .insert("Authorization", auth.header_value());
+    }
+    let connector = match &config.tls {
+        Some(tls) => Some(tls.build_connector()?),
+        None => None,
+    };
+    let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
+        .await
+        .map_err(WsError::from)?;
+    Ok(ws)
+}
+
+/// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command channel
+/// closing (returns `true`). Any other command received while disconnected is dropped with a log
+/// line rather than queued for after reconnect — a `SendActionAwait`'s `oneshot::Sender` is
+/// simply dropped, which naturally surfaces `Error::ChannelClosed` to whichever caller was
+/// awaiting the reply (the same failure mode a closed channel already produces elsewhere).
+/// Mirrors `ferrowl_modbus::client_core::wait_reconnect_backoff` exactly (OC-R-106).
+async fn wait_reconnect_backoff<V, L>(
+    receiver: &mut mpsc::Receiver<Command<V>>,
+    backoff: Duration,
+    log: &L,
+) -> bool
+where
+    V: Version,
+    L: LogFn,
+{
+    let deadline = tokio::time::Instant::now() + backoff;
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => return false,
+            cmd = receiver.recv() => match cmd {
+                None | Some(Command::Terminate) => return true,
+                Some(_) => {
+                    log.invoke(
+                        "Command dropped: client is disconnected and reconnecting.".to_string(),
+                    )
+                    .await;
+                }
+            },
+        }
+    }
+}
+
+/// What happened during one connection attempt, as fed to [`classify_attempt`].
+enum AttemptResult {
+    /// The dial itself failed; no handshake ever completed.
+    DialFailed(Error),
+    /// `core::run` ended via `Command::Terminate` (or the command channel closing).
+    Terminated,
+    /// `core::run` ended because the connection dropped, after a completed handshake.
+    Disconnected,
+}
+
+/// Classifies one connection attempt's result into [`AttemptOutcome`] (OC-R-048, OC-R-105). Pure
+/// and free of I/O so it is directly unit-testable without waiting out a real backoff — in
+/// particular, OC-R-105's "reset unconditionally after any completed handshake, regardless of
+/// whether any OCPP message was subsequently exchanged" is exactly the difference between the
+/// `DialFailed` and `Disconnected` arms below.
+fn classify_attempt(result: AttemptResult, reconnect: bool) -> AttemptOutcome<Error> {
+    match result {
+        AttemptResult::DialFailed(error) => AttemptOutcome::Failed {
+            error,
+            reconnect,
+            // `reset` is about *this* run having completed a handshake, not about the failed
+            // dial that never got one.
+            reset: false,
+        },
+        AttemptResult::Terminated => AttemptOutcome::Done,
+        AttemptResult::Disconnected => AttemptOutcome::Failed {
+            error: Error::Disconnected,
+            reconnect,
+            // The handshake that started this `core::run` call did complete (we only reach
+            // `Disconnected` after a successful `dial`), so the reset condition is met
+            // unconditionally here, regardless of whether any OCPP message was exchanged.
+            reset: true,
+        },
+    }
+}
+
+/// Drive the retry loop: dial the configured CSMS and run the connection, retrying a failed
+/// dial or a dropped connection per [`BackoffPolicy`] when `config.reconnect` is set (OC-R-048,
+/// OC-R-105–107). `status` receives a "Client disconnected" line once the task ends, regardless
+/// of why (mirrors `ferrowl_modbus`'s server tasks logging "Server stopped" the same way).
+async fn run_reconnect_loop<V, H, L, St>(
+    config: Arc<RwLock<Config>>,
+    handler: Arc<H>,
+    receiver: mpsc::Receiver<Command<V>>,
+    log: L,
+    status: St,
+) -> Result<(), Error>
+where
+    V: Version,
+    H: CsActionHandler<V>,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+{
+    // Shared between `attempt` and `wait_abortable`, called strictly sequentially by
+    // `run_with_backoff` and never concurrently — same technique as
+    // `ferrowl_modbus::server_core`'s TCP server (see Shared).
+    let receiver = AsyncMutex::new(receiver);
+
+    let attempt = || {
+        let config = config.clone();
+        let handler = handler.clone();
+        let log = log.clone();
+        let receiver = &receiver;
+        async move {
+            let guard = config.read().await;
+            let reconnect = guard.reconnect;
+            let dial_result = dial::<V>(&guard).await;
+            let timeout = guard.timeout();
+            drop(guard);
+            match dial_result {
+                Err(e) => classify_attempt(AttemptResult::DialFailed(e), reconnect),
+                Ok(ws) => {
+                    let mut receiver = receiver.lock().await;
+                    let run_end = core::run::<V, H, _, _>(
+                        ws,
+                        handler.clone(),
+                        &mut receiver,
+                        log.clone(),
+                        timeout,
+                    )
+                    .await;
+                    let attempt_result = match run_end {
+                        core::RunEnd::Terminated => AttemptResult::Terminated,
+                        core::RunEnd::Disconnected => AttemptResult::Disconnected,
+                    };
+                    classify_attempt(attempt_result, reconnect)
+                }
+            }
+        }
+    };
+
+    let wait_abortable = |backoff: Duration| {
+        let receiver = &receiver;
+        let log = log.clone();
+        async move {
+            let mut receiver = receiver.lock().await;
+            wait_reconnect_backoff(&mut receiver, backoff, &log).await
+        }
+    };
+
+    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    status.invoke("Client disconnected".to_string()).await;
+    result
+}
+
 /// Builds and connects a CS client for a specific OCPP [`Version`].
 pub struct ClientBuilder<V: Version> {
-    config: Config,
+    config: Arc<RwLock<Config>>,
     _v: PhantomData<fn() -> V>,
 }
 
 impl<V: Version> ClientBuilder<V> {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Arc<RwLock<Config>>) -> Self {
         Self {
             config,
             _v: PhantomData,
         }
     }
 
-    /// Dial the configured CSMS (advertising `V::subprotocol()`) and spawn the client task.
+    /// Spawn the client task, which dials the configured CSMS (advertising `V::subprotocol()`).
     ///
     /// `handler` answers CSMS-initiated Calls. For the low-level API pass a [`CsActionHandler`];
     /// for the semantic API pass [`SemanticAdapter::new(your_cs_handler)`](SemanticAdapter).
-    pub async fn spawn<H, L>(self, handler: H, log: L) -> Result<Client<V>, Error>
+    ///
+    /// `spawn` itself always returns `Ok` — a dial or mid-connection failure no longer fails the
+    /// start synchronously; it surfaces from [`Client::join`] instead (OC-R-048/OC-R-105). With
+    /// `config.reconnect` set (the default), a failed dial or a dropped connection does not end
+    /// the task: it logs, waits an exponential backoff (capped, reset after a connection whose
+    /// handshake completed), and retries. `status` receives a "Client disconnected" line once
+    /// the task ends, regardless of why.
+    pub async fn spawn<H, L, St>(self, handler: H, log: L, status: St) -> Result<Client<V>, Error>
     where
         H: CsActionHandler<V>,
         L: LogFn + Clone,
+        St: LogFn + Clone,
     {
-        let mut request = self
-            .config
-            .url
-            .as_str()
-            .into_client_request()
-            .map_err(WsError::from)?;
-        request.headers_mut().insert(
-            "Sec-WebSocket-Protocol",
-            HeaderValue::from_static(V::subprotocol()),
-        );
-        if let Some(auth) = &self.config.basic_auth {
-            request
-                .headers_mut()
-                .insert("Authorization", auth.header_value());
-        }
-        let connector = match &self.config.tls {
-            Some(tls) => Some(tls.build_connector()?),
-            None => None,
-        };
-        let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
-            .await
-            .map_err(WsError::from)?;
-
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
-        let handle = tokio::spawn(core::run::<V, H, _, _>(
-            ws,
+        let handle = tokio::spawn(run_reconnect_loop::<V, H, _, _>(
+            self.config,
             Arc::new(handler),
             cmd_rx,
             log,
-            self.config.timeout(),
+            status,
         ));
 
         Ok(Client {
@@ -157,6 +313,67 @@ impl<V: Version> Client<V> {
         match self.handle.take() {
             Some(handle) => handle.await.map_err(|_| Error::NotRunning)?,
             None => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AttemptOutcome, AttemptResult, classify_attempt};
+    use crate::error::Error;
+
+    /// OC-R-105 — a failed dial never resets the backoff (no handshake ever completed), but the
+    /// caller's freshly-read `reconnect` flag still passes through unchanged.
+    #[test]
+    fn ut_classify_attempt_dial_failed_never_resets() {
+        match classify_attempt(AttemptResult::DialFailed(Error::ChannelClosed), true) {
+            AttemptOutcome::Failed {
+                reconnect, reset, ..
+            } => {
+                assert!(reconnect);
+                assert!(!reset);
+            }
+            AttemptOutcome::Done => panic!("expected Failed"),
+        }
+    }
+
+    /// OC-R-106 — an explicit terminate (or the command channel closing) ends the retry loop
+    /// gracefully, regardless of `reconnect`.
+    #[test]
+    fn ut_classify_attempt_terminated_is_done() {
+        assert!(matches!(
+            classify_attempt(AttemptResult::Terminated, true),
+            AttemptOutcome::Done
+        ));
+        assert!(matches!(
+            classify_attempt(AttemptResult::Terminated, false),
+            AttemptOutcome::Done
+        ));
+    }
+
+    /// OC-R-105 — a connection that completed its handshake and then dropped always resets the
+    /// backoff, regardless of whether any OCPP message was subsequently exchanged (this pure
+    /// function cannot see whether one was — that's exactly the point).
+    #[test]
+    fn ut_classify_attempt_disconnected_always_resets() {
+        match classify_attempt(AttemptResult::Disconnected, true) {
+            AttemptOutcome::Failed {
+                reconnect, reset, ..
+            } => {
+                assert!(reconnect);
+                assert!(reset);
+            }
+            AttemptOutcome::Done => panic!("expected Failed"),
+        }
+    }
+
+    /// OC-R-048/OC-R-107 — the freshly-read `reconnect` flag passes through unchanged on a
+    /// dropped connection too.
+    #[test]
+    fn ut_classify_attempt_disconnected_honors_reconnect_false() {
+        match classify_attempt(AttemptResult::Disconnected, false) {
+            AttemptOutcome::Failed { reconnect, .. } => assert!(!reconnect),
+            AttemptOutcome::Done => panic!("expected Failed"),
         }
     }
 }

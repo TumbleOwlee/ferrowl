@@ -101,20 +101,23 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     let clear_cache_seen = Arc::new(AtomicBool::new(false));
     // A successful connect here is the subprotocol regression guard: the client advertises
     // `ocpp2.1` and the server must accept it (previously it could end up bound as `ocpp1.6`).
-    let client = cs::ClientBuilder::<V2_1>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            clear_cache_seen: clear_cache_seen.clone(),
-        },
-        sink(),
-    )
-    .await
-    .expect("client failed to connect");
+    let client =
+        cs::ClientBuilder::<V2_1>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                clear_cache_seen: clear_cache_seen.clone(),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client failed to connect");
 
     // CS -> CSMS: BootNotification.
     let boot = Action21::BootNotification(
