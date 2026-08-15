@@ -13,7 +13,6 @@ use tokio::task::JoinHandle;
 /// `config.tls` is set (BR-R-011), mirroring `tcp/server.rs::run`'s bind/TLS shape exactly
 /// (duplicated rather than shared: the store-based server and the bridge server share no
 /// state type to factor a common helper around).
-#[allow(dead_code)] // wired into bridge::run in a later stage
 pub(crate) async fn run<S, F, L>(
     config: &Config,
     service: BridgeService<S, F, L>,

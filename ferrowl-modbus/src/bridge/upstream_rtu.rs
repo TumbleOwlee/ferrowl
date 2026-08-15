@@ -11,7 +11,6 @@ use tokio::task::JoinHandle;
 /// `service` (BR-R-005 — upstream acts as an ordinary server). One port, one link, no accept
 /// loop, no reconnect (edge-cases.md: "Upstream RTU serial loss ends the bridge task with an
 /// error; there is no reconnect for the upstream side").
-#[allow(dead_code)] // wired into bridge::run in a later stage
 pub(crate) async fn run<S, F, L>(
     config: &Config,
     service: BridgeService<S, F, L>,

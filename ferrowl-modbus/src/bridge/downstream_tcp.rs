@@ -23,7 +23,6 @@ impl TcpDownstream {
 
     /// The wrapped `DownstreamHandle`, for `BridgeService::new` (`bridge::mod::run`'s
     /// assembly, and this module's own crate-internal upstream tests).
-    #[allow(dead_code)] // wired into bridge::run in a later stage
     pub(crate) fn into_handle(self) -> DownstreamHandle<FrameTransport<ClientStream, Tcp>, Tcp> {
         self.0
     }

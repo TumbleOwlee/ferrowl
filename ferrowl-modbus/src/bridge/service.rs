@@ -8,8 +8,6 @@ use rust_modbus::{
 
 /// The upstream-facing `Service`: applies BR-R-015's filter, then forwards to the
 /// downstream link and relays its answer verbatim (BR-R-007).
-// Not yet constructed by production code: wired into `bridge::run` in a later stage.
-#[allow(dead_code)]
 pub(crate) struct BridgeService<S, F, L> {
     downstream: DownstreamHandle<S, F>,
     unit_filter: Option<UnitIdFilter>,
@@ -17,7 +15,6 @@ pub(crate) struct BridgeService<S, F, L> {
 }
 
 impl<S, F, L> BridgeService<S, F, L> {
-    #[allow(dead_code)] // wired into bridge::run in a later stage
     pub(crate) fn new(
         downstream: DownstreamHandle<S, F>,
         unit_filter: Option<UnitIdFilter>,
@@ -41,8 +38,6 @@ impl<S, F, L> BridgeService<S, F, L> {
 // Send-ness *is* resolved per monomorphized call site); only the trait impl is written once
 // per concrete transport this crate actually drives a `BridgeService` over — the two
 // production shapes (TCP, RTU) plus, in this module's own tests, an in-memory duplex link.
-#[allow(dead_code)] // used only by the per-transport Service impls below, which are
-// themselves not yet constructed by production code (see BridgeService's own allow)
 async fn forward_and_relay<S, F, L>(
     downstream: &DownstreamHandle<S, F>,
     unit_filter: &Option<UnitIdFilter>,
