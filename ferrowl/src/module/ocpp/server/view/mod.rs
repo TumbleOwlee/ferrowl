@@ -674,6 +674,21 @@ mod tests {
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
     }
 
+    /// Poll until the CSMS listener has bound: `start()` no longer binds synchronously, retrying
+    /// a failed bind with backoff instead (OC-R-083), so `bound_addr()` is `None` until the first
+    /// successful bind lands.
+    async fn poll_bound_addr(
+        backend: &crate::module::ocpp::server::backend::OcppServer<V1_6>,
+    ) -> Option<String> {
+        for _ in 0..50 {
+            if let Some(addr) = backend.bound_addr() {
+                return Some(addr);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        None
+    }
+
     // Regression (structural since the backend stopped owning a spec copy): applying a resolved
     // `:edit` updates the view's spec — the single source the backend binds from on every
     // `start(&spec, ..)` — and stops the old listener so the next start rebinds with the edited
@@ -1001,7 +1016,11 @@ mod tests {
             "a plain listener must not report a self-signed certificate, got: {msg}"
         );
         assert!(v.backend.is_online());
-        assert!(v.backend.bound_addr().is_some());
+        // OC-R-083: the listener no longer binds synchronously inside `start()` — poll for it.
+        assert!(
+            poll_bound_addr(&v.backend).await.is_some(),
+            "the listener must bind promptly against a free port"
+        );
 
         // Edit the endpoint's security to wss (no certs → self-signed fallback), then restart.
         // The rebound listener must reflect the *current* spec, not the stale plain copy.
