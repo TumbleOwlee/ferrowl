@@ -6,8 +6,8 @@ use rust_modbus::{ExceptionCode, FrameTransport, RequestPdu, ResponsePdu, Tcp, U
 /// A `DownstreamHandle` connected over TCP (plain or TLS, BR-R-011). Wraps the handle rather
 /// than aliasing it directly: the underlying `ClientStream` (plain-or-TLS socket type) is
 /// `pub(crate)` in `tcp::tls` and never needs naming outside this crate, so this newtype keeps
-/// it out of the public API surface while still letting `bridge::mod::run` (and this module's
-/// own integration tests, a separate crate under `tests/`) hold and forward through a handle.
+/// it out of the public API surface while still letting external integration tests (this
+/// module's own, under `tests/`) hold and forward through a handle.
 #[derive(Clone)]
 pub struct TcpDownstream(DownstreamHandle<FrameTransport<ClientStream, Tcp>, Tcp>);
 
@@ -19,6 +19,13 @@ impl TcpDownstream {
         request: RequestPdu,
     ) -> Result<Option<ResponsePdu>, ExceptionCode> {
         self.0.forward(unit, request).await
+    }
+
+    /// The wrapped `DownstreamHandle`, for `BridgeService::new` (`bridge::mod::run`'s
+    /// assembly, and this module's own crate-internal upstream tests).
+    #[allow(dead_code)] // wired into bridge::run in a later stage
+    pub(crate) fn into_handle(self) -> DownstreamHandle<FrameTransport<ClientStream, Tcp>, Tcp> {
+        self.0
     }
 }
 
