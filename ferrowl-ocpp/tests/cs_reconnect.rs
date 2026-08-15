@@ -21,6 +21,19 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Poll until the CSMS listener has bound: `spawn` no longer binds synchronously, retrying a
+/// failed bind with backoff instead (OC-R-083), so `local_addr()` is `None` until the first
+/// successful bind lands.
+async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
+    for _ in 0..50 {
+        if let Some(addr) = server.local_addr() {
+            return addr;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("CSMS listener never bound");
+}
+
 /// CSMS handler answering the single action these tests exercise.
 struct TestCsms;
 
@@ -164,7 +177,7 @@ async fn cs_config_reread_on_every_dial() {
     .spawn(TestCsms, sink())
     .await
     .expect("server failed to bind");
-    shared_config.write().await.url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    shared_config.write().await.url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     // The 1s initial backoff plus a margin must elapse before the re-read connect succeeds.
     sleep(Duration::from_millis(1500)).await;

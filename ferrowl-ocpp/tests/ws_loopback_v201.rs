@@ -21,6 +21,19 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Poll until the CSMS listener has bound: `spawn` no longer binds synchronously, retrying a
+/// failed bind with backoff instead (OC-R-083), so `local_addr()` is `None` until the first
+/// successful bind lands.
+async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
+    for _ in 0..50 {
+        if let Some(addr) = server.local_addr() {
+            return addr;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("CSMS listener never bound");
+}
+
 /// CSMS handler answering the two CS-initiated actions used by this test.
 struct TestCsms;
 
@@ -96,7 +109,7 @@ async fn first_connection(server: &csms::Server<V2_0_1>) -> csms::ConnectionId {
 /// OC-R-014 — the 2.0.1 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     let clear_cache_seen = Arc::new(AtomicBool::new(false));
     // A successful connect here is the subprotocol regression guard: the client advertises
