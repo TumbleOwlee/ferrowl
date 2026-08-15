@@ -10,6 +10,7 @@ use rust_modbus::{
 };
 use std::fmt::Display;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
 /// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
@@ -497,6 +498,19 @@ where
     }
 }
 
+/// Which event a server's [`Server`] treats as "the serve loop did something useful"
+/// (MB-R-132): connection-oriented transports (TCP, `RtuOverTcp`, `AsciiOverTcp`) reset on
+/// accepting a connection; datagram/single-link transports (RTU, `Ascii`, `Udp`) have no
+/// separate "connect" step, so they reset on reading a request/datagram instead. Set via
+/// [`Server::with_reset_on`] by each transport's own server module (MB-R-130–134's `spawn()`
+/// wiring, not this shared core) — unset, a `Server` still runs (both branches are safe
+/// no-ops against a `Server::new`-default `activity` nobody reads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResetOn {
+    Connect,
+    Request,
+}
+
 /// Per-connection Modbus server service shared by every server transport (TCP, RTU,
 /// RTU-over-TCP): every request is answered directly from the shared `memory` via
 /// [`handle_request`]. `verbose` toggles the per-request success/failure logging — every
@@ -511,6 +525,12 @@ where
     log: L,
     verbose: bool,
     physical_serial: bool,
+    /// MB-R-132's per-serve-loop "did something useful" flag. Defaults to a private flag
+    /// nobody outside this `Server` reads — a caller that never opts in via
+    /// [`with_reset_on`](Self::with_reset_on) gets `on_connect`/`on_request` that flip a flag
+    /// harmlessly into the void, not a behavior change.
+    activity: Arc<AtomicBool>,
+    reset_on: ResetOn,
 }
 
 impl<T, L> Server<T, L>
@@ -529,7 +549,20 @@ where
             log,
             verbose,
             physical_serial,
+            activity: Arc::new(AtomicBool::new(false)),
+            reset_on: ResetOn::Connect,
         }
+    }
+
+    /// Opts this server into MB-R-132's activity tracking: `activity` is the flag a caller's
+    /// own reconnect loop reads back after the serve loop ends, and `reset_on` picks which
+    /// event sets it (see [`ResetOn`]). Additive — a caller that never calls this keeps the
+    /// `Server::new` default, which is inert (nothing outside this `Server` ever observes it).
+    #[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
+    pub(crate) fn with_reset_on(mut self, activity: Arc<AtomicBool>, reset_on: ResetOn) -> Self {
+        self.activity = activity;
+        self.reset_on = reset_on;
+        self
     }
 }
 
@@ -548,7 +581,7 @@ where
         unit: UnitId,
         request: RequestPdu,
     ) -> Result<Option<ResponsePdu>, ExceptionCode> {
-        handle_request(
+        let result = handle_request(
             unit,
             request,
             &self.memory,
@@ -556,7 +589,23 @@ where
             self.verbose,
             self.physical_serial,
         )
-        .await
+        .await;
+        // MB-R-132 — "at least one request was ... read", not "answered successfully": a
+        // refused request (an `Err(ExceptionCode)`) still counts, so this flips unconditionally
+        // on the outcome, not just on `Ok`.
+        if self.reset_on == ResetOn::Request {
+            self.activity.store(true, Ordering::Relaxed);
+        }
+        result
+    }
+
+    // MB-R-132 (connection-oriented half) — called once per connection, before any request is
+    // read (SV-R-032); always accepts (MB-R-057/MB-R-065 untouched, every connection is served).
+    async fn on_connect(&self, _conn: &Connection) -> rust_modbus::Acceptance {
+        if self.reset_on == ResetOn::Connect {
+            self.activity.store(true, Ordering::Relaxed);
+        }
+        rust_modbus::Acceptance::Accept
     }
 
     // A framing or I/O failure on the wire never reaches `on_request`; this reports it (the
@@ -618,18 +667,82 @@ fn sha256_fingerprint(cert: &rustls_pki_types::CertificateDer<'_>) -> String {
         .join(":")
 }
 
+/// How a driven serve loop ended (MB-R-130/MB-R-131/MB-R-133).
+#[allow(dead_code)] // wired onto a real serve loop by s4/s5/s6, not this shared core
+pub(crate) enum ServeEnd {
+    /// A `ServerCommand::Terminate`, or the command channel closing, ended the loop gracefully
+    /// (MB-R-133) — includes the ordinary "serving future returned `Ok(())`" case, since both
+    /// paths mean "no retry is wanted."
+    Terminated,
+    /// The serve loop itself ended with a failure (a bind/open failure surfacing from a listener
+    /// or serial link, MB-R-130/MB-R-131) with no command ever received.
+    Failed(rust_modbus::Error),
+}
+
+/// Drives one `serve_fut` (whatever a transport's `serve`/`serve_framed`/`serve_tls`/`serve_link`
+/// call returns) against a `ServerCommand` channel, racing the two: a `Terminate` (or the channel
+/// closing) requests a graceful `handle.shutdown()` and waits for `serve_fut` to actually end
+/// before returning [`ServeEnd::Terminated`] (MB-R-133); `serve_fut` ending on its own — `Ok(())`
+/// (a graceful stop the caller didn't ask for — treated the same as `Terminated`, since either
+/// way no retry is wanted) or `Err(e)` (MB-R-130/MB-R-131, [`ServeEnd::Failed`]) — returns
+/// immediately without ever touching `handle`.
+#[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
+pub(crate) async fn drive_serve<Fut>(
+    serve_fut: Fut,
+    handle: rust_modbus::ServerHandle,
+    commands: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
+) -> ServeEnd
+where
+    Fut: std::future::Future<Output = rust_modbus::Result<()>>,
+{
+    tokio::pin!(serve_fut);
+    loop {
+        tokio::select! {
+            result = &mut serve_fut => {
+                return match result {
+                    Ok(()) => ServeEnd::Terminated,
+                    Err(e) => ServeEnd::Failed(e),
+                };
+            }
+            cmd = commands.recv() => {
+                if matches!(cmd, None | Some(crate::ServerCommand::Terminate)) {
+                    let _ = tokio::join!(handle.shutdown(), &mut serve_fut);
+                    return ServeEnd::Terminated;
+                }
+            }
+        }
+    }
+}
+
+/// Waits out a bind/open backoff, aborting early on `ServerCommand::Terminate` or the command
+/// channel closing (mirrors [`crate::client_core::wait_reconnect_backoff`], simplified:
+/// `ServerCommand` has only one variant, so there is no "drop a non-terminate command" case to
+/// log).
+#[allow(dead_code)] // called by s4/s5/s6's own spawn() wiring, not this shared core
+pub(crate) async fn wait_reconnect_backoff(
+    receiver: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
+    backoff: std::time::Duration,
+) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(backoff) => false,
+        _ = receiver.recv() => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ServerCommand;
     use crate::SlaveKey;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::CellKind as MemKind;
     use rust_modbus::{
         Address, Ascii, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
         FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
-        RecordNumber, Rtu, Server as ModbusServer, Tcp,
+        RecordNumber, Rtu, Server as ModbusServer, ServerHandle, Tcp,
     };
     use std::sync::Mutex;
+    use std::time::Duration;
 
     /// Build a memory map for slave `1`, holding registers `[0,4)`, seeded with `seed` at addr 0,
     /// wrapped in the `Arc<RwLock<_>>` that `handle_request` expects.
@@ -723,6 +836,91 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registers, vec![RegisterValue(10), RegisterValue(20)]);
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-132 — with `ResetOn::Connect`, the activity flag flips as soon as a connection is
+    /// accepted, before any request is read; a request alone (`ResetOn::Request` not selected)
+    /// does not move it further, and it starts `false`.
+    async fn ut_server_on_connect_sets_activity_when_reset_on_connect() {
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let activity = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server =
+            Server::new(mem, log, true, false).with_reset_on(activity.clone(), ResetOn::Connect);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        // Hold the client end open (this is what "a connection was accepted" means for a
+        // single already-established link) without ever sending a request.
+        let _client_end = client_end;
+        assert!(
+            !activity.load(std::sync::atomic::Ordering::Relaxed),
+            "must start false"
+        );
+        for _ in 0..50 {
+            if activity.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            activity.load(std::sync::atomic::Ordering::Relaxed),
+            "on_connect must set activity for ResetOn::Connect"
+        );
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-132 — with `ResetOn::Request`, the activity flag stays false until a request is
+    /// actually read (accepting the connection alone does not move it), and flips regardless of
+    /// whether the request was answered or refused.
+    async fn ut_server_on_request_sets_activity_when_reset_on_request() {
+        // Slave 1 has a declared region, slave 9 does not: the request below targets 9, an
+        // unmapped slave, which is refused with `IllegalDataAddress` (not physical-serial here,
+        // so it is a real exception, not silence) — proving the flag flips on a refused request
+        // too, not only a successfully-answered one.
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let activity = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server =
+            Server::new(mem, log, true, false).with_reset_on(activity.clone(), ResetOn::Request);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        // Connection accepted, no request sent yet: must still be false.
+        let mut client: RmClient<_, Tcp> = RmClient::new(FrameTransport::new(client_end));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !activity.load(std::sync::atomic::Ordering::Relaxed),
+            "on_connect alone must not set activity for ResetOn::Request"
+        );
+
+        let _ = client
+            .read_holding_registers(UnitId(9), Address(0), Quantity(1))
+            .await;
+
+        for _ in 0..50 {
+            if activity.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            activity.load(std::sync::atomic::Ordering::Relaxed),
+            "a refused request must still set activity for ResetOn::Request"
+        );
 
         handle.shutdown().await;
         let _ = serving.await;
@@ -1997,5 +2195,83 @@ mod tests {
 
         handle.shutdown().await;
         let _ = serving.await;
+    }
+
+    /// A minimal `rust_modbus::Server` (with no memory/regions declared) plus its handle — just
+    /// enough plumbing for `drive_serve` tests, which exercise the shared command/shutdown
+    /// dispatch, not request handling.
+    fn minimal_modbus_server() -> (
+        ModbusServer<Server<SlaveKey, impl LogFn + Clone>>,
+        ServerHandle,
+    ) {
+        let mem = seeded_memory(&[]);
+        let (log, _) = recording_log();
+        let modbus = ModbusServer::new(Server::new(mem, log, true, false));
+        let handle = modbus.handle();
+        (modbus, handle)
+    }
+
+    #[tokio::test]
+    /// MB-R-133 — a `ServerCommand::Terminate` on the command channel ends `drive_serve` with
+    /// `ServeEnd::Terminated`, via the graceful `handle.shutdown()` path (proved by the peer end
+    /// staying open and connected throughout — nothing here ever drops or aborts the link).
+    async fn ut_drive_serve_terminate_ends_gracefully() {
+        let (modbus, handle) = minimal_modbus_server();
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let serve_fut = modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+
+        let driving = tokio::spawn(async move { drive_serve(serve_fut, handle, &mut rx).await });
+        tx.send(ServerCommand::Terminate).await.unwrap();
+
+        let end = tokio::time::timeout(Duration::from_secs(5), driving)
+            .await
+            .expect("drive_serve did not return promptly")
+            .unwrap();
+        assert!(matches!(end, ServeEnd::Terminated));
+        drop(client_end); // kept alive until here: the link was never dropped mid-test.
+    }
+
+    #[tokio::test]
+    /// MB-R-133 — the command channel closing (every sender dropped) ends `drive_serve` the same
+    /// way as an explicit `Terminate`, with `ServeEnd::Terminated`.
+    async fn ut_drive_serve_channel_close_ends_gracefully() {
+        let (modbus, handle) = minimal_modbus_server();
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let serve_fut = modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end));
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        drop(tx);
+
+        let end = tokio::time::timeout(
+            Duration::from_secs(5),
+            drive_serve(serve_fut, handle, &mut rx),
+        )
+        .await
+        .expect("drive_serve did not return promptly");
+        assert!(matches!(end, ServeEnd::Terminated));
+        drop(client_end);
+    }
+
+    #[tokio::test]
+    /// MB-R-130/MB-R-131 — a mid-serve transport failure (the `serve_fut` itself resolving
+    /// `Err`) surfaces from `drive_serve` as `ServeEnd::Failed`, without a command ever being
+    /// sent — proven with a synthetic future rather than a real link failure, since
+    /// `serve_link`'s own failure mode is infallible by the crate's own documentation (its
+    /// `Result` exists only so a *future* serving failure needs no API change); `drive_serve` is
+    /// generic over any `Future<Output = rust_modbus::Result<()>>`, so this exercises its actual
+    /// dispatch logic exactly as a real `serve`/`serve_framed`/`serve_tls` failure would (the
+    /// code path s4/s5/s6 wire a real listener-bind/accept failure onto).
+    async fn ut_drive_serve_transport_failure_surfaces_as_failed() {
+        let (_modbus, handle) = minimal_modbus_server();
+        let serve_fut = async { Err(rust_modbus::Error::TrailingBytes { extra: 1 }) };
+        let (_tx, mut rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+
+        let end = tokio::time::timeout(
+            Duration::from_secs(5),
+            drive_serve(serve_fut, handle, &mut rx),
+        )
+        .await
+        .expect("drive_serve did not return promptly");
+        assert!(matches!(end, ServeEnd::Failed(_)));
     }
 }
