@@ -162,17 +162,23 @@ value input is in raw, unscaled units. Entering `10` on a register with
 consistent — display always scales, input never does — but it means the string you
 type is not the string you read back.
 
-### 6.8 Declaration failures are silent
+### 6.8 Declaration failures are warned, not silent
 
-Declaring a memory region reports success or failure, but the module-construction
-and runtime register-edit paths ignore that result. A declaration that is rejected
-for an incompatible overlap therefore fails quietly: the register exists in the
-table but has no backing memory, so reads and writes against it fail at runtime.
+Declaring a memory region still reports success or failure via `Memory::add_ranges`'s
+`bool` return, and a rejected declaration still leaves the register or gap cell
+without backing memory — reads and writes against it still fail at runtime. But
+every module-construction, module-reconfiguration, and runtime register-edit call
+site now logs a Warning (MB-R-129) identifying the register name (or, for an
+explicit-read-range gap cell with no single register name, the slave id and
+register kind) and the rejected address/range at the moment of rejection, so the
+eventual runtime read/write failure is traceable back to its cause instead of
+being a mystery.
 
 The reachable case: a register added at runtime at an address that a `read_ranges`
 gap already declared as a read-only cell. The overlap is (existing `Read` cell,
 requested `ReadWrite` region), which is not one of the widening combinations, so
-the declaration is rejected and dropped.
+the declaration is rejected and dropped — and now logs a Warning naming the
+register and the rejected range.
 
 ### 6.9 Client writes are fire-and-forget
 
