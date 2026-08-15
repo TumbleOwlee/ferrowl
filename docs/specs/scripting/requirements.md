@@ -55,7 +55,7 @@ assertion failures belongs to `cli-headless/`.
 
 **SC-R-011** — A sim thread shall be spawned only when at least one script is enabled for its owner; with no enabled script, no sim thread shall exist. This constrains *sim* threads only: the on-demand single-script execution of SC-R-035 runs on its own short-lived thread and is neither gated on nor counted as a sim thread.
 
-**SC-R-012** — A sim thread shall be controlled by a stop flag it observes only between execution cycles. Setting the flag and joining the thread shall stop the sim; the sim handle's destruction shall also stop and join it.
+**SC-R-012** — A sim thread shall be controlled by a stop flag it observes between execution cycles, and, during a cycle, at each firing of the execution hook (SC-R-034). Setting the flag and joining the thread shall stop the sim; the sim handle's destruction shall also stop and join it.
 
 **SC-R-013** — Within each cycle a sim thread shall sleep up to the configured cycle interval in small chunks, re-checking the stop flag between chunks, so a stop request during the idle portion of a cycle is observed promptly.
 
@@ -133,4 +133,6 @@ assertion failures belongs to `cli-headless/`.
 
 **SC-R-033** — If building the Lua context itself fails — a Lua **syntax** error in any script, or a duplicate script name (SC-R-005) — the entire sim thread shall log a single "failed to build Lua context" error and shall not loop; **no** script in that context shall run. A load-time failure is therefore all-or-nothing per context, whereas a run-time failure (SC-R-032) is isolated per script.
 
-**SC-R-034** — There shall be no execution-time limit, instruction-count limit, or memory ceiling on a script. This is a stated constraint, not an oversight; see [`edge-cases.md`](./edge-cases.md) §5.1.
+**SC-R-034** — Every Lua context — a sim thread's context (SC-R-010) and the on-demand single-script run's context (SC-R-035) alike — shall install an execution hook via mlua's `every_nth_instruction`, firing every 1,000 instructions. On each firing the hook shall: (a) for a sim-thread context, check the thread's stop flag and, if set, raise a Lua error to unwind the currently-executing script; (b) unconditionally check elapsed wall-clock time since the current cycle (or, for an on-demand run, the single execution) began, raising a Lua error if it exceeds a fixed 1,000 ms cap. Both the 1,000-instruction hook interval and the 1,000 ms wall-clock cap are fixed constants; neither is exposed as a config key or CLI flag. There is no memory ceiling on a script. See [`edge-cases.md`](./edge-cases.md) §5.1.
+
+**SC-R-039** — An error raised by the execution hook (stop-flag or wall-clock) shall flow through the same per-script error-handling path as any other runtime error: SC-R-032's per-script isolation and `[sim]`-prefixed logging for a sim thread, and SC-R-035's `[run]`-prefixed logging for an on-demand run. It shall not crash the sim thread, and, for a sim thread, any other script in that context shall still run that cycle. A hook-raised stop shall let a pending stop-and-join complete promptly instead of blocking on the join.
