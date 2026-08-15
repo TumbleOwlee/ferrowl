@@ -2,6 +2,7 @@
 //! config file (de)serialization ([`convert`]), tracked tokio task spawning
 //! ([`tokio`]), and a few ergonomic macros and traits.
 
+pub mod backoff;
 pub mod convert;
 pub mod tokio;
 

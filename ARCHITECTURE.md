@@ -29,7 +29,7 @@ published independently.
 | `ferrowl-templates` | The bundled Lua script-template library. A build script walks `templates/<context>/…` and generates the `TEMPLATES` array at compile time; carries its own `TemplateContext`, which the binary maps to its `ScriptContext`. |
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua and JSON). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
-| `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits. |
+| `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits, and the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops. |
 
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),
 **OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`),
