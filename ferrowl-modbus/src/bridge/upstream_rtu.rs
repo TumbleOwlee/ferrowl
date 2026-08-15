@@ -11,6 +11,10 @@ use tokio::task::JoinHandle;
 /// `service` (BR-R-005 — upstream acts as an ordinary server). One port, one link, no accept
 /// loop, no reconnect (edge-cases.md: "Upstream RTU serial loss ends the bridge task with an
 /// error; there is no reconnect for the upstream side").
+///
+/// No `log: L` parameter here, unlike `upstream_tcp::run`: that one takes `log` only to warn on
+/// a self-signed TLS certificate fallback (BR-R-011), and RTU has no TLS concept at all — there
+/// is nothing this layer ever logs.
 pub(crate) async fn run<S, F, L>(
     config: &Config,
     service: BridgeService<S, F, L>,
