@@ -13,6 +13,7 @@ use crate::module::modbus::table::{Definition, TableHeader, column_index};
 use crate::module::view::CommandResult;
 
 use super::super::ModbusModule;
+use super::super::build::declare_or_reject_msg;
 use super::super::registers::{register_mem_binding, sync_register_def, write_command};
 use super::ModbusModuleView;
 
@@ -83,10 +84,15 @@ impl ModbusModuleView {
         );
 
         if let Some((kind, key, range)) = register_mem_binding(&edited.register) {
-            self.module
-                .memory()
-                .write()
-                .add_ranges(key, &kind, &[range]);
+            let subject = format!("register '{}'", edited.name);
+            let rejected = {
+                let memory = self.module.memory();
+                let mut mem = memory.write();
+                declare_or_reject_msg(&mut mem, key, &kind, &range, &subject).err()
+            };
+            if let Some(msg) = rejected {
+                self.module.log().write().await.write(Level::Warning, &msg);
+            }
         }
 
         self.module.rebuild_operations().await;
@@ -189,7 +195,14 @@ impl ModbusModuleView {
         self.table.set_definitions(defs);
 
         if let Some((memory, key, kind, range)) = mem_update {
-            memory.write().add_ranges(key, &kind, &[range]);
+            let subject = format!("register '{}'", edited.name);
+            let rejected = {
+                let mut mem = memory.write();
+                declare_or_reject_msg(&mut mem, key, &kind, &range, &subject).err()
+            };
+            if let Some(msg) = rejected {
+                self.module.log().write().await.write(Level::Warning, &msg);
+            }
         }
 
         self.module.rebuild_operations().await;
@@ -591,5 +604,106 @@ mod tests {
         assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
         assert!(path.exists());
         let _ = std::fs::remove_file(&path);
+    }
+
+    fn device_with_gap() -> DeviceConfig {
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, ReadRanges, RegisterDef, ValueType, WordOrderCfg,
+        };
+        use std::collections::BTreeMap;
+
+        let mut definitions = BTreeMap::new();
+        // Fixed holding register at address 8: leaves [0,8) and [9,10) as gaps once `read_ranges`
+        // below spans [0,10) — see `explicit_read_coverage`, `build.rs`.
+        definitions.insert(
+            "hold".into(),
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(8),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: ValueType::U16,
+                endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![],
+                update: None,
+                description: "d".into(),
+                default: None,
+            },
+        );
+        let mut device = DeviceConfig::default();
+        device.definitions = definitions;
+        device.read_ranges = ReadRanges {
+            holding: Some("0-10".into()),
+            ..Default::default()
+        };
+        device
+    }
+
+    #[tokio::test]
+    /// MB-R-129 — a runtime-added register colliding with a `read_ranges` gap cell (the reachable
+    /// case in edge-cases.md §6.8) logs a Warning naming the register and the rejected range, from
+    /// `apply_add`'s call site — `add_ranges`'s own silent rejection (no backing memory) is
+    /// unaffected.
+    async fn ut_apply_add_warns_on_gap_collision() {
+        let device = device_with_gap();
+        let spec = spec(Role::Server);
+        let module = ModbusModule::new(&spec, &device);
+        let mut v = ModbusModuleView::new(module, spec, device);
+
+        // Address 2 falls inside the [0,8) gap, already declared Read; `holding(2)` is ReadWrite.
+        v.apply_add(edited("new", holding(2), None)).await;
+
+        let warned = v
+            .module
+            .log()
+            .write()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .iter()
+            .any(|(_, level, msg)| {
+                *level == Level::Warning && msg.contains("register 'new'") && msg.contains("[2, 3)")
+            });
+        assert!(
+            warned,
+            "expected a Warning naming the rejected register/range"
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-129 — editing a register into a `read_ranges` gap cell it collides with logs the same
+    /// Warning, from `apply_edit`'s call site.
+    async fn ut_apply_edit_warns_on_gap_collision() {
+        let device = device_with_gap();
+        let spec = spec(Role::Server);
+        let module = ModbusModule::new(&spec, &device);
+        let mut v = ModbusModuleView::new(module, spec, device);
+
+        // Add harmlessly outside any gap, then edit its address into the gap.
+        v.apply_add(edited("movable", holding(20), None)).await;
+        v.apply_edit(edited("movable", holding(2), None), 1, "movable".into())
+            .await;
+
+        let warned = v
+            .module
+            .log()
+            .write()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .iter()
+            .any(|(_, level, msg)| {
+                *level == Level::Warning
+                    && msg.contains("register 'movable'")
+                    && msg.contains("[2, 3)")
+            });
+        assert!(
+            warned,
+            "expected a Warning naming the rejected register/range"
+        );
     }
 }

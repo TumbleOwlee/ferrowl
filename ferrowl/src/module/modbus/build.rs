@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ferrowl_codec::{Access, Address, Kind, Register};
 use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetConfig, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Range};
+use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use tokio::sync::RwLock;
 
 use crate::config::{Endpoint, Role, device::NamedValue, device::ReadRanges};
@@ -170,6 +170,37 @@ pub(crate) fn build_read_operations(
         }
     }
     ops
+}
+
+/// MB-R-129 — declares `range` for `key`/`kind` in `memory` via `Memory::add_ranges`. On success
+/// returns `Ok(())`; on rejection (an incompatible overlap) returns `Err` holding the Warning line
+/// the caller should log, naming `subject` (the register name, or `gap_cell_subject`'s text for an
+/// explicit-read-range gap), the rejected range, and the rejection reason. `add_ranges`'s own
+/// all-or-nothing rejection semantics are unchanged; this only surfaces the failure to the caller.
+pub(crate) fn declare_or_reject_msg(
+    memory: &mut Memory<Key<SlaveKey>>,
+    key: Key<SlaveKey>,
+    kind: &MemKind,
+    range: &Range,
+    subject: &str,
+) -> Result<(), String> {
+    if memory.add_ranges(key, kind, std::slice::from_ref(range)) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{subject}: declaration of {range} rejected — overlaps existing memory with an incompatible type/access combination"
+        ))
+    }
+}
+
+/// MB-R-129 — subject text for a `read_ranges` gap-cell declaration, which has no single register
+/// name: identifies it by slave id and register kind instead, e.g. `"read-range gap cell (slave 1,
+/// HoldingRegister)"`.
+pub(crate) fn gap_cell_subject(key: &Key<SlaveKey>) -> String {
+    format!(
+        "read-range gap cell (slave {}, {:?})",
+        key.id.slave_id, key.id.kind
+    )
 }
 
 /// For every function code with explicit read ranges, the gap cells (inside those ranges but not
@@ -895,5 +926,75 @@ mod tests {
             }
             _ => panic!("expected an Ascii config"),
         }
+    }
+
+    #[test]
+    /// MB-R-129 — `declare_or_reject_msg` returns `Ok(())` and leaves `Memory::add_ranges`'s
+    /// acceptance unaffected when the range is compatible.
+    fn ut_declare_or_reject_msg_ok_on_accepted_range() {
+        let mut memory = Memory::<Key<SlaveKey>>::default();
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let result = super::declare_or_reject_msg(
+            &mut memory,
+            key,
+            &MemKind::ReadWrite(CellType::Register),
+            &Range::new(0, 2),
+            "register 'r'",
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    /// MB-R-129 — on an incompatible overlap, `declare_or_reject_msg` returns `Err` naming the
+    /// subject, the rejected range, and the incompatible-overlap reason; `add_ranges`'s
+    /// all-or-nothing rejection (the range stays undeclared) is unchanged.
+    fn ut_declare_or_reject_msg_err_on_incompatible_overlap() {
+        let mut memory = Memory::<Key<SlaveKey>>::default();
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        // Pre-populate a Read-only cell at [0,2) — mirrors a `read_ranges` gap declaration.
+        assert!(memory.add_ranges(
+            key.clone(),
+            &MemKind::Read(CellType::Register),
+            &[Range::new(0, 2)]
+        ));
+
+        let range = Range::new(0, 2);
+        let result = super::declare_or_reject_msg(
+            &mut memory,
+            key,
+            &MemKind::ReadWrite(CellType::Register),
+            &range,
+            "register 'r'",
+        );
+        let msg = result.expect_err("ReadWrite over an existing Read cell is incompatible");
+        assert!(msg.contains("register 'r'"));
+        assert!(msg.contains(&range.to_string()));
+        assert!(msg.to_lowercase().contains("incompatible"));
+    }
+
+    #[test]
+    /// MB-R-129 — a read-range gap cell's rejection subject identifies it by slave id and
+    /// register kind, since it has no single register name.
+    fn ut_gap_cell_subject_names_slave_and_kind() {
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(3),
+                kind: Kind::InputRegister,
+            },
+        };
+        let subject = super::gap_cell_subject(&key);
+        assert!(subject.contains("gap cell"));
+        assert!(subject.contains('3'));
+        assert!(subject.contains("InputRegister"));
     }
 }

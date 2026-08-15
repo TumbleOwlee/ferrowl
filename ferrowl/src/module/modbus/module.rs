@@ -24,8 +24,8 @@ use crate::instance::error::Error;
 use crate::lua::{SimHandle, run_script_once, run_sim};
 
 use super::build::{
-    Timing, build_instance, build_read_operations, default_value, endpoint_to_config,
-    explicit_read_coverage,
+    Timing, build_instance, build_read_operations, declare_or_reject_msg, default_value,
+    endpoint_to_config, explicit_read_coverage, gap_cell_subject,
 };
 use super::log::{FileSink, append, open_sink};
 
@@ -92,6 +92,7 @@ impl ModbusModule {
     /// Build a module from an instance spec and its device-type config.
     pub fn new(spec: &ModuleSpec, device: &DeviceConfig) -> Self {
         let mut memory = Memory::<Key<SlaveKey>>::default();
+        let mut log = LogRing::init();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
         let scripts = super::registers::collect_scripts(device);
         let mut virtual_init: HashMap<String, ferrowl_codec::Value> = HashMap::new();
@@ -123,7 +124,15 @@ impl ModbusModule {
                     Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(def.mem_type()),
                     Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(def.mem_type()),
                 };
-                memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
+                if let Err(msg) = declare_or_reject_msg(
+                    &mut memory,
+                    key,
+                    &mem_kind,
+                    &range,
+                    &format!("register '{name}'"),
+                ) {
+                    log.write(Level::Warning, &msg);
+                }
                 if let Some(default) = &def.default
                     && let Ok(raw) = register.encode(&default.to_string())
                 {
@@ -140,13 +149,16 @@ impl ModbusModule {
         // Cover gaps inside explicit read ranges (Read cells) so a batched client read can store
         // the whole request; the gap words are read but otherwise unused.
         for (key, mem_kind, range) in explicit_read_coverage(&registers, &device.read_ranges) {
-            memory.add_ranges(key, &mem_kind, std::slice::from_ref(&range));
+            let subject = gap_cell_subject(&key);
+            if let Err(msg) = declare_or_reject_msg(&mut memory, key, &mem_kind, &range, &subject) {
+                log.write(Level::Warning, &msg);
+            }
         }
         let operations = build_read_operations(&registers, &device.read_ranges);
 
         let memory: ModuleMemory = Arc::new(MemLock::new(memory));
         let operations = Arc::new(RwLock::new(operations));
-        let log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
+        let log: ModuleLog = Arc::new(RwLock::new(log));
         let script_log: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
 
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
@@ -390,9 +402,14 @@ impl ModbusModule {
         // Adopt new explicit read ranges: cover their gaps in memory, then rebuild operations.
         self.read_ranges = read_ranges;
         for (key, mem_kind, range) in explicit_read_coverage(&self.registers, &self.read_ranges) {
-            self.memory
-                .write()
-                .add_ranges(key, &mem_kind, std::slice::from_ref(&range));
+            let subject = gap_cell_subject(&key);
+            let rejected = {
+                let mut mem = self.memory.write();
+                declare_or_reject_msg(&mut mem, key, &mem_kind, &range, &subject).err()
+            };
+            if let Some(msg) = rejected {
+                self.log.write().await.write(Level::Warning, &msg);
+            }
         }
         self.rebuild_operations().await;
         let net_config = endpoint_to_config(endpoint, &timing, tls);
