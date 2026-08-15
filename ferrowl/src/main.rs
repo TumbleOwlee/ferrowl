@@ -359,6 +359,11 @@ fn main() {
         std::process::exit(code);
     }
 
+    if let Some(SubCommand::Bridge(ref bridge_args)) = args.command {
+        let code = runtime.block_on(cli::bridge::run(bridge_args));
+        std::process::exit(code);
+    }
+
     // Release the terminal on panic so the error message is visible.
     let handler = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {

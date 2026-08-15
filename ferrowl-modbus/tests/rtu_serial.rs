@@ -105,3 +105,59 @@ async fn rtu_client_open_failure_reconnect_true_retries() {
         .expect("client task panicked");
     assert!(joined.is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// BR-R-010, BR-R-006 — a bridge RTU downstream against an unopenable serial port answers
+/// every `forward` with `GatewayPathUnavailable` and keeps retrying the open in the background
+/// (MB-R-050–056's backoff), logging a `[bridge]`-prefixed line each attempt.
+async fn bridge_rtu_downstream_open_failure_answers_gateway_path_unavailable_and_retries() {
+    let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let log = {
+        let lines = lines.clone();
+        move |s: String| {
+            let lines = lines.clone();
+            async move {
+                lines.lock().push(s);
+            }
+        }
+    };
+
+    let downstream = ferrowl_modbus::bridge::spawn_rtu_downstream(bad_config(true), log);
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(200),
+        downstream.forward(
+            UnitId(1),
+            rust_modbus::RequestPdu::ReadHoldingRegisters {
+                address: rust_modbus::Address(0),
+                quantity: rust_modbus::Quantity(1),
+            },
+        ),
+    )
+    .await
+    .expect("forward must not block on a pending open");
+    assert_eq!(
+        result,
+        Err(rust_modbus::ExceptionCode::GatewayPathUnavailable)
+    );
+
+    // The open keeps failing on a 1s-then-doubling backoff (INITIAL_BACKOFF): poll until a
+    // second [bridge]-prefixed attempt has been logged, proving the retry loop is alive.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let count = lines
+            .lock()
+            .iter()
+            .filter(|l| l.starts_with(ferrowl_modbus::bridge::ERROR_PREFIX))
+            .count();
+        if count >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "expected at least two [bridge]-prefixed open-failure lines within the deadline: {:?}",
+            lines.lock()
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+}

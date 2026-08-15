@@ -16,6 +16,7 @@ resolve it, don't paper over it.
 | [`tui/`](./tui/) | Tabs, dialogs, `:` commands, keybindings, editor |
 | [`config-session/`](./config-session/) | Device/session file envelope, TOML/JSON, save/load, `migrate` |
 | [`cli-headless/`](./cli-headless/) | `ferrowl run`, CLI flags, exit codes, CI usage |
+| [`bridge/`](./bridge/) | `ferrowl bridge`, headless upstream/downstream Modbus relay (TCP/RTU) |
 
 Cross-cutting: [`non-functional-requirements.md`](./non-functional-requirements.md).
 
@@ -37,6 +38,7 @@ CLI flags, OCPP action names) are part of the contract and *are* spec content.
 | tui | `UI-R-nnn` |
 | config-session | `CS-R-nnn` |
 | cli-headless | `CL-R-nnn` |
+| bridge | `BR-R-nnn` |
 | non-functional (global) | `NF-R-nnn` |
 
 Never renumber. Never reuse a retired ID. A deleted requirement's ID stays dead.
