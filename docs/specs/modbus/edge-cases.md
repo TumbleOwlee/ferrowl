@@ -137,11 +137,17 @@ observable effect on a running module.
 An RTU **server** ignores the field entirely: it answers for whichever slave ids
 have declared memory regions, not for a single configured one.
 
-### 6.4 No server-side reconnect
+### 6.4 Server-side reconnect retries only after the current serve loop ends
 
-`reconnect` is client-only. A server whose listener or serial port fails ends its
-task; it does not retry the bind or the port open. Restarting it is the operator's
-(or the module lifecycle's) job.
+Resolved: every server transport (TCP, RTU, `RtuOverTcp`, `Udp`, `Ascii`,
+`AsciiOverTcp`) now honors `reconnect` — a listener bind failure, a serial-port
+open failure, or a mid-serve failure retries using the same shared backoff driver
+as the client (MB-R-051, MB-R-071, MB-R-075, MB-R-120, MB-R-124, MB-R-130–134).
+
+Retained nuance: a mid-serve failure does not retry immediately. The server waits
+for the *current* serve loop to fully end on its own before starting the backoff
+wait — an in-flight connection is never torn down early just to reach a retry
+sooner.
 
 ### 6.5 Unbounded TCP server connections
 

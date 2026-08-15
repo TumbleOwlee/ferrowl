@@ -110,27 +110,37 @@ mistaken for an oversight and silently "fixed".
 
 ## 6. Known limitations — intentional constraints
 
-### 6.1 No auto-reconnect
+### 6.1 CS reconnect resets on handshake, not on message exchange
 
-The OCPP crate has **no** reconnect logic at all, in either role. A CS whose
-connection drops — for any reason: peer close, transport error, timeout on the
-socket — stays disconnected until an operator issues `:start` or `:restart`. There
-is no backoff, no retry loop, and no queueing of commands issued while
-disconnected.
+Resolved: a CS now reconnects on a failed dial or a dropped connection, using the
+same shared bounded-exponential-backoff driver as Modbus's client (see
+`modbus/requirements.md`, MB-R-051; `requirements.md`, OC-R-048, OC-R-105–107).
+Governed by the `reconnect` config field, default enabled. There is still no
+queueing of commands issued while disconnected — a command other than terminate
+sent while backing off is dropped, same as Modbus (MB-R-054).
 
-This is deliberately unlike Modbus, whose client reconnects with a bounded
-exponential backoff (see `modbus/requirements.md`, MB-R-050 – MB-R-055). OCPP has
-no equivalent. Nothing in the config turns it on.
+Retained nuance: the backoff resets to 1 s as soon as the WebSocket handshake
+completes, before any OCPP message is exchanged (OC-R-105). A peer that accepts
+the socket and then immediately drops it, every time, will still see the backoff
+reset — and effectively retry near 1 s — on every attempt, rather than the
+interval growing as it would if reset required a successful message exchange.
 
-Consequence: a CS module that was online and dropped shows offline and stays that
-way; auto-Heartbeat and auto-MeterValues halt and do not resume on their own.
+Consequence: a CS module that was online and dropped now recovers on its own;
+auto-Heartbeat and auto-MeterValues resume once reconnected without operator
+intervention.
 
-### 6.2 No listener retry
+### 6.2 CSMS bind retry has no disable toggle
 
-A CSMS whose bind fails logs the error and gives up; it does not retry the bind on
-a later tick. Rebinding is the operator's job (`:start` / `:restart`). A server
-does, however, bind **automatically on creation** — unlike a client, which never
-connects until told to.
+Resolved: a CSMS whose bind fails now retries using the same shared backoff
+driver (OC-R-083, OC-R-108–109), instead of giving up permanently. A server still
+binds **automatically on creation** — unlike a client, which never connects until
+told to.
+
+Retained nuance: unlike the CS's `reconnect` field, there is no config toggle to
+disable this — a CSMS always retries a failed bind for as long as the module
+itself is running (mirrors Modbus's server-side behavior, which likewise has no
+per-transport way to keep a listener bind fail-fast while other reconnect
+behavior stays on).
 
 ### 6.3 Unbounded connections and no idle timeout
 
