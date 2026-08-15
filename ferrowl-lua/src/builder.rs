@@ -1,6 +1,7 @@
 use crate::{Context, Result, module::LogSink, module::Module};
 use mlua::UserData;
 use std::hash::Hash;
+use std::sync::{Arc, atomic::AtomicBool};
 
 /// Lua context builder
 pub struct ContextBuilder<K>
@@ -8,6 +9,7 @@ where
     K: Hash + Eq + Default,
 {
     context: Result<Context<K>>,
+    stop_flag: Option<Arc<AtomicBool>>,
 }
 
 impl<K> Default for ContextBuilder<K>
@@ -18,6 +20,7 @@ where
     fn default() -> Self {
         Self {
             context: Ok(Context::<K>::default()),
+            stop_flag: None,
         }
     }
 }
@@ -30,7 +33,18 @@ where
     /// [`ContextBuilder::default`] and chain `with_*`.
     #[cfg(test)]
     fn from(context: Result<Context<K>>) -> Self {
-        Self { context }
+        Self {
+            context,
+            stop_flag: None,
+        }
+    }
+
+    /// SC-R-034 / SC-R-012 — attach a sim thread's stop flag so the execution hook installed in
+    /// `build()` can unwind a runaway script promptly instead of only observing the flag between
+    /// cycles. Only a sim-thread call site passes this; an on-demand run (SC-R-035) omits it.
+    pub fn with_stop_flag(mut self, stop: Arc<AtomicBool>) -> Self {
+        self.stop_flag = Some(stop);
+        self
     }
 
     /// Add a new module to the lua context
@@ -82,9 +96,12 @@ where
         self
     }
 
-    /// Build the final context
+    /// Build the final context, installing the SC-R-034 execution hook (wall-clock cap always,
+    /// stop-flag check when `with_stop_flag` was called) as the last step.
     pub fn build(self) -> Result<Context<K>> {
-        self.context
+        let mut ctx = self.context?;
+        ctx.install_execution_hook(self.stop_flag)?;
+        Ok(ctx)
     }
 }
 
