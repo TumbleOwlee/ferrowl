@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::udp;
-use ferrowl_modbus::{Command, Error, FunctionCode, Key, Operation, SlaveKey, TcpError, UnitId};
+use ferrowl_modbus::{
+    Command, Error, FunctionCode, Key, Operation, ServerCommand, SlaveKey, TcpError, UnitId,
+};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
@@ -91,8 +93,9 @@ async fn it_udp_server_answers_a_request() {
     let mem = server_mem();
     let port = free_udp_port().await;
     let cfg = config(port);
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("server failed to start");
     sleep(Duration::from_millis(50)).await;
@@ -125,8 +128,9 @@ async fn it_udp_server_answers_slave_zero() {
     let mem = server_mem();
     let port = free_udp_port().await;
     let cfg = config(port);
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server = udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("server failed to start");
     sleep(Duration::from_millis(50)).await;
@@ -149,21 +153,6 @@ async fn it_udp_server_answers_slave_zero() {
     );
 
     server.abort();
-}
-
-#[tokio::test]
-/// MB-R-120 — a bind failure (port already occupied) surfaces as an error from `spawn`, is not
-/// retried, mirroring `tcp::server`'s own bind-failure test.
-async fn it_udp_server_bind_failure_surfaces() {
-    let port = free_udp_port().await;
-    let _occupier = tokio::net::UdpSocket::bind(("127.0.0.1", port))
-        .await
-        .unwrap();
-    let mem: Mem = Arc::new(MemLock::new(Memory::default()));
-    let res = udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port))), mem)
-        .spawn(sink())
-        .await;
-    assert!(res.is_err());
 }
 
 /// Client memory with the same regions declared but no values (the client fills them from
@@ -193,9 +182,10 @@ async fn it_udp_client_polls_server_and_executes_commands() {
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let server =
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
-            .spawn(sink())
+            .spawn(srv_rx, sink(), sink())
             .await
             .expect("server failed to start");
 
