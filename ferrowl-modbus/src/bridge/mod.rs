@@ -4,6 +4,7 @@ mod downstream;
 mod downstream_rtu;
 mod downstream_tcp;
 mod service;
+mod upstream_rtu;
 mod upstream_tcp;
 pub use config::{BridgeEndpointKind, BridgeEndpointSpec, UnitIdFilter};
 pub use downstream::{DownstreamHandle, ERROR_PREFIX};
