@@ -94,14 +94,23 @@ mod tests {
         }"#;
         let cfg: Config = serde_json::from_str(json).expect("deserializes");
         let tls = cfg.tls.expect("tls present");
-        assert_eq!(tls.ca_file.as_deref(), Some("ca.pem"));
-        assert_eq!(tls.cert_file.as_deref(), Some("cert.pem"));
-        assert_eq!(tls.key_file.as_deref(), Some("key.pem"));
+        // Both cert_file/key_file are set and self_signed is false, so server_cert resolves
+        // Explicit; ca_file is present too, but insecure_skip_verify wins (MB-R-109), so it's
+        // provably discarded rather than combined with skip-verify.
+        assert_eq!(
+            tls.server_cert,
+            ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: "cert.pem".to_string(),
+                key_file: "key.pem".to_string(),
+            }
+        );
+        assert_eq!(
+            tls.client_verification,
+            ferrowl_util::tls::ClientVerification::SkipVerify
+        );
         assert_eq!(tls.client_cert_file.as_deref(), Some("client.pem"));
         assert_eq!(tls.client_key_file.as_deref(), Some("client-key.pem"));
         assert_eq!(tls.client_ca_file.as_deref(), Some("client-ca.pem"));
         assert!(tls.require_client_cert);
-        assert!(!tls.self_signed);
-        assert!(tls.insecure_skip_verify);
     }
 }
