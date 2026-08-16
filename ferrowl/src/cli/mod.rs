@@ -494,16 +494,22 @@ fn build_descriptor_tls(
             )),
         }
     };
+    let server_cert = ferrowl_util::tls::ServerCertSource::resolve(
+        parse_bool("self_signed")?,
+        get("cert_file"),
+        get("key_file"),
+    )?;
+    let client_verification = ferrowl_util::tls::ClientVerification::resolve(
+        parse_bool("insecure_skip_verify")?,
+        get("ca_file"),
+    );
     Ok(Some(ferrowl_modbus::tcp::ModbusTlsConfig {
-        ca_file: get("ca_file"),
-        cert_file: get("cert_file"),
-        key_file: get("key_file"),
+        client_verification,
+        server_cert,
         client_cert_file: get("client_cert_file"),
         client_key_file: get("client_key_file"),
         client_ca_file: get("client_ca_file"),
         require_client_cert: parse_bool("require_client_cert")?,
-        self_signed: parse_bool("self_signed")?,
-        insecure_skip_verify: parse_bool("insecure_skip_verify")?,
     }))
 }
 
@@ -1136,10 +1142,39 @@ mod tests {
         match with_tls.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 let tls = cfg.tls.expect("tls present");
-                assert!(tls.self_signed);
+                assert_eq!(
+                    tls.server_cert,
+                    ferrowl_util::tls::ServerCertSource::SelfSigned
+                );
             }
             ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
         }
+    }
+
+    #[test]
+    /// MB-R-106 — via the CLI mini-language: `self_signed=true` wins unconditionally over
+    /// `cert_file`/`key_file` present in the same descriptor.
+    fn ut_parse_bridge_descriptor_tls_self_signed_wins_over_cert_files() {
+        let parsed =
+            parse_bridge_descriptor("port=502,self_signed=true,cert_file=s.crt,key_file=s.key")
+                .unwrap();
+        match parsed.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                let tls = cfg.tls.expect("tls present");
+                assert_eq!(
+                    tls.server_cert,
+                    ferrowl_util::tls::ServerCertSource::SelfSigned
+                );
+            }
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// MB-R-107 — via the CLI mini-language: `cert_file` set alone (no `self_signed`, no
+    /// `key_file`) is a configuration-resolution error.
+    fn ut_parse_bridge_descriptor_tls_cert_file_alone_is_error() {
+        assert!(parse_bridge_descriptor("port=502,cert_file=s.crt").is_err());
     }
 
     #[test]
