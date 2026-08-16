@@ -40,6 +40,25 @@ use security::{SecurityInputs, SecurityLevel, SkipVerifyChoice, validate_securit
 #[derive(Debug, Clone)]
 pub struct ConfigPath;
 
+/// Client-only auto-reconnect toggle (OC-R-048, OC-R-107). Mirrors Modbus's own
+/// `setup_dialog::choices::ReconnectChoice`, duplicated rather than shared: the two setup
+/// dialogs are independent module types with no shared UI-choices module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectChoice {
+    On,
+    Off,
+}
+
+impl ToLabel for ReconnectChoice {
+    fn to_label(&self) -> String {
+        match self {
+            ReconnectChoice::On => "On",
+            ReconnectChoice::Off => "Off",
+        }
+        .to_string()
+    }
+}
+
 impl Validate for ConfigPath {
     fn validate(input: &str) -> ValidateResult {
         let input = input.trim();
@@ -84,6 +103,10 @@ pub struct OcppSetupDialog {
     /// Optional URL path appended after the endpoint, e.g. `/ocpp/cp001`.
     #[focus(when = {self.role.get_value() == OcppRole::Client})]
     pub path: Widget<InputFieldState, InputField<String>>,
+    /// Client-only: automatically reconnect (with backoff) instead of ending the CS task on a
+    /// lost or refused connection (OC-R-048). Ignored (and hidden) for the server role.
+    #[focus(when = {self.role.get_value() == OcppRole::Client})]
+    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     /// Transport security level, offered only for `wss://`.
     #[focus(when = {self.show_security()})]
     pub security: Widget<SelectionState<SecurityLevel>, Selection<SecurityLevel>>,
@@ -175,6 +198,11 @@ impl OcppSetupDialog {
             .ip(input("IP", "127.0.0.1", &input_style, false))
             .port(input("Port", "9000", &input_style, false))
             .path(input("Path", "/ocpp/cp001", &input_style, false))
+            .reconnect(selection(
+                "Reconnect",
+                vec![ReconnectChoice::On, ReconnectChoice::Off],
+                &selection_style,
+            ))
             .security(selection(
                 "Security",
                 vec![
@@ -263,6 +291,9 @@ impl OcppSetupDialog {
         set_text(&mut d.ip, &spec.ip);
         set_text(&mut d.port, &spec.port.to_string());
         set_text(&mut d.path, &spec.path);
+        d.reconnect
+            .state
+            .set_selection(if spec.reconnect.unwrap_or(true) { 0 } else { 1 });
 
         let level = SecurityLevel::from_config(&spec.security, spec.role);
         d.security.state.set_selection(level.index());
@@ -344,6 +375,8 @@ impl OcppSetupDialog {
         }
 
         let role = self.role.get_value();
+        let reconnect = (role == OcppRole::Client)
+            .then(|| self.reconnect.state.get_value() == ReconnectChoice::On);
         let protocol = self.protocol.get_value();
         let security = if protocol == OcppProtocol::Wss {
             let level = self.security.get_value();
@@ -386,6 +419,7 @@ impl OcppSetupDialog {
             port,
             path,
             timeout_ms: None,
+            reconnect,
             security,
         })
     }
@@ -424,6 +458,11 @@ impl OcppSetupDialog {
     /// host:port and ignores it — so it is hidden (and skipped by focus) when the role is Server.
     fn path_hidden(&self) -> bool {
         self.role.get_value() == OcppRole::Server
+    }
+
+    /// The reconnect toggle is client-only (OC-R-048); the server role ignores it entirely.
+    fn show_reconnect(&self) -> bool {
+        self.role.get_value() == OcppRole::Client
     }
 
     /// Whether the protocol is `wss://` (gates every security-related field).
@@ -532,12 +571,14 @@ impl OcppSetupDialog {
         let show_cert_a = self.show_cert_row_a();
         let show_cert_b = self.show_cert_row_b();
         let show_hint = self.show_hint();
+        let show_reconnect = self.show_reconnect();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
-        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
-        // (3 each), and the hint line (1), only when applicable.
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the reconnect row
+        // (3), the security rows (3 each), and the hint line (1), only when applicable.
         let box_height = 17
             + if has_error { 3 } else { 0 }
+            + if show_reconnect { 3 } else { 0 }
             + if show_security_row { 3 } else { 0 }
             + if show_cert_a { 3 } else { 0 }
             + if show_cert_b { 3 } else { 0 }
@@ -571,21 +612,23 @@ impl OcppSetupDialog {
         block.render(vcenter, buf);
 
         let error_height = if has_error { 3 } else { 0 };
+        let reconnect_height = if show_reconnect { 3 } else { 0 };
         let security_height = if show_security_row { 3 } else { 0 };
         let cert_a_height = if show_cert_a { 3 } else { 0 };
         let cert_b_height = if show_cert_b { 3 } else { 0 };
         let hint_height = if show_hint { 1 } else { 0 };
         let rows = Layout::vertical([
-            Constraint::Length(3),               // name
-            Constraint::Length(3),               // config path
-            Constraint::Length(3),               // version | role
-            Constraint::Length(3),               // protocol | ip | port | path
-            Constraint::Length(security_height), // security | username | password | skip-verify
-            Constraint::Length(hint_height),     // self-signed hint (server, below TLS)
-            Constraint::Length(cert_a_height),   // cert_file|key_file or ca_file
-            Constraint::Length(cert_b_height),   // client_cert|client_key or client_ca_file
-            Constraint::Length(error_height),    // error (hidden when empty)
-            Constraint::Length(1),               // keybinds
+            Constraint::Length(3),                // name
+            Constraint::Length(3),                // config path
+            Constraint::Length(3),                // version | role
+            Constraint::Length(3),                // protocol | ip | port | path
+            Constraint::Length(reconnect_height), // reconnect (client only)
+            Constraint::Length(security_height),  // security | username | password | skip-verify
+            Constraint::Length(hint_height),      // self-signed hint (server, below TLS)
+            Constraint::Length(cert_a_height),    // cert_file|key_file or ca_file
+            Constraint::Length(cert_b_height),    // client_cert|client_key or client_ca_file
+            Constraint::Length(error_height),     // error (hidden when empty)
+            Constraint::Length(1),                // keybinds
         ])
         .split(inner);
 
@@ -609,48 +652,52 @@ impl OcppSetupDialog {
             );
         }
 
+        if show_reconnect {
+            render_field!(self, reconnect, rows[4], buf);
+        }
+
         let is_client = role == OcppRole::Client;
         if show_security_row {
             if show_credentials {
                 if is_client {
-                    render_row!(self, rows[4], buf; security, username, password, skip_verify);
+                    render_row!(self, rows[5], buf; security, username, password, skip_verify);
                 } else {
-                    render_row!(self, rows[4], buf; security, username, password);
+                    render_row!(self, rows[5], buf; security, username, password);
                 }
             } else if is_client {
-                render_row!(self, rows[4], buf; security, skip_verify);
+                render_row!(self, rows[5], buf; security, skip_verify);
             } else {
                 // Server without credential fields: the selection is the row's only widget,
                 // so it takes the full width instead of leaving two thirds blank.
-                render_field!(self, security, rows[4], buf);
+                render_field!(self, security, rows[5], buf);
             }
         }
 
         if show_hint {
             self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
-            render_field!(self, hint, rows[5], buf);
+            render_field!(self, hint, rows[6], buf);
         }
 
         if show_cert_a {
             if show_server_cert {
-                render_row!(self, rows[6], buf; cert_file, key_file);
+                render_row!(self, rows[7], buf; cert_file, key_file);
             } else {
-                render_field!(self, ca_file, rows[6], buf);
+                render_field!(self, ca_file, rows[7], buf);
             }
         }
 
         if show_cert_b {
             if show_client_ca {
-                render_field!(self, client_ca_file, rows[7], buf);
+                render_field!(self, client_ca_file, rows[8], buf);
             } else {
-                render_row!(self, rows[7], buf; client_cert_file, client_key_file);
+                render_row!(self, rows[8], buf; client_cert_file, client_key_file);
             }
         }
 
         if has_error {
-            render_field!(self, error, rows[8], buf);
+            render_field!(self, error, rows[9], buf);
         }
-        render_field!(self, keybinds, rows[9], buf);
+        render_field!(self, keybinds, rows[10], buf);
 
         // Must be called after every sibling widget above has been rendered, so a popup paints on
         // top rather than being overwritten (painter's-algorithm buffer model).
@@ -834,7 +881,7 @@ fn keybinds_text() -> Widget<String, Text> {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_ui::traits::{HandleEvents, SetFocus};
+    use ferrowl_ui::traits::{HandleEvents, IsFocus, SetFocus};
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
@@ -851,6 +898,59 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ferrowl_ocpp_setup_test_{name}"));
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    /// OC-R-048, OC-R-107 — the setup dialog resolves a reconnect-off selection into the spec.
+    fn ut_resolve_reconnect_off_maps_to_some_false() {
+        let mut d = OcppSetupDialog::new(); // Client by default
+        set_text(&mut d.name, "cs-1");
+        d.reconnect.state.set_selection(1); // Off
+        let spec = d.resolve().expect("valid client config");
+        assert_eq!(spec.reconnect, Some(false));
+    }
+
+    #[test]
+    /// OC-R-048 — a server-role setup reports no reconnect setting (the field is client-only).
+    fn ut_resolve_server_role_reports_no_reconnect() {
+        let mut d = OcppSetupDialog::new();
+        set_text(&mut d.name, "csms-1");
+        d.role.state.set_selection(1); // Server
+        // Default role is Client; reconnect selection is irrelevant/unseen once role is Server.
+        let spec = d.resolve().expect("valid server config");
+        assert_eq!(spec.reconnect, None);
+    }
+
+    #[test]
+    /// OC-R-107 — editing an existing client spec prefills the reconnect toggle from the spec.
+    fn ut_edit_prefills_reconnect_off() {
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: Some(false),
+            security: OcppSecurityConfig::default(),
+        };
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml");
+        assert_eq!(dialog.reconnect.state.get_value(), ReconnectChoice::Off);
+        let resolved = dialog.resolve().expect("valid client config");
+        assert_eq!(resolved.reconnect, Some(false));
+    }
+
+    #[test]
+    /// UI-R-022 — the focus cycle skips the reconnect field when it is hidden for a server role.
+    fn ut_focus_next_skips_reconnect_for_server_role() {
+        let mut d = OcppSetupDialog::new();
+        d.role.state.set_selection(1); // Server
+        for _ in 0..20 {
+            d.focus_next();
+        }
+        assert!(!d.reconnect.state.is_focused());
     }
 
     // Regression: editing a ws module whose device file carries a security section (Basic Auth
@@ -873,6 +973,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security: security.clone(),
         };
         let d = OcppSetupDialog::edit(&spec, "");
@@ -1019,6 +1120,7 @@ mod tests {
             port: 9443,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security: OcppSecurityConfig {
                 cert_file: Some(cert),
                 key_file: Some(key),
@@ -1044,6 +1146,7 @@ mod tests {
             port: 9000,
             path: "/ocpp/cp001".into(),
             timeout_ms: None,
+            reconnect: None,
             security: OcppSecurityConfig {
                 insecure_skip_verify: true,
                 ..Default::default()

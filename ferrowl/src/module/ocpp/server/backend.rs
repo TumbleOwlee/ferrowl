@@ -329,6 +329,7 @@ mod tests {
             port: occupied_port,
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(1000),
+            reconnect: None,
             security: OcppSecurityConfig::default(),
         };
 

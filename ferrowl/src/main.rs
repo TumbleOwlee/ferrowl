@@ -149,6 +149,7 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
         port,
         path: "/ocpp/cp001".into(),
         timeout_ms: None,
+        reconnect: None,
         security: Default::default(),
     };
     let device = OcppDeviceConfig::from_spec(&spec, Vec::new());
