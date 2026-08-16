@@ -76,7 +76,7 @@ async fn tcp_server_bind_failure_retries_then_succeeds() {
     let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::tcp::ServerBuilder::new(
+    let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
     )
@@ -125,7 +125,7 @@ async fn tcp_server_bind_failure_reconnect_false_ends_task() {
     let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::tcp::ServerBuilder::new(
+    let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, false))),
         server_mem(),
     )
@@ -150,7 +150,7 @@ async fn tcp_server_terminate_while_backing_off_ends_task_ok() {
     let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
 
     let (sender, receiver) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::tcp::ServerBuilder::new(
+    let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
     )
@@ -180,7 +180,7 @@ async fn rtu_over_tcp_server_bind_failure_retries_then_succeeds() {
     let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (handle, _bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
     )
@@ -226,7 +226,7 @@ async fn ascii_over_tcp_server_bind_failure_retries_then_succeeds() {
     let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
+    let (handle, _bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
     )

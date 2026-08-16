@@ -666,6 +666,17 @@ fn sha256_fingerprint(cert: &rustls_pki_types::CertificateDer<'_>) -> String {
         .join(":")
 }
 
+/// The address a listener/socket transport (Tcp, RtuOverTcp, AsciiOverTcp, Udp) is actually
+/// bound to right now — `None` until the first successful bind, cleared again once the serve
+/// loop for that bind ends. Lets a caller observe the already-spec'd bind/retry behavior
+/// (MB-R-130, MB-R-134) instead of racing it: `spawn()` returns before the first bind attempt
+/// has necessarily run, so this is the only way to know the listener is actually up (mirrors
+/// `ferrowl_ocpp::csms::Server::local_addr`, OC-R-083). RTU and Ascii (physical serial, no socket
+/// address) have no equivalent: `open_serial` is a single synchronous local-path open with no
+/// listen/accept step for a peer to race against, unlike a network bind a remote client can dial
+/// before it lands.
+pub(crate) type BoundAddr = std::sync::Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>;
+
 /// How a driven serve loop ended (MB-R-130/MB-R-131/MB-R-133).
 pub(crate) enum ServeEnd {
     /// A `ServerCommand::Terminate`, or the command channel closing, ended the loop gracefully

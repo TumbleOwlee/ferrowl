@@ -195,8 +195,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -220,7 +224,14 @@ impl<T: KeyParams> Instance<T> {
                         return Err(e.into());
                     }
                     Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                        // Pure serial: no socket, so no bind to report — an `Arc` nobody ever
+                        // writes to reads back `None` from `Instance::bound_addr()`, correctly
+                        // indistinguishable from "never bound."
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                        }));
                     }
                 }
             }
@@ -243,8 +254,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -267,8 +282,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -292,7 +311,12 @@ impl<T: KeyParams> Instance<T> {
                         return Err(e.into());
                     }
                     Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                        // Pure serial — see the identical `RtuServer` arm above.
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                        }));
                     }
                 }
             }
@@ -315,13 +339,30 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle, sender }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// The address a server instance is actually bound to right now — `None` for a client
+    /// instance, a pure-serial (Rtu/Ascii) server, an instance never started, or a TCP-framed/UDP
+    /// server backing off from a failed bind (MB-R-130). `Some(<real addr>)` once bound, useful
+    /// when the configured port was `0`. A caller that needs to know the listener is up (not
+    /// merely that `start()` returned — the bind itself races behind the retried task) polls
+    /// this instead of sleeping a fixed duration.
+    pub fn bound_addr(&self) -> Option<std::net::SocketAddr> {
+        match &self.handle {
+            Some(Handle::Server(h)) => *h.bound_addr.lock(),
+            _ => None,
+        }
     }
 
     /// Stops the running task: asks clients to terminate gracefully, then
@@ -498,6 +539,7 @@ mod tests {
         instance.handle = Some(handle::Handle::Server(handle::ServerHandle {
             handle: task,
             sender,
+            bound_addr: Arc::new(parking_lot::Mutex::new(None)),
         }));
 
         let err = instance.send_command(Command::Terminate).await.unwrap_err();
@@ -752,6 +794,49 @@ mod tests {
 
         // `stop()` on an already-finished task still tears down bookkeeping cleanly.
         instance.stop().await.expect("stop after natural finish");
+    }
+
+    /// MB-R-130 (bound_addr companion) — a TCP server instance's `bound_addr()` is `None` right
+    /// after `start()` returns (which only guarantees the task was scheduled), `Some(<real
+    /// addr>)` once the listener actually binds (even with the configured `port: 0`), and `None`
+    /// again after a graceful `stop()` — the ready signal a caller polls instead of racing
+    /// `start()`'s return with a fixed sleep.
+    #[tokio::test]
+    async fn it_tcp_server_bound_addr_reflects_listener_state() {
+        let mut instance = Instance::with_tcp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(tcp::Config {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+                timeout_ms: 200,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+                tls: None,
+            })),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        assert!(instance.bound_addr().is_none());
+
+        instance.start(sink(), sink()).await.expect("start");
+
+        let mut addr = None;
+        for _ in 0..50 {
+            addr = instance.bound_addr();
+            if addr.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        let addr = addr.expect("listener must have bound within 1s");
+        assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
+
+        instance.stop().await.expect("stop");
+        assert!(
+            instance.bound_addr().is_none(),
+            "bound_addr must clear once the instance stops"
+        );
     }
 
     /// MB-R-133 — stopping a running TCP server sends `ServerCommand::Terminate` through the

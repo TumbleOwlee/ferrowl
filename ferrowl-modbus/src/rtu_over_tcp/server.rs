@@ -1,5 +1,7 @@
 // Crate
-use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
+use crate::server_core::{
+    BoundAddr, ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff,
+};
 use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand, TcpError};
@@ -44,21 +46,33 @@ impl<T: KeyParams> ServerBuilder<T> {
     /// `reconnect` — retrying an invalid configuration can never succeed.
     /// `ServerCommand::Terminate` (or the channel closing) aborts a backoff wait immediately
     /// (MB-R-133).
+    ///
+    /// The returned `BoundAddr` is `None` until the listener actually binds and clears again
+    /// once its serve loop ends — a caller that needs to know the listener is up (rather than
+    /// merely that the task was scheduled) polls it instead of racing `spawn()`'s return with a
+    /// fixed sleep (see [`BoundAddr`]).
     pub async fn spawn<L, St>(
         &self,
         receiver: Receiver<ServerCommand>,
         log: L,
         status: St,
-    ) -> Result<JoinHandle<Result<(), Error>>, Error>
+    ) -> Result<(JoinHandle<Result<(), Error>>, BoundAddr), Error>
     where
         L: LogFn + Clone,
         St: LogFn + Clone,
     {
         let config = self.config.clone();
         let memory = self.memory.clone();
-        Ok(tokio::task::spawn(run(
-            config, memory, receiver, log, status,
-        )))
+        let bound_addr: BoundAddr = Arc::new(parking_lot::Mutex::new(None));
+        let handle = tokio::task::spawn(run(
+            config,
+            memory,
+            receiver,
+            log,
+            status,
+            bound_addr.clone(),
+        ));
+        Ok((handle, bound_addr))
     }
 }
 
@@ -83,6 +97,7 @@ async fn run<T, L, St>(
     receiver: Receiver<ServerCommand>,
     log: L,
     status: St,
+    bound_addr: BoundAddr,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -101,6 +116,7 @@ where
         let log = log.clone();
         let activity = activity.clone();
         let receiver = &receiver;
+        let bound_addr = bound_addr.clone();
         async move {
             activity.store(false, Ordering::Relaxed);
             let guard = config.read().await;
@@ -131,15 +147,27 @@ where
                             reset: false,
                         },
                         Ok(listener) => {
+                            let bound = match listener.local_addr() {
+                                Ok(addr) => addr,
+                                Err(e) => {
+                                    return AttemptOutcome::Failed {
+                                        error: Error::Server(e),
+                                        reconnect,
+                                        reset: false,
+                                    };
+                                }
+                            };
+                            *bound_addr.lock() = Some(bound);
                             let handle = server.handle();
                             let mut receiver = receiver.lock().await;
-                            match drive_serve(
+                            let end = drive_serve(
                                 server.serve_framed::<rust_modbus::RtuOverTcp>(listener),
                                 handle,
                                 &mut receiver,
                             )
-                            .await
-                            {
+                            .await;
+                            *bound_addr.lock() = None;
+                            match end {
                                 ServeEnd::Terminated => AttemptOutcome::Done,
                                 ServeEnd::Failed(e) => AttemptOutcome::Failed {
                                     error: Error::Server(e),
@@ -178,15 +206,27 @@ where
                                     reset: false,
                                 },
                                 Ok(listener) => {
+                                    let bound = match listener.local_addr() {
+                                        Ok(addr) => addr,
+                                        Err(e) => {
+                                            return AttemptOutcome::Failed {
+                                                error: Error::Server(e),
+                                                reconnect,
+                                                reset: false,
+                                            };
+                                        }
+                                    };
+                                    *bound_addr.lock() = Some(bound);
                                     let handle = server.handle();
                                     let mut receiver = receiver.lock().await;
-                                    match drive_serve(
+                                    let end = drive_serve(
                                         server.serve_tls::<rust_modbus::RtuOverTcp>(listener),
                                         handle,
                                         &mut receiver,
                                     )
-                                    .await
-                                    {
+                                    .await;
+                                    *bound_addr.lock() = None;
+                                    match end {
                                         ServeEnd::Terminated => AttemptOutcome::Done,
                                         ServeEnd::Failed(e) => AttemptOutcome::Failed {
                                             error: Error::Server(e),
@@ -218,7 +258,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{PHYSICAL_SERIAL, VERBOSE};
+    use super::{PHYSICAL_SERIAL, ServerBuilder, VERBOSE};
+    use crate::tcp::Config;
+    use crate::{Key, ServerCommand, SlaveKey};
 
     /// MB-R-067 — the RtuOverTcp server logs per-request outcomes exactly like every other
     /// transport (RTU, RTU-over-TCP, TCP alike now).
@@ -232,5 +274,55 @@ mod tests {
     #[test]
     fn ut_rtu_over_tcp_server_is_not_physical_serial() {
         assert!(!PHYSICAL_SERIAL);
+    }
+
+    fn sink() -> impl crate::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// MB-R-130 (bound_addr companion) — same lifecycle as `tcp::server`'s own test: `None`
+    /// before the first successful bind, `Some(<real addr>)` once bound, `None` again once
+    /// `ServerCommand::Terminate` ends the serve loop.
+    #[tokio::test]
+    async fn ut_bound_addr_reflects_bind_lifecycle() {
+        let config = Config {
+            ip: "127.0.0.1".to_string(),
+            port: 0,
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+            tls: None,
+        };
+        let memory = std::sync::Arc::new(parking_lot::RwLock::new(ferrowl_store::Memory::<
+            Key<SlaveKey>,
+        >::default()));
+        let (tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let (handle, bound_addr) = ServerBuilder::new(
+            std::sync::Arc::new(tokio::sync::RwLock::new(config)),
+            memory,
+        )
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("spawn always returns Ok");
+
+        let mut addr = None;
+        for _ in 0..50 {
+            addr = *bound_addr.lock();
+            if addr.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let addr = addr.expect("listener must have bound within 1s");
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
+
+        tx.send(ServerCommand::Terminate).await.unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
+        assert!(
+            bound_addr.lock().is_none(),
+            "bound_addr must clear once the serve loop ends"
+        );
     }
 }

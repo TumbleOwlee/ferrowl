@@ -94,10 +94,11 @@ async fn it_udp_server_answers_a_request() {
     let port = free_udp_port().await;
     let cfg = config(port);
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, _bound_addr) =
+        udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
     sleep(Duration::from_millis(50)).await;
 
     let addr: SocketAddr = format!("{}:{}", cfg.ip, cfg.port).parse().unwrap();
@@ -129,10 +130,11 @@ async fn it_udp_server_answers_slave_zero() {
     let port = free_udp_port().await;
     let cfg = config(port);
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, _bound_addr) =
+        udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
     sleep(Duration::from_millis(50)).await;
 
     let addr: SocketAddr = format!("{}:{}", cfg.ip, cfg.port).parse().unwrap();
@@ -183,7 +185,7 @@ async fn it_udp_client_polls_server_and_executes_commands() {
     let cli_mem = client_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server =
+    let (server, _bound_addr) =
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
             .spawn(srv_rx, sink(), sink())
             .await

@@ -148,7 +148,7 @@ async fn self_signed_fallback_is_used_and_logged() {
     let cfg = Arc::new(RwLock::new(config(port, tcp::ModbusTlsConfig::default())));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, log, sink())
         .await
         .expect("server should start with the self-signed fallback");
@@ -189,7 +189,7 @@ async fn explicit_self_signed_is_used_without_fallback_log() {
     )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, log, sink())
         .await
         .expect("server should start with an explicit self-signed cert");
@@ -236,7 +236,7 @@ async fn explicit_files_win_over_self_signed() {
     )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, log, sink())
         .await
         .expect("server should start from the explicit files");
@@ -280,7 +280,7 @@ async fn lone_cert_or_key_file_fails_server_start() {
         },
     )));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = tcp::ServerBuilder::new(cert_only, memory())
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(cert_only, memory())
         .spawn(rx, sink(), sink())
         .await
         .expect("spawn always returns Ok now");
@@ -305,7 +305,7 @@ async fn lone_cert_or_key_file_fails_server_start() {
         },
     )));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = tcp::ServerBuilder::new(key_only, memory())
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(key_only, memory())
         .spawn(rx, sink(), sink())
         .await
         .expect("spawn always returns Ok now");
@@ -347,7 +347,7 @@ async fn require_client_cert_enforced() {
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("mTLS server should start");
@@ -421,7 +421,7 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("mTLS server should start");
@@ -479,7 +479,7 @@ async fn require_client_cert_rejection_is_logged() {
     )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, log, sink())
         .await
         .expect("mTLS server should start");
@@ -544,7 +544,7 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(cfg, memory())
+    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("server should start: a client_ca_file without require_client_cert is valid");
@@ -582,7 +582,7 @@ async fn require_client_cert_without_ca_fails_server_start() {
         },
     )));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = tcp::ServerBuilder::new(cfg, memory())
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(rx, sink(), sink())
         .await
         .expect("spawn always returns Ok now");
@@ -617,7 +617,7 @@ async fn malformed_pem_fails_server_start() {
         },
     )));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = tcp::ServerBuilder::new(cfg, memory())
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
         .spawn(rx, sink(), sink())
         .await
         .expect("spawn always returns Ok now");

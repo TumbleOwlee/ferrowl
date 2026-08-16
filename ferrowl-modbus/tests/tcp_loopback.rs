@@ -33,6 +33,19 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
+/// task was scheduled, not that its first bind attempt has run).
+async fn wait_bound_addr(bound_addr: &Arc<Mutex<Option<std::net::SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
+}
+
 /// A log sink that records every line, so a test can assert on what the client logged.
 /// `LogFn + Clone` is satisfied by a move-closure capturing an `Arc`.
 fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Arc<Mutex<Vec<String>>>) {
@@ -168,10 +181,12 @@ async fn tcp_client_polls_server_and_executes_commands() {
 
     // Start the server.
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
@@ -310,10 +325,12 @@ async fn tcp_client_handles_server_rejections() {
     // Server with no registered regions: every request for slave 1 is rejected.
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
         slave_id: UnitId(1),
@@ -385,7 +402,7 @@ async fn tcp_unparseable_address_is_error() {
     // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
         .spawn(rx, sink(), sink())
         .await
         .expect("spawn always returns Ok now");
@@ -405,10 +422,12 @@ async fn tcp_server_serves_concurrent_clients() {
     let srv_mem = server_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Two independent clients connect at the same time and both read from the one server.
     let ops = || {
@@ -520,10 +539,12 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     sleep(Duration::from_millis(200)).await;
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // The 1s initial backoff plus poll delay must elapse before the client retries and reads.
     sleep(Duration::from_millis(2000)).await;
@@ -589,10 +610,12 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
     let cli_mem = client_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Start with a single operation reading the holding registers.
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -660,10 +683,12 @@ async fn tcp_client_rereads_config_on_reconnect() {
 
     // A server listens on `good_port`; the client is initially pointed at `bad_port` (no listener).
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(good_port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(good_port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let shared_cfg = Arc::new(RwLock::new(config(bad_port)));
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -728,10 +753,12 @@ async fn tcp_client_backoff_resets_after_successful_run() {
     // Bring the server up during the first (1 s) backoff so the second attempt connects and reads.
     sleep(Duration::from_millis(500)).await;
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Let the client connect and get at least one read through (marks the run successful).
     sleep(Duration::from_millis(2000)).await;
@@ -801,10 +828,12 @@ async fn tcp_client_addresses_operation_slave_id() {
     let srv_mem: Mem = Arc::new(MemLock::new(sm));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Client store keyed on slave 7 too; the operation targets slave 7.
     let mut cm = Memory::<Key<SlaveKey>>::default();
@@ -853,10 +882,12 @@ async fn tcp_client_delays_before_first_poll() {
     let cli_mem = client_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // A long start delay: nothing should be read until it elapses.
     let cfg = tcp::Config {
@@ -956,10 +987,12 @@ async fn tcp_client_success_resets_retry_counter() {
     let cli_mem = client_mem();
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
         slave_id: UnitId(1),

@@ -61,7 +61,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
         .unwrap();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle =
+    let (handle, _bound_addr) =
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
@@ -105,7 +105,7 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
         .unwrap();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = udp::ServerBuilder::<SlaveKey>::new(
+    let (handle, _bound_addr) = udp::ServerBuilder::<SlaveKey>::new(
         Arc::new(RwLock::new(config(port, false))),
         empty_mem(),
     )
@@ -130,7 +130,7 @@ async fn udp_server_terminate_while_backing_off_ends_task_ok() {
         .unwrap();
 
     let (tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle =
+    let (handle, _bound_addr) =
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await

@@ -212,7 +212,7 @@ mod tests {
         // so a sender dropped immediately after `spawn()` would end this task before the test
         // gets to use it.
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        let handle = ferrowl_modbus::tcp::ServerBuilder::new(
+        let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
             Arc::new(tokio::sync::RwLock::new(config)),
             srv_mem,
         )

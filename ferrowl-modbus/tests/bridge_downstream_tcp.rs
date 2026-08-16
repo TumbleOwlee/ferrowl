@@ -27,6 +27,19 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
+/// task was scheduled, not that its first bind attempt has run).
+async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
+}
+
 /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -70,10 +83,12 @@ async fn it_tcp_downstream_connects_and_forwards() {
     let srv_mem = Arc::new(MemLock::new(mem));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let _server = tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server failed to start");
+    let (_server, bound_addr) =
+        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let downstream = bridge::spawn_tcp_downstream(config(port), sink());
     // Give the downstream's background reconnector time to connect.

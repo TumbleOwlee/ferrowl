@@ -89,7 +89,7 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
         ..Default::default()
     };
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server =
+    let (server, _bound_addr) =
         rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port, server_tls))), srv_mem)
             .spawn(srv_rx, sink(), sink())
             .await

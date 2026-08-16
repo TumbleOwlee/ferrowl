@@ -32,6 +32,19 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
+/// task was scheduled, not that its first bind attempt has run).
+async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
+}
+
 /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
 fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -144,13 +157,14 @@ async fn rtu_over_tcp_client_polls_server_and_executes_commands() {
 
     // Start the server.
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
     )
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
@@ -301,10 +315,11 @@ async fn rtu_over_tcp_unparseable_address_is_error() {
     // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _bound_addr) =
+        ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok now");
     let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on an address error")
@@ -323,13 +338,14 @@ async fn rtu_over_tcp_client_skips_broadcast_poll_without_disconnect() {
     let srv_mem = server_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
     )
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Slave id 0 is the broadcast address: no server answers a read addressed to it.
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -380,13 +396,14 @@ async fn rtu_over_tcp_client_fire_and_forget_broadcast_write() {
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
     )
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
@@ -454,13 +471,14 @@ async fn rtu_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
     )
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
     // `spawn()` only guarantees the task was scheduled, not that its first bind attempt has
     // run yet (MB-R-130/MB-R-134: the bind moved into the retried task itself); give it a
     // moment before a single-shot raw connect that (unlike the ferrowl client) never retries.

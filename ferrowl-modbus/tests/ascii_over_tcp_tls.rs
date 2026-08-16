@@ -90,7 +90,7 @@ async fn ascii_over_tcp_client_server_tls_roundtrip() {
         ..Default::default()
     };
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let server = ascii_over_tcp::ServerBuilder::new(
+    let (server, _bound_addr) = ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port, server_tls))),
         srv_mem,
     )

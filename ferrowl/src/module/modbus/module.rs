@@ -426,6 +426,14 @@ impl ModbusModule {
     pub fn is_instance_active(&self) -> bool {
         self.instance.active()
     }
+
+    /// The address a server-role instance is actually bound to right now — `None` for a client
+    /// instance, a pure-serial (Rtu/Ascii) server, a never-started instance, or one currently
+    /// backing off from a failed bind (MB-R-130). Lets the view display the real OS-assigned
+    /// port when the configured port was `0` (mirrors OCPP's own CSMS status line, OC-R-083).
+    pub fn bound_addr(&self) -> Option<std::net::SocketAddr> {
+        self.instance.bound_addr()
+    }
 }
 
 #[cfg(test)]
@@ -576,6 +584,49 @@ mod tests {
             module
                 .set_log_base(Some("/no/such/ferrowl/dir/base.log"))
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-130 (bound_addr companion) — a TCP server module's `bound_addr()` is `None` before
+    /// `start()`, `Some(<real addr>)` once the listener actually binds (even with the configured
+    /// `port: 0`), and `None` again after `stop()` — the same ready-signal lifecycle
+    /// `ferrowl-modbus`'s `ServerBuilder::spawn` and `Instance::bound_addr` already prove,
+    /// threaded one layer further through the module the view reads from.
+    async fn ut_module_bound_addr_reflects_listener_state() {
+        use super::ModbusModule;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+
+        let device = device_with_defs();
+        let spec = ModuleSpec {
+            name: "srv".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        let mut module = ModbusModule::new(&spec, &device);
+        assert!(module.bound_addr().is_none());
+
+        module.start().await.expect("start");
+
+        let mut addr = None;
+        for _ in 0..50 {
+            addr = module.bound_addr();
+            if addr.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        let addr = addr.expect("listener must have bound within 1s");
+        assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
+
+        module.stop().await.expect("stop");
+        assert!(
+            module.bound_addr().is_none(),
+            "bound_addr must clear once the module stops"
         );
     }
 
