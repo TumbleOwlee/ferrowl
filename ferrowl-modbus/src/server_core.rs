@@ -1,16 +1,21 @@
 //! Transport-agnostic Modbus server request handler shared by the TCP and RTU servers.
 
-use crate::{Key, KeyParams, LogFn};
+use crate::tcp::Config;
+use crate::tcp::tls::build_server_tls_config;
+use crate::{Error, Key, KeyParams, LogFn, ServerCommand, TcpError};
 
 use ferrowl_store::{CellType, Memory, Range};
+use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 use parking_lot::RwLock;
 use rust_modbus::{
     Connection, ExceptionCode, FunctionCode, Quantity, RegisterValue, RequestPdu, ResponsePdu,
-    Service, UnitId,
+    Server as ModbusServer, ServerFraming, Service, TcpListener, TlsListener, UnitId,
 };
 use std::fmt::Display;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
 /// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
@@ -734,6 +739,187 @@ pub(crate) async fn wait_reconnect_backoff(
         _ = tokio::time::sleep(backoff) => false,
         _ = receiver.recv() => true,
     }
+}
+
+/// Drive the bind/serve retry loop shared by every TCP-family server transport (Tcp,
+/// RtuOverTcp, Ascii-over-TCP — all three ride a raw [`TcpListener`]/[`TlsListener`] and share
+/// `crate::tcp::Config`; only the [`ServerFraming`] `F` they hand to `serve_framed`/`serve_tls`
+/// differs). Binds the configured TCP address and serves with `F`'s framing, retrying a bind or
+/// mid-serve failure per [`BackoffPolicy`] when `config.reconnect` is set (MB-R-071/MB-R-114/
+/// MB-R-126 revised, MB-R-130–134). Each accepted connection answers from the shared `memory`
+/// via a [`Server`] with the caller's `verbose`/`physical_serial` flags. Plain TCP unless
+/// `config.tls` is set (MB-R-104/MB-R-115/MB-R-127), in which case the listener terminates TLS
+/// on each accepted connection. A TLS configuration error (MB-R-107/MB-R-108) always ends the
+/// task immediately regardless of `reconnect` — retrying an invalid configuration can never
+/// succeed.
+#[allow(clippy::too_many_arguments)] // config/memory/receiver/log/status/bound_addr + verbose/physical_serial flags
+pub(crate) async fn run_tcp_family<T, F, L, St>(
+    config: Arc<tokio::sync::RwLock<Config>>,
+    memory: Arc<RwLock<Memory<Key<T>>>>,
+    receiver: tokio::sync::mpsc::Receiver<ServerCommand>,
+    log: L,
+    status: St,
+    bound_addr: BoundAddr,
+    verbose: bool,
+    physical_serial: bool,
+) -> Result<(), Error>
+where
+    T: KeyParams,
+    F: ServerFraming + Send + 'static,
+    F::Header: Send + Sync,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+{
+    // Shared between `attempt` and `wait_abortable`, called strictly sequentially by
+    // `run_with_backoff` and never concurrently — same technique as
+    // `client_core::run_reconnect_loop` (see Shared).
+    let receiver = AsyncMutex::new(receiver);
+    let activity = Arc::new(AtomicBool::new(false));
+
+    let attempt = || {
+        let config = config.clone();
+        let memory = memory.clone();
+        let log = log.clone();
+        let activity = activity.clone();
+        let receiver = &receiver;
+        let bound_addr = bound_addr.clone();
+        async move {
+            activity.store(false, Ordering::Relaxed);
+            let guard = config.read().await;
+            let reconnect = guard.reconnect;
+            let addr: SocketAddr = match format!("{}:{}", guard.ip, guard.port).parse() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    return AttemptOutcome::Failed {
+                        error: Error::Tcp(TcpError::Address(e)),
+                        // A malformed address never fixes itself by retrying; matches the
+                        // pre-retry behavior, which failed this unconditionally too.
+                        reconnect: false,
+                        reset: false,
+                    };
+                }
+            };
+            let server = ModbusServer::new(
+                Server::new(memory.clone(), log.clone(), verbose, physical_serial)
+                    .with_reset_on(activity.clone(), ResetOn::Connect),
+            );
+            match &guard.tls {
+                None => {
+                    drop(guard);
+                    match TcpListener::bind(addr).await {
+                        Err(e) => AttemptOutcome::Failed {
+                            error: Error::Server(e),
+                            reconnect,
+                            reset: false,
+                        },
+                        Ok(listener) => {
+                            let bound = match listener.local_addr() {
+                                Ok(addr) => addr,
+                                Err(e) => {
+                                    return AttemptOutcome::Failed {
+                                        error: Error::Server(e),
+                                        reconnect,
+                                        reset: false,
+                                    };
+                                }
+                            };
+                            *bound_addr.lock() = Some(bound);
+                            let handle = server.handle();
+                            let mut receiver = receiver.lock().await;
+                            let end = drive_serve(
+                                server.serve_framed::<F>(listener),
+                                handle,
+                                &mut receiver,
+                            )
+                            .await;
+                            *bound_addr.lock() = None;
+                            match end {
+                                ServeEnd::Terminated => AttemptOutcome::Done,
+                                ServeEnd::Failed(e) => AttemptOutcome::Failed {
+                                    error: Error::Server(e),
+                                    reconnect,
+                                    reset: activity.load(Ordering::Relaxed),
+                                },
+                            }
+                        }
+                    }
+                }
+                Some(tls) => {
+                    let build_result = build_server_tls_config(tls, &guard.ip);
+                    drop(guard);
+                    match build_result {
+                        Err(e) => AttemptOutcome::Failed {
+                            error: Error::Tcp(e),
+                            // A TLS configuration error never fixes itself by retrying
+                            // (MB-R-107/MB-R-108) — always ends the task, regardless of
+                            // `reconnect`.
+                            reconnect: false,
+                            reset: false,
+                        },
+                        Ok((tls_config, used_fallback)) => {
+                            if used_fallback {
+                                log.invoke(
+                                    "No cert_file/key_file/self_signed configured for this TLS \
+                                     server; falling back to an ephemeral self-signed certificate."
+                                        .to_string(),
+                                )
+                                .await;
+                            }
+                            match TlsListener::bind(addr, tls_config).await {
+                                Err(e) => AttemptOutcome::Failed {
+                                    error: Error::Server(e),
+                                    reconnect,
+                                    reset: false,
+                                },
+                                Ok(listener) => {
+                                    let bound = match listener.local_addr() {
+                                        Ok(addr) => addr,
+                                        Err(e) => {
+                                            return AttemptOutcome::Failed {
+                                                error: Error::Server(e),
+                                                reconnect,
+                                                reset: false,
+                                            };
+                                        }
+                                    };
+                                    *bound_addr.lock() = Some(bound);
+                                    let handle = server.handle();
+                                    let mut receiver = receiver.lock().await;
+                                    let end = drive_serve(
+                                        server.serve_tls::<F>(listener),
+                                        handle,
+                                        &mut receiver,
+                                    )
+                                    .await;
+                                    *bound_addr.lock() = None;
+                                    match end {
+                                        ServeEnd::Terminated => AttemptOutcome::Done,
+                                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
+                                            error: Error::Server(e),
+                                            reconnect,
+                                            reset: activity.load(Ordering::Relaxed),
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let wait_abortable = |backoff: std::time::Duration| {
+        let receiver = &receiver;
+        async move {
+            let mut receiver = receiver.lock().await;
+            wait_reconnect_backoff(&mut receiver, backoff).await
+        }
+    };
+
+    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    status.invoke("Server stopped".to_string()).await;
+    result
 }
 
 #[cfg(test)]
