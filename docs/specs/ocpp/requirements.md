@@ -117,7 +117,7 @@ behavior, stated limitations).
 
 **OC-R-039** — A CSMS with `require_client_cert` set shall reject any client that does not present a certificate signed by the configured `client_ca_file`. `require_client_cert` without a `client_ca_file` shall fail the server's start.
 
-**OC-R-040** — `require_client_cert` combined with a self-signed CSMS certificate shall fail the server's start: there is no CA to distribute for mutual TLS in that mode.
+**OC-R-040** — `require_client_cert` combined with a self-signed CSMS certificate shall be permitted, provided `client_ca_file` is also set — the server's own self-signed identity and the CA trusted for verifying client certificates are independent. `require_client_cert` without a `client_ca_file` shall fail the server's start regardless of certificate mode (OC-R-039, unchanged).
 
 **OC-R-041** — Failing to open, parse, or find a certificate or private key in a configured PEM file shall fail the start of the CS connection or the CSMS listener with a TLS error, before any socket work.
 
@@ -127,7 +127,13 @@ behavior, stated limitations).
 
 **OC-R-095** — A `wss://` endpoint in the **server** role for which no TLS material at all is configured shall bind with an ephemeral self-signed certificate, and the fallback shall be reported in the module log. A `wss://` server shall never silently bind plain TCP.
 
-**OC-R-096** — Which TLS material a `wss://` server uses shall be decided by its security configuration: the server certificate + key files when both are set, otherwise `self_signed`, otherwise the ephemeral fallback of OC-R-095.
+**OC-R-096** — Which TLS material a `wss://` server uses shall be decided by its security configuration: an ephemeral self-signed certificate when `self_signed` is set (the server certificate + key files are then structurally unreachable regardless of any value); otherwise the server certificate + key files when both are set; otherwise the ephemeral fallback of OC-R-095.
+
+**OC-R-110** — The OCPP setup dialog shall offer a Self-Signed toggle for the server role, shown whenever the security level is `Tls` or `MutualTls` (mirroring the Modbus TCP dialog's Self-Signed toggle). When On, the server certificate/key inputs (`cert_file`/`key_file`) shall be hidden and excluded from the resolved config regardless of any text already present in them; the dialog's validation shall not require those files while Self-Signed is On. Self-Signed shall have no effect on the client-CA input or `require_client_cert`, which mTLS continues to control independently. The input widgets' stored text shall be left unmodified, so toggling Self-Signed back Off restores the previously entered cert/key paths and re-requires them for validation.
+
+**OC-R-111** — The OCPP setup dialog's client-side `ca_file` input shall be hidden whenever Skip-Verify is On (mirroring the Modbus TCP dialog), and the resolved config shall exclude `ca_file` from the result whenever Skip-Verify is On, regardless of any text already present in that input. The input widget's stored text shall be left unmodified, so toggling Skip-Verify back Off restores the previously entered CA path.
+
+**OC-R-112** — A CSMS's `cert_file` or `key_file` set alone (not both), while `self_signed` is not set, shall fail configuration resolution with a TLS configuration error, rather than silently falling through to an inert listener.
 
 ---
 

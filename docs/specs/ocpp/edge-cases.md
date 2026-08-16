@@ -71,9 +71,14 @@ mistaken for an oversight and silently "fixed".
 | TLS handshake fails on an accepted socket | logged with the peer address; that socket is dropped. The listener keeps accepting |
 | CS connects to a TLS CSMS whose certificate is not trusted | the dial fails; the module reports a connect failure |
 | CS has `insecure_skip_verify` set | any server certificate is accepted; `ca_file` is **ignored**, not combined. The channel is still encrypted and signatures are still verified — only the certificate identity check is skipped |
+| The OCPP setup dialog's client-side `ca_file` input after Skip-Verify is toggled On | hidden and excluded from the resolved config regardless of any text already present (OC-R-111) |
 | CS is configured with a client certificate but no key (or vice versa) | no client certificate is presented; the connection proceeds without mTLS rather than failing |
 | CSMS has `require_client_cert` but no `client_ca_file` | the listener **fails to start** |
-| CSMS has `require_client_cert` and a self-signed certificate | the listener **fails to start** — there is no CA to distribute for mTLS in that mode |
+| CSMS has `require_client_cert` and a self-signed certificate, with `client_ca_file` set | permitted — the server's self-signed identity and the CA trusted for verifying client certs are independent (OC-R-040) |
+| CSMS has `require_client_cert` and a self-signed certificate, with no `client_ca_file` | the listener **fails to start** — same as any `require_client_cert` without a `client_ca_file` (OC-R-039) |
+| `self_signed` set together with explicit CSMS `cert_file`/`key_file` | `self_signed` wins unconditionally; the files are structurally unreachable, not merely ignored (OC-R-096) |
+| CSMS `cert_file`/`key_file` set alone while `self_signed` is not set | configuration resolution fails (OC-R-112) |
+| The OCPP setup dialog's Self-Signed toggle (server role, shown at `Tls`/`MutualTls`) toggled On after `cert_file`/`key_file` text was entered | resolved config excludes both files entirely; the widgets' stored text is preserved for when the toggle goes back Off (OC-R-110) |
 | A configured PEM file cannot be opened, contains no certificate, or contains no private key | the CS dial / CSMS bind fails with a TLS error, before any socket work |
 | `username` set without `password` (or vice versa) | Basic Auth is **not** enabled; the field is inert |
 | A `wss://` **server** endpoint with no TLS material configured at all | binds with an ephemeral self-signed certificate and logs the fallback. It never silently binds plain TCP |

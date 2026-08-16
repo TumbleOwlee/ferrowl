@@ -267,6 +267,8 @@ behavior, stated limitations).
 
 **MB-R-127** — TLS (MB-R-104–MB-R-111) shall apply to an `AsciiOverTcp` connection exactly as it does to a Modbus-TCP-framed or `RtuOverTcp` one: the same `tls` field, certificate resolution, self-signed fallback, mTLS rules, and handshake-failure logging, with only the post-handshake framing differing.
 
+**MB-R-135** — The Modbus TCP setup dialog (covering `Tcp`, `RtuOverTcp` per MB-R-115, and `AsciiOverTcp` per MB-R-127) shall resolve its transport config so that Self-Signed On always excludes `cert_file`/`key_file` from the result regardless of any text already present in those now-hidden inputs, and Skip-Verify On always excludes `ca_file` from the result regardless of any text already present in that now-hidden input. The input widgets' stored text shall be left unmodified, so toggling the option back Off restores the previously entered path.
+
 ---
 
 ## Module lifecycle and device configuration
@@ -313,11 +315,11 @@ behavior, stated limitations).
 
 **MB-R-104** — The Modbus TCP connection config shall carry an optional `tls` field of type `ModbusTlsConfig`, unset by default. When unset, the endpoint shall use plain TCP. When set, the client shall connect over TLS and the server shall listen over TLS, for that endpoint, instead of plain TCP.
 
-**MB-R-105** — `ModbusTlsConfig` shall carry exactly nine fields: `ca_file`, `cert_file`, `key_file`, `client_cert_file`, `client_key_file`, `client_ca_file` (each an optional string, unset by default), and `require_client_cert`, `self_signed`, `insecure_skip_verify` (each a bool, defaulting to `false`).
+**MB-R-105** — `ModbusTlsConfig` shall carry: `server_cert: ServerCertSource` (replacing `self_signed`/`cert_file`/`key_file`), `client_verification: ClientVerification` (replacing `ca_file`/`insecure_skip_verify`), `client_cert_file`/`client_key_file`/`client_ca_file` (each an optional string, unset by default), and `require_client_cert` (a bool, defaulting to `false`).
 
-**MB-R-106** — With `tls` set, a server shall resolve its presented certificate as: the PEM files at `cert_file`/`key_file` when both are set (explicit files always win); otherwise an ephemeral self-signed certificate when `self_signed` is set; otherwise an ephemeral self-signed certificate with the fallback logged, when none of `cert_file`, `key_file`, `self_signed` is set.
+**MB-R-106** — With `tls` set, a server shall resolve its presented certificate as: an ephemeral self-signed certificate when `self_signed` is set (`cert_file`/`key_file` are then structurally unreachable, regardless of any value present); otherwise the PEM files at `cert_file`/`key_file` when both are set; otherwise an ephemeral self-signed certificate with the fallback logged, when none of `cert_file`, `key_file`, `self_signed` is set.
 
-**MB-R-107** — `cert_file` or `key_file` set alone (not both) shall fail the server's start with a TLS configuration error, rather than silently falling through to a self-signed certificate.
+**MB-R-107** — `cert_file` or `key_file` set alone (not both), while `self_signed` is not set, shall fail configuration resolution with a TLS configuration error, rather than silently falling through to a self-signed certificate. Once `self_signed` is set, `cert_file`/`key_file` are structurally unreachable (MB-R-106) and this rule does not apply.
 
 **MB-R-108** — With `tls` set on a server and `require_client_cert` set, a connection presenting no client certificate, or one not signed by the CA in `client_ca_file`, shall fail the TLS handshake and never reach the request handler. `require_client_cert` set without `client_ca_file` shall fail the server's start with a TLS configuration error. With `require_client_cert` unset, `client_ca_file` shall be ignored and no client certificate requested.
 
