@@ -854,6 +854,7 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
 /// OC-R-097 — a `ws://` CS endpoint connects in plaintext and ignores any configured TLS material (the scheme is authoritative).
 async fn ws_client_ignores_configured_tls_material() {
     use ferrowl_ocpp::CsTlsConfig;
+    use ferrowl_util::tls::ClientVerification;
 
     let server = start_server().await; // plain ws:// CSMS
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
@@ -867,10 +868,9 @@ async fn ws_client_ignores_configured_tls_material() {
             timeout_ms: 2000,
             basic_auth: None,
             tls: Some(CsTlsConfig {
-                ca_file: None,
+                client_verification: ClientVerification::SkipVerify,
                 client_cert_file: None,
                 client_key_file: None,
-                insecure_skip_verify: true,
             }),
         })))
         .spawn(
