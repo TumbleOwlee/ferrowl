@@ -1,5 +1,4 @@
 use crate::LogFn;
-use crate::client_core::{INITIAL_BACKOFF, MAX_BACKOFF};
 use rust_modbus::{
     Client, ClientFraming, ClientTransport, ExceptionCode, RequestPdu, ResponsePdu, UnitId,
 };
@@ -38,8 +37,9 @@ where
     F: ClientFraming + Send + 'static,
 {
     /// Spawns the background reconnector and returns a handle. `connect` is retried with
-    /// doubling backoff (`INITIAL_BACKOFF`..=`MAX_BACKOFF`, MB-R-051's exact rule) whenever
-    /// the link is down and `reconnect` is true; with `reconnect` false a lost/failed
+    /// doubling backoff (`ferrowl_util::backoff::BackoffPolicy::default()`'s `initial`..=`max`,
+    /// MB-R-051's exact rule) whenever the link is down and `reconnect` is true; with
+    /// `reconnect` false a lost/failed
     /// connection is never retried (Shared design decision 2). `log` receives lifecycle
     /// lines (unprefixed) and failure lines (prefixed `ERROR_PREFIX`).
     pub fn spawn<C, Fut, L>(mut connect: C, reconnect: bool, log: L) -> Self
@@ -58,7 +58,8 @@ where
         tokio::spawn(async move {
             loop {
                 task_reconnect_needed.notified().await;
-                let mut backoff = INITIAL_BACKOFF;
+                let policy = ferrowl_util::backoff::BackoffPolicy::default();
+                let mut backoff = policy.initial;
                 loop {
                     match connect().await {
                         Ok(client) => {
@@ -80,7 +81,7 @@ where
                                 return;
                             }
                             tokio::time::sleep(backoff).await;
-                            backoff = (backoff * 2).min(MAX_BACKOFF);
+                            backoff = (backoff * 2).min(policy.max);
                         }
                     }
                 }

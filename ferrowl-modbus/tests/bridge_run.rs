@@ -9,16 +9,30 @@
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge::{BridgeConfig, BridgeEndpointKind, BridgeEndpointSpec};
-use ferrowl_modbus::{Key, SlaveKey};
+use ferrowl_modbus::{Key, ServerCommand, SlaveKey};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, UnitId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock as TokioRwLock;
+use tokio::sync::mpsc;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
+}
+
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
+/// task was scheduled, not that its first bind attempt has run).
+async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
 }
 
 fn free_port() -> u16 {
@@ -69,13 +83,15 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     )
     .unwrap();
     let srv_mem = Arc::new(MemLock::new(mem));
-    let _downstream_server = ferrowl_modbus::tcp::ServerBuilder::new(
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (_downstream_server, bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(TokioRwLock::new(tcp_config(downstream_port))),
         srv_mem,
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("downstream server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let upstream_port = free_port();
     let config = BridgeConfig {

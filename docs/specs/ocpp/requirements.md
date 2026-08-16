@@ -143,7 +143,13 @@ behavior, stated limitations).
 
 **OC-R-047** — Terminating a CS, or closing its command channel, shall tear the connection down and end the client task successfully.
 
-**OC-R-048** — A CS shall never reconnect on its own: a dropped or failed connection stays down until an operator restarts it (see [`edge-cases.md`](./edge-cases.md)).
+**OC-R-048** — With `reconnect` enabled (the default), a CS shall never end its task on a failed dial or a dropped connection; it shall wait a backoff and retry the connection, using the same backoff policy as the Modbus client (MB-R-051). With `reconnect` disabled, a failed dial or a dropped connection shall end the CS task with that error, after emitting a disconnected status.
+
+**OC-R-105** — A CS's reconnect backoff shall reset to 1 s after any connection during which the WebSocket handshake completed, regardless of whether any OCPP message was subsequently exchanged.
+
+**OC-R-106** — Terminating a CS, or closing its command channel, while it is backing off shall abort the wait immediately and end the CS task with success (extends OC-R-047 to the backing-off state).
+
+**OC-R-107** — The `reconnect` field, the endpoint, and the security (TLS/auth) configuration shall be re-read from the shared device config on every dial attempt, so an edit to them takes effect on the next reconnect without a restart (mirrors MB-R-056).
 
 ---
 
@@ -158,6 +164,10 @@ behavior, stated limitations).
 **OC-R-052** — A CSMS shall accept commands: send a Call to one connection with or without awaiting its reply, broadcast a fire-and-forget Call to every live connection, disconnect one connection, and terminate.
 
 **OC-R-053** — Terminating a CSMS shall terminate every live connection and end the accept loop.
+
+**OC-R-108** — A CSMS's listener-bind backoff shall reset to 1 s once the listener has bound and accepted at least one connection.
+
+**OC-R-109** — Terminating a CSMS while it is backing off from a failed bind shall abort the wait immediately and end the module task successfully (extends OC-R-053 to the backing-off state).
 
 **OC-R-054** — A connection shall be deregistered from the registry when its connection loop ends, for any reason.
 
@@ -233,7 +243,7 @@ behavior, stated limitations).
 
 **OC-R-082** — The connection or listener configuration shall be rebuilt from the current module spec on every start, so an edited endpoint or security section always takes effect on the next start without a stale copy.
 
-**OC-R-083** — A client module shall **not** connect automatically; it shall connect only on an explicit start. A server module shall bind its listener automatically on creation, and a failed bind shall be logged and shall not be retried automatically.
+**OC-R-083** — A client module shall **not** connect automatically; it shall connect only on an explicit start. A server module shall bind its listener automatically on creation. With `reconnect` enabled (the default), a failed bind shall not end the module task; it shall retry using the same backoff policy as the Modbus client (MB-R-051). With `reconnect` disabled, a failed bind shall end the module task with that error, surfaced to the caller.
 
 **OC-R-084** — Restarting a module shall stop the current instance and start a new one from the current spec. Restarting a server shall additionally discard every observed charging-station entry.
 

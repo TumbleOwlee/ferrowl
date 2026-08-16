@@ -906,6 +906,7 @@ dependencies = [
  "clap",
  "ferrowl-codec",
  "ferrowl-store",
+ "ferrowl-util",
  "itertools 0.15.0",
  "parking_lot",
  "rcgen",
@@ -924,6 +925,7 @@ name = "ferrowl-ocpp"
 version = "0.6.1"
 dependencies = [
  "base64 0.23.1",
+ "ferrowl-util",
  "futures-util",
  "parking_lot",
  "rcgen",

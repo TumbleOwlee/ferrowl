@@ -84,9 +84,23 @@ mod tests {
     use std::time::Duration;
     use tokio::io::DuplexStream;
     use tokio::sync::RwLock as TokioRwLock;
+    use tokio::sync::mpsc;
 
     fn sink() -> impl LogFn + Clone {
         |_s: String| async move {}
+    }
+
+    /// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+    /// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees
+    /// the task was scheduled, not that its first bind attempt has run).
+    async fn wait_bound_addr(bound_addr: &crate::server_core::BoundAddr) {
+        for _ in 0..50 {
+            if bound_addr.lock().is_some() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("listener did not bind within 1s");
     }
 
     fn free_port() -> u16 {
@@ -209,13 +223,15 @@ mod tests {
         )
         .unwrap();
         let srv_mem = Arc::new(MemLock::new(mem));
-        let _downstream_server = crate::tcp::ServerBuilder::new(
+        let (_srv_tx, srv_rx) = mpsc::channel::<crate::ServerCommand>(1);
+        let (_downstream_server, downstream_bound_addr) = crate::tcp::ServerBuilder::new(
             Arc::new(TokioRwLock::new(tcp_config(downstream_port))),
             srv_mem,
         )
-        .spawn(sink())
+        .spawn(srv_rx, sink(), sink())
         .await
         .expect("downstream server failed to start");
+        wait_bound_addr(&downstream_bound_addr).await;
 
         let downstream = downstream_tcp::spawn(tcp_config(downstream_port), sink());
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -83,7 +83,7 @@ Fields of the TCP transport config, shared by the client and server roles.
 | `timeout_ms` | usize | `3000` | ≥ 0 | per-operation and connect timeout |
 | `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
-| `reconnect` | bool | `true` | — | client-only: auto-reconnect with backoff. Ignored by the server. |
+| `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry a listener bind, serial-port open, or mid-serve failure with the same backoff instead of ending the server task (MB-R-130–134) |
 | `tls` | optional `ModbusTlsConfig` | unset | client+server | see requirements.md MB-R-104ff |
 
 When these fields are absent from a serialized config, `reconnect` defaults to
@@ -114,7 +114,7 @@ same field table — no additions or removals (MB-R-125).
 | `timeout_ms` | usize | `3000` | ≥ 0 | per-operation timeout |
 | `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
-| `reconnect` | bool | `true` | — | client-only: auto-reconnect with backoff. Ignored by the server. |
+| `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry a listener bind, serial-port open, or mid-serve failure with the same backoff instead of ending the server task (MB-R-130–134) |
 
 An out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial
 configuration error **before** the port is opened.
@@ -197,7 +197,7 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 | `timeout_ms` | optional usize | `3000` | per-operation timeout |
 | `delay_ms` | optional usize | `1000` | delay before first operation after connect |
 | `interval_ms` | optional usize | `1000` | poll interval |
-| `reconnect` | optional bool | `true` | client-only |
+| `reconnect` | optional bool | `true` | client: auto-reconnect (MB-R-050–055); server: bind/serial-open/mid-serve retry (MB-R-130–134) |
 | `read_ranges` | `ReadRanges` | empty | explicit batched read windows (§6.1) |
 | `definitions` | map of name → `RegisterDef` | — (required) | the register table (§6.2) |
 | `scripts` | list | empty | Lua sim scripts — see `scripting/` |

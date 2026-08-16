@@ -20,6 +20,19 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Poll until the CSMS listener has bound: `spawn` no longer binds synchronously, retrying a
+/// failed bind with backoff instead (OC-R-083), so `local_addr()` is `None` until the first
+/// successful bind lands.
+async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
+    for _ in 0..50 {
+        if let Some(addr) = server.local_addr() {
+            return addr;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("CSMS listener never bound");
+}
+
 /// CSMS handler answering the three CS-initiated actions used by this test.
 struct TestCsms;
 
@@ -75,6 +88,7 @@ async fn start_server() -> csms::Server<V1_6> {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -104,23 +118,26 @@ async fn first_connection(server: &csms::Server<V1_6>) -> csms::ConnectionId {
 /// OC-R-056 — the CSMS handler is told which connection each Call arrived on (its `ConnectionId` argument).
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     let remote_start_seen = Arc::new(AtomicBool::new(false));
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: remote_start_seen.clone(),
-        },
-        sink(),
-    )
-    .await
-    .expect("client failed to connect");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: remote_start_seen.clone(),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client failed to connect");
 
     // CS -> CSMS: BootNotification.
     let boot = Action16::BootNotification(
@@ -190,7 +207,7 @@ async fn malformed_call_with_recoverable_id_gets_call_error() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let mut request = url.into_client_request().expect("bad url");
     request
         .headers_mut()
@@ -278,21 +295,24 @@ async fn raw_connect(
 /// OC-R-025 — a handler rejecting an inbound Call sends a CallError back and leaves the connection intact (a later Call still succeeds).
 async fn handler_rejection_is_call_error_and_keeps_connection() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("client failed to connect");
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client failed to connect");
 
     // TestCsms rejects Authorize (its `_` arm) with a CallError.
     let authorize =
@@ -317,7 +337,7 @@ async fn bad_payload_is_formation_violation() {
     use tokio_tungstenite::tungstenite::Message;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let mut ws = raw_connect(&url).await;
 
     // Valid frame + valid action name, but the payload is missing BootNotification's required fields.
@@ -345,7 +365,7 @@ async fn malformed_and_binary_frames_do_not_tear_down() {
     use tokio_tungstenite::tungstenite::Message;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let mut ws = raw_connect(&url).await;
 
     // Unrecoverable text (not JSON) — logged and skipped, no reply, no teardown.
@@ -377,6 +397,7 @@ async fn awaited_call_times_out() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -388,24 +409,27 @@ async fn awaited_call_times_out() {
         sink(),
     )
     .await
-    .expect("server bind");
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    .expect("server failed to bind");
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     // Short client timeout: the slow (700ms) handler cannot answer before it fires.
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 150,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("client connect");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 150,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client connect");
 
     let hb = Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
     assert!(client.call(hb).await.is_err(), "call should have timed out");
@@ -424,6 +448,7 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -435,22 +460,25 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
         sink(),
     )
     .await
-    .expect("server bind");
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("client connect");
+    .expect("server failed to bind");
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client connect");
 
     // Fire a slow Heartbeat without awaiting, then immediately await a fast StatusNotification.
     let hb = Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
@@ -482,7 +510,7 @@ async fn csms_requires_and_echoes_subprotocol() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     // No Sec-WebSocket-Protocol header → the upgrade is rejected.
     let bare = url.clone().into_client_request().expect("bad url");
@@ -513,20 +541,22 @@ async fn csms_requires_and_echoes_subprotocol() {
 /// OC-R-051 — each accepted connection gets an opaque, monotonically increasing id from 1; the charge-point identity is kept as metadata, not the key, so duplicate identities never collide.
 async fn connection_ids_are_monotonic_and_identity_is_metadata() {
     let server = start_server().await;
-    let addr = server.local_addr();
+    let addr = bound_addr(&server).await;
 
     // Two clients dialing the *same* charge-point identity path.
     let make_client = || async {
-        cs::ClientBuilder::<V1_6>::new(cs::Config {
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             url: format!("ws://{addr}/ocpp/DUP"),
+            reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
             tls: None,
-        })
+        })))
         .spawn(
             TestCs {
                 remote_start_seen: Arc::new(AtomicBool::new(false)),
             },
+            sink(),
             sink(),
         )
         .await
@@ -570,19 +600,21 @@ async fn csms_broadcast_and_disconnect() {
     let seen_a = Arc::new(AtomicBool::new(false));
     let seen_b = Arc::new(AtomicBool::new(false));
     let server = start_server().await;
-    let addr = server.local_addr();
+    let addr = bound_addr(&server).await;
 
     let mk = |flag: Arc<AtomicBool>| async move {
-        cs::ClientBuilder::<V1_6>::new(cs::Config {
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             url: format!("ws://{addr}/ocpp/CS"),
+            reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
             tls: None,
-        })
+        })))
         .spawn(
             TestCs {
                 remote_start_seen: flag,
             },
+            sink(),
             sink(),
         )
         .await
@@ -635,21 +667,24 @@ async fn csms_broadcast_and_disconnect() {
 /// OC-R-055 — a command addressing an unknown connection id fails that command alone (an awaited Call is rejected) and the server keeps running.
 async fn command_to_unknown_connection_fails_alone() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("client connect");
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client connect");
     let conn = first_connection(&server).await;
 
     // An awaited Call to a nonexistent id is rejected, but the server stays up.
@@ -675,59 +710,71 @@ async fn command_to_unknown_connection_fails_alone() {
 /// OC-R-053 — terminating a CSMS ends the accept loop, so no further connections are accepted.
 async fn terminated_csms_stops_accepting() {
     let server = start_server().await;
-    let addr = server.local_addr();
+    let addr = bound_addr(&server).await;
     server.terminate().await.expect("server terminate");
 
-    // After termination the listener is gone: a new client cannot connect.
+    // After termination the listener is gone: `spawn` still succeeds (OC-R-048/OC-R-105: the
+    // dial moved inside the retried task), but with `reconnect: false` the task ends on that
+    // first failed dial and the error surfaces from `join()`.
     sleep(Duration::from_millis(100)).await;
-    let res = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url: format!("ws://{addr}/ocpp/CS001"),
-        timeout_ms: 1000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await;
+    let mut res =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url: format!("ws://{addr}/ocpp/CS001"),
+            reconnect: false,
+            timeout_ms: 1000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("spawn always returns Ok now; the dial error surfaces from the task");
     assert!(
-        res.is_err(),
+        res.join().await.is_err(),
         "no connection should be accepted after terminate"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-/// OC-R-048 — a CS does not reconnect on its own: once the CSMS drops, the connection stays down.
-async fn cs_does_not_reconnect() {
+/// OC-R-048 (revised) — with `reconnect: false`, a CS does not reconnect on its own: once the
+/// CSMS drops, the connection stays down and the task ends with the dropped-connection error.
+/// (Default-`reconnect` behavior — retrying with backoff — is exercised end-to-end by
+/// `ferrowl-ocpp/tests/cs_reconnect.rs`, which can actually bring a target back up on the exact
+/// port the CS is dialing; that isn't reliably reproducible here since `start_server` always
+/// binds an OS-assigned port that a restarted server can't be pointed back at.)
+async fn cs_stays_disconnected_when_reconnect_is_disabled() {
     let server = start_server().await;
-    let addr = server.local_addr();
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url: format!("ws://{addr}/ocpp/CS001"),
-        timeout_ms: 1000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("client connect");
+    let addr = bound_addr(&server).await;
+    let mut client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url: format!("ws://{addr}/ocpp/CS001"),
+            reconnect: false,
+            timeout_ms: 1000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client connect");
 
-    // Drop the server; the CS must not silently re-establish a connection.
+    // Drop the server; with `reconnect: false` the CS task ends instead of retrying.
     server.terminate().await.expect("server terminate");
-    sleep(Duration::from_millis(300)).await;
 
-    // A Call now fails and keeps failing (no reconnect brought the link back).
-    let hb = Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
-    assert!(client.call(hb).await.is_err());
-
-    let _ = client.terminate().await;
+    assert!(
+        client.join().await.is_err(),
+        "the task should end with the dropped-connection error, not linger retrying"
+    );
 }
 
 /// A CS handler that records its connect/disconnect lifecycle hooks firing.
@@ -756,22 +803,25 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     let connected = Arc::new(AtomicBool::new(false));
     let disconnected = Arc::new(AtomicBool::new(false));
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 1000,
-        basic_auth: None,
-        tls: None,
-    })
-    .spawn(
-        HookCs {
-            connected: connected.clone(),
-            disconnected: disconnected.clone(),
-        },
-        sink(),
-    )
-    .await
-    .expect("client connect");
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 1000,
+            basic_auth: None,
+            tls: None,
+        })))
+        .spawn(
+            HookCs {
+                connected: connected.clone(),
+                disconnected: disconnected.clone(),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("client connect");
 
     // The connect hook fired on establishment.
     for _ in 0..50 {
@@ -806,29 +856,32 @@ async fn ws_client_ignores_configured_tls_material() {
     use ferrowl_ocpp::CsTlsConfig;
 
     let server = start_server().await; // plain ws:// CSMS
-    let url = format!("ws://{}/ocpp/CS001", server.local_addr());
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     // TLS material is configured, but the ws:// scheme means it must be ignored and the connection
     // made in plaintext. If it were honored, a TLS handshake over the plain socket would fail.
-    let client = cs::ClientBuilder::<V1_6>::new(cs::Config {
-        url,
-        timeout_ms: 2000,
-        basic_auth: None,
-        tls: Some(CsTlsConfig {
-            ca_file: None,
-            client_cert_file: None,
-            client_key_file: None,
-            insecure_skip_verify: true,
-        }),
-    })
-    .spawn(
-        TestCs {
-            remote_start_seen: Arc::new(AtomicBool::new(false)),
-        },
-        sink(),
-    )
-    .await
-    .expect("ws client should connect in plaintext, ignoring TLS material");
+    let client =
+        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Some(CsTlsConfig {
+                ca_file: None,
+                client_cert_file: None,
+                client_key_file: None,
+                insecure_skip_verify: true,
+            }),
+        })))
+        .spawn(
+            TestCs {
+                remote_start_seen: Arc::new(AtomicBool::new(false)),
+            },
+            sink(),
+            sink(),
+        )
+        .await
+        .expect("ws client should connect in plaintext, ignoring TLS material");
 
     let hb = Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
     assert!(matches!(

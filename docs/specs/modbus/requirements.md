@@ -157,6 +157,16 @@ behavior, stated limitations).
 
 **MB-R-056** — The connection settings (`reconnect`, `timeout_ms`, `delay_ms`, `interval_ms`, and the transport endpoint) shall be re-read from the shared configuration on every connection attempt, so an edit to them takes effect on the next reconnect.
 
+**MB-R-130** — With `reconnect` enabled (the default), a Modbus server's listener bind failure (TCP, `RtuOverTcp`, `Udp`, `AsciiOverTcp`) or serial-port open failure (RTU, `Ascii`) shall not end the server task; the server shall wait a backoff and retry, using the same backoff policy as the client (MB-R-051).
+
+**MB-R-131** — With `reconnect` enabled, a mid-serve failure — the listener or serial port failing after having already opened successfully — shall retry the same way, once the current serve loop ends.
+
+**MB-R-132** — The backoff shall reset to 1 s after any serve loop during which at least one connection was accepted (TCP, `RtuOverTcp`, `AsciiOverTcp`) or at least one request/datagram was read (RTU, `Ascii`, `Udp`).
+
+**MB-R-133** — The terminate command, or the command channel closing, shall abort a backoff wait immediately and end the server task with success.
+
+**MB-R-134** — With `reconnect` disabled, a listener bind failure, a serial-port open failure, or a mid-serve failure shall end the server task with that error, after emitting a server-stopped status.
+
 ---
 
 ## Server
@@ -197,7 +207,7 @@ behavior, stated limitations).
 
 **MB-R-070** — A TCP server shall bind `ip:port` and accept connections in a loop, serving each accepted connection concurrently against the same shared store.
 
-**MB-R-071** — Failure to bind the TCP listen address shall fail the server's start, and the error shall be surfaced to the caller rather than retried.
+**MB-R-071** — With `reconnect` enabled (the default), a failure to bind the TCP listen address shall not fail the server's start; the server shall retry the bind using the shared backoff policy (MB-R-051), per MB-R-130–MB-R-134. With `reconnect` disabled, bind failure shall fail the server's start, and the error shall be surfaced to the caller.
 
 ---
 
@@ -209,7 +219,7 @@ behavior, stated limitations).
 
 **MB-R-074** — An RTU server shall open the serial port once and serve it as a single persistent point-to-point connection, with no accept loop.
 
-**MB-R-075** — Failure to open the serial port shall fail the server's start with a serial error. For a client it shall be treated as a failed connection attempt and be subject to the reconnect rules (MB-R-050 – MB-R-055).
+**MB-R-075** — With `reconnect` enabled (the default), a failure to open the serial port shall not fail the server's start; the server shall retry the open using the shared backoff policy (MB-R-051), per MB-R-130–MB-R-134. With `reconnect` disabled, serial-port-open failure shall fail the server's start with a serial error. For a client it shall be treated as a failed connection attempt and be subject to the reconnect rules (MB-R-050 – MB-R-055).
 
 ---
 
@@ -233,7 +243,7 @@ behavior, stated limitations).
 
 **MB-R-119** — A `Udp` server shall bind `ip:port` once and serve inbound datagrams from any peer, each independently against the same shared store (MB-R-057–MB-R-065); there is no accept loop and no per-peer connection lifecycle — no `on_connect`/`on_disconnect` notification is emitted for a `Udp` peer. MB-R-101–MB-R-103 (RTU/RtuOverTcp broadcast slave id 0 handling) do not extend to `Udp` — a `Udp` server answers a request addressed to slave id 0 exactly as it would any other slave id (MB-R-065), including sending its response.
 
-**MB-R-120** — Failure to bind the `Udp` listen address shall fail the server's start, and the error shall be surfaced to the caller rather than retried (as MB-R-071 for TCP). A datagram that fails to receive or decode shall be logged as a failed request (MB-R-066–MB-R-067) and shall cost nothing beyond itself — it neither ends serving nor affects any other datagram.
+**MB-R-120** — With `reconnect` enabled (the default), a failure to bind the `Udp` listen address shall not fail the server's start; the server shall retry the bind using the shared backoff policy (MB-R-051), per MB-R-130–MB-R-134 (as MB-R-071 for TCP). With `reconnect` disabled, bind failure shall fail the server's start, and the error shall be surfaced to the caller. A datagram that fails to receive or decode shall be logged as a failed request (MB-R-066–MB-R-067) and shall cost nothing beyond itself — it neither ends serving nor affects any other datagram.
 
 ---
 
@@ -245,7 +255,7 @@ behavior, stated limitations).
 
 **MB-R-123** — An `Ascii` server shall open the serial port once and serve it as a single persistent point-to-point connection, with no accept loop (as MB-R-074), using ASCII framing for its requests and responses.
 
-**MB-R-124** — Failure to open the serial port for `Ascii` shall be handled exactly as MB-R-075: it shall fail the server's start with a serial error, and for a client it shall be treated as a failed connection attempt, subject to the reconnect rules (MB-R-050–MB-R-055).
+**MB-R-124** — Failure to open the serial port for `Ascii` shall be handled exactly as MB-R-075: with `reconnect` enabled (the default), the server retries the open using the shared backoff policy instead of failing start; with `reconnect` disabled, it fails the server's start with a serial error. For a client it shall be treated as a failed connection attempt, subject to the reconnect rules (MB-R-050–MB-R-055).
 
 ---
 

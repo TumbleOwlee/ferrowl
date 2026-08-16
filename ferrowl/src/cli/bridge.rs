@@ -174,7 +174,10 @@ mod tests {
     async fn seeded_downstream_server(
         port: u16,
         value: u16,
-    ) -> tokio::task::JoinHandle<Result<(), ferrowl_modbus::Error>> {
+    ) -> (
+        tokio::sync::mpsc::Sender<ferrowl_modbus::ServerCommand>,
+        tokio::task::JoinHandle<Result<(), ferrowl_modbus::Error>>,
+    ) {
         use ferrowl_codec::Kind as RegKind;
         use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
         use parking_lot::RwLock as MemLock;
@@ -203,10 +206,24 @@ mod tests {
             reconnect: true,
             tls: None,
         };
-        ferrowl_modbus::tcp::ServerBuilder::new(Arc::new(tokio::sync::RwLock::new(config)), srv_mem)
-            .spawn(|_s: String| async move {})
-            .await
-            .expect("downstream server failed to start")
+        // The sender must be returned alongside the handle and kept alive by the caller for as
+        // long as the server should keep running: the shared server core treats the command
+        // channel closing (every sender dropped) the same as an explicit `Terminate` (MB-R-133),
+        // so a sender dropped immediately after `spawn()` would end this task before the test
+        // gets to use it.
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
+            Arc::new(tokio::sync::RwLock::new(config)),
+            srv_mem,
+        )
+        .spawn(
+            receiver,
+            |_s: String| async move {},
+            |_s: String| async move {},
+        )
+        .await
+        .expect("downstream server failed to start");
+        (sender, handle)
     }
 
     fn descriptor(port: u16) -> String {
@@ -282,7 +299,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_bridge_end_to_end_relays_a_real_request() {
         let downstream_port = free_port();
-        let _downstream = seeded_downstream_server(downstream_port, 77).await;
+        let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 77).await;
 
         let upstream_port = free_port();
         let args = BridgeArgs {
@@ -351,7 +368,7 @@ mod tests {
         std::fs::write(&log_file, "PREEXISTING\n").unwrap();
 
         let downstream_port = free_port();
-        let _downstream = seeded_downstream_server(downstream_port, 5).await;
+        let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 5).await;
         let upstream_port = free_port();
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),

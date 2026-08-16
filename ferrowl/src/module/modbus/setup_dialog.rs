@@ -51,7 +51,8 @@ pub struct SetupValues {
     pub timeout_ms: Option<usize>,
     pub delay_ms: Option<usize>,
     pub interval_ms: Option<usize>,
-    /// Client-only auto-reconnect setting; always explicit after a dialog save.
+    /// Auto-reconnect setting (MB-R-050–MB-R-055 client, MB-R-130–MB-R-134 server); always
+    /// explicit after a dialog save.
     pub reconnect: Option<bool>,
     /// Explicit per-function-code read ranges (client only), applied to the device config.
     pub read_ranges: ReadRanges,
@@ -147,6 +148,10 @@ pub struct SetupDialog {
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub baud: Widget<InputFieldState, InputField<String>>,
+    /// Governs client redial (MB-R-050–055) and server bind/serial-open/mid-serve retry
+    /// (MB-R-130–134); shown for every role and transport, next to Port or Baud.
+    #[focus]
+    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
     pub parity: Widget<SelectionState<Parity>, Selection<Parity>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Rtu | Transport::Ascii)})]
@@ -159,8 +164,6 @@ pub struct SetupDialog {
     pub delay: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub interval: Widget<InputFieldState, InputField<String>>,
-    #[focus(when = {self.role.get_value() == Role::Client})]
-    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     #[focus]
     pub holding_ranges: Widget<InputFieldState, InputField<String>>,
     #[focus]
@@ -348,7 +351,7 @@ impl SetupDialog {
             .ip(input("IP", None, "127.0.0.1", &input_style, false))
             .port(input(
                 "Port",
-                Some(HorizontalAlignment::Right),
+                Some(HorizontalAlignment::Center),
                 "502",
                 &input_style,
                 false,
@@ -363,7 +366,7 @@ impl SetupDialog {
             ))
             .baud(input(
                 "Baud",
-                Some(HorizontalAlignment::Right),
+                Some(HorizontalAlignment::Center),
                 "19200",
                 &input_style,
                 false,
@@ -457,7 +460,7 @@ impl SetupDialog {
             .interval(input("Interval ms", None, "", &input_style, false))
             .reconnect(selection(
                 "Reconnect",
-                None,
+                Some(HorizontalAlignment::Right),
                 vec![ReconnectChoice::On, ReconnectChoice::Off],
                 &selection_style,
             ))
@@ -778,10 +781,9 @@ impl SetupDialog {
         let timeout_ms = parse_ms(self.timeout.state.input(), "Timeout")?;
         let delay_ms = parse_ms(self.delay.state.input(), "Delay")?;
         let interval_ms = parse_ms(self.interval.state.input(), "Interval")?;
-        // Reconnect is client-only and hidden for servers; don't report a value for a setting
-        // the user never saw, so a server-role save can't clobber it in the device config.
-        let reconnect =
-            (role == Role::Client).then(|| self.reconnect.state.get_value() == ReconnectChoice::On);
+        // Reconnect is shown for every role: it governs client redial (MB-R-050–055) and, since
+        // the shared backoff driver, server bind/serial-open/mid-serve retry (MB-R-130–134).
+        let reconnect = Some(self.reconnect.state.get_value() == ReconnectChoice::On);
         let read_ranges = ReadRanges {
             holding: opt(self.holding_ranges.state.input()),
             input: opt(self.input_ranges.state.input()),
@@ -975,23 +977,17 @@ impl SetupDialog {
         if is_rtu {
             let [row0, row1] = Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
                 .areas(endpoint_area);
-            render_row!(self, row0, buf; path, baud);
+            render_row!(self, row0, buf; path, baud, reconnect);
             render_row!(self, row1, buf;
                 parity => Constraint::Percentage(35),
                 data_bits => Constraint::Percentage(30),
                 stop_bits => Constraint::Percentage(35)
             );
         } else {
-            render_row!(self, endpoint_area, buf; ip, port);
+            render_row!(self, endpoint_area, buf; ip, port, reconnect);
         }
 
-        // Client: timeout | delay | interval | reconnect. Server hides reconnect, so the
-        // remaining three widen to thirds instead of leaving a blank quarter.
-        if self.role.state.get_value() == Role::Client {
-            render_row!(self, rows[idx], buf; timeout, delay, interval, reconnect);
-        } else {
-            render_row!(self, rows[idx], buf; timeout, delay, interval);
-        }
+        render_row!(self, rows[idx], buf; timeout, delay, interval);
         idx += 1;
 
         render_row!(self, rows[idx], buf; holding_ranges, input_ranges);
@@ -1225,10 +1221,10 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a server-role setup resolves to no reconnect setting.
-    fn ut_resolve_server_role_reports_no_reconnect() {
-        // Reconnect is hidden for servers; resolving must not report a value for a setting the
-        // user never saw, so applying it can't clobber the device config's existing setting.
+    /// MB-R-130, MB-R-134 — a server role also reports a reconnect setting: server-side
+    /// reconnect (bind/serial-open/mid-serve retry) is governed by the same config field as
+    /// the client's, so the dialog must resolve a value for it regardless of role.
+    fn ut_resolve_server_role_reports_reconnect() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
             delay_ms: 0,
@@ -1236,9 +1232,13 @@ mod tests {
             reconnect: true,
         });
         set_input(&mut dialog.name, "dev");
-        // Default role is Server; reconnect selection is irrelevant/unseen.
+        // Default role is Server; default reconnect selection is On.
         let outcome = dialog.resolve().unwrap();
-        assert_eq!(outcome.values.reconnect, None);
+        assert_eq!(outcome.values.reconnect, Some(true));
+
+        dialog.reconnect.state.set_selection(1); // Off
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.reconnect, Some(false));
     }
 
     #[test]
@@ -1625,20 +1625,21 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-022 — the focus cycle skips the reconnect field when it is disabled for a server role.
-    fn ut_focus_next_skips_reconnect_for_server_role() {
+    /// UI-R-022 — the focus cycle visits the reconnect field for every role, since server-side
+    /// reconnect (MB-R-130–134) makes it applicable regardless of role.
+    fn ut_focus_next_reaches_reconnect_for_server_role() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
         });
-        // Default role is Server, so reconnect is gated off and traversal must skip it.
-        dialog.focus = SetupDialogFocus::Interval;
-        dialog.interval.state.set_focused(true);
+        // Default role is Server, and default transport is Tcp, so `baud` is gated off and
+        // traversal moves straight from `port` to `reconnect`.
+        dialog.focus = SetupDialogFocus::Port;
+        dialog.port.state.set_focused(true);
         dialog.focus_next();
-        assert!(dialog.holding_ranges.state.is_focused());
-        assert!(!dialog.reconnect.state.is_focused());
+        assert!(dialog.reconnect.state.is_focused());
     }
 
     fn default_timing() -> Timing {

@@ -35,8 +35,8 @@ pub struct Config {
     #[arg(id = "interval", short('I'), long, default_value_t = 0)]
     pub interval_ms: usize,
 
-    /// Client-only: automatically reconnect (with backoff) on a lost or refused connection
-    /// instead of ending the client task. Ignored by the server.
+    /// Automatically reconnect (with backoff) instead of ending the task: on a lost or refused
+    /// connection (client), or a bind/serve failure (server, MB-R-071/MB-R-130–134).
     #[serde(default = "default_reconnect")]
     #[arg(long, default_value_t = true)]
     pub reconnect: bool,

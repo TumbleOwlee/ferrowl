@@ -819,6 +819,7 @@ mod tests {
             port: 0,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security: Default::default(),
         };
         ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
@@ -1093,16 +1094,23 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-102 — a failed backend (re)start from the client view is reported at Error level.
-    async fn ut_restart_reports_backend_start_failure() {
+    /// OC-R-048, OC-R-105 (revised) — `start`/`restart` no longer fails synchronously against an
+    /// unreachable CSMS: the dial happens inside the retried task, so the view reports
+    /// "Reconnecting" at Info level even against a dead endpoint, instead of the old synchronous
+    /// "assume connected"/fail-fast behavior this test used to cover (OC-R-102's Error-level
+    /// reporting path is still exercised by a genuine `stop`/`start` failure — e.g. the CSMS's
+    /// still-synchronous OC-R-040 TLS-misconfiguration check — just no longer reachable from the
+    /// CS role's `start`).
+    async fn ut_restart_against_unreachable_csms_still_succeeds() {
         let mut v = client_view::<V2_0_1>(OcppVersion::V2_0_1);
-        // Point at a closed port so the reconnect's start() fails fast.
+        // A closed port used to fail the reconnect's start() fast; now the dial retries inside
+        // the spawned task instead, so start() itself always succeeds.
         v.spec.port = 1;
         let result = v.handle_command_impl("restart").await;
         match result {
             crate::module::view::CommandResult::Handled(Some((level, msg))) => {
-                assert!(matches!(level, crate::app::Level::Error), "{msg}");
-                assert!(msg.contains("Reconnect failed"), "{msg}");
+                assert!(matches!(level, crate::app::Level::Info), "{msg}");
+                assert!(msg.contains("Reconnecting"), "{msg}");
             }
             _ => panic!("restart should be handled with a log line"),
         }

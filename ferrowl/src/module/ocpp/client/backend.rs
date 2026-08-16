@@ -198,6 +198,21 @@ pub(crate) fn msg_row(m: &OcppMessage) -> MsgRow {
     }
 }
 
+/// Build the `ferrowl-ocpp` client `Config` from a runtime spec — a pure function so it can be
+/// unit-tested without spinning up a task. `spec.reconnect` (OC-R-107, re-read from the shared
+/// device config on every dial attempt via [`start`](OcppClient::start) rebuilding this on each
+/// call) falls back to reconnect-enabled when unset, matching Modbus's own
+/// `DEFAULT_RECONNECT`/`ModbusModule::resolve_timing`.
+fn build_config(spec: &OcppSpec) -> Config {
+    Config {
+        url: spec.url(),
+        timeout_ms: spec.timeout_ms.unwrap_or(30_000),
+        basic_auth: spec.security.basic_auth(),
+        tls: spec.security.cs_tls(),
+        reconnect: spec.reconnect.unwrap_or(true),
+    }
+}
+
 /// The version-generic charging-station backend owned by a client view.
 /// Deliberately holds no copy of the module spec: the connection config is built from the spec
 /// the view passes into each [`start`](Self::start) call (see the CSMS backend for the rationale).
@@ -261,18 +276,16 @@ impl<V: Version> OcppClient<V> {
             }
             let _ = self.stop().await;
         }
-        let config = Config {
-            url: spec.url(),
-            timeout_ms: spec.timeout_ms.unwrap_or(30_000),
-            basic_auth: spec.security.basic_auth(),
-            tls: spec.security.cs_tls(),
-        };
+        let config = build_config(spec);
         let log = log_fn(self.messages.clone());
-        let client = ClientBuilder::<V>::new(config).spawn(handler, log).await?;
+        let status = log_fn(self.messages.clone());
+        let client = ClientBuilder::<V>::new(Arc::new(RwLock::new(config)))
+            .spawn(handler, log, status)
+            .await?;
         self.client = Some(client);
-        // The handshake already completed in `spawn`; reflect it immediately (the handler's
-        // on_connected callback keeps it in sync thereafter).
-        self.online.store(true, Ordering::Relaxed);
+        // `spawn` no longer dials synchronously (OC-R-048, OC-R-105): the handshake happens
+        // inside the retried task, so `online` stays false here and is flipped by the handler's
+        // on_connected/on_disconnected callbacks once a real handshake actually completes.
         Ok(())
     }
 
@@ -415,6 +428,101 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    use crate::module::ocpp::config::device::OcppSecurityConfig;
+    use crate::module::ocpp::config::session::OcppProtocol;
+
+    /// A handler that never receives a Call in these tests — `start()` never completes a
+    /// handshake against a closed port.
+    struct NoopCsHandler;
+    impl CsActionHandler<ferrowl_ocpp::V1_6> for NoopCsHandler {
+        async fn handle_call(
+            &self,
+            _action: ferrowl_ocpp::Action16,
+        ) -> Result<ferrowl_ocpp::Response16, ferrowl_ocpp::CallError> {
+            Err(ferrowl_ocpp::CallError::new(
+                ferrowl_ocpp::CallErrorCode::NotImplemented,
+                "unsupported",
+            ))
+        }
+    }
+
+    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — nothing
+    /// answers on it afterward, standing in for a refused dial.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn spec_with_reconnect(reconnect: Option<bool>) -> OcppSpec {
+        OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: free_port(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect,
+            security: OcppSecurityConfig::default(),
+        }
+    }
+
+    #[test]
+    /// OC-R-107 — the client `Config` built from a spec carries the spec's own `reconnect`
+    /// setting, re-read fresh on every `start()` call, instead of a hardcoded `true`.
+    fn ut_build_config_reads_reconnect_from_spec() {
+        assert!(build_config(&spec_with_reconnect(Some(true))).reconnect);
+        assert!(!build_config(&spec_with_reconnect(Some(false))).reconnect);
+    }
+
+    #[test]
+    /// OC-R-048 — an unset `reconnect` (a device config predating the field, or one that never
+    /// set it) falls back to reconnect-enabled, matching Modbus's own `DEFAULT_RECONNECT`.
+    fn ut_build_config_defaults_reconnect_to_true_when_unset() {
+        assert!(build_config(&spec_with_reconnect(None)).reconnect);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-048, OC-R-105-107 — `OcppClient::start()` against an unreachable CSMS returns `Ok(())`
+    /// immediately (spawn always succeeds now, the dial happens inside the retried task) and
+    /// stays offline until a real handshake completes, instead of the old synchronous
+    /// "assume connected" flip.
+    async fn it_cs_start_against_unreachable_csms_stays_running() {
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: free_port(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect: None,
+            security: OcppSecurityConfig::default(),
+        };
+
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        backend
+            .start(&spec, NoopCsHandler)
+            .await
+            .expect("start must not fail synchronously against an unreachable CSMS");
+
+        assert!(
+            !backend.is_online(),
+            "start must not assume connected before the handshake actually completes"
+        );
+
+        // The handle is still usable: stop() must not hang on a never-connected, backing-off client.
+        tokio::time::timeout(std::time::Duration::from_secs(2), backend.stop())
+            .await
+            .expect("stop() must not hang while the client task is backing off")
+            .expect("stop() must succeed");
+    }
 
     #[test]
     /// OC-R-060 — the CS heartbeat cadence uses the interval the CSMS returned in its BootNotification response.

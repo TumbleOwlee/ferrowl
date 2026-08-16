@@ -212,6 +212,7 @@ where
             host: spec.ip.clone(),
             port: spec.port,
             timeout_ms: spec.timeout_ms.unwrap_or(30_000),
+            reconnect: spec.reconnect.unwrap_or(true),
             basic_auth: spec.security.basic_auth(),
             tls,
         };
@@ -232,9 +233,13 @@ where
         }
     }
 
-    /// The bound local address (`host:port`) when running, for the status line.
+    /// The bound local address (`host:port`) when running, for the status line. `None` both
+    /// while never bound and while backing off from a failed bind (OC-R-083).
     pub fn bound_addr(&self) -> Option<String> {
-        self.server.as_ref().map(|s| s.local_addr().to_string())
+        self.server
+            .as_ref()
+            .and_then(|s| s.local_addr())
+            .map(|a| a.to_string())
     }
 
     /// The charge-point identity for a connection (URL-path segment), if known.
@@ -286,6 +291,70 @@ pub fn inbound_messages(name: &str, request: Value, response: Value) -> [OcppMes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::module::ocpp::config::device::OcppSecurityConfig;
+    use crate::module::ocpp::config::session::OcppProtocol;
+
+    /// A handler that never receives a Call in this test — `start()` binds an occupied port, so
+    /// no connection is ever accepted.
+    struct NoopCsmsHandler;
+    impl CsmsActionHandler<ferrowl_ocpp::V1_6> for NoopCsmsHandler {
+        async fn handle_call(
+            &self,
+            _conn: ConnectionId,
+            _action: ferrowl_ocpp::Action16,
+        ) -> Result<ferrowl_ocpp::Response16, ferrowl_ocpp::CallError> {
+            Err(ferrowl_ocpp::CallError::new(
+                ferrowl_ocpp::CallErrorCode::NotImplemented,
+                "unsupported",
+            ))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-083, OC-R-108-109 — `OcppServer::start()` against an occupied port still returns
+    /// `Ok(TlsBinding)` (spawn no longer fails synchronously on a failed bind); `bound_addr()`
+    /// stays `None` while backing off and becomes `Some(_)` once the port frees up.
+    async fn it_csms_start_against_occupied_port_stays_running() {
+        let occupier = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("occupier bind failed");
+        let occupied_port = occupier.local_addr().expect("occupier addr").port();
+
+        let spec = OcppSpec {
+            name: "csms".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: occupied_port,
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(1000),
+            reconnect: None,
+            security: OcppSecurityConfig::default(),
+        };
+
+        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new();
+        backend
+            .start(&spec, NoopCsmsHandler)
+            .await
+            .expect("start must not fail synchronously on an occupied port");
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            backend.bound_addr().is_none(),
+            "bound_addr must stay None while the port is occupied and the bind is retrying"
+        );
+
+        drop(occupier);
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        assert!(
+            backend.bound_addr().is_some(),
+            "bound_addr must become Some once the occupied port is freed"
+        );
+
+        backend.stop().await.expect("stop() must succeed");
+    }
 
     fn store(cs: &[&str]) -> RfidLists {
         Arc::new(RwLock::new(RfidStore {

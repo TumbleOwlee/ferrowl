@@ -14,6 +14,10 @@ pub struct Config {
     /// How long to wait for a correlated reply before failing an awaited Call.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
+    /// Automatically retry a failed listener bind (with backoff) instead of ending the module
+    /// task (OC-R-083). Mirrors the CS role's own `reconnect` field.
+    #[serde(default = "default_reconnect")]
+    pub reconnect: bool,
     /// Expected HTTP Basic Auth credentials (Security Profile 1). When set, the handshake is
     /// rejected with HTTP 401 unless the request presents a matching `Authorization` header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,6 +30,10 @@ pub struct Config {
 
 fn default_timeout_ms() -> u64 {
     30_000
+}
+
+fn default_reconnect() -> bool {
+    true
 }
 
 impl Config {

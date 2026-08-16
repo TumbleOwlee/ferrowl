@@ -12,8 +12,19 @@ use super::Command;
 use super::action_handler::CsActionHandler;
 use crate::action::Version;
 use crate::conn::{Connection, InboundDispatch};
-use crate::error::{CallError, Error};
+use crate::error::CallError;
 use crate::log::LogFn;
+
+/// How a completed connection ended, distinguishing an explicit stop (OC-R-106) from a dropped
+/// connection (OC-R-048) — the two must be classified differently by the retry loop in
+/// `ClientBuilder::spawn`: `Terminated` stops retrying, `Disconnected` triggers a backoff+retry
+/// (or ends the task with an error, per `reconnect`).
+pub(crate) enum RunEnd {
+    /// `Command::Terminate` was received, or the command channel closed (every sender dropped).
+    Terminated,
+    /// The connection's reader task observed the peer close, a websocket error, or a stream end.
+    Disconnected,
+}
 
 /// Bridges the role-agnostic [`InboundDispatch`] to the user's [`CsActionHandler`].
 pub(crate) struct CsDispatch<V: Version, H: CsActionHandler<V>> {
@@ -34,10 +45,10 @@ impl<V: Version, H: CsActionHandler<V>> InboundDispatch<V> for CsDispatch<V, H> 
 pub(crate) async fn run<V, H, S, L>(
     ws: S,
     handler: Arc<H>,
-    mut commands: mpsc::Receiver<Command<V>>,
+    commands: &mut mpsc::Receiver<Command<V>>,
     log: L,
     timeout: Duration,
-) -> Result<(), Error>
+) -> RunEnd
 where
     V: Version,
     H: CsActionHandler<V>,
@@ -59,11 +70,11 @@ where
     let notified = shutdown.notified();
     tokio::pin!(notified);
 
-    loop {
+    let end = loop {
         tokio::select! {
-            _ = &mut notified => break,
+            _ = &mut notified => break RunEnd::Disconnected,
             cmd = commands.recv() => match cmd {
-                None | Some(Command::Terminate) => break,
+                None | Some(Command::Terminate) => break RunEnd::Terminated,
                 Some(Command::SendAction(action)) => {
                     if let Err(e) = connection.outbound.fire(action).await {
                         log.invoke(format!("CS failed to send action: {e}")).await;
@@ -74,9 +85,9 @@ where
                 }
             },
         }
-    }
+    };
 
     connection.shutdown().await;
     handler.on_disconnected().await;
-    Ok(())
+    end
 }

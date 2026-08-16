@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
-use ferrowl_modbus::{Address, Command, FunctionCode, Key, Operation, SlaveKey, UnitId, Word};
+use ferrowl_modbus::{
+    Address, Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId, Word,
+};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -28,6 +30,19 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
+}
+
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
+/// task was scheduled, not that its first bind attempt has run).
+async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
 }
 
 /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
@@ -141,13 +156,15 @@ async fn rtu_over_tcp_client_polls_server_and_executes_commands() {
     let cli_mem = client_mem();
 
     // Start the server.
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
@@ -281,6 +298,8 @@ async fn rtu_over_tcp_client_polls_server_and_executes_commands() {
 #[tokio::test]
 /// MB-R-114, MB-R-069 — an `ip`/`port` pair that does not parse as a socket address fails with a
 /// TCP address error, for both the RTU-over-TCP client and the server, same as plain TCP.
+/// `spawn()` itself always returns `Ok` now (MB-R-130/MB-R-134); the server-side address error
+/// surfaces from the joined task instead, and never retries even with `reconnect` on.
 async fn rtu_over_tcp_unparseable_address_is_error() {
     use ferrowl_modbus::{Error, TcpError};
 
@@ -295,27 +314,18 @@ async fn rtu_over_tcp_unparseable_address_is_error() {
 
     // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
-    let server_err =
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound_addr) =
         ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
-            .spawn(sink())
+            .spawn(rx, sink(), sink())
             .await
-            .unwrap_err();
+            .expect("spawn always returns Ok now");
+    let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly, not retry, on an address error")
+        .expect("task must not panic")
+        .unwrap_err();
     assert!(matches!(server_err, Error::Tcp(TcpError::Address(_))));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-114, MB-R-071 — failure to bind the RTU-over-TCP listen address fails the server's start
-/// and surfaces the error, same as plain TCP.
-async fn rtu_over_tcp_server_bind_conflict_is_error() {
-    let port = free_port();
-    // Occupy the port so the server's bind fails.
-    let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
-    let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
-    let res =
-        ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), mem)
-            .spawn(sink())
-            .await;
-    assert!(res.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -327,13 +337,15 @@ async fn rtu_over_tcp_client_skips_broadcast_poll_without_disconnect() {
     let port = free_port();
     let srv_mem = server_mem();
 
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     // Slave id 0 is the broadcast address: no server answers a read addressed to it.
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -383,13 +395,15 @@ async fn rtu_over_tcp_client_fire_and_forget_broadcast_write() {
     );
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
 
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
@@ -456,13 +470,19 @@ async fn rtu_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
     );
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
 
-    let server = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
     )
-    .spawn(sink())
+    .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
+    // `spawn()` only guarantees the task was scheduled, not that its first bind attempt has
+    // run yet (MB-R-130/MB-R-134: the bind moved into the retried task itself); give it a
+    // moment before a single-shot raw connect that (unlike the ferrowl client) never retries.
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     let transport = connect_tcp_framed::<RtuOverTcp>(addr, TcpConfig::default())

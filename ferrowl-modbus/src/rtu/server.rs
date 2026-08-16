@@ -1,17 +1,21 @@
 // Crate
 use crate::common::serial_config_from;
 use crate::rtu::Config;
-use crate::server_core::Server;
-use crate::{Error, Key, KeyParams, LogFn, SerialError};
+use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
+use crate::{Error, Key, KeyParams, LogFn, SerialError, ServerCommand};
 
 // Workspace
 use ferrowl_store::Memory;
+use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
 // External
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Rtu, Server as ModbusServer, open_serial};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
 
 /// Builds and spawns a Modbus RTU server task answering requests from the
@@ -26,14 +30,27 @@ impl<T: KeyParams> ServerBuilder<T> {
         Self { config, memory }
     }
 
-    /// Opens the configured serial port and spawns the serve loop as a
-    /// tokio task. `log` receives log lines.
-    pub async fn spawn<L>(&self, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
+    /// Spawns the serve loop as a tokio task and always returns `Ok` (MB-R-130): the serial
+    /// port open moves inside the retried task itself, so a bad path or busy port no longer
+    /// fails `spawn()` synchronously — it surfaces from the joined `JoinHandle` instead, after
+    /// exhausting retries (`reconnect: false`, MB-R-134) or never, if `reconnect` stays true
+    /// and the caller eventually sends `ServerCommand::Terminate` (MB-R-133). `log` receives
+    /// log lines, `status` receives lifecycle status lines.
+    pub async fn spawn<L, St>(
+        &self,
+        receiver: Receiver<ServerCommand>,
+        log: L,
+        status: St,
+    ) -> Result<JoinHandle<Result<(), Error>>, Error>
     where
         L: LogFn + Clone,
+        St: LogFn + Clone,
     {
-        let guard = self.config.read().await;
-        run(&guard, self.memory.clone(), log).await
+        let config = self.config.clone();
+        let memory = self.memory.clone();
+        Ok(tokio::task::spawn(run(
+            config, memory, receiver, log, status,
+        )))
     }
 }
 
@@ -45,34 +62,90 @@ const VERBOSE: bool = true;
 /// silence, not an exception.
 const PHYSICAL_SERIAL: bool = true;
 
-/// Open the configured serial port and spawn the RTU serve loop, answering from the shared `memory`
-/// via a [`Server`] (verbose logging on, MB-R-067).
-async fn run<T, L>(
-    config: &Config,
+/// Open the configured serial port and serve it, retrying the open with the shared backoff
+/// policy on failure (MB-R-075 revised, MB-R-130–134). `ResetOn::Request` (not `Connect`): the
+/// RTU link's own `on_connect` fires once immediately, before any request is read, so it cannot
+/// be the "did something useful" signal — only reading a request/datagram counts (see Shared
+/// note in plan.md).
+async fn run<T, L, St>(
+    config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
+    receiver: Receiver<ServerCommand>,
     log: L,
-) -> Result<JoinHandle<Result<(), Error>>, Error>
+    status: St,
+) -> Result<(), Error>
 where
     T: KeyParams,
     L: LogFn + Clone,
+    St: LogFn + Clone,
 {
-    let serial = serial_config_from(
-        config.baud_rate,
-        config.data_bits,
-        config.stop_bits,
-        config.parity.as_deref(),
-    )?;
-    match open_serial::<Rtu>(&config.path, serial) {
-        Ok(transport) => {
-            let server = ModbusServer::new(Server::new(memory, log, VERBOSE, PHYSICAL_SERIAL));
-            // One port, one link, no accept loop (MB-R-074). The default `ServerConfig` filters
-            // by no unit id, so every slave id with declared regions is served (MB-R-065).
-            Ok(tokio::task::spawn(async move {
-                server.serve_link(transport).await.map_err(Error::Server)
-            }))
+    let receiver = AsyncMutex::new(receiver);
+    let activity = Arc::new(AtomicBool::new(false));
+
+    let attempt = || {
+        let config = config.clone();
+        let memory = memory.clone();
+        let log = log.clone();
+        let activity = activity.clone();
+        let receiver = &receiver;
+        async move {
+            activity.store(false, Ordering::Relaxed);
+            let guard = config.read().await;
+            let reconnect = guard.reconnect;
+            let serial = match serial_config_from(
+                guard.baud_rate,
+                guard.data_bits,
+                guard.stop_bits,
+                guard.parity.as_deref(),
+            ) {
+                Ok(serial) => serial,
+                Err(e) => {
+                    return AttemptOutcome::Failed {
+                        error: e.into(),
+                        reconnect: false, // a bad serial-config value never fixes itself
+                        reset: false,
+                    };
+                }
+            };
+            let path = guard.path.clone();
+            drop(guard);
+            match open_serial::<Rtu>(&path, serial) {
+                Err(e) => AttemptOutcome::Failed {
+                    error: SerialError::Error(e).into(),
+                    reconnect,
+                    reset: false,
+                },
+                Ok(transport) => {
+                    let server = ModbusServer::new(
+                        Server::new(memory.clone(), log.clone(), VERBOSE, PHYSICAL_SERIAL)
+                            .with_reset_on(activity.clone(), ResetOn::Request),
+                    );
+                    let handle = server.handle();
+                    let mut receiver = receiver.lock().await;
+                    match drive_serve(server.serve_link(transport), handle, &mut receiver).await {
+                        ServeEnd::Terminated => AttemptOutcome::Done,
+                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
+                            error: Error::Server(e),
+                            reconnect,
+                            reset: activity.load(Ordering::Relaxed),
+                        },
+                    }
+                }
+            }
         }
-        Err(e) => Err(SerialError::Error(e).into()),
-    }
+    };
+
+    let wait_abortable = |backoff: std::time::Duration| {
+        let receiver = &receiver;
+        async move {
+            let mut receiver = receiver.lock().await;
+            wait_reconnect_backoff(&mut receiver, backoff).await
+        }
+    };
+
+    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    status.invoke("Server stopped".to_string()).await;
+    result
 }
 
 #[cfg(test)]

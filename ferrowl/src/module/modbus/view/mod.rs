@@ -398,7 +398,10 @@ impl ModuleView for ModbusModuleView {
                 .build()
                 .expect("all required builder fields are set");
             let mut label = if online {
-                "ONLINE".to_string()
+                match self.module.bound_addr() {
+                    Some(addr) => format!("ONLINE  {addr}"),
+                    None => "ONLINE".to_string(),
+                }
             } else {
                 "OFFLINE".to_string()
             };

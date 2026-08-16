@@ -189,13 +189,18 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::TcpServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -212,13 +217,21 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::RtuServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
                     Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                        // Pure serial: no socket, so no bind to report — an `Arc` nobody ever
+                        // writes to reads back `None` from `Instance::bound_addr()`, correctly
+                        // indistinguishable from "never bound."
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                        }));
                     }
                 }
             }
@@ -235,13 +248,18 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::RtuOverTcpServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -258,13 +276,18 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::UdpServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
@@ -281,13 +304,19 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::AsciiServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
                     Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                        // Pure serial — see the identical `RtuServer` arm above.
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                        }));
                     }
                 }
             }
@@ -304,18 +333,36 @@ impl<T: KeyParams> Instance<T> {
                 }
             }
             Builder::AsciiOverTcpServer(builder) => {
-                let res = builder.spawn(log).await;
+                let (sender, receiver) = tokio::sync::mpsc::channel(10);
+                let res = builder.spawn(receiver, log, status).await;
                 match res {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Server(handle::ServerHandle { handle }));
+                    Ok((handle, bound_addr)) => {
+                        self.handle = Some(Handle::Server(handle::ServerHandle {
+                            handle,
+                            sender,
+                            bound_addr,
+                        }));
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// The address a server instance is actually bound to right now — `None` for a client
+    /// instance, a pure-serial (Rtu/Ascii) server, an instance never started, or a TCP-framed/UDP
+    /// server backing off from a failed bind (MB-R-130). `Some(<real addr>)` once bound, useful
+    /// when the configured port was `0`. A caller that needs to know the listener is up (not
+    /// merely that `start()` returned — the bind itself races behind the retried task) polls
+    /// this instead of sleeping a fixed duration.
+    pub fn bound_addr(&self) -> Option<std::net::SocketAddr> {
+        match &self.handle {
+            Some(Handle::Server(h)) => *h.bound_addr.lock(),
+            _ => None,
+        }
     }
 
     /// Stops the running task: asks clients to terminate gracefully, then
@@ -325,11 +372,20 @@ impl<T: KeyParams> Instance<T> {
             return Err(InstanceError::NotRunning.into());
         }
 
-        if self
-            .send_command(ferrowl_modbus::Command::Terminate)
-            .await
-            .is_ok()
-        {
+        let sent_terminate = match &self.handle {
+            Some(Handle::Client(h)) => h
+                .sender
+                .send(ferrowl_modbus::Command::Terminate)
+                .await
+                .is_ok(),
+            Some(Handle::Server(h)) => h
+                .sender
+                .send(ferrowl_modbus::ServerCommand::Terminate)
+                .await
+                .is_ok(),
+            None => unreachable!("stop() early-returns above when handle is None"),
+        };
+        if sent_terminate {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
@@ -479,8 +535,11 @@ mod tests {
     async fn send_command_on_server_is_invalid_operation() {
         let mut instance = tcp_client_instance();
         let task = tokio::spawn(async { Ok(()) });
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
         instance.handle = Some(handle::Handle::Server(handle::ServerHandle {
             handle: task,
+            sender,
+            bound_addr: Arc::new(parking_lot::Mutex::new(None)),
         }));
 
         let err = instance.send_command(Command::Terminate).await.unwrap_err();
@@ -639,23 +698,30 @@ mod tests {
         assert!(!instance.active());
     }
 
-    /// MB-R-123 — an Ascii server instance fails `start` on a serial-open failure exactly
-    /// like an RTU server instance (MB-R-075/124).
+    /// MB-R-123, MB-R-130 (revised) — an Ascii server instance's `start` now always succeeds
+    /// (the serial-open failure moved inside the retried task itself, per MB-R-075/124's
+    /// revision); with `reconnect` disabled the instance still ends up inactive shortly after,
+    /// exactly like an RTU server instance and like `ascii_client_open_failure_ends_task` above.
     #[tokio::test]
-    async fn ascii_server_open_failure_fails_start() {
+    async fn ascii_server_open_failure_ends_task() {
         let mut instance = Instance::with_ascii_server(config::ServerConfig {
             config: Arc::new(RwLock::new(dead_rtu_config(false))),
             memory: Arc::new(MemLock::new(
                 ferrowl_store::Memory::<Key<SlaveKey>>::default(),
             )),
         });
-        let err = instance.start(sink(), sink()).await.unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Net(ferrowl_modbus::Error::Serial(
-                ferrowl_modbus::SerialError::Error(_)
-            ))
-        ));
+        instance
+            .start(sink(), sink())
+            .await
+            .expect("spawn always returns Ok now; the open error surfaces from the task");
+
+        for _ in 0..50 {
+            if !instance.active() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        assert!(!instance.active());
     }
 
     /// MB-R-126 — an AsciiOverTcp client instance starts, connects, and stops exactly like a
@@ -728,5 +794,124 @@ mod tests {
 
         // `stop()` on an already-finished task still tears down bookkeeping cleanly.
         instance.stop().await.expect("stop after natural finish");
+    }
+
+    /// MB-R-130 (bound_addr companion) — a TCP server instance's `bound_addr()` is `None` right
+    /// after `start()` returns (which only guarantees the task was scheduled), `Some(<real
+    /// addr>)` once the listener actually binds (even with the configured `port: 0`), and `None`
+    /// again after a graceful `stop()` — the ready signal a caller polls instead of racing
+    /// `start()`'s return with a fixed sleep.
+    #[tokio::test]
+    async fn it_tcp_server_bound_addr_reflects_listener_state() {
+        let mut instance = Instance::with_tcp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(tcp::Config {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+                timeout_ms: 200,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+                tls: None,
+            })),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        assert!(instance.bound_addr().is_none());
+
+        instance.start(sink(), sink()).await.expect("start");
+
+        let mut addr = None;
+        for _ in 0..50 {
+            addr = instance.bound_addr();
+            if addr.is_some() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
+        let addr = addr.expect("listener must have bound within 1s");
+        assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
+
+        instance.stop().await.expect("stop");
+        assert!(
+            instance.bound_addr().is_none(),
+            "bound_addr must clear once the instance stops"
+        );
+    }
+
+    /// MB-R-133 — stopping a running TCP server sends `ServerCommand::Terminate` through the
+    /// new server sender and awaits the task, the same graceful path clients already had; this
+    /// is asserted indirectly by timing: the 100ms grace-period sleep `stop()` always takes
+    /// after a successful send is the *only* delay, so `stop()` returning promptly after that
+    /// (well under an additional 100ms) proves the send-then-await path fired rather than
+    /// `stop()` falling through to the abort-and-await fallback for a task that never got the
+    /// message.
+    #[tokio::test]
+    async fn it_server_terminate_ends_task_gracefully() {
+        let port = free_port();
+        let mut instance = Instance::with_tcp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(tcp::Config {
+                ip: "127.0.0.1".to_string(),
+                port,
+                timeout_ms: 200,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+                tls: None,
+            })),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+
+        let before = tokio::time::Instant::now();
+        instance.stop().await.expect("stop");
+        assert!(!instance.active());
+        // `stop()`'s own grace period is 100ms; comfortably under 250ms proves no abort-fallback
+        // wait (which would additionally block on `h.handle.await` after `abort()`, itself
+        // instant, but a task that never received Terminate wouldn't have exited gracefully
+        // during the 100ms sleep in the first place — this bounds out that failure mode).
+        assert!(
+            before.elapsed() < tokio::time::Duration::from_millis(250),
+            "stop() took {:?}, expected the graceful send-then-await path to finish promptly",
+            before.elapsed()
+        );
+    }
+
+    /// MB-R-133 — stopping a TCP server whose task is actively backing off from a bind failure
+    /// (an occupied port, per MB-R-071/MB-R-130) still ends it gracefully and promptly via
+    /// `ServerCommand::Terminate`, exercised through the full `Instance` stack (not just
+    /// `ferrowl-modbus` in isolation, which s4 already covers).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_server_stop_on_backing_off_task_ends_promptly() {
+        let port = free_port();
+        let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let mut instance = Instance::with_tcp_server(config::ServerConfig {
+            config: Arc::new(RwLock::new(tcp::Config {
+                ip: "127.0.0.1".to_string(),
+                port,
+                timeout_ms: 200,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+                tls: None,
+            })),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        instance.start(sink(), sink()).await.expect("start");
+        assert!(instance.active());
+
+        // Give the task a moment to actually be in its backoff wait, not mid-bind-attempt.
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(2), instance.stop())
+            .await
+            .expect("stop() must not hang while the task is backing off");
+        assert!(result.is_ok());
+        assert!(!instance.active());
     }
 }

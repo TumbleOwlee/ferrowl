@@ -168,6 +168,11 @@ pub struct OcppDeviceConfig {
     /// Awaited-reply timeout (ms); `None` uses the crate default (30_000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Automatically reconnect (with backoff) instead of ending the module task on failure:
+    /// client redial on a lost or refused connection (OC-R-048), or server listener bind retry
+    /// (OC-R-083). `None` falls back to the default (on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<bool>,
     /// Lua simulation scripts (run every ~100ms while enabled; client role only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ScriptDef>,
@@ -253,6 +258,7 @@ impl OcppDeviceConfig {
             ocpp_version: spec.version,
             role: spec.role,
             timeout_ms: spec.timeout_ms,
+            reconnect: spec.reconnect,
             scripts,
             script_interval: default_script_interval(),
             log_file: None,
@@ -304,6 +310,7 @@ mod tests {
             ocpp_version: OcppVersion::V2_0_1,
             role: OcppRole::Client,
             timeout_ms: Some(5000),
+            reconnect: Some(false),
             scripts: vec![ScriptDef {
                 name: "boot".into(),
                 code: "C_OCPP:Set(\"Power\", 11000)".into(),
@@ -506,6 +513,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: Some(1000),
+            reconnect: Some(false),
             security: OcppSecurityConfig::default(),
         };
         let scripts = vec![ScriptDef {
@@ -517,7 +525,21 @@ mod tests {
         assert_eq!(cfg.ocpp_version, OcppVersion::V1_6);
         assert_eq!(cfg.role, OcppRole::Server);
         assert_eq!(cfg.timeout_ms, Some(1000));
+        assert_eq!(cfg.reconnect, Some(false));
         assert_eq!(cfg.scripts, scripts);
         assert_eq!(cfg.version, None);
+    }
+
+    #[test]
+    /// OC-R-107 — a device config predating the `reconnect` field loads with its default (unset,
+    /// falling back to reconnect-enabled at the point of use), mirroring Modbus's own
+    /// `DeviceConfig::reconnect` compatibility shim.
+    fn ut_device_config_loads_without_reconnect_field() {
+        let json = serde_json::json!({
+            "ocpp_version": "1.6",
+            "role": "client",
+        });
+        let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
+        assert_eq!(cfg.reconnect, None);
     }
 }

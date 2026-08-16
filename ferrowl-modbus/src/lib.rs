@@ -26,7 +26,7 @@ pub mod tcp;
 mod transport;
 pub mod udp;
 
-pub use command::Command;
+pub use command::{Command, ServerCommand};
 pub use error::{Error, ModbusError, SerialError, TcpError};
 pub use key::{Key, KeyParams, SlaveKey};
 pub use log::LogFn;

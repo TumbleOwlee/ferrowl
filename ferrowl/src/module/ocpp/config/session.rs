@@ -103,6 +103,11 @@ pub struct OcppSpec {
     /// Awaited-reply timeout (ms); `None` uses the crate default (30_000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Automatically reconnect (with backoff) instead of ending the module task on failure:
+    /// client redial on a lost or refused connection (OC-R-048), or server listener bind retry
+    /// (OC-R-083). `None` falls back to the default (on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<bool>,
     /// Websocket transport security (Basic Auth / TLS / mTLS); defaults to plain `ws://`.
     #[serde(default, skip_serializing_if = "OcppSecurityConfig::is_empty")]
     pub security: OcppSecurityConfig,
@@ -156,6 +161,7 @@ impl OcppSpec {
             port: module.port,
             path: module.path.clone(),
             timeout_ms: device.timeout_ms,
+            reconnect: device.reconnect,
             security: device.security.clone(),
         }
     }
@@ -221,6 +227,7 @@ mod tests {
                     port: 9000,
                     path: String::new(),
                     timeout_ms: None,
+                    reconnect: None,
                     security: OcppSecurityConfig::default(),
                 };
                 assert_eq!(spec.version, version);
@@ -267,6 +274,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security: OcppSecurityConfig::default(),
         };
         assert_eq!(spec.url(), "ws://127.0.0.1:9000");
@@ -303,6 +311,7 @@ mod tests {
             port: 8080,
             path: "/ocpp/cp001".into(),
             timeout_ms: Some(5000),
+            reconnect: None,
             security: OcppSecurityConfig::default(),
         };
         let mut v = serde_json::to_value(&spec).unwrap();
@@ -326,6 +335,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security,
         }
     }

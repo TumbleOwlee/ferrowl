@@ -120,6 +120,7 @@ mod tests {
             port: 9000,
             path: String::new(),
             timeout_ms: None,
+            reconnect: None,
             security: OcppSecurityConfig {
                 username: Some("dialog-user".into()),
                 ..Default::default()

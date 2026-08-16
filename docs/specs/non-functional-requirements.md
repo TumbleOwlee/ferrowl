@@ -24,7 +24,7 @@ IDs are stable and append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-020** — A Modbus client shall auto-reconnect with exponential backoff bounded to 1s–30s. (Specified in [`modbus/`](./modbus/).)
 
-**NF-R-021** — An OCPP connection shall not auto-reconnect at the crate level; a dropped connection stays dropped until an operator issues `:restart`. (Specified in [`ocpp/`](./ocpp/).)
+**NF-R-021** — An OCPP connection (CS or CSMS) shall auto-reconnect using the same bounded exponential-backoff policy as Modbus's client (MB-R-051), gated by the CS's `reconnect` config field (default enabled) and, for a CSMS, applied unconditionally to a failed listener bind. (Specified in [`ocpp/`](./ocpp/), OC-R-048, OC-R-083.)
 
 **NF-R-022** — A Lua script error shall never crash its host module: the error is logged and the script loop continues.
 
