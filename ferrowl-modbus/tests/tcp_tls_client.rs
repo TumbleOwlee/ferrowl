@@ -10,6 +10,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use ferrowl_modbus::tcp;
+use ferrowl_util::tls::ClientVerification;
 use rcgen::{CertificateParams, Issuer, KeyPair};
 use rust_modbus::{
     ClientCertPolicy, RootStore, ServerCertVerification, TcpConfig, TlsClientConfig, TlsListener,
@@ -103,7 +104,7 @@ async fn tls_client_connects_to_plain_rust_modbus_tls_server() {
     let cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         },
     );
@@ -153,7 +154,9 @@ async fn tls_client_verifies_against_ca_file() {
     let trusted_cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            ca_file: Some(cert_file),
+            client_verification: ClientVerification::Verify {
+                ca_file: Some(cert_file),
+            },
             ..Default::default()
         },
     );
@@ -219,7 +222,9 @@ async fn tls_client_presents_identity_only_when_both_files_set() {
     let both_cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            ca_file: Some(server_cert_file.clone()),
+            client_verification: ClientVerification::Verify {
+                ca_file: Some(server_cert_file.clone()),
+            },
             client_cert_file: Some(client_cert_file.clone()),
             client_key_file: Some(client_key_file.clone()),
             ..Default::default()
@@ -291,7 +296,7 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let handshake_cfg = config(
         plain_addr.port(),
         tcp::ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         },
     );
@@ -307,7 +312,7 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let refused_cfg = config(
         refused_port,
         tcp::ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         },
     );
@@ -331,7 +336,7 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let mut timeout_cfg = config(
         stalling_addr.port(),
         tcp::ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         },
     );
