@@ -499,9 +499,9 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-096 — explicit server cert + key files take precedence over `self_signed` for a wss CSMS
+    /// OC-R-096 — `ServerCertSource::Explicit` maps to `CsmsTlsMode::Files` for a wss CSMS
     /// (embed/reuse `ServerCertSource`'s own precedence, not re-resolved here).
-    fn ut_csms_tls_explicit_files_win_over_self_signed() {
+    fn ut_csms_tls_explicit_maps_to_files() {
         let cfg = OcppSecurityConfig {
             server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
                 cert_file: "s.crt".into(),
