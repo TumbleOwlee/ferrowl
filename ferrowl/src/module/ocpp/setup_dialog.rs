@@ -94,6 +94,10 @@ pub struct OcppSetupDialog {
     pub version: Widget<SelectionState<OcppVersion>, Selection<OcppVersion>>,
     #[focus]
     pub role: Widget<SelectionState<OcppRole>, Selection<OcppRole>>,
+    /// Client-only: automatically reconnect (with backoff) instead of ending the CS task on a
+    /// lost or refused connection (OC-R-048). Ignored (and hidden) for the server role.
+    #[focus(when = {self.role.get_value() == OcppRole::Client})]
+    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     #[focus]
     pub protocol: Widget<SelectionState<OcppProtocol>, Selection<OcppProtocol>>,
     #[focus]
@@ -103,10 +107,6 @@ pub struct OcppSetupDialog {
     /// Optional URL path appended after the endpoint, e.g. `/ocpp/cp001`.
     #[focus(when = {self.role.get_value() == OcppRole::Client})]
     pub path: Widget<InputFieldState, InputField<String>>,
-    /// Client-only: automatically reconnect (with backoff) instead of ending the CS task on a
-    /// lost or refused connection (OC-R-048). Ignored (and hidden) for the server role.
-    #[focus(when = {self.role.get_value() == OcppRole::Client})]
-    pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     /// Transport security level, offered only for `wss://`.
     #[focus(when = {self.show_security()})]
     pub security: Widget<SelectionState<SecurityLevel>, Selection<SecurityLevel>>,
@@ -185,8 +185,9 @@ impl OcppSetupDialog {
                 vec![OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1],
                 &selection_style,
             ))
-            .role(selection(
+            .role(aligned_selection(
                 "Role",
+                Some(HorizontalAlignment::Center),
                 vec![OcppRole::Client, OcppRole::Server],
                 &selection_style,
             ))
@@ -198,8 +199,9 @@ impl OcppSetupDialog {
             .ip(input("IP", "127.0.0.1", &input_style, false))
             .port(input("Port", "9000", &input_style, false))
             .path(input("Path", "/ocpp/cp001", &input_style, false))
-            .reconnect(selection(
+            .reconnect(aligned_selection(
                 "Reconnect",
+                Some(HorizontalAlignment::Right),
                 vec![ReconnectChoice::On, ReconnectChoice::Off],
                 &selection_style,
             ))
@@ -573,12 +575,11 @@ impl OcppSetupDialog {
         let show_hint = self.show_hint();
         let show_reconnect = self.show_reconnect();
 
-        // border(2) + inner margin(2) + name(3) + config path(3) + version|role(3)
-        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the reconnect row
-        // (3), the security rows (3 each), and the hint line (1), only when applicable.
+        // border(2) + inner margin(2) + name(3) + config path(3) + version|role|reconnect(3)
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
+        // (3 each), and the hint line (1), only when applicable.
         let box_height = 17
             + if has_error { 3 } else { 0 }
-            + if show_reconnect { 3 } else { 0 }
             + if show_security_row { 3 } else { 0 }
             + if show_cert_a { 3 } else { 0 }
             + if show_cert_b { 3 } else { 0 }
@@ -612,29 +613,31 @@ impl OcppSetupDialog {
         block.render(vcenter, buf);
 
         let error_height = if has_error { 3 } else { 0 };
-        let reconnect_height = if show_reconnect { 3 } else { 0 };
         let security_height = if show_security_row { 3 } else { 0 };
         let cert_a_height = if show_cert_a { 3 } else { 0 };
         let cert_b_height = if show_cert_b { 3 } else { 0 };
         let hint_height = if show_hint { 1 } else { 0 };
         let rows = Layout::vertical([
-            Constraint::Length(3),                // name
-            Constraint::Length(3),                // config path
-            Constraint::Length(3),                // version | role
-            Constraint::Length(3),                // protocol | ip | port | path
-            Constraint::Length(reconnect_height), // reconnect (client only)
-            Constraint::Length(security_height),  // security | username | password | skip-verify
-            Constraint::Length(hint_height),      // self-signed hint (server, below TLS)
-            Constraint::Length(cert_a_height),    // cert_file|key_file or ca_file
-            Constraint::Length(cert_b_height),    // client_cert|client_key or client_ca_file
-            Constraint::Length(error_height),     // error (hidden when empty)
-            Constraint::Length(1),                // keybinds
+            Constraint::Length(3),               // name
+            Constraint::Length(3),               // config path
+            Constraint::Length(3),               // version | role | reconnect (client only)
+            Constraint::Length(3),               // protocol | ip | port | path
+            Constraint::Length(security_height), // security | username | password | skip-verify
+            Constraint::Length(hint_height),     // self-signed hint (server, below TLS)
+            Constraint::Length(cert_a_height),   // cert_file|key_file or ca_file
+            Constraint::Length(cert_b_height),   // client_cert|client_key or client_ca_file
+            Constraint::Length(error_height),    // error (hidden when empty)
+            Constraint::Length(1),               // keybinds
         ])
         .split(inner);
 
         render_field!(self, name, rows[0], buf);
         render_field!(self, config_path, rows[1], buf);
-        render_row!(self, rows[2], buf; version, role);
+        if show_reconnect {
+            render_row!(self, rows[2], buf; version, role, reconnect);
+        } else {
+            render_row!(self, rows[2], buf; version, role);
+        }
 
         if self.path_hidden() {
             // No URL path for the server role — let ip take the freed space.
@@ -652,52 +655,48 @@ impl OcppSetupDialog {
             );
         }
 
-        if show_reconnect {
-            render_field!(self, reconnect, rows[4], buf);
-        }
-
         let is_client = role == OcppRole::Client;
         if show_security_row {
             if show_credentials {
                 if is_client {
-                    render_row!(self, rows[5], buf; security, username, password, skip_verify);
+                    render_row!(self, rows[4], buf; security, username, password, skip_verify);
                 } else {
-                    render_row!(self, rows[5], buf; security, username, password);
+                    render_row!(self, rows[4], buf; security, username, password);
                 }
             } else if is_client {
-                render_row!(self, rows[5], buf; security, skip_verify);
+                render_row!(self, rows[4], buf; security, skip_verify);
             } else {
                 // Server without credential fields: the selection is the row's only widget,
                 // so it takes the full width instead of leaving two thirds blank.
-                render_field!(self, security, rows[5], buf);
+                render_field!(self, security, rows[4], buf);
             }
         }
 
         if show_hint {
             self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
-            render_field!(self, hint, rows[6], buf);
+            render_field!(self, hint, rows[5], buf);
         }
 
         if show_cert_a {
             if show_server_cert {
-                render_row!(self, rows[7], buf; cert_file, key_file);
+                render_row!(self, rows[6], buf; cert_file, key_file);
             } else {
-                render_field!(self, ca_file, rows[7], buf);
+                render_field!(self, ca_file, rows[6], buf);
             }
         }
 
         if show_cert_b {
             if show_client_ca {
-                render_field!(self, client_ca_file, rows[8], buf);
+                render_field!(self, client_ca_file, rows[7], buf);
             } else {
-                render_row!(self, rows[8], buf; client_cert_file, client_key_file);
+                render_row!(self, rows[7], buf; client_cert_file, client_key_file);
             }
         }
 
         if has_error {
-            render_field!(self, error, rows[9], buf);
+            render_field!(self, error, rows[8], buf);
         }
-        render_field!(self, keybinds, rows[10], buf);
+        render_field!(self, keybinds, rows[9], buf);
 
         // Must be called after every sibling widget above has been rendered, so a popup paints on
         // top rather than being overwritten (painter's-algorithm buffer model).
@@ -807,6 +806,15 @@ fn selection<T: ToLabel + Clone>(
     values: Vec<T>,
     style: &SelectionStyle,
 ) -> Widget<SelectionState<T>, Selection<T>> {
+    aligned_selection(title, None, values, style)
+}
+
+fn aligned_selection<T: ToLabel + Clone>(
+    title: &str,
+    title_alignment: Option<HorizontalAlignment>,
+    values: Vec<T>,
+    style: &SelectionStyle,
+) -> Widget<SelectionState<T>, Selection<T>> {
     Widget {
         state: SelectionStateBuilder::default()
             .focused(false)
@@ -815,7 +823,9 @@ fn selection<T: ToLabel + Clone>(
             .expect("all required builder fields are set"),
         widget: SelectionBuilder::default()
             .border(Border::Full(Margin::new(1, 0)))
-            .title(Some((title, HorizontalAlignment::Left).into()))
+            .title(Some(
+                (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
+            ))
             .margin(Margin {
                 vertical: 0,
                 horizontal: 1,
