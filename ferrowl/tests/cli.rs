@@ -17,8 +17,10 @@ fn evse_device() -> &'static str {
 #[test]
 /// CL-R-025 — a SIGINT (Ctrl-C) during a headless run ends the loop as a clean shutdown (exit 0).
 fn it_sigint_is_a_clean_shutdown() {
+    // Port 0: this test never connects to the server, only checks SIGINT shutdown, so an
+    // ephemeral port removes the collision class entirely (AGENTS.md: tests bind port 0).
     let module = format!(
-        "name=sig,device={},transport=tcp,ip=127.0.0.1,port=15931,role=server",
+        "name=sig,device={},transport=tcp,ip=127.0.0.1,port=0,role=server",
         evse_device()
     );
     // No --duration: the run loops until interrupted.
