@@ -25,17 +25,16 @@ pub struct OcppSecurityConfig {
     /// Basic Auth password. Never logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    /// Client role only: extra trust anchor (PEM file) for a self-signed CSMS certificate, added
-    /// on top of the system/webpki root store.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ca_file: Option<String>,
-    /// Server role only: certificate chain (PEM file) presented to connecting clients. Setting
-    /// this (together with `key_file`) is what turns on TLS for the listener.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cert_file: Option<String>,
-    /// Server role only: private key (PEM file) matching `cert_file`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_file: Option<String>,
+    /// Client role only: how the server's certificate is verified — `ca_file` (extra trust
+    /// anchor added on top of the system/webpki root store) or `insecure_skip_verify`. MB-R-109/
+    /// OC-R-036 precedence lives in [`ferrowl_util::tls::ClientVerification::resolve`].
+    #[serde(flatten)]
+    pub client_verification: ferrowl_util::tls::ClientVerification,
+    /// Server role only: source of the certificate chain/key presented to connecting clients.
+    /// Setting this to `Explicit`/`SelfSigned` is what turns on TLS for the listener. OC-R-096
+    /// precedence lives in [`ferrowl_util::tls::ServerCertSource::resolve`].
+    #[serde(flatten)]
+    pub server_cert: ferrowl_util::tls::ServerCertSource,
     /// Client role: client certificate (PEM file) presented for mutual TLS. Server role: ignored
     /// (see `client_ca_file` for verifying the peer's certificate instead).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,17 +50,6 @@ pub struct OcppSecurityConfig {
     /// `client_ca_file` (Security Profile 3).
     #[serde(default)]
     pub require_client_cert: bool,
-    /// Server role only: below the TLS level (None/Basic Auth), generate an ephemeral self-signed
-    /// certificate in memory at each start instead of refusing to bind `wss://` at all. Ignored
-    /// once `cert_file`/`key_file` are set — explicit files always win.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub self_signed: bool,
-    /// Client role only: accept any server certificate without authenticating it (see
-    /// `ferrowl_ocpp::CsTlsConfig::insecure_skip_verify`). Needed to talk to a CSMS using
-    /// `self_signed`, since its identity changes every start and so cannot be pinned via
-    /// `ca_file`. Test rigs only.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub insecure_skip_verify: bool,
 }
 
 impl OcppSecurityConfig {
@@ -80,34 +68,39 @@ impl OcppSecurityConfig {
         }
     }
 
-    /// CS-side TLS config, if any of `ca_file`/`client_cert_file`/`client_key_file`/
-    /// `insecure_skip_verify` is set.
+    /// CS-side TLS config, if any of `client_verification`'s `ca_file`/`SkipVerify`/
+    /// `client_cert_file`/`client_key_file` is set.
     pub fn cs_tls(&self) -> Option<ferrowl_ocpp::CsTlsConfig> {
-        if self.ca_file.is_none()
-            && self.client_cert_file.is_none()
+        if matches!(
+            self.client_verification,
+            ferrowl_util::tls::ClientVerification::Verify { ca_file: None }
+        ) && self.client_cert_file.is_none()
             && self.client_key_file.is_none()
-            && !self.insecure_skip_verify
         {
             return None;
         }
         Some(ferrowl_ocpp::CsTlsConfig {
-            ca_file: self.ca_file.clone(),
+            client_verification: self.client_verification.clone(),
             client_cert_file: self.client_cert_file.clone(),
             client_key_file: self.client_key_file.clone(),
-            insecure_skip_verify: self.insecure_skip_verify,
         })
     }
 
-    /// CSMS-side TLS config: explicit `cert_file`/`key_file` win when set; otherwise `self_signed`
-    /// turns on an ephemeral in-memory certificate; otherwise `None` (no TLS on the listener).
+    /// CSMS-side TLS config: embeds/reuses `ServerCertSource`'s own precedence directly (OC-R-096)
+    /// rather than re-resolving it here — `Unset` is the only case with no TLS on the listener.
     pub fn csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
-        let mode = match (&self.cert_file, &self.key_file) {
-            (Some(cert_file), Some(key_file)) => ferrowl_ocpp::CsmsTlsMode::Files {
+        let mode = match &self.server_cert {
+            ferrowl_util::tls::ServerCertSource::Unset => return None,
+            ferrowl_util::tls::ServerCertSource::SelfSigned => {
+                ferrowl_ocpp::CsmsTlsMode::SelfSigned
+            }
+            ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file,
+                key_file,
+            } => ferrowl_ocpp::CsmsTlsMode::Files {
                 cert_file: cert_file.clone(),
                 key_file: key_file.clone(),
             },
-            _ if self.self_signed => ferrowl_ocpp::CsmsTlsMode::SelfSigned,
-            _ => return None,
         };
         Some(ferrowl_ocpp::CsmsTlsConfig {
             mode,
@@ -357,15 +350,14 @@ mod tests {
             security: OcppSecurityConfig {
                 username: Some("cp001".into()),
                 password: Some("s3cret".into()),
-                ca_file: Some("/tmp/ca.pem".into()),
-                cert_file: None,
-                key_file: None,
+                client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                    ca_file: Some("/tmp/ca.pem".into()),
+                },
+                server_cert: ferrowl_util::tls::ServerCertSource::Unset,
                 client_cert_file: None,
                 client_key_file: None,
                 client_ca_file: None,
                 require_client_cert: false,
-                self_signed: false,
-                insecure_skip_verify: false,
             },
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -393,8 +385,39 @@ mod tests {
         assert!(cfg.security.basic_auth().is_none());
         assert!(cfg.security.cs_tls().is_none());
         assert!(cfg.security.csms_tls().is_none());
-        assert!(!cfg.security.self_signed);
-        assert!(!cfg.security.insecure_skip_verify);
+    }
+
+    #[test]
+    /// struct/type rework — `OcppSecurityConfig`'s TLS-shaped defaults match
+    /// `ServerCertSource`/`ClientVerification`'s own defaults.
+    fn ut_ocpp_security_config_defaults() {
+        let cfg = OcppSecurityConfig::default();
+        assert_eq!(cfg.server_cert, ferrowl_util::tls::ServerCertSource::Unset);
+        assert_eq!(
+            cfg.client_verification,
+            ferrowl_util::tls::ClientVerification::Verify { ca_file: None }
+        );
+    }
+
+    #[test]
+    /// OC-R-112 — `cert_file` set alone (no `key_file`, no `self_signed`) fails to deserialize an
+    /// `OcppSecurityConfig`: this is where OC-R-112 actually bites, since (unlike a bare
+    /// `CsmsTlsMode`) `OcppSecurityConfig` has a legal "unset" state via `ServerCertSource::Unset`.
+    fn ut_device_config_cert_file_alone_fails_to_load() {
+        let json = serde_json::json!({"cert_file": "s.crt"});
+        let result: Result<OcppSecurityConfig, _> = serde_json::from_value(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    /// struct/type rework — `csms_tls()` returns `None` when `server_cert` is `Unset`, distinct
+    /// from `CsmsTlsMode`'s own fallible (never-`Unset`) conversion.
+    fn ut_csms_tls_unset_returns_none() {
+        let cfg = OcppSecurityConfig {
+            server_cert: ferrowl_util::tls::ServerCertSource::Unset,
+            ..Default::default()
+        };
+        assert!(cfg.csms_tls().is_none());
     }
 
     // An old-format device config file (predating `script_interval`) must still load, with
@@ -451,8 +474,8 @@ mod tests {
     /// CS-R-004 — new security fields round-trip through TOML and JSON.
     fn ut_security_config_new_fields_round_trip() {
         let cfg = OcppSecurityConfig {
-            self_signed: true,
-            insecure_skip_verify: true,
+            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
             ..Default::default()
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -468,7 +491,7 @@ mod tests {
     /// OC-R-096 — a wss CSMS with no server cert/key files uses `self_signed` for its TLS material.
     fn ut_csms_tls_self_signed_without_cert_files() {
         let cfg = OcppSecurityConfig {
-            self_signed: true,
+            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
             ..Default::default()
         };
         let tls = cfg.csms_tls().expect("self_signed enables TLS");
@@ -476,12 +499,14 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-096 — explicit server cert + key files take precedence over `self_signed` for a wss CSMS.
+    /// OC-R-096 — explicit server cert + key files take precedence over `self_signed` for a wss CSMS
+    /// (embed/reuse `ServerCertSource`'s own precedence, not re-resolved here).
     fn ut_csms_tls_explicit_files_win_over_self_signed() {
         let cfg = OcppSecurityConfig {
-            self_signed: true,
-            cert_file: Some("s.crt".into()),
-            key_file: Some("s.key".into()),
+            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: "s.crt".into(),
+                key_file: "s.key".into(),
+            },
             ..Default::default()
         };
         let tls = cfg.csms_tls().expect("cert/key enable TLS");
@@ -489,16 +514,19 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-036 — a CS TLS configuration carries the `insecure_skip_verify` flag.
+    /// OC-R-036 — a CS TLS configuration carries `ClientVerification::SkipVerify`.
     fn ut_cs_tls_carries_insecure_skip_verify() {
         let cfg = OcppSecurityConfig {
-            insecure_skip_verify: true,
+            client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
             ..Default::default()
         };
         let tls = cfg
             .cs_tls()
-            .expect("insecure_skip_verify does not gate cs_tls presence");
-        assert!(tls.insecure_skip_verify);
+            .expect("SkipVerify does not gate cs_tls presence");
+        assert_eq!(
+            tls.client_verification,
+            ferrowl_util::tls::ClientVerification::SkipVerify
+        );
     }
 
     #[test]
