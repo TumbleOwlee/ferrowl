@@ -4,6 +4,7 @@
 
 pub mod backoff;
 pub mod convert;
+pub mod tls;
 pub mod tokio;
 
 /// Simple macro to prevent boilerplate of `.to_owned()`

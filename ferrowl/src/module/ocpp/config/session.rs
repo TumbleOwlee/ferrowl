@@ -366,8 +366,10 @@ mod tests {
     /// OC-R-042 — a ws:// CSMS endpoint leaves any configured TLS material inert.
     fn ut_effective_csms_tls_ws_ignores_configured_certificates() {
         let security = crate::config::ocpp::OcppSecurityConfig {
-            cert_file: Some("certs/csms.pem".into()),
-            key_file: Some("certs/csms.key".into()),
+            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: "certs/csms.pem".into(),
+                key_file: "certs/csms.key".into(),
+            },
             ..Default::default()
         };
         let spec = spec_with(OcppProtocol::Ws, security);
@@ -378,8 +380,10 @@ mod tests {
     /// OC-R-096 — explicit server cert + key files take precedence over the ephemeral self-signed fallback.
     fn ut_effective_csms_tls_explicit_files_win_over_fallback() {
         let security = crate::config::ocpp::OcppSecurityConfig {
-            cert_file: Some("certs/csms.pem".into()),
-            key_file: Some("certs/csms.key".into()),
+            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: "certs/csms.pem".into(),
+                key_file: "certs/csms.key".into(),
+            },
             ..Default::default()
         };
         let spec = spec_with(OcppProtocol::Wss, security);

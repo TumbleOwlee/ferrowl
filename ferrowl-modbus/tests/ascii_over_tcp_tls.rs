@@ -11,6 +11,7 @@ use ferrowl_modbus::ascii_over_tcp;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_util::tls::{ClientVerification, ServerCertSource};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -86,7 +87,7 @@ async fn ascii_over_tcp_client_server_tls_roundtrip() {
 
     // Server: an ephemeral self-signed cert (`self_signed = true`, no cert_file/key_file).
     let server_tls = tcp::ModbusTlsConfig {
-        self_signed: true,
+        server_cert: ServerCertSource::SelfSigned,
         ..Default::default()
     };
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
@@ -106,7 +107,7 @@ async fn ascii_over_tcp_client_server_tls_roundtrip() {
     // AsciiOverTcp handshake plumbing, not certificate validation, which MB-R-109's
     // tcp_tls_client.rs tests already cover in depth).
     let client_tls = tcp::ModbusTlsConfig {
-        insecure_skip_verify: true,
+        client_verification: ClientVerification::SkipVerify,
         ..Default::default()
     };
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -165,7 +166,7 @@ async fn ascii_over_tcp_tls_handshake_failure_is_connect_failure() {
     let handshake_cfg = config(
         plain_addr.port(),
         tcp::ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         },
     );

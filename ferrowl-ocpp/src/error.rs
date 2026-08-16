@@ -58,10 +58,6 @@ pub enum TlsError {
     MissingClientCa,
     #[error("client certificate verifier configuration failed: {0}")]
     ClientVerifier(String),
-    #[error(
-        "self-signed CSMS certificates do not support require_client_cert (no CA to distribute for mTLS)"
-    )]
-    SelfSignedWithClientCert,
     #[error("failed to generate self-signed certificate: {0}")]
     SelfSignedGen(rcgen::Error),
     #[error("failed to encode generated private key: {0}")]

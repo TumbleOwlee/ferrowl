@@ -90,7 +90,10 @@ mistaken for an oversight and silently "fixed".
 
 | Condition | Behavior |
 |---|---|
-| `self_signed` set together with explicit `cert_file`/`key_file` | the explicit files win; no error, self-generation is skipped |
+| `self_signed` set together with explicit `cert_file`/`key_file` | `self_signed` wins unconditionally; the files are structurally unreachable, not merely ignored (MB-R-106) |
+| `cert_file`/`key_file` set alone while `self_signed` is not set | configuration resolution fails, not server bind (MB-R-107) |
+| The Modbus TCP setup dialog's Self-Signed toggled On after `cert_file`/`key_file` text was entered | resolved config excludes both files entirely; the widgets' stored text is preserved for when the toggle goes back Off (MB-R-135) |
+| The Modbus TCP setup dialog's Skip-Verify toggled On after `ca_file` text was entered | resolved config excludes `ca_file` entirely (MB-R-135) |
 | `tls` set in an RTU device config | ignored — the RTU `Config` has no `tls` field (MB-R-112), so the key is unreachable rather than rejected |
 | A `cert_file`/`key_file`/`ca_file`/`client_cert_file`/`client_key_file`/`client_ca_file` path that is malformed PEM or unreadable | server or client start fails with a TLS configuration error, the same tier as MB-R-107/MB-R-108 |
 

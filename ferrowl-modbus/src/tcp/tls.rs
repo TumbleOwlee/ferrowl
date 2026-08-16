@@ -18,12 +18,10 @@ use crate::TcpError;
 /// TLS material for a Modbus/TCP endpoint, client or server (MB-R-105).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct ModbusTlsConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ca_file: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cert_file: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_file: Option<String>,
+    #[serde(flatten)]
+    pub client_verification: ferrowl_util::tls::ClientVerification,
+    #[serde(flatten)]
+    pub server_cert: ferrowl_util::tls::ServerCertSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_cert_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32,10 +30,6 @@ pub struct ModbusTlsConfig {
     pub client_ca_file: Option<String>,
     #[serde(default)]
     pub require_client_cert: bool,
-    #[serde(default)]
-    pub self_signed: bool,
-    #[serde(default)]
-    pub insecure_skip_verify: bool,
 }
 
 /// Read a PEM file's raw bytes, mapping a missing/unreadable file to the TLS
@@ -101,14 +95,17 @@ impl AsyncWrite for ClientStream {
 /// presented only when both `client_cert_file` and `client_key_file` are set;
 /// either alone presents nothing — MB-R-110.
 pub(crate) fn build_client_tls_config(cfg: &ModbusTlsConfig) -> Result<TlsClientConfig, TcpError> {
-    let server_cert = if cfg.insecure_skip_verify {
-        ServerCertVerification::DangerousDisableVerification
-    } else {
-        let mut roots = RootStore::native();
-        if let Some(path) = &cfg.ca_file {
-            roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
+    let server_cert = match &cfg.client_verification {
+        ferrowl_util::tls::ClientVerification::SkipVerify => {
+            ServerCertVerification::DangerousDisableVerification
         }
-        ServerCertVerification::Verify(roots)
+        ferrowl_util::tls::ClientVerification::Verify { ca_file } => {
+            let mut roots = RootStore::native();
+            if let Some(path) = ca_file {
+                roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
+            }
+            ServerCertVerification::Verify(roots)
+        }
     };
     let client_identity = match (&cfg.client_cert_file, &cfg.client_key_file) {
         (Some(cert), Some(key)) => Some(ClientIdentity {
@@ -123,17 +120,27 @@ pub(crate) fn build_client_tls_config(cfg: &ModbusTlsConfig) -> Result<TlsClient
     })
 }
 
-/// Resolve the server's presented certificate per MB-R-106/107, and whether an
+/// Resolve the server's presented certificate per MB-R-106, and whether an
 /// ephemeral self-signed certificate was used *without* being explicitly
-/// requested (the caller logs that case). Explicit `cert_file`/`key_file` always
-/// win over `self_signed` when both are set (edge-cases.md "TLS boundaries").
+/// requested (the caller logs that case). `self_signed` wins unconditionally over
+/// `cert_file`/`key_file` (edge-cases.md "TLS boundaries") — enforced by
+/// `ServerCertSource` at construction (MB-R-107), so the "one set, not the other"
+/// case is unrepresentable here and needs no error arm.
 pub(crate) fn resolve_server_identity(
     cfg: &ModbusTlsConfig,
     bind_host: &str,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, bool), TcpError> {
-    match (&cfg.cert_file, &cfg.key_file) {
-        (Some(cert), Some(key)) => {
-            let chain = rust_modbus::load_pem_cert_chain(&read_pem(cert)?).map_err(map_tls_err)?;
+    match &cfg.server_cert {
+        ferrowl_util::tls::ServerCertSource::SelfSigned => {
+            let (chain, k) = generate_self_signed(bind_host)?;
+            Ok((chain, k, false))
+        }
+        ferrowl_util::tls::ServerCertSource::Explicit {
+            cert_file,
+            key_file,
+        } => {
+            let chain =
+                rust_modbus::load_pem_cert_chain(&read_pem(cert_file)?).map_err(map_tls_err)?;
             // A PEM document with no certificate blocks at all (garbage input) parses
             // successfully to an empty chain rather than erroring; catch that here so it
             // fails at the same TLS-configuration-error tier as every other malformed-PEM
@@ -141,19 +148,16 @@ pub(crate) fn resolve_server_identity(
             // listener bind time, as a bare `Error::Server(Error::TlsHandshake)`.
             if chain.is_empty() {
                 return Err(TcpError::Configuration(format!(
-                    "{cert} contains no certificate"
+                    "{cert_file} contains no certificate"
                 )));
             }
-            let k = rust_modbus::load_pem_private_key(&read_pem(key)?).map_err(map_tls_err)?;
+            let k = rust_modbus::load_pem_private_key(&read_pem(key_file)?).map_err(map_tls_err)?;
             Ok((chain, k, false))
         }
-        (None, None) => {
+        ferrowl_util::tls::ServerCertSource::Unset => {
             let (chain, k) = generate_self_signed(bind_host)?;
-            Ok((chain, k, !cfg.self_signed))
+            Ok((chain, k, true))
         }
-        _ => Err(TcpError::Configuration(
-            "cert_file and key_file must both be set, or neither (MB-R-107)".into(),
-        )),
     }
 }
 
@@ -277,13 +281,16 @@ mod tests {
     /// MB-R-109 — `insecure_skip_verify` disables server certificate verification and
     /// ignores `ca_file`, rather than combining the two.
     #[test]
-    fn ut_build_client_tls_config_insecure_skip_verify_ignores_ca_file() {
+    fn ut_build_client_tls_config_client_verification_skip_wins() {
         use super::build_client_tls_config;
+        use ferrowl_util::tls::ClientVerification;
         use rust_modbus::ServerCertVerification;
 
         let cfg = ModbusTlsConfig {
-            ca_file: Some("/no/such/ca.pem".to_string()),
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::resolve(
+                true,
+                Some("/no/such/ca.pem".to_string()),
+            ),
             ..Default::default()
         };
         let built = build_client_tls_config(&cfg).expect("builds despite unreadable ca_file");
@@ -293,19 +300,77 @@ mod tests {
         ));
     }
 
-    /// MB-R-105 — `ModbusTlsConfig` carries exactly nine fields, six optional
-    /// strings unset and three bools false, by default.
+    /// MB-R-105 — `ModbusTlsConfig` carries the `client_verification`/`server_cert` enums plus
+    /// the four untouched fields, all defaulting to their empty/off state.
     #[test]
     fn ut_modbus_tls_config_defaults() {
+        use ferrowl_util::tls::{ClientVerification, ServerCertSource};
+
         let cfg = ModbusTlsConfig::default();
-        assert_eq!(cfg.ca_file, None);
-        assert_eq!(cfg.cert_file, None);
-        assert_eq!(cfg.key_file, None);
+        assert_eq!(cfg.server_cert, ServerCertSource::Unset);
+        assert_eq!(
+            cfg.client_verification,
+            ClientVerification::Verify { ca_file: None }
+        );
         assert_eq!(cfg.client_cert_file, None);
         assert_eq!(cfg.client_key_file, None);
         assert_eq!(cfg.client_ca_file, None);
         assert!(!cfg.require_client_cert);
-        assert!(!cfg.self_signed);
-        assert!(!cfg.insecure_skip_verify);
+    }
+
+    /// MB-R-106 — a `SelfSigned` server_cert never reads cert_file/key_file (there are none in
+    /// the variant) and is not the fallback (used_fallback == false: it was explicitly asked
+    /// for).
+    #[test]
+    fn ut_resolve_server_identity_self_signed_variant_never_reads_disk() {
+        use super::resolve_server_identity;
+        use ferrowl_util::tls::ServerCertSource;
+
+        let cfg = ModbusTlsConfig {
+            server_cert: ServerCertSource::SelfSigned,
+            ..Default::default()
+        };
+        let (_chain, _key, used_fallback) =
+            resolve_server_identity(&cfg, "localhost").expect("self-signed generation succeeds");
+        assert!(!used_fallback);
+    }
+
+    /// MB-R-106 — an `Explicit` server_cert loads exactly the named cert/key PEM files.
+    #[test]
+    fn ut_resolve_server_identity_explicit_variant_loads_files() {
+        use super::resolve_server_identity;
+        use ferrowl_util::tls::ServerCertSource;
+
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cert_file = write_pem("srv-cert", &cert_pem);
+        let key_file = write_pem("srv-key", &key_pem);
+
+        let cfg = ModbusTlsConfig {
+            server_cert: ServerCertSource::Explicit {
+                cert_file,
+                key_file,
+            },
+            ..Default::default()
+        };
+        let (chain, _key, used_fallback) =
+            resolve_server_identity(&cfg, "localhost").expect("loads explicit files");
+        assert_eq!(chain.len(), 1);
+        assert!(!used_fallback);
+    }
+
+    /// MB-R-106 — an `Unset` server_cert falls back to an ephemeral self-signed certificate and
+    /// flags the fallback so the caller can log it.
+    #[test]
+    fn ut_resolve_server_identity_unset_variant_falls_back_and_flags_it() {
+        use super::resolve_server_identity;
+        use ferrowl_util::tls::ServerCertSource;
+
+        let cfg = ModbusTlsConfig {
+            server_cert: ServerCertSource::Unset,
+            ..Default::default()
+        };
+        let (_chain, _key, used_fallback) =
+            resolve_server_identity(&cfg, "localhost").expect("falls back to self-signed");
+        assert!(used_fallback);
     }
 }
