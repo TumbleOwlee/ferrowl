@@ -454,9 +454,13 @@ mod tests {
 
         let mut cfg = sample();
         cfg.tls = Some(ModbusTlsConfig {
-            ca_file: Some("ca.pem".to_string()),
-            cert_file: Some("cert.pem".to_string()),
-            key_file: Some("key.pem".to_string()),
+            client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                ca_file: Some("ca.pem".to_string()),
+            },
+            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: "cert.pem".to_string(),
+                key_file: "key.pem".to_string(),
+            },
             require_client_cert: true,
             ..Default::default()
         });

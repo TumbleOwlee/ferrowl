@@ -8,6 +8,7 @@ use ferrowl_ui::traits::ToLabel;
 
 use crate::config::Role;
 use ferrowl_modbus::tcp::ModbusTlsConfig;
+use ferrowl_util::tls::{ClientVerification, ServerCertSource};
 
 /// Modbus/TCP TLS level. Cumulative: `MutualTls`'s fields are shown in addition to `Tls`'s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -85,7 +86,10 @@ impl TlsLevel {
             Role::Client => {
                 if cfg.client_cert_file.is_some() {
                     TlsLevel::MutualTls
-                } else if cfg.ca_file.is_some() || cfg.insecure_skip_verify {
+                } else if !matches!(
+                    cfg.client_verification,
+                    ClientVerification::Verify { ca_file: None }
+                ) {
                     TlsLevel::Tls
                 } else {
                     TlsLevel::Off
@@ -94,7 +98,7 @@ impl TlsLevel {
             Role::Server => {
                 if cfg.require_client_cert || cfg.client_ca_file.is_some() {
                     TlsLevel::MutualTls
-                } else if cfg.cert_file.is_some() || cfg.key_file.is_some() || cfg.self_signed {
+                } else if !matches!(cfg.server_cert, ServerCertSource::Unset) {
                     TlsLevel::Tls
                 } else {
                     TlsLevel::Off
@@ -119,22 +123,19 @@ impl TlsLevel {
             let t = s.trim();
             (!t.is_empty()).then(|| t.to_string())
         };
-        let tls = self >= TlsLevel::Tls;
+        let _ = (ca_file, cert_file, key_file); // consulted by the caller (`resolve`) instead; see below
         let mtls = self == TlsLevel::MutualTls;
         let is_client = role == Role::Client;
         let is_server = role == Role::Server;
         ModbusTlsConfig {
-            ca_file: if tls && is_client { opt(ca_file) } else { None },
-            cert_file: if tls && is_server {
-                opt(cert_file)
-            } else {
-                None
-            },
-            key_file: if tls && is_server {
-                opt(key_file)
-            } else {
-                None
-            },
+            // `server_cert`/`client_verification` are overwritten by the caller (`resolve`),
+            // which resolves them from the dialog's `self_signed`/`skip_verify` toggle widgets
+            // together with the raw field text via `ServerCertSource::resolve`/
+            // `ClientVerification::resolve` (MB-R-135) -- neither is derivable from the raw text
+            // alone, since the toggle can exclude stale text this function has no visibility
+            // into.
+            client_verification: ClientVerification::default(),
+            server_cert: ServerCertSource::default(),
             client_cert_file: if mtls && is_client {
                 opt(client_cert_file)
             } else {
@@ -151,11 +152,6 @@ impl TlsLevel {
                 None
             },
             require_client_cert: mtls && is_server,
-            // Set by the caller (`resolve`), which reads the dialog's `self_signed`/
-            // `skip_verify` toggle widgets — neither is derivable from the raw field text this
-            // function works from.
-            self_signed: false,
-            insecure_skip_verify: false,
         }
     }
 
@@ -186,19 +182,23 @@ pub(super) fn validate_tls(
 
     match role {
         Role::Server => {
-            if level >= TlsLevel::Tls && !cfg.self_signed {
-                let cert = cfg
-                    .cert_file
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .ok_or("Certificate file is required for TLS (or enable Self-Signed).")?;
-                exists("Certificate file", cert)?;
-                let key = cfg
-                    .key_file
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .ok_or("Key file is required for TLS (or enable Self-Signed).")?;
-                exists("Key file", key)?;
+            if level >= TlsLevel::Tls && !matches!(cfg.server_cert, ServerCertSource::SelfSigned) {
+                match &cfg.server_cert {
+                    ServerCertSource::Explicit {
+                        cert_file,
+                        key_file,
+                    } => {
+                        exists("Certificate file", cert_file)?;
+                        exists("Key file", key_file)?;
+                    }
+                    ServerCertSource::Unset => {
+                        return Err(
+                            "Certificate file is required for TLS (or enable Self-Signed)."
+                                .to_string(),
+                        );
+                    }
+                    ServerCertSource::SelfSigned => unreachable!("excluded by the outer !matches!"),
+                }
             }
             if level == TlsLevel::MutualTls {
                 let ca = cfg
@@ -210,7 +210,7 @@ pub(super) fn validate_tls(
             }
         }
         Role::Client => {
-            if let Some(ca) = cfg.ca_file.as_deref()
+            if let ClientVerification::Verify { ca_file: Some(ca) } = &cfg.client_verification
                 && !ca.is_empty()
             {
                 exists("CA file", ca)?;
@@ -252,7 +252,9 @@ mod tests {
     /// UI-R-024 — a client TLS config loads into the CA-file field.
     fn ut_from_config_tls_client_is_ca_file() {
         let cfg = ModbusTlsConfig {
-            ca_file: Some("ca.pem".into()),
+            client_verification: ClientVerification::Verify {
+                ca_file: Some("ca.pem".into()),
+            },
             ..Default::default()
         };
         assert_eq!(TlsLevel::from_config(&cfg, Role::Client), TlsLevel::Tls);
@@ -262,7 +264,7 @@ mod tests {
     /// UI-R-024 — a client config with only skip-verify set still loads at the TLS level.
     fn ut_from_config_tls_client_is_skip_verify_alone() {
         let cfg = ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         };
         assert_eq!(TlsLevel::from_config(&cfg, Role::Client), TlsLevel::Tls);
@@ -272,8 +274,10 @@ mod tests {
     /// UI-R-024 — a server TLS config loads into the cert and key fields.
     fn ut_from_config_tls_server_is_cert_and_key() {
         let cfg = ModbusTlsConfig {
-            cert_file: Some("s.crt".into()),
-            key_file: Some("s.key".into()),
+            server_cert: ServerCertSource::Explicit {
+                cert_file: "s.crt".into(),
+                key_file: "s.key".into(),
+            },
             ..Default::default()
         };
         assert_eq!(TlsLevel::from_config(&cfg, Role::Server), TlsLevel::Tls);
@@ -283,7 +287,7 @@ mod tests {
     /// UI-R-024 — a server config with only self_signed set still loads at the TLS level.
     fn ut_from_config_tls_server_is_self_signed_alone() {
         let cfg = ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ServerCertSource::SelfSigned,
             ..Default::default()
         };
         assert_eq!(TlsLevel::from_config(&cfg, Role::Server), TlsLevel::Tls);
@@ -339,14 +343,13 @@ mod tests {
                 client_ca_file: "cca",
             },
         );
-        assert_eq!(cfg.cert_file, None);
-        assert_eq!(cfg.key_file, None);
         assert_eq!(cfg.client_ca_file, None);
         assert!(!cfg.require_client_cert);
     }
 
     #[test]
-    /// UI-R-024 — a server TLS build keeps cert/key and drops client fields.
+    /// UI-R-024 — a server TLS build drops client fields (server_cert/client_verification are
+    /// resolved by the caller, `resolve()`, not by `build_config` -- see MB-R-135).
     fn ut_build_config_tls_server_keeps_cert_key_not_client_fields() {
         let cfg = TlsLevel::Tls.build_config(
             Role::Server,
@@ -359,9 +362,6 @@ mod tests {
                 client_ca_file: "cca",
             },
         );
-        assert_eq!(cfg.cert_file.as_deref(), Some("cert"));
-        assert_eq!(cfg.key_file.as_deref(), Some("key"));
-        assert_eq!(cfg.ca_file, None); // client-only field
         assert_eq!(cfg.client_ca_file, None);
     }
 
@@ -398,7 +398,6 @@ mod tests {
                 client_ca_file: "",
             },
         );
-        assert_eq!(cfg.ca_file.as_deref(), Some("ca"));
         assert_eq!(cfg.client_cert_file.as_deref(), Some("ccert"));
         assert_eq!(cfg.client_key_file.as_deref(), Some("ckey"));
         assert_eq!(cfg.client_ca_file, None); // server-only field
@@ -411,7 +410,7 @@ mod tests {
     /// UI-R-024 — a server at TLS with self_signed set needs no cert/key files.
     fn ut_validate_tls_server_self_signed_needs_no_files() {
         let cfg = ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ServerCertSource::SelfSigned,
             ..Default::default()
         };
         assert!(validate_tls(&cfg, Role::Server, TlsLevel::Tls, &|_| false).is_ok());
@@ -424,8 +423,10 @@ mod tests {
         assert!(validate_tls(&missing, Role::Server, TlsLevel::Tls, &|_| false).is_err());
 
         let cfg = ModbusTlsConfig {
-            cert_file: Some("s.crt".into()),
-            key_file: Some("s.key".into()),
+            server_cert: ServerCertSource::Explicit {
+                cert_file: "s.crt".into(),
+                key_file: "s.key".into(),
+            },
             ..Default::default()
         };
         assert!(validate_tls(&cfg, Role::Server, TlsLevel::Tls, &|_| true).is_ok());
@@ -436,7 +437,7 @@ mod tests {
     /// UI-R-024 — a server at mTLS additionally requires an existing client CA file.
     fn ut_validate_tls_server_mutual_tls_requires_client_ca_file() {
         let cfg = ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ServerCertSource::SelfSigned,
             client_ca_file: Some("ca.pem".into()),
             ..Default::default()
         };
@@ -444,7 +445,7 @@ mod tests {
         assert!(validate_tls(&cfg, Role::Server, TlsLevel::MutualTls, &|_| false).is_err());
 
         let no_ca = ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ServerCertSource::SelfSigned,
             ..Default::default()
         };
         assert!(validate_tls(&no_ca, Role::Server, TlsLevel::MutualTls, &|_| true).is_err());
@@ -454,14 +455,16 @@ mod tests {
     /// UI-R-024 — a client's CA file, when set, must exist; skip-verify alone needs no file.
     fn ut_validate_tls_client_ca_file_must_exist_when_set() {
         let cfg = ModbusTlsConfig {
-            ca_file: Some("ca.pem".into()),
+            client_verification: ClientVerification::Verify {
+                ca_file: Some("ca.pem".into()),
+            },
             ..Default::default()
         };
         assert!(validate_tls(&cfg, Role::Client, TlsLevel::Tls, &|_| true).is_ok());
         assert!(validate_tls(&cfg, Role::Client, TlsLevel::Tls, &|_| false).is_err());
 
         let skip_verify_only = ModbusTlsConfig {
-            insecure_skip_verify: true,
+            client_verification: ClientVerification::SkipVerify,
             ..Default::default()
         };
         assert!(validate_tls(&skip_verify_only, Role::Client, TlsLevel::Tls, &|_| false).is_ok());

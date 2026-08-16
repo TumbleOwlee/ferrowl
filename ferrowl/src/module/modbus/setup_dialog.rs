@@ -261,20 +261,36 @@ impl SetupDialog {
         if let Some(tls) = tls {
             let level = TlsLevel::from_config(tls, role);
             dialog.tls_level.state.set_selection(level.index());
-            dialog
-                .self_signed
-                .state
-                .set_selection(if tls.self_signed { 1 } else { 0 });
-            dialog
-                .skip_verify
-                .state
-                .set_selection(if tls.insecure_skip_verify { 1 } else { 0 });
-            set_suggest_input(&mut dialog.ca_file, tls.ca_file.as_deref().unwrap_or(""));
-            set_suggest_input(
-                &mut dialog.cert_file,
-                tls.cert_file.as_deref().unwrap_or(""),
+            dialog.self_signed.state.set_selection(
+                if tls.server_cert == ferrowl_util::tls::ServerCertSource::SelfSigned {
+                    1
+                } else {
+                    0
+                },
             );
-            set_suggest_input(&mut dialog.key_file, tls.key_file.as_deref().unwrap_or(""));
+            dialog.skip_verify.state.set_selection(
+                if tls.client_verification == ferrowl_util::tls::ClientVerification::SkipVerify {
+                    1
+                } else {
+                    0
+                },
+            );
+            let ca_file = match &tls.client_verification {
+                ferrowl_util::tls::ClientVerification::Verify { ca_file } => {
+                    ca_file.as_deref().unwrap_or("")
+                }
+                ferrowl_util::tls::ClientVerification::SkipVerify => "",
+            };
+            set_suggest_input(&mut dialog.ca_file, ca_file);
+            let (cert_file, key_file) = match &tls.server_cert {
+                ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file,
+                    key_file,
+                } => (cert_file.as_str(), key_file.as_str()),
+                _ => ("", ""),
+            };
+            set_suggest_input(&mut dialog.cert_file, cert_file);
+            set_suggest_input(&mut dialog.key_file, key_file);
             set_suggest_input(
                 &mut dialog.client_cert_file,
                 tls.client_cert_file.as_deref().unwrap_or(""),
@@ -814,12 +830,36 @@ impl SetupDialog {
                         client_ca_file: self.client_ca_file.state.input(),
                     },
                 );
+                // MB-R-135: resolve server_cert/client_verification from the toggle widgets
+                // together with the raw text, rather than layering a bare self_signed/
+                // insecure_skip_verify flag on top of whatever build_config already put in
+                // cert_file/key_file/ca_file -- that layering is exactly the bug MB-R-135 fixes
+                // (Self-Signed On no longer excludes stale cert/key text from the resolved
+                // config). The `?` here is effectively unreachable today: `validate_tls`'s
+                // existing cert/key-required check below already catches "cert_file xor
+                // key_file, Self-Signed Off" with a friendlier message first, at Tls level and
+                // above -- but it is the correct fallback for a future path that skips that
+                // check.
                 if role == Role::Server {
-                    cfg.self_signed = self.self_signed.state.get_value() == SelfSignedChoice::On;
+                    let opt = |s: &str| {
+                        let t = s.trim();
+                        (!t.is_empty()).then(|| t.to_string())
+                    };
+                    cfg.server_cert = ferrowl_util::tls::ServerCertSource::resolve(
+                        self.self_signed.state.get_value() == SelfSignedChoice::On,
+                        opt(self.cert_file.state.input()),
+                        opt(self.key_file.state.input()),
+                    )?;
                 }
                 if role == Role::Client {
-                    cfg.insecure_skip_verify =
-                        self.skip_verify.state.get_value() == SkipVerifyChoice::On;
+                    let opt = |s: &str| {
+                        let t = s.trim();
+                        (!t.is_empty()).then(|| t.to_string())
+                    };
+                    cfg.client_verification = ferrowl_util::tls::ClientVerification::resolve(
+                        self.skip_verify.state.get_value() == SkipVerifyChoice::On,
+                        opt(self.ca_file.state.input()),
+                    );
                 }
                 validate_tls(&cfg, role, level, &|p| std::path::Path::new(p).exists())?;
                 Some(Some(cfg))
@@ -1619,9 +1659,99 @@ mod tests {
         set_suggest_input(&mut dialog.client_ca_file, "client_ca.pem");
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
-        assert!(cfg.self_signed);
+        assert_eq!(
+            cfg.server_cert,
+            ferrowl_util::tls::ServerCertSource::SelfSigned
+        );
         assert_eq!(cfg.client_ca_file, None);
         assert!(!cfg.require_client_cert);
+    }
+
+    #[test]
+    /// MB-R-135 — toggling Self-Signed On excludes stale cert_file/key_file text from the
+    /// resolved config, even though the widgets' stored text is untouched.
+    fn ut_resolve_self_signed_excludes_stale_cert_key_text() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        set_suggest_input(&mut dialog.cert_file, "s.crt");
+        set_suggest_input(&mut dialog.key_file, "s.key");
+        dialog.self_signed.state.set_selection(1); // On, after the text was typed
+
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap().unwrap();
+        assert_eq!(
+            cfg.server_cert,
+            ferrowl_util::tls::ServerCertSource::SelfSigned
+        );
+        // The stored text survives the toggle -- only the resolved config excludes it.
+        assert_eq!(dialog.cert_file.state.input(), "s.crt");
+        assert_eq!(dialog.key_file.state.input(), "s.key");
+    }
+
+    #[test]
+    /// MB-R-135 — toggling Skip-Verify On excludes stale ca_file text from the resolved config,
+    /// even though the widget's stored text is untouched.
+    fn ut_resolve_skip_verify_excludes_stale_ca_file_text() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(1); // Role::Server=0, Role::Client=1
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        set_suggest_input(&mut dialog.ca_file, "ca.pem");
+        dialog.skip_verify.state.set_selection(1); // On, after the text was typed
+
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap().unwrap();
+        assert_eq!(
+            cfg.client_verification,
+            ferrowl_util::tls::ClientVerification::SkipVerify
+        );
+        assert_eq!(dialog.ca_file.state.input(), "ca.pem");
+    }
+
+    #[test]
+    /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
+    /// (nothing was cleared, only excluded while On).
+    fn ut_resolve_toggle_self_signed_back_off_restores_cert_key() {
+        let cert = std::env::temp_dir().join("ferrowl_modbus_setup_test_s.crt");
+        let key = std::env::temp_dir().join("ferrowl_modbus_setup_test_s.key");
+        std::fs::write(&cert, b"").unwrap();
+        std::fs::write(&key, b"").unwrap();
+        let cert = cert.to_str().unwrap().to_string();
+        let key = key.to_str().unwrap().to_string();
+
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        set_suggest_input(&mut dialog.cert_file, &cert);
+        set_suggest_input(&mut dialog.key_file, &key);
+        dialog.self_signed.state.set_selection(1); // On
+        dialog.self_signed.state.set_selection(0); // Off again
+
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap().unwrap();
+        assert_eq!(
+            cfg.server_cert,
+            ferrowl_util::tls::ServerCertSource::Explicit {
+                cert_file: cert,
+                key_file: key,
+            }
+        );
     }
 
     #[test]

@@ -791,7 +791,7 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
             ..Default::default()
         });
         let endpoint = Endpoint::Tcp {
@@ -822,7 +822,7 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
             ..Default::default()
         });
         let endpoint = Endpoint::RtuOverTcp {
@@ -881,7 +881,7 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            self_signed: true,
+            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
             ..Default::default()
         });
         let endpoint = Endpoint::AsciiOverTcp {
