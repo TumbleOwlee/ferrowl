@@ -129,18 +129,15 @@ Consequence: a CS module that was online and dropped now recovers on its own;
 auto-Heartbeat and auto-MeterValues resume once reconnected without operator
 intervention.
 
-### 6.2 CSMS bind retry has no disable toggle
+### 6.2 CSMS bind retry
 
 Resolved: a CSMS whose bind fails now retries using the same shared backoff
 driver (OC-R-083, OC-R-108–109), instead of giving up permanently. A server still
 binds **automatically on creation** — unlike a client, which never connects until
-told to.
-
-Retained nuance: unlike the CS's `reconnect` field, there is no config toggle to
-disable this — a CSMS always retries a failed bind for as long as the module
-itself is running (mirrors Modbus's server-side behavior, which likewise has no
-per-transport way to keep a listener bind fail-fast while other reconnect
-behavior stays on).
+told to. Governed by the same `reconnect` config field as the CS role
+(default enabled); with it disabled, a failed bind ends the module task
+instead of retrying, mirroring Modbus's own server-side toggle
+(MB-R-130–134).
 
 ### 6.3 Unbounded connections and no idle timeout
 

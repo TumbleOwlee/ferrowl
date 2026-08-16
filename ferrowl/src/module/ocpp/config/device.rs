@@ -168,9 +168,9 @@ pub struct OcppDeviceConfig {
     /// Awaited-reply timeout (ms); `None` uses the crate default (30_000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
-    /// Client-only: automatically reconnect (with backoff) on a lost or refused connection
-    /// instead of ending the CS task (OC-R-048). `None` falls back to the default (on). Ignored
-    /// by the server role.
+    /// Automatically reconnect (with backoff) instead of ending the module task on failure:
+    /// client redial on a lost or refused connection (OC-R-048), or server listener bind retry
+    /// (OC-R-083). `None` falls back to the default (on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<bool>,
     /// Lua simulation scripts (run every ~100ms while enabled; client role only).

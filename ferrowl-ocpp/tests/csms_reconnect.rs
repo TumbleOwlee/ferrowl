@@ -63,6 +63,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
         host: "127.0.0.1".to_owned(),
         port: occupied_port,
         timeout_ms: 1000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -122,6 +123,7 @@ async fn csms_terminate_while_backing_off_ends_task_ok() {
         host: "127.0.0.1".to_owned(),
         port: occupied_port,
         timeout_ms: 1000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -136,6 +138,36 @@ async fn csms_terminate_while_backing_off_ends_task_ok() {
         .await
         .expect("terminate() must not hang while the task is backing off from a failed bind");
     assert!(result.is_ok());
+
+    drop(occupier);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-083 (revised) — with `reconnect` disabled, a CSMS listener bind failure ends the module
+/// task with that error instead of retrying, mirroring `ferrowl_modbus::tcp`'s
+/// `tcp_server_bind_failure_reconnect_false_ends_task` (MB-R-134).
+async fn csms_bind_failure_reconnect_false_ends_task() {
+    let occupier = TokioTcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("occupier bind failed");
+    let occupied_port = occupier.local_addr().expect("occupier addr").port();
+
+    let mut server = csms::ServerBuilder::<V1_6>::new(csms::Config {
+        host: "127.0.0.1".to_owned(),
+        port: occupied_port,
+        timeout_ms: 1000,
+        reconnect: false,
+        basic_auth: None,
+        tls: None,
+    })
+    .spawn(TestCsms, sink())
+    .await
+    .expect("spawn must not fail synchronously on an occupied port");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), server.join())
+        .await
+        .expect("task should end promptly, not retry, with reconnect disabled");
+    assert!(result.is_err(), "join must surface the bind failure");
 
     drop(occupier);
 }

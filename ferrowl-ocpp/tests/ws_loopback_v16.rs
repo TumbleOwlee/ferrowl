@@ -88,6 +88,7 @@ async fn start_server() -> csms::Server<V1_6> {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -396,6 +397,7 @@ async fn awaited_call_times_out() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })
@@ -446,6 +448,7 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })

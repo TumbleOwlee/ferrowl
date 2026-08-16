@@ -105,6 +105,7 @@ async fn basic_auth_accepts_matching_credentials() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: Some(auth.clone()),
         tls: None,
     })
@@ -139,6 +140,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: Some(BasicAuth {
             username: "cp001".to_owned(),
             password: "s3cret".to_owned(),
@@ -183,6 +185,7 @@ async fn basic_auth_rejects_missing_credentials() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: Some(BasicAuth {
             username: "cp001".to_owned(),
             password: "s3cret".to_owned(),
@@ -230,6 +233,7 @@ async fn tls_loopback_over_self_signed_cert() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: Some(CsmsTlsConfig {
             mode: CsmsTlsMode::Files {
@@ -284,6 +288,7 @@ async fn tls_loopback_rejects_untrusted_cert() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: Some(CsmsTlsConfig {
             mode: CsmsTlsMode::Files {
@@ -333,6 +338,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: Some(CsmsTlsConfig {
             mode: CsmsTlsMode::SelfSigned,
@@ -376,6 +382,7 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: Some(CsmsTlsConfig {
             mode: CsmsTlsMode::SelfSigned,
@@ -430,6 +437,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: Some(auth.clone()),
         tls,
     })
@@ -493,6 +501,7 @@ async fn self_signed_with_require_client_cert_is_rejected_at_build() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: Some(CsmsTlsConfig {
             mode: CsmsTlsMode::SelfSigned,

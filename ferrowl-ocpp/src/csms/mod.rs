@@ -58,9 +58,10 @@ where
     /// `handler` answers inbound Calls for every connection.
     ///
     /// A *bind* failure no longer fails the start synchronously; it is retried from inside the
-    /// task instead (OC-R-083, OC-R-108, OC-R-109). Unlike a CS, a CSMS has no `reconnect`
-    /// toggle: a failed bind is always retried for as long as the module itself is running,
-    /// using the same backoff policy as the Modbus client (MB-R-051).
+    /// task instead (OC-R-083, OC-R-108, OC-R-109). With `config.reconnect` set (the default), a
+    /// failed bind is retried using the same backoff policy as the Modbus client (MB-R-051); with
+    /// it unset, a failed bind ends the module task with that error, surfaced from
+    /// [`Server::join`]/[`Server::terminate`].
     /// [`Server::local_addr`] is `None` until the first successful bind.
     ///
     /// A TLS-configuration *build* failure is a different kind of error: it is deterministic
@@ -112,7 +113,7 @@ pub struct Server<V: Version> {
     cmd_tx: mpsc::Sender<Command<V>>,
     registry: Arc<ConnectionRegistry<V>>,
     local_addr: Arc<Mutex<Option<SocketAddr>>>,
-    handle: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<Result<(), Error>>>,
     _v: PhantomData<fn() -> V>,
 }
 
@@ -163,7 +164,7 @@ impl<V: Version> Server<V> {
     /// Wait for the server task to finish.
     pub async fn join(&mut self) -> Result<(), Error> {
         if let Some(handle) = self.handle.take() {
-            handle.await.map_err(|_| Error::NotRunning)?;
+            handle.await.map_err(|_| Error::NotRunning)??;
         }
         Ok(())
     }
@@ -208,11 +209,12 @@ where
 }
 
 /// Drive the listener-bind retry loop: bind the configured address and run the accept loop,
-/// retrying a failed bind per [`BackoffPolicy`] — always, since a CSMS has no `reconnect` toggle
-/// (OC-R-083, OC-R-108, OC-R-109). `tls` is already built (a build failure is checked once,
-/// synchronously, by [`ServerBuilder::spawn`] — OC-R-040 — and never retried here). Fills
-/// `local_addr` once bound, clears it again if the accept loop ever ends (own `Terminate`/channel
-/// close) so a caller can tell "never bound"/"backing off" apart from "bound".
+/// retrying a failed bind per [`BackoffPolicy`] when `config.reconnect` is set (OC-R-083,
+/// OC-R-108, OC-R-109); with it unset, a failed bind ends the loop with that error. `tls` is
+/// already built (a build failure is checked once, synchronously, by [`ServerBuilder::spawn`] —
+/// OC-R-040 — and never retried here). Fills `local_addr` once bound, clears it again if the
+/// accept loop ever ends (own `Terminate`/channel close) so a caller can tell "never
+/// bound"/"backing off" apart from "bound".
 #[allow(clippy::too_many_arguments)]
 async fn run_reconnect_loop<V, H, L>(
     config: Config,
@@ -222,7 +224,8 @@ async fn run_reconnect_loop<V, H, L>(
     log: L,
     local_addr: Arc<Mutex<Option<SocketAddr>>>,
     tls: Option<Arc<rustls::ServerConfig>>,
-) where
+) -> Result<(), Error>
+where
     V: Version,
     V::Action: Clone,
     H: CsmsActionHandler<V>,
@@ -245,8 +248,7 @@ async fn run_reconnect_loop<V, H, L>(
             match TcpListener::bind((config.host.as_str(), config.port)).await {
                 Err(e) => AttemptOutcome::Failed {
                     error: Error::from(e),
-                    // OC-R-083: unconditional — a CSMS has no `reconnect` toggle.
-                    reconnect: true,
+                    reconnect: config.reconnect,
                     reset: false,
                 },
                 Ok(listener) => {
@@ -255,7 +257,7 @@ async fn run_reconnect_loop<V, H, L>(
                         Err(e) => {
                             return AttemptOutcome::Failed {
                                 error: Error::from(e),
-                                reconnect: true,
+                                reconnect: config.reconnect,
                                 reset: false,
                             };
                         }
@@ -295,7 +297,7 @@ async fn run_reconnect_loop<V, H, L>(
         }
     };
 
-    let _ = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await
 }
 
 /// The accept loop: hand-shakes new sockets and routes server-level commands.

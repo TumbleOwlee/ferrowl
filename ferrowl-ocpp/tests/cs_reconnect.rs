@@ -171,6 +171,7 @@ async fn cs_config_reread_on_every_dial() {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 1000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })

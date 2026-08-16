@@ -86,6 +86,7 @@ async fn start_server() -> csms::Server<V2_0_1> {
         host: "127.0.0.1".to_owned(),
         port: 0,
         timeout_ms: 2000,
+        reconnect: true,
         basic_auth: None,
         tls: None,
     })

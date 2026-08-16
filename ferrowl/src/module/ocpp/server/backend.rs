@@ -212,6 +212,7 @@ where
             host: spec.ip.clone(),
             port: spec.port,
             timeout_ms: spec.timeout_ms.unwrap_or(30_000),
+            reconnect: spec.reconnect.unwrap_or(true),
             basic_auth: spec.security.basic_auth(),
             tls,
         };

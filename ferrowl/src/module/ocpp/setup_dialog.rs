@@ -40,9 +40,10 @@ use security::{SecurityInputs, SecurityLevel, SkipVerifyChoice, validate_securit
 #[derive(Debug, Clone)]
 pub struct ConfigPath;
 
-/// Client-only auto-reconnect toggle (OC-R-048, OC-R-107). Mirrors Modbus's own
-/// `setup_dialog::choices::ReconnectChoice`, duplicated rather than shared: the two setup
-/// dialogs are independent module types with no shared UI-choices module.
+/// Auto-reconnect toggle: client redial (OC-R-048, OC-R-107) or server bind retry
+/// (OC-R-083, OC-R-108–109). Mirrors Modbus's own `setup_dialog::choices::ReconnectChoice`,
+/// duplicated rather than shared: the two setup dialogs are independent module types with no
+/// shared UI-choices module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconnectChoice {
     On,
@@ -94,9 +95,9 @@ pub struct OcppSetupDialog {
     pub version: Widget<SelectionState<OcppVersion>, Selection<OcppVersion>>,
     #[focus]
     pub role: Widget<SelectionState<OcppRole>, Selection<OcppRole>>,
-    /// Client-only: automatically reconnect (with backoff) instead of ending the CS task on a
-    /// lost or refused connection (OC-R-048). Ignored (and hidden) for the server role.
-    #[focus(when = {self.role.get_value() == OcppRole::Client})]
+    /// Automatically reconnect (with backoff) instead of ending the module task on failure:
+    /// client redial (OC-R-048) or server bind retry (OC-R-083). Shown for every role.
+    #[focus]
     pub reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     #[focus]
     pub protocol: Widget<SelectionState<OcppProtocol>, Selection<OcppProtocol>>,
@@ -377,8 +378,7 @@ impl OcppSetupDialog {
         }
 
         let role = self.role.get_value();
-        let reconnect = (role == OcppRole::Client)
-            .then(|| self.reconnect.state.get_value() == ReconnectChoice::On);
+        let reconnect = Some(self.reconnect.state.get_value() == ReconnectChoice::On);
         let protocol = self.protocol.get_value();
         let security = if protocol == OcppProtocol::Wss {
             let level = self.security.get_value();
@@ -460,11 +460,6 @@ impl OcppSetupDialog {
     /// host:port and ignores it — so it is hidden (and skipped by focus) when the role is Server.
     fn path_hidden(&self) -> bool {
         self.role.get_value() == OcppRole::Server
-    }
-
-    /// The reconnect toggle is client-only (OC-R-048); the server role ignores it entirely.
-    fn show_reconnect(&self) -> bool {
-        self.role.get_value() == OcppRole::Client
     }
 
     /// Whether the protocol is `wss://` (gates every security-related field).
@@ -573,7 +568,6 @@ impl OcppSetupDialog {
         let show_cert_a = self.show_cert_row_a();
         let show_cert_b = self.show_cert_row_b();
         let show_hint = self.show_hint();
-        let show_reconnect = self.show_reconnect();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role|reconnect(3)
         // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
@@ -633,11 +627,7 @@ impl OcppSetupDialog {
 
         render_field!(self, name, rows[0], buf);
         render_field!(self, config_path, rows[1], buf);
-        if show_reconnect {
-            render_row!(self, rows[2], buf; version, role, reconnect);
-        } else {
-            render_row!(self, rows[2], buf; version, role);
-        }
+        render_row!(self, rows[2], buf; version, role, reconnect);
 
         if self.path_hidden() {
             // No URL path for the server role — let ip take the freed space.
@@ -921,14 +911,17 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-048 — a server-role setup reports no reconnect setting (the field is client-only).
-    fn ut_resolve_server_role_reports_no_reconnect() {
+    /// OC-R-083 — a server-role setup reports its own reconnect setting (default On), same as
+    /// the client role.
+    fn ut_resolve_server_role_reports_reconnect() {
         let mut d = OcppSetupDialog::new();
         set_text(&mut d.name, "csms-1");
         d.role.state.set_selection(1); // Server
-        // Default role is Client; reconnect selection is irrelevant/unseen once role is Server.
         let spec = d.resolve().expect("valid server config");
-        assert_eq!(spec.reconnect, None);
+        assert_eq!(spec.reconnect, Some(true));
+        d.reconnect.state.set_selection(1); // Off
+        let spec = d.resolve().expect("valid server config");
+        assert_eq!(spec.reconnect, Some(false));
     }
 
     #[test]
@@ -953,14 +946,23 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-022 — the focus cycle skips the reconnect field when it is hidden for a server role.
-    fn ut_focus_next_skips_reconnect_for_server_role() {
+    /// UI-R-022 — the focus cycle reaches the reconnect field for a server role too (OC-R-083).
+    fn ut_focus_next_reaches_reconnect_for_server_role() {
         let mut d = OcppSetupDialog::new();
         d.role.state.set_selection(1); // Server
+        d.set_focused(true);
+        let mut visited = false;
         for _ in 0..20 {
             d.focus_next();
+            if d.reconnect.state.is_focused() {
+                visited = true;
+                break;
+            }
         }
-        assert!(!d.reconnect.state.is_focused());
+        assert!(
+            visited,
+            "reconnect field must be reachable for a server role"
+        );
     }
 
     // Regression: editing a ws module whose device file carries a security section (Basic Auth

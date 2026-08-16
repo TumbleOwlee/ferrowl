@@ -243,7 +243,7 @@ behavior, stated limitations).
 
 **OC-R-082** — The connection or listener configuration shall be rebuilt from the current module spec on every start, so an edited endpoint or security section always takes effect on the next start without a stale copy.
 
-**OC-R-083** — A client module shall **not** connect automatically; it shall connect only on an explicit start. A server module shall bind its listener automatically on creation; a failed bind shall retry using the same backoff policy as the Modbus client (MB-R-051), with no separate config toggle — a CSMS always retries a failed bind when the module itself is running.
+**OC-R-083** — A client module shall **not** connect automatically; it shall connect only on an explicit start. A server module shall bind its listener automatically on creation. With `reconnect` enabled (the default), a failed bind shall not end the module task; it shall retry using the same backoff policy as the Modbus client (MB-R-051). With `reconnect` disabled, a failed bind shall end the module task with that error, surfaced to the caller.
 
 **OC-R-084** — Restarting a module shall stop the current instance and start a new one from the current spec. Restarting a server shall additionally discard every observed charging-station entry.
 
