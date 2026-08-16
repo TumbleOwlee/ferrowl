@@ -3,6 +3,7 @@
 //! (`from_config` infers a level, `build_config` resolves one, `validate_security` checks files).
 
 use ferrowl_ui::traits::ToLabel;
+use ferrowl_util::tls::{ClientVerification, ServerCertSource};
 
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::OcppRole;
@@ -49,6 +50,25 @@ impl ToLabel for SkipVerifyChoice {
     }
 }
 
+/// Server-only "generate an ephemeral self-signed certificate" toggle, offered whenever `Tls`/
+/// `MutualTls` is selected. Mirrors `SelfSignedChoice` in the Modbus dialog's `tls` module
+/// byte-for-byte (see `ferrowl/src/module/modbus/setup_dialog/tls.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfSignedChoice {
+    Off,
+    On,
+}
+
+impl ToLabel for SelfSignedChoice {
+    fn to_label(&self) -> String {
+        match self {
+            SelfSignedChoice::Off => "Off",
+            SelfSignedChoice::On => "On",
+        }
+        .to_string()
+    }
+}
+
 /// Raw text of every security input field, passed by name so the many look-alike path fields
 /// cannot be transposed at a call site (a swapped positional pair would compile and only fail at
 /// TLS-handshake time).
@@ -72,7 +92,10 @@ impl SecurityLevel {
             OcppRole::Client => {
                 if cfg.client_cert_file.is_some() {
                     SecurityLevel::MutualTls
-                } else if cfg.ca_file.is_some() {
+                } else if !matches!(
+                    cfg.client_verification,
+                    ClientVerification::Verify { ca_file: None }
+                ) {
                     SecurityLevel::Tls
                 } else if cfg.username.is_some() {
                     SecurityLevel::BasicAuth
@@ -83,7 +106,12 @@ impl SecurityLevel {
             OcppRole::Server => {
                 if cfg.require_client_cert || cfg.client_ca_file.is_some() {
                     SecurityLevel::MutualTls
-                } else if cfg.cert_file.is_some() || cfg.key_file.is_some() {
+                } else if matches!(cfg.server_cert, ServerCertSource::Explicit { .. }) {
+                    // Deliberately not `!matches!(.., Unset)`: `SelfSigned` alone must not imply
+                    // `Tls` here, since `resolve()`'s below-`Tls` auto-fallback (OC-R-095) also
+                    // sets `server_cert: SelfSigned` -- treating that as `Tls` on a later
+                    // `edit()` would promote the level and make the fallback irreversible.
+                    // Matches the pre-OC-R-110 behavior, which ignored `self_signed` here too.
                     SecurityLevel::Tls
                 } else if cfg.username.is_some() {
                     SecurityLevel::BasicAuth
@@ -113,24 +141,14 @@ impl SecurityLevel {
             (!t.is_empty()).then(|| t.to_string())
         };
         let basic = self >= SecurityLevel::BasicAuth;
-        let tls = self >= SecurityLevel::Tls;
         let mtls = self == SecurityLevel::MutualTls;
         let is_client = role == OcppRole::Client;
         let is_server = role == OcppRole::Server;
+        let _ = ca_file; // consulted by the caller (`resolve`) instead; see below
+        let _ = (cert_file, key_file); // ditto
         OcppSecurityConfig {
             username: if basic { opt(username) } else { None },
             password: if basic { opt(password) } else { None },
-            ca_file: if tls && is_client { opt(ca_file) } else { None },
-            cert_file: if tls && is_server {
-                opt(cert_file)
-            } else {
-                None
-            },
-            key_file: if tls && is_server {
-                opt(key_file)
-            } else {
-                None
-            },
             client_cert_file: if mtls && is_client {
                 opt(client_cert_file)
             } else {
@@ -147,11 +165,14 @@ impl SecurityLevel {
                 None
             },
             require_client_cert: mtls && is_server,
-            // Set by the caller (`resolve`), which knows the role/level rule for `self_signed`
-            // and reads the dialog's `skip_verify` toggle for `insecure_skip_verify` — neither is
-            // derivable from the raw field text this function works from.
-            self_signed: false,
-            insecure_skip_verify: false,
+            // `server_cert`/`client_verification` are overwritten by the caller (`resolve`),
+            // which resolves them from the dialog's `self_signed`/`skip_verify` toggle widgets
+            // together with the raw field text via `ServerCertSource::resolve`/
+            // `ClientVerification::resolve` (OC-R-110/OC-R-111, mirroring MB-R-135) -- neither is
+            // derivable from the raw text alone, since the toggle can exclude stale text this
+            // function has no visibility into.
+            client_verification: ClientVerification::default(),
+            server_cert: ServerCertSource::default(),
         }
     }
 
@@ -183,19 +204,24 @@ pub(super) fn validate_security(
 
     match role {
         OcppRole::Server => {
-            if level >= SecurityLevel::Tls {
-                let cert = cfg
-                    .cert_file
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .ok_or("Certificate file is required for TLS.")?;
-                exists("Certificate file", cert)?;
-                let key = cfg
-                    .key_file
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .ok_or("Key file is required for TLS.")?;
-                exists("Key file", key)?;
+            // OC-R-110: Self-Signed needs no cert/key files (mirrors Modbus's `validate_tls`
+            // fix in s8).
+            if level >= SecurityLevel::Tls
+                && !matches!(cfg.server_cert, ServerCertSource::SelfSigned)
+            {
+                match &cfg.server_cert {
+                    ServerCertSource::Explicit {
+                        cert_file,
+                        key_file,
+                    } => {
+                        exists("Certificate file", cert_file)?;
+                        exists("Key file", key_file)?;
+                    }
+                    ServerCertSource::Unset => {
+                        return Err("Certificate file is required for TLS.".to_string());
+                    }
+                    ServerCertSource::SelfSigned => unreachable!("excluded by the outer !matches!"),
+                }
             }
             if level == SecurityLevel::MutualTls {
                 let ca = cfg
@@ -207,7 +233,7 @@ pub(super) fn validate_security(
             }
         }
         OcppRole::Client => {
-            if let Some(ca) = cfg.ca_file.as_deref()
+            if let ClientVerification::Verify { ca_file: Some(ca) } = &cfg.client_verification
                 && !ca.is_empty()
             {
                 exists("CA file", ca)?;
@@ -273,7 +299,9 @@ mod tests {
     /// UI-R-024 — a client TLS config loads into the CA-file field.
     fn ut_from_config_tls_client_is_ca_file() {
         let cfg = OcppSecurityConfig {
-            ca_file: Some("ca.pem".into()),
+            client_verification: ClientVerification::Verify {
+                ca_file: Some("ca.pem".into()),
+            },
             ..Default::default()
         };
         assert_eq!(
@@ -286,8 +314,10 @@ mod tests {
     /// UI-R-024 — a server TLS config loads into the cert and key fields.
     fn ut_from_config_tls_server_is_cert_and_key() {
         let cfg = OcppSecurityConfig {
-            cert_file: Some("s.crt".into()),
-            key_file: Some("s.key".into()),
+            server_cert: ServerCertSource::Explicit {
+                cert_file: "s.crt".into(),
+                key_file: "s.key".into(),
+            },
             ..Default::default()
         };
         assert_eq!(
@@ -350,14 +380,13 @@ mod tests {
         );
         assert_eq!(cfg.username.as_deref(), Some("u"));
         assert_eq!(cfg.password.as_deref(), Some("p"));
-        assert_eq!(cfg.cert_file, None);
-        assert_eq!(cfg.key_file, None);
         assert_eq!(cfg.client_ca_file, None);
         assert!(!cfg.require_client_cert);
     }
 
     #[test]
-    /// UI-R-024 — a server TLS build keeps cert/key and drops client fields.
+    /// UI-R-024 — a server TLS build drops client fields (server_cert/client_verification are
+    /// resolved by the caller, `resolve()`, not by `build_config` -- see OC-R-110/OC-R-111.)
     fn ut_build_config_tls_server_keeps_cert_key_not_client_fields() {
         let cfg = SecurityLevel::Tls.build_config(
             OcppRole::Server,
@@ -372,9 +401,6 @@ mod tests {
                 client_ca_file: "cca",
             },
         );
-        assert_eq!(cfg.cert_file.as_deref(), Some("cert"));
-        assert_eq!(cfg.key_file.as_deref(), Some("key"));
-        assert_eq!(cfg.ca_file, None); // client-only field
         assert_eq!(cfg.client_ca_file, None);
     }
 
@@ -415,7 +441,6 @@ mod tests {
                 client_ca_file: "",
             },
         );
-        assert_eq!(cfg.ca_file.as_deref(), Some("ca"));
         assert_eq!(cfg.client_cert_file.as_deref(), Some("ccert"));
         assert_eq!(cfg.client_key_file.as_deref(), Some("ckey"));
         assert_eq!(cfg.client_ca_file, None); // server-only field
