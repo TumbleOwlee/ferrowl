@@ -254,6 +254,186 @@ pub enum ClientTlsPolicy {
     },
 }
 
+/// Wire shadow for [`ServerTlsPolicy`]'s flattened fields: [`ServerCertSource`]'s own three
+/// (`self_signed`/`cert_file`/`key_file`) plus `require_client_cert` (the `MutualTls` trigger)
+/// and [`ClientCertVerification`]'s own three. `require_client_cert` gates whether the
+/// verification fields are even consulted — unlike a bare flattened `ClientCertVerification`
+/// (which errors on an empty `ca_files` unconditionally), a `Tls`-level document legitimately
+/// carries none of them at all.
+#[derive(Serialize, Deserialize, Default)]
+struct RawServerTlsPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cert_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_file: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    self_signed: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    require_client_cert: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    client_ca_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_ca_file: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    client_cert_skip_verify: bool,
+}
+
+impl Serialize for ServerTlsPolicy {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let raw = match self {
+            ServerTlsPolicy::NoTls => RawServerTlsPolicy::default(),
+            ServerTlsPolicy::Tls { server_cert } => RawServerTlsPolicy {
+                self_signed: matches!(server_cert, ServerCertSource::SelfSigned),
+                cert_file: match server_cert {
+                    ServerCertSource::Explicit { cert_file, .. } => Some(cert_file.clone()),
+                    _ => None,
+                },
+                key_file: match server_cert {
+                    ServerCertSource::Explicit { key_file, .. } => Some(key_file.clone()),
+                    _ => None,
+                },
+                ..Default::default()
+            },
+            ServerTlsPolicy::MutualTls {
+                server_cert,
+                client_verification,
+            } => RawServerTlsPolicy {
+                self_signed: matches!(server_cert, ServerCertSource::SelfSigned),
+                cert_file: match server_cert {
+                    ServerCertSource::Explicit { cert_file, .. } => Some(cert_file.clone()),
+                    _ => None,
+                },
+                key_file: match server_cert {
+                    ServerCertSource::Explicit { key_file, .. } => Some(key_file.clone()),
+                    _ => None,
+                },
+                require_client_cert: true,
+                client_ca_files: match client_verification {
+                    ClientCertVerification::Verify { ca_files } => ca_files.clone(),
+                    ClientCertVerification::SkipVerify => Vec::new(),
+                },
+                client_ca_file: None,
+                client_cert_skip_verify: matches!(
+                    client_verification,
+                    ClientCertVerification::SkipVerify
+                ),
+            },
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ServerTlsPolicy {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = RawServerTlsPolicy::deserialize(deserializer)?;
+        let server_cert = ServerCertSource::resolve(raw.self_signed, raw.cert_file, raw.key_file)
+            .map_err(D::Error::custom)?;
+        if !raw.require_client_cert {
+            return Ok(ServerTlsPolicy::Tls { server_cert });
+        }
+        let ca_files = if !raw.client_ca_files.is_empty() {
+            raw.client_ca_files
+        } else {
+            raw.client_ca_file.into_iter().collect()
+        };
+        let client_verification =
+            ClientCertVerification::resolve(raw.client_cert_skip_verify, ca_files)
+                .map_err(D::Error::custom)?;
+        Ok(ServerTlsPolicy::MutualTls {
+            server_cert,
+            client_verification,
+        })
+    }
+}
+
+/// Wire shadow for [`ClientTlsPolicy`]'s flattened fields: [`ClientVerification`]'s own two
+/// (`ca_file`/`insecure_skip_verify`) plus `client_self_signed`/`client_cert_file`/
+/// `client_key_file` (the `MutualTls` identity, [`ClientCertSource`]'s own three) — no explicit
+/// "is this mTLS" trigger field of its own; `MutualTls` is inferred from any client-identity
+/// field being present, mirroring how the dialog layer already treats "client cert file set" as
+/// the mTLS trigger (`TlsLevel::from_config`).
+#[derive(Serialize, Deserialize, Default)]
+struct RawClientTlsPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ca_file: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    insecure_skip_verify: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_cert_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_key_file: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    client_self_signed: bool,
+}
+
+impl Serialize for ClientTlsPolicy {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let raw = match self {
+            ClientTlsPolicy::NoTls => RawClientTlsPolicy::default(),
+            ClientTlsPolicy::Tls {
+                client_verification,
+            } => RawClientTlsPolicy {
+                ca_file: match client_verification {
+                    ClientVerification::Verify { ca_file } => ca_file.clone(),
+                    ClientVerification::SkipVerify => None,
+                },
+                insecure_skip_verify: matches!(client_verification, ClientVerification::SkipVerify),
+                ..Default::default()
+            },
+            ClientTlsPolicy::MutualTls {
+                client_verification,
+                client_identity,
+            } => RawClientTlsPolicy {
+                ca_file: match client_verification {
+                    ClientVerification::Verify { ca_file } => ca_file.clone(),
+                    ClientVerification::SkipVerify => None,
+                },
+                insecure_skip_verify: matches!(client_verification, ClientVerification::SkipVerify),
+                client_self_signed: matches!(client_identity, ClientCertSource::SelfSigned),
+                client_cert_file: match client_identity {
+                    ClientCertSource::Explicit {
+                        client_cert_file, ..
+                    } => Some(client_cert_file.clone()),
+                    ClientCertSource::SelfSigned => None,
+                },
+                client_key_file: match client_identity {
+                    ClientCertSource::Explicit {
+                        client_key_file, ..
+                    } => Some(client_key_file.clone()),
+                    ClientCertSource::SelfSigned => None,
+                },
+            },
+        };
+        raw.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ClientTlsPolicy {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = RawClientTlsPolicy::deserialize(deserializer)?;
+        let client_verification =
+            ClientVerification::resolve(raw.insecure_skip_verify, raw.ca_file);
+        let mtls = raw.client_self_signed
+            || raw.client_cert_file.is_some()
+            || raw.client_key_file.is_some();
+        if !mtls {
+            return Ok(ClientTlsPolicy::Tls {
+                client_verification,
+            });
+        }
+        let client_identity = ClientCertSource::resolve(
+            raw.client_self_signed,
+            raw.client_cert_file,
+            raw.client_key_file,
+        )
+        .map_err(D::Error::custom)?;
+        Ok(ClientTlsPolicy::MutualTls {
+            client_verification,
+            client_identity,
+        })
+    }
+}
+
 /// Wire shadow for [`ServerCertSource`]'s flattened fields (`cert_file`/`key_file`/
 /// `self_signed`), used by its manual `Serialize`/`Deserialize` so the type stays
 /// `#[serde(flatten)]`-compatible.
@@ -347,6 +527,218 @@ mod tests {
     struct ClientVerificationWrapper {
         #[serde(flatten)]
         client_verification: ClientVerification,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ServerTlsPolicyWrapper {
+        #[serde(flatten)]
+        server: ServerTlsPolicy,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ClientTlsPolicyWrapper {
+        #[serde(flatten)]
+        client: ClientTlsPolicy,
+    }
+
+    // --- ServerTlsPolicy serde --------------------------------------------------------------
+
+    /// MB-R-105 — a bare `{}` (no `require_client_cert`) deserializes `Tls { server_cert: Unset }`
+    /// (the MB-R-106 fallback state), never `NoTls` — `NoTls` is accessor-only, unreachable via
+    /// `Deserialize`.
+    #[test]
+    fn ut_server_tls_policy_deserialize_empty_is_tls_unset() {
+        let w: ServerTlsPolicyWrapper = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            w.server,
+            ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::Unset
+            }
+        );
+    }
+
+    /// MB-R-105/108 — `require_client_cert: true` with a non-empty `client_ca_files` resolves
+    /// `MutualTls` with `ClientCertVerification::Verify` holding exactly those files.
+    #[test]
+    fn ut_server_tls_policy_deserialize_mutual_tls_verify() {
+        let json = serde_json::json!({
+            "self_signed": true,
+            "require_client_cert": true,
+            "client_ca_files": ["a.pem", "b.pem"],
+        });
+        let w: ServerTlsPolicyWrapper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            w.server,
+            ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::SelfSigned,
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec!["a.pem".to_string(), "b.pem".to_string()]
+                }
+            }
+        );
+    }
+
+    /// MB-R-105/108 — `require_client_cert: true` with `client_cert_skip_verify: true` resolves
+    /// `MutualTls` with `ClientCertVerification::SkipVerify`, `client_ca_files` ignored.
+    #[test]
+    fn ut_server_tls_policy_deserialize_mutual_tls_skip_verify() {
+        let json = serde_json::json!({
+            "self_signed": true,
+            "require_client_cert": true,
+            "client_cert_skip_verify": true,
+        });
+        let w: ServerTlsPolicyWrapper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            w.server,
+            ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::SelfSigned,
+                client_verification: ClientCertVerification::SkipVerify,
+            }
+        );
+    }
+
+    /// MB-R-105/108 — `require_client_cert: true` with neither `client_ca_files` nor
+    /// `client_cert_skip_verify` is a deserialize error (empty `ca_files`, MB-R-108).
+    #[test]
+    fn ut_server_tls_policy_deserialize_mutual_tls_empty_ca_files_is_error() {
+        let json = serde_json::json!({"self_signed": true, "require_client_cert": true});
+        let result: Result<ServerTlsPolicyWrapper, _> = serde_json::from_value(json);
+        assert!(result.is_err());
+    }
+
+    /// Backward compat — a legacy document (`client_ca_file` singular + `require_client_cert`)
+    /// still deserializes onto `MutualTls { client_verification: Verify { ca_files: [path] }, .. }`.
+    #[test]
+    fn ut_server_tls_policy_deserialize_legacy_singular_client_ca_file() {
+        let json = serde_json::json!({
+            "cert_file": "s.crt",
+            "key_file": "s.key",
+            "require_client_cert": true,
+            "client_ca_file": "legacy-ca.pem",
+        });
+        let w: ServerTlsPolicyWrapper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            w.server,
+            ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: "s.crt".to_string(),
+                    key_file: "s.key".to_string(),
+                },
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec!["legacy-ca.pem".to_string()]
+                }
+            }
+        );
+    }
+
+    /// struct/type rework — `Tls`/`MutualTls` round-trip through their flattened wire shape.
+    #[test]
+    fn ut_server_tls_policy_serde_round_trip() {
+        let tls = ServerTlsPolicyWrapper {
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::SelfSigned,
+            },
+        };
+        let value = serde_json::to_value(&tls).unwrap();
+        assert_eq!(value, serde_json::json!({"self_signed": true}));
+        let back: ServerTlsPolicyWrapper = serde_json::from_value(value).unwrap();
+        assert_eq!(back.server, tls.server);
+
+        let mtls = ServerTlsPolicyWrapper {
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::SelfSigned,
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec!["ca.pem".to_string()],
+                },
+            },
+        };
+        let value = serde_json::to_value(&mtls).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "self_signed": true,
+                "require_client_cert": true,
+                "client_ca_files": ["ca.pem"],
+            })
+        );
+        let back: ServerTlsPolicyWrapper = serde_json::from_value(value).unwrap();
+        assert_eq!(back.server, mtls.server);
+    }
+
+    // --- ClientTlsPolicy serde --------------------------------------------------------------
+
+    /// MB-R-105 — a bare `{}` deserializes `Tls { client_verification: Verify { ca_file: None } }`
+    /// (the "no TLS options set" state), never `NoTls`.
+    #[test]
+    fn ut_client_tls_policy_deserialize_empty_is_tls_default_verify() {
+        let w: ClientTlsPolicyWrapper = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            w.client,
+            ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::Verify { ca_file: None }
+            }
+        );
+    }
+
+    /// MB-R-105/138 — `client_self_signed: true` resolves `MutualTls` with
+    /// `ClientCertSource::SelfSigned`, even with no cert/key files present.
+    #[test]
+    fn ut_client_tls_policy_deserialize_mutual_tls_self_signed() {
+        let json = serde_json::json!({"client_self_signed": true});
+        let w: ClientTlsPolicyWrapper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            w.client,
+            ClientTlsPolicy::MutualTls {
+                client_verification: ClientVerification::Verify { ca_file: None },
+                client_identity: ClientCertSource::SelfSigned,
+            }
+        );
+    }
+
+    /// MB-R-105 — both `client_cert_file`/`client_key_file` set (no `client_self_signed`)
+    /// resolves `MutualTls` with `ClientCertSource::Explicit`.
+    #[test]
+    fn ut_client_tls_policy_deserialize_mutual_tls_explicit() {
+        let json = serde_json::json!({
+            "client_cert_file": "c.pem",
+            "client_key_file": "k.pem",
+        });
+        let w: ClientTlsPolicyWrapper = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            w.client,
+            ClientTlsPolicy::MutualTls {
+                client_verification: ClientVerification::Verify { ca_file: None },
+                client_identity: ClientCertSource::Explicit {
+                    client_cert_file: "c.pem".to_string(),
+                    client_key_file: "k.pem".to_string(),
+                },
+            }
+        );
+    }
+
+    /// struct/type rework — `Tls`/`MutualTls` round-trip through their flattened wire shape.
+    #[test]
+    fn ut_client_tls_policy_serde_round_trip() {
+        let tls = ClientTlsPolicyWrapper {
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
+        };
+        let value = serde_json::to_value(&tls).unwrap();
+        assert_eq!(value, serde_json::json!({"insecure_skip_verify": true}));
+        let back: ClientTlsPolicyWrapper = serde_json::from_value(value).unwrap();
+        assert_eq!(back.client, tls.client);
+
+        let mtls = ClientTlsPolicyWrapper {
+            client: ClientTlsPolicy::MutualTls {
+                client_verification: ClientVerification::Verify { ca_file: None },
+                client_identity: ClientCertSource::SelfSigned,
+            },
+        };
+        let value = serde_json::to_value(&mtls).unwrap();
+        assert_eq!(value, serde_json::json!({"client_self_signed": true}));
+        let back: ClientTlsPolicyWrapper = serde_json::from_value(value).unwrap();
+        assert_eq!(back.client, mtls.client);
     }
 
     #[derive(Serialize, Deserialize)]
