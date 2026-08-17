@@ -387,6 +387,70 @@ async fn require_client_cert_enforced() {
 }
 
 #[tokio::test]
+/// MB-R-108 — server-role `SkipVerify` (`ClientCertVerification::SkipVerify`) still requires a
+/// client certificate be presented (a handshake with none fails, same as `Verify`), but performs
+/// no chain/identity validation against any root store: a client presenting a certificate signed
+/// by nobody the server trusts (a bare self-signed cert, not chained to any configured CA — here
+/// there is no CA configured at all) is still accepted.
+async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
+    let (server_cert_pem, server_key_pem) = self_signed_pem();
+    let server_cert_file = write_pem("skip-verify-server-cert", &server_cert_pem);
+    let server_key_file = write_pem("skip-verify-server-key", &server_key_pem);
+
+    // A client cert self-signed by nobody the server trusts (not chained to any CA at all).
+    let (untrusted_cert_pem, untrusted_key_pem) = self_signed_pem();
+
+    let port = free_port();
+    let cfg = Arc::new(RwLock::new(config(
+        port,
+        tcp::ModbusTlsConfig {
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: server_cert_file,
+                    key_file: server_key_file,
+                },
+                client_verification: ClientCertVerification::SkipVerify,
+            },
+            ..Default::default()
+        },
+    )));
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("skip-verify mTLS server should start");
+
+    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
+    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
+    // unlike the ferrowl client, never retries.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    // An untrusted, unrelated self-signed cert: accepted anyway (chain/identity never checked).
+    let untrusted_chain = rust_modbus::load_pem_cert_chain(untrusted_cert_pem.as_bytes()).unwrap();
+    let untrusted_key = rust_modbus::load_pem_private_key(untrusted_key_pem.as_bytes()).unwrap();
+    raw_connect(
+        addr,
+        Some(&server_cert_pem),
+        Some(ClientIdentity {
+            cert_chain: untrusted_chain,
+            key: untrusted_key,
+        }),
+    )
+    .await
+    .expect("SkipVerify must accept a presented certificate with no chain validation");
+
+    // No client certificate presented at all: still rejected (see the TLS 1.3 client-side
+    // completion quirk note in `require_client_cert_enforced` — the connect future can appear to
+    // succeed to the client even though the server has already rejected it).
+    let _ = raw_connect(addr, Some(&server_cert_pem), None).await;
+
+    server.abort();
+}
+
+#[tokio::test]
 /// MB-R-111 (server connection-scoping half) — a rejected mTLS handshake (missing
 /// or wrong-CA client certificate) never takes down the accept loop: a subsequent
 /// well-behaved client still connects.

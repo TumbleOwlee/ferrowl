@@ -63,7 +63,7 @@ ratatui = { version = "0.30.2", features = [
 rcgen = "0.14.9"
 # Pinned by rev, not branch: `cargo update` must not silently move us to whatever the fork's
 # `main` points at. Bump the rev deliberately when pulling in upstream changes.
-rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "4325457be48b494b7fb90d74627dfc4c3055499d", default-features = false }
+rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "1886993c4acc2a33a093a9134a3a8c7aff6794f6", default-features = false }
 rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "36813f46ab7d0a50100f1e0fe099aaf0c4e10791", default-features = false }
 # Already pulled in transitively by rustls's "ring" feature below; named directly so
 # ferrowl-modbus can hash a rejected TLS peer certificate (MB-R-111) without pinning its

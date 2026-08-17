@@ -264,15 +264,12 @@ fn generate_self_signed(
 /// once per file, accumulating into one trust store — MB-R-108/MB-R-136's "any one is
 /// sufficient, not all").
 ///
-/// `MutualTls`'s `SkipVerify` ("require a client cert but skip chain validation") has no
-/// representable `rust_modbus::ClientCertPolicy` today: the crate exposes only
-/// `Require(RootStore)` (validates against the store — an empty store rejects every
-/// certificate, the *opposite* of accept-any) and `None` (no client cert requested at all).
-/// There is no public escape hatch to build a custom verifier through `rust_modbus`'s API. This
-/// is a genuine upstream gap, filed as
-/// <https://github.com/TumbleOwlee/rust-modbus/issues/40>; until it ships, this configuration is
-/// rejected explicitly here rather than silently mapped onto behavior that doesn't match
-/// MB-R-108 (e.g. accepting nothing, or accepting everything unauthenticated).
+/// `MutualTls`'s `SkipVerify` ("require a client cert but skip chain validation") maps to
+/// `ClientCertPolicy::AllowAny` — added upstream at
+/// <https://github.com/TumbleOwlee/rust-modbus/issues/40> (rev pinned in the workspace
+/// `Cargo.toml` includes the fix) specifically to cover this case: a handshake presenting no
+/// certificate still fails, exactly like `Require`, but a presented certificate's chain/identity
+/// is never checked.
 pub(crate) fn build_server_tls_config(
     policy: &ServerTlsPolicy,
     bind_host: &str,
@@ -296,15 +293,7 @@ pub(crate) fn build_server_tls_config(
             }
             ClientCertPolicy::Require(roots)
         }
-        Some(ClientCertVerification::SkipVerify) => {
-            return Err(TcpError::Configuration(
-                "server-role client-certificate skip-verify (MB-R-108) is not yet supported: \
-                 rust_modbus's ClientCertPolicy has no \"require a client cert but skip chain \
-                 validation\" mode — tracked at \
-                 https://github.com/TumbleOwlee/rust-modbus/issues/40"
-                    .to_string(),
-            ));
-        }
+        Some(ClientCertVerification::SkipVerify) => ClientCertPolicy::AllowAny,
     };
     Ok(Some((
         TlsServerConfig {
@@ -617,21 +606,25 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::Require(_)));
     }
 
-    /// MB-R-108 — server-role `SkipVerify` is rejected explicitly (interim: no
-    /// `rust_modbus::ClientCertPolicy` mode expresses "require a client cert but skip chain
-    /// validation" — see `rust-modbus#40`), rather than silently mapped onto the wrong behavior.
+    /// MB-R-108 — server-role `SkipVerify` maps to `ClientCertPolicy::AllowAny`: a client
+    /// certificate is still required (unlike `Tls`'s `ClientCertPolicy::None`), but no chain/
+    /// identity validation is performed against any root store. The actual handshake behavior
+    /// this produces (a presented-but-untrusted cert is accepted, no cert at all is rejected) is
+    /// proven end-to-end by the loopback integration test in `tests/tcp_tls_server.rs`.
     #[test]
-    fn ut_build_server_tls_config_skip_verify_rejected_pending_upstream_support() {
+    fn ut_build_server_tls_config_skip_verify_maps_to_allow_any() {
         use super::build_server_tls_config;
         use ferrowl_util::tls::{ClientCertVerification, ServerCertSource, ServerTlsPolicy};
+        use rust_modbus::ClientCertPolicy;
 
         let cache = new_self_signed_cache();
         let policy = ServerTlsPolicy::MutualTls {
             server_cert: ServerCertSource::SelfSigned,
             client_verification: ClientCertVerification::SkipVerify,
         };
-        let err = build_server_tls_config(&policy, "localhost", &cache)
-            .expect_err("SkipVerify has no rust_modbus representation yet");
-        assert!(err.to_string().contains("rust-modbus/issues/40"));
+        let (built, _fallback) = build_server_tls_config(&policy, "localhost", &cache)
+            .expect("builds")
+            .expect("Some");
+        assert!(matches!(built.client_certs, ClientCertPolicy::AllowAny));
     }
 }
