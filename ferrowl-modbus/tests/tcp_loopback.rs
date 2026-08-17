@@ -181,11 +181,14 @@ async fn tcp_client_polls_server_and_executes_commands() {
 
     // Start the server.
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // Operations cover every read function code the client supports.
@@ -217,6 +220,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -325,11 +329,14 @@ async fn tcp_client_handles_server_rejections() {
     // Server with no registered regions: every request for slave 1 is rejected.
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -342,6 +349,7 @@ async fn tcp_client_handles_server_rejections() {
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -395,17 +403,21 @@ async fn tcp_unparseable_address_is_error() {
 
     // Client side (`Client` isn't `Debug`, so match the result rather than `unwrap_err`).
     assert!(matches!(
-        tcp::Client::connect(&bad).await,
+        tcp::Client::connect(&bad, &tcp::new_self_signed_cache()).await,
         Err(Error::Tcp(TcpError::Address(_)))
     ));
 
     // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let (handle, _bound_addr) = tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(bad)),
+        mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn always returns Ok now");
     let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on an address error")
@@ -422,11 +434,14 @@ async fn tcp_server_serves_concurrent_clients() {
     let srv_mem = server_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // Two independent clients connect at the same time and both read from the one server.
@@ -441,16 +456,24 @@ async fn tcp_server_serves_concurrent_clients() {
     let mem_b = client_mem();
     let (tx_a, rx_a) = mpsc::channel::<Command>(16);
     let (tx_b, rx_b) = mpsc::channel::<Command>(16);
-    let client_a =
-        tcp::ClientBuilder::new(Arc::new(RwLock::new(config(port))), ops(), mem_a.clone())
-            .spawn(rx_a, sink(), sink())
-            .await
-            .expect("client A failed to connect");
-    let client_b =
-        tcp::ClientBuilder::new(Arc::new(RwLock::new(config(port))), ops(), mem_b.clone())
-            .spawn(rx_b, sink(), sink())
-            .await
-            .expect("client B failed to connect");
+    let client_a = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        ops(),
+        mem_a.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx_a, sink(), sink())
+    .await
+    .expect("client A failed to connect");
+    let client_b = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        ops(),
+        mem_b.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx_b, sink(), sink())
+    .await
+    .expect("client B failed to connect");
 
     sleep(Duration::from_millis(600)).await;
 
@@ -479,7 +502,11 @@ async fn tcp_server_serves_concurrent_clients() {
 async fn tcp_client_connect_refused_is_error() {
     // Nothing is listening on this port, so the connect fails.
     let port = free_port();
-    assert!(tcp::Client::connect(&config(port)).await.is_err());
+    assert!(
+        tcp::Client::connect(&config(port), &tcp::new_self_signed_cache())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -498,6 +525,7 @@ async fn tcp_client_reconnect_false_dies_on_refused_connect() {
         Arc::new(RwLock::new(config_no_reconnect(port))),
         operations,
         client_mem(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -530,6 +558,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -539,11 +568,14 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     sleep(Duration::from_millis(200)).await;
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // The 1s initial backoff plus poll delay must elapse before the client retries and reads.
@@ -583,6 +615,7 @@ async fn tcp_client_terminate_during_backoff_exits_promptly() {
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -610,11 +643,14 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
     let cli_mem = client_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // Start with a single operation reading the holding registers.
@@ -628,6 +664,7 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
         Arc::new(RwLock::new(config(port))),
         operations.clone(),
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -683,11 +720,14 @@ async fn tcp_client_rereads_config_on_reconnect() {
 
     // A server listens on `good_port`; the client is initially pointed at `bad_port` (no listener).
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(good_port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(good_port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     let shared_cfg = Arc::new(RwLock::new(config(bad_port)));
@@ -697,10 +737,15 @@ async fn tcp_client_rereads_config_on_reconnect() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(shared_cfg.clone(), operations, cli_mem.clone())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn succeeds; first connect fails against the empty port");
+    let client = tcp::ClientBuilder::new(
+        shared_cfg.clone(),
+        operations,
+        cli_mem.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn succeeds; first connect fails against the empty port");
 
     // First connect attempt fails; while it backs off, repoint the config at the live server.
     sleep(Duration::from_millis(200)).await;
@@ -745,6 +790,7 @@ async fn tcp_client_backoff_resets_after_successful_run() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, log, sink())
     .await
@@ -753,11 +799,14 @@ async fn tcp_client_backoff_resets_after_successful_run() {
     // Bring the server up during the first (1 s) backoff so the second attempt connects and reads.
     sleep(Duration::from_millis(500)).await;
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // Let the client connect and get at least one read through (marks the run successful).
@@ -828,11 +877,14 @@ async fn tcp_client_addresses_operation_slave_id() {
     let srv_mem: Mem = Arc::new(MemLock::new(sm));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // Client store keyed on slave 7 too; the operation targets slave 7.
@@ -854,6 +906,7 @@ async fn tcp_client_addresses_operation_slave_id() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -882,11 +935,14 @@ async fn tcp_client_delays_before_first_poll() {
     let cli_mem = client_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     // A long start delay: nothing should be read until it elapses.
@@ -900,10 +956,15 @@ async fn tcp_client_delays_before_first_poll() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(Arc::new(RwLock::new(cfg)), operations, cli_mem.clone())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("client failed to connect");
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(cfg)),
+        operations,
+        cli_mem.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("client failed to connect");
 
     // Well before the 600ms delay elapses: nothing polled yet.
     sleep(Duration::from_millis(250)).await;
@@ -964,10 +1025,15 @@ async fn tcp_client_read_times_out_when_server_silent() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(Arc::new(RwLock::new(cfg)), operations, client_mem())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("connect (TCP handshake) succeeds against the silent listener");
+    let client = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(cfg)),
+        operations,
+        client_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("connect (TCP handshake) succeeds against the silent listener");
 
     // timeout_ms is 300ms; the task must end with an error well before this bound.
     let joined = tokio::time::timeout(Duration::from_secs(3), client)
@@ -987,11 +1053,14 @@ async fn tcp_client_success_resets_retry_counter() {
     let cli_mem = client_mem();
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem.clone())
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem.clone(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -1005,6 +1074,7 @@ async fn tcp_client_success_resets_retry_counter() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, log, sink())
     .await

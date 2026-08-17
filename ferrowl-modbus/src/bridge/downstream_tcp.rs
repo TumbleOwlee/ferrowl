@@ -33,10 +33,18 @@ impl TcpDownstream {
 /// (`config.reconnect`, MB-R-050–056).
 pub fn spawn(config: tcp::Config, log: impl LogFn + Clone + 'static) -> TcpDownstream {
     let reconnect = config.reconnect;
+    // One cache for this downstream's whole lifetime (reused across reconnect attempts,
+    // mirroring the module-instance-scoped cache lifetime used elsewhere — MB-R-138).
+    let cache = tcp::tls::new_self_signed_cache();
     TcpDownstream(DownstreamHandle::spawn(
         move || {
             let config = config.clone();
-            async move { tcp::Client::connect(&config).await.map(|c| c.core.client) }
+            let cache = cache.clone();
+            async move {
+                tcp::Client::connect(&config, &cache)
+                    .await
+                    .map(|c| c.core.client)
+            }
         },
         reconnect,
         log,

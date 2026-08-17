@@ -83,11 +83,14 @@ async fn it_tcp_downstream_connects_and_forwards() {
     let srv_mem = Arc::new(MemLock::new(mem));
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (_server, bound_addr) =
-        tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (_server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     wait_bound_addr(&bound_addr).await;
 
     let downstream = bridge::spawn_tcp_downstream(config(port), sink());

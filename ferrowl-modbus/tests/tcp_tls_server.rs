@@ -15,7 +15,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
-use ferrowl_util::tls::ServerCertSource;
+use ferrowl_util::tls::{ClientCertVerification, ServerCertSource, ServerTlsPolicy};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
 use rcgen::{CertificateParams, Issuer, KeyPair};
@@ -149,10 +149,11 @@ async fn self_signed_fallback_is_used_and_logged() {
     let cfg = Arc::new(RwLock::new(config(port, tcp::ModbusTlsConfig::default())));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, log, sink())
-        .await
-        .expect("server should start with the self-signed fallback");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, log, sink())
+            .await
+            .expect("server should start with the self-signed fallback");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -184,16 +185,19 @@ async fn explicit_self_signed_is_used_without_fallback_log() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::SelfSigned,
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         },
     )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, log, sink())
-        .await
-        .expect("server should start with an explicit self-signed cert");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, log, sink())
+            .await
+            .expect("server should start with an explicit self-signed cert");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -231,7 +235,9 @@ async fn self_signed_wins_over_explicit_files() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::SelfSigned,
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         },
     )));
@@ -241,10 +247,11 @@ async fn self_signed_wins_over_explicit_files() {
 
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, log, sink())
-        .await
-        .expect("server should start with self_signed");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, log, sink())
+            .await
+            .expect("server should start with self_signed");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -315,20 +322,24 @@ async fn require_client_cert_enforced() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: server_cert_file.clone(),
-                key_file: server_key_file,
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: server_cert_file.clone(),
+                    key_file: server_key_file,
+                },
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec![ca_file],
+                },
             },
-            require_client_cert: true,
-            client_ca_file: Some(ca_file),
             ..Default::default()
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("mTLS server should start");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("mTLS server should start");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -391,20 +402,24 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: server_cert_file.clone(),
-                key_file: server_key_file,
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: server_cert_file.clone(),
+                    key_file: server_key_file,
+                },
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec![ca_file],
+                },
             },
-            require_client_cert: true,
-            client_ca_file: Some(ca_file),
             ..Default::default()
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("mTLS server should start");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("mTLS server should start");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -450,21 +465,25 @@ async fn require_client_cert_rejection_is_logged() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: server_cert_file.clone(),
-                key_file: server_key_file,
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: server_cert_file.clone(),
+                    key_file: server_key_file,
+                },
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec![ca_file],
+                },
             },
-            require_client_cert: true,
-            client_ca_file: Some(ca_file),
             ..Default::default()
         },
     )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, log, sink())
-        .await
-        .expect("mTLS server should start");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, log, sink())
+            .await
+            .expect("mTLS server should start");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -512,26 +531,30 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
     let server_key_file = write_pem("no-require-server-key", &server_key_pem);
 
     let (ca_pem, ..) = ca_and_signed_client_pem();
-    let ca_file = write_pem("no-require-ca", &ca_pem);
+    let _ca_file = write_pem("no-require-ca", &ca_pem);
 
     let port = free_port();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: server_cert_file,
-                key_file: server_key_file,
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: server_cert_file,
+                    key_file: server_key_file,
+                },
             },
-            client_ca_file: Some(ca_file),
-            // require_client_cert left at its default (false).
+            // client_ca_file is not even representable here: `Tls` (require_client_cert
+            // unset) carries no client_verification field at all, so a configured CA is
+            // structurally ignored rather than merely unread at runtime.
             ..Default::default()
         },
     )));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(srv_rx, sink(), sink())
-        .await
-        .expect("server should start: a client_ca_file without require_client_cert is valid");
+    let (server, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(srv_rx, sink(), sink())
+            .await
+            .expect("server should start: a client_ca_file without require_client_cert is valid");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -546,42 +569,20 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
     server.abort();
 }
 
-#[tokio::test]
-/// MB-R-108 — `require_client_cert` without a `client_ca_file` fails the server's
-/// start with a TLS configuration error, before any bind is attempted. `spawn()` itself
-/// always returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces from the
-/// joined task instead, and never retries (a TLS configuration error can never fix itself).
-async fn require_client_cert_without_ca_fails_server_start() {
-    let (cert_pem, key_pem) = self_signed_pem();
-    let cert_file = write_pem("no-ca-cert", &cert_pem);
-    let key_file = write_pem("no-ca-key", &key_pem);
-
-    let cfg = Arc::new(RwLock::new(config(
-        free_port(),
-        tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: cert_file,
-                key_file: key_file,
-            },
-            require_client_cert: true,
-            ..Default::default()
-        },
-    )));
-    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let (handle, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
-    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
-        .await
-        .expect("task should end promptly, not retry, on a TLS configuration error")
-        .expect("task must not panic");
-    assert!(matches!(
-        result,
-        Err(ferrowl_modbus::Error::Tcp(
-            ferrowl_modbus::TcpError::Configuration(_)
-        ))
-    ));
+/// MB-R-108 (new timing) — `require_client_cert` without any `client_ca_files`/`client_ca_file`
+/// now fails at config *deserialization*, not server start: `ClientCertVerification`'s custom
+/// `Deserialize` (via `ServerTlsPolicy`'s) makes the illegal "empty ca_files" state impossible to
+/// construct from JSON at all — mirrors `lone_cert_or_key_file_fails_config_deserialization`
+/// above for MB-R-107.
+#[test]
+fn require_client_cert_without_ca_fails_config_deserialization() {
+    let json = r#"{"ip":"127.0.0.1","port":0,"timeout_ms":1000,"delay_ms":0,
+        "interval_ms":0,"tls":{"self_signed":true,"require_client_cert":true}}"#;
+    let result: Result<tcp::Config, _> = serde_json::from_str(json);
+    assert!(
+        result.is_err(),
+        "require_client_cert without any CA must fail to deserialize"
+    );
 }
 
 #[tokio::test]
@@ -597,18 +598,21 @@ async fn malformed_pem_fails_server_start() {
     let cfg = Arc::new(RwLock::new(config(
         free_port(),
         tcp::ModbusTlsConfig {
-            server_cert: ServerCertSource::Explicit {
-                cert_file: bad_cert,
-                key_file: key_file,
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: bad_cert,
+                    key_file,
+                },
             },
             ..Default::default()
         },
     )));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let (handle, _bound_addr) = tcp::ServerBuilder::new(cfg, memory())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok now");
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on a TLS configuration error")

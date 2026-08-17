@@ -7,6 +7,9 @@
 //! layer below `bridge::run` (`BridgeService`, `upstream_tcp::run`, `upstream_rtu::run`) by
 //! crate-internal tests alongside `bridge::run`'s own definition, per BR-R-002/005/006.
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge::{BridgeConfig, BridgeEndpointKind, BridgeEndpointSpec};
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey};
@@ -87,6 +90,7 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     let (_downstream_server, bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(TokioRwLock::new(tcp_config(downstream_port))),
         srv_mem,
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(srv_rx, sink(), sink())
     .await

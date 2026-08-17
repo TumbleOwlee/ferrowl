@@ -762,6 +762,7 @@ pub(crate) async fn run_tcp_family<T, F, L, St>(
     bound_addr: BoundAddr,
     verbose: bool,
     physical_serial: bool,
+    cache: crate::tcp::tls::SelfSignedCache,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -783,6 +784,7 @@ where
         let activity = activity.clone();
         let receiver = &receiver;
         let bound_addr = bound_addr.clone();
+        let cache = cache.clone();
         async move {
             activity.store(false, Ordering::Relaxed);
             let guard = config.read().await;
@@ -803,8 +805,9 @@ where
                 Server::new(memory.clone(), log.clone(), verbose, physical_serial)
                     .with_reset_on(activity.clone(), ResetOn::Connect),
             );
-            match &guard.tls {
-                None => {
+            let policy = guard.server_tls_policy();
+            match &policy {
+                ferrowl_util::tls::ServerTlsPolicy::NoTls => {
                     drop(guard);
                     match TcpListener::bind(addr).await {
                         Err(e) => AttemptOutcome::Failed {
@@ -844,8 +847,8 @@ where
                         }
                     }
                 }
-                Some(tls) => {
-                    let build_result = build_server_tls_config(tls, &guard.ip);
+                _ => {
+                    let build_result = build_server_tls_config(&policy, &guard.ip, &cache);
                     drop(guard);
                     match build_result {
                         Err(e) => AttemptOutcome::Failed {
@@ -856,7 +859,12 @@ where
                             reconnect: false,
                             reset: false,
                         },
-                        Ok((tls_config, used_fallback)) => {
+                        // `NoTls` was already handled above, so this arm only ever runs for
+                        // `Tls`/`MutualTls`, both of which always build `Some((..))`.
+                        Ok(None) => unreachable!(
+                            "build_server_tls_config returns None only for NoTls, already handled"
+                        ),
+                        Ok(Some((tls_config, used_fallback))) => {
                             if used_fallback {
                                 log.invoke(
                                     "No cert_file/key_file/self_signed configured for this TLS \

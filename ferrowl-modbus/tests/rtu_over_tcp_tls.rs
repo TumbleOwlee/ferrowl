@@ -11,7 +11,7 @@ use ferrowl_modbus::rtu_over_tcp;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
-use ferrowl_util::tls::{ClientVerification, ServerCertSource};
+use ferrowl_util::tls::{ClientTlsPolicy, ClientVerification, ServerCertSource, ServerTlsPolicy};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -86,15 +86,20 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
 
     // Server: an ephemeral self-signed cert (`self_signed = true`, no cert_file/key_file).
     let server_tls = tcp::ModbusTlsConfig {
-        server_cert: ServerCertSource::SelfSigned,
+        server: ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::SelfSigned,
+        },
         ..Default::default()
     };
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) =
-        rtu_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(config(port, server_tls))), srv_mem)
-            .spawn(srv_rx, sink(), sink())
-            .await
-            .expect("server failed to start");
+    let (server, _bound_addr) = rtu_over_tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port, server_tls))),
+        srv_mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .expect("server failed to start");
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before starting the client so
     // its first connect attempt does not race the server into a full backoff wait.
@@ -104,7 +109,9 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
     // RTU-over-TCP handshake plumbing, not certificate validation, which MB-R-109's
     // tcp_tls_client.rs tests already cover in depth).
     let client_tls = tcp::ModbusTlsConfig {
-        client_verification: ClientVerification::SkipVerify,
+        client: ClientTlsPolicy::Tls {
+            client_verification: ClientVerification::SkipVerify,
+        },
         ..Default::default()
     };
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -117,6 +124,7 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
         Arc::new(RwLock::new(config(port, client_tls))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -163,11 +171,13 @@ async fn rtu_over_tcp_tls_handshake_failure_is_connect_failure() {
     let handshake_cfg = config(
         plain_addr.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::SkipVerify,
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
             ..Default::default()
         },
     );
-    let result = rtu_over_tcp::Client::connect(&handshake_cfg).await;
+    let result = rtu_over_tcp::Client::connect(&handshake_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         result.is_err(),
         "expected TLS handshake against a plain listener to fail"

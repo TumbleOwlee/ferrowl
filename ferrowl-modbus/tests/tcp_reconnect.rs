@@ -79,6 +79,7 @@ async fn tcp_server_bind_failure_retries_then_succeeds() {
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(receiver, sink(), sink())
     .await
@@ -128,6 +129,7 @@ async fn tcp_server_bind_failure_reconnect_false_ends_task() {
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, false))),
         server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(receiver, sink(), sink())
     .await
@@ -153,6 +155,7 @@ async fn tcp_server_terminate_while_backing_off_ends_task_ok() {
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(receiver, sink(), sink())
     .await
@@ -183,6 +186,7 @@ async fn rtu_over_tcp_server_bind_failure_retries_then_succeeds() {
     let (handle, _bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(receiver, sink(), sink())
     .await
@@ -229,6 +233,7 @@ async fn ascii_over_tcp_server_bind_failure_retries_then_succeeds() {
     let (handle, _bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(tcp_config(port, true))),
         server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
     )
     .spawn(receiver, sink(), sink())
     .await
