@@ -1,7 +1,7 @@
 //! Shared TLS-configuration enums, generalizing the server-certificate-source and
 //! client-verification axes that both `ferrowl-modbus`'s `ModbusTlsConfig` and `ferrowl-ocpp`'s
-//! `CsTlsConfig`/`CsmsTlsMode`/the `ferrowl` crate's `OcppSecurityConfig` represent on the wire
-//! as `self_signed`/`cert_file`/`key_file` and `insecure_skip_verify`/`ca_file` respectively.
+//! `cs::Config.tls`/`csms::Config.tls`/the `ferrowl` crate's `OcppSecurityConfig` represent on the
+//! wire as `self_signed`/`cert_file`/`key_file` and `insecure_skip_verify`/`ca_file` respectively.
 //! No requirement ID of its own — supports MB-R-106/MB-R-107/MB-R-109/OC-R-036/OC-R-096/
 //! OC-R-112 ("struct/type rework" in the approved spec text).
 

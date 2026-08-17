@@ -66,7 +66,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
         reconnect: true,
         basic_auth: None,
         tls: None,
-    })
+    }, ferrowl_ocpp::new_self_signed_cache())
     .spawn(TestCsms, sink())
     .await
     .expect("spawn must not fail synchronously on an occupied port — only a TLS-config-build failure does (OC-R-040)");
@@ -87,17 +87,19 @@ async fn csms_bind_failure_retries_then_succeeds() {
 
     // A real CS can now connect and complete a Call.
     let url = format!("ws://{addr}/ocpp/CS001");
-    let client =
-        cs::ClientBuilder::<V1_6>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+    let client = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             url,
             reconnect: false,
             timeout_ms: 1000,
             basic_auth: None,
             tls: None,
-        })))
-        .spawn(TestCs, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now; the dial happens inside the task");
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok now; the dial happens inside the task");
 
     let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
     let resp = tokio::time::timeout(Duration::from_secs(1), client.call(hb))
@@ -119,14 +121,17 @@ async fn csms_terminate_while_backing_off_ends_task_ok() {
         .expect("occupier bind failed");
     let occupied_port = occupier.local_addr().expect("occupier addr").port();
 
-    let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
-        host: "127.0.0.1".to_owned(),
-        port: occupied_port,
-        timeout_ms: 1000,
-        reconnect: true,
-        basic_auth: None,
-        tls: None,
-    })
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: occupied_port,
+            timeout_ms: 1000,
+            reconnect: true,
+            basic_auth: None,
+            tls: None,
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCsms, sink())
     .await
     .expect("spawn must not fail synchronously on an occupied port");
@@ -152,14 +157,17 @@ async fn csms_bind_failure_reconnect_false_ends_task() {
         .expect("occupier bind failed");
     let occupied_port = occupier.local_addr().expect("occupier addr").port();
 
-    let mut server = csms::ServerBuilder::<V1_6>::new(csms::Config {
-        host: "127.0.0.1".to_owned(),
-        port: occupied_port,
-        timeout_ms: 1000,
-        reconnect: false,
-        basic_auth: None,
-        tls: None,
-    })
+    let mut server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: occupied_port,
+            timeout_ms: 1000,
+            reconnect: false,
+            basic_auth: None,
+            tls: None,
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCsms, sink())
     .await
     .expect("spawn must not fail synchronously on an occupied port");

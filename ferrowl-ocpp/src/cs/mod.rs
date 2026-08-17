@@ -21,6 +21,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use crate::action::Version;
 use crate::error::{Error, WsError};
 use crate::log::LogFn;
+use crate::security::{SelfSignedCache, build_connector};
 
 pub use action_handler::CsActionHandler;
 pub use command::Command;
@@ -34,7 +35,7 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Dial the configured CSMS (advertising `V::subprotocol()`). Extracted out of `spawn`'s old
 /// synchronous connect so it can be retried from inside the reconnect loop (OC-R-048/OC-R-105).
-async fn dial<V: Version>(config: &Config) -> Result<Ws, Error> {
+async fn dial<V: Version>(config: &Config, cache: &SelfSignedCache) -> Result<Ws, Error> {
     let mut request = config
         .url
         .as_str()
@@ -50,7 +51,7 @@ async fn dial<V: Version>(config: &Config) -> Result<Ws, Error> {
             .insert("Authorization", auth.header_value());
     }
     let connector = match &config.tls {
-        Some(tls) => Some(tls.build_connector()?),
+        Some(tls) => Some(build_connector(tls, cache)?),
         None => None,
     };
     let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
@@ -133,6 +134,7 @@ fn classify_attempt(result: AttemptResult, reconnect: bool) -> AttemptOutcome<Er
 /// of why (mirrors `ferrowl_modbus`'s server tasks logging "Server stopped" the same way).
 async fn run_reconnect_loop<V, H, L, St>(
     config: Arc<RwLock<Config>>,
+    cache: SelfSignedCache,
     handler: Arc<H>,
     receiver: mpsc::Receiver<Command<V>>,
     log: L,
@@ -151,13 +153,14 @@ where
 
     let attempt = || {
         let config = config.clone();
+        let cache = cache.clone();
         let handler = handler.clone();
         let log = log.clone();
         let receiver = &receiver;
         async move {
             let guard = config.read().await;
             let reconnect = guard.reconnect;
-            let dial_result = dial::<V>(&guard).await;
+            let dial_result = dial::<V>(&guard, &cache).await;
             let timeout = guard.timeout();
             drop(guard);
             match dial_result {
@@ -199,13 +202,19 @@ where
 /// Builds and connects a CS client for a specific OCPP [`Version`].
 pub struct ClientBuilder<V: Version> {
     config: Arc<RwLock<Config>>,
+    cache: SelfSignedCache,
     _v: PhantomData<fn() -> V>,
 }
 
 impl<V: Version> ClientBuilder<V> {
-    pub fn new(config: Arc<RwLock<Config>>) -> Self {
+    /// `cache` should be created once per module instance (e.g. in the owning backend's `new()`,
+    /// via [`crate::new_self_signed_cache`]) and reused across every `spawn` for that instance —
+    /// never a fresh cache per call — so a `client_self_signed` identity that stays self-signed
+    /// across a reconnect or reconfigure is not regenerated needlessly (OC-R-115).
+    pub fn new(config: Arc<RwLock<Config>>, cache: SelfSignedCache) -> Self {
         Self {
             config,
+            cache,
             _v: PhantomData,
         }
     }
@@ -230,6 +239,7 @@ impl<V: Version> ClientBuilder<V> {
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
         let handle = tokio::spawn(run_reconnect_loop::<V, H, _, _>(
             self.config,
+            self.cache,
             Arc::new(handler),
             cmd_rx,
             log,

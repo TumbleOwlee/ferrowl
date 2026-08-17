@@ -82,14 +82,17 @@ impl CsActionHandler<V2_1> for TestCs {
 
 /// Spawn a CSMS server on an OS-assigned port and return it.
 async fn start_server() -> csms::Server<V2_1> {
-    csms::ServerBuilder::<V2_1>::new(csms::Config {
-        host: "127.0.0.1".to_owned(),
-        port: 0,
-        timeout_ms: 2000,
-        reconnect: true,
-        basic_auth: None,
-        tls: None,
-    })
+    csms::ServerBuilder::<V2_1>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: None,
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCsms, sink())
     .await
     .expect("server failed to bind")
@@ -115,23 +118,25 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     let clear_cache_seen = Arc::new(AtomicBool::new(false));
     // A successful connect here is the subprotocol regression guard: the client advertises
     // `ocpp2.1` and the server must accept it (previously it could end up bound as `ocpp1.6`).
-    let client =
-        cs::ClientBuilder::<V2_1>::new(std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+    let client = cs::ClientBuilder::<V2_1>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             url,
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
             tls: None,
-        })))
-        .spawn(
-            TestCs {
-                clear_cache_seen: clear_cache_seen.clone(),
-            },
-            sink(),
-            sink(),
-        )
-        .await
-        .expect("client failed to connect");
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(
+        TestCs {
+            clear_cache_seen: clear_cache_seen.clone(),
+        },
+        sink(),
+        sink(),
+    )
+    .await
+    .expect("client failed to connect");
 
     // CS -> CSMS: BootNotification.
     let boot = Action21::BootNotification(
