@@ -220,6 +220,10 @@ pub struct OcppClient<V: Version> {
     client: Option<Client<V>>,
     online: Arc<AtomicBool>,
     messages: Messages,
+    /// Cached self-signed mTLS client identity (OC-R-115), created once per backend instance and
+    /// reused across every `start()` call so repeated `:restart`/reconnects don't regenerate it —
+    /// never reinitialized inside `start()`.
+    self_signed_cache: ferrowl_ocpp::SelfSignedCache,
 }
 
 impl<V: Version> OcppClient<V> {
@@ -228,6 +232,7 @@ impl<V: Version> OcppClient<V> {
             client: None,
             online: Arc::new(AtomicBool::new(false)),
             messages: Arc::new(RwLock::new(Vec::new())),
+            self_signed_cache: ferrowl_ocpp::new_self_signed_cache(),
         }
     }
 
@@ -279,9 +284,12 @@ impl<V: Version> OcppClient<V> {
         let config = build_config(spec);
         let log = log_fn(self.messages.clone());
         let status = log_fn(self.messages.clone());
-        let client = ClientBuilder::<V>::new(Arc::new(RwLock::new(config)))
-            .spawn(handler, log, status)
-            .await?;
+        let client = ClientBuilder::<V>::new(
+            Arc::new(RwLock::new(config)),
+            self.self_signed_cache.clone(),
+        )
+        .spawn(handler, log, status)
+        .await?;
         self.client = Some(client);
         // `spawn` no longer dials synchronously (OC-R-048, OC-R-105): the handshake happens
         // inside the retried task, so `online` stays false here and is flipped by the handler's

@@ -128,16 +128,14 @@ impl OcppSpec {
     /// The scheme is authoritative in the other direction too: a `ws://` server binds plain TCP
     /// even when certificate files are configured, so its URL never lies about its transport.
     /// This mirrors a `ws://` client, which likewise ignores its own TLS material.
-    pub fn effective_csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
+    pub fn effective_csms_tls(&self) -> Option<ferrowl_util::tls::ServerTlsPolicy> {
         if self.protocol != OcppProtocol::Wss {
             return None;
         }
         self.security.csms_tls().or_else(|| {
             self.csms_self_signed_fallback()
-                .then_some(ferrowl_ocpp::CsmsTlsConfig {
-                    mode: ferrowl_ocpp::CsmsTlsMode::SelfSigned,
-                    client_ca_file: None,
-                    require_client_cert: false,
+                .then_some(ferrowl_util::tls::ServerTlsPolicy::Tls {
+                    server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
                 })
         })
     }
@@ -348,8 +346,12 @@ mod tests {
         let spec = spec_with(OcppProtocol::Wss, Default::default());
         assert!(spec.csms_self_signed_fallback());
         let tls = spec.effective_csms_tls().expect("fallback TLS");
-        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::SelfSigned));
-        assert!(!tls.require_client_cert);
+        assert_eq!(
+            tls,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+            }
+        );
     }
 
     #[test]
@@ -366,9 +368,11 @@ mod tests {
     /// OC-R-042 — a ws:// CSMS endpoint leaves any configured TLS material inert.
     fn ut_effective_csms_tls_ws_ignores_configured_certificates() {
         let security = crate::config::ocpp::OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: "certs/csms.pem".into(),
-                key_file: "certs/csms.key".into(),
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: "certs/csms.pem".into(),
+                    key_file: "certs/csms.key".into(),
+                },
             },
             ..Default::default()
         };
@@ -380,15 +384,25 @@ mod tests {
     /// OC-R-096 — explicit server cert + key files take precedence over the ephemeral self-signed fallback.
     fn ut_effective_csms_tls_explicit_files_win_over_fallback() {
         let security = crate::config::ocpp::OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: "certs/csms.pem".into(),
-                key_file: "certs/csms.key".into(),
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: "certs/csms.pem".into(),
+                    key_file: "certs/csms.key".into(),
+                },
             },
             ..Default::default()
         };
         let spec = spec_with(OcppProtocol::Wss, security);
         assert!(!spec.csms_self_signed_fallback());
         let tls = spec.effective_csms_tls().expect("configured TLS");
-        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::Files { .. }));
+        assert_eq!(
+            tls,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: "certs/csms.pem".into(),
+                    key_file: "certs/csms.key".into(),
+                }
+            }
+        );
     }
 }

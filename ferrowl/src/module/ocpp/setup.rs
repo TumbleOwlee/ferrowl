@@ -133,8 +133,10 @@ mod tests {
     fn ut_ws_preserves_loaded_security() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("existing-ca.pem".into()),
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                        ca_file: Some("existing-ca.pem".into()),
+                    },
                 },
                 ..Default::default()
             },
@@ -143,9 +145,11 @@ mod tests {
         let spec = base_spec(OcppProtocol::Ws);
         apply_security_precedence(&mut loaded, &spec);
         assert_eq!(
-            loaded.security.client_verification,
-            ferrowl_util::tls::ClientVerification::Verify {
-                ca_file: Some("existing-ca.pem".into())
+            loaded.security.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                    ca_file: Some("existing-ca.pem".into())
+                }
             }
         );
         assert_eq!(loaded.security.username, None);
@@ -156,8 +160,10 @@ mod tests {
     fn ut_wss_overwrites_loaded_security_with_dialog() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("existing-ca.pem".into()),
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                        ca_file: Some("existing-ca.pem".into()),
+                    },
                 },
                 ..Default::default()
             },
