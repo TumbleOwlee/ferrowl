@@ -80,8 +80,9 @@ impl ToLabel for SelfSignedChoice {
 }
 
 /// Raw text of every security input field, plus every toggle, passed by name so the many
-/// look-alike path fields cannot be transposed at a call site. `client_ca_files` is raw
-/// comma-separated text (OC-R-113), parsed by [`parse_ca_list`].
+/// look-alike path fields cannot be transposed at a call site. `client_ca_files` is the
+/// add/remove/edit list widget's current entries (OC-R-113) — already individual paths, no
+/// further parsing.
 pub struct SecurityInputs<'a> {
     pub username: &'a str,
     pub password: &'a str,
@@ -90,7 +91,7 @@ pub struct SecurityInputs<'a> {
     pub key_file: &'a str,
     pub client_cert_file: &'a str,
     pub client_key_file: &'a str,
-    pub client_ca_files: &'a str,
+    pub client_ca_files: &'a [String],
     /// Server: server certificate is self-signed (OC-R-110). Client, at `MutualTls` only: the
     /// client's own mTLS identity is self-signed (OC-R-116).
     pub self_signed: bool,
@@ -98,17 +99,6 @@ pub struct SecurityInputs<'a> {
     pub skip_verify: bool,
     /// Server, at `MutualTls` only: accept any client certificate (OC-R-113).
     pub client_cert_skip_verify: bool,
-}
-
-/// Split `raw` on commas into a list of trimmed, non-empty CA file paths (OC-R-113). Duplicated
-/// from the Modbus dialog's identical helper rather than shared — the two setup dialogs are
-/// independent module types with no shared UI-choices module (see this file's own doc comment).
-pub(super) fn parse_ca_list(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 impl SecurityLevel {
@@ -201,7 +191,7 @@ impl SecurityLevel {
                 };
                 let server_cert = ServerCertSource::resolve(self_signed, cert_file, key_file)?;
                 cfg.server = if mtls {
-                    let ca_files = parse_ca_list(client_ca_files);
+                    let ca_files = client_ca_files.to_vec();
                     if !client_cert_skip_verify && ca_files.is_empty() {
                         return Err(
                             "Client CA list is required for mTLS (or enable Skip Verify)."
@@ -354,7 +344,7 @@ mod tests {
         key_file: &'a str,
         client_cert_file: &'a str,
         client_key_file: &'a str,
-        client_ca_files: &'a str,
+        client_ca_files: &'a [String],
     ) -> SecurityInputs<'a> {
         SecurityInputs {
             username,
@@ -485,7 +475,16 @@ mod tests {
         let cfg = SecurityLevel::BasicAuth
             .build_config(
                 OcppRole::Server,
-                inputs("u", "p", "ca", "cert", "key", "ccert", "ckey", "cca"),
+                inputs(
+                    "u",
+                    "p",
+                    "ca",
+                    "cert",
+                    "key",
+                    "ccert",
+                    "ckey",
+                    &["cca".to_string()],
+                ),
             )
             .unwrap();
         assert_eq!(cfg.username.as_deref(), Some("u"));
@@ -505,7 +504,16 @@ mod tests {
         let cfg = SecurityLevel::MutualTls
             .build_config(
                 OcppRole::Server,
-                inputs("", "", "", "cert", "key", "", "", "ca1.pem, ca2.pem"),
+                inputs(
+                    "",
+                    "",
+                    "",
+                    "cert",
+                    "key",
+                    "",
+                    "",
+                    &["ca1.pem".to_string(), "ca2.pem".to_string()],
+                ),
             )
             .unwrap();
         match cfg.server {
@@ -524,7 +532,7 @@ mod tests {
         let err = SecurityLevel::MutualTls
             .build_config(
                 OcppRole::Server,
-                inputs("", "", "", "cert", "key", "", "", ""),
+                inputs("", "", "", "cert", "key", "", "", &[]),
             )
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
@@ -534,7 +542,7 @@ mod tests {
     /// OC-R-116 — a mutual-TLS client build with the self-signed toggle on excludes the
     /// (possibly stale) client-cert/key text and resolves to `ClientCertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
-        let mut i = inputs("", "", "", "", "", "stale.crt", "stale.key", "");
+        let mut i = inputs("", "", "", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
         let cfg = SecurityLevel::MutualTls
             .build_config(OcppRole::Client, i)
@@ -555,7 +563,7 @@ mod tests {
         let cfg = SecurityLevel::MutualTls
             .build_config(
                 OcppRole::Client,
-                inputs("", "", "ca", "", "", "ccert", "ckey", ""),
+                inputs("", "", "ca", "", "", "ccert", "ckey", &[]),
             )
             .unwrap();
         assert_eq!(
@@ -672,22 +680,5 @@ mod tests {
         assert!(
             validate_security(&cfg, OcppRole::Client, SecurityLevel::MutualTls, &|_| false).is_ok()
         );
-    }
-
-    // --- parse_ca_list ---------------------------------------------------------------------------
-
-    #[test]
-    /// OC-R-113 — the CA list parses comma-separated, trims whitespace, and drops empty entries.
-    fn ut_parse_ca_list_trims_and_drops_empty() {
-        assert_eq!(
-            parse_ca_list(" ca1.pem ,ca2.pem,, ca3.pem"),
-            vec![
-                "ca1.pem".to_string(),
-                "ca2.pem".to_string(),
-                "ca3.pem".to_string(),
-            ]
-        );
-        assert_eq!(parse_ca_list(""), Vec::<String>::new());
-        assert_eq!(parse_ca_list("   "), Vec::<String>::new());
     }
 }

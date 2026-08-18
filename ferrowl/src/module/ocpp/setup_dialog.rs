@@ -7,13 +7,13 @@ use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
+        ButtonState, InputFieldState, InputFieldStateBuilder, SelectionState,
+        SelectionStateBuilder, SuggestInputState, SuggestInputStateBuilder,
     },
-    style::{InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
+    style::{ButtonStyle, InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        Button, GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
@@ -159,13 +159,23 @@ pub struct OcppSetupDialog {
     #[focus(when = {self.show_client_cert()})]
     pub client_key_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
-    /// Server-only comma-separated list of CAs used to verify client certificates under mTLS
-    /// (OC-R-113) — a certificate signed by any one is sufficient. Free text rather than a
-    /// dedicated add/remove/edit sub-dialog, mirroring the Modbus dialog's `client_ca_files`
-    /// field. Selecting mTLS as server implies `ServerTlsPolicy::MutualTls` in the resolved
-    /// config (unless `client_cert_skip_verify` is on, in which case this list is ignored).
+    /// Server-only list of CAs used to verify client certificates under mTLS (OC-R-113) — a
+    /// certificate signed by any one is sufficient. An add/remove list (mirrors the Modbus
+    /// dialog's `client_ca_files` cluster exactly, sharing `AddCaFileDialog`): `Selection<String>`
+    /// browses/selects the current entries; `client_ca_add_button`/`client_ca_delete_button` add
+    /// via `client_ca_add_dialog` or remove the selected entry. Selecting mTLS as server implies
+    /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
+    /// on, in which case this list is ignored).
     #[focus(when = {self.show_client_ca()})]
-    pub client_ca_files: Widget<InputFieldState, InputField<String>>,
+    pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
+    #[focus(when = {self.show_client_ca()})]
+    pub client_ca_add_button: Widget<ButtonState, Button>,
+    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
+    pub client_ca_delete_button: Widget<ButtonState, Button>,
+    /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`; not
+    /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring `close_confirm`.
+    #[builder(default)]
+    pub client_ca_add_dialog: Option<crate::dialog::ca_file_list::AddCaFileDialog>,
     /// Security section the dialog was opened with (`edit`; `Default` for a fresh dialog).
     /// [`resolve`](Self::resolve) returns it untouched while the protocol is `ws`: the security
     /// UI is hidden then, and a hidden section must never clobber a config-file-only setup
@@ -286,11 +296,20 @@ impl OcppSetupDialog {
                 &input_style,
                 cert_provider(),
             ))
-            .client_ca_files(input(
-                "Client CA(s) (comma-separated)",
-                "client_ca1.pem, client_ca2.pem",
-                &input_style,
-                false,
+            .client_ca_files(selection(
+                "Client CA(s)",
+                Vec::<String>::new(),
+                &selection_style,
+            ))
+            .client_ca_add_button(ferrowl_ui::widgets::button(
+                "ADD",
+                ButtonStyle::default(),
+                0,
+            ))
+            .client_ca_delete_button(ferrowl_ui::widgets::button(
+                "DEL",
+                ButtonStyle::default(),
+                0,
             ))
             .preserved_security(OcppSecurityConfig::default())
             .fs_cache(Default::default())
@@ -368,14 +387,13 @@ impl OcppSetupDialog {
                 };
                 set_suggest_text(&mut d.cert_file, cert_file);
                 set_suggest_text(&mut d.key_file, key_file);
-                let (ca_files_text, skip) = match &client_verification {
-                    Some(ClientCertVerification::Verify { ca_files }) => {
-                        (ca_files.join(", "), false)
-                    }
-                    Some(ClientCertVerification::SkipVerify) => (String::new(), true),
-                    None => (String::new(), false),
+                let (ca_files, skip) = match &client_verification {
+                    Some(ClientCertVerification::Verify { ca_files }) => (ca_files.clone(), false),
+                    Some(ClientCertVerification::SkipVerify) => (Vec::new(), true),
+                    None => (Vec::new(), false),
                 };
-                set_text(&mut d.client_ca_files, &ca_files_text);
+                *d.client_ca_files.state.values_mut() = ca_files;
+                d.client_ca_files.state.set_selection(0);
                 d.client_cert_skip_verify
                     .state
                     .set_selection(if skip { 1 } else { 0 });
@@ -489,7 +507,7 @@ impl OcppSetupDialog {
                     key_file: blank_below_tls(tls, self.key_file.state.input()),
                     client_cert_file: self.client_cert_file.state.input(),
                     client_key_file: self.client_key_file.state.input(),
-                    client_ca_files: self.client_ca_files.state.input(),
+                    client_ca_files: self.client_ca_files.state.values(),
                     self_signed: effective_self_signed,
                     skip_verify: is_client && self.skip_verify.get_value() == SkipVerifyChoice::On,
                     client_cert_skip_verify: is_server
@@ -531,8 +549,10 @@ impl OcppSetupDialog {
         self.config_path.state.input().trim().to_string()
     }
 
-    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it; everything
-    /// else falls through to the derived per-field routing.
+    /// Route a key: the close-confirm popup captures all keys while open; then the client-CA
+    /// add-dialog (OC-R-113), if open; then the client-CA ADD/DEL buttons (Enter/Space); Esc
+    /// (with nothing else open) opens the close-confirm popup; everything else falls through to
+    /// the derived per-field routing.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         match route_close_confirm(&mut self.close_confirm, modifiers, code) {
             CloseConfirmOutcome::NotActive => {}
@@ -543,12 +563,66 @@ impl OcppSetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
+        if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
+            match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) => {
+                    self.client_ca_add_dialog = None;
+                }
+                (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
+                    Ok(path) => {
+                        self.client_ca_files.state.values_mut().push(path);
+                        let idx = self.client_ca_files.state.values().len() - 1;
+                        self.client_ca_files.state.set_selection(idx);
+                        self.client_ca_add_dialog = None;
+                    }
+                    Err(e) => dialog.error.state = e,
+                },
+                _ => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
+            }
+            return EventResult::Consumed;
+        }
+
+        if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
+            match self.focus {
+                OcppSetupDialogFocus::ClientCaAddButton => {
+                    self.client_ca_add_dialog =
+                        Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
+                    return EventResult::Consumed;
+                }
+                OcppSetupDialogFocus::ClientCaDeleteButton => {
+                    self.delete_selected_client_ca();
+                    return EventResult::Consumed;
+                }
+                _ => {}
+            }
+        }
+
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
             self.close_confirm = Some(CloseConfirmDialog::new());
             return EventResult::Consumed;
         }
 
         <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Remove the currently-selected client-CA entry (OC-R-113), if any, adjusting the
+    /// selection cursor to stay in bounds.
+    fn delete_selected_client_ca(&mut self) {
+        let idx = self.client_ca_files.state.selection();
+        let vals = self.client_ca_files.state.values_mut();
+        if vals.is_empty() {
+            return;
+        }
+        vals.remove(idx);
+        let new_len = self.client_ca_files.state.values().len();
+        let new_idx = if new_len == 0 {
+            0
+        } else {
+            idx.min(new_len - 1)
+        };
+        self.client_ca_files.state.set_selection(new_idx);
     }
 
     /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
@@ -839,7 +913,11 @@ impl OcppSetupDialog {
 
         if show_cert_b {
             if show_client_ca {
-                render_field!(self, client_ca_files, rows[8], buf);
+                render_row!(self, rows[8], buf;
+                    client_ca_files => Constraint::Percentage(60),
+                    client_ca_add_button => Constraint::Percentage(20),
+                    client_ca_delete_button => Constraint::Percentage(20)
+                );
             } else {
                 render_row!(self, rows[8], buf; client_cert_file, client_key_file);
             }
@@ -870,7 +948,11 @@ impl OcppSetupDialog {
         self.client_key_file
             .widget
             .render_overlay(area, buf, &mut self.client_key_file.state);
-        // `client_ca_files` is a plain `InputField`, not a `SuggestInput` — no overlay to render.
+        // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+
+        if let Some(d) = self.client_ca_add_dialog.as_mut() {
+            d.render(area, buf);
+        }
 
         if let Some(confirm) = self.close_confirm.as_mut() {
             confirm.render(vcenter, buf);
@@ -1337,10 +1419,17 @@ mod tests {
         assert!(err.contains("Client CA list is required"), "{err}");
     }
 
+    fn type_into(state: &mut ferrowl_ui::state::InputFieldState, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
     #[test]
-    /// OC-R-113 — the client-CA list field supports adding, editing and removing entries via its
-    /// comma-separated text: a two-entry list resolves to both CAs; editing down to one entry
-    /// resolves to just that one; clearing it entirely (with Skip Verify on) resolves with none.
+    /// OC-R-113 — the client-CA row is a genuine add/remove list: the ADD button opens a
+    /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes
+    /// whichever entry is currently selected — not a comma-separated text field.
     fn ut_client_ca_files_add_remove_edit() {
         let cert = tmp_file("mca_cert.crt");
         let key = tmp_file("mca_key.key");
@@ -1353,8 +1442,33 @@ mod tests {
         set_suggest_text(&mut d.cert_file, &cert);
         set_suggest_text(&mut d.key_file, &key);
 
-        // Add: two CAs.
-        set_text(&mut d.client_ca_files, &format!("{ca1}, {ca2}"));
+        assert!(d.client_ca_files.state.values().is_empty());
+
+        // ADD: open the sub-dialog, type a path, confirm with Enter.
+        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.client_ca_add_dialog.is_some());
+        type_into(
+            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &ca1,
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.client_ca_add_dialog.is_none());
+        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+
+        // ADD a second entry.
+        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(
+            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &ca2,
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(
+            d.client_ca_files.state.values(),
+            &[ca1.clone(), ca2.clone()]
+        );
+
         let spec = d.resolve().expect("two CAs resolve");
         match spec.security.server {
             ServerTlsPolicy::MutualTls {
@@ -1364,19 +1478,24 @@ mod tests {
             other => panic!("expected MutualTls with Verify, got {other:?}"),
         }
 
-        // Edit/remove: down to one CA.
-        set_text(&mut d.client_ca_files, &ca2);
+        // DEL: remove the currently-selected entry (selection sits on the last-added item).
+        assert_eq!(d.client_ca_files.state.selection(), 1);
+        d.focus = OcppSetupDialogFocus::ClientCaDeleteButton;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+
         let spec = d.resolve().expect("one CA resolves");
         match spec.security.server {
             ServerTlsPolicy::MutualTls {
                 client_verification: ClientCertVerification::Verify { ca_files },
                 ..
-            } => assert_eq!(ca_files, vec![ca2]),
+            } => assert_eq!(ca_files, vec![ca1]),
             other => panic!("expected MutualTls with Verify, got {other:?}"),
         }
 
         // Remove all: needs Skip Verify on to resolve without error.
-        set_text(&mut d.client_ca_files, "");
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert!(d.client_ca_files.state.values().is_empty());
         assert!(d.resolve().is_err());
         d.client_cert_skip_verify.state.set_selection(1); // On
         let spec = d.resolve().expect("skip-verify needs no CA list");
