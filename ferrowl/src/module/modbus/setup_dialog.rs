@@ -9,13 +9,13 @@ use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
+        ButtonState, InputFieldState, InputFieldStateBuilder, SelectionState,
+        SelectionStateBuilder, SuggestInputState, SuggestInputStateBuilder,
     },
-    style::{InputFieldStyle, SelectionStyle, TextStyle},
+    style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        Button, GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
@@ -144,14 +144,24 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_cert()})]
     pub client_key_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    /// Server-only comma-separated list of CAs used to verify client certificates under mTLS
-    /// (MB-R-136) — a certificate signed by any one is sufficient. Free text rather than a
-    /// dedicated add/remove/edit sub-dialog, mirroring this same dialog's `holding_ranges`/
-    /// `input_ranges`/etc. comma-separated-list fields. Selecting mTLS as server implies
+    /// Server-only list of CAs used to verify client certificates under mTLS (MB-R-136) — a
+    /// certificate signed by any one is sufficient. An add/remove list (`Selection<String>`
+    /// browses/selects the current entries; `client_ca_add_button`/`client_ca_delete_button` add
+    /// via `client_ca_add_dialog` or remove the selected entry), mirroring the register named-
+    /// value editor's add/remove list interaction. Selecting mTLS as server implies
     /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
     /// on, in which case this list is ignored).
     #[focus(when = {self.show_client_ca()})]
-    pub client_ca_files: Widget<InputFieldState, InputField<String>>,
+    pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
+    #[focus(when = {self.show_client_ca()})]
+    pub client_ca_add_button: Widget<ButtonState, Button>,
+    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
+    pub client_ca_delete_button: Widget<ButtonState, Button>,
+    /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`;
+    /// not itself a `#[focus]` field — routed specially in `handle_events` while open, mirroring
+    /// `close_confirm`.
+    #[builder(default)]
+    pub client_ca_add_dialog: Option<crate::dialog::ca_file_list::AddCaFileDialog>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
@@ -312,14 +322,15 @@ impl SetupDialog {
                     };
                     set_suggest_input(&mut dialog.cert_file, cert_file);
                     set_suggest_input(&mut dialog.key_file, key_file);
-                    let (ca_files_text, skip) = match &client_verification {
+                    let (ca_files, skip) = match &client_verification {
                         Some(ClientCertVerification::Verify { ca_files }) => {
-                            (ca_files.join(", "), false)
+                            (ca_files.clone(), false)
                         }
-                        Some(ClientCertVerification::SkipVerify) => (String::new(), true),
-                        None => (String::new(), false),
+                        Some(ClientCertVerification::SkipVerify) => (Vec::new(), true),
+                        None => (Vec::new(), false),
                     };
-                    set_input(&mut dialog.client_ca_files, &ca_files_text);
+                    *dialog.client_ca_files.state.values_mut() = ca_files;
+                    dialog.client_ca_files.state.set_selection(0);
                     dialog
                         .client_cert_skip_verify
                         .state
@@ -533,12 +544,21 @@ impl SetupDialog {
                 false,
                 FsPathProvider::with_extensions(&["pem", "crt", "key"]),
             ))
-            .client_ca_files(input(
-                "Client CA(s) (comma-separated)",
+            .client_ca_files(selection(
+                "Client CA(s)",
                 None,
-                "client_ca1.pem, client_ca2.pem",
-                &input_style,
-                false,
+                Vec::<String>::new(),
+                &selection_style,
+            ))
+            .client_ca_add_button(ferrowl_ui::widgets::button(
+                "ADD",
+                ButtonStyle::default(),
+                0,
+            ))
+            .client_ca_delete_button(ferrowl_ui::widgets::button(
+                "DEL",
+                ButtonStyle::default(),
+                0,
             ))
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
@@ -707,8 +727,10 @@ impl SetupDialog {
         self.show_client_cert() || self.show_client_ca()
     }
 
-    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it;
-    /// everything else falls through to the derived per-field routing.
+    /// Route a key: the close-confirm popup captures all keys while open; then the client-CA
+    /// add-dialog (MB-R-136), if open; then the client-CA ADD/DEL buttons (Enter/Space); Esc
+    /// (with nothing else open) opens the close-confirm popup; everything else falls through to
+    /// the derived per-field routing.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         match route_close_confirm(&mut self.close_confirm, modifiers, code) {
             CloseConfirmOutcome::NotActive => {}
@@ -719,12 +741,66 @@ impl SetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
+        if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
+            match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) => {
+                    self.client_ca_add_dialog = None;
+                }
+                (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
+                    Ok(path) => {
+                        self.client_ca_files.state.values_mut().push(path);
+                        let idx = self.client_ca_files.state.values().len() - 1;
+                        self.client_ca_files.state.set_selection(idx);
+                        self.client_ca_add_dialog = None;
+                    }
+                    Err(e) => dialog.error.state = e,
+                },
+                _ => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
+            }
+            return EventResult::Consumed;
+        }
+
+        if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
+            match self.focus {
+                SetupDialogFocus::ClientCaAddButton => {
+                    self.client_ca_add_dialog =
+                        Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
+                    return EventResult::Consumed;
+                }
+                SetupDialogFocus::ClientCaDeleteButton => {
+                    self.delete_selected_client_ca();
+                    return EventResult::Consumed;
+                }
+                _ => {}
+            }
+        }
+
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
             self.close_confirm = Some(CloseConfirmDialog::new());
             return EventResult::Consumed;
         }
 
         <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Remove the currently-selected client-CA entry (MB-R-136), if any, adjusting the
+    /// selection cursor to stay in bounds.
+    fn delete_selected_client_ca(&mut self) {
+        let idx = self.client_ca_files.state.selection();
+        let vals = self.client_ca_files.state.values_mut();
+        if vals.is_empty() {
+            return;
+        }
+        vals.remove(idx);
+        let new_len = self.client_ca_files.state.values().len();
+        let new_idx = if new_len == 0 {
+            0
+        } else {
+            idx.min(new_len - 1)
+        };
+        self.client_ca_files.state.set_selection(new_idx);
     }
 
     /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
@@ -922,7 +998,7 @@ impl SetupDialog {
                         key_file: self.key_file.state.input(),
                         client_cert_file: self.client_cert_file.state.input(),
                         client_key_file: self.client_key_file.state.input(),
-                        client_ca_files: self.client_ca_files.state.input(),
+                        client_ca_files: self.client_ca_files.state.values(),
                         self_signed: self.self_signed.state.get_value() == SelfSignedChoice::On,
                         skip_verify: self.skip_verify.state.get_value() == SkipVerifyChoice::On,
                         client_cert_skip_verify: self.client_cert_skip_verify.state.get_value()
@@ -1099,7 +1175,11 @@ impl SetupDialog {
                 if self.show_client_cert() {
                     render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
                 } else {
-                    render_field!(self, client_ca_files, rows[idx], buf);
+                    render_row!(self, rows[idx], buf;
+                        client_ca_files => Constraint::Percentage(60),
+                        client_ca_add_button => Constraint::Percentage(20),
+                        client_ca_delete_button => Constraint::Percentage(20)
+                    );
                 }
                 idx += 1;
             }
@@ -1159,7 +1239,11 @@ impl SetupDialog {
         self.client_key_file
             .widget
             .render_overlay(area, buf, &mut self.client_key_file.state);
-        // `client_ca_files` is a plain `InputField`, not a `SuggestInput` — no overlay to render.
+        // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+
+        if let Some(d) = self.client_ca_add_dialog.as_mut() {
+            d.render(area, buf);
+        }
 
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
@@ -1747,7 +1831,7 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
         dialog.self_signed.state.set_selection(1); // On
-        set_input(&mut dialog.client_ca_files, "client_ca.pem");
+        *dialog.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
@@ -1918,5 +2002,95 @@ mod tests {
         assert!(dialog.close_confirm.is_some());
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         assert!(dialog.take_close_request());
+    }
+
+    fn type_into(state: &mut InputFieldState, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
+    /// MB-R-136 — the client-CA row is a genuine add/remove list: the ADD button opens a
+    /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes
+    /// whichever entry is currently selected — not a comma-separated text field.
+    #[test]
+    fn ut_client_ca_files_add_remove_edit() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Role::Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog.self_signed.state.set_selection(1); // server cert self-signed, no file needed
+
+        assert!(dialog.client_ca_files.state.values().is_empty());
+
+        // ADD: open the sub-dialog, type a path, confirm with Enter.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "ca1.pem",
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_none());
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &["ca1.pem".to_string()]
+        );
+
+        // ADD a second entry.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "ca2.pem",
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &["ca1.pem".to_string(), "ca2.pem".to_string()]
+        );
+
+        // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        assert!(
+            !dialog
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty()
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.client_ca_add_dialog.is_none());
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &["ca1.pem".to_string(), "ca2.pem".to_string()]
+        );
+
+        // DEL: remove the currently-selected entry (selection sits on the last-added item).
+        assert_eq!(dialog.client_ca_files.state.selection(), 1);
+        dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &["ca1.pem".to_string()]
+        );
+
+        // Removing the last entry leaves the list empty and the DEL button no longer eligible.
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        assert!(!dialog.show_client_ca() || dialog.client_ca_files.state.values().is_empty());
+
+        // Resolving with an empty list and skip-verify off is a validation error (MB-R-136).
+        assert!(dialog.resolve().is_err());
     }
 }

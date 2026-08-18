@@ -76,15 +76,15 @@ impl ToLabel for SkipVerifyChoice {
 }
 
 /// Raw text of every TLS path field, plus every toggle, passed by name so the many look-alike
-/// path fields cannot be transposed at a call site. `client_ca_files` is raw comma-separated
-/// text (MB-R-136), parsed by [`parse_ca_list`].
+/// path fields cannot be transposed at a call site. `client_ca_files` is the add/remove/edit
+/// list widget's current entries (MB-R-136) — already individual paths, no further parsing.
 pub struct TlsInputs<'a> {
     pub ca_file: &'a str,
     pub cert_file: &'a str,
     pub key_file: &'a str,
     pub client_cert_file: &'a str,
     pub client_key_file: &'a str,
-    pub client_ca_files: &'a str,
+    pub client_ca_files: &'a [String],
     /// Server: server certificate is self-signed (MB-R-106). Client, at `MutualTls` only: the
     /// client's own mTLS identity is self-signed (MB-R-138/139).
     pub self_signed: bool,
@@ -92,15 +92,6 @@ pub struct TlsInputs<'a> {
     pub skip_verify: bool,
     /// Server, at `MutualTls` only: accept any client certificate (MB-R-136).
     pub client_cert_skip_verify: bool,
-}
-
-/// Split `raw` on commas into a list of trimmed, non-empty CA file paths (MB-R-136).
-pub(super) fn parse_ca_list(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 impl TlsLevel {
@@ -155,7 +146,7 @@ impl TlsLevel {
                 let server_cert =
                     ServerCertSource::resolve(self_signed, opt(cert_file), opt(key_file))?;
                 cfg.server = if mtls {
-                    let ca_files = parse_ca_list(client_ca_files);
+                    let ca_files = client_ca_files.to_vec();
                     if !client_cert_skip_verify && ca_files.is_empty() {
                         return Err(
                             "Client CA list is required for mTLS (or enable Skip Verify)."
@@ -302,7 +293,7 @@ mod tests {
         key_file: &'a str,
         client_cert_file: &'a str,
         client_key_file: &'a str,
-        client_ca_files: &'a str,
+        client_ca_files: &'a [String],
     ) -> TlsInputs<'a> {
         TlsInputs {
             ca_file,
@@ -369,7 +360,7 @@ mod tests {
     /// UI-R-024 — a server TLS build resolves cert/key from raw text when self-signed is off.
     fn ut_build_config_tls_server_resolves_cert_key() {
         let cfg = TlsLevel::Tls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", ""))
+            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
             .unwrap();
         assert_eq!(
             cfg.server,
@@ -389,7 +380,14 @@ mod tests {
         let cfg = TlsLevel::MutualTls
             .build_config(
                 Role::Server,
-                inputs("", "cert", "key", "", "", "ca1.pem, ca2.pem"),
+                inputs(
+                    "",
+                    "cert",
+                    "key",
+                    "",
+                    "",
+                    &["ca1.pem".to_string(), "ca2.pem".to_string()],
+                ),
             )
             .unwrap();
         match cfg.server {
@@ -407,7 +405,7 @@ mod tests {
     /// `ClientCertVerification::Verify { ca_files: vec![] }`).
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
         let err = TlsLevel::MutualTls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", ""))
+            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
     }
@@ -415,7 +413,7 @@ mod tests {
     #[test]
     /// MB-R-136 — a mutual-TLS server build with skip-verify on needs no CA list at all.
     fn ut_build_config_mutual_tls_server_skip_verify_needs_no_ca_list() {
-        let mut i = inputs("", "cert", "key", "", "", "");
+        let mut i = inputs("", "cert", "key", "", "", &[]);
         i.client_cert_skip_verify = true;
         let cfg = TlsLevel::MutualTls.build_config(Role::Server, i).unwrap();
         assert_eq!(
@@ -434,7 +432,7 @@ mod tests {
     /// MB-R-139 — a mutual-TLS client build with the self-signed toggle on excludes the
     /// (possibly stale) client-cert/key text and resolves to `ClientCertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
-        let mut i = inputs("", "", "", "stale.crt", "stale.key", "");
+        let mut i = inputs("", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
         let cfg = TlsLevel::MutualTls.build_config(Role::Client, i).unwrap();
         assert_eq!(
@@ -451,7 +449,7 @@ mod tests {
     /// default placeholder (the caller stitches in the real inactive-role config, if any).
     fn ut_build_config_leaves_inactive_role_at_default() {
         let cfg = TlsLevel::Tls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", ""))
+            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
             .unwrap();
         assert_eq!(cfg.client, ModbusTlsConfig::default().client);
     }
@@ -569,22 +567,5 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_tls(&cfg, Role::Client, TlsLevel::MutualTls, &|_| false).is_ok());
-    }
-
-    // --- parse_ca_list ---------------------------------------------------------------------------
-
-    #[test]
-    /// MB-R-136 — the CA list parses comma-separated, trims whitespace, and drops empty entries.
-    fn ut_parse_ca_list_trims_and_drops_empty() {
-        assert_eq!(
-            parse_ca_list(" ca1.pem ,ca2.pem,, ca3.pem"),
-            vec![
-                "ca1.pem".to_string(),
-                "ca2.pem".to_string(),
-                "ca3.pem".to_string(),
-            ]
-        );
-        assert_eq!(parse_ca_list(""), Vec::<String>::new());
-        assert_eq!(parse_ca_list("   "), Vec::<String>::new());
     }
 }
