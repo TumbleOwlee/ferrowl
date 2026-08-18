@@ -695,11 +695,10 @@ impl OcppSetupDialog {
             && self.level() == SecurityLevel::MutualTls
     }
 
-    /// A second toggle row, shown only at mTLS: the client's self-signed-identity toggle for the
-    /// client role, or the server's client-cert-skip-verify toggle for the server role — exactly
-    /// one is ever applicable for a given role, so this single flag governs one shared row.
-    fn show_second_toggle_row(&self) -> bool {
-        self.wss() && self.level() == SecurityLevel::MutualTls
+    /// Row: the Skip Verify toggle — server's `client_cert_skip_verify` (mTLS only), or the
+    /// client's `skip_verify` (TLS level or above) — exactly one applies for a given role.
+    fn show_skip_verify_row(&self) -> bool {
+        self.show_client_cert_skip_verify() || self.show_skip_verify()
     }
 
     /// Server certificate/key inputs (wss server at TLS level or above, Self-Signed Off).
@@ -728,14 +727,16 @@ impl OcppSetupDialog {
             && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
     }
 
-    /// First certificate row: server cert/key, or the client trust anchor.
-    fn show_cert_row_a(&self) -> bool {
-        self.show_ca_file() || self.show_server_cert()
+    /// Row: the own-identity cert/key pair sharing the Self-Signed row — server's
+    /// `cert_file`/`key_file`, or the client's `client_cert_file`/`client_key_file`.
+    fn show_identity_row(&self) -> bool {
+        self.show_server_cert() || self.show_client_cert()
     }
 
-    /// Second certificate row: client mTLS cert/key, or the server client-CA list.
-    fn show_cert_row_b(&self) -> bool {
-        self.show_client_cert() || self.show_client_ca()
+    /// Row: the peer-verification input sharing the Skip Verify row — server's
+    /// `client_ca_files` list, or the client's `ca_file`.
+    fn show_peer_verify_row(&self) -> bool {
+        self.show_client_ca() || self.show_ca_file()
     }
 
     /// Cached `Path::exists` with a short TTL: `render` re-runs `resolve` (and so the security
@@ -769,25 +770,28 @@ impl OcppSetupDialog {
 
         let has_error = !self.error.state.is_empty();
         let role = self.role.get_value();
+        let is_server = role == OcppRole::Server;
         let show_security_row = self.show_security();
         let show_credentials = self.show_credentials();
-        let show_second_toggle_row = self.show_second_toggle_row();
-        let show_server_cert = self.show_server_cert();
-        let show_client_ca = self.show_client_ca();
-        let show_cert_a = self.show_cert_row_a();
-        let show_cert_b = self.show_cert_row_b();
+        // Fixed 3-row TLS layout (both roles): Security (no side toggle), a Self-Signed row that
+        // also carries the own-identity cert/key pair, and a Skip Verify row that also carries
+        // the peer-verification input — each combined row's existence is governed by its toggle
+        // field's own gate, since the paired file field's gate is always a strict subset of it.
+        let show_self_signed_row = self.show_self_signed();
+        let show_identity_row = self.show_identity_row();
+        let show_skip_verify_row = self.show_skip_verify_row();
+        let show_peer_verify_row = self.show_peer_verify_row();
         let show_hint = self.show_hint();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role|reconnect(3)
-        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security rows
-        // (3 each), the second toggle row (3, mTLS only), and the hint line (1), only when
-        // applicable.
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security row
+        // (3), the self-signed row (3, mTLS only for client), the skip-verify row (3), and the
+        // hint line (1), only when applicable.
         let box_height = 17
             + if has_error { 3 } else { 0 }
             + if show_security_row { 3 } else { 0 }
-            + if show_second_toggle_row { 3 } else { 0 }
-            + if show_cert_a { 3 } else { 0 }
-            + if show_cert_b { 3 } else { 0 }
+            + if show_self_signed_row { 3 } else { 0 }
+            + if show_skip_verify_row { 3 } else { 0 }
             + if show_hint { 1 } else { 0 };
         let box_width = 80;
 
@@ -819,22 +823,20 @@ impl OcppSetupDialog {
 
         let error_height = if has_error { 3 } else { 0 };
         let security_height = if show_security_row { 3 } else { 0 };
-        let second_toggle_height = if show_second_toggle_row { 3 } else { 0 };
-        let cert_a_height = if show_cert_a { 3 } else { 0 };
-        let cert_b_height = if show_cert_b { 3 } else { 0 };
+        let self_signed_height = if show_self_signed_row { 3 } else { 0 };
+        let skip_verify_height = if show_skip_verify_row { 3 } else { 0 };
         let hint_height = if show_hint { 1 } else { 0 };
         let rows = Layout::vertical([
-            Constraint::Length(3),                    // name
-            Constraint::Length(3),                    // config path
-            Constraint::Length(3),                    // version | role | reconnect (client only)
-            Constraint::Length(3),                    // protocol | ip | port | path
-            Constraint::Length(security_height), // security | username | password | side toggle
-            Constraint::Length(second_toggle_height), // second toggle row (mTLS only)
-            Constraint::Length(hint_height),     // self-signed hint (server, below TLS)
-            Constraint::Length(cert_a_height),   // cert_file|key_file or ca_file
-            Constraint::Length(cert_b_height),   // client_cert|client_key or client_ca_files
-            Constraint::Length(error_height),    // error (hidden when empty)
-            Constraint::Length(1),               // keybinds
+            Constraint::Length(3),                  // name
+            Constraint::Length(3),                  // config path
+            Constraint::Length(3),                  // version | role | reconnect (client only)
+            Constraint::Length(3),                  // protocol | ip | port | path
+            Constraint::Length(security_height),    // security | username | password
+            Constraint::Length(self_signed_height), // self_signed (+ own-identity cert/key pair)
+            Constraint::Length(hint_height),        // self-signed hint (server, below TLS)
+            Constraint::Length(skip_verify_height), // skip-verify toggle (+ peer-verification input)
+            Constraint::Length(error_height),       // error (hidden when empty)
+            Constraint::Length(1),                  // keybinds
         ])
         .split(inner);
 
@@ -858,43 +860,35 @@ impl OcppSetupDialog {
             );
         }
 
-        let is_client = role == OcppRole::Client;
-        // Primary side widget: server -> self-signed (Tls+, OC-R-110); client -> skip-verify
-        // (Tls+ only, OC-R-111) -- mirrors the Modbus dialog's primary/second toggle-row split.
-        let show_side = if is_client {
-            self.show_skip_verify()
-        } else {
-            self.show_self_signed()
-        };
         if show_security_row {
             if show_credentials {
-                if show_side {
-                    if is_client {
-                        render_row!(self, rows[4], buf; security, username, password, skip_verify);
-                    } else {
-                        render_row!(self, rows[4], buf; security, username, password, self_signed);
-                    }
-                } else {
-                    render_row!(self, rows[4], buf; security, username, password);
-                }
-            } else if show_side {
-                if is_client {
-                    render_row!(self, rows[4], buf; security, skip_verify);
-                } else {
-                    render_row!(self, rows[4], buf; security, self_signed);
-                }
+                render_row!(self, rows[4], buf; security, username, password);
             } else {
-                // No credential fields and no side toggle: the selection is the row's only
-                // widget, so it takes the full width instead of leaving two thirds blank.
+                // No credential fields: the selection is the row's only widget, so it takes
+                // the full width instead of leaving two thirds blank.
                 render_field!(self, security, rows[4], buf);
             }
         }
 
-        if show_second_toggle_row {
-            if is_client {
-                render_field!(self, self_signed, rows[5], buf);
+        // Self-Signed row: always Self-Signed itself, plus (when applicable) the role's own
+        // identity cert/key pair sharing the same row.
+        if show_self_signed_row {
+            if show_identity_row {
+                if is_server {
+                    render_row!(self, rows[5], buf;
+                        self_signed => Constraint::Length(16),
+                        cert_file => Constraint::Fill(1),
+                        key_file => Constraint::Fill(1)
+                    );
+                } else {
+                    render_row!(self, rows[5], buf;
+                        self_signed => Constraint::Length(16),
+                        client_cert_file => Constraint::Fill(1),
+                        client_key_file => Constraint::Fill(1)
+                    );
+                }
             } else {
-                render_field!(self, client_cert_skip_verify, rows[5], buf);
+                render_field!(self, self_signed, rows[5], buf);
             }
         }
 
@@ -903,30 +897,44 @@ impl OcppSetupDialog {
             render_field!(self, hint, rows[6], buf);
         }
 
-        if show_cert_a {
-            if show_server_cert {
-                render_row!(self, rows[7], buf; cert_file, key_file);
+        // Skip Verify row: always the Skip Verify toggle itself, plus (when applicable) the
+        // peer-verification input sharing the same row.
+        if show_skip_verify_row {
+            if show_peer_verify_row {
+                if is_server {
+                    // No client-CA entries yet: give ADD the remaining width and skip DEL
+                    // entirely rather than paint an empty, nothing-to-delete button.
+                    if self.client_ca_files.state.values().is_empty() {
+                        render_row!(self, rows[7], buf;
+                            client_cert_skip_verify => Constraint::Length(16),
+                            client_ca_files => Constraint::Percentage(60),
+                            client_ca_add_button => Constraint::Fill(1)
+                        );
+                    } else {
+                        render_row!(self, rows[7], buf;
+                            client_cert_skip_verify => Constraint::Length(16),
+                            client_ca_files => Constraint::Percentage(45),
+                            client_ca_add_button => Constraint::Percentage(15),
+                            client_ca_delete_button => Constraint::Fill(1)
+                        );
+                    }
+                } else {
+                    render_row!(self, rows[7], buf;
+                        skip_verify => Constraint::Length(16),
+                        ca_file => Constraint::Fill(1)
+                    );
+                }
+            } else if is_server {
+                render_field!(self, client_cert_skip_verify, rows[7], buf);
             } else {
-                render_field!(self, ca_file, rows[7], buf);
-            }
-        }
-
-        if show_cert_b {
-            if show_client_ca {
-                render_row!(self, rows[8], buf;
-                    client_ca_files => Constraint::Percentage(60),
-                    client_ca_add_button => Constraint::Percentage(20),
-                    client_ca_delete_button => Constraint::Percentage(20)
-                );
-            } else {
-                render_row!(self, rows[8], buf; client_cert_file, client_key_file);
+                render_field!(self, skip_verify, rows[7], buf);
             }
         }
 
         if has_error {
-            render_field!(self, error, rows[9], buf);
+            render_field!(self, error, rows[8], buf);
         }
-        render_field!(self, keybinds, rows[10], buf);
+        render_field!(self, keybinds, rows[9], buf);
 
         // Must be called after every sibling widget above has been rendered, so a popup paints on
         // top rather than being overwritten (painter's-algorithm buffer model).
@@ -1862,5 +1870,183 @@ mod tests {
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(':'));
         assert_eq!(dialog.name.state.input(), ":");
         assert!(dialog.close_confirm.is_none());
+    }
+
+    // --- post-gate3 row-layout refinement ---------------------------------------------------
+
+    fn row_of(buf: &Buffer, needle: &str) -> u16 {
+        let text = buffer_text(buf);
+        text.lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} not found in:\n{text}")) as u16
+    }
+
+    #[test]
+    /// OC-R-110, OC-R-113, OC-R-116 — mTLS row order, server role: the security row carries only
+    /// security/username/password (no side toggle); Self-Signed shares a row with the server's
+    /// own cert/key pair; Skip Verify shares a row with the client-CA list.
+    fn ut_mtls_row_order_server() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let security_row = row_of(&buf, "Security");
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Cert File");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert!(
+            security_row < self_signed_row,
+            "security must render before self-signed:\n{text}"
+        );
+        assert_eq!(
+            self_signed_row, cert_row,
+            "self-signed and the own-identity cert/key pair must share a row:\n{text}"
+        );
+        assert!(
+            self_signed_row < skip_row,
+            "self-signed must render before skip-verify:\n{text}"
+        );
+        assert_eq!(
+            skip_row, ca_row,
+            "skip-verify and the client-CA list must share a row:\n{text}"
+        );
+    }
+
+    #[test]
+    /// OC-R-110, OC-R-111, OC-R-116 — mTLS row order, client role: the security row carries only
+    /// security/username/password; Self-Signed shares a row with the client's own cert/key pair;
+    /// Skip Verify shares a row with the CA-file input.
+    fn ut_mtls_row_order_client() {
+        let mut d = wss_dialog(0); // Client
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let security_row = row_of(&buf, "Security");
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Client Cert");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "CA File");
+        assert!(
+            security_row < self_signed_row,
+            "security must render before self-signed:\n{text}"
+        );
+        assert_eq!(
+            self_signed_row, cert_row,
+            "self-signed and the client's own cert/key pair must share a row:\n{text}"
+        );
+        assert!(
+            self_signed_row < skip_row,
+            "self-signed must render before skip-verify:\n{text}"
+        );
+        assert_eq!(
+            skip_row, ca_row,
+            "skip-verify and the CA-file input must share a row:\n{text}"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — the security row no longer carries a side toggle: Self-Signed/Skip Verify
+    /// never appear on the same line as Username/Password.
+    fn ut_security_row_has_no_side_toggle() {
+        let mut d = wss_dialog(1); // Server
+        d.security.state.set_selection(SecurityLevel::Tls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let security_line = text
+            .lines()
+            .find(|l| l.contains("Security"))
+            .expect("security row present");
+        assert!(
+            !security_line.contains("Self-Signed"),
+            "security row still carries the side toggle:\n{text}"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — an empty client-CA list shows no placeholder entry, and the DEL button is not
+    /// rendered at all, so ADD gets the row's full width (mirrors the Modbus dialog).
+    fn ut_client_ca_empty_hides_delete_button() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        assert!(d.client_ca_files.state.values().is_empty());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("DEL"),
+            "DEL button rendered with an empty client-CA list:\n{text}"
+        );
+        assert!(text.contains("ADD"), "ADD button missing:\n{text}");
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA row's DEL button hugs the dialog's right inner edge with no
+    /// trailing dead space, matching every other full-width row (mirrors the Modbus dialog).
+    fn ut_client_ca_delete_button_hugs_right_edge() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        d.client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]);
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+
+        fn rightmost_non_space(buf: &Buffer, y: u16) -> u16 {
+            (0..buf.area.width)
+                .rev()
+                .find(|&x| buf[(x, y)].symbol() != " ")
+                .unwrap_or(0)
+        }
+
+        let name_row = row_of(&buf, "Name");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert_eq!(
+            rightmost_non_space(&buf, name_row),
+            rightmost_non_space(&buf, ca_row),
+            "DEL button leaves trailing dead space vs. the dialog's other full-width rows"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA list's row stays a fixed 3 rows tall regardless of entry count;
+    /// more entries scroll/clip, never grow the box (mirrors the Modbus dialog).
+    fn ut_client_ca_row_height_fixed_regardless_of_entry_count() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        d.client_ca_files
+            .state
+            .set_values((0..10).map(|i| format!("ca{i}.pem")).collect::<Vec<_>>());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let ca_row = row_of(&buf, "Client CA(s)");
+        let keybinds_row = row_of(&buf, "Esc");
+        // The client-CA box is 1 content row + 2 border rows, immediately followed by the
+        // error row (0 or 3 lines) and keybinds; with >3 entries the extras scroll/clip, they
+        // must never push keybinds further down than a fixed 3-row box would.
+        assert!(
+            keybinds_row - ca_row <= 6,
+            "client-CA row appears to have grown beyond a fixed 3-row box:\n{text}"
+        );
     }
 }
