@@ -676,13 +676,6 @@ impl SetupDialog {
             && self.tls_level() == TlsLevel::MutualTls
     }
 
-    /// A second toggle row, shown only at mTLS: the client's self-signed-identity toggle for the
-    /// client role, or the server's client-cert-skip-verify toggle for the server role — exactly
-    /// one is ever applicable for a given role, so this single flag governs one shared row.
-    fn show_second_toggle_row(&self) -> bool {
-        self.tls_shown() && self.tls_level() == TlsLevel::MutualTls
-    }
-
     /// Client trust-anchor input (TCP client at TLS level or above).
     fn show_ca_file(&self) -> bool {
         self.tls_shown()
@@ -717,14 +710,22 @@ impl SetupDialog {
             && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
     }
 
-    /// First certificate row: server cert/key, or the client trust anchor.
-    fn show_cert_row_a(&self) -> bool {
-        self.show_ca_file() || self.show_server_cert()
+    /// Row 3 (skip-verify toggle): server's `client_cert_skip_verify`, or the client's
+    /// `skip_verify` — exactly one applies for a given role.
+    fn show_skip_verify_row(&self) -> bool {
+        self.show_client_cert_skip_verify() || self.show_skip_verify()
     }
 
-    /// Second certificate row: client mTLS cert/key, or the server client-CA list.
-    fn show_cert_row_b(&self) -> bool {
-        self.show_client_cert() || self.show_client_ca()
+    /// Row 2 (own-identity cert/key pair): server's `cert_file`/`key_file`, or the client's
+    /// `client_cert_file`/`client_key_file` — exactly one applies for a given role.
+    fn show_identity_row(&self) -> bool {
+        self.show_server_cert() || self.show_client_cert()
+    }
+
+    /// Row 4 (peer-verification input): server's `client_ca_files` list, or the client's
+    /// `ca_file` — exactly one applies for a given role.
+    fn show_peer_verify_row(&self) -> bool {
+        self.show_client_ca() || self.show_ca_file()
     }
 
     /// Route a key: the close-confirm popup captures all keys while open; then the client-CA
@@ -1054,13 +1055,17 @@ impl SetupDialog {
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
-        let show_second_toggle_row = self.show_second_toggle_row();
-        let show_cert_row_a = self.show_cert_row_a();
-        let show_cert_row_b = self.show_cert_row_b();
-        let tls_rows: u16 = show_tls as u16
-            + show_second_toggle_row as u16
-            + show_cert_row_a as u16
-            + show_cert_row_b as u16;
+        // Fixed 4-slot TLS row order (both roles): Self-Signed, own-identity cert/key pair,
+        // Skip Verify, peer-verification input — each flag already folds in `tls_shown()`, so a
+        // row's absence (e.g. the client's Self-Signed row outside mTLS) simply isn't budgeted.
+        let show_self_signed_row = self.show_self_signed();
+        let show_identity_row = self.show_identity_row();
+        let show_skip_verify_row = self.show_skip_verify_row();
+        let show_peer_verify_row = self.show_peer_verify_row();
+        let tls_rows: u16 = show_self_signed_row as u16
+            + show_identity_row as u16
+            + show_skip_verify_row as u16
+            + show_peer_verify_row as u16;
         // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
         // + error(4) + keybinds(1) + optional config-path row (New mode) + optional TLS rows.
         let box_height = 27 + endpoint_rows * 3 + tls_rows * 3;
@@ -1102,17 +1107,17 @@ impl SetupDialog {
             Constraint::Length(3),                 // holding + input ranges
             Constraint::Length(3),                 // coil + discrete ranges
         ];
-        if show_tls {
-            constraints.push(Constraint::Length(3)); // TLS level (+ self-signed/skip-verify)
+        if show_self_signed_row {
+            constraints.push(Constraint::Length(3)); // Self-Signed
         }
-        if show_second_toggle_row {
-            constraints.push(Constraint::Length(3)); // client self-signed (mTLS), or server client_cert_skip_verify
+        if show_identity_row {
+            constraints.push(Constraint::Length(3)); // own-identity cert/key pair
         }
-        if show_cert_row_a {
-            constraints.push(Constraint::Length(3)); // ca_file, or cert_file + key_file
+        if show_skip_verify_row {
+            constraints.push(Constraint::Length(3)); // Skip Verify
         }
-        if show_cert_row_b {
-            constraints.push(Constraint::Length(3)); // client_cert_file + client_key_file, or client_ca_files
+        if show_peer_verify_row {
+            constraints.push(Constraint::Length(3)); // peer-verification input (CA file, or client-CA list)
         }
         constraints.push(Constraint::Length(4)); // error
         constraints.push(Constraint::Length(1)); // keybinds
@@ -1138,48 +1143,52 @@ impl SetupDialog {
 
         if show_tls {
             let is_server = self.role.state.get_value() == Role::Server;
-            let show_side = if is_server {
-                self.show_self_signed()
-            } else {
-                self.show_skip_verify()
-            };
-            let side_area = rows[idx];
-            if show_side {
+
+            // Row 1: Self-Signed (both roles).
+            if show_self_signed_row {
+                render_field!(self, self_signed, rows[idx], buf);
+                idx += 1;
+            }
+
+            // Row 2: own-identity cert/key pair.
+            if show_identity_row {
                 if is_server {
-                    render_field!(self, self_signed, side_area, buf);
+                    render_row!(self, rows[idx], buf; cert_file, key_file);
                 } else {
-                    render_field!(self, skip_verify, side_area, buf);
+                    render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
                 }
                 idx += 1;
             }
 
-            if show_second_toggle_row {
+            // Row 3: Skip Verify.
+            if show_skip_verify_row {
                 if is_server {
                     render_field!(self, client_cert_skip_verify, rows[idx], buf);
                 } else {
-                    render_field!(self, self_signed, rows[idx], buf);
+                    render_field!(self, skip_verify, rows[idx], buf);
                 }
                 idx += 1;
             }
 
-            if show_cert_row_a {
-                if self.show_ca_file() {
+            // Row 4: peer-verification input.
+            if show_peer_verify_row {
+                if is_server {
+                    // No client-CA entries yet: give ADD the row's full remaining width and
+                    // skip DEL entirely rather than paint an empty, nothing-to-delete button.
+                    if self.client_ca_files.state.values().is_empty() {
+                        render_row!(self, rows[idx], buf;
+                            client_ca_files => Constraint::Percentage(80),
+                            client_ca_add_button => Constraint::Fill(1)
+                        );
+                    } else {
+                        render_row!(self, rows[idx], buf;
+                            client_ca_files => Constraint::Percentage(60),
+                            client_ca_add_button => Constraint::Percentage(20),
+                            client_ca_delete_button => Constraint::Fill(1)
+                        );
+                    }
+                } else {
                     render_field!(self, ca_file, rows[idx], buf);
-                } else {
-                    render_row!(self, rows[idx], buf; cert_file, key_file);
-                }
-                idx += 1;
-            }
-
-            if show_cert_row_b {
-                if self.show_client_cert() {
-                    render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
-                } else {
-                    render_row!(self, rows[idx], buf;
-                        client_ca_files => Constraint::Percentage(60),
-                        client_ca_add_button => Constraint::Percentage(20),
-                        client_ca_delete_button => Constraint::Percentage(20)
-                    );
                 }
                 idx += 1;
             }
@@ -1537,11 +1546,11 @@ mod tests {
         });
         // Default role is Server.
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_identity_row());
         dialog.self_signed.state.set_selection(1); // On
-        assert!(!dialog.show_cert_row_a());
+        assert!(!dialog.show_identity_row());
         dialog.self_signed.state.set_selection(0); // Off
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_identity_row());
     }
 
     #[test]
@@ -1556,11 +1565,167 @@ mod tests {
         });
         dialog.role.state.set_selection(1); // Client
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_peer_verify_row());
         dialog.skip_verify.state.set_selection(1); // On
-        assert!(!dialog.show_cert_row_a());
+        assert!(!dialog.show_peer_verify_row());
         dialog.skip_verify.state.set_selection(0); // Off
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_peer_verify_row());
+    }
+
+    fn row_of(buf: &Buffer, needle: &str) -> u16 {
+        let text = buffer_text(buf);
+        text.lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} not found in:\n{text}")) as u16
+    }
+
+    #[test]
+    /// UI-R-024 — mTLS row order, server role: Self-Signed first, then the server's own
+    /// cert/key pair, then Skip Verify, then the client-CA list (post-gate3 layout refinement).
+    fn ut_mtls_row_order_server() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Cert File");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert!(
+            self_signed_row < cert_row,
+            "self-signed must render before cert/key"
+        );
+        assert!(
+            cert_row < skip_row,
+            "cert/key must render before skip-verify"
+        );
+        assert!(
+            skip_row < ca_row,
+            "skip-verify must render before client-CA list"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — mTLS row order, client role: Self-Signed first, then the client's own
+    /// cert/key pair, then Skip Verify, then the CA-file input (post-gate3 layout refinement).
+    fn ut_mtls_row_order_client() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(1); // Client
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Client Cert");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "CA File");
+        assert!(
+            self_signed_row < cert_row,
+            "self-signed must render before client cert/key"
+        );
+        assert!(
+            cert_row < skip_row,
+            "client cert/key must render before skip-verify"
+        );
+        assert!(
+            skip_row < ca_row,
+            "skip-verify must render before the CA-file input"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — an empty client-CA list shows no placeholder entry, and the DEL button is
+    /// not rendered at all (nothing eligible to delete), so ADD gets the row's full width.
+    fn ut_client_ca_empty_hides_delete_button() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("DEL"),
+            "DEL button rendered with an empty client-CA list:\n{text}"
+        );
+        assert!(text.contains("ADD"), "ADD button missing:\n{text}");
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA row's ADD/DEL buttons hug the dialog's right inner edge with
+    /// no trailing dead space, matching every other full-width row in the dialog.
+    fn ut_client_ca_delete_button_hugs_right_edge() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]);
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        fn rightmost_non_space(buf: &Buffer, y: u16) -> u16 {
+            (0..buf.area.width)
+                .rev()
+                .find(|&x| buf[(x, y)].symbol() != " ")
+                .unwrap_or(0)
+        }
+
+        let name_row = row_of(&buf, "Name");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert_eq!(
+            rightmost_non_space(&buf, name_row),
+            rightmost_non_space(&buf, ca_row),
+            "DEL button leaves trailing dead space vs. the dialog's other full-width rows"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA list's row stays a fixed 3 rows tall (1 content + 2 border)
+    /// regardless of how many entries it holds; more entries scroll/clip, never grow the box.
+    fn ut_client_ca_row_height_fixed_regardless_of_entry_count() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values((0..10).map(|i| format!("ca{i}.pem")).collect::<Vec<_>>());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let ca_row = row_of(&buf, "Client CA(s)");
+        let next_row = row_of(&buf, "IP");
+        // The client-CA box is 1 content row + 2 border rows; with >3 entries the extras
+        // scroll/clip, they must never push the following row further down.
+        assert_eq!(
+            next_row - ca_row,
+            3,
+            "client-CA row appears to have grown beyond a fixed 3-row box:\n{text}"
+        );
     }
 
     #[test]
