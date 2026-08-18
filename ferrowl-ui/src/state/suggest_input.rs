@@ -190,7 +190,7 @@ where
                     self.list.move_down();
                     return EventResult::Consumed;
                 }
-                (KeyModifiers::NONE, KeyCode::Enter) | (KeyModifiers::NONE, KeyCode::Tab) => {
+                (KeyModifiers::NONE, KeyCode::Enter) => {
                     self.accept_selected();
                     return EventResult::Consumed;
                 }

@@ -6,12 +6,16 @@
 //! selected entry", handled by the caller directly against the `Vec` without needing a dialog).
 
 use super::NonEmpty;
+use crate::dialog::path_suggest::FsPathProvider;
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder},
+    state::{InputFieldStateBuilder, SuggestInputState, SuggestInputStateBuilder},
     style::{InputFieldStyle, TextStyle},
-    widgets::{InputField, InputFieldBuilder, Text, TextBuilder, Validate, ValidateResult, Widget},
+    widgets::{
+        InputFieldBuilder, SuggestInput, SuggestInputBuilder, Text, TextBuilder, Validate,
+        ValidateResult, Widget,
+    },
 };
 use ratatui::{
     buffer::Buffer,
@@ -22,7 +26,7 @@ use std::fmt::Debug;
 
 #[derive(Builder, Clone, Debug)]
 pub struct AddCaFileDialog {
-    pub path: Widget<InputFieldState, InputField<NonEmpty>>,
+    pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
 }
@@ -39,20 +43,31 @@ impl AddCaFileDialog {
 
         AddCaFileDialogBuilder::default()
             .path(Widget {
-                state: InputFieldStateBuilder::default()
-                    .focused(true)
-                    .disabled(false)
-                    .placeholder(Some("ca.pem".to_string()))
+                state: SuggestInputStateBuilder::default()
+                    .field(
+                        InputFieldStateBuilder::default()
+                            .focused(true)
+                            .disabled(false)
+                            .placeholder(Some("ca.pem".to_string()))
+                            .build()
+                            .expect("all required builder fields are set"),
+                    )
+                    .provider(FsPathProvider::with_extensions(&["pem", "crt", "key"]))
                     .build()
                     .expect("all required builder fields are set"),
-                widget: InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some("CA File Path".into()))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(input_style)
+                widget: SuggestInputBuilder::default()
+                    .input_field(
+                        InputFieldBuilder::default()
+                            .border(Border::Full(Margin::new(1, 0)))
+                            .title(Some("CA File Path".into()))
+                            .margin(Margin {
+                                vertical: 0,
+                                horizontal: 1,
+                            })
+                            .style(input_style)
+                            .build()
+                            .expect("all required builder fields are set"),
+                    )
                     .build()
                     .expect("all required builder fields are set"),
             })
@@ -161,6 +176,12 @@ impl AddCaFileDialog {
             buf,
             &mut self.keybinds.state,
         );
+
+        // Drawn last, over every sibling widget above, matching every other suggest-input field
+        // in this codebase (e.g. the setup dialogs' own `cert_file`/`ca_file` popups).
+        self.path
+            .widget
+            .render_overlay(area, buf, &mut self.path.state);
     }
 }
 
@@ -176,7 +197,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::{HandleEvents, SetFocus};
 
-    fn type_into(state: &mut InputFieldState, s: &str) {
+    fn type_into(state: &mut SuggestInputState<FsPathProvider>, s: &str) {
         state.set_focused(true);
         for c in s.chars() {
             state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));

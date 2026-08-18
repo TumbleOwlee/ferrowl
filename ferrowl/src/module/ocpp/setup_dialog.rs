@@ -124,26 +124,12 @@ pub struct OcppSetupDialog {
     /// `username`; the field is not obscured on screen.
     #[focus(when = {self.show_credentials()})]
     pub password: Widget<InputFieldState, InputField<String>>,
-    /// Client role only: accept any server certificate without authenticating it. **OC-R-111**:
-    /// shown only at `Tls`/`MutualTls` (not at every wss level) — Basic Auth alone has nothing to
-    /// do with certificate verification.
-    #[focus(when = {self.show_skip_verify()})]
-    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
     /// Server: "generate an ephemeral self-signed certificate" toggle (OC-R-110, shown at TLS+).
     /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
     /// (OC-R-116) — the same widget field backs both, since only one role is ever active for a
     /// given dialog instance. Mirrors the Modbus dialog's `self_signed` field exactly.
     #[focus(when = {self.show_self_signed()})]
     pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
-    /// Server-only, at mTLS only: "accept any client certificate" toggle (OC-R-113). On hides the
-    /// client-CA list below and excludes it from the resolved config; the list's own text is
-    /// preserved (never cleared) so toggling back Off restores it.
-    #[focus(when = {self.show_client_cert_skip_verify()})]
-    pub client_cert_skip_verify:
-        Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
-    /// Client role only: extra trust anchor for a self-signed CSMS certificate.
-    #[focus(when = {self.show_ca_file()})]
-    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     /// Server role only: certificate chain presented to connecting clients.
     #[focus(when = {self.show_server_cert()})]
     pub cert_file:
@@ -151,6 +137,12 @@ pub struct OcppSetupDialog {
     /// Server role only: private key matching `cert_file`.
     #[focus(when = {self.show_server_cert()})]
     pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
+    /// Server-only, at mTLS only: "accept any client certificate" toggle (OC-R-113). On hides the
+    /// client-CA list below and excludes it from the resolved config; the list's own text is
+    /// preserved (never cleared) so toggling back Off restores it.
+    #[focus(when = {self.show_client_cert_skip_verify()})]
+    pub client_cert_skip_verify:
+        Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
     /// Client role only: client certificate presented for mutual TLS.
     #[focus(when = {self.show_client_cert()})]
     pub client_cert_file:
@@ -166,12 +158,20 @@ pub struct OcppSetupDialog {
     /// via `client_ca_add_dialog` or remove the selected entry. Selecting mTLS as server implies
     /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
     /// on, in which case this list is ignored).
-    #[focus(when = {self.show_client_ca()})]
+    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
     pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
     #[focus(when = {self.show_client_ca()})]
     pub client_ca_add_button: Widget<ButtonState, Button>,
     #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
     pub client_ca_delete_button: Widget<ButtonState, Button>,
+    /// Client role only: accept any server certificate without authenticating it. **OC-R-111**:
+    /// shown only at `Tls`/`MutualTls` (not at every wss level) — Basic Auth alone has nothing to
+    /// do with certificate verification.
+    #[focus(when = {self.show_skip_verify()})]
+    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
+    /// Client role only: extra trust anchor for a self-signed CSMS certificate.
+    #[focus(when = {self.show_ca_file()})]
+    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`; not
     /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring `close_confirm`.
     #[builder(default)]
@@ -304,12 +304,12 @@ impl OcppSetupDialog {
             .client_ca_add_button(ferrowl_ui::widgets::button(
                 "ADD",
                 ButtonStyle::default(),
-                0,
+                1,
             ))
             .client_ca_delete_button(ferrowl_ui::widgets::button(
                 "DEL",
                 ButtonStyle::default(),
-                0,
+                1,
             ))
             .preserved_security(OcppSecurityConfig::default())
             .fs_cache(Default::default())
@@ -862,7 +862,11 @@ impl OcppSetupDialog {
 
         if show_security_row {
             if show_credentials {
-                render_row!(self, rows[4], buf; security, username, password);
+                render_row!(self, rows[4], buf;
+                    security=> Constraint::Percentage(25),
+                    username=> Constraint::Fill(1),
+                    password=> Constraint::Fill(1)
+                );
             } else {
                 // No credential fields: the selection is the row's only widget, so it takes
                 // the full width instead of leaving two thirds blank.
@@ -876,13 +880,13 @@ impl OcppSetupDialog {
             if show_identity_row {
                 if is_server {
                     render_row!(self, rows[5], buf;
-                        self_signed => Constraint::Length(16),
+                        self_signed => Constraint::Percentage(25),
                         cert_file => Constraint::Fill(1),
                         key_file => Constraint::Fill(1)
                     );
                 } else {
                     render_row!(self, rows[5], buf;
-                        self_signed => Constraint::Length(16),
+                        self_signed => Constraint::Percentage(25),
                         client_cert_file => Constraint::Fill(1),
                         client_key_file => Constraint::Fill(1)
                     );
@@ -906,13 +910,13 @@ impl OcppSetupDialog {
                     // entirely rather than paint an empty, nothing-to-delete button.
                     if self.client_ca_files.state.values().is_empty() {
                         render_row!(self, rows[7], buf;
-                            client_cert_skip_verify => Constraint::Length(16),
+                            client_cert_skip_verify => Constraint::Percentage(25),
                             client_ca_files => Constraint::Percentage(60),
                             client_ca_add_button => Constraint::Fill(1)
                         );
                     } else {
                         render_row!(self, rows[7], buf;
-                            client_cert_skip_verify => Constraint::Length(16),
+                            client_cert_skip_verify => Constraint::Percentage(25),
                             client_ca_files => Constraint::Percentage(45),
                             client_ca_add_button => Constraint::Percentage(15),
                             client_ca_delete_button => Constraint::Fill(1)
@@ -920,7 +924,7 @@ impl OcppSetupDialog {
                     }
                 } else {
                     render_row!(self, rows[7], buf;
-                        skip_verify => Constraint::Length(16),
+                        skip_verify => Constraint::Percentage(25),
                         ca_file => Constraint::Fill(1)
                     );
                 }

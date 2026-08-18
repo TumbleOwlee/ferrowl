@@ -149,7 +149,7 @@ where
         let inner = crate::widgets::render_border(
             popup,
             buf,
-            &Border::Full(Margin::new(0, 0)),
+            &Border::Full(Margin::new(1, 0)),
             None,
             self.popup_style.border,
         );
