@@ -215,6 +215,7 @@ mod tests {
         let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
             Arc::new(tokio::sync::RwLock::new(config)),
             srv_mem,
+            ferrowl_modbus::tcp::new_self_signed_cache(),
         )
         .spawn(
             receiver,
@@ -266,6 +267,7 @@ mod tests {
             std::sync::Arc::new(tokio::sync::RwLock::new(config)),
             operations,
             mem,
+            ferrowl_modbus::tcp::new_self_signed_cache(),
         )
         .spawn(rx, |_s: String| async move {}, |_s: String| async move {})
         .await

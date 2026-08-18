@@ -369,17 +369,24 @@ pub(crate) fn build_instance(
     config: NetConfig,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
+    cache: ferrowl_modbus::tcp::SelfSignedCache,
 ) -> Instance<SlaveKey> {
     match (role, config) {
-        (Role::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(ClientConfig {
-            config: Arc::new(RwLock::new(cfg)),
-            operations,
-            memory,
-        }),
-        (Role::Server, NetConfig::Tcp(cfg)) => Instance::with_tcp_server(ServerConfig {
-            config: Arc::new(RwLock::new(cfg)),
-            memory,
-        }),
+        (Role::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(
+            ClientConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                operations,
+                memory,
+            },
+            cache,
+        ),
+        (Role::Server, NetConfig::Tcp(cfg)) => Instance::with_tcp_server(
+            ServerConfig {
+                config: Arc::new(RwLock::new(cfg)),
+                memory,
+            },
+            cache,
+        ),
         (Role::Client, NetConfig::Rtu(cfg)) => Instance::with_rtu_client(ClientConfig {
             config: Arc::new(RwLock::new(cfg)),
             operations,
@@ -389,19 +396,21 @@ pub(crate) fn build_instance(
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
-        (Role::Client, NetConfig::RtuOverTcp(cfg)) => {
-            Instance::with_rtu_over_tcp_client(ClientConfig {
+        (Role::Client, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_client(
+            ClientConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 operations,
                 memory,
-            })
-        }
-        (Role::Server, NetConfig::RtuOverTcp(cfg)) => {
-            Instance::with_rtu_over_tcp_server(ServerConfig {
+            },
+            cache,
+        ),
+        (Role::Server, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_server(
+            ServerConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 memory,
-            })
-        }
+            },
+            cache,
+        ),
         (Role::Client, NetConfig::Udp(cfg)) => Instance::with_udp_client(ClientConfig {
             config: Arc::new(RwLock::new(cfg)),
             operations,
@@ -420,19 +429,21 @@ pub(crate) fn build_instance(
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
-        (Role::Client, NetConfig::AsciiOverTcp(cfg)) => {
-            Instance::with_ascii_over_tcp_client(ClientConfig {
+        (Role::Client, NetConfig::AsciiOverTcp(cfg)) => Instance::with_ascii_over_tcp_client(
+            ClientConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 operations,
                 memory,
-            })
-        }
-        (Role::Server, NetConfig::AsciiOverTcp(cfg)) => {
-            Instance::with_ascii_over_tcp_server(ServerConfig {
+            },
+            cache,
+        ),
+        (Role::Server, NetConfig::AsciiOverTcp(cfg)) => Instance::with_ascii_over_tcp_server(
+            ServerConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 memory,
-            })
-        }
+            },
+            cache,
+        ),
     }
 }
 
@@ -791,7 +802,9 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         });
         let endpoint = Endpoint::Tcp {
@@ -822,7 +835,9 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         });
         let endpoint = Endpoint::RtuOverTcp {
@@ -881,7 +896,9 @@ mod tests {
             reconnect: true,
         };
         let tls = Some(ModbusTlsConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         });
         let endpoint = Endpoint::AsciiOverTcp {

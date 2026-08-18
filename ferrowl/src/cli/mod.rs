@@ -499,17 +499,41 @@ fn build_descriptor_tls(
         get("cert_file"),
         get("key_file"),
     )?;
+    // Both `server` and `client` are always present regardless of which role this endpoint
+    // turns out to be (MB-R-105) — the descriptor's fields map 1:1 onto whichever half a
+    // downstream/upstream role actually consults; the other half is simply inert.
+    let server = if parse_bool("require_client_cert")? {
+        let ca_files = get("client_ca_file").into_iter().collect::<Vec<_>>();
+        ferrowl_util::tls::ServerTlsPolicy::MutualTls {
+            server_cert,
+            client_verification: ferrowl_util::tls::ClientCertVerification::resolve(
+                false, ca_files,
+            )?,
+        }
+    } else {
+        ferrowl_util::tls::ServerTlsPolicy::Tls { server_cert }
+    };
     let client_verification = ferrowl_util::tls::ClientVerification::resolve(
         parse_bool("insecure_skip_verify")?,
         get("ca_file"),
     );
+    let client = match (get("client_cert_file"), get("client_key_file")) {
+        (Some(client_cert_file), Some(client_key_file)) => {
+            ferrowl_util::tls::ClientTlsPolicy::MutualTls {
+                client_verification,
+                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
+                    client_cert_file,
+                    client_key_file,
+                },
+            }
+        }
+        _ => ferrowl_util::tls::ClientTlsPolicy::Tls {
+            client_verification,
+        },
+    };
     Ok(Some(ferrowl_modbus::tcp::ModbusTlsConfig {
-        client_verification,
-        server_cert,
-        client_cert_file: get("client_cert_file"),
-        client_key_file: get("client_key_file"),
-        client_ca_file: get("client_ca_file"),
-        require_client_cert: parse_bool("require_client_cert")?,
+        server,
+        client,
     }))
 }
 
@@ -1143,8 +1167,10 @@ mod tests {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 let tls = cfg.tls.expect("tls present");
                 assert_eq!(
-                    tls.server_cert,
-                    ferrowl_util::tls::ServerCertSource::SelfSigned
+                    tls.server,
+                    ferrowl_util::tls::ServerTlsPolicy::Tls {
+                        server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                    }
                 );
             }
             ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
@@ -1162,8 +1188,10 @@ mod tests {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 let tls = cfg.tls.expect("tls present");
                 assert_eq!(
-                    tls.server_cert,
-                    ferrowl_util::tls::ServerCertSource::SelfSigned
+                    tls.server,
+                    ferrowl_util::tls::ServerTlsPolicy::Tls {
+                        server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                    }
                 );
             }
             ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),

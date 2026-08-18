@@ -86,6 +86,12 @@ pub struct ModbusModule {
     sim: Option<SimHandle>,
     /// Shared values for virtual registers (no Modbus address), keyed by register name.
     virtual_values: VirtualStore,
+    /// Cached self-signed TLS material (MB-R-138), reused across `reconfigure()` calls as long
+    /// as the resolved TLS source stays self-signed. Created once here, per module instance —
+    /// never re-created inside `reconfigure`, which is what makes `:restart`/`:reload`/a config
+    /// edit that keeps the source self-signed reuse cached material, while a genuinely fresh
+    /// module instance (new tab, device-type switch) starts with an empty cache.
+    self_signed_cache: ferrowl_modbus::tcp::SelfSignedCache,
 }
 
 impl ModbusModule {
@@ -165,8 +171,15 @@ impl ModbusModule {
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
         let timing = Self::resolve_timing(device);
+        let self_signed_cache = ferrowl_modbus::tcp::new_self_signed_cache();
         let net_config = endpoint_to_config(&spec.endpoint, &timing, device.tls.clone());
-        let instance = build_instance(spec.role, net_config, operations.clone(), memory.clone());
+        let instance = build_instance(
+            spec.role,
+            net_config,
+            operations.clone(),
+            memory.clone(),
+            self_signed_cache.clone(),
+        );
 
         let mut module = Self {
             name: spec.name.clone(),
@@ -182,6 +195,7 @@ impl ModbusModule {
             script_interval: device.script_interval_duration(),
             sim: None,
             virtual_values: Arc::new(RwLock::new(virtual_init)),
+            self_signed_cache,
         };
         module.ensure_sim();
         module
@@ -418,6 +432,7 @@ impl ModbusModule {
             net_config,
             self.operations.clone(),
             self.memory.clone(),
+            self.self_signed_cache.clone(),
         );
         self.ensure_sim();
         Ok(())
