@@ -112,12 +112,21 @@ pub struct SetupDialog {
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
     #[focus]
     pub role: Widget<SelectionState<Role>, Selection<Role>>,
-    /// Server-only "generate an ephemeral self-signed certificate" toggle.
+    /// Server: "generate an ephemeral self-signed server certificate" toggle (shown at TLS+).
+    /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
+    /// (MB-R-139) — the same widget field backs both, since only one role is ever active for a
+    /// given dialog instance.
     #[focus(when = {self.show_self_signed()})]
     pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
     /// Client-only "accept any server certificate" toggle.
     #[focus(when = {self.show_skip_verify()})]
     pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
+    /// Server-only, at mTLS only: "accept any client certificate" toggle (MB-R-136). On hides
+    /// the client-CA list below and excludes it from the resolved config; the list's own text is
+    /// preserved (never cleared) so toggling back Off restores it.
+    #[focus(when = {self.show_client_cert_skip_verify()})]
+    pub client_cert_skip_verify:
+        Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
     /// Client-only extra trust anchor for a self-signed server certificate.
     #[focus(when = {self.show_ca_file()})]
     pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
@@ -135,11 +144,14 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_cert()})]
     pub client_key_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    /// Server-only CA used to verify client certificates (selecting mTLS as server implies
-    /// `require_client_cert = true` in the resolved config).
+    /// Server-only comma-separated list of CAs used to verify client certificates under mTLS
+    /// (MB-R-136) — a certificate signed by any one is sufficient. Free text rather than a
+    /// dedicated add/remove/edit sub-dialog, mirroring this same dialog's `holding_ranges`/
+    /// `input_ranges`/etc. comma-separated-list fields. Selecting mTLS as server implies
+    /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
+    /// on, in which case this list is ignored).
     #[focus(when = {self.show_client_ca()})]
-    pub client_ca_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    pub client_ca_files: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
@@ -175,6 +187,12 @@ pub struct SetupDialog {
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
+    /// The original device's `tls` config, if any (Edit mode only). On save, the half of
+    /// `ModbusTlsConfig` belonging to the *inactive* role is stitched back in from here, so a
+    /// role toggle preserves the other role's previously-saved TLS settings instead of resetting
+    /// them to `ModbusTlsConfig::default()`'s placeholder.
+    #[builder(default)]
+    original_tls: Option<ModbusTlsConfig>,
     /// Confirm-close popup, opened with Esc.
     #[builder(default)]
     pub close_confirm: Option<CloseConfirmDialog>,
@@ -259,50 +277,96 @@ impl SetupDialog {
             }
         }
         if let Some(tls) = tls {
+            use ferrowl_util::tls::{
+                ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
+                ServerCertSource, ServerTlsPolicy,
+            };
+
             let level = TlsLevel::from_config(tls, role);
             dialog.tls_level.state.set_selection(level.index());
-            dialog.self_signed.state.set_selection(
-                if tls.server_cert == ferrowl_util::tls::ServerCertSource::SelfSigned {
-                    1
-                } else {
-                    0
-                },
-            );
-            dialog.skip_verify.state.set_selection(
-                if tls.client_verification == ferrowl_util::tls::ClientVerification::SkipVerify {
-                    1
-                } else {
-                    0
-                },
-            );
-            let ca_file = match &tls.client_verification {
-                ferrowl_util::tls::ClientVerification::Verify { ca_file } => {
-                    ca_file.as_deref().unwrap_or("")
+            dialog.original_tls = Some(tls.clone());
+
+            match role {
+                Role::Server => {
+                    let (server_cert, client_verification) = match &tls.server {
+                        ServerTlsPolicy::MutualTls {
+                            server_cert,
+                            client_verification,
+                        } => (server_cert.clone(), Some(client_verification.clone())),
+                        ServerTlsPolicy::Tls { server_cert } => (server_cert.clone(), None),
+                        ServerTlsPolicy::NoTls => (ServerCertSource::Unset, None),
+                    };
+                    dialog.self_signed.state.set_selection(
+                        if server_cert == ServerCertSource::SelfSigned {
+                            1
+                        } else {
+                            0
+                        },
+                    );
+                    let (cert_file, key_file) = match &server_cert {
+                        ServerCertSource::Explicit {
+                            cert_file,
+                            key_file,
+                        } => (cert_file.as_str(), key_file.as_str()),
+                        _ => ("", ""),
+                    };
+                    set_suggest_input(&mut dialog.cert_file, cert_file);
+                    set_suggest_input(&mut dialog.key_file, key_file);
+                    let (ca_files_text, skip) = match &client_verification {
+                        Some(ClientCertVerification::Verify { ca_files }) => {
+                            (ca_files.join(", "), false)
+                        }
+                        Some(ClientCertVerification::SkipVerify) => (String::new(), true),
+                        None => (String::new(), false),
+                    };
+                    set_input(&mut dialog.client_ca_files, &ca_files_text);
+                    dialog
+                        .client_cert_skip_verify
+                        .state
+                        .set_selection(if skip { 1 } else { 0 });
                 }
-                ferrowl_util::tls::ClientVerification::SkipVerify => "",
-            };
-            set_suggest_input(&mut dialog.ca_file, ca_file);
-            let (cert_file, key_file) = match &tls.server_cert {
-                ferrowl_util::tls::ServerCertSource::Explicit {
-                    cert_file,
-                    key_file,
-                } => (cert_file.as_str(), key_file.as_str()),
-                _ => ("", ""),
-            };
-            set_suggest_input(&mut dialog.cert_file, cert_file);
-            set_suggest_input(&mut dialog.key_file, key_file);
-            set_suggest_input(
-                &mut dialog.client_cert_file,
-                tls.client_cert_file.as_deref().unwrap_or(""),
-            );
-            set_suggest_input(
-                &mut dialog.client_key_file,
-                tls.client_key_file.as_deref().unwrap_or(""),
-            );
-            set_suggest_input(
-                &mut dialog.client_ca_file,
-                tls.client_ca_file.as_deref().unwrap_or(""),
-            );
+                Role::Client => {
+                    let (client_verification, client_identity) = match &tls.client {
+                        ClientTlsPolicy::MutualTls {
+                            client_verification,
+                            client_identity,
+                        } => (client_verification.clone(), Some(client_identity.clone())),
+                        ClientTlsPolicy::Tls {
+                            client_verification,
+                        } => (client_verification.clone(), None),
+                        ClientTlsPolicy::NoTls => {
+                            (ClientVerification::Verify { ca_file: None }, None)
+                        }
+                    };
+                    dialog.skip_verify.state.set_selection(
+                        if client_verification == ClientVerification::SkipVerify {
+                            1
+                        } else {
+                            0
+                        },
+                    );
+                    let ca_file = match &client_verification {
+                        ClientVerification::Verify { ca_file } => ca_file.as_deref().unwrap_or(""),
+                        ClientVerification::SkipVerify => "",
+                    };
+                    set_suggest_input(&mut dialog.ca_file, ca_file);
+                    let self_signed_client =
+                        matches!(client_identity, Some(ClientCertSource::SelfSigned));
+                    dialog
+                        .self_signed
+                        .state
+                        .set_selection(if self_signed_client { 1 } else { 0 });
+                    let (ccert, ckey) = match &client_identity {
+                        Some(ClientCertSource::Explicit {
+                            client_cert_file,
+                            client_key_file,
+                        }) => (client_cert_file.as_str(), client_key_file.as_str()),
+                        _ => ("", ""),
+                    };
+                    set_suggest_input(&mut dialog.client_cert_file, ccert);
+                    set_suggest_input(&mut dialog.client_key_file, ckey);
+                }
+            }
         }
         dialog
     }
@@ -423,6 +487,12 @@ impl SetupDialog {
                 vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
                 &selection_style,
             ))
+            .client_cert_skip_verify(selection(
+                "Skip Verify",
+                None,
+                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
+                &selection_style,
+            ))
             .ca_file(suggest_input(
                 "CA File",
                 None,
@@ -463,13 +533,12 @@ impl SetupDialog {
                 false,
                 FsPathProvider::with_extensions(&["pem", "crt", "key"]),
             ))
-            .client_ca_file(suggest_input(
-                "Client CA",
+            .client_ca_files(input(
+                "Client CA(s) (comma-separated)",
                 None,
-                "client_ca.pem",
+                "client_ca1.pem, client_ca2.pem",
                 &input_style,
                 false,
-                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
             ))
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
@@ -563,11 +632,14 @@ impl SetupDialog {
         self.tls_level.get_value()
     }
 
-    /// Server-only self-signed toggle (TCP server at TLS level or above).
+    /// Server: self-signed server-certificate toggle (TLS level or above). Client, at mTLS
+    /// only: self-signed client-identity toggle (MB-R-139) — same widget, different meaning per
+    /// role (see the field's doc comment).
     fn show_self_signed(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Server
-            && self.tls_level() >= TlsLevel::Tls
+            && ((self.role.get_value() == Role::Server && self.tls_level() >= TlsLevel::Tls)
+                || (self.role.get_value() == Role::Client
+                    && self.tls_level() == TlsLevel::MutualTls))
     }
 
     /// Client-only skip-verify toggle (TCP client at TLS level or above).
@@ -575,6 +647,20 @@ impl SetupDialog {
         self.tls_shown()
             && self.role.get_value() == Role::Client
             && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Server-only, mTLS only: "accept any client certificate" toggle (MB-R-136).
+    fn show_client_cert_skip_verify(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Server
+            && self.tls_level() == TlsLevel::MutualTls
+    }
+
+    /// A second toggle row, shown only at mTLS: the client's self-signed-identity toggle for the
+    /// client role, or the server's client-cert-skip-verify toggle for the server role — exactly
+    /// one is ever applicable for a given role, so this single flag governs one shared row.
+    fn show_second_toggle_row(&self) -> bool {
+        self.tls_shown() && self.tls_level() == TlsLevel::MutualTls
     }
 
     /// Client trust-anchor input (TCP client at TLS level or above).
@@ -593,18 +679,22 @@ impl SetupDialog {
             && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
-    /// Client mTLS certificate/key inputs.
+    /// Client mTLS certificate/key inputs — hidden when the client's self-signed-identity
+    /// toggle is on (MB-R-139), mirroring the server's `show_server_cert`.
     fn show_client_cert(&self) -> bool {
         self.tls_shown()
             && self.role.get_value() == Role::Client
             && self.tls_level() == TlsLevel::MutualTls
+            && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
-    /// Server mTLS client-CA input.
+    /// Server mTLS client-CA list input — hidden when `client_cert_skip_verify` is on
+    /// (MB-R-136), preserving the list's own text so toggling back Off restores it.
     fn show_client_ca(&self) -> bool {
         self.tls_shown()
             && self.role.get_value() == Role::Server
             && self.tls_level() == TlsLevel::MutualTls
+            && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
     }
 
     /// First certificate row: server cert/key, or the client trust anchor.
@@ -612,7 +702,7 @@ impl SetupDialog {
         self.show_ca_file() || self.show_server_cert()
     }
 
-    /// Second certificate row: client mTLS cert/key, or the server client-CA.
+    /// Second certificate row: client mTLS cert/key, or the server client-CA list.
     fn show_cert_row_b(&self) -> bool {
         self.show_client_cert() || self.show_client_ca()
     }
@@ -819,6 +909,11 @@ impl SetupDialog {
             if level == TlsLevel::Off {
                 Some(None)
             } else {
+                // MB-R-135/136/139: `build_config` resolves the active role's policy directly
+                // from the raw text together with the toggle widgets (self_signed/skip_verify/
+                // client_cert_skip_verify), so a toggle excludes stale text from the resolved
+                // config rather than layering a flag on top of whatever raw text happened to be
+                // present.
                 let mut cfg = level.build_config(
                     role,
                     TlsInputs {
@@ -827,39 +922,21 @@ impl SetupDialog {
                         key_file: self.key_file.state.input(),
                         client_cert_file: self.client_cert_file.state.input(),
                         client_key_file: self.client_key_file.state.input(),
-                        client_ca_file: self.client_ca_file.state.input(),
+                        client_ca_files: self.client_ca_files.state.input(),
+                        self_signed: self.self_signed.state.get_value() == SelfSignedChoice::On,
+                        skip_verify: self.skip_verify.state.get_value() == SkipVerifyChoice::On,
+                        client_cert_skip_verify: self.client_cert_skip_verify.state.get_value()
+                            == SkipVerifyChoice::On,
                     },
-                );
-                // MB-R-135: resolve server_cert/client_verification from the toggle widgets
-                // together with the raw text, rather than layering a bare self_signed/
-                // insecure_skip_verify flag on top of whatever build_config already put in
-                // cert_file/key_file/ca_file -- that layering is exactly the bug MB-R-135 fixes
-                // (Self-Signed On no longer excludes stale cert/key text from the resolved
-                // config). The `?` here is effectively unreachable today: `validate_tls`'s
-                // existing cert/key-required check below already catches "cert_file xor
-                // key_file, Self-Signed Off" with a friendlier message first, at Tls level and
-                // above -- but it is the correct fallback for a future path that skips that
-                // check.
-                if role == Role::Server {
-                    let opt = |s: &str| {
-                        let t = s.trim();
-                        (!t.is_empty()).then(|| t.to_string())
-                    };
-                    cfg.server_cert = ferrowl_util::tls::ServerCertSource::resolve(
-                        self.self_signed.state.get_value() == SelfSignedChoice::On,
-                        opt(self.cert_file.state.input()),
-                        opt(self.key_file.state.input()),
-                    )?;
-                }
-                if role == Role::Client {
-                    let opt = |s: &str| {
-                        let t = s.trim();
-                        (!t.is_empty()).then(|| t.to_string())
-                    };
-                    cfg.client_verification = ferrowl_util::tls::ClientVerification::resolve(
-                        self.skip_verify.state.get_value() == SkipVerifyChoice::On,
-                        opt(self.ca_file.state.input()),
-                    );
+                )?;
+                // Stitch the inactive role's half back in from the original config (if any), so
+                // a role toggle preserves the other role's previously-saved TLS settings instead
+                // of resetting them to `ModbusTlsConfig::default()`'s placeholder.
+                if let Some(orig) = &self.original_tls {
+                    match role {
+                        Role::Server => cfg.client = orig.client.clone(),
+                        Role::Client => cfg.server = orig.server.clone(),
+                    }
                 }
                 validate_tls(&cfg, role, level, &|p| std::path::Path::new(p).exists())?;
                 Some(Some(cfg))
@@ -901,9 +978,13 @@ impl SetupDialog {
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
+        let show_second_toggle_row = self.show_second_toggle_row();
         let show_cert_row_a = self.show_cert_row_a();
         let show_cert_row_b = self.show_cert_row_b();
-        let tls_rows: u16 = show_tls as u16 + show_cert_row_a as u16 + show_cert_row_b as u16;
+        let tls_rows: u16 = show_tls as u16
+            + show_second_toggle_row as u16
+            + show_cert_row_a as u16
+            + show_cert_row_b as u16;
         // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
         // + error(4) + keybinds(1) + optional config-path row (New mode) + optional TLS rows.
         let box_height = 27 + endpoint_rows * 3 + tls_rows * 3;
@@ -948,11 +1029,14 @@ impl SetupDialog {
         if show_tls {
             constraints.push(Constraint::Length(3)); // TLS level (+ self-signed/skip-verify)
         }
+        if show_second_toggle_row {
+            constraints.push(Constraint::Length(3)); // client self-signed (mTLS), or server client_cert_skip_verify
+        }
         if show_cert_row_a {
             constraints.push(Constraint::Length(3)); // ca_file, or cert_file + key_file
         }
         if show_cert_row_b {
-            constraints.push(Constraint::Length(3)); // client_cert_file + client_key_file, or client_ca_file
+            constraints.push(Constraint::Length(3)); // client_cert_file + client_key_file, or client_ca_files
         }
         constraints.push(Constraint::Length(4)); // error
         constraints.push(Constraint::Length(1)); // keybinds
@@ -993,6 +1077,15 @@ impl SetupDialog {
                 idx += 1;
             }
 
+            if show_second_toggle_row {
+                if is_server {
+                    render_field!(self, client_cert_skip_verify, rows[idx], buf);
+                } else {
+                    render_field!(self, self_signed, rows[idx], buf);
+                }
+                idx += 1;
+            }
+
             if show_cert_row_a {
                 if self.show_ca_file() {
                     render_field!(self, ca_file, rows[idx], buf);
@@ -1006,7 +1099,7 @@ impl SetupDialog {
                 if self.show_client_cert() {
                     render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
                 } else {
-                    render_field!(self, client_ca_file, rows[idx], buf);
+                    render_field!(self, client_ca_files, rows[idx], buf);
                 }
                 idx += 1;
             }
@@ -1066,9 +1159,7 @@ impl SetupDialog {
         self.client_key_file
             .widget
             .render_overlay(area, buf, &mut self.client_key_file.state);
-        self.client_ca_file
-            .widget
-            .render_overlay(area, buf, &mut self.client_ca_file.state);
+        // `client_ca_files` is a plain `InputField`, not a `SuggestInput` — no overlay to render.
 
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
@@ -1656,15 +1747,15 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
         dialog.self_signed.state.set_selection(1); // On
-        set_suggest_input(&mut dialog.client_ca_file, "client_ca.pem");
+        set_input(&mut dialog.client_ca_files, "client_ca.pem");
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::SelfSigned
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+            }
         );
-        assert_eq!(cfg.client_ca_file, None);
-        assert!(!cfg.require_client_cert);
     }
 
     #[test]
@@ -1686,8 +1777,10 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::SelfSigned
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+            }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
         assert_eq!(dialog.cert_file.state.input(), "s.crt");
@@ -1713,8 +1806,10 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.client_verification,
-            ferrowl_util::tls::ClientVerification::SkipVerify
+            cfg.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify
+            }
         );
         assert_eq!(dialog.ca_file.state.input(), "ca.pem");
     }
@@ -1746,10 +1841,12 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: cert,
-                key_file: key,
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: cert,
+                    key_file: key,
+                }
             }
         );
     }
