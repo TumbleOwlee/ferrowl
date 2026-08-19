@@ -147,6 +147,8 @@ behavior, stated limitations).
 
 **OC-R-119** — `extra_headers` is a client-only device config field. It shall not be exposed through the `--ocpp` key=value CLI form — only through the device config file — consistent with the other list-shaped client-only fields (`connectors`, `config`).
 
+**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected", emitted whenever its connection task ends) shall be written to the module log, not the message log — the message log records only request/response message pairs (§9).
+
 ---
 
 ## Role — Charging Station (CS, client)
