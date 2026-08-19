@@ -623,6 +623,12 @@ impl OcppSetupDialog {
             idx.min(new_len - 1)
         };
         self.client_ca_files.state.set_selection(new_idx);
+        if new_len == 0 {
+            // DEL is no longer eligible (`#[focus(when = ...)]` excludes it once the list is
+            // empty) — leaving `self.focus` pointed at it would strand further Tab navigation on
+            // a dead target, so fall back to ADD (mirrors the Modbus setup dialog's fix).
+            self.focus = OcppSetupDialogFocus::ClientCaAddButton;
+        }
     }
 
     /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
@@ -1508,6 +1514,9 @@ mod tests {
         // Remove all: needs Skip Verify on to resolve without error.
         d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         assert!(d.client_ca_files.state.values().is_empty());
+        // Deleting down to an empty list must not leave `focus` stuck on the now-ineligible DEL
+        // button — it falls back to ADD, so Tab from there keeps working.
+        assert_eq!(d.focus, OcppSetupDialogFocus::ClientCaAddButton);
         assert!(d.resolve().is_err());
         d.client_cert_skip_verify.state.set_selection(1); // On
         let spec = d.resolve().expect("skip-verify needs no CA list");
@@ -1809,6 +1818,12 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
+        // `client_ca_files` is focus-eligible only when non-empty (post-s11: an empty list hides
+        // the field, matching its no-longer-rendered DEL button) — populate it so this cycle
+        // actually reaches it.
+        d.client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]);
         d.set_focused(true);
         let mut visited = Vec::new();
         for _ in 0..20 {

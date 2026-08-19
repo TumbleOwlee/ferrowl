@@ -750,6 +750,9 @@ impl SetupDialog {
                 // While the path field's completion popup is open, Enter accepts the
                 // highlighted suggestion (mirroring every other suggest-input field) rather
                 // than submitting the sub-dialog.
+                (KeyModifiers::NONE, KeyCode::Enter) if dialog.path.state.suggestions_open() => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
                 (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
                     Ok(path) => {
                         self.client_ca_files.state.values_mut().push(path);
@@ -2377,7 +2380,6 @@ mod tests {
                 sub.path.state.suggestions_open(),
                 "no completion popup offered for a 's' prefix (expects to match e.g. 'src')"
             );
-            drop(sub);
             dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
             assert!(
                 dialog.client_ca_add_dialog.is_some(),
@@ -2385,6 +2387,9 @@ mod tests {
                  the sub-dialog"
             );
             dialog.client_ca_add_dialog = None;
+            // Abandoning the sub-dialog above doesn't move focus off the ADD button that opened
+            // it; point back at DEL so the next step actually deletes rather than reopening ADD.
+            dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
         }
 
         // Removing the last entry leaves the list empty and the DEL button no longer eligible.
