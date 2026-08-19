@@ -31,12 +31,16 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_tcp_client(config: ClientConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+    pub fn with_tcp_client(
+        config: ClientConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
+    ) -> Self {
         Self {
             builder: Builder::TcpClient(ferrowl_modbus::tcp::ClientBuilder::new(
                 config.config,
                 config.operations,
                 config.memory,
+                cache,
             )),
             handle: None,
         }
@@ -53,11 +57,15 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_tcp_server(config: ServerConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+    pub fn with_tcp_server(
+        config: ServerConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
+    ) -> Self {
         Self {
             builder: Builder::TcpServer(ferrowl_modbus::tcp::ServerBuilder::new(
                 config.config,
                 config.memory,
+                cache,
             )),
             handle: None,
         }
@@ -73,22 +81,30 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
-    pub fn with_rtu_over_tcp_client(config: ClientConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+    pub fn with_rtu_over_tcp_client(
+        config: ClientConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
+    ) -> Self {
         Self {
             builder: Builder::RtuOverTcpClient(ferrowl_modbus::rtu_over_tcp::ClientBuilder::new(
                 config.config,
                 config.operations,
                 config.memory,
+                cache,
             )),
             handle: None,
         }
     }
 
-    pub fn with_rtu_over_tcp_server(config: ServerConfig<T, ferrowl_modbus::tcp::Config>) -> Self {
+    pub fn with_rtu_over_tcp_server(
+        config: ServerConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
+    ) -> Self {
         Self {
             builder: Builder::RtuOverTcpServer(ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
                 config.config,
                 config.memory,
+                cache,
             )),
             handle: None,
         }
@@ -138,6 +154,7 @@ impl<T: KeyParams> Instance<T> {
 
     pub fn with_ascii_over_tcp_client(
         config: ClientConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
     ) -> Self {
         Self {
             builder: Builder::AsciiOverTcpClient(
@@ -145,6 +162,7 @@ impl<T: KeyParams> Instance<T> {
                     config.config,
                     config.operations,
                     config.memory,
+                    cache,
                 ),
             ),
             handle: None,
@@ -153,10 +171,15 @@ impl<T: KeyParams> Instance<T> {
 
     pub fn with_ascii_over_tcp_server(
         config: ServerConfig<T, ferrowl_modbus::tcp::Config>,
+        cache: ferrowl_modbus::tcp::SelfSignedCache,
     ) -> Self {
         Self {
             builder: Builder::AsciiOverTcpServer(
-                ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(config.config, config.memory),
+                ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
+                    config.config,
+                    config.memory,
+                    cache,
+                ),
             ),
             handle: None,
         }
@@ -490,13 +513,16 @@ mod tests {
             fn_code: FunctionCode::ReadHoldingRegisters,
             range: Range::new(0, 2),
         }]));
-        Instance::with_tcp_client(config::ClientConfig {
-            config: Arc::new(RwLock::new(dead_tcp_config())),
-            operations,
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        })
+        Instance::with_tcp_client(
+            config::ClientConfig {
+                config: Arc::new(RwLock::new(dead_tcp_config())),
+                operations,
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        )
     }
 
     #[tokio::test]
@@ -581,13 +607,16 @@ mod tests {
     /// like a TCP client instance (reuses `tcp::Config`, MB-R-113).
     fn rtu_over_tcp_client_instance() -> Instance<SlaveKey> {
         let operations = Arc::new(RwLock::new(vec![]));
-        Instance::with_rtu_over_tcp_client(config::ClientConfig {
-            config: Arc::new(RwLock::new(dead_tcp_config())),
-            operations,
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        })
+        Instance::with_rtu_over_tcp_client(
+            config::ClientConfig {
+                config: Arc::new(RwLock::new(dead_tcp_config())),
+                operations,
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        )
     }
 
     #[tokio::test]
@@ -728,13 +757,16 @@ mod tests {
     /// TCP/RtuOverTcp client instance (reuses `tcp::Config`, MB-R-125).
     fn ascii_over_tcp_client_instance() -> Instance<SlaveKey> {
         let operations = Arc::new(RwLock::new(vec![]));
-        Instance::with_ascii_over_tcp_client(config::ClientConfig {
-            config: Arc::new(RwLock::new(dead_tcp_config())),
-            operations,
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        })
+        Instance::with_ascii_over_tcp_client(
+            config::ClientConfig {
+                config: Arc::new(RwLock::new(dead_tcp_config())),
+                operations,
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        )
     }
 
     #[tokio::test]
@@ -752,20 +784,23 @@ mod tests {
     #[tokio::test]
     async fn ascii_over_tcp_server_starts_and_stops() {
         let port = free_port();
-        let mut instance = Instance::with_ascii_over_tcp_server(config::ServerConfig {
-            config: Arc::new(RwLock::new(tcp::Config {
-                ip: "127.0.0.1".to_string(),
-                port,
-                timeout_ms: 200,
-                delay_ms: 0,
-                interval_ms: 0,
-                reconnect: true,
-                tls: None,
-            })),
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        });
+        let mut instance = Instance::with_ascii_over_tcp_server(
+            config::ServerConfig {
+                config: Arc::new(RwLock::new(tcp::Config {
+                    ip: "127.0.0.1".to_string(),
+                    port,
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 0,
+                    reconnect: true,
+                    tls: None,
+                })),
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        );
         instance.start(sink(), sink()).await.expect("start");
         assert!(instance.active());
         instance.stop().await.expect("stop");
@@ -803,20 +838,23 @@ mod tests {
     /// `start()`'s return with a fixed sleep.
     #[tokio::test]
     async fn it_tcp_server_bound_addr_reflects_listener_state() {
-        let mut instance = Instance::with_tcp_server(config::ServerConfig {
-            config: Arc::new(RwLock::new(tcp::Config {
-                ip: "127.0.0.1".to_string(),
-                port: 0,
-                timeout_ms: 200,
-                delay_ms: 0,
-                interval_ms: 0,
-                reconnect: true,
-                tls: None,
-            })),
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        });
+        let mut instance = Instance::with_tcp_server(
+            config::ServerConfig {
+                config: Arc::new(RwLock::new(tcp::Config {
+                    ip: "127.0.0.1".to_string(),
+                    port: 0,
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 0,
+                    reconnect: true,
+                    tls: None,
+                })),
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        );
         assert!(instance.bound_addr().is_none());
 
         instance.start(sink(), sink()).await.expect("start");
@@ -849,20 +887,23 @@ mod tests {
     #[tokio::test]
     async fn it_server_terminate_ends_task_gracefully() {
         let port = free_port();
-        let mut instance = Instance::with_tcp_server(config::ServerConfig {
-            config: Arc::new(RwLock::new(tcp::Config {
-                ip: "127.0.0.1".to_string(),
-                port,
-                timeout_ms: 200,
-                delay_ms: 0,
-                interval_ms: 0,
-                reconnect: true,
-                tls: None,
-            })),
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        });
+        let mut instance = Instance::with_tcp_server(
+            config::ServerConfig {
+                config: Arc::new(RwLock::new(tcp::Config {
+                    ip: "127.0.0.1".to_string(),
+                    port,
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 0,
+                    reconnect: true,
+                    tls: None,
+                })),
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        );
         instance.start(sink(), sink()).await.expect("start");
         assert!(instance.active());
 
@@ -888,20 +929,23 @@ mod tests {
     async fn it_server_stop_on_backing_off_task_ends_promptly() {
         let port = free_port();
         let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
-        let mut instance = Instance::with_tcp_server(config::ServerConfig {
-            config: Arc::new(RwLock::new(tcp::Config {
-                ip: "127.0.0.1".to_string(),
-                port,
-                timeout_ms: 200,
-                delay_ms: 0,
-                interval_ms: 0,
-                reconnect: true,
-                tls: None,
-            })),
-            memory: Arc::new(MemLock::new(
-                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
-            )),
-        });
+        let mut instance = Instance::with_tcp_server(
+            config::ServerConfig {
+                config: Arc::new(RwLock::new(tcp::Config {
+                    ip: "127.0.0.1".to_string(),
+                    port,
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 0,
+                    reconnect: true,
+                    tls: None,
+                })),
+                memory: Arc::new(MemLock::new(
+                    ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+                )),
+            },
+            ferrowl_modbus::tcp::new_self_signed_cache(),
+        );
         instance.start(sink(), sink()).await.expect("start");
         assert!(instance.active());
 

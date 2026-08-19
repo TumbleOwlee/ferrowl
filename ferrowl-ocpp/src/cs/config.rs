@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use crate::security::{BasicAuth, CsTlsConfig};
+use ferrowl_util::tls::ClientTlsPolicy;
+
+use crate::security::BasicAuth;
 
 /// Configuration for dialing a CSMS. The OCPP-J identity is conventionally the last path segment
 /// of `url` (e.g. `ws://host:9000/ocpp/CS001`); the websocket subprotocol is fixed by the chosen
@@ -20,7 +22,7 @@ pub struct Config {
     pub basic_auth: Option<BasicAuth>,
     /// TLS material for `wss://` URLs (Security Profiles 2 and 3). Ignored for `ws://` URLs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<CsTlsConfig>,
+    pub tls: Option<ClientTlsPolicy>,
     /// Automatically reconnect (with backoff) on a failed dial or dropped connection instead of
     /// ending the client task (OC-R-048).
     #[serde(default = "default_reconnect")]

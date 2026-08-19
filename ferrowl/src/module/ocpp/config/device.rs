@@ -16,7 +16,7 @@ use super::session::{OcppRole, OcppSpec, OcppVersion};
 /// one) and TLS/mTLS (Security Profiles two and three). Fields are named by which role uses them;
 /// a field irrelevant to the instance's [`OcppRole`] is simply left `None` (same convention as
 /// the role-specific fields elsewhere in [`OcppDeviceConfig`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcppSecurityConfig {
     /// Basic Auth username. Client role: sent on connect. Server role: required to accept a
     /// connection (together with `password`).
@@ -25,31 +25,43 @@ pub struct OcppSecurityConfig {
     /// Basic Auth password. Never logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    /// Client role only: how the server's certificate is verified — `ca_file` (extra trust
-    /// anchor added on top of the system/webpki root store) or `insecure_skip_verify`. MB-R-109/
-    /// OC-R-036 precedence lives in [`ferrowl_util::tls::ClientVerification::resolve`].
+    /// Server-role TLS policy (OC-R-096/OC-R-039/OC-R-113). Only consulted when this instance is
+    /// a CSMS; always present on the wire regardless of role (see `ModbusTlsConfig`'s doc
+    /// comment for why) so a role toggle doesn't lose the other role's settings.
     #[serde(flatten)]
-    pub client_verification: ferrowl_util::tls::ClientVerification,
-    /// Server role only: source of the certificate chain/key presented to connecting clients.
-    /// Setting this to `Explicit`/`SelfSigned` is what turns on TLS for the listener. OC-R-096
-    /// precedence lives in [`ferrowl_util::tls::ServerCertSource::resolve`].
+    pub server: ferrowl_util::tls::ServerTlsPolicy,
+    /// Client-role TLS policy (OC-R-036/OC-R-115/OC-R-116). Only consulted when this instance is
+    /// a charging station.
     #[serde(flatten)]
-    pub server_cert: ferrowl_util::tls::ServerCertSource,
-    /// Client role: client certificate (PEM file) presented for mutual TLS. Server role: ignored
-    /// (see `client_ca_file` for verifying the peer's certificate instead).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_cert_file: Option<String>,
-    /// Client role only: private key (PEM file) matching `client_cert_file`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_key_file: Option<String>,
-    /// Server role only: CA (PEM file) used to verify client certificates when
-    /// `require_client_cert` is set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_ca_file: Option<String>,
-    /// Server role only: reject clients that fail to present a certificate signed by
-    /// `client_ca_file` (Security Profile 3).
-    #[serde(default)]
-    pub require_client_cert: bool,
+    pub client: ferrowl_util::tls::ClientTlsPolicy,
+}
+
+/// The "nothing configured" state for each policy — `ServerTlsPolicy`/`ClientTlsPolicy` have no
+/// `NoTls`-shaped `Default` of their own (deserializing a *present* flattened block never
+/// produces `NoTls`, see `ferrowl_util::tls`'s doc comment), so `OcppSecurityConfig::default()`
+/// and `cs_tls`/`csms_tls`'s "was anything actually set" check both compare against this
+/// literal "unset source, plain verify with no CA" baseline instead.
+fn default_server_tls() -> ferrowl_util::tls::ServerTlsPolicy {
+    ferrowl_util::tls::ServerTlsPolicy::Tls {
+        server_cert: ferrowl_util::tls::ServerCertSource::Unset,
+    }
+}
+
+fn default_client_tls() -> ferrowl_util::tls::ClientTlsPolicy {
+    ferrowl_util::tls::ClientTlsPolicy::Tls {
+        client_verification: ferrowl_util::tls::ClientVerification::Verify { ca_file: None },
+    }
+}
+
+impl Default for OcppSecurityConfig {
+    fn default() -> Self {
+        OcppSecurityConfig {
+            username: None,
+            password: None,
+            server: default_server_tls(),
+            client: default_client_tls(),
+        }
+    }
 }
 
 impl OcppSecurityConfig {
@@ -68,45 +80,15 @@ impl OcppSecurityConfig {
         }
     }
 
-    /// CS-side TLS config, if any of `client_verification`'s `ca_file`/`SkipVerify`/
-    /// `client_cert_file`/`client_key_file` is set.
-    pub fn cs_tls(&self) -> Option<ferrowl_ocpp::CsTlsConfig> {
-        if matches!(
-            self.client_verification,
-            ferrowl_util::tls::ClientVerification::Verify { ca_file: None }
-        ) && self.client_cert_file.is_none()
-            && self.client_key_file.is_none()
-        {
-            return None;
-        }
-        Some(ferrowl_ocpp::CsTlsConfig {
-            client_verification: self.client_verification.clone(),
-            client_cert_file: self.client_cert_file.clone(),
-            client_key_file: self.client_key_file.clone(),
-        })
+    /// CS-side TLS policy, if any TLS field was set at all (i.e. `self.client` differs from the
+    /// "nothing configured" baseline).
+    pub fn cs_tls(&self) -> Option<ferrowl_util::tls::ClientTlsPolicy> {
+        (self.client != default_client_tls()).then(|| self.client.clone())
     }
 
-    /// CSMS-side TLS config: embeds/reuses `ServerCertSource`'s own precedence directly (OC-R-096)
-    /// rather than re-resolving it here — `Unset` is the only case with no TLS on the listener.
-    pub fn csms_tls(&self) -> Option<ferrowl_ocpp::CsmsTlsConfig> {
-        let mode = match &self.server_cert {
-            ferrowl_util::tls::ServerCertSource::Unset => return None,
-            ferrowl_util::tls::ServerCertSource::SelfSigned => {
-                ferrowl_ocpp::CsmsTlsMode::SelfSigned
-            }
-            ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file,
-                key_file,
-            } => ferrowl_ocpp::CsmsTlsMode::Files {
-                cert_file: cert_file.clone(),
-                key_file: key_file.clone(),
-            },
-        };
-        Some(ferrowl_ocpp::CsmsTlsConfig {
-            mode,
-            client_ca_file: self.client_ca_file.clone(),
-            require_client_cert: self.require_client_cert,
-        })
+    /// CSMS-side TLS policy, if any TLS field was set at all.
+    pub fn csms_tls(&self) -> Option<ferrowl_util::tls::ServerTlsPolicy> {
+        (self.server != default_server_tls()).then(|| self.server.clone())
     }
 }
 
@@ -350,14 +332,12 @@ mod tests {
             security: OcppSecurityConfig {
                 username: Some("cp001".into()),
                 password: Some("s3cret".into()),
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("/tmp/ca.pem".into()),
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                        ca_file: Some("/tmp/ca.pem".into()),
+                    },
                 },
-                server_cert: ferrowl_util::tls::ServerCertSource::Unset,
-                client_cert_file: None,
-                client_key_file: None,
-                client_ca_file: None,
-                require_client_cert: false,
+                ..Default::default()
             },
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -392,10 +372,19 @@ mod tests {
     /// `ServerCertSource`/`ClientVerification`'s own defaults.
     fn ut_ocpp_security_config_defaults() {
         let cfg = OcppSecurityConfig::default();
-        assert_eq!(cfg.server_cert, ferrowl_util::tls::ServerCertSource::Unset);
         assert_eq!(
-            cfg.client_verification,
-            ferrowl_util::tls::ClientVerification::Verify { ca_file: None }
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Unset,
+            }
+        );
+        assert_eq!(
+            cfg.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                    ca_file: None
+                },
+            }
         );
     }
 
@@ -413,10 +402,7 @@ mod tests {
     /// struct/type rework — `csms_tls()` returns `None` when `server_cert` is `Unset`, distinct
     /// from `CsmsTlsMode`'s own fallible (never-`Unset`) conversion.
     fn ut_csms_tls_unset_returns_none() {
-        let cfg = OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::Unset,
-            ..Default::default()
-        };
+        let cfg = OcppSecurityConfig::default();
         assert!(cfg.csms_tls().is_none());
     }
 
@@ -474,8 +460,12 @@ mod tests {
     /// CS-R-004 — new security fields round-trip through TOML and JSON.
     fn ut_security_config_new_fields_round_trip() {
         let cfg = OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
-            client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            },
+            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            },
             ..Default::default()
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -491,41 +481,59 @@ mod tests {
     /// OC-R-096 — a wss CSMS with no server cert/key files uses `self_signed` for its TLS material.
     fn ut_csms_tls_self_signed_without_cert_files() {
         let cfg = OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            },
             ..Default::default()
         };
         let tls = cfg.csms_tls().expect("self_signed enables TLS");
-        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::SelfSigned));
+        assert!(matches!(
+            tls,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            }
+        ));
     }
 
     #[test]
-    /// OC-R-096 — `ServerCertSource::Explicit` maps to `CsmsTlsMode::Files` for a wss CSMS
-    /// (embed/reuse `ServerCertSource`'s own precedence, not re-resolved here).
+    /// OC-R-096 — `ServerCertSource::Explicit` is carried through for a wss CSMS (embed/reuse
+    /// `ServerCertSource`'s own precedence, not re-resolved here).
     fn ut_csms_tls_explicit_maps_to_files() {
         let cfg = OcppSecurityConfig {
-            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: "s.crt".into(),
-                key_file: "s.key".into(),
+            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: "s.crt".into(),
+                    key_file: "s.key".into(),
+                },
             },
             ..Default::default()
         };
         let tls = cfg.csms_tls().expect("cert/key enable TLS");
-        assert!(matches!(tls.mode, ferrowl_ocpp::CsmsTlsMode::Files { .. }));
+        assert!(matches!(
+            tls,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit { .. },
+            }
+        ));
     }
 
     #[test]
     /// OC-R-036 — a CS TLS configuration carries `ClientVerification::SkipVerify`.
     fn ut_cs_tls_carries_insecure_skip_verify() {
         let cfg = OcppSecurityConfig {
-            client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            },
             ..Default::default()
         };
         let tls = cfg
             .cs_tls()
             .expect("SkipVerify does not gate cs_tls presence");
         assert_eq!(
-            tls.client_verification,
-            ferrowl_util::tls::ClientVerification::SkipVerify
+            tls,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            }
         );
     }
 

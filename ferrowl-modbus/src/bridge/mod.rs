@@ -227,6 +227,7 @@ mod tests {
         let (_downstream_server, downstream_bound_addr) = crate::tcp::ServerBuilder::new(
             Arc::new(TokioRwLock::new(tcp_config(downstream_port))),
             srv_mem,
+            crate::tcp::tls::new_self_signed_cache(),
         )
         .spawn(srv_rx, sink(), sink())
         .await

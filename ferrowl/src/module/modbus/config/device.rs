@@ -48,7 +48,12 @@ pub struct DeviceConfig {
     pub reconnect: Option<bool>,
     /// TLS settings for this device's TCP endpoint (MB-R-104). Ignored entirely when
     /// the module's endpoint is RTU (MB-R-112). `None` (the default) keeps the
-    /// endpoint on plain TCP.
+    /// endpoint on plain TCP. `ModbusTlsConfig` (MB-R-105) carries a role-pure `server`
+    /// ([`ferrowl_util::tls::ServerTlsPolicy`]) and `client`
+    /// ([`ferrowl_util::tls::ClientTlsPolicy`]) policy as flattened wire siblings — only the
+    /// one matching this module's configured role (client or server) is ever consulted, but
+    /// both are always present on the wire so a config file can be edited in place when the
+    /// role toggles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
     /// Base path for per-module log files (tab name appended as suffix). `None` disables.
@@ -451,18 +456,27 @@ mod tests {
     /// deserializes to `None`.
     fn ut_device_config_tls_serde_roundtrip() {
         use ferrowl_modbus::tcp::ModbusTlsConfig;
+        use ferrowl_util::tls::{
+            ClientCertVerification, ClientTlsPolicy, ClientVerification, ServerCertSource,
+            ServerTlsPolicy,
+        };
 
         let mut cfg = sample();
         cfg.tls = Some(ModbusTlsConfig {
-            client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                ca_file: Some("ca.pem".to_string()),
+            server: ServerTlsPolicy::MutualTls {
+                server_cert: ServerCertSource::Explicit {
+                    cert_file: "cert.pem".to_string(),
+                    key_file: "key.pem".to_string(),
+                },
+                client_verification: ClientCertVerification::Verify {
+                    ca_files: vec!["client-ca.pem".to_string()],
+                },
             },
-            server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: "cert.pem".to_string(),
-                key_file: "key.pem".to_string(),
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::Verify {
+                    ca_file: Some("ca.pem".to_string()),
+                },
             },
-            require_client_cert: true,
-            ..Default::default()
         });
         let json = serde_json::to_string(&cfg).unwrap();
         let back: DeviceConfig = serde_json::from_str(&json).unwrap();

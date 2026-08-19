@@ -1,6 +1,6 @@
 use crate::client_core::{ClientCore, ConnectAttempt};
 use crate::tcp::Config;
-use crate::tcp::tls::{ClientStream, build_client_tls_config};
+use crate::tcp::tls::{ClientStream, SelfSignedCache, build_client_tls_config};
 use crate::{Command, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
 use ferrowl_store::Memory;
@@ -22,6 +22,7 @@ pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
+    cache: SelfSignedCache,
 }
 
 impl<T: KeyParams> ClientBuilder<T> {
@@ -29,11 +30,13 @@ impl<T: KeyParams> ClientBuilder<T> {
         config: Arc<RwLock<Config>>,
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<MemLock<Memory<Key<T>>>>,
+        cache: SelfSignedCache,
     ) -> Self {
         Self {
             config,
             operations,
             memory,
+            cache,
         }
     }
 
@@ -59,9 +62,11 @@ impl<T: KeyParams> ClientBuilder<T> {
         let config = self.config.clone();
         let operations = self.operations.clone();
         let memory = self.memory.clone();
+        let cache = self.cache.clone();
         Ok(tokio::task::spawn(async move {
             ClientCore::run_reconnect_loop(receiver, log, status, operations, memory, move || {
                 let config = config.clone();
+                let cache = cache.clone();
                 async move {
                     let guard = config.read().await;
                     let attempt = ConnectAttempt {
@@ -69,7 +74,9 @@ impl<T: KeyParams> ClientBuilder<T> {
                         timeout_ms: guard.timeout_ms,
                         delay_ms: guard.delay_ms,
                         interval_ms: guard.interval_ms,
-                        client: Client::connect(&guard).await.map(|client| client.core),
+                        client: Client::connect(&guard, &cache)
+                            .await
+                            .map(|client| client.core),
                     };
                     drop(guard);
                     attempt
@@ -91,15 +98,11 @@ impl Client {
     /// Opens a TCP connection to `config.ip:config.port`, bounded by the
     /// configured timeout. Plain TCP unless `config.tls` is set (MB-R-127), in which
     /// case the same timeout bounds the TCP connect and the TLS handshake together.
-    pub async fn connect(config: &Config) -> Result<Self, Error> {
+    pub async fn connect(config: &Config, cache: &SelfSignedCache) -> Result<Self, Error> {
         let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
             .parse()
             .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
-        let tls_config = config
-            .tls
-            .as_ref()
-            .map(build_client_tls_config)
-            .transpose()?;
+        let tls_config = build_client_tls_config(&config.client_tls_policy(), cache)?;
         let attempt = async {
             match tls_config {
                 None => connect_tcp_framed::<Ascii>(addr, TcpConfig::default())

@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use crate::security::{BasicAuth, CsmsTlsConfig};
+use ferrowl_util::tls::ServerTlsPolicy;
+
+use crate::security::BasicAuth;
 
 /// Configuration for a CSMS server's listening socket.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -25,7 +27,7 @@ pub struct Config {
     /// TLS material for the listening socket (Security Profiles 2 and 3). When set, every
     /// accepted connection is TLS-terminated before the OCPP-J handshake.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<CsmsTlsConfig>,
+    pub tls: Option<ServerTlsPolicy>,
 }
 
 fn default_timeout_ms() -> u64 {

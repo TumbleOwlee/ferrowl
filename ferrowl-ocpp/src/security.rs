@@ -6,21 +6,27 @@
 //! * Profile 3 -- mutual TLS: the peer also presents (and the other side verifies) a client
 //!   certificate.
 //!
-//! Profiles 2 and 3 share the same rustls plumbing; a [`CsTlsConfig`]/[`CsmsTlsConfig`] only
-//! becomes "profile 3" once a client certificate (CS) or `require_client_cert` (CSMS) is set.
+//! Profiles 2 and 3 share the same rustls plumbing; a [`ferrowl_util::tls::ClientTlsPolicy`]/
+//! [`ferrowl_util::tls::ServerTlsPolicy`] only becomes "profile 3" once its `MutualTls` variant
+//! is resolved (a client certificate for CS, `require_client_cert` on the wire for CSMS).
 
 use std::sync::Arc;
 
 use base64::Engine;
+use parking_lot::Mutex;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
 use rustls::pki_types::pem::{self, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
+use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
+use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
-use ferrowl_util::tls::{ClientVerification, ServerCertSource};
+use ferrowl_util::tls::{
+    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
+    ServerCertSource, ServerTlsPolicy,
+};
 
 use crate::error::{Error, TlsError};
 
@@ -59,54 +65,98 @@ impl BasicAuth {
     }
 }
 
-/// TLS material for the CS (client) side (Security Profiles 2 and 3).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CsTlsConfig {
-    /// How the server's certificate is verified: the webpki root store plus an optional extra
-    /// trust anchor (`ca_file`), or `insecure_skip_verify` disabling authentication entirely.
-    /// MB-R-109/OC-R-036 precedence lives in [`ClientVerification::resolve`] — skip-verify wins,
-    /// `ca_file` ignored rather than combined with it.
-    #[serde(flatten)]
-    pub client_verification: ClientVerification,
-    /// Client certificate (PEM file path) presented for mutual TLS (Profile 3). Requires
-    /// `client_key_file`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_cert_file: Option<String>,
-    /// Private key (PEM file path) matching `client_cert_file`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_key_file: Option<String>,
+/// A self-signed certificate/key pair generated once per module instance and reused across
+/// connect/reconnect/bind attempts, cleared whenever the resolved source moves away from
+/// self-signed so a later reversion regenerates fresh material (OC-R-037/OC-R-115 — mirrors
+/// `ferrowl_modbus::tcp::SelfSignedCache` exactly; independently defined here since
+/// `ferrowl-util` does not depend on `rustls-pki-types`/`parking_lot`).
+pub type SelfSignedCache =
+    Arc<Mutex<Option<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)>>>;
+
+/// A fresh, empty cache — call exactly once per module instance, never per-reconfigure, so a
+/// config edit that keeps the source self-signed reuses the same material instead of
+/// regenerating it.
+pub fn new_self_signed_cache() -> SelfSignedCache {
+    Arc::new(Mutex::new(None))
 }
 
-impl CsTlsConfig {
-    /// Build the rustls-backed [`Connector`]: webpki roots plus `ca_file` if set, and a client
-    /// certificate if both `client_cert_file` and `client_key_file` are set. When
-    /// `client_verification` is `SkipVerify`, server authentication is disabled entirely and
-    /// `ca_file` is ignored.
-    pub(crate) fn build_connector(&self) -> Result<Connector, Error> {
-        let builder = rustls::ClientConfig::builder();
-        let builder = match &self.client_verification {
-            ClientVerification::SkipVerify => builder
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert::new())),
-            ClientVerification::Verify { ca_file } => {
-                let mut roots = rustls::RootCertStore::empty();
-                roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-                if let Some(path) = ca_file {
-                    for cert in load_certs(path)? {
-                        roots.add(cert).map_err(TlsError::Rustls)?;
-                    }
-                }
-                builder.with_root_certificates(roots)
-            }
-        };
-        let config = match (&self.client_cert_file, &self.client_key_file) {
-            (Some(cert_path), Some(key_path)) => builder
-                .with_client_auth_cert(load_certs(cert_path)?, load_private_key(key_path)?)
-                .map_err(TlsError::Rustls)?,
-            _ => builder.with_no_client_auth(),
-        };
-        Ok(Connector::Rustls(Arc::new(config)))
+/// Resolve a self-signed pair via the cache/regenerate rule (OC-R-037/OC-R-115, `## Shared` in
+/// the tls-mtls-role-split plan): reused whenever the resolved source stays self-signed,
+/// regenerated the first time or after any transition away from self-signed cleared it.
+/// `PrivateKeyDer` is not `Clone` (by design, `rustls-pki-types` 1.15.1); `clone_key()` is its
+/// explicit deep-copy escape hatch, used on every cache hit.
+fn resolve_self_signed(
+    host: &str,
+    cache: &SelfSignedCache,
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), Error> {
+    let mut guard = cache.lock();
+    if let Some((chain, key)) = guard.as_ref() {
+        return Ok((chain.clone(), key.clone_key()));
     }
+    let (chain, key) = generate_self_signed(host)?;
+    *guard = Some((chain.clone(), key.clone_key()));
+    Ok((chain, key))
+}
+
+/// Build the rustls-backed [`Connector`] from a resolved [`ClientTlsPolicy`]: `NoTls` is
+/// unreachable here — the caller only invokes this under `Some(policy)` (the wrapping `Option`
+/// on `cs::Config.tls` itself carries the "no TLS configured" signal). `Tls`/`MutualTls` build
+/// server-certificate verification identically (OC-R-036: skip-verify wins over `ca_file`, never
+/// combined — [`ClientVerification::resolve`]); `MutualTls` additionally presents a client
+/// identity: `Explicit` loads from disk, `SelfSigned` generates/reuses via the cache rule
+/// (OC-R-115).
+pub(crate) fn build_connector(
+    policy: &ClientTlsPolicy,
+    cache: &SelfSignedCache,
+) -> Result<Connector, Error> {
+    let (client_verification, client_identity_source) = match policy {
+        ClientTlsPolicy::NoTls => {
+            unreachable!("build_connector is only ever called under Some(policy)")
+        }
+        ClientTlsPolicy::Tls {
+            client_verification,
+        } => (client_verification, None),
+        ClientTlsPolicy::MutualTls {
+            client_verification,
+            client_identity,
+        } => (client_verification, Some(client_identity)),
+    };
+
+    let builder = rustls::ClientConfig::builder();
+    let builder = match client_verification {
+        ClientVerification::SkipVerify => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyServerCert::new())),
+        ClientVerification::Verify { ca_file } => {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            if let Some(path) = ca_file {
+                for cert in load_certs(path)? {
+                    roots.add(cert).map_err(TlsError::Rustls)?;
+                }
+            }
+            builder.with_root_certificates(roots)
+        }
+    };
+    let config = match client_identity_source {
+        Some(ClientCertSource::Explicit {
+            client_cert_file,
+            client_key_file,
+        }) => builder
+            .with_client_auth_cert(
+                load_certs(client_cert_file)?,
+                load_private_key(client_key_file)?,
+            )
+            .map_err(TlsError::Rustls)?,
+        Some(ClientCertSource::SelfSigned) => {
+            let (chain, key) = resolve_self_signed("ferrowl-ocpp-client", cache)?;
+            builder
+                .with_client_auth_cert(chain, key)
+                .map_err(TlsError::Rustls)?
+        }
+        None => builder.with_no_client_auth(),
+    };
+    Ok(Connector::Rustls(Arc::new(config)))
 }
 
 /// A [`ServerCertVerifier`] that accepts any server certificate without checking it. The
@@ -165,113 +215,149 @@ impl ServerCertVerifier for AcceptAnyServerCert {
     }
 }
 
-/// Where the CSMS TLS server certificate/key come from. Embeds [`ServerCertSource`] rather than
-/// re-deriving MB-R-106/OC-R-096 precedence: its `Deserialize` delegates to
-/// `ServerCertSource::deserialize`, mapping `SelfSigned`/`Explicit`/`Unset` onto
-/// `CsmsTlsMode::SelfSigned`/`CsmsTlsMode::Files { .. }`/a deserialize error (a bare
-/// `CsmsTlsMode` has no legal "unset" state — see Shared).
-#[derive(Debug, Clone)]
-pub enum CsmsTlsMode {
-    /// Certificate chain and private key loaded from PEM files on disk.
-    Files { cert_file: String, key_file: String },
-    /// An ephemeral self-signed certificate, generated in memory fresh at each server start and
-    /// never written to disk. Since the identity changes every start, connecting clients cannot
-    /// pin it in advance -- see `CsTlsConfig`'s `ClientVerification::SkipVerify`. Not compatible
-    /// with `require_client_cert` (there is no CA to hand out to clients for mTLS in this mode).
-    SelfSigned,
+/// A [`ClientCertVerifier`] that requires a client certificate be presented, but performs no
+/// chain/identity validation against any root store -- the server-role mirror of
+/// [`AcceptAnyServerCert`]. Backs `ServerTlsPolicy::MutualTls`'s `ClientCertVerification::
+/// SkipVerify` (OC-R-039): a handshake presenting no certificate still fails
+/// (`client_auth_mandatory` stays at its default of `true`, following `offer_client_auth`), but a
+/// presented certificate's chain/identity is never checked. Signature verification itself is
+/// still delegated to the default crypto provider so the handshake stays cryptographically sound.
+#[derive(Debug)]
+struct AllowAnyClientCert {
+    supported_algs: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
-impl serde::Serialize for CsmsTlsMode {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let source = match self {
-            CsmsTlsMode::Files {
-                cert_file,
-                key_file,
-            } => ServerCertSource::Explicit {
-                cert_file: cert_file.clone(),
-                key_file: key_file.clone(),
-            },
-            CsmsTlsMode::SelfSigned => ServerCertSource::SelfSigned,
-        };
-        source.serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for CsmsTlsMode {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-        match ServerCertSource::deserialize(deserializer)? {
-            ServerCertSource::SelfSigned => Ok(CsmsTlsMode::SelfSigned),
-            ServerCertSource::Explicit {
-                cert_file,
-                key_file,
-            } => Ok(CsmsTlsMode::Files {
-                cert_file,
-                key_file,
-            }),
-            ServerCertSource::Unset => Err(D::Error::custom(
-                "cert_file/key_file or self_signed must be set",
-            )),
+impl AllowAnyClientCert {
+    fn new() -> Self {
+        Self {
+            supported_algs: CryptoProvider::get_default()
+                .expect("a default rustls CryptoProvider is installed")
+                .signature_verification_algorithms,
         }
     }
 }
 
-/// TLS material for the CSMS (server) side (Security Profiles 2 and 3).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CsmsTlsConfig {
-    /// Source of the server certificate chain and private key.
-    #[serde(flatten)]
-    pub mode: CsmsTlsMode,
-    /// CA (PEM file path) used to verify client certificates. Required when
-    /// `require_client_cert` is set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_ca_file: Option<String>,
-    /// Reject client connections that fail to present a certificate signed by `client_ca_file`
-    /// (Security Profile 3).
-    #[serde(default)]
-    pub require_client_cert: bool,
+impl ClientCertVerifier for AllowAnyClientCert {
+    fn root_hint_subjects(&self) -> &[DistinguishedName] {
+        // No hints to offer -- any client certificate is accepted regardless of its issuer, so
+        // there is no meaningful "acceptable trust anchor" list to advertise.
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
+    ) -> Result<ClientCertVerified, rustls::Error> {
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(message, cert, dss, &self.supported_algs)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(message, cert, dss, &self.supported_algs)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.supported_algs.supported_schemes()
+    }
 }
 
-impl CsmsTlsConfig {
-    /// Build the rustls server config from the configured cert/key (loaded from disk, or an
-    /// ephemeral self-signed pair generated in memory), adding client-cert verification when
-    /// `require_client_cert` is set. `host` is the listener's bind address/hostname, included as
-    /// a SAN entry when generating a self-signed certificate.
-    pub(crate) fn build_server_config(
-        &self,
-        host: &str,
-    ) -> Result<Arc<rustls::ServerConfig>, Error> {
-        let (certs, key) = match &self.mode {
-            CsmsTlsMode::Files {
-                cert_file,
-                key_file,
-            } => (load_certs(cert_file)?, load_private_key(key_file)?),
-            CsmsTlsMode::SelfSigned => generate_self_signed(host)?,
-        };
+/// Resolve the CSMS's presented certificate per OC-R-096, and whether an ephemeral self-signed
+/// certificate was used *without* being explicitly requested (the caller logs that case,
+/// OC-R-095) -- mirrors `ferrowl_modbus::tcp::tls::resolve_server_identity` exactly.
+/// `self_signed` wins unconditionally over `cert_file`/`key_file`, enforced by
+/// [`ServerCertSource`] at construction, so the "one set, not the other" case is unrepresentable
+/// here and needs no error arm.
+fn resolve_server_identity(
+    server_cert: &ServerCertSource,
+    host: &str,
+    cache: &SelfSignedCache,
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, bool), Error> {
+    match server_cert {
+        ServerCertSource::SelfSigned => {
+            let (chain, key) = resolve_self_signed(host, cache)?;
+            Ok((chain, key, false))
+        }
+        ServerCertSource::Explicit {
+            cert_file,
+            key_file,
+        } => {
+            // Any explicit configuration clears the cache: a later reversion to self-signed must
+            // regenerate rather than reuse material from before the explicit interlude.
+            *cache.lock() = None;
+            Ok((load_certs(cert_file)?, load_private_key(key_file)?, false))
+        }
+        ServerCertSource::Unset => {
+            let (chain, key) = resolve_self_signed(host, cache)?;
+            Ok((chain, key, true))
+        }
+    }
+}
 
-        let builder = rustls::ServerConfig::builder();
-        let builder = if self.require_client_cert {
-            let ca_file = self
-                .client_ca_file
-                .as_ref()
-                .ok_or(TlsError::MissingClientCa)?;
+/// Build the rustls server config from a resolved [`ServerTlsPolicy`]: `NoTls` is unreachable
+/// here -- the caller only invokes this under `Some(policy)` (the wrapping `Option` on
+/// `csms::Config.tls` itself carries the "no TLS configured" signal). Returns the built config
+/// plus whether an unrequested ephemeral self-signed fallback was used (OC-R-095/OC-R-096, the
+/// caller logs that case). `host` is the listener's bind address/hostname, included as a SAN
+/// entry when generating a self-signed certificate. `MutualTls`'s `Verify{ca_files}` trusts a
+/// client certificate signed by *any one* of the configured CAs (OC-R-039/OC-R-113's "any one is
+/// sufficient, not all"); `SkipVerify` still requires a presented certificate but skips
+/// chain/identity validation entirely ([`AllowAnyClientCert`]).
+pub(crate) fn build_server_config(
+    policy: &ServerTlsPolicy,
+    host: &str,
+    cache: &SelfSignedCache,
+) -> Result<(Arc<rustls::ServerConfig>, bool), Error> {
+    let (server_cert, client_verification) = match policy {
+        ServerTlsPolicy::NoTls => {
+            unreachable!("build_server_config is only ever called under Some(policy)")
+        }
+        ServerTlsPolicy::Tls { server_cert } => (server_cert, None),
+        ServerTlsPolicy::MutualTls {
+            server_cert,
+            client_verification,
+        } => (server_cert, Some(client_verification)),
+    };
+    let (certs, key, used_fallback) = resolve_server_identity(server_cert, host, cache)?;
+
+    let builder = rustls::ServerConfig::builder();
+    let builder = match client_verification {
+        None => builder.with_no_client_auth(),
+        Some(ClientCertVerification::Verify { ca_files }) => {
             let mut roots = rustls::RootCertStore::empty();
-            for cert in load_certs(ca_file)? {
-                roots.add(cert).map_err(TlsError::Rustls)?;
+            for ca_file in ca_files {
+                for cert in load_certs(ca_file)? {
+                    roots.add(cert).map_err(TlsError::Rustls)?;
+                }
             }
             let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots))
                 .build()
                 .map_err(|e| TlsError::ClientVerifier(e.to_string()))?;
             builder.with_client_cert_verifier(verifier)
-        } else {
-            builder.with_no_client_auth()
-        };
+        }
+        Some(ClientCertVerification::SkipVerify) => {
+            builder.with_client_cert_verifier(Arc::new(AllowAnyClientCert::new()))
+        }
+    };
 
-        let config = builder
-            .with_single_cert(certs, key)
-            .map_err(TlsError::Rustls)?;
-        Ok(Arc::new(config))
-    }
+    let config = builder
+        .with_single_cert(certs, key)
+        .map_err(TlsError::Rustls)?;
+    Ok((Arc::new(config), used_fallback))
 }
 
 /// Generate an ephemeral self-signed certificate/key pair in memory (never written to disk), with
@@ -458,67 +544,92 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-035 — a CS presents a client certificate for mutual TLS when, and only when, both the client cert and key files are configured.
-    fn ut_cs_client_cert_only_when_both_cert_and_key_set() {
+    /// MB-R-105/OC-R-035 — a client identity is presented only under `MutualTls`; a bare `Tls`
+    /// policy never presents one, regardless of what would otherwise be configured.
+    fn ut_build_connector_identity_only_under_mutual_tls() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cert = temp_pem("cs-cert", &cert_pem);
         let key = temp_pem("cs-key", &key_pem);
+        let cache = new_self_signed_cache();
 
-        // Both set and valid → the client-auth branch loads them and succeeds.
-        let both = CsTlsConfig {
+        let mtls = ClientTlsPolicy::MutualTls {
             client_verification: ClientVerification::Verify { ca_file: None },
-            client_cert_file: Some(cert),
-            client_key_file: Some(key),
+            client_identity: ClientCertSource::Explicit {
+                client_cert_file: cert,
+                client_key_file: key,
+            },
         };
-        assert!(both.build_connector().is_ok());
+        assert!(build_connector(&mtls, &cache).is_ok());
 
-        // Only the cert set → the no-client-auth branch is taken; the cert is never loaded, so even
-        // a nonexistent path is ignored (no client certificate is presented).
-        let cert_only = CsTlsConfig {
+        let tls_only = ClientTlsPolicy::Tls {
             client_verification: ClientVerification::Verify { ca_file: None },
-            client_cert_file: Some("/no/such/ferrowl-cert.pem".into()),
-            client_key_file: None,
         };
-        assert!(cert_only.build_connector().is_ok());
+        assert!(build_connector(&tls_only, &cache).is_ok());
+    }
 
-        // Both set but missing on disk → the client-auth branch attempts to load and fails, proving
-        // the client certificate is loaded/presented exactly when both files are configured.
-        let both_missing = CsTlsConfig {
+    #[test]
+    /// OC-R-035 — a `MutualTls` policy with a valid explicit client cert/key pair builds; the
+    /// same pair missing on disk fails to build, proving the identity really is loaded.
+    fn ut_build_connector_explicit_identity_loaded_when_present() {
+        let cache = new_self_signed_cache();
+
+        let missing = ClientTlsPolicy::MutualTls {
             client_verification: ClientVerification::Verify { ca_file: None },
-            client_cert_file: Some("/no/such/ferrowl-cert.pem".into()),
-            client_key_file: Some("/no/such/ferrowl-key.pem".into()),
+            client_identity: ClientCertSource::Explicit {
+                client_cert_file: "/no/such/ferrowl-cert.pem".into(),
+                client_key_file: "/no/such/ferrowl-key.pem".into(),
+            },
         };
-        assert!(both_missing.build_connector().is_err());
+        assert!(build_connector(&missing, &cache).is_err());
     }
 
     /// OC-R-036 — `insecure_skip_verify` disables server-certificate verification (installs
     /// `AcceptAnyServerCert`) and ignores `ca_file`, even when it points at an unreadable path.
     #[test]
-    fn ut_cs_tls_config_client_verification_skip_wins() {
-        let cfg = CsTlsConfig {
+    fn ut_build_connector_client_verification_skip_wins() {
+        let cache = new_self_signed_cache();
+        let skip = ClientTlsPolicy::Tls {
             client_verification: ClientVerification::resolve(
                 true,
                 Some("/no/such/ca.pem".to_string()),
             ),
-            client_cert_file: None,
-            client_key_file: None,
         };
-        assert!(cfg.build_connector().is_ok());
+        assert!(build_connector(&skip, &cache).is_ok());
 
         // Without skip-verify, the same unreadable ca_file must fail to load.
-        let cfg = CsTlsConfig {
+        let verify = ClientTlsPolicy::Tls {
             client_verification: ClientVerification::resolve(
                 false,
                 Some("/no/such/ca.pem".to_string()),
             ),
-            client_cert_file: None,
-            client_key_file: None,
         };
-        assert!(cfg.build_connector().is_err());
+        assert!(build_connector(&verify, &cache).is_err());
+    }
+
+    /// OC-R-115 — a `SelfSigned` client identity is generated once and reused across repeated
+    /// calls sharing the same cache (cache hit, not a fresh key pair each time).
+    #[test]
+    fn ut_build_connector_self_signed_identity_reuses_cache() {
+        let cache = new_self_signed_cache();
+        let policy = ClientTlsPolicy::MutualTls {
+            client_verification: ClientVerification::Verify { ca_file: None },
+            client_identity: ClientCertSource::SelfSigned,
+        };
+        assert!(build_connector(&policy, &cache).is_ok());
+        assert!(build_connector(&policy, &cache).is_ok());
+        let chain1 = cache
+            .lock()
+            .as_ref()
+            .expect("cached after first build")
+            .0
+            .clone();
+        assert!(build_connector(&policy, &cache).is_ok());
+        let chain2 = cache.lock().as_ref().expect("still cached").0.clone();
+        assert_eq!(chain1, chain2, "cache hit reuses the same certificate");
     }
 
     #[test]
-    /// OC-R-038 — a generated self-signed CSMS certificate carries the listener's host as a SAN, plus `localhost` when the host differs.
+    /// OC-R-038 — a generated self-signed certificate carries the listener's host as a SAN, plus `localhost` when the host differs.
     fn ut_self_signed_carries_host_and_localhost_sans() {
         // DNS SAN names are encoded as ASCII (IA5String) inside the certificate DER.
         let contains = |der: &[u8], needle: &[u8]| der.windows(needle.len()).any(|w| w == needle);
@@ -538,57 +649,116 @@ mod tests {
     fn ut_require_client_cert_with_ca_builds_verifier() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let (ca_pem, _ca_key) = cert_and_key_pem();
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::Files {
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::MutualTls {
+            server_cert: ServerCertSource::Explicit {
                 cert_file: temp_pem("mtls-cert", &cert_pem),
                 key_file: temp_pem("mtls-key", &key_pem),
             },
-            client_ca_file: Some(temp_pem("mtls-ca", &ca_pem)),
-            require_client_cert: true,
+            client_verification: ClientCertVerification::Verify {
+                ca_files: vec![temp_pem("mtls-ca", &ca_pem)],
+            },
         };
-        assert!(cfg.build_server_config("localhost").is_ok());
+        assert!(build_server_config(&policy, "localhost", &cache).is_ok());
     }
 
     #[test]
     /// OC-R-041 — a self-signed CSMS builds a usable server TLS config in memory.
     /// OC-R-037 — the CSMS server certificate may come from an ephemeral in-memory self-signed pair.
     fn ut_build_server_config_self_signed() {
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::SelfSigned,
-            client_ca_file: None,
-            require_client_cert: false,
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::SelfSigned,
         };
-        assert!(cfg.build_server_config("localhost").is_ok());
+        let (_config, used_fallback) =
+            build_server_config(&policy, "localhost", &cache).expect("builds");
+        assert!(!used_fallback, "self-signed was explicitly requested");
+    }
+
+    /// OC-R-037 (cache reuse) — a `SelfSigned` server_cert reuses the cached pair across repeat
+    /// calls sharing the same cache, rather than regenerating a fresh key pair each time.
+    #[test]
+    fn ut_build_server_config_self_signed_reuses_cached_pair() {
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::SelfSigned,
+        };
+        build_server_config(&policy, "localhost", &cache).expect("builds");
+        let chain1 = cache
+            .lock()
+            .as_ref()
+            .expect("cached after first build")
+            .0
+            .clone();
+        build_server_config(&policy, "localhost", &cache).expect("builds");
+        let chain2 = cache.lock().as_ref().expect("still cached").0.clone();
+        assert_eq!(chain1, chain2, "cache hit reuses the same certificate");
+    }
+
+    /// OC-R-037 (cache regen) — resolving `Explicit` clears the cache, so a later reversion to
+    /// `SelfSigned` regenerates fresh material rather than reusing anything from before the
+    /// explicit interlude.
+    #[test]
+    fn ut_build_server_config_explicit_then_self_signed_regenerates() {
+        let cache = new_self_signed_cache();
+        let self_signed = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::SelfSigned,
+        };
+        build_server_config(&self_signed, "localhost", &cache).expect("builds");
+        let chain1 = cache
+            .lock()
+            .as_ref()
+            .expect("cached after first build")
+            .0
+            .clone();
+
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let explicit = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::Explicit {
+                cert_file: temp_pem("explicit-cert", &cert_pem),
+                key_file: temp_pem("explicit-key", &key_pem),
+            },
+        };
+        build_server_config(&explicit, "localhost", &cache).expect("builds");
+        assert!(
+            cache.lock().is_none(),
+            "an explicit build must clear the cache"
+        );
+
+        build_server_config(&self_signed, "localhost", &cache).expect("builds");
+        let chain2 = cache
+            .lock()
+            .as_ref()
+            .expect("regenerated after reversion")
+            .0
+            .clone();
+        assert_ne!(
+            chain1, chain2,
+            "an explicit interlude must clear the cache, forcing regeneration"
+        );
     }
 
     #[test]
     /// OC-R-040 — a self-signed CSMS requiring client certificates succeeds when a
-    /// `client_ca_file` is configured: the server's own self-signed identity and the CA trusted
-    /// for verifying client certificates are independent.
-    fn ut_require_client_cert_self_signed_with_client_ca_succeeds() {
+    /// `client_ca_file` is configured, in either verification mode: the server's own self-signed
+    /// identity and the CA trusted for verifying client certificates are independent.
+    fn ut_require_client_cert_self_signed_with_any_verification_mode_succeeds() {
         let (ca_pem, _ca_key) = cert_and_key_pem();
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::SelfSigned,
-            client_ca_file: Some(temp_pem("self-signed-mtls-ca", &ca_pem)),
-            require_client_cert: true,
-        };
-        assert!(cfg.build_server_config("localhost").is_ok());
-    }
+        let cache = new_self_signed_cache();
 
-    #[test]
-    /// OC-R-039 — a self-signed CSMS requiring client certificates without a `client_ca_file`
-    /// still fails to start, exactly as a Files-mode CSMS would (OC-R-040 only relaxes the
-    /// self-signed-vs-mTLS combination itself, not the client_ca_file requirement).
-    fn ut_require_client_cert_self_signed_without_client_ca_fails() {
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::SelfSigned,
-            client_ca_file: None,
-            require_client_cert: true,
+        let verify = ServerTlsPolicy::MutualTls {
+            server_cert: ServerCertSource::SelfSigned,
+            client_verification: ClientCertVerification::Verify {
+                ca_files: vec![temp_pem("self-signed-mtls-ca", &ca_pem)],
+            },
         };
-        assert!(matches!(
-            cfg.build_server_config("localhost"),
-            Err(Error::Tls(TlsError::MissingClientCa))
-        ));
+        assert!(build_server_config(&verify, "localhost", &cache).is_ok());
+
+        let skip = ServerTlsPolicy::MutualTls {
+            server_cert: ServerCertSource::SelfSigned,
+            client_verification: ClientCertVerification::SkipVerify,
+        };
+        assert!(build_server_config(&skip, "localhost", &cache).is_ok());
     }
 
     #[test]
@@ -596,83 +766,57 @@ mod tests {
     /// OC-R-037 — the CSMS server certificate may come from PEM files on disk.
     fn ut_build_server_config_from_files() {
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::Files {
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::Explicit {
                 cert_file: temp_pem("srv-cert", &cert_pem),
                 key_file: temp_pem("srv-key", &key_pem),
             },
-            client_ca_file: None,
-            require_client_cert: false,
         };
-        assert!(cfg.build_server_config("localhost").is_ok());
+        assert!(build_server_config(&policy, "localhost", &cache).is_ok());
     }
 
     #[test]
-    /// OC-R-029 — requiring client certificates without a configured CA file is rejected.
-    /// OC-R-039 — `require_client_cert` without a `client_ca_file` fails the server's start.
-    fn ut_require_client_cert_without_ca_is_rejected() {
-        let (cert_pem, key_pem) = cert_and_key_pem();
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::Files {
-                cert_file: temp_pem("srv-cert2", &cert_pem),
-                key_file: temp_pem("srv-key2", &key_pem),
+    /// OC-R-096 — a `Tls` policy with `server_cert: Unset` falls back to an ephemeral self-signed
+    /// certificate and flags the fallback so the caller can log it (OC-R-095).
+    fn ut_build_server_config_unset_falls_back_to_ephemeral_and_flags_it() {
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            server_cert: ServerCertSource::Unset,
+        };
+        let (_config, used_fallback) =
+            build_server_config(&policy, "localhost", &cache).expect("falls back to self-signed");
+        assert!(used_fallback);
+    }
+
+    /// OC-R-039 — server-role `SkipVerify` still requires a client certificate be presented (the
+    /// config resolves and builds); the actual "no cert at all is rejected, an untrusted one is
+    /// accepted" handshake behavior is proven end-to-end by the loopback integration test in
+    /// `tests/ws_loopback_security.rs`.
+    #[test]
+    fn ut_build_server_config_skip_verify_requires_presented_cert() {
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::MutualTls {
+            server_cert: ServerCertSource::SelfSigned,
+            client_verification: ClientCertVerification::SkipVerify,
+        };
+        assert!(build_server_config(&policy, "localhost", &cache).is_ok());
+    }
+
+    /// OC-R-039/OC-R-113 — `Verify{ca_files}` accumulates every configured CA into a single trust
+    /// store, config-resolution level (the actual "any one is sufficient" handshake accept is
+    /// proven end-to-end by the loopback integration test).
+    #[test]
+    fn ut_build_server_config_multi_ca_accumulates_into_one_root_store() {
+        let (ca1_pem, _) = cert_and_key_pem();
+        let (ca2_pem, _) = cert_and_key_pem();
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::MutualTls {
+            server_cert: ServerCertSource::SelfSigned,
+            client_verification: ClientCertVerification::Verify {
+                ca_files: vec![temp_pem("ca1", &ca1_pem), temp_pem("ca2", &ca2_pem)],
             },
-            client_ca_file: None,
-            require_client_cert: true,
         };
-        assert!(matches!(
-            cfg.build_server_config("localhost"),
-            Err(Error::Tls(TlsError::MissingClientCa))
-        ));
-    }
-
-    /// OC-R-096 — `self_signed` wins unconditionally over `cert_file`/`key_file` present in the
-    /// same raw JSON object, exercised through `CsmsTlsMode`'s (flattened) `Deserialize`.
-    #[test]
-    fn ut_csms_tls_mode_deserialize_self_signed_wins_over_explicit_files() {
-        let json = serde_json::json!({
-            "self_signed": true,
-            "cert_file": "c.crt",
-            "key_file": "c.key",
-            "client_ca_file": null,
-            "require_client_cert": false,
-        });
-        let cfg: CsmsTlsConfig = serde_json::from_value(json).expect("deserializes");
-        assert!(matches!(cfg.mode, CsmsTlsMode::SelfSigned));
-    }
-
-    /// struct/type rework — a bare `CsmsTlsMode` has no legal "unset" state: a `CsmsTlsConfig`
-    /// with none of `self_signed`/`cert_file`/`key_file` set fails to deserialize.
-    #[test]
-    fn ut_csms_tls_mode_deserialize_unset_is_error() {
-        let json = serde_json::json!({
-            "require_client_cert": false,
-        });
-        let result: Result<CsmsTlsConfig, _> = serde_json::from_value(json);
-        assert!(result.is_err());
-    }
-
-    /// struct/type rework — `cert_file`/`key_file` flatten as siblings of `client_ca_file`/
-    /// `require_client_cert`, not nested under a `"mode"` key.
-    #[test]
-    fn ut_csms_tls_config_flatten_round_trip() {
-        let cfg = CsmsTlsConfig {
-            mode: CsmsTlsMode::Files {
-                cert_file: "s.crt".to_string(),
-                key_file: "s.key".to_string(),
-            },
-            client_ca_file: Some("ca.pem".to_string()),
-            require_client_cert: true,
-        };
-        let value = serde_json::to_value(&cfg).unwrap();
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "cert_file": "s.crt",
-                "key_file": "s.key",
-                "client_ca_file": "ca.pem",
-                "require_client_cert": true,
-            })
-        );
+        assert!(build_server_config(&policy, "localhost", &cache).is_ok());
     }
 }

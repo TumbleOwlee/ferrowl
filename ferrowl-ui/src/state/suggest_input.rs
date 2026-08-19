@@ -13,9 +13,11 @@ use crate::widgets::GetValue;
 ///
 /// Typing re-queries the provider; the popup opens when it returns matches
 /// and closes when it doesn't. While the popup is open, Up/Down navigate it
-/// and Enter/Tab accept the highlighted entry (re-querying and staying open
+/// and Enter accepts the highlighted entry (re-querying and staying open
 /// for [`Suggestion::partial`] entries); Esc closes it without touching the
-/// text. While closed, those keys are left `Unhandled` for the caller.
+/// text. Tab is left `Unhandled` even while the popup is open, so it always
+/// moves focus to the next field rather than accepting a suggestion. While
+/// closed, Up/Down/Enter/Esc are left `Unhandled` for the caller.
 #[derive(Builder, Debug, Clone)]
 pub struct SuggestInputState<P>
 where
@@ -190,7 +192,7 @@ where
                     self.list.move_down();
                     return EventResult::Consumed;
                 }
-                (KeyModifiers::NONE, KeyCode::Enter) | (KeyModifiers::NONE, KeyCode::Tab) => {
+                (KeyModifiers::NONE, KeyCode::Enter) => {
                     self.accept_selected();
                     return EventResult::Consumed;
                 }
@@ -333,6 +335,20 @@ mod tests {
         assert!(matches!(r, EventResult::Consumed));
         assert!(!s.suggestions_open());
         assert_eq!(s.input(), "a");
+    }
+
+    #[test]
+    /// UI-R-026 — Tab is never consumed by the popup, even while it's open, so it always moves
+    /// focus to the surrounding dialog's next field instead of accepting a suggestion.
+    fn tab_unhandled_while_popup_open() {
+        let mut s = state();
+        type_str(&mut s, "a");
+        assert!(s.suggestions_open());
+        let r = s.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert!(matches!(r, EventResult::Unhandled(..)));
+        // The suggestion wasn't accepted and the popup is untouched.
+        assert_eq!(s.input(), "a");
+        assert!(s.suggestions_open());
     }
 
     #[test]

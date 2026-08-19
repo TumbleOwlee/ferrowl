@@ -89,10 +89,10 @@ fn config(url: String, reconnect: bool) -> Arc<RwLock<cs::Config>> {
 /// never ends its task: it stays alive, backing off and retrying.
 async fn cs_dial_failure_retries_while_reconnect_enabled() {
     let dead_port = free_port();
-    let mut client = cs::ClientBuilder::<V1_6>::new(config(
-        format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"),
-        true,
-    ))
+    let mut client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCs, sink(), sink())
     .await
     .expect("spawn always returns Ok now; the dial happens inside the task");
@@ -114,10 +114,10 @@ async fn cs_dial_failure_retries_while_reconnect_enabled() {
 /// error (after emitting a disconnected status), instead of retrying.
 async fn cs_dial_failure_reconnect_false_ends_task() {
     let dead_port = free_port();
-    let mut client = cs::ClientBuilder::<V1_6>::new(config(
-        format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"),
-        false,
-    ))
+    let mut client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), false),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCs, sink(), sink())
     .await
     .expect("spawn always returns Ok now; the dial error surfaces from the task");
@@ -134,10 +134,10 @@ async fn cs_dial_failure_reconnect_false_ends_task() {
 /// state.
 async fn cs_terminate_while_backing_off_ends_task_ok() {
     let dead_port = free_port();
-    let client = cs::ClientBuilder::<V1_6>::new(config(
-        format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"),
-        true,
-    ))
+    let client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCs, sink(), sink())
     .await
     .expect("spawn always returns Ok now; the dial happens inside the task");
@@ -160,21 +160,27 @@ async fn cs_config_reread_on_every_dial() {
     let dead_port = free_port();
     let shared_config = config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true);
 
-    let client = cs::ClientBuilder::<V1_6>::new(shared_config.clone())
-        .spawn(TestCs, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now; the dial happens inside the task");
+    let client = cs::ClientBuilder::<V1_6>::new(
+        shared_config.clone(),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok now; the dial happens inside the task");
 
     // First connect attempt fails; while it backs off, repoint the config at a live CSMS.
     sleep(Duration::from_millis(200)).await;
-    let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
-        host: "127.0.0.1".to_owned(),
-        port: 0,
-        timeout_ms: 1000,
-        reconnect: true,
-        basic_auth: None,
-        tls: None,
-    })
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 1000,
+            reconnect: true,
+            basic_auth: None,
+            tls: None,
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
     .spawn(TestCsms, sink())
     .await
     .expect("server failed to bind");

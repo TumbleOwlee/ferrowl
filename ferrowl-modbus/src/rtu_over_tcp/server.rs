@@ -1,6 +1,7 @@
 // Crate
 use crate::server_core::{BoundAddr, run_tcp_family};
 use crate::tcp::Config;
+use crate::tcp::tls::SelfSignedCache;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand};
 
 // Workspace
@@ -18,11 +19,20 @@ use tokio::task::JoinHandle;
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
+    cache: SelfSignedCache,
 }
 
 impl<T: KeyParams> ServerBuilder<T> {
-    pub fn new(config: Arc<RwLock<Config>>, memory: Arc<MemLock<Memory<Key<T>>>>) -> Self {
-        Self { config, memory }
+    pub fn new(
+        config: Arc<RwLock<Config>>,
+        memory: Arc<MemLock<Memory<Key<T>>>>,
+        cache: SelfSignedCache,
+    ) -> Self {
+        Self {
+            config,
+            memory,
+            cache,
+        }
     }
 
     /// Binds the configured listen address and spawns the accept loop as a tokio task. `log`
@@ -55,6 +65,7 @@ impl<T: KeyParams> ServerBuilder<T> {
     {
         let config = self.config.clone();
         let memory = self.memory.clone();
+        let cache = self.cache.clone();
         let bound_addr: BoundAddr = Arc::new(parking_lot::Mutex::new(None));
         let handle = tokio::task::spawn(run(
             config,
@@ -63,6 +74,7 @@ impl<T: KeyParams> ServerBuilder<T> {
             log,
             status,
             bound_addr.clone(),
+            cache,
         ));
         Ok((handle, bound_addr))
     }
@@ -91,6 +103,7 @@ async fn run<T, L, St>(
     log: L,
     status: St,
     bound_addr: BoundAddr,
+    cache: SelfSignedCache,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -106,6 +119,7 @@ where
         bound_addr,
         VERBOSE,
         PHYSICAL_SERIAL,
+        cache,
     )
     .await
 }
@@ -155,6 +169,7 @@ mod tests {
         let (handle, bound_addr) = ServerBuilder::new(
             std::sync::Arc::new(tokio::sync::RwLock::new(config)),
             memory,
+            crate::tcp::tls::new_self_signed_cache(),
         )
         .spawn(rx, sink(), sink())
         .await

@@ -27,7 +27,7 @@ use crate::action::Version;
 use crate::error::{CallError, Error};
 use crate::log::LogFn;
 use crate::ocppj::CallErrorCode;
-use crate::security::BasicAuth;
+use crate::security::{BasicAuth, SelfSignedCache, build_server_config};
 
 pub use action_handler::CsmsActionHandler;
 pub use command::Command;
@@ -40,6 +40,7 @@ const COMMAND_CHANNEL_CAP: usize = 32;
 /// Builds and binds a CSMS server for a specific OCPP [`Version`].
 pub struct ServerBuilder<V: Version> {
     config: Config,
+    cache: SelfSignedCache,
     _v: PhantomData<fn() -> V>,
 }
 
@@ -47,9 +48,14 @@ impl<V: Version> ServerBuilder<V>
 where
     V::Action: Clone,
 {
-    pub fn new(config: Config) -> Self {
+    /// `cache` should be created once per module instance (e.g. in the owning backend's `new()`,
+    /// via [`crate::new_self_signed_cache`]) and reused across every `spawn` for that instance —
+    /// never a fresh cache per call — so a `self_signed` server certificate that stays
+    /// self-signed across a rebind or reconfigure is not regenerated needlessly (OC-R-037).
+    pub fn new(config: Config, cache: SelfSignedCache) -> Self {
         Self {
             config,
+            cache,
             _v: PhantomData,
         }
     }
@@ -80,8 +86,21 @@ where
             .config
             .tls
             .as_ref()
-            .map(|tls| tls.build_server_config(&self.config.host))
+            .map(|policy| build_server_config(policy, &self.config.host, &self.cache))
             .transpose()?;
+        // OC-R-095/OC-R-096: log when no TLS material at all was configured and the listener
+        // falls back to an ephemeral self-signed certificate.
+        if let Some((_, used_fallback)) = &tls
+            && *used_fallback
+        {
+            log.invoke(
+                "No cert_file/key_file/self_signed configured for this TLS server; falling \
+                 back to an ephemeral self-signed certificate."
+                    .to_string(),
+            )
+            .await;
+        }
+        let tls = tls.map(|(config, _)| config);
 
         let handler = Arc::new(handler);
         let registry = ConnectionRegistry::<V>::new();

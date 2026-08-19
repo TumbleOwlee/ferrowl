@@ -161,6 +161,7 @@ async fn ascii_over_tcp_client_polls_server_and_executes_commands() {
     let (server, bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(srv_rx, sink(), sink())
     .await
@@ -196,6 +197,7 @@ async fn ascii_over_tcp_client_polls_server_and_executes_commands() {
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -309,18 +311,21 @@ async fn ascii_over_tcp_unparseable_address_is_error() {
 
     // Client side (`Client` isn't `Debug`, so match the result rather than `unwrap_err`).
     assert!(matches!(
-        ferrowl_modbus::ascii_over_tcp::Client::connect(&bad).await,
+        ferrowl_modbus::ascii_over_tcp::Client::connect(&bad, &tcp::new_self_signed_cache()).await,
         Err(Error::Tcp(TcpError::Address(_)))
     ));
 
     // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let (handle, _bound_addr) =
-        ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(Arc::new(RwLock::new(bad)), mem)
-            .spawn(rx, sink(), sink())
-            .await
-            .expect("spawn always returns Ok now");
+    let (handle, _bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(bad)),
+        mem,
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn always returns Ok now");
     let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on an address error")
@@ -342,6 +347,7 @@ async fn ascii_over_tcp_client_skips_broadcast_poll_without_disconnect() {
     let (server, bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
+        tcp::new_self_signed_cache(),
     )
     .spawn(srv_rx, sink(), sink())
     .await
@@ -359,6 +365,7 @@ async fn ascii_over_tcp_client_skips_broadcast_poll_without_disconnect() {
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -400,6 +407,7 @@ async fn ascii_over_tcp_client_fire_and_forget_broadcast_write() {
     let (server, bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem.clone(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(srv_rx, sink(), sink())
     .await
@@ -412,6 +420,7 @@ async fn ascii_over_tcp_client_fire_and_forget_broadcast_write() {
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
+        tcp::new_self_signed_cache(),
     )
     .spawn(rx, sink(), sink())
     .await
@@ -475,6 +484,7 @@ async fn ascii_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
     let (server, bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
         srv_mem,
+        tcp::new_self_signed_cache(),
     )
     .spawn(srv_rx, sink(), sink())
     .await

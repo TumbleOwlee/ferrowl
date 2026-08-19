@@ -72,10 +72,11 @@ mistaken for an oversight and silently "fixed".
 | CS connects to a TLS CSMS whose certificate is not trusted | the dial fails; the module reports a connect failure |
 | CS has `insecure_skip_verify` set | any server certificate is accepted; `ca_file` is **ignored**, not combined. The channel is still encrypted and signatures are still verified — only the certificate identity check is skipped |
 | The OCPP setup dialog's client-side `ca_file` input after Skip-Verify is toggled On | hidden and excluded from the resolved config regardless of any text already present (OC-R-111) |
+| The OCPP setup dialog's client-role Skip-Verify toggle at security level `None`/`BasicAuth` | hidden entirely, not merely inert — Basic-Auth-only connections have nothing to do with certificate verification, so the toggle is shown only at `Tls`/`MutualTls` (OC-R-111) |
 | CS is configured with a client certificate but no key (or vice versa) | no client certificate is presented; the connection proceeds without mTLS rather than failing |
-| CSMS has `require_client_cert` but no `client_ca_file` | the listener **fails to start** |
-| CSMS has `require_client_cert` and a self-signed certificate, with `client_ca_file` set | permitted — the server's self-signed identity and the CA trusted for verifying client certs are independent (OC-R-040) |
-| CSMS has `require_client_cert` and a self-signed certificate, with no `client_ca_file` | the listener **fails to start** — same as any `require_client_cert` without a `client_ca_file` (OC-R-039) |
+| CSMS selects `ServerTlsPolicy::MutualTls` but `client_verification` resolves to `Verify` with zero `ca_files` | fails at construction/`resolve()` time, never at listener-start time — the same tier as `ServerCertSource`'s own construction-time checks (OC-R-039) |
+| CSMS selects `ServerTlsPolicy::MutualTls` with a self-signed certificate (`server_cert: ServerCertSource::SelfSigned`) and `client_verification: Verify` holding at least one CA file | permitted — the server's self-signed identity and the CA(s) trusted for verifying client certs are independent (OC-R-040) |
+| CSMS selects `ServerTlsPolicy::MutualTls` with a self-signed certificate and `client_verification` resolves to `Verify` with zero CA files | fails at construction, same as any `Verify` with zero `ca_files` — the self-signed identity does not exempt it (OC-R-039) |
 | `self_signed` set together with explicit CSMS `cert_file`/`key_file` | `self_signed` wins unconditionally; the files are structurally unreachable, not merely ignored (OC-R-096) |
 | CSMS `cert_file`/`key_file` set alone while `self_signed` is not set | configuration resolution fails (OC-R-112) |
 | The OCPP setup dialog's Self-Signed toggle (server role, shown at `Tls`/`MutualTls`) toggled On after `cert_file`/`key_file` text was entered | resolved config excludes both files entirely; the widgets' stored text is preserved for when the toggle goes back Off (OC-R-110) |
@@ -84,6 +85,12 @@ mistaken for an oversight and silently "fixed".
 | A `wss://` **server** endpoint with no TLS material configured at all | binds with an ephemeral self-signed certificate and logs the fallback. It never silently binds plain TCP |
 | A `ws://` **client** endpoint with TLS material configured | the TLS material is inert; the connection is plain |
 | A `ws://` **server** endpoint with server certificate files configured | the TLS material is inert; the listener is plain TCP — symmetric with the `ws://` client above. The scheme decides the transport, so a URL never advertises a transport its listener does not speak |
+| A `ServerTlsPolicy::MutualTls` client certificate signed by any one of several configured `ca_files` | accepted — verification is "any one matches", not "all must match"; `ca_files` is a trust-anchor set, not an ordered chain (OC-R-039) |
+| `ServerTlsPolicy::MutualTls` with `ClientCertVerification::SkipVerify` and a connection presenting no client certificate at all | handshake still fails — `SkipVerify` skips the CA/identity check on a *presented* cert, it does not make presenting one optional (OC-R-039) |
+| The OCPP setup dialog's server-role Skip Verify toggled On while mTLS is selected | the `client_ca_files` list widget is hidden and excluded from the resolved config regardless of entries already present; list contents preserved, restored when the toggle goes back Off (OC-R-113) |
+| The OCPP setup dialog's client-role (CS) Self Signed toggled On while mTLS is selected | the Client Cert/Key inputs are hidden and excluded from the resolved config regardless of text already present; text preserved, restored when the toggle goes back Off (OC-R-116) |
+| A self-signed certificate/key pair, once generated for a module instance | cached and reused across every subsequent bind/connect/reconnect and `:restart`/`:reload`, including a config edit that leaves the resolved source self-signed; regenerated only on a transition *into* self-signed from something else; a fresh module instance (not a `:restart`/`:reload` of the same one) discards the cache instead of reusing it, since the pair is never written to disk (OC-R-037/OC-R-115) |
+| A legacy config file with the old singular `client_ca_file` set and `require_client_cert: true`, no `client_ca_files` present | still deserializes — `client_ca_file` is read as a one-element `ca_files` list when `client_ca_files` is absent or empty; a config carrying both prefers `client_ca_files` (OC-R-039/OC-R-096) |
 
 ---
 

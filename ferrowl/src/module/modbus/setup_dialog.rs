@@ -9,13 +9,13 @@ use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
+        ButtonState, InputFieldState, InputFieldStateBuilder, SelectionState,
+        SelectionStateBuilder, SuggestInputState, SuggestInputStateBuilder,
     },
-    style::{InputFieldStyle, SelectionStyle, TextStyle},
+    style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        Button, GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
@@ -112,15 +112,12 @@ pub struct SetupDialog {
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
     #[focus]
     pub role: Widget<SelectionState<Role>, Selection<Role>>,
-    /// Server-only "generate an ephemeral self-signed certificate" toggle.
+    /// Server: "generate an ephemeral self-signed server certificate" toggle (shown at TLS+).
+    /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
+    /// (MB-R-139) — the same widget field backs both, since only one role is ever active for a
+    /// given dialog instance.
     #[focus(when = {self.show_self_signed()})]
     pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
-    /// Client-only "accept any server certificate" toggle.
-    #[focus(when = {self.show_skip_verify()})]
-    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
-    /// Client-only extra trust anchor for a self-signed server certificate.
-    #[focus(when = {self.show_ca_file()})]
-    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
     /// Server-only certificate chain presented to connecting clients.
     #[focus(when = {self.show_server_cert()})]
     pub cert_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
@@ -135,11 +132,36 @@ pub struct SetupDialog {
     #[focus(when = {self.show_client_cert()})]
     pub client_key_file:
         Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    /// Server-only CA used to verify client certificates (selecting mTLS as server implies
-    /// `require_client_cert = true` in the resolved config).
+    /// Server-only, at mTLS only: "accept any client certificate" toggle (MB-R-136). On hides
+    /// the client-CA list below and excludes it from the resolved config; the list's own text is
+    /// preserved (never cleared) so toggling back Off restores it.
+    #[focus(when = {self.show_client_cert_skip_verify()})]
+    pub client_cert_skip_verify:
+        Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
+    /// Client-only "accept any server certificate" toggle.
+    #[focus(when = {self.show_skip_verify()})]
+    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
+    /// Client-only extra trust anchor for a self-signed server certificate.
+    #[focus(when = {self.show_ca_file()})]
+    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    /// Server-only list of CAs used to verify client certificates under mTLS (MB-R-136) — a
+    /// certificate signed by any one is sufficient. An add/remove list (`Selection<String>`
+    /// browses/selects the current entries; `client_ca_add_button`/`client_ca_delete_button` add
+    /// via `client_ca_add_dialog` or remove the selected entry), mirroring the register named-
+    /// value editor's add/remove list interaction. Selecting mTLS as server implies
+    /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
+    /// on, in which case this list is ignored).
+    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
+    pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
     #[focus(when = {self.show_client_ca()})]
-    pub client_ca_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
+    pub client_ca_add_button: Widget<ButtonState, Button>,
+    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
+    pub client_ca_delete_button: Widget<ButtonState, Button>,
+    /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`;
+    /// not itself a `#[focus]` field — routed specially in `handle_events` while open, mirroring
+    /// `close_confirm`.
+    #[builder(default)]
+    pub client_ca_add_dialog: Option<crate::dialog::ca_file_list::AddCaFileDialog>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
     pub ip: Widget<InputFieldState, InputField<String>>,
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::Udp | Transport::AsciiOverTcp)})]
@@ -175,6 +197,12 @@ pub struct SetupDialog {
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
+    /// The original device's `tls` config, if any (Edit mode only). On save, the half of
+    /// `ModbusTlsConfig` belonging to the *inactive* role is stitched back in from here, so a
+    /// role toggle preserves the other role's previously-saved TLS settings instead of resetting
+    /// them to `ModbusTlsConfig::default()`'s placeholder.
+    #[builder(default)]
+    original_tls: Option<ModbusTlsConfig>,
     /// Confirm-close popup, opened with Esc.
     #[builder(default)]
     pub close_confirm: Option<CloseConfirmDialog>,
@@ -259,50 +287,97 @@ impl SetupDialog {
             }
         }
         if let Some(tls) = tls {
+            use ferrowl_util::tls::{
+                ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
+                ServerCertSource, ServerTlsPolicy,
+            };
+
             let level = TlsLevel::from_config(tls, role);
             dialog.tls_level.state.set_selection(level.index());
-            dialog.self_signed.state.set_selection(
-                if tls.server_cert == ferrowl_util::tls::ServerCertSource::SelfSigned {
-                    1
-                } else {
-                    0
-                },
-            );
-            dialog.skip_verify.state.set_selection(
-                if tls.client_verification == ferrowl_util::tls::ClientVerification::SkipVerify {
-                    1
-                } else {
-                    0
-                },
-            );
-            let ca_file = match &tls.client_verification {
-                ferrowl_util::tls::ClientVerification::Verify { ca_file } => {
-                    ca_file.as_deref().unwrap_or("")
+            dialog.original_tls = Some(tls.clone());
+
+            match role {
+                Role::Server => {
+                    let (server_cert, client_verification) = match &tls.server {
+                        ServerTlsPolicy::MutualTls {
+                            server_cert,
+                            client_verification,
+                        } => (server_cert.clone(), Some(client_verification.clone())),
+                        ServerTlsPolicy::Tls { server_cert } => (server_cert.clone(), None),
+                        ServerTlsPolicy::NoTls => (ServerCertSource::Unset, None),
+                    };
+                    dialog.self_signed.state.set_selection(
+                        if server_cert == ServerCertSource::SelfSigned {
+                            1
+                        } else {
+                            0
+                        },
+                    );
+                    let (cert_file, key_file) = match &server_cert {
+                        ServerCertSource::Explicit {
+                            cert_file,
+                            key_file,
+                        } => (cert_file.as_str(), key_file.as_str()),
+                        _ => ("", ""),
+                    };
+                    set_suggest_input(&mut dialog.cert_file, cert_file);
+                    set_suggest_input(&mut dialog.key_file, key_file);
+                    let (ca_files, skip) = match &client_verification {
+                        Some(ClientCertVerification::Verify { ca_files }) => {
+                            (ca_files.clone(), false)
+                        }
+                        Some(ClientCertVerification::SkipVerify) => (Vec::new(), true),
+                        None => (Vec::new(), false),
+                    };
+                    *dialog.client_ca_files.state.values_mut() = ca_files;
+                    dialog.client_ca_files.state.set_selection(0);
+                    dialog
+                        .client_cert_skip_verify
+                        .state
+                        .set_selection(if skip { 1 } else { 0 });
                 }
-                ferrowl_util::tls::ClientVerification::SkipVerify => "",
-            };
-            set_suggest_input(&mut dialog.ca_file, ca_file);
-            let (cert_file, key_file) = match &tls.server_cert {
-                ferrowl_util::tls::ServerCertSource::Explicit {
-                    cert_file,
-                    key_file,
-                } => (cert_file.as_str(), key_file.as_str()),
-                _ => ("", ""),
-            };
-            set_suggest_input(&mut dialog.cert_file, cert_file);
-            set_suggest_input(&mut dialog.key_file, key_file);
-            set_suggest_input(
-                &mut dialog.client_cert_file,
-                tls.client_cert_file.as_deref().unwrap_or(""),
-            );
-            set_suggest_input(
-                &mut dialog.client_key_file,
-                tls.client_key_file.as_deref().unwrap_or(""),
-            );
-            set_suggest_input(
-                &mut dialog.client_ca_file,
-                tls.client_ca_file.as_deref().unwrap_or(""),
-            );
+                Role::Client => {
+                    let (client_verification, client_identity) = match &tls.client {
+                        ClientTlsPolicy::MutualTls {
+                            client_verification,
+                            client_identity,
+                        } => (client_verification.clone(), Some(client_identity.clone())),
+                        ClientTlsPolicy::Tls {
+                            client_verification,
+                        } => (client_verification.clone(), None),
+                        ClientTlsPolicy::NoTls => {
+                            (ClientVerification::Verify { ca_file: None }, None)
+                        }
+                    };
+                    dialog.skip_verify.state.set_selection(
+                        if client_verification == ClientVerification::SkipVerify {
+                            1
+                        } else {
+                            0
+                        },
+                    );
+                    let ca_file = match &client_verification {
+                        ClientVerification::Verify { ca_file } => ca_file.as_deref().unwrap_or(""),
+                        ClientVerification::SkipVerify => "",
+                    };
+                    set_suggest_input(&mut dialog.ca_file, ca_file);
+                    let self_signed_client =
+                        matches!(client_identity, Some(ClientCertSource::SelfSigned));
+                    dialog
+                        .self_signed
+                        .state
+                        .set_selection(if self_signed_client { 1 } else { 0 });
+                    let (ccert, ckey) = match &client_identity {
+                        Some(ClientCertSource::Explicit {
+                            client_cert_file,
+                            client_key_file,
+                        }) => (client_cert_file.as_str(), client_key_file.as_str()),
+                        _ => ("", ""),
+                    };
+                    set_suggest_input(&mut dialog.client_cert_file, ccert);
+                    set_suggest_input(&mut dialog.client_key_file, ckey);
+                }
+            }
         }
         dialog
     }
@@ -423,6 +498,12 @@ impl SetupDialog {
                 vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
                 &selection_style,
             ))
+            .client_cert_skip_verify(selection(
+                "Skip Verify",
+                None,
+                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
+                &selection_style,
+            ))
             .ca_file(suggest_input(
                 "CA File",
                 None,
@@ -463,13 +544,21 @@ impl SetupDialog {
                 false,
                 FsPathProvider::with_extensions(&["pem", "crt", "key"]),
             ))
-            .client_ca_file(suggest_input(
-                "Client CA",
+            .client_ca_files(selection(
+                "Client CA(s)",
                 None,
-                "client_ca.pem",
-                &input_style,
-                false,
-                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+                Vec::<String>::new(),
+                &selection_style,
+            ))
+            .client_ca_add_button(ferrowl_ui::widgets::button(
+                "ADD",
+                ButtonStyle::default(),
+                1,
+            ))
+            .client_ca_delete_button(ferrowl_ui::widgets::button(
+                "DEL",
+                ButtonStyle::default(),
+                1,
             ))
             .timeout(input("Timeout ms", None, "", &input_style, false))
             .delay(input("Delay ms", None, "", &input_style, false))
@@ -563,11 +652,14 @@ impl SetupDialog {
         self.tls_level.get_value()
     }
 
-    /// Server-only self-signed toggle (TCP server at TLS level or above).
+    /// Server: self-signed server-certificate toggle (TLS level or above). Client, at mTLS
+    /// only: self-signed client-identity toggle (MB-R-139) — same widget, different meaning per
+    /// role (see the field's doc comment).
     fn show_self_signed(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Server
-            && self.tls_level() >= TlsLevel::Tls
+            && ((self.role.get_value() == Role::Server && self.tls_level() >= TlsLevel::Tls)
+                || (self.role.get_value() == Role::Client
+                    && self.tls_level() == TlsLevel::MutualTls))
     }
 
     /// Client-only skip-verify toggle (TCP client at TLS level or above).
@@ -575,6 +667,13 @@ impl SetupDialog {
         self.tls_shown()
             && self.role.get_value() == Role::Client
             && self.tls_level() >= TlsLevel::Tls
+    }
+
+    /// Server-only, mTLS only: "accept any client certificate" toggle (MB-R-136).
+    fn show_client_cert_skip_verify(&self) -> bool {
+        self.tls_shown()
+            && self.role.get_value() == Role::Server
+            && self.tls_level() == TlsLevel::MutualTls
     }
 
     /// Client trust-anchor input (TCP client at TLS level or above).
@@ -593,32 +692,46 @@ impl SetupDialog {
             && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
-    /// Client mTLS certificate/key inputs.
+    /// Client mTLS certificate/key inputs — hidden when the client's self-signed-identity
+    /// toggle is on (MB-R-139), mirroring the server's `show_server_cert`.
     fn show_client_cert(&self) -> bool {
         self.tls_shown()
             && self.role.get_value() == Role::Client
             && self.tls_level() == TlsLevel::MutualTls
+            && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
-    /// Server mTLS client-CA input.
+    /// Server mTLS client-CA list input — hidden when `client_cert_skip_verify` is on
+    /// (MB-R-136), preserving the list's own text so toggling back Off restores it.
     fn show_client_ca(&self) -> bool {
         self.tls_shown()
             && self.role.get_value() == Role::Server
             && self.tls_level() == TlsLevel::MutualTls
+            && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
     }
 
-    /// First certificate row: server cert/key, or the client trust anchor.
-    fn show_cert_row_a(&self) -> bool {
-        self.show_ca_file() || self.show_server_cert()
+    /// Row 3 (skip-verify toggle): server's `client_cert_skip_verify`, or the client's
+    /// `skip_verify` — exactly one applies for a given role.
+    fn show_skip_verify_row(&self) -> bool {
+        self.show_client_cert_skip_verify() || self.show_skip_verify()
     }
 
-    /// Second certificate row: client mTLS cert/key, or the server client-CA.
-    fn show_cert_row_b(&self) -> bool {
-        self.show_client_cert() || self.show_client_ca()
+    /// Row 2 (own-identity cert/key pair): server's `cert_file`/`key_file`, or the client's
+    /// `client_cert_file`/`client_key_file` — exactly one applies for a given role.
+    fn show_identity_row(&self) -> bool {
+        self.show_server_cert() || self.show_client_cert()
     }
 
-    /// Route a key: the close-confirm popup captures all keys while open; Esc opens it;
-    /// everything else falls through to the derived per-field routing.
+    /// Row 4 (peer-verification input): server's `client_ca_files` list, or the client's
+    /// `ca_file` — exactly one applies for a given role.
+    fn show_peer_verify_row(&self) -> bool {
+        self.show_client_ca() || self.show_ca_file()
+    }
+
+    /// Route a key: the close-confirm popup captures all keys while open; then the client-CA
+    /// add-dialog (MB-R-136), if open; then the client-CA ADD/DEL buttons (Enter/Space); Esc
+    /// (with nothing else open) opens the close-confirm popup; everything else falls through to
+    /// the derived per-field routing.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         match route_close_confirm(&mut self.close_confirm, modifiers, code) {
             CloseConfirmOutcome::NotActive => {}
@@ -629,12 +742,82 @@ impl SetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
+        if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
+            match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) => {
+                    self.client_ca_add_dialog = None;
+                }
+                // While the path field's completion popup is open, Enter accepts the
+                // highlighted suggestion (mirroring every other suggest-input field) rather
+                // than submitting the sub-dialog.
+                (KeyModifiers::NONE, KeyCode::Enter) if dialog.path.state.suggestions_open() => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
+                (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
+                    Ok(path) => {
+                        self.client_ca_files.state.values_mut().push(path);
+                        let idx = self.client_ca_files.state.values().len() - 1;
+                        self.client_ca_files.state.set_selection(idx);
+                        self.client_ca_add_dialog = None;
+                    }
+                    Err(e) => dialog.error.state = e,
+                },
+                _ => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
+            }
+            return EventResult::Consumed;
+        }
+
+        if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
+            match self.focus {
+                SetupDialogFocus::ClientCaAddButton => {
+                    self.client_ca_add_dialog =
+                        Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
+                    return EventResult::Consumed;
+                }
+                SetupDialogFocus::ClientCaDeleteButton => {
+                    self.delete_selected_client_ca();
+                    return EventResult::Consumed;
+                }
+                _ => {}
+            }
+        }
+
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
             self.close_confirm = Some(CloseConfirmDialog::new());
             return EventResult::Consumed;
         }
 
         <Self as HandleEvents>::handle_events(self, modifiers, code)
+    }
+
+    /// Remove the currently-selected client-CA entry (MB-R-136), if any, adjusting the
+    /// selection cursor to stay in bounds.
+    fn delete_selected_client_ca(&mut self) {
+        let idx = self.client_ca_files.state.selection();
+        let vals = self.client_ca_files.state.values_mut();
+        if vals.is_empty() {
+            return;
+        }
+        vals.remove(idx);
+        let new_len = self.client_ca_files.state.values().len();
+        let new_idx = if new_len == 0 {
+            0
+        } else {
+            idx.min(new_len - 1)
+        };
+        self.client_ca_files.state.set_selection(new_idx);
+        if new_len == 0 {
+            // DEL is no longer eligible (`#[focus(when = ...)]` excludes it once the list is
+            // empty) — leaving `self.focus` pointed at it would strand further Tab navigation on
+            // a dead target, so fall back to ADD. `focus_previous()` is what the render-time
+            // empty-list guard already uses for the same transition, and (unlike a raw enum
+            // assignment) it correctly pairs the widget-level blur/focus with the enum update.
+            // Callers only reach here with `self.focus == ClientCaDeleteButton` (the Enter/Space
+            // handler guards on that), so "previous" always lands on ADD.
+            self.focus_previous();
+        }
     }
 
     /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
@@ -819,6 +1002,11 @@ impl SetupDialog {
             if level == TlsLevel::Off {
                 Some(None)
             } else {
+                // MB-R-135/136/139: `build_config` resolves the active role's policy directly
+                // from the raw text together with the toggle widgets (self_signed/skip_verify/
+                // client_cert_skip_verify), so a toggle excludes stale text from the resolved
+                // config rather than layering a flag on top of whatever raw text happened to be
+                // present.
                 let mut cfg = level.build_config(
                     role,
                     TlsInputs {
@@ -827,39 +1015,21 @@ impl SetupDialog {
                         key_file: self.key_file.state.input(),
                         client_cert_file: self.client_cert_file.state.input(),
                         client_key_file: self.client_key_file.state.input(),
-                        client_ca_file: self.client_ca_file.state.input(),
+                        client_ca_files: self.client_ca_files.state.values(),
+                        self_signed: self.self_signed.state.get_value() == SelfSignedChoice::On,
+                        skip_verify: self.skip_verify.state.get_value() == SkipVerifyChoice::On,
+                        client_cert_skip_verify: self.client_cert_skip_verify.state.get_value()
+                            == SkipVerifyChoice::On,
                     },
-                );
-                // MB-R-135: resolve server_cert/client_verification from the toggle widgets
-                // together with the raw text, rather than layering a bare self_signed/
-                // insecure_skip_verify flag on top of whatever build_config already put in
-                // cert_file/key_file/ca_file -- that layering is exactly the bug MB-R-135 fixes
-                // (Self-Signed On no longer excludes stale cert/key text from the resolved
-                // config). The `?` here is effectively unreachable today: `validate_tls`'s
-                // existing cert/key-required check below already catches "cert_file xor
-                // key_file, Self-Signed Off" with a friendlier message first, at Tls level and
-                // above -- but it is the correct fallback for a future path that skips that
-                // check.
-                if role == Role::Server {
-                    let opt = |s: &str| {
-                        let t = s.trim();
-                        (!t.is_empty()).then(|| t.to_string())
-                    };
-                    cfg.server_cert = ferrowl_util::tls::ServerCertSource::resolve(
-                        self.self_signed.state.get_value() == SelfSignedChoice::On,
-                        opt(self.cert_file.state.input()),
-                        opt(self.key_file.state.input()),
-                    )?;
-                }
-                if role == Role::Client {
-                    let opt = |s: &str| {
-                        let t = s.trim();
-                        (!t.is_empty()).then(|| t.to_string())
-                    };
-                    cfg.client_verification = ferrowl_util::tls::ClientVerification::resolve(
-                        self.skip_verify.state.get_value() == SkipVerifyChoice::On,
-                        opt(self.ca_file.state.input()),
-                    );
+                )?;
+                // Stitch the inactive role's half back in from the original config (if any), so
+                // a role toggle preserves the other role's previously-saved TLS settings instead
+                // of resetting them to `ModbusTlsConfig::default()`'s placeholder.
+                if let Some(orig) = &self.original_tls {
+                    match role {
+                        Role::Server => cfg.client = orig.client.clone(),
+                        Role::Client => cfg.server = orig.server.clone(),
+                    }
                 }
                 validate_tls(&cfg, role, level, &|p| std::path::Path::new(p).exists())?;
                 Some(Some(cfg))
@@ -901,9 +1071,17 @@ impl SetupDialog {
         // RTU needs two endpoint rows (path/baud, parity/data-bits/stop-bits); TCP one.
         let endpoint_rows: u16 = if is_rtu { 2 } else { 1 };
         let show_tls = self.tls_shown();
-        let show_cert_row_a = self.show_cert_row_a();
-        let show_cert_row_b = self.show_cert_row_b();
-        let tls_rows: u16 = show_tls as u16 + show_cert_row_a as u16 + show_cert_row_b as u16;
+        // Fixed 4-slot TLS row order (both roles): Self-Signed, own-identity cert/key pair,
+        // Skip Verify, peer-verification input — each flag already folds in `tls_shown()`, so a
+        // row's absence (e.g. the client's Self-Signed row outside mTLS) simply isn't budgeted.
+        let show_self_signed_row = self.show_self_signed();
+        let show_identity_row = self.show_identity_row();
+        let show_skip_verify_row = self.show_skip_verify_row();
+        let show_peer_verify_row = self.show_peer_verify_row();
+        let tls_rows: u16 = show_self_signed_row as u16
+            + show_identity_row as u16
+            + show_skip_verify_row as u16
+            + show_peer_verify_row as u16;
         // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
         // + error(4) + keybinds(1) + optional config-path row (New mode) + optional TLS rows.
         let box_height = 27 + endpoint_rows * 3 + tls_rows * 3;
@@ -945,14 +1123,17 @@ impl SetupDialog {
             Constraint::Length(3),                 // holding + input ranges
             Constraint::Length(3),                 // coil + discrete ranges
         ];
-        if show_tls {
-            constraints.push(Constraint::Length(3)); // TLS level (+ self-signed/skip-verify)
+        if show_self_signed_row {
+            constraints.push(Constraint::Length(3)); // Self-Signed
         }
-        if show_cert_row_a {
-            constraints.push(Constraint::Length(3)); // ca_file, or cert_file + key_file
+        if show_identity_row {
+            constraints.push(Constraint::Length(3)); // own-identity cert/key pair
         }
-        if show_cert_row_b {
-            constraints.push(Constraint::Length(3)); // client_cert_file + client_key_file, or client_ca_file
+        if show_skip_verify_row {
+            constraints.push(Constraint::Length(3)); // Skip Verify
+        }
+        if show_peer_verify_row {
+            constraints.push(Constraint::Length(3)); // peer-verification input (CA file, or client-CA list)
         }
         constraints.push(Constraint::Length(4)); // error
         constraints.push(Constraint::Length(1)); // keybinds
@@ -978,35 +1159,56 @@ impl SetupDialog {
 
         if show_tls {
             let is_server = self.role.state.get_value() == Role::Server;
-            let show_side = if is_server {
-                self.show_self_signed()
-            } else {
-                self.show_skip_verify()
-            };
-            let side_area = rows[idx];
-            if show_side {
+
+            // Row 1: Self-Signed (both roles).
+            if show_self_signed_row {
+                render_field!(self, self_signed, rows[idx], buf);
+                idx += 1;
+            }
+
+            // Row 2: own-identity cert/key pair.
+            if show_identity_row {
                 if is_server {
-                    render_field!(self, self_signed, side_area, buf);
-                } else {
-                    render_field!(self, skip_verify, side_area, buf);
-                }
-                idx += 1;
-            }
-
-            if show_cert_row_a {
-                if self.show_ca_file() {
-                    render_field!(self, ca_file, rows[idx], buf);
-                } else {
                     render_row!(self, rows[idx], buf; cert_file, key_file);
+                } else {
+                    render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
                 }
                 idx += 1;
             }
 
-            if show_cert_row_b {
-                if self.show_client_cert() {
-                    render_row!(self, rows[idx], buf; client_cert_file, client_key_file);
+            // Row 3: Skip Verify.
+            if show_skip_verify_row {
+                if is_server {
+                    render_field!(self, client_cert_skip_verify, rows[idx], buf);
                 } else {
-                    render_field!(self, client_ca_file, rows[idx], buf);
+                    render_field!(self, skip_verify, rows[idx], buf);
+                }
+                idx += 1;
+            }
+
+            // Row 4: peer-verification input.
+            if show_peer_verify_row {
+                if is_server {
+                    // No client-CA entries yet: give ADD the row's full remaining width and
+                    // skip DEL entirely rather than paint an empty, nothing-to-delete button.
+                    if self.client_ca_files.state.values().is_empty() {
+                        // Hidden button shouldn't be focused.
+                        if self.focus == SetupDialogFocus::ClientCaDeleteButton {
+                            self.focus_previous();
+                        }
+                        render_row!(self, rows[idx], buf;
+                            client_ca_files => Constraint::Percentage(80),
+                            client_ca_add_button => Constraint::Fill(1)
+                        );
+                    } else {
+                        render_row!(self, rows[idx], buf;
+                            client_ca_files => Constraint::Percentage(60),
+                            client_ca_add_button => Constraint::Percentage(20),
+                            client_ca_delete_button => Constraint::Fill(1)
+                        );
+                    }
+                } else {
+                    render_field!(self, ca_file, rows[idx], buf);
                 }
                 idx += 1;
             }
@@ -1066,9 +1268,11 @@ impl SetupDialog {
         self.client_key_file
             .widget
             .render_overlay(area, buf, &mut self.client_key_file.state);
-        self.client_ca_file
-            .widget
-            .render_overlay(area, buf, &mut self.client_ca_file.state);
+        // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+
+        if let Some(d) = self.client_ca_add_dialog.as_mut() {
+            d.render(area, buf);
+        }
 
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
@@ -1206,7 +1410,7 @@ fn set_suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvi
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_ui::traits::{HandleEvents, IsFocus, SetFocus};
+    use ferrowl_ui::traits::{IsFocus, SetFocus};
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
@@ -1217,6 +1421,30 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    fn tmp_file(name: &str) -> String {
+        let path = std::env::temp_dir().join(format!("ferrowl_modbus_setup_test_{name}"));
+        std::fs::write(&path, b"").unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    /// Submits the open client-CA add sub-dialog. A fully-typed path that exists on disk always
+    /// matches itself in the completion popup (`complete_path`'s prefix match includes the exact
+    /// name), so confirming needs one Enter per open popup (to accept, which is a same-value
+    /// no-op for a non-partial match) followed by the Enter that actually submits.
+    fn confirm_ca_add(dialog: &mut SetupDialog) {
+        while dialog
+            .client_ca_add_dialog
+            .as_ref()
+            .unwrap()
+            .path
+            .state
+            .suggestions_open()
+        {
+            dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        }
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
     }
 
     /// Typing into the config-path field opens the filesystem suggestion popup, and the
@@ -1362,11 +1590,11 @@ mod tests {
         });
         // Default role is Server.
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_identity_row());
         dialog.self_signed.state.set_selection(1); // On
-        assert!(!dialog.show_cert_row_a());
+        assert!(!dialog.show_identity_row());
         dialog.self_signed.state.set_selection(0); // Off
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_identity_row());
     }
 
     #[test]
@@ -1381,11 +1609,196 @@ mod tests {
         });
         dialog.role.state.set_selection(1); // Client
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_peer_verify_row());
         dialog.skip_verify.state.set_selection(1); // On
-        assert!(!dialog.show_cert_row_a());
+        assert!(!dialog.show_peer_verify_row());
         dialog.skip_verify.state.set_selection(0); // Off
-        assert!(dialog.show_cert_row_a());
+        assert!(dialog.show_peer_verify_row());
+    }
+
+    fn row_of(buf: &Buffer, needle: &str) -> u16 {
+        let text = buffer_text(buf);
+        text.lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} not found in:\n{text}")) as u16
+    }
+
+    #[test]
+    /// UI-R-024 — with an empty client-CA list, the `client_ca_files` box still occupies the
+    /// full fixed 3-row slot (top border + content + bottom border) rather than shrinking to a
+    /// 2-row box (the `Selection` widget's default self-sizing collapses a 0-entry list to
+    /// `height = entries + border`, i.e. 2 rows, leaving its bottom border misaligned with the
+    /// ADD button's own 3-row box beside it).
+    fn ut_client_ca_empty_list_box_keeps_full_row_height() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let ca_row = row_of(&buf, "Client CA(s)");
+        let bottom_line: String = (0..buf.area.width)
+            .map(|x| buf[(x, ca_row + 2)].symbol().to_string())
+            .collect();
+        assert!(
+            bottom_line.contains('└'),
+            "empty client-CA box's bottom border is missing from its third row \
+             (box collapsed to 2 rows instead of the fixed 3):\n{bottom_line}"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — mTLS row order, server role: Self-Signed first, then the server's own
+    /// cert/key pair, then Skip Verify, then the client-CA list (post-gate3 layout refinement).
+    fn ut_mtls_row_order_server() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Cert File");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert!(
+            self_signed_row < cert_row,
+            "self-signed must render before cert/key"
+        );
+        assert!(
+            cert_row < skip_row,
+            "cert/key must render before skip-verify"
+        );
+        assert!(
+            skip_row < ca_row,
+            "skip-verify must render before client-CA list"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — mTLS row order, client role: Self-Signed first, then the client's own
+    /// cert/key pair, then Skip Verify, then the CA-file input (post-gate3 layout refinement).
+    fn ut_mtls_row_order_client() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(1); // Client
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let self_signed_row = row_of(&buf, "Self-Signed");
+        let cert_row = row_of(&buf, "Client Cert");
+        let skip_row = row_of(&buf, "Skip Verify");
+        let ca_row = row_of(&buf, "CA File");
+        assert!(
+            self_signed_row < cert_row,
+            "self-signed must render before client cert/key"
+        );
+        assert!(
+            cert_row < skip_row,
+            "client cert/key must render before skip-verify"
+        );
+        assert!(
+            skip_row < ca_row,
+            "skip-verify must render before the CA-file input"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — an empty client-CA list shows no placeholder entry, and the DEL button is
+    /// not rendered at all (nothing eligible to delete), so ADD gets the row's full width.
+    fn ut_client_ca_empty_hides_delete_button() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("DEL"),
+            "DEL button rendered with an empty client-CA list:\n{text}"
+        );
+        assert!(text.contains("ADD"), "ADD button missing:\n{text}");
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA row's ADD/DEL buttons hug the dialog's right inner edge with
+    /// no trailing dead space, matching every other full-width row in the dialog.
+    fn ut_client_ca_delete_button_hugs_right_edge() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]);
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        fn rightmost_non_space(buf: &Buffer, y: u16) -> u16 {
+            (0..buf.area.width)
+                .rev()
+                .find(|&x| buf[(x, y)].symbol() != " ")
+                .unwrap_or(0)
+        }
+
+        let name_row = row_of(&buf, "Name");
+        let ca_row = row_of(&buf, "Client CA(s)");
+        assert_eq!(
+            rightmost_non_space(&buf, name_row),
+            rightmost_non_space(&buf, ca_row),
+            "DEL button leaves trailing dead space vs. the dialog's other full-width rows"
+        );
+    }
+
+    #[test]
+    /// UI-R-024 — the client-CA list's row stays a fixed 3 rows tall (1 content + 2 border)
+    /// regardless of how many entries it holds; more entries scroll/clip, never grow the box.
+    fn ut_client_ca_row_height_fixed_regardless_of_entry_count() {
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values((0..10).map(|i| format!("ca{i}.pem")).collect::<Vec<_>>());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        let ca_row = row_of(&buf, "Client CA(s)");
+        let next_row = row_of(&buf, "IP");
+        // The client-CA box is 1 content row + 2 border rows; with >3 entries the extras
+        // scroll/clip, they must never push the following row further down.
+        assert_eq!(
+            next_row - ca_row,
+            3,
+            "client-CA row appears to have grown beyond a fixed 3-row box:\n{text}"
+        );
     }
 
     #[test]
@@ -1656,15 +2069,15 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
         dialog.self_signed.state.set_selection(1); // On
-        set_suggest_input(&mut dialog.client_ca_file, "client_ca.pem");
+        *dialog.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::SelfSigned
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+            }
         );
-        assert_eq!(cfg.client_ca_file, None);
-        assert!(!cfg.require_client_cert);
     }
 
     #[test]
@@ -1686,8 +2099,10 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::SelfSigned
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+            }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
         assert_eq!(dialog.cert_file.state.input(), "s.crt");
@@ -1713,8 +2128,10 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.client_verification,
-            ferrowl_util::tls::ClientVerification::SkipVerify
+            cfg.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify
+            }
         );
         assert_eq!(dialog.ca_file.state.input(), "ca.pem");
     }
@@ -1746,10 +2163,12 @@ mod tests {
         let outcome = dialog.resolve().unwrap();
         let cfg = outcome.values.tls.unwrap().unwrap();
         assert_eq!(
-            cfg.server_cert,
-            ferrowl_util::tls::ServerCertSource::Explicit {
-                cert_file: cert,
-                key_file: key,
+            cfg.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                    cert_file: cert,
+                    key_file: key,
+                }
             }
         );
     }
@@ -1770,6 +2189,79 @@ mod tests {
         dialog.port.state.set_focused(true);
         dialog.focus_next();
         assert!(dialog.reconnect.state.is_focused());
+    }
+
+    /// Drive `focus_next()` from `SetupDialogFocus::Role` and collect the sequence of foci
+    /// visited up to and including `SetupDialogFocus::Ip`.
+    fn focus_sequence_from_role(dialog: &mut SetupDialog) -> Vec<SetupDialogFocus> {
+        dialog.focus = SetupDialogFocus::Role;
+        let mut seq = vec![dialog.focus];
+        loop {
+            dialog.focus_next();
+            seq.push(dialog.focus);
+            if dialog.focus == SetupDialogFocus::Ip {
+                break;
+            }
+        }
+        seq
+    }
+
+    #[test]
+    /// MB-R-136 — the mTLS server-role Tab order matches the dialog's visual row order (post-
+    /// s9 layout): Role, Self-Signed, own cert/key, Skip Verify, then the client-CA list and its
+    /// ADD/DEL buttons, then IP.
+    fn ut_tab_order_server_mtls() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]); // non-empty, so DEL is eligible
+        let seq = focus_sequence_from_role(&mut dialog);
+        assert_eq!(
+            seq,
+            vec![
+                SetupDialogFocus::Role,
+                SetupDialogFocus::SelfSigned,
+                SetupDialogFocus::CertFile,
+                SetupDialogFocus::KeyFile,
+                SetupDialogFocus::ClientCertSkipVerify,
+                SetupDialogFocus::ClientCaFiles,
+                SetupDialogFocus::ClientCaAddButton,
+                SetupDialogFocus::ClientCaDeleteButton,
+                SetupDialogFocus::Ip,
+            ]
+        );
+    }
+
+    #[test]
+    /// MB-R-136 — the mTLS client-role Tab order: Role, Self-Signed, own cert/key, Skip Verify,
+    /// then the CA-file trust-anchor input, then IP (no ADD/DEL — client role never shows the
+    /// client-CA list).
+    fn ut_tab_order_client_mtls() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(1); // Client
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        let seq = focus_sequence_from_role(&mut dialog);
+        assert_eq!(
+            seq,
+            vec![
+                SetupDialogFocus::Role,
+                SetupDialogFocus::SelfSigned,
+                SetupDialogFocus::ClientCertFile,
+                SetupDialogFocus::ClientKeyFile,
+                SetupDialogFocus::SkipVerify,
+                SetupDialogFocus::CaFile,
+                SetupDialogFocus::Ip,
+            ]
+        );
     }
 
     fn default_timing() -> Timing {
@@ -1821,5 +2313,169 @@ mod tests {
         assert!(dialog.close_confirm.is_some());
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         assert!(dialog.take_close_request());
+    }
+
+    fn type_into<S: SetFocus + HandleEvents>(state: &mut S, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
+    /// MB-R-136 — the client-CA row is a genuine add/remove list: the ADD button opens a
+    /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes
+    /// whichever entry is currently selected — not a comma-separated text field.
+    #[test]
+    fn ut_client_ca_files_add_remove_edit() {
+        let ca1 = tmp_file("mca1.pem");
+        let ca2 = tmp_file("mca2.pem");
+        let mut dialog = SetupDialog::create(default_timing());
+        set_input(&mut dialog.name, "dev");
+        dialog.role.state.set_selection(0); // Role::Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog.self_signed.state.set_selection(1); // server cert self-signed, no file needed
+
+        assert!(dialog.client_ca_files.state.values().is_empty());
+
+        // ADD: open the sub-dialog, type a path, confirm with Enter.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &ca1,
+        );
+        confirm_ca_add(&mut dialog);
+        assert!(dialog.client_ca_add_dialog.is_none());
+        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+
+        // ADD a second entry.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &ca2,
+        );
+        confirm_ca_add(&mut dialog);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &[ca1.clone(), ca2.clone()]
+        );
+
+        // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
+        dialog.focus = SetupDialogFocus::ClientCaAddButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        assert!(
+            !dialog
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty()
+        );
+
+        // A path that doesn't exist on disk is also rejected: same sub-dialog stays open with an
+        // error, nothing appended (only a file present on disk can be confirmed).
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "/nonexistent/ca-does-not-exist.pem",
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        assert!(
+            !dialog
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty()
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.client_ca_add_dialog.is_none());
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            &[ca1.clone(), ca2.clone()]
+        );
+
+        // DEL: remove the currently-selected entry (selection sits on the last-added item).
+        assert_eq!(dialog.client_ca_files.state.selection(), 1);
+        dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+
+        // MB-R-136 — the ADD sub-dialog's path field offers filesystem completions, and
+        // accepting one (Enter with the popup open) fills the field without submitting the
+        // sub-dialog (Enter without a popup open is what submits).
+        {
+            dialog.focus = SetupDialogFocus::ClientCaAddButton;
+            dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+            let sub = dialog.client_ca_add_dialog.as_mut().unwrap();
+            type_into(&mut sub.path.state, "s");
+            assert!(
+                sub.path.state.suggestions_open(),
+                "no completion popup offered for a 's' prefix (expects to match e.g. 'src')"
+            );
+            dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+            assert!(
+                dialog.client_ca_add_dialog.is_some(),
+                "Enter with the completion popup open must accept the suggestion, not submit \
+                 the sub-dialog"
+            );
+            dialog.client_ca_add_dialog = None;
+            // Abandoning the sub-dialog above doesn't move focus off the ADD button that opened
+            // it; point back at DEL so the next step actually deletes rather than reopening ADD.
+            dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
+        }
+
+        // Removing the last entry leaves the list empty and the DEL button no longer eligible.
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        assert!(!dialog.show_client_ca() || dialog.client_ca_files.state.values().is_empty());
+
+        // Deleting down to an empty list must not leave `focus` stuck on the now-ineligible DEL
+        // button — it falls back to ADD, so Tab from there keeps working.
+        assert_eq!(dialog.focus, SetupDialogFocus::ClientCaAddButton);
+
+        // Resolving with an empty list and skip-verify off is a validation error (MB-R-136).
+        assert!(dialog.resolve().is_err());
+    }
+
+    #[test]
+    /// MB-R-136 — deleting the last remaining client-CA entry moves focus off the now-
+    /// unfocusable DEL button (its `#[focus(when = ...)]` excludes it once the list is empty) and
+    /// onto ADD, so a subsequent Tab still traverses correctly instead of getting stuck.
+    fn ut_delete_last_client_ca_falls_back_focus_to_add_button() {
+        let mut dialog = SetupDialog::create(default_timing());
+        dialog.role.state.set_selection(0); // Server
+        dialog
+            .tls_level
+            .state
+            .set_selection(TlsLevel::MutualTls.index());
+        dialog
+            .client_ca_files
+            .state
+            .set_values(vec!["ca1.pem".to_string()]);
+        dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
+        dialog.client_ca_delete_button.state.set_focused(true);
+
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+
+        assert!(dialog.client_ca_files.state.values().is_empty());
+        assert_eq!(dialog.focus, SetupDialogFocus::ClientCaAddButton);
+        // The fallback must also move the *widget-level* highlight, not just the tracking enum
+        // — otherwise DEL stays visually focused (though hidden) and ADD stays unhighlighted
+        // until the next real Tab press.
+        assert!(!dialog.client_ca_delete_button.state.is_focused());
+        assert!(dialog.client_ca_add_button.state.is_focused());
+        // Tab from the fallback proceeds normally rather than looping on a dead target.
+        dialog.focus_next();
+        assert_ne!(dialog.focus, SetupDialogFocus::ClientCaDeleteButton);
     }
 }

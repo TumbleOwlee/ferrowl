@@ -28,16 +28,20 @@ where
         .parse()
         .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
     let server = ModbusServer::new(service);
-    match &config.tls {
+    // The bridge has no persistent module instance to own a cache across restarts (BR-R-* has
+    // no self-signed-reuse requirement of its own); a fresh cache per call is equivalent to
+    // today's regenerate-every-start behavior for this call site specifically.
+    let cache = crate::tcp::tls::new_self_signed_cache();
+    match build_server_tls_config(&config.server_tls_policy(), &config.ip, &cache)
+        .map_err(Error::Tcp)?
+    {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
                 server.serve(listener).await.map_err(Error::Server)
             })),
             Err(e) => Err(Error::Server(e)),
         },
-        Some(tls) => {
-            let (tls_config, used_fallback) =
-                build_server_tls_config(tls, &config.ip).map_err(Error::Tcp)?;
+        Some((tls_config, used_fallback)) => {
             if used_fallback {
                 log.invoke(
                     "No cert_file/key_file/self_signed configured for this TLS server; \
@@ -159,6 +163,7 @@ mod tests {
         let (_downstream_server, downstream_bound_addr) = crate::tcp::ServerBuilder::new(
             Arc::new(TokioRwLock::new(config(downstream_port))),
             srv_mem,
+            crate::tcp::tls::new_self_signed_cache(),
         )
         .spawn(srv_rx, sink(), sink())
         .await

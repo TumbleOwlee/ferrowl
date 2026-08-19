@@ -171,6 +171,10 @@ pub struct OcppServer<V: Version> {
     server: Option<Server<V>>,
     /// Server bound state (drives the ONLINE/OFFLINE status line).
     online: Arc<AtomicBool>,
+    /// Cached self-signed server certificate (OC-R-037), created once per backend instance and
+    /// reused across every `start()` call so repeated `:restart`/rebind attempts don't
+    /// regenerate it — never reinitialized inside `start()`.
+    self_signed_cache: ferrowl_ocpp::SelfSignedCache,
 }
 
 impl<V: Version> OcppServer<V>
@@ -181,6 +185,7 @@ where
         Self {
             server: None,
             online: Arc::new(AtomicBool::new(false)),
+            self_signed_cache: ferrowl_ocpp::new_self_signed_cache(),
         }
     }
 
@@ -200,10 +205,21 @@ where
         let tls = spec.effective_csms_tls();
         let binding = match &tls {
             None => TlsBinding::Plain,
-            Some(cfg) => match cfg.mode {
-                ferrowl_ocpp::CsmsTlsMode::SelfSigned => TlsBinding::SelfSigned,
-                ferrowl_ocpp::CsmsTlsMode::Files { .. } => TlsBinding::Certificates,
-            },
+            Some(
+                ferrowl_util::tls::ServerTlsPolicy::Tls { server_cert }
+                | ferrowl_util::tls::ServerTlsPolicy::MutualTls { server_cert, .. },
+            ) => {
+                match server_cert {
+                    ferrowl_util::tls::ServerCertSource::SelfSigned => TlsBinding::SelfSigned,
+                    ferrowl_util::tls::ServerCertSource::Explicit { .. } => {
+                        TlsBinding::Certificates
+                    }
+                    // `effective_csms_tls` never returns `Tls{server_cert: Unset}` — a wss
+                    // endpoint without configured material falls back to `SelfSigned` instead.
+                    ferrowl_util::tls::ServerCertSource::Unset => TlsBinding::Plain,
+                }
+            }
+            Some(ferrowl_util::tls::ServerTlsPolicy::NoTls) => TlsBinding::Plain,
         };
         if self.server.is_some() {
             return Ok(binding);
@@ -216,7 +232,7 @@ where
             basic_auth: spec.security.basic_auth(),
             tls,
         };
-        let server = ServerBuilder::<V>::new(config)
+        let server = ServerBuilder::<V>::new(config, self.self_signed_cache.clone())
             .spawn(handler, |_s: String| async {})
             .await?;
         self.server = Some(server);

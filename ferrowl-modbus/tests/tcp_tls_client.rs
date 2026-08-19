@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use ferrowl_modbus::tcp;
-use ferrowl_util::tls::ClientVerification;
+use ferrowl_util::tls::{ClientCertSource, ClientTlsPolicy, ClientVerification};
 use rcgen::{CertificateParams, Issuer, KeyPair};
 use rust_modbus::{
     ClientCertPolicy, RootStore, ServerCertVerification, TcpConfig, TlsClientConfig, TlsListener,
@@ -104,11 +104,13 @@ async fn tls_client_connects_to_plain_rust_modbus_tls_server() {
     let cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::SkipVerify,
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
             ..Default::default()
         },
     );
-    let client = tcp::Client::connect(&cfg).await;
+    let client = tcp::Client::connect(&cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         client.is_ok(),
         "expected connect to succeed: {}",
@@ -154,13 +156,15 @@ async fn tls_client_verifies_against_ca_file() {
     let trusted_cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::Verify {
-                ca_file: Some(cert_file),
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::Verify {
+                    ca_file: Some(cert_file),
+                },
             },
             ..Default::default()
         },
     );
-    let trusted = tcp::Client::connect(&trusted_cfg).await;
+    let trusted = tcp::Client::connect(&trusted_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         trusted.is_ok(),
         "expected trusted connect: {}",
@@ -169,7 +173,7 @@ async fn tls_client_verifies_against_ca_file() {
 
     // Untrusted: neither ca_file nor insecure_skip_verify set.
     let untrusted_cfg = config(bound.port(), tcp::ModbusTlsConfig::default());
-    let untrusted = tcp::Client::connect(&untrusted_cfg).await;
+    let untrusted = tcp::Client::connect(&untrusted_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         untrusted.is_err(),
         "expected untrusted connect to fail verification"
@@ -222,15 +226,19 @@ async fn tls_client_presents_identity_only_when_both_files_set() {
     let both_cfg = config(
         bound.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::Verify {
-                ca_file: Some(server_cert_file.clone()),
+            client: ClientTlsPolicy::MutualTls {
+                client_verification: ClientVerification::Verify {
+                    ca_file: Some(server_cert_file.clone()),
+                },
+                client_identity: ClientCertSource::Explicit {
+                    client_cert_file: client_cert_file.clone(),
+                    client_key_file: client_key_file.clone(),
+                },
             },
-            client_cert_file: Some(client_cert_file.clone()),
-            client_key_file: Some(client_key_file.clone()),
             ..Default::default()
         },
     );
-    let both = tcp::Client::connect(&both_cfg).await;
+    let both = tcp::Client::connect(&both_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         both.is_ok(),
         "expected mTLS connect to succeed: {}",
@@ -296,11 +304,14 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let handshake_cfg = config(
         plain_addr.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::SkipVerify,
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
             ..Default::default()
         },
     );
-    let handshake_result = tcp::Client::connect(&handshake_cfg).await;
+    let handshake_result =
+        tcp::Client::connect(&handshake_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         handshake_result.is_err(),
         "expected TLS handshake against a plain listener to fail"
@@ -312,11 +323,13 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let refused_cfg = config(
         refused_port,
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::SkipVerify,
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
             ..Default::default()
         },
     );
-    let refused_result = tcp::Client::connect(&refused_cfg).await;
+    let refused_result = tcp::Client::connect(&refused_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         refused_result.is_err(),
         "expected connect to a closed port to fail"
@@ -336,12 +349,14 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     let mut timeout_cfg = config(
         stalling_addr.port(),
         tcp::ModbusTlsConfig {
-            client_verification: ClientVerification::SkipVerify,
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::SkipVerify,
+            },
             ..Default::default()
         },
     );
     timeout_cfg.timeout_ms = 50;
-    let timeout_result = tcp::Client::connect(&timeout_cfg).await;
+    let timeout_result = tcp::Client::connect(&timeout_cfg, &tcp::new_self_signed_cache()).await;
     assert!(
         timeout_result.is_err(),
         "expected a stalled handshake to time out"
