@@ -19,6 +19,7 @@ use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
+use crate::module::view::SharedLog;
 
 /// Number of `refresh` ticks per second (the UI ticks at ~100ms), used to convert second-based
 /// cadences (heartbeat interval, MeterValues period) into tick counts.
@@ -273,6 +274,7 @@ impl<V: Version> OcppClient<V> {
         &mut self,
         spec: &OcppSpec,
         device: &OcppDeviceConfig,
+        log: &SharedLog,
         handler: H,
     ) -> Result<(), Error> {
         if self.client.is_some() {
@@ -285,13 +287,18 @@ impl<V: Version> OcppClient<V> {
             let _ = self.stop().await;
         }
         let config = build_config(spec, device);
-        let log = log_fn(self.messages.clone());
-        let status = log_fn(self.messages.clone());
+        let wire_log = log_fn(self.messages.clone());
+        // OC-R-120: connection-status lines (currently just "Client disconnected", emitted once
+        // the client task ends regardless of why) go to the module log, not the message table —
+        // the message table records only request/response pairs (§9). General diagnostic strings
+        // (`wire_log`, e.g. "Command dropped...") are unaffected and keep going to the message
+        // table as before.
+        let status = status_fn(log.clone());
         let client = ClientBuilder::<V>::new(
             Arc::new(RwLock::new(config)),
             self.self_signed_cache.clone(),
         )
-        .spawn(handler, log, status)
+        .spawn(handler, wire_log, status)
         .await?;
         self.client = Some(client);
         // `spawn` no longer dials synchronously (OC-R-048, OC-R-105): the handshake happens
@@ -405,6 +412,20 @@ fn log_fn(
     }
 }
 
+/// A `LogFn` that records connection-status lines (currently just "Client disconnected",
+/// emitted once the client task ends regardless of why) into the module log (OC-R-120), not the
+/// message table — the message table records only request/response message pairs (§9).
+fn status_fn(
+    log: SharedLog,
+) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Clone {
+    move |s: String| {
+        let log = log.clone();
+        Box::pin(async move {
+            log.write().await.write(crate::app::Level::Info, &s);
+        })
+    }
+}
+
 /// Format a Unix-millisecond timestamp as an RFC3339 UTC string (`YYYY-MM-DDTHH:MM:SSZ`).
 pub fn rfc3339(ms: u64) -> String {
     let total_secs = ms / 1000;
@@ -456,6 +477,11 @@ mod tests {
                 "unsupported",
             ))
         }
+    }
+
+    /// A fresh, empty module log for a test to hand to `start()` and inspect afterward.
+    fn test_log() -> SharedLog {
+        Arc::new(RwLock::new(crate::app::LogRing::init()))
     }
 
     /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — nothing
@@ -545,7 +571,12 @@ mod tests {
 
         let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
         backend
-            .start(&spec, &OcppDeviceConfig::default(), NoopCsHandler)
+            .start(
+                &spec,
+                &OcppDeviceConfig::default(),
+                &test_log(),
+                NoopCsHandler,
+            )
             .await
             .expect("start must not fail synchronously against an unreachable CSMS");
 
@@ -559,6 +590,61 @@ mod tests {
             .await
             .expect("stop() must not hang while the client task is backing off")
             .expect("stop() must succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-120 — a CS's connection-status line ("Client disconnected", emitted once the
+    /// client task ends) lands in the module log, not the message table (the message table
+    /// records only request/response pairs). `reconnect: false` against a refused dial makes
+    /// the client task end almost immediately (one failed attempt, no retry), so the status
+    /// line lands within the poll window below without needing a real CSMS.
+    async fn it_disconnect_status_line_lands_in_module_log_not_message_table() {
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: free_port(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect: Some(false),
+            security: OcppSecurityConfig::default(),
+        };
+
+        let log = test_log();
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        backend
+            .start(&spec, &OcppDeviceConfig::default(), &log, NoopCsHandler)
+            .await
+            .expect("start must not fail synchronously");
+
+        // Poll for the disconnect line rather than a fixed sleep: the client task's single
+        // failed dial + status invocation should land well inside this window.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut found = false;
+        while std::time::Instant::now() < deadline {
+            let lines = log.write().await.peek_n(crate::app::LOG_SIZE);
+            if lines.iter().any(|(_, _, line)| line.contains("disconnect")) {
+                found = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            found,
+            "the module log must receive a 'disconnect' status line once the client task ends"
+        );
+
+        let messages = backend.messages_snapshot().await;
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.payload.as_str().is_some_and(|s| s.contains("disconnect"))),
+            "the disconnect status line must not be recorded in the message table"
+        );
+
+        let _ = backend.stop().await;
     }
 
     #[test]
