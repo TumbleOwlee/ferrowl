@@ -141,6 +141,12 @@ behavior, stated limitations).
 
 **OC-R-116** — The OCPP setup dialog shall offer a Self Signed toggle for the CS (client) role, shown whenever mTLS is selected. When On, the Client Cert/Key inputs shall be hidden and excluded from the resolved config regardless of text already present, resolving to `ClientTlsPolicy::MutualTls`'s `client_identity: ClientCertSource::SelfSigned`; the dialog's validation shall not require those files while Self Signed is On. The input widgets' stored text shall be left unmodified, so toggling Self Signed back Off restores the previously entered paths and re-requires them for validation.
 
+**OC-R-117** — A CS device config may declare `extra_headers`, an ordered list of `HeaderDef { name, value }` pairs. Every configured header shall be sent on the WebSocket upgrade request in addition to any header the client sets itself (e.g. the Basic Auth `Authorization` header of OC-R-030, the subprotocol token of OC-R-004). Construction shall reject a `HeaderDef` whose `name` case-insensitively matches a header name the client itself controls (`Authorization`, `Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version`, `Sec-WebSocket-Protocol`, `Sec-WebSocket-Extensions`), naming the offending header in the error.
+
+**OC-R-118** — A `HeaderDef.name` shall match the HTTP token grammar (visible ASCII, no separators or whitespace); a `HeaderDef.value` shall contain only printable ASCII bytes (0x20–0x7E), which excludes CR/LF and other control characters. Construction shall reject any `HeaderDef` violating either rule, naming the offending header and field in the error.
+
+**OC-R-119** — `extra_headers` is a client-only device config field. It shall not be exposed through the `--ocpp` key=value CLI form — only through the device config file — consistent with the other list-shaped client-only fields (`connectors`, `config`).
+
 ---
 
 ## Role — Charging Station (CS, client)
