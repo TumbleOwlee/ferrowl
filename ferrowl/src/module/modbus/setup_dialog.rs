@@ -1423,6 +1423,30 @@ mod tests {
         out
     }
 
+    fn tmp_file(name: &str) -> String {
+        let path = std::env::temp_dir().join(format!("ferrowl_modbus_setup_test_{name}"));
+        std::fs::write(&path, b"").unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    /// Submits the open client-CA add sub-dialog. A fully-typed path that exists on disk always
+    /// matches itself in the completion popup (`complete_path`'s prefix match includes the exact
+    /// name), so confirming needs one Enter per open popup (to accept, which is a same-value
+    /// no-op for a non-partial match) followed by the Enter that actually submits.
+    fn confirm_ca_add(dialog: &mut SetupDialog) {
+        while dialog
+            .client_ca_add_dialog
+            .as_ref()
+            .unwrap()
+            .path
+            .state
+            .suggestions_open()
+        {
+            dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        }
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+    }
+
     /// Typing into the config-path field opens the filesystem suggestion popup, and the
     /// popup is drawn on top of the dialog by the trailing `render_overlay` calls in `render`.
     #[test]
@@ -2303,6 +2327,8 @@ mod tests {
     /// whichever entry is currently selected — not a comma-separated text field.
     #[test]
     fn ut_client_ca_files_add_remove_edit() {
+        let ca1 = tmp_file("mca1.pem");
+        let ca2 = tmp_file("mca2.pem");
         let mut dialog = SetupDialog::create(default_timing());
         set_input(&mut dialog.name, "dev");
         dialog.role.state.set_selection(0); // Role::Server
@@ -2320,26 +2346,23 @@ mod tests {
         assert!(dialog.client_ca_add_dialog.is_some());
         type_into(
             &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
-            "ca1.pem",
+            &ca1,
         );
-        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        confirm_ca_add(&mut dialog);
         assert!(dialog.client_ca_add_dialog.is_none());
-        assert_eq!(
-            dialog.client_ca_files.state.values(),
-            &["ca1.pem".to_string()]
-        );
+        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
 
         // ADD a second entry.
         dialog.focus = SetupDialogFocus::ClientCaAddButton;
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         type_into(
             &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
-            "ca2.pem",
+            &ca2,
         );
-        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        confirm_ca_add(&mut dialog);
         assert_eq!(
             dialog.client_ca_files.state.values(),
-            &["ca1.pem".to_string(), "ca2.pem".to_string()]
+            &[ca1.clone(), ca2.clone()]
         );
 
         // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
@@ -2356,21 +2379,36 @@ mod tests {
                 .state
                 .is_empty()
         );
+
+        // A path that doesn't exist on disk is also rejected: same sub-dialog stays open with an
+        // error, nothing appended (only a file present on disk can be confirmed).
+        type_into(
+            &mut dialog.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "/nonexistent/ca-does-not-exist.pem",
+        );
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.client_ca_add_dialog.is_some());
+        assert!(
+            !dialog
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty()
+        );
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(dialog.client_ca_add_dialog.is_none());
         assert_eq!(
             dialog.client_ca_files.state.values(),
-            &["ca1.pem".to_string(), "ca2.pem".to_string()]
+            &[ca1.clone(), ca2.clone()]
         );
 
         // DEL: remove the currently-selected entry (selection sits on the last-added item).
         assert_eq!(dialog.client_ca_files.state.selection(), 1);
         dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(
-            dialog.client_ca_files.state.values(),
-            &["ca1.pem".to_string()]
-        );
+        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
 
         // MB-R-136 — the ADD sub-dialog's path field offers filesystem completions, and
         // accepting one (Enter with the popup open) fills the field without submitting the

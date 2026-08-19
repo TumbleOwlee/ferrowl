@@ -1491,6 +1491,31 @@ mod tests {
             &[ca1.clone(), ca2.clone()]
         );
 
+        // A path that doesn't exist on disk is rejected: the sub-dialog stays open with an
+        // error, nothing appended (only a file present on disk can be confirmed).
+        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(
+            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "/nonexistent/ca-does-not-exist.pem",
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.client_ca_add_dialog.is_some());
+        assert!(
+            !d.client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty()
+        );
+        d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(d.client_ca_add_dialog.is_none());
+        assert_eq!(
+            d.client_ca_files.state.values(),
+            &[ca1.clone(), ca2.clone()]
+        );
+
         let spec = d.resolve().expect("two CAs resolve");
         match spec.security.server {
             ServerTlsPolicy::MutualTls {

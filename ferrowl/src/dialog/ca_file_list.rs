@@ -24,6 +24,10 @@ use ratatui::{
 };
 use std::fmt::Debug;
 
+/// Extensions accepted for a client-CA file, shared between the path field's completion
+/// suggestions and `AddCaFileDialog::validate`'s own check.
+const CA_EXTENSIONS: &[&str] = &["pem", "crt", "key"];
+
 #[derive(Builder, Clone, Debug)]
 pub struct AddCaFileDialog {
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
@@ -52,7 +56,7 @@ impl AddCaFileDialog {
                             .build()
                             .expect("all required builder fields are set"),
                     )
-                    .provider(FsPathProvider::with_extensions(&["pem", "crt", "key"]))
+                    .provider(FsPathProvider::with_extensions(CA_EXTENSIONS))
                     .build()
                     .expect("all required builder fields are set"),
                 widget: SuggestInputBuilder::default()
@@ -103,6 +107,29 @@ impl AddCaFileDialog {
     fn validate(&self) -> Result<(), String> {
         if let ValidateResult::Error(e) = NonEmpty::validate(self.path.state.input()) {
             return Err(format!("Path: {e}"));
+        }
+        let path = self.path.state.input().trim();
+        let p = std::path::Path::new(path);
+        if !p.exists() {
+            return Err(format!("Path: file not found: {path}"));
+        }
+        if p.is_dir() {
+            return Err(format!("Path: is a directory, not a file: {path}"));
+        }
+        let has_valid_extension = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| {
+                CA_EXTENSIONS
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(e))
+            })
+            .unwrap_or(false);
+        if !has_valid_extension {
+            return Err(format!(
+                "Path: unsupported extension (expected one of {}): {path}",
+                CA_EXTENSIONS.join(", ")
+            ));
         }
         Ok(())
     }
@@ -204,15 +231,53 @@ mod tests {
         }
     }
 
-    /// MB-R-136/OC-R-113 — an empty path fails validation; a non-empty one is trimmed and
-    /// returned.
+    fn tmp_file(name: &str) -> String {
+        let path = std::env::temp_dir().join(format!("ferrowl_ca_file_list_test_{name}"));
+        std::fs::write(&path, b"").unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    /// MB-R-136/OC-R-113 — an empty path fails validation; a non-empty, existing one is trimmed
+    /// and returned.
     #[test]
     fn ut_apply_requires_non_empty_path() {
         assert!(AddCaFileDialog::new().apply().is_err());
+        let ca = tmp_file("nonempty.pem");
         let mut d = AddCaFileDialog::new();
-        type_into(&mut d.path.state, "  ca.pem  ");
+        type_into(&mut d.path.state, &format!("  {ca}  "));
         // The input field itself doesn't trim as typed; `apply` trims on read.
-        assert_eq!(d.apply().unwrap(), "ca.pem".trim());
+        assert_eq!(d.apply().unwrap(), ca.trim());
+    }
+
+    /// MB-R-136/OC-R-113 — a path that doesn't exist on disk fails validation, so it can't be
+    /// confirmed into the client-CA list.
+    #[test]
+    fn ut_apply_rejects_nonexistent_path() {
+        let mut d = AddCaFileDialog::new();
+        type_into(&mut d.path.state, "/nonexistent/ca-does-not-exist.pem");
+        let err = d.apply().expect_err("nonexistent path must not apply");
+        assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    /// MB-R-136/OC-R-113 — a directory can't be confirmed as a client-CA file, even though it
+    /// exists on disk.
+    #[test]
+    fn ut_apply_rejects_directory() {
+        let mut d = AddCaFileDialog::new();
+        type_into(&mut d.path.state, &std::env::temp_dir().to_string_lossy());
+        let err = d.apply().expect_err("a directory must not apply");
+        assert!(err.contains("directory"), "unexpected error: {err}");
+    }
+
+    /// MB-R-136/OC-R-113 — a file with an extension outside pem/crt/key is rejected, even though
+    /// it exists on disk and isn't a directory.
+    #[test]
+    fn ut_apply_rejects_wrong_extension() {
+        let mut d = AddCaFileDialog::new();
+        let bad = tmp_file("ca.txt");
+        type_into(&mut d.path.state, &bad);
+        let err = d.apply().expect_err("a .txt file must not apply");
+        assert!(err.contains("extension"), "unexpected error: {err}");
     }
 
     /// MB-R-136/OC-R-113 — the add-CA sub-dialog renders its title and an inline error while
