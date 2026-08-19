@@ -65,6 +65,71 @@ impl BasicAuth {
     }
 }
 
+/// One extra header sent on the CS WebSocket upgrade request in addition to the client's own
+/// (subprotocol, Basic Auth) — OC-R-117.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "HeaderDefWire")]
+pub struct HeaderDef {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(serde::Deserialize)]
+struct HeaderDefWire {
+    name: String,
+    value: String,
+}
+
+impl TryFrom<HeaderDefWire> for HeaderDef {
+    type Error = crate::error::HeaderError;
+    fn try_from(w: HeaderDefWire) -> Result<Self, Self::Error> {
+        HeaderDef::new(w.name, w.value)
+    }
+}
+
+/// Header names the client itself sets — OC-R-117's exact collision list (see the plan's
+/// `## Shared` section for the source list).
+const RESERVED_HEADER_NAMES: [&str; 8] = [
+    "authorization",
+    "host",
+    "upgrade",
+    "connection",
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-protocol",
+    "sec-websocket-extensions",
+];
+
+impl HeaderDef {
+    /// Construct a validated header. OC-R-117: rejects a `name` case-insensitively matching a
+    /// client-controlled header. OC-R-118: `name` must be an HTTP token (RFC 7230 `tchar*`, no
+    /// separators/whitespace); `value` must be printable ASCII only (0x20-0x7E), which excludes
+    /// CR/LF and other control bytes.
+    pub fn new(
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, crate::error::HeaderError> {
+        let name = name.into();
+        let value = value.into();
+        if RESERVED_HEADER_NAMES.contains(&name.to_ascii_lowercase().as_str()) {
+            return Err(crate::error::HeaderError::Reserved(name));
+        }
+        if name.is_empty() || !name.bytes().all(is_tchar) {
+            return Err(crate::error::HeaderError::InvalidName(name));
+        }
+        if !value.bytes().all(|b| (0x20..=0x7E).contains(&b)) {
+            return Err(crate::error::HeaderError::InvalidValue(name));
+        }
+        Ok(HeaderDef { name, value })
+    }
+}
+
+/// RFC 7230 `tchar`: `"!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." / "^" / "_" /
+/// "`" / "|" / "~" / DIGIT / ALPHA`.
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
 /// A self-signed certificate/key pair generated once per module instance and reused across
 /// connect/reconnect/bind attempts, cleared whenever the resolved source moves away from
 /// self-signed so a later reversion regenerates fresh material (OC-R-037/OC-R-115 — mirrors
@@ -818,5 +883,91 @@ mod tests {
             },
         };
         assert!(build_server_config(&policy, "localhost", &cache).is_ok());
+    }
+
+    #[test]
+    /// OC-R-117 — a `HeaderDef` name colliding case-insensitively with a client-controlled
+    /// header is rejected, naming the offending header in the error.
+    fn ut_header_def_rejects_reserved_name_case_insensitive() {
+        let err = HeaderDef::new("AUTHORIZATION", "x").unwrap_err();
+        assert!(matches!(err, crate::error::HeaderError::Reserved(ref n) if n == "AUTHORIZATION"));
+        assert!(err.to_string().contains("AUTHORIZATION"));
+
+        let err = HeaderDef::new("Sec-WebSocket-Key", "x").unwrap_err();
+        assert!(
+            matches!(err, crate::error::HeaderError::Reserved(ref n) if n == "Sec-WebSocket-Key")
+        );
+        assert!(err.to_string().contains("Sec-WebSocket-Key"));
+    }
+
+    #[test]
+    /// OC-R-117 — an ordinary, non-reserved header name is accepted.
+    fn ut_header_def_accepts_ordinary_name() {
+        assert!(HeaderDef::new("X-Custom", "v").is_ok());
+    }
+
+    #[test]
+    /// OC-R-118 — a header name violating the HTTP token grammar (whitespace, a separator) is
+    /// rejected.
+    fn ut_header_def_rejects_invalid_name_grammar() {
+        assert!(matches!(
+            HeaderDef::new("X Custom", "v"),
+            Err(crate::error::HeaderError::InvalidName(_))
+        ));
+        assert!(matches!(
+            HeaderDef::new("X/Custom", "v"),
+            Err(crate::error::HeaderError::InvalidName(_))
+        ));
+    }
+
+    #[test]
+    /// OC-R-118 — a header value containing a control byte (CR/LF) is rejected.
+    fn ut_header_def_rejects_control_byte_in_value() {
+        assert!(matches!(
+            HeaderDef::new("X-Custom", "a\r\nb"),
+            Err(crate::error::HeaderError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    /// Round-trips a valid `HeaderDef` through JSON and TOML unchanged.
+    fn ut_header_def_toml_json_roundtrip() {
+        let header = HeaderDef::new("X-Tenant", "acme-1").unwrap();
+
+        let json = serde_json::to_string(&header).unwrap();
+        let back: HeaderDef = serde_json::from_str(&json).unwrap();
+        assert_eq!(header, back);
+
+        let toml = toml::to_string(&header).unwrap();
+        let back: HeaderDef = toml::from_str(&toml).unwrap();
+        assert_eq!(header, back);
+    }
+
+    #[test]
+    /// Deserializing a `HeaderDef` with a reserved name fails — the `try_from` gate applies on
+    /// load, not just via `HeaderDef::new`.
+    fn ut_header_def_deserialize_rejects_invalid() {
+        let value = serde_json::json!({"name": "Authorization", "value": "x"});
+        assert!(serde_json::from_value::<HeaderDef>(value).is_err());
+    }
+
+    #[test]
+    /// `HeaderError`'s `Display` names the offending header for every variant.
+    fn ut_header_error_display() {
+        assert!(
+            crate::error::HeaderError::Reserved("Authorization".into())
+                .to_string()
+                .contains("Authorization")
+        );
+        assert!(
+            crate::error::HeaderError::InvalidName("X Custom".into())
+                .to_string()
+                .contains("X Custom")
+        );
+        assert!(
+            crate::error::HeaderError::InvalidValue("X-Custom".into())
+                .to_string()
+                .contains("X-Custom")
+        );
     }
 }

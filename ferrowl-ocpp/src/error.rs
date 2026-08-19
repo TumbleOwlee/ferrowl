@@ -66,6 +66,18 @@ pub enum TlsError {
     Rustls(#[from] rustls::Error),
 }
 
+/// `extra_headers` (OC-R-117/OC-R-118) construction failure: a reserved/collided name, or a
+/// name/value violating the HTTP token/printable-ASCII grammar.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum HeaderError {
+    #[error("extra_headers: '{0}' collides with a header the client already controls")]
+    Reserved(String),
+    #[error("extra_headers: '{0}' is not a valid HTTP header name")]
+    InvalidName(String),
+    #[error("extra_headers: value for '{0}' contains a byte outside 0x20-0x7E")]
+    InvalidValue(String),
+}
+
 /// OCPP-semantic failure: unknown action, (de)serialization, or request validation.
 #[derive(Debug, thiserror::Error)]
 pub enum OcppError {
@@ -90,6 +102,8 @@ pub enum Error {
     Ocpp(#[from] OcppError),
     #[error("{0}")]
     Tls(#[from] TlsError),
+    #[error("{0}")]
+    Header(#[from] HeaderError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("operation not supported by this OCPP version")]

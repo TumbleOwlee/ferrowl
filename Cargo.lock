@@ -937,6 +937,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "toml",
  "uuid",
  "validator",
  "webpki-roots 1.0.9",
