@@ -13,7 +13,7 @@ use ferrowl_ui::{
         SelectionStateBuilder, SuggestInputState, SuggestInputStateBuilder,
     },
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
-    traits::{HandleEvents, SetFocus, ToLabel},
+    traits::{HandleEvents, ToLabel},
     widgets::{
         Button, GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
@@ -811,13 +811,12 @@ impl SetupDialog {
         if new_len == 0 {
             // DEL is no longer eligible (`#[focus(when = ...)]` excludes it once the list is
             // empty) — leaving `self.focus` pointed at it would strand further Tab navigation on
-            // a dead target, so fall back to ADD. Must also move the widget-level highlight (not
-            // just the tracking enum), mirroring what `focus_next`/`focus_previous` do on every
-            // other transition — otherwise DEL stays visually focused (though hidden) and ADD
-            // stays unhighlighted until the next real Tab press.
-            self.client_ca_delete_button.state.set_focused(false);
-            self.focus = SetupDialogFocus::ClientCaAddButton;
-            self.client_ca_add_button.state.set_focused(true);
+            // a dead target, so fall back to ADD. `focus_previous()` is what the render-time
+            // empty-list guard already uses for the same transition, and (unlike a raw enum
+            // assignment) it correctly pairs the widget-level blur/focus with the enum update.
+            // Callers only reach here with `self.focus == ClientCaDeleteButton` (the Enter/Space
+            // handler guards on that), so "previous" always lands on ADD.
+            self.focus_previous();
         }
     }
 
@@ -1411,7 +1410,7 @@ fn set_suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvi
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use ferrowl_ui::traits::IsFocus;
+    use ferrowl_ui::traits::{IsFocus, SetFocus};
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
