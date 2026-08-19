@@ -265,7 +265,8 @@ impl<V: ClientVersion> ClientView<V> {
                         .write(Level::Info, "Settings updated");
                     if was_online {
                         let handler = self.make_handler();
-                        if let Err(e) = self.backend.start(&self.spec, handler).await {
+                        if let Err(e) = self.backend.start(&self.spec, &self.device, handler).await
+                        {
                             self.log.write().await.write(
                                 Level::Error,
                                 &format!("Restart after settings update failed: {e}"),
@@ -409,7 +410,7 @@ impl<V: ClientVersion> ClientView<V> {
         match parsed {
             OcppClientCmd::Start => Box::pin(async move {
                 let handler = self.make_handler();
-                match self.backend.start(&self.spec, handler).await {
+                match self.backend.start(&self.spec, &self.device, handler).await {
                     Ok(()) => CommandResult::Handled(Some((
                         Level::Info,
                         format!("Connecting to {}", self.spec.url()),
@@ -436,7 +437,7 @@ impl<V: ClientVersion> ClientView<V> {
                         .write(Level::Error, &format!("Reconnect: stop failed: {e}"));
                 }
                 let handler = self.make_handler();
-                match self.backend.start(&self.spec, handler).await {
+                match self.backend.start(&self.spec, &self.device, handler).await {
                     Ok(()) => CommandResult::Handled(Some((Level::Info, "Reconnecting".into()))),
                     Err(e) => CommandResult::Handled(Some((
                         Level::Error,

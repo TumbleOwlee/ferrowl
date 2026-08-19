@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use ferrowl_ocpp::cs::{Client, ClientBuilder, Command, Config, CsActionHandler};
 use ferrowl_ocpp::{Error, Version};
 
+use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
@@ -203,12 +204,13 @@ pub(crate) fn msg_row(m: &OcppMessage) -> MsgRow {
 /// device config on every dial attempt via [`start`](OcppClient::start) rebuilding this on each
 /// call) falls back to reconnect-enabled when unset, matching Modbus's own
 /// `DEFAULT_RECONNECT`/`ModbusModule::resolve_timing`.
-fn build_config(spec: &OcppSpec) -> Config {
+fn build_config(spec: &OcppSpec, device: &OcppDeviceConfig) -> Config {
     Config {
         url: spec.url(),
         timeout_ms: spec.timeout_ms.unwrap_or(30_000),
         basic_auth: spec.security.basic_auth(),
         tls: spec.security.cs_tls(),
+        extra_headers: device.extra_headers.clone(),
         reconnect: spec.reconnect.unwrap_or(true),
     }
 }
@@ -270,6 +272,7 @@ impl<V: Version> OcppClient<V> {
     pub async fn start<H: CsActionHandler<V>>(
         &mut self,
         spec: &OcppSpec,
+        device: &OcppDeviceConfig,
         handler: H,
     ) -> Result<(), Error> {
         if self.client.is_some() {
@@ -281,7 +284,7 @@ impl<V: Version> OcppClient<V> {
             }
             let _ = self.stop().await;
         }
-        let config = build_config(spec);
+        let config = build_config(spec, device);
         let log = log_fn(self.messages.clone());
         let status = log_fn(self.messages.clone());
         let client = ClientBuilder::<V>::new(
@@ -484,15 +487,41 @@ mod tests {
     /// OC-R-107 — the client `Config` built from a spec carries the spec's own `reconnect`
     /// setting, re-read fresh on every `start()` call, instead of a hardcoded `true`.
     fn ut_build_config_reads_reconnect_from_spec() {
-        assert!(build_config(&spec_with_reconnect(Some(true))).reconnect);
-        assert!(!build_config(&spec_with_reconnect(Some(false))).reconnect);
+        assert!(
+            build_config(
+                &spec_with_reconnect(Some(true)),
+                &OcppDeviceConfig::default()
+            )
+            .reconnect
+        );
+        assert!(
+            !build_config(
+                &spec_with_reconnect(Some(false)),
+                &OcppDeviceConfig::default()
+            )
+            .reconnect
+        );
     }
 
     #[test]
     /// OC-R-048 — an unset `reconnect` (a device config predating the field, or one that never
     /// set it) falls back to reconnect-enabled, matching Modbus's own `DEFAULT_RECONNECT`.
     fn ut_build_config_defaults_reconnect_to_true_when_unset() {
-        assert!(build_config(&spec_with_reconnect(None)).reconnect);
+        assert!(build_config(&spec_with_reconnect(None), &OcppDeviceConfig::default()).reconnect);
+    }
+
+    #[test]
+    /// OC-R-117 — extra_headers flows from the device config into the dial Config.
+    fn ut_build_config_carries_extra_headers() {
+        let spec = spec_with_reconnect(Some(true));
+        let device = OcppDeviceConfig {
+            extra_headers: vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_config(&spec, &device).extra_headers,
+            device.extra_headers
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -516,7 +545,7 @@ mod tests {
 
         let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
         backend
-            .start(&spec, NoopCsHandler)
+            .start(&spec, &OcppDeviceConfig::default(), NoopCsHandler)
             .await
             .expect("start must not fail synchronously against an unreachable CSMS");
 
