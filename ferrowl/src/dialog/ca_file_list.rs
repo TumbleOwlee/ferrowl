@@ -280,6 +280,16 @@ mod tests {
         assert!(err.contains("extension"), "unexpected error: {err}");
     }
 
+    /// MB-R-136/OC-R-113 — the extension check is case-insensitive, matching `FsPathProvider`'s
+    /// own completion-suggestion matching.
+    #[test]
+    fn ut_apply_accepts_uppercase_extension() {
+        let mut d = AddCaFileDialog::new();
+        let ca = tmp_file("uppercase.PEM");
+        type_into(&mut d.path.state, &ca);
+        assert_eq!(d.apply().unwrap(), ca);
+    }
+
     /// MB-R-136/OC-R-113 — the add-CA sub-dialog renders its title and an inline error while
     /// empty.
     #[test]
