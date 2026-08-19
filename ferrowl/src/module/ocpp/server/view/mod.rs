@@ -711,6 +711,20 @@ mod tests {
         assert!(v.backend.is_online(), "edit must rebind the listener");
     }
 
+    #[tokio::test]
+    /// UI-R-059 — an edited header list survives an in-place setup confirm on the server view
+    /// too: `refresh_impl` must apply the dialog's `extra_headers` onto the reconfigured
+    /// device (the server role ignores the value at runtime, but it must still round-trip
+    /// through an edit rather than being silently dropped).
+    async fn ut_edit_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut v = server_view();
+        let edited = v.spec.clone(); // same role: in-place reconfigure, not a replacement
+        let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+        v.deferred.setup = Some((edited, String::new(), headers.clone()));
+        v.refresh_impl().await;
+        assert_eq!(v.device.extra_headers, headers);
+    }
+
     #[test]
     /// UI-R-049 — the server view's focus cycle includes the payload pane.
     fn focus_cycle_includes_payload_pane() {

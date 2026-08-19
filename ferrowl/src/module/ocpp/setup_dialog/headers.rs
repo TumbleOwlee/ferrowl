@@ -276,10 +276,12 @@ impl HeaderEditPrompt {
         }
     }
 
+    #[cfg(test)]
     pub fn name_input(&self) -> &Widget<InputFieldState, InputField<String>> {
         &self.name_input
     }
 
+    #[cfg(test)]
     pub fn value_input(&self) -> &Widget<InputFieldState, InputField<String>> {
         &self.value_input
     }

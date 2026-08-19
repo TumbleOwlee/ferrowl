@@ -1057,6 +1057,23 @@ mod tests {
     }
 
     #[tokio::test]
+    /// UI-R-059 — an edited header list survives an in-place setup confirm: `refresh_impl`
+    /// must apply the dialog's `extra_headers` onto the reconfigured device, not just the
+    /// role/version/endpoint fields carried in the `OcppSpec`.
+    async fn ut_edit_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let edited = v.spec.clone(); // same role/version: in-place reconfigure, not a replacement
+        let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+        v.deferred.setup = Some((edited, String::new(), headers.clone()));
+        v.refresh_impl().await;
+        assert!(
+            v.take_replacement().is_none(),
+            "same role/version must reconfigure in place, not replace the view"
+        );
+        assert_eq!(v.device.extra_headers, headers);
+    }
+
+    #[tokio::test]
     /// OC-R-086 — switching a client's OCPP version keeps its Lua scripts and warns that they may
     /// call actions the new version lacks.
     async fn version_switch_keeps_scripts_and_warns() {

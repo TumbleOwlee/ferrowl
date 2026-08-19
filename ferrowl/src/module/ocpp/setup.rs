@@ -205,14 +205,30 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117/UI-R-059 — `build_device` (used by `confirm`) carries the dialog's working
-    /// extra-headers list onto the device config, not just the resolved `OcppSpec` (which has
-    /// no headers field of its own).
+    /// OC-R-117/UI-R-059 — `confirm` (exercised here through the same public
+    /// `handle_events`/`confirm` surface the app drives) succeeds with a populated headers
+    /// table, and the device it composes carries that list — not just the resolved `OcppSpec`,
+    /// which has no headers field of its own.
+    ///
+    /// `ModuleView` (what `confirm`'s factory produces) deliberately exposes no way to read a
+    /// built view's internal `device` back out — no downcast, no accessor — so the composed
+    /// device itself is checked via `build_device`, the same private helper `confirm` calls
+    /// with the same dialog/spec/path, rather than by inspecting the opaque view. This mirrors
+    /// the existing precedent for testing this function's other composition step
+    /// (`ut_ws_preserves_loaded_security`/`ut_wss_overwrites_loaded_security_with_dialog` test
+    /// `apply_security_precedence` the same way).
     fn ut_confirm_carries_dialog_extra_headers_onto_device() {
         let mut sv = OcppSetupView::new();
-        sv.dialog.name.state.set_input("cs-1".to_string());
+        for c in "cs-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
         sv.dialog.extra_headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
-        let spec = sv.dialog.resolve().expect("a named client dialog resolves");
+
+        let (name, factory) = sv.confirm().expect("a named client dialog resolves");
+        assert_eq!(name, "cs-1");
+        let _view = factory();
+
+        let spec = sv.dialog.resolve().expect("still resolves after confirm");
         let device = build_device(&sv.dialog, &spec, &sv.dialog.config_path());
         assert_eq!(device.extra_headers.len(), 1);
         assert_eq!(device.extra_headers[0].name, "X-Tenant");
