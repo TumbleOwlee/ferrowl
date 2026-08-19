@@ -120,6 +120,7 @@ async fn basic_auth_accepts_matching_credentials() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -166,6 +167,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
     // the credential-mismatch error surfaces from `join()`.
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 2000,
@@ -213,6 +215,7 @@ async fn basic_auth_rejects_missing_credentials() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 2000,
@@ -268,6 +271,7 @@ async fn tls_loopback_over_self_signed_cert() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -325,6 +329,7 @@ async fn tls_loopback_rejects_untrusted_cert() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 2000,
@@ -370,6 +375,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -414,6 +420,7 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 2000,
@@ -465,6 +472,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url: url.clone(),
             reconnect: true,
             timeout_ms: 2000,
@@ -485,6 +493,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
 
     let mut wrong = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 2000,
@@ -563,6 +572,7 @@ async fn it_csms_self_signed_with_require_client_cert_and_client_ca_accepts_conn
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -648,6 +658,7 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -701,6 +712,7 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,

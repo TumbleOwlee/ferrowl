@@ -120,6 +120,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     // `ocpp2.1` and the server must accept it (previously it could end up bound as `ocpp1.6`).
     let client = cs::ClientBuilder::<V2_1>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,

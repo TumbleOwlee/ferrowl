@@ -76,6 +76,7 @@ fn free_port() -> u16 {
 
 fn config(url: String, reconnect: bool) -> Arc<RwLock<cs::Config>> {
     Arc::new(RwLock::new(cs::Config {
+        extra_headers: Vec::new(),
         url,
         reconnect,
         timeout_ms: 1000,

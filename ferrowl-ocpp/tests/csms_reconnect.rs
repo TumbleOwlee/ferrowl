@@ -89,6 +89,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
     let url = format!("ws://{addr}/ocpp/CS001");
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: false,
             timeout_ms: 1000,
