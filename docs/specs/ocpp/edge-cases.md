@@ -91,6 +91,9 @@ mistaken for an oversight and silently "fixed".
 | The OCPP setup dialog's client-role (CS) Self Signed toggled On while mTLS is selected | the Client Cert/Key inputs are hidden and excluded from the resolved config regardless of text already present; text preserved, restored when the toggle goes back Off (OC-R-116) |
 | A self-signed certificate/key pair, once generated for a module instance | cached and reused across every subsequent bind/connect/reconnect and `:restart`/`:reload`, including a config edit that leaves the resolved source self-signed; regenerated only on a transition *into* self-signed from something else; a fresh module instance (not a `:restart`/`:reload` of the same one) discards the cache instead of reusing it, since the pair is never written to disk (OC-R-037/OC-R-115) |
 | A legacy config file with the old singular `client_ca_file` set and `require_client_cert: true`, no `client_ca_files` present | still deserializes — `client_ca_file` is read as a one-element `ca_files` list when `client_ca_files` is absent or empty; a config carrying both prefers `client_ca_files` (OC-R-039/OC-R-096) |
+| `extra_headers` entry whose `name` collides (case-insensitively) with a header the client already controls | construction fails, naming the offending header (OC-R-117) |
+| `extra_headers` entry whose `name` or `value` contains a byte outside the allowed grammar (e.g. embedded CR/LF) | construction fails, naming the offending header and field (OC-R-118) |
+| `extra_headers` configured on a server-role device config | inert — the field is client-only and has no effect for a CSMS |
 
 ---
 

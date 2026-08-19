@@ -210,7 +210,7 @@ impl<V: ClientVersion> ClientView<V> {
 
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            if let Some((spec, path)) = self.deferred.setup.take() {
+            if let Some((spec, path, extra_headers)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
                 device.connectors = self.device.connectors.clone();
@@ -223,6 +223,10 @@ impl<V: ClientVersion> ClientView<V> {
                 device.imsi = self.device.imsi.clone();
                 device.meter_serial_number = self.device.meter_serial_number.clone();
                 device.meter_type = self.device.meter_type.clone();
+                // Not carried forward from `self.device` like the fields above: the setup
+                // dialog's headers table is authoritative for a confirmed edit, unlike device
+                // metadata the dialog never exposes.
+                device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Server {
                     if let Err(e) = self.backend.stop().await {
                         self.log.write().await.write(
@@ -265,7 +269,11 @@ impl<V: ClientVersion> ClientView<V> {
                         .write(Level::Info, "Settings updated");
                     if was_online {
                         let handler = self.make_handler();
-                        if let Err(e) = self.backend.start(&self.spec, handler).await {
+                        if let Err(e) = self
+                            .backend
+                            .start(&self.spec, &self.device, &self.log, handler)
+                            .await
+                        {
                             self.log.write().await.write(
                                 Level::Error,
                                 &format!("Restart after settings update failed: {e}"),
@@ -409,7 +417,11 @@ impl<V: ClientVersion> ClientView<V> {
         match parsed {
             OcppClientCmd::Start => Box::pin(async move {
                 let handler = self.make_handler();
-                match self.backend.start(&self.spec, handler).await {
+                match self
+                    .backend
+                    .start(&self.spec, &self.device, &self.log, handler)
+                    .await
+                {
                     Ok(()) => CommandResult::Handled(Some((
                         Level::Info,
                         format!("Connecting to {}", self.spec.url()),
@@ -436,7 +448,11 @@ impl<V: ClientVersion> ClientView<V> {
                         .write(Level::Error, &format!("Reconnect: stop failed: {e}"));
                 }
                 let handler = self.make_handler();
-                match self.backend.start(&self.spec, handler).await {
+                match self
+                    .backend
+                    .start(&self.spec, &self.device, &self.log, handler)
+                    .await
+                {
                     Ok(()) => CommandResult::Handled(Some((Level::Info, "Reconnecting".into()))),
                     Err(e) => CommandResult::Handled(Some((
                         Level::Error,
@@ -449,6 +465,7 @@ impl<V: ClientVersion> ClientView<V> {
                     crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
                         &self.spec,
                         &self.device_path,
+                        &self.device.extra_headers,
                     ),
                 ));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))

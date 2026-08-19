@@ -238,6 +238,7 @@ than `ws`/`wss` is an error.
 | `connector_rfids` | list of `ConnectorRfids` | empty | **server only**: per-connector accept-lists |
 | `connectors` | list of `ConnectorRef` | empty | **client only**: connector-table seed. Empty = CS-level only. Unbounded |
 | `config` | list of `ConfigKeyDef` | empty | **client only**: persisted configuration/variable key store. Empty = built-in defaults |
+| `extra_headers` | list of `HeaderDef` | empty | **client only**: extra HTTP headers sent on the WebSocket upgrade request, in addition to any header the client sets itself. See OC-R-117–119 |
 | `model` | optional string | unset | **client only**: CS boot identity model, seeded/written like `connectors`/`config` |
 | `vendor` | optional string | unset | **client only**: CS boot identity vendor |
 | `firmware_version` | optional string | unset | **client only**: CS boot identity firmware version |
@@ -273,6 +274,13 @@ field is defaulted.
 | `key` | string | — (required) |
 | `value` | string | empty |
 | `readonly` | bool | `false` |
+
+### 8.4 `HeaderDef`
+
+| Field | Type | Default |
+|---|---|---|
+| `name` | string | — (required) |
+| `value` | string | — (required) |
 
 ---
 

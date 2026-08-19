@@ -178,6 +178,10 @@ pub struct OcppDeviceConfig {
     /// role (CSMS config is per-connected-station and transient).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<ConfigKeyDef>,
+    /// Extra headers sent on the WebSocket upgrade request in addition to the client's own
+    /// (OC-R-117). Client-only device config field: never exposed via `--ocpp` (OC-R-119).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_headers: Vec<ferrowl_ocpp::HeaderDef>,
     /// CS boot identity model, seeded into state on load and written by `:wd` (OC-R-103). Unset =
     /// keep the built-in default. Ignored for the server role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -241,6 +245,7 @@ impl OcppDeviceConfig {
             connector_rfids: Vec::new(),
             connectors: Vec::new(),
             config: Vec::new(),
+            extra_headers: Vec::new(),
             model: None,
             vendor: None,
             firmware_version: None,
@@ -321,6 +326,7 @@ mod tests {
                     readonly: true,
                 },
             ],
+            extra_headers: Vec::new(),
             model: Some("Ferrowl-EVSE-Pro".into()),
             vendor: Some("Acme".into()),
             firmware_version: Some("2.3.1".into()),
@@ -577,5 +583,33 @@ mod tests {
         });
         let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
         assert_eq!(cfg.reconnect, None);
+    }
+
+    #[test]
+    /// OC-R-117 — extra_headers round-trips through TOML and JSON.
+    fn ut_device_config_extra_headers_round_trip() {
+        let cfg = OcppDeviceConfig {
+            extra_headers: vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()],
+            ..Default::default()
+        };
+        for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
+            let path =
+                std::env::temp_dir().join(format!("ferrowl_ocpp_device_extra_headers_test.{ext}"));
+            let path = path.to_str().unwrap();
+            Converter::save(&cfg, path, ty).expect("save");
+            let back: OcppDeviceConfig = Converter::load(path, ty).expect("load");
+            assert_eq!(cfg, back);
+        }
+    }
+
+    #[test]
+    /// OC-R-117 — a device config predating extra_headers loads with an empty list.
+    fn ut_device_config_loads_without_extra_headers_field() {
+        let json = serde_json::json!({
+            "ocpp_version": "1.6",
+            "role": "client",
+        });
+        let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
+        assert_eq!(cfg.extra_headers, Vec::new());
     }
 }

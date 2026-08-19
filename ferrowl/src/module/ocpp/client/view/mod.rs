@@ -400,7 +400,7 @@ type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 struct Deferred {
     /// A pending send: action name, payload, and the scope it targets.
     send: Option<(String, serde_json::Value, Scope)>,
-    setup: Option<(OcppSpec, String)>,
+    setup: Option<(OcppSpec, String, Vec<ferrowl_ocpp::HeaderDef>)>,
     replacement: Option<Box<dyn ModuleView>>,
 }
 
@@ -980,6 +980,75 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    /// UI-R-059 — a header added via real keystrokes through the setup dialog's `handle_events`
+    /// (typing name/value and pressing Enter to add, as a real user does — not by poking
+    /// `dialog.extra_headers` directly) must survive confirming the dialog via `:edit` and
+    /// reopening it.
+    async fn ut_header_added_via_keystrokes_survives_edit_confirm_and_reopen() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        v.handle_command("edit").await;
+        assert!(v.overlay.is_active(), "edit must open the setup overlay");
+
+        // Give the dialog a name so `resolve()` can succeed later.
+        for c in "cs-1".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
+        // Port, Path, then HeaderNameInput — 9 hops (ws/client dialog, headers table hidden
+        // while empty).
+        for _ in 0..9 {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        }
+        for c in "X-Tenant".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab); // -> HeaderValueInput
+        for c in "acme-1".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter); // add the header
+
+        if let ClientOverlay::Setup(dialog) = &v.overlay {
+            assert_eq!(
+                dialog.extra_headers().len(),
+                1,
+                "the header must land in the dialog's working list right after Enter-to-add"
+            );
+        } else {
+            panic!("setup overlay must still be open after adding a header");
+        }
+
+        // Confirm/close the dialog: the literal reported sequence is a second bare Enter right
+        // after add — reproduce that exactly rather than assuming a Tab away first.
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            !v.overlay.is_active(),
+            "Enter must confirm and close the setup dialog after a header was added"
+        );
+
+        v.refresh_impl().await;
+        assert_eq!(
+            v.device.extra_headers.len(),
+            1,
+            "the added header must land on the device after refresh_impl processes deferred.setup"
+        );
+        assert_eq!(v.device.extra_headers[0].name, "X-Tenant");
+
+        // Reopen via :edit (the reported repro step) and check the dialog reflects it.
+        v.handle_command("edit").await;
+        if let ClientOverlay::Setup(dialog) = &v.overlay {
+            assert_eq!(
+                dialog.extra_headers().len(),
+                1,
+                "the reopened setup dialog must show the previously added header"
+            );
+        } else {
+            panic!("edit must reopen the setup overlay");
+        }
+    }
+
     // --- Module lifecycle: connection loss / role-version switch -----------------------------
 
     #[tokio::test]
@@ -1017,7 +1086,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.role = OcppRole::Server;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_some(),
@@ -1028,7 +1097,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_some(),
@@ -1040,7 +1109,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.port = 4711;
-        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_none(),
@@ -1057,6 +1126,23 @@ mod tests {
     }
 
     #[tokio::test]
+    /// UI-R-059 — an edited header list survives an in-place setup confirm: `refresh_impl`
+    /// must apply the dialog's `extra_headers` onto the reconfigured device, not just the
+    /// role/version/endpoint fields carried in the `OcppSpec`.
+    async fn ut_edit_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        let edited = v.spec.clone(); // same role/version: in-place reconfigure, not a replacement
+        let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+        v.deferred.setup = Some((edited, String::new(), headers.clone()));
+        v.refresh_impl().await;
+        assert!(
+            v.take_replacement().is_none(),
+            "same role/version must reconfigure in place, not replace the view"
+        );
+        assert_eq!(v.device.extra_headers, headers);
+    }
+
+    #[tokio::test]
     /// OC-R-086 — switching a client's OCPP version keeps its Lua scripts and warns that they may
     /// call actions the new version lacks.
     async fn version_switch_keeps_scripts_and_warns() {
@@ -1068,7 +1154,7 @@ mod tests {
         }];
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
 
         let replacement = v

@@ -285,7 +285,7 @@ type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 /// built replacement view (version/role switch).
 #[derive(Default)]
 struct Deferred {
-    setup: Option<(OcppSpec, String)>,
+    setup: Option<(OcppSpec, String, Vec<ferrowl_ocpp::HeaderDef>)>,
     replacement: Option<Box<dyn ModuleView>>,
 }
 
@@ -702,13 +702,27 @@ mod tests {
         edited.protocol = OcppProtocol::Wss;
         edited.security.username = Some("username".into());
         edited.security.password = Some("password".into());
-        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
         assert_eq!(v.spec, edited);
         assert!(v.spec.csms_self_signed_fallback());
         // The same tick stops the old listener and rebinds from the edited spec (want_running
         // is on by default), so the backend ends the tick online with the new settings.
         assert!(v.backend.is_online(), "edit must rebind the listener");
+    }
+
+    #[tokio::test]
+    /// UI-R-059 — an edited header list survives an in-place setup confirm on the server view
+    /// too: `refresh_impl` must apply the dialog's `extra_headers` onto the reconfigured
+    /// device (the server role ignores the value at runtime, but it must still round-trip
+    /// through an edit rather than being silently dropped).
+    async fn ut_edit_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut v = server_view();
+        let edited = v.spec.clone(); // same role: in-place reconfigure, not a replacement
+        let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+        v.deferred.setup = Some((edited, String::new(), headers.clone()));
+        v.refresh_impl().await;
+        assert_eq!(v.device.extra_headers, headers);
     }
 
     #[test]

@@ -532,10 +532,14 @@ where
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
             // Apply a resolved `:edit`.
-            if let Some((spec, path)) = self.deferred.setup.take() {
+            if let Some((spec, path, extra_headers)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
                 device.log_file = self.device.log_file.clone();
                 with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
+                // Not carried forward from `self.device`: the setup dialog's headers table is
+                // authoritative for a confirmed edit (server role ignores it, but the value is
+                // still threaded uniformly — see `HeaderDef`'s doc comment).
+                device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind.
@@ -707,6 +711,7 @@ where
                         crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
                             &self.spec,
                             &self.device_path,
+                            &self.device.extra_headers,
                         ),
                     ));
                     CommandResult::Handled(None)

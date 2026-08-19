@@ -52,21 +52,8 @@ impl SetupView for OcppSetupView {
         let spec = self.dialog.resolve().ok()?;
         let path = self.dialog.config_path();
         let name = spec.name.clone();
+        let device = build_device(&self.dialog, &spec, &path);
 
-        // Assemble the device config: an existing file at `path` is authoritative (its scripts,
-        // and — to avoid clobbering — its version/role/timeout); otherwise build it from the
-        // dialog's selections with no scripts yet.
-        let device = if path.is_empty() {
-            OcppDeviceConfig::from_spec(&spec, Vec::new())
-        } else {
-            match crate::config::load_ocpp_device(&path) {
-                Ok(mut loaded) => {
-                    apply_security_precedence(&mut loaded, &spec);
-                    loaded
-                }
-                Err(_) => OcppDeviceConfig::from_spec(&spec, Vec::new()),
-            }
-        };
         // Reconcile the runtime spec with the (possibly file-sourced) device fields + endpoint.
         let module = OcppModuleSpec::from_spec(&spec, &path);
         let spec = OcppSpec::from_parts(&module, &device);
@@ -77,6 +64,28 @@ impl SetupView for OcppSetupView {
         };
         Some((name, factory))
     }
+}
+
+/// Assemble the device config for [`OcppSetupView::confirm`]: an existing file at `path` is
+/// authoritative (its scripts, and — to avoid clobbering — its version/role/timeout); otherwise
+/// build it from the dialog's selections with no scripts yet. `extra_headers` (OC-R-117/118/119,
+/// UI-R-059) always comes from the dialog's working list, regardless of the file/fresh split
+/// above — it has no file fallback the way security does, since a fresh dialog's table starts
+/// empty either way.
+fn build_device(dialog: &OcppSetupDialog, spec: &OcppSpec, path: &str) -> OcppDeviceConfig {
+    let mut device = if path.is_empty() {
+        OcppDeviceConfig::from_spec(spec, Vec::new())
+    } else {
+        match crate::config::load_ocpp_device(path) {
+            Ok(mut loaded) => {
+                apply_security_precedence(&mut loaded, spec);
+                loaded
+            }
+            Err(_) => OcppDeviceConfig::from_spec(spec, Vec::new()),
+        }
+    };
+    device.extra_headers = dialog.extra_headers();
+    device
 }
 
 /// Decide which security section wins when merging a loaded device config with the dialog's
@@ -193,5 +202,92 @@ mod tests {
             assert!(!name.is_empty());
             let _view = factory();
         }
+    }
+
+    #[test]
+    /// OC-R-117/UI-R-059 — `confirm` (exercised here through the same public
+    /// `handle_events`/`confirm` surface the app drives) succeeds with a populated headers
+    /// table, and the device it composes carries that list — not just the resolved `OcppSpec`,
+    /// which has no headers field of its own.
+    ///
+    /// `ModuleView` (what `confirm`'s factory produces) deliberately exposes no way to read a
+    /// built view's internal `device` back out — no downcast, no accessor — so the composed
+    /// device itself is checked via `build_device`, the same private helper `confirm` calls
+    /// with the same dialog/spec/path, rather than by inspecting the opaque view. This mirrors
+    /// the existing precedent for testing this function's other composition step
+    /// (`ut_ws_preserves_loaded_security`/`ut_wss_overwrites_loaded_security_with_dialog` test
+    /// `apply_security_precedence` the same way).
+    fn ut_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut sv = OcppSetupView::new();
+        for c in "cs-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        sv.dialog.extra_headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+
+        let (name, factory) = sv.confirm().expect("a named client dialog resolves");
+        assert_eq!(name, "cs-1");
+        let _view = factory();
+
+        let spec = sv.dialog.resolve().expect("still resolves after confirm");
+        let device = build_device(&sv.dialog, &spec, &sv.dialog.config_path());
+        assert_eq!(device.extra_headers.len(), 1);
+        assert_eq!(device.extra_headers[0].name, "X-Tenant");
+    }
+
+    #[test]
+    /// UI-R-059 — a header added via real keystrokes (type name, Tab, type value, Enter to add
+    /// — not by poking `dialog.extra_headers` directly) must still be present when the dialog is
+    /// confirmed, even if the very next key after adding is another bare Enter (the natural next
+    /// keystroke a user presses to close the dialog).
+    fn ut_header_added_via_keystrokes_survives_a_second_enter_and_confirm() {
+        let mut sv = OcppSetupView::new();
+        for c in "cs-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
+        // Port, Path, then HeaderNameInput — 9 hops (fresh dialog defaults to ws/client, headers
+        // table hidden while empty). `SetupView` routes Tab via `focus_next`, not through
+        // `handle_events` (the app shell calls it directly on a Tab key — see `close_requested`'s
+        // sibling methods on this trait), so drive focus that way here too.
+        for _ in 0..9 {
+            sv.focus_next();
+        }
+        for c in "X-Tenant".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        sv.focus_next(); // -> HeaderValueInput
+        for c in "acme-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Enter); // add the header
+        assert_eq!(
+            sv.dialog.extra_headers.len(),
+            1,
+            "the header must land in the dialog's working list right after Enter-to-add"
+        );
+
+        // The literal reported next keystroke: a second bare Enter, still focused in the
+        // headers-add cluster. The app shell (`App::handle_dialog_key`) only calls `confirm()`
+        // when `handle_events` reports the key `Unhandled` — so this must not be consumed
+        // trying (and failing) to add an empty header, or the dialog could never be confirmed
+        // from this focus state at all.
+        assert!(
+            matches!(
+                sv.handle_events(KeyModifiers::NONE, KeyCode::Enter),
+                EventResult::Unhandled(KeyModifiers::NONE, KeyCode::Enter)
+            ),
+            "a second bare Enter with nothing typed must fall through to confirm, not be \
+             swallowed trying to add an empty header"
+        );
+
+        let (name, factory) = sv.confirm().expect("a named client dialog resolves");
+        assert_eq!(name, "cs-1");
+        let _view = factory();
+
+        let spec = sv.dialog.resolve().expect("still resolves after confirm");
+        let device = build_device(&sv.dialog, &spec, &sv.dialog.config_path());
+        assert_eq!(device.extra_headers.len(), 1);
+        assert_eq!(device.extra_headers[0].name, "X-Tenant");
     }
 }

@@ -15,7 +15,7 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::action::Version;
@@ -49,6 +49,14 @@ async fn dial<V: Version>(config: &Config, cache: &SelfSignedCache) -> Result<Ws
         request
             .headers_mut()
             .insert("Authorization", auth.header_value());
+    }
+    for header in &config.extra_headers {
+        request.headers_mut().insert(
+            HeaderName::from_bytes(header.name.as_bytes())
+                .expect("HeaderDef::new already validated the name is a valid token"),
+            HeaderValue::from_str(&header.value)
+                .expect("HeaderDef::new already validated the value is printable ASCII"),
+        );
     }
     let connector = match &config.tls {
         Some(tls) => Some(build_connector(tls, cache)?),

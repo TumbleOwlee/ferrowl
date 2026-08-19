@@ -43,3 +43,4 @@ tokio = { workspace = true, features = [
     "net",
 ] }
 serde_json = { workspace = true }
+toml = { workspace = true }

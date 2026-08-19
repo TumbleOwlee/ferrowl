@@ -115,12 +115,15 @@ where
                 ServerOverlay::Setup(_) => {
                     if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code) {
                         let resolved = if let ServerOverlay::Setup(setup) = &self.overlay {
-                            setup.resolve().ok().map(|spec| (spec, setup.config_path()))
+                            setup
+                                .resolve()
+                                .ok()
+                                .map(|spec| (spec, setup.config_path(), setup.extra_headers()))
                         } else {
                             None
                         };
-                        if let Some((spec, path)) = resolved {
-                            self.deferred.setup = Some((spec, path));
+                        if let Some((spec, path, extra_headers)) = resolved {
+                            self.deferred.setup = Some((spec, path, extra_headers));
                             self.overlay.close();
                         }
                     }

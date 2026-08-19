@@ -126,6 +126,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     let remote_start_seen = Arc::new(AtomicBool::new(false));
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -303,6 +304,7 @@ async fn handler_rejection_is_call_error_and_keeps_connection() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -425,6 +427,7 @@ async fn awaited_call_times_out() {
     // Short client timeout: the slow (700ms) handler cannot answer before it fires.
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 150,
@@ -479,6 +482,7 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -564,6 +568,7 @@ async fn connection_ids_are_monotonic_and_identity_is_metadata() {
     let make_client = || async {
         cs::ClientBuilder::<V1_6>::new(
             std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+                extra_headers: Vec::new(),
                 url: format!("ws://{addr}/ocpp/DUP"),
                 reconnect: true,
                 timeout_ms: 2000,
@@ -625,6 +630,7 @@ async fn csms_broadcast_and_disconnect() {
     let mk = |flag: Arc<AtomicBool>| async move {
         cs::ClientBuilder::<V1_6>::new(
             std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+                extra_headers: Vec::new(),
                 url: format!("ws://{addr}/ocpp/CS"),
                 reconnect: true,
                 timeout_ms: 2000,
@@ -693,6 +699,7 @@ async fn command_to_unknown_connection_fails_alone() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
@@ -744,6 +751,7 @@ async fn terminated_csms_stops_accepting() {
     sleep(Duration::from_millis(100)).await;
     let mut res = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url: format!("ws://{addr}/ocpp/CS001"),
             reconnect: false,
             timeout_ms: 1000,
@@ -779,6 +787,7 @@ async fn cs_stays_disconnected_when_reconnect_is_disabled() {
     let addr = bound_addr(&server).await;
     let mut client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url: format!("ws://{addr}/ocpp/CS001"),
             reconnect: false,
             timeout_ms: 1000,
@@ -835,6 +844,7 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 1000,
@@ -894,6 +904,7 @@ async fn ws_client_ignores_configured_tls_material() {
     // made in plaintext. If it were honored, a TLS handshake over the plain socket would fail.
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
             url,
             reconnect: true,
             timeout_ms: 2000,
