@@ -864,6 +864,17 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-119 — extra_headers is not a --ocpp key=value field; an unrecognized key is silently
+    /// inert, same as config/connectors.
+    fn ut_parse_ocpp_spec_ignores_extra_headers_key() {
+        let spec = parse_ocpp_spec("name=cs1,device=d.toml,port=9000,extra_headers=X-Tenant:acme")
+            .unwrap();
+        assert_eq!(spec.name, "cs1");
+        assert_eq!(spec.device, "d.toml");
+        assert_eq!(spec.port, 9000);
+    }
+
+    #[test]
     /// CL-R-013 — a malformed run --ocpp descriptor is a parse error.
     fn ut_parse_ocpp_spec_errors() {
         assert!(parse_ocpp_spec("device=d,port=1").is_err()); // missing name
