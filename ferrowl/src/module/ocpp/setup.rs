@@ -233,4 +233,61 @@ mod tests {
         assert_eq!(device.extra_headers.len(), 1);
         assert_eq!(device.extra_headers[0].name, "X-Tenant");
     }
+
+    #[test]
+    /// UI-R-059 — a header added via real keystrokes (type name, Tab, type value, Enter to add
+    /// — not by poking `dialog.extra_headers` directly) must still be present when the dialog is
+    /// confirmed, even if the very next key after adding is another bare Enter (the natural next
+    /// keystroke a user presses to close the dialog).
+    fn ut_header_added_via_keystrokes_survives_a_second_enter_and_confirm() {
+        let mut sv = OcppSetupView::new();
+        for c in "cs-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
+        // Port, Path, then HeaderNameInput — 9 hops (fresh dialog defaults to ws/client, headers
+        // table hidden while empty). `SetupView` routes Tab via `focus_next`, not through
+        // `handle_events` (the app shell calls it directly on a Tab key — see `close_requested`'s
+        // sibling methods on this trait), so drive focus that way here too.
+        for _ in 0..9 {
+            sv.focus_next();
+        }
+        for c in "X-Tenant".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        sv.focus_next(); // -> HeaderValueInput
+        for c in "acme-1".chars() {
+            sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Enter); // add the header
+        assert_eq!(
+            sv.dialog.extra_headers.len(),
+            1,
+            "the header must land in the dialog's working list right after Enter-to-add"
+        );
+
+        // The literal reported next keystroke: a second bare Enter, still focused in the
+        // headers-add cluster. The app shell (`App::handle_dialog_key`) only calls `confirm()`
+        // when `handle_events` reports the key `Unhandled` — so this must not be consumed
+        // trying (and failing) to add an empty header, or the dialog could never be confirmed
+        // from this focus state at all.
+        assert!(
+            matches!(
+                sv.handle_events(KeyModifiers::NONE, KeyCode::Enter),
+                EventResult::Unhandled(KeyModifiers::NONE, KeyCode::Enter)
+            ),
+            "a second bare Enter with nothing typed must fall through to confirm, not be \
+             swallowed trying to add an empty header"
+        );
+
+        let (name, factory) = sv.confirm().expect("a named client dialog resolves");
+        assert_eq!(name, "cs-1");
+        let _view = factory();
+
+        let spec = sv.dialog.resolve().expect("still resolves after confirm");
+        let device = build_device(&sv.dialog, &spec, &sv.dialog.config_path());
+        assert_eq!(device.extra_headers.len(), 1);
+        assert_eq!(device.extra_headers[0].name, "X-Tenant");
+    }
 }

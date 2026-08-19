@@ -980,6 +980,75 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    /// UI-R-059 — a header added via real keystrokes through the setup dialog's `handle_events`
+    /// (typing name/value and pressing Enter to add, as a real user does — not by poking
+    /// `dialog.extra_headers` directly) must survive confirming the dialog via `:edit` and
+    /// reopening it.
+    async fn ut_header_added_via_keystrokes_survives_edit_confirm_and_reopen() {
+        let mut v = client_view::<V1_6>(OcppVersion::V1_6);
+        v.handle_command("edit").await;
+        assert!(v.overlay.is_active(), "edit must open the setup overlay");
+
+        // Give the dialog a name so `resolve()` can succeed later.
+        for c in "cs-1".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
+        // Port, Path, then HeaderNameInput — 9 hops (ws/client dialog, headers table hidden
+        // while empty).
+        for _ in 0..9 {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        }
+        for c in "X-Tenant".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab); // -> HeaderValueInput
+        for c in "acme-1".chars() {
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
+        }
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter); // add the header
+
+        if let ClientOverlay::Setup(dialog) = &v.overlay {
+            assert_eq!(
+                dialog.extra_headers().len(),
+                1,
+                "the header must land in the dialog's working list right after Enter-to-add"
+            );
+        } else {
+            panic!("setup overlay must still be open after adding a header");
+        }
+
+        // Confirm/close the dialog: the literal reported sequence is a second bare Enter right
+        // after add — reproduce that exactly rather than assuming a Tab away first.
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            !v.overlay.is_active(),
+            "Enter must confirm and close the setup dialog after a header was added"
+        );
+
+        v.refresh_impl().await;
+        assert_eq!(
+            v.device.extra_headers.len(),
+            1,
+            "the added header must land on the device after refresh_impl processes deferred.setup"
+        );
+        assert_eq!(v.device.extra_headers[0].name, "X-Tenant");
+
+        // Reopen via :edit (the reported repro step) and check the dialog reflects it.
+        v.handle_command("edit").await;
+        if let ClientOverlay::Setup(dialog) = &v.overlay {
+            assert_eq!(
+                dialog.extra_headers().len(),
+                1,
+                "the reopened setup dialog must show the previously added header"
+            );
+        } else {
+            panic!("edit must reopen the setup overlay");
+        }
+    }
+
     // --- Module lifecycle: connection loss / role-version switch -----------------------------
 
     #[tokio::test]

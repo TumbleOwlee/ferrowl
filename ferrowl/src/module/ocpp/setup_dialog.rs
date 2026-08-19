@@ -693,6 +693,14 @@ impl OcppSetupDialog {
                 self.focus,
                 OcppSetupDialogFocus::HeaderNameInput | OcppSetupDialogFocus::HeaderValueInput
             )
+            // Only treat Enter as "add" when the user actually typed something. Both inputs are
+            // cleared on a successful add but focus stays put (there is nowhere sensible to move
+            // it to), so a bare Enter pressed again right after adding a header — the natural
+            // next keystroke to confirm/close the whole dialog — must not be swallowed here
+            // trying to add an empty header (which always fails OC-R-118's non-empty-name check
+            // and would otherwise trap Enter in this cluster indefinitely).
+            && !(self.header_name_input.state.input().trim().is_empty()
+                && self.header_value_input.state.input().trim().is_empty())
         {
             match self.headers_ref().add() {
                 Ok(()) => self.header_error = None,
