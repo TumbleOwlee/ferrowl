@@ -400,7 +400,7 @@ type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 struct Deferred {
     /// A pending send: action name, payload, and the scope it targets.
     send: Option<(String, serde_json::Value, Scope)>,
-    setup: Option<(OcppSpec, String)>,
+    setup: Option<(OcppSpec, String, Vec<ferrowl_ocpp::HeaderDef>)>,
     replacement: Option<Box<dyn ModuleView>>,
 }
 
@@ -1017,7 +1017,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.role = OcppRole::Server;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_some(),
@@ -1028,7 +1028,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_some(),
@@ -1040,7 +1040,7 @@ mod tests {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         let mut edited = v.spec.clone();
         edited.port = 4711;
-        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
         assert!(
             v.take_replacement().is_none(),
@@ -1068,7 +1068,7 @@ mod tests {
         }];
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
-        v.deferred.setup = Some((edited, String::new()));
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
         v.refresh_impl().await;
 
         let replacement = v

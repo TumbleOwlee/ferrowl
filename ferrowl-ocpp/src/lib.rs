@@ -17,7 +17,9 @@ pub mod cs;
 pub mod csms;
 
 pub use action::{ConnectorScope, Version};
-pub use error::{CallError, Error, FramingError, OcppError, TlsError, ValidationError, WsError};
+pub use error::{
+    CallError, Error, FramingError, HeaderError, OcppError, TlsError, ValidationError, WsError,
+};
 pub use log::LogFn;
 pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};
 pub use security::{BasicAuth, HeaderDef, SelfSignedCache, new_self_signed_cache};

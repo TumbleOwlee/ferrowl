@@ -285,7 +285,7 @@ type MsgTable = Widget<TableState<MsgRow, 5>, Table<MsgRow, MsgHeader, 5>>;
 /// built replacement view (version/role switch).
 #[derive(Default)]
 struct Deferred {
-    setup: Option<(OcppSpec, String)>,
+    setup: Option<(OcppSpec, String, Vec<ferrowl_ocpp::HeaderDef>)>,
     replacement: Option<Box<dyn ModuleView>>,
 }
 
@@ -702,7 +702,7 @@ mod tests {
         edited.protocol = OcppProtocol::Wss;
         edited.security.username = Some("username".into());
         edited.security.password = Some("password".into());
-        v.deferred.setup = Some((edited.clone(), String::new()));
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
         assert_eq!(v.spec, edited);
         assert!(v.spec.csms_self_signed_fallback());

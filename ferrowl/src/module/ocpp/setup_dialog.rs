@@ -35,9 +35,18 @@ use crate::dialog::path_suggest::FsPathProvider;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
+mod headers;
 mod security;
+use headers::{
+    HeaderEditOutcome, HeaderEditPrompt, HeaderTable, HeaderTableRef, header_name_input,
+    header_table, header_value_input, route_header_edit,
+};
 use security::{
     SecurityInputs, SecurityLevel, SelfSignedChoice, SkipVerifyChoice, validate_security,
+};
+
+use crate::module::modbus::dialog::{
+    ConfirmDeleteDialog, DeleteConfirmOutcome, route_delete_confirm,
 };
 
 /// Live validator for the device-config path field: empty is allowed (a fresh empty config),
@@ -114,6 +123,37 @@ pub struct OcppSetupDialog {
     /// Optional URL path appended after the endpoint, e.g. `/ocpp/cp001`.
     #[focus(when = {self.role.get_value() == OcppRole::Client})]
     pub path: Widget<InputFieldState, InputField<String>>,
+    /// Extra HTTP headers sent on the client's websocket handshake (OC-R-117/118/119,
+    /// UI-R-059). Client role only — a CSMS server has no outbound handshake to attach headers
+    /// to. Hidden while `extra_headers` is empty (mirrors `client_ca_files`) — an empty table
+    /// has nothing to select/edit/delete, so it is skipped by focus and never painted.
+    #[focus(when = {self.show_headers_table()})]
+    pub headers_table: HeaderTable,
+    /// Add-a-header name input, sharing a row with `header_value_input` below the table.
+    #[focus(when = {self.show_headers()})]
+    pub header_name_input: Widget<InputFieldState, InputField<String>>,
+    /// Add-a-header value input.
+    #[focus(when = {self.show_headers()})]
+    pub header_value_input: Widget<InputFieldState, InputField<String>>,
+    /// Working copy of the extra-headers list edited via `headers_table`/the add-inputs/the edit
+    /// popup. Threaded onto [`crate::module::ocpp::config::device::OcppDeviceConfig::extra_headers`]
+    /// by the host (not part of [`OcppSpec`], which `resolve` builds — headers live on the device
+    /// config, not the spec).
+    #[builder(default)]
+    pub extra_headers: Vec<ferrowl_ocpp::HeaderDef>,
+    /// Edit-in-place popup for the selected header row, opened by Enter on `headers_table`; not
+    /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring
+    /// `client_ca_add_dialog`.
+    #[builder(default)]
+    pub header_edit_prompt: Option<HeaderEditPrompt>,
+    /// Delete-confirmation popup for the selected header row, opened by `d` on `headers_table`.
+    #[builder(default)]
+    pub header_delete_confirm: Option<ConfirmDeleteDialog>,
+    /// Validation error from the add-inputs/edit-popup (OC-R-117/118), shown via `error` alongside
+    /// `resolve`'s own errors. Kept separate from `resolve`'s `Result` because `extra_headers` is
+    /// not part of `OcppSpec` — `resolve` has no way to see or report a header rejection itself.
+    #[builder(default)]
+    pub header_error: Option<String>,
     /// Transport security level, offered only for `wss://`.
     #[focus(when = {self.show_security()})]
     pub security: Widget<SelectionState<SecurityLevel>, Selection<SecurityLevel>>,
@@ -233,6 +273,10 @@ impl OcppSetupDialog {
             .ip(input("IP", "127.0.0.1", &input_style, false))
             .port(input("Port", "9000", &input_style, false))
             .path(input("Path", "/ocpp/cp001", &input_style, false))
+            .headers_table(header_table(Vec::new()))
+            .header_name_input(header_name_input(crate::view::border_style()))
+            .header_value_input(header_value_input(crate::view::border_style()))
+            .extra_headers(Vec::new())
             .reconnect(aligned_selection(
                 "Reconnect",
                 Some(HorizontalAlignment::Right),
@@ -326,8 +370,17 @@ impl OcppSetupDialog {
     }
 
     /// Build a dialog pre-filled with an existing spec + device-config path, for `:edit`.
-    pub fn edit(spec: &OcppSpec, device_path: &str) -> Self {
+    /// `extra_headers` seeds the headers table (OC-R-117/118/119, UI-R-059) — it comes from
+    /// [`crate::module::ocpp::config::device::OcppDeviceConfig::extra_headers`], not `spec`,
+    /// since headers live on the device config rather than the resolved spec.
+    pub fn edit(
+        spec: &OcppSpec,
+        device_path: &str,
+        extra_headers: &[ferrowl_ocpp::HeaderDef],
+    ) -> Self {
         let mut d = Self::new();
+        d.extra_headers = extra_headers.to_vec();
+        d.headers_table = header_table(headers::rows(&d.extra_headers));
         set_text(&mut d.name, &spec.name);
         set_suggest_text(&mut d.config_path, device_path);
         d.version.state.set_selection(match spec.version {
@@ -549,6 +602,11 @@ impl OcppSetupDialog {
         self.config_path.state.input().trim().to_string()
     }
 
+    /// The working extra-headers list edited via `headers_table` (OC-R-117/118/119, UI-R-059).
+    pub fn extra_headers(&self) -> Vec<ferrowl_ocpp::HeaderDef> {
+        self.extra_headers.clone()
+    }
+
     /// Route a key: the close-confirm popup captures all keys while open; then the client-CA
     /// add-dialog (OC-R-113), if open; then the client-CA ADD/DEL buttons (Enter/Space); Esc
     /// (with nothing else open) opens the close-confirm popup; everything else falls through to
@@ -580,6 +638,65 @@ impl OcppSetupDialog {
                 _ => {
                     let _ = dialog.path.state.handle_events(modifiers, code);
                 }
+            }
+            return EventResult::Consumed;
+        }
+
+        match route_header_edit(&mut self.header_edit_prompt, modifiers, code) {
+            HeaderEditOutcome::NotActive => {}
+            HeaderEditOutcome::Consumed => return EventResult::Consumed,
+            HeaderEditOutcome::Commit(name, value) => {
+                if let Some(index) = self.headers_ref().selected() {
+                    match self.headers_ref().commit_edit(index, &name, &value) {
+                        Ok(()) => {
+                            self.header_error = None;
+                            self.header_edit_prompt = None;
+                        }
+                        Err(e) => self.header_error = Some(e.to_string()),
+                    }
+                } else {
+                    // The selected row vanished (e.g. deleted from elsewhere) while the prompt
+                    // was open; drop the now-stale prompt rather than apply to nothing.
+                    self.header_edit_prompt = None;
+                }
+                return EventResult::Consumed;
+            }
+        }
+
+        match route_delete_confirm(&mut self.header_delete_confirm, modifiers, code) {
+            DeleteConfirmOutcome::NotActive => {}
+            DeleteConfirmOutcome::Confirmed => {
+                self.headers_ref().delete_selected();
+                return EventResult::Consumed;
+            }
+            DeleteConfirmOutcome::Consumed => return EventResult::Consumed,
+        }
+
+        if self.focus == OcppSetupDialogFocus::HeadersTable {
+            if modifiers == KeyModifiers::NONE && code == KeyCode::Enter {
+                if let Some(prompt) = self.headers_ref().open_edit_prompt() {
+                    self.header_edit_prompt = Some(prompt);
+                }
+                return EventResult::Consumed;
+            }
+            if modifiers == KeyModifiers::NONE && code == KeyCode::Char('d') {
+                if self.headers_ref().selected().is_some() {
+                    self.header_delete_confirm = Some(ConfirmDeleteDialog::new("this header"));
+                }
+                return EventResult::Consumed;
+            }
+        }
+
+        if modifiers == KeyModifiers::NONE
+            && code == KeyCode::Enter
+            && matches!(
+                self.focus,
+                OcppSetupDialogFocus::HeaderNameInput | OcppSetupDialogFocus::HeaderValueInput
+            )
+        {
+            match self.headers_ref().add() {
+                Ok(()) => self.header_error = None,
+                Err(e) => self.header_error = Some(e.to_string()),
             }
             return EventResult::Consumed;
         }
@@ -644,6 +761,31 @@ impl OcppSetupDialog {
     /// host:port and ignores it — so it is hidden (and skipped by focus) when the role is Server.
     fn path_hidden(&self) -> bool {
         self.role.get_value() == OcppRole::Server
+    }
+
+    /// The extra-headers cluster (table + add-inputs, OC-R-117/118/119, UI-R-059) — client role
+    /// only, independent of `wss`/security: headers ride the plain websocket handshake too.
+    fn show_headers(&self) -> bool {
+        self.role.get_value() == OcppRole::Client
+    }
+
+    /// The table itself, as opposed to the always-visible add-inputs (when `show_headers`):
+    /// hidden while `extra_headers` is empty, mirroring `client_ca_files`'s
+    /// `show_client_ca() && !values().is_empty()` gate — an empty table has nothing to
+    /// select/edit/delete, so painting an empty box would waste a row for no purpose.
+    fn show_headers_table(&self) -> bool {
+        self.show_headers() && !self.extra_headers.is_empty()
+    }
+
+    /// Bundle of `&mut` borrows into this dialog's own headers-cluster fields (see
+    /// [`HeaderTableRef`]'s doc comment for why this can't be a nested owned struct).
+    fn headers_ref(&mut self) -> HeaderTableRef<'_> {
+        HeaderTableRef {
+            headers: &mut self.extra_headers,
+            table: &mut self.headers_table,
+            name_input: &mut self.header_name_input,
+            value_input: &mut self.header_value_input,
+        }
     }
 
     /// Whether the protocol is `wss://` (gates every security-related field).
@@ -773,14 +915,17 @@ impl OcppSetupDialog {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        match self.resolve() {
-            Ok(_) => self.error.state.clear(),
-            Err(e) => self.error.state = e,
+        match (self.resolve(), &self.header_error) {
+            (Err(e), _) => self.error.state = e,
+            (Ok(_), Some(e)) => self.error.state = e.clone(),
+            (Ok(_), None) => self.error.state.clear(),
         }
 
         let has_error = !self.error.state.is_empty();
         let role = self.role.get_value();
         let is_server = role == OcppRole::Server;
+        let show_headers = self.show_headers();
+        let show_headers_table = self.show_headers_table();
         let show_security_row = self.show_security();
         let show_credentials = self.show_credentials();
         // Fixed 3-row TLS layout (both roles): Security (no side toggle), a Self-Signed row that
@@ -794,11 +939,15 @@ impl OcppSetupDialog {
         let show_hint = self.show_hint();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role|reconnect(3)
-        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the security row
-        // (3), the self-signed row (3, mTLS only for client), the skip-verify row (3), and the
-        // hint line (1), only when applicable.
+        // + protocol|ip|port|path(3) + keybinds(1), plus the error box (3), the headers
+        // add-inputs (3, client role only), the headers table itself (7 = border(2) + header(1)
+        // + 4 rows, only once `extra_headers` is non-empty), the security row (3), the
+        // self-signed row (3, mTLS only for client), the skip-verify row (3), and the hint line
+        // (1), only when applicable.
         let box_height = 17
             + if has_error { 3 } else { 0 }
+            + if show_headers { 3 } else { 0 }
+            + if show_headers_table { 7 } else { 0 }
             + if show_security_row { 3 } else { 0 }
             + if show_self_signed_row { 3 } else { 0 }
             + if show_skip_verify_row { 3 } else { 0 }
@@ -832,21 +981,25 @@ impl OcppSetupDialog {
         block.render(vcenter, buf);
 
         let error_height = if has_error { 3 } else { 0 };
+        let headers_table_height = if show_headers_table { 7 } else { 0 };
+        let headers_inputs_height = if show_headers { 3 } else { 0 };
         let security_height = if show_security_row { 3 } else { 0 };
         let self_signed_height = if show_self_signed_row { 3 } else { 0 };
         let skip_verify_height = if show_skip_verify_row { 3 } else { 0 };
         let hint_height = if show_hint { 1 } else { 0 };
         let rows = Layout::vertical([
-            Constraint::Length(3),                  // name
-            Constraint::Length(3),                  // config path
-            Constraint::Length(3),                  // version | role | reconnect (client only)
-            Constraint::Length(3),                  // protocol | ip | port | path
-            Constraint::Length(security_height),    // security | username | password
-            Constraint::Length(self_signed_height), // self_signed (+ own-identity cert/key pair)
-            Constraint::Length(hint_height),        // self-signed hint (server, below TLS)
-            Constraint::Length(skip_verify_height), // skip-verify toggle (+ peer-verification input)
-            Constraint::Length(error_height),       // error (hidden when empty)
-            Constraint::Length(1),                  // keybinds
+            Constraint::Length(3),                     // 0: name
+            Constraint::Length(3),                     // 1: config path
+            Constraint::Length(3), // 2: version | role | reconnect (client only)
+            Constraint::Length(3), // 3: protocol | ip | port | path
+            Constraint::Length(headers_table_height), // 4: headers table (client only, non-empty)
+            Constraint::Length(headers_inputs_height), // 5: header name | value add-inputs
+            Constraint::Length(security_height), // 6: security | username | password
+            Constraint::Length(self_signed_height), // 7: self_signed (+ own-identity cert/key pair)
+            Constraint::Length(hint_height), // 8: self-signed hint (server, below TLS)
+            Constraint::Length(skip_verify_height), // 9: skip-verify toggle (+ peer-verification input)
+            Constraint::Length(error_height),       // 10: error (hidden when empty)
+            Constraint::Length(1),                  // 11: keybinds
         ])
         .split(inner);
 
@@ -870,9 +1023,18 @@ impl OcppSetupDialog {
             );
         }
 
+        if show_headers_table {
+            render_field!(self, headers_table, rows[4], buf);
+        } else if self.focus == OcppSetupDialogFocus::HeadersTable {
+            self.focus_next();
+        }
+        if show_headers {
+            render_row!(self, rows[5], buf; header_name_input, header_value_input);
+        }
+
         if show_security_row {
             if show_credentials {
-                render_row!(self, rows[4], buf;
+                render_row!(self, rows[6], buf;
                     security=> Constraint::Percentage(25),
                     username=> Constraint::Fill(1),
                     password=> Constraint::Fill(1)
@@ -880,7 +1042,7 @@ impl OcppSetupDialog {
             } else {
                 // No credential fields: the selection is the row's only widget, so it takes
                 // the full width instead of leaving two thirds blank.
-                render_field!(self, security, rows[4], buf);
+                render_field!(self, security, rows[6], buf);
             }
         }
 
@@ -889,26 +1051,26 @@ impl OcppSetupDialog {
         if show_self_signed_row {
             if show_identity_row {
                 if is_server {
-                    render_row!(self, rows[5], buf;
+                    render_row!(self, rows[7], buf;
                         self_signed => Constraint::Percentage(25),
                         cert_file => Constraint::Fill(1),
                         key_file => Constraint::Fill(1)
                     );
                 } else {
-                    render_row!(self, rows[5], buf;
+                    render_row!(self, rows[7], buf;
                         self_signed => Constraint::Percentage(25),
                         client_cert_file => Constraint::Fill(1),
                         client_key_file => Constraint::Fill(1)
                     );
                 }
             } else {
-                render_field!(self, self_signed, rows[5], buf);
+                render_field!(self, self_signed, rows[7], buf);
             }
         }
 
         if show_hint {
             self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
-            render_field!(self, hint, rows[6], buf);
+            render_field!(self, hint, rows[8], buf);
         }
 
         // Skip Verify row: always the Skip Verify toggle itself, plus (when applicable) the
@@ -919,13 +1081,13 @@ impl OcppSetupDialog {
                     // No client-CA entries yet: give ADD the remaining width and skip DEL
                     // entirely rather than paint an empty, nothing-to-delete button.
                     if self.client_ca_files.state.values().is_empty() {
-                        render_row!(self, rows[7], buf;
+                        render_row!(self, rows[9], buf;
                             client_cert_skip_verify => Constraint::Percentage(25),
                             client_ca_files => Constraint::Percentage(60),
                             client_ca_add_button => Constraint::Fill(1)
                         );
                     } else {
-                        render_row!(self, rows[7], buf;
+                        render_row!(self, rows[9], buf;
                             client_cert_skip_verify => Constraint::Percentage(25),
                             client_ca_files => Constraint::Percentage(45),
                             client_ca_add_button => Constraint::Percentage(15),
@@ -933,22 +1095,22 @@ impl OcppSetupDialog {
                         );
                     }
                 } else {
-                    render_row!(self, rows[7], buf;
+                    render_row!(self, rows[9], buf;
                         skip_verify => Constraint::Percentage(25),
                         ca_file => Constraint::Fill(1)
                     );
                 }
             } else if is_server {
-                render_field!(self, client_cert_skip_verify, rows[7], buf);
+                render_field!(self, client_cert_skip_verify, rows[9], buf);
             } else {
-                render_field!(self, skip_verify, rows[7], buf);
+                render_field!(self, skip_verify, rows[9], buf);
             }
         }
 
         if has_error {
-            render_field!(self, error, rows[8], buf);
+            render_field!(self, error, rows[10], buf);
         }
-        render_field!(self, keybinds, rows[9], buf);
+        render_field!(self, keybinds, rows[11], buf);
 
         // Must be called after every sibling widget above has been rendered, so a popup paints on
         // top rather than being overwritten (painter's-algorithm buffer model).
@@ -974,6 +1136,14 @@ impl OcppSetupDialog {
 
         if let Some(d) = self.client_ca_add_dialog.as_mut() {
             d.render(area, buf);
+        }
+
+        if let Some(prompt) = self.header_edit_prompt.as_mut() {
+            prompt.render(area, buf);
+        }
+
+        if let Some(confirm) = self.header_delete_confirm.as_mut() {
+            confirm.render(area, buf);
         }
 
         if let Some(confirm) = self.close_confirm.as_mut() {
@@ -1203,7 +1373,7 @@ mod tests {
             reconnect: Some(false),
             security: OcppSecurityConfig::default(),
         };
-        let dialog = OcppSetupDialog::edit(&spec, "device.toml");
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml", &[]);
         assert_eq!(dialog.reconnect.state.get_value(), ReconnectChoice::Off);
         let resolved = dialog.resolve().expect("valid client config");
         assert_eq!(resolved.reconnect, Some(false));
@@ -1252,7 +1422,7 @@ mod tests {
             reconnect: None,
             security: security.clone(),
         };
-        let d = OcppSetupDialog::edit(&spec, "");
+        let d = OcppSetupDialog::edit(&spec, "", &[]);
         let resolved = d.resolve().expect("ws edit resolves");
         assert_eq!(resolved.security, security);
     }
@@ -1688,7 +1858,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let dialog = OcppSetupDialog::edit(&spec, "device.toml");
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml", &[]);
         let resolved = dialog.resolve().expect("valid mTLS server config");
         assert_eq!(resolved.security, spec.security);
     }
@@ -1713,7 +1883,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let dialog = OcppSetupDialog::edit(&spec, "device.toml");
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml", &[]);
         assert_eq!(dialog.skip_verify.state.get_value(), SkipVerifyChoice::On);
         let resolved = dialog.resolve().expect("valid client config");
         assert_eq!(
@@ -2100,6 +2270,185 @@ mod tests {
         assert!(
             keybinds_row - ca_row <= 6,
             "client-CA row appears to have grown beyond a fixed 3-row box:\n{text}"
+        );
+    }
+
+    // --- OC-R-117/118/119, UI-R-059: extra-headers table ------------------------------------
+
+    fn client_dialog() -> OcppSetupDialog {
+        let mut d = OcppSetupDialog::new();
+        set_text(&mut d.name, "cs-1");
+        d // Client by default
+    }
+
+    fn header(name: &str, value: &str) -> ferrowl_ocpp::HeaderDef {
+        ferrowl_ocpp::HeaderDef::new(name, value).unwrap()
+    }
+
+    #[test]
+    /// OC-R-117 — editing an existing device seeds the headers table from `extra_headers`.
+    fn ut_edit_seeds_extra_headers_table() {
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: OcppSecurityConfig::default(),
+        };
+        let headers = vec![header("X-Tenant", "acme-1")];
+        let dialog = OcppSetupDialog::edit(&spec, "device.toml", &headers);
+        assert_eq!(dialog.extra_headers, headers);
+        assert_eq!(dialog.headers_table.state.values().len(), 1);
+    }
+
+    #[test]
+    /// UI-R-059 — the headers cluster is client-only; a server-role dialog hides it (and never
+    /// grows the dialog's box height for it), mirroring `path`.
+    fn ut_headers_table_hidden_for_server_role() {
+        let mut d = client_dialog();
+        d.extra_headers = vec![header("X-A", "1")];
+        d.headers_table = header_table(headers::rows(&d.extra_headers));
+        assert!(d.show_headers());
+        assert!(d.show_headers_table());
+        d.role.state.set_selection(1); // Server
+        assert!(!d.show_headers());
+        assert!(!d.show_headers_table());
+
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("Extra Headers"),
+            "headers table rendered for the server role:\n{text}"
+        );
+    }
+
+    #[test]
+    /// UI-R-059 (mid-review addendum) — the headers table itself is hidden while `extra_headers`
+    /// is empty, even for the client role; the add-inputs stay visible so the first header can
+    /// still be entered.
+    fn ut_headers_table_hidden_when_empty_shown_once_populated() {
+        let mut d = client_dialog();
+        assert!(d.show_headers());
+        assert!(!d.show_headers_table());
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("Extra Headers"),
+            "empty headers table must not be painted:\n{text}"
+        );
+        assert!(
+            text.contains("Header Name"),
+            "add-inputs must stay visible even with an empty table:\n{text}"
+        );
+
+        d.extra_headers = vec![header("X-A", "1")];
+        d.headers_table = header_table(headers::rows(&d.extra_headers));
+        assert!(d.show_headers_table());
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Extra Headers"),
+            "headers table must appear once a header exists:\n{text}"
+        );
+    }
+
+    #[test]
+    /// UI-R-059 — `Enter` on the selected header row opens an edit prompt prefilled from it.
+    fn ut_enter_on_selected_header_row_opens_edit_prompt_prefilled() {
+        let mut d = client_dialog();
+        d.extra_headers = vec![header("X-A", "1")];
+        d.headers_table = header_table(headers::rows(&d.extra_headers));
+        d.focus = OcppSetupDialogFocus::HeadersTable;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        let prompt = d.header_edit_prompt.as_ref().expect("edit prompt opened");
+        assert_eq!(prompt.name_input().state.input(), "X-A");
+        assert_eq!(prompt.value_input().state.input(), "1");
+    }
+
+    #[test]
+    /// UI-R-059 — `Enter` on an empty (unselected) header table is a no-op: no prompt opens.
+    fn ut_enter_on_unselected_header_table_is_noop() {
+        let mut d = client_dialog();
+        d.focus = OcppSetupDialogFocus::HeadersTable;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.header_edit_prompt.is_none());
+    }
+
+    #[test]
+    /// UI-R-059 — `d` on the selected header row opens a delete-confirm popup; confirming
+    /// removes the row from `extra_headers`.
+    fn ut_d_on_selected_header_row_opens_delete_confirm_then_removes_on_yes() {
+        let mut d = client_dialog();
+        d.extra_headers = vec![header("X-A", "1")];
+        d.headers_table = header_table(headers::rows(&d.extra_headers));
+        d.focus = OcppSetupDialogFocus::HeadersTable;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('d'));
+        assert!(d.header_delete_confirm.is_some());
+
+        // The DELETE button, not CANCEL, is the confirm dialog's default under test — select it
+        // explicitly rather than assume its default focus.
+        d.header_delete_confirm.as_mut().unwrap().focus_next();
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.header_delete_confirm.is_none());
+        assert!(d.extra_headers.is_empty());
+    }
+
+    #[test]
+    /// UI-R-059 — `d` on an empty (unselected) header table is a no-op: no confirm popup opens.
+    fn ut_d_on_unselected_header_table_is_noop() {
+        let mut d = client_dialog();
+        d.focus = OcppSetupDialogFocus::HeadersTable;
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('d'));
+        assert!(d.header_delete_confirm.is_none());
+    }
+
+    #[test]
+    /// OC-R-117/118 — typing into the add-inputs and pressing `Enter` appends a header and
+    /// clears both inputs.
+    fn ut_add_header_via_inputs_then_enter() {
+        let mut d = client_dialog();
+        d.focus = OcppSetupDialogFocus::HeaderValueInput;
+        type_into(&mut d.header_name_input.state, "X-Tenant");
+        type_into(&mut d.header_value_input.state, "acme-1");
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(d.extra_headers.len(), 1);
+        assert_eq!(d.extra_headers[0].name, "X-Tenant");
+        assert_eq!(d.header_name_input.state.input(), "");
+        assert_eq!(d.header_value_input.state.input(), "");
+    }
+
+    #[test]
+    /// OC-R-117 — a refused add (reserved header name) leaves both inputs' text in place and
+    /// surfaces the error via the dialog's own error box, rather than silently dropping it.
+    fn ut_add_header_refused_inline_keeps_prompt_open() {
+        let mut d = client_dialog();
+        d.focus = OcppSetupDialogFocus::HeaderNameInput;
+        type_into(&mut d.header_name_input.state, "Authorization");
+        d.focus = OcppSetupDialogFocus::HeaderValueInput;
+        type_into(&mut d.header_value_input.state, "Basic xyz");
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.extra_headers.is_empty());
+        assert_eq!(d.header_name_input.state.input(), "Authorization");
+        assert_eq!(d.header_value_input.state.input(), "Basic xyz");
+        assert!(d.header_error.is_some());
+
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        d.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Authorization"),
+            "error must be surfaced without wiping the offending input:\n{text}"
         );
     }
 }

@@ -52,21 +52,8 @@ impl SetupView for OcppSetupView {
         let spec = self.dialog.resolve().ok()?;
         let path = self.dialog.config_path();
         let name = spec.name.clone();
+        let device = build_device(&self.dialog, &spec, &path);
 
-        // Assemble the device config: an existing file at `path` is authoritative (its scripts,
-        // and — to avoid clobbering — its version/role/timeout); otherwise build it from the
-        // dialog's selections with no scripts yet.
-        let device = if path.is_empty() {
-            OcppDeviceConfig::from_spec(&spec, Vec::new())
-        } else {
-            match crate::config::load_ocpp_device(&path) {
-                Ok(mut loaded) => {
-                    apply_security_precedence(&mut loaded, &spec);
-                    loaded
-                }
-                Err(_) => OcppDeviceConfig::from_spec(&spec, Vec::new()),
-            }
-        };
         // Reconcile the runtime spec with the (possibly file-sourced) device fields + endpoint.
         let module = OcppModuleSpec::from_spec(&spec, &path);
         let spec = OcppSpec::from_parts(&module, &device);
@@ -77,6 +64,28 @@ impl SetupView for OcppSetupView {
         };
         Some((name, factory))
     }
+}
+
+/// Assemble the device config for [`OcppSetupView::confirm`]: an existing file at `path` is
+/// authoritative (its scripts, and — to avoid clobbering — its version/role/timeout); otherwise
+/// build it from the dialog's selections with no scripts yet. `extra_headers` (OC-R-117/118/119,
+/// UI-R-059) always comes from the dialog's working list, regardless of the file/fresh split
+/// above — it has no file fallback the way security does, since a fresh dialog's table starts
+/// empty either way.
+fn build_device(dialog: &OcppSetupDialog, spec: &OcppSpec, path: &str) -> OcppDeviceConfig {
+    let mut device = if path.is_empty() {
+        OcppDeviceConfig::from_spec(spec, Vec::new())
+    } else {
+        match crate::config::load_ocpp_device(path) {
+            Ok(mut loaded) => {
+                apply_security_precedence(&mut loaded, spec);
+                loaded
+            }
+            Err(_) => OcppDeviceConfig::from_spec(spec, Vec::new()),
+        }
+    };
+    device.extra_headers = dialog.extra_headers();
+    device
 }
 
 /// Decide which security section wins when merging a loaded device config with the dialog's
@@ -193,5 +202,19 @@ mod tests {
             assert!(!name.is_empty());
             let _view = factory();
         }
+    }
+
+    #[test]
+    /// OC-R-117/UI-R-059 — `build_device` (used by `confirm`) carries the dialog's working
+    /// extra-headers list onto the device config, not just the resolved `OcppSpec` (which has
+    /// no headers field of its own).
+    fn ut_confirm_carries_dialog_extra_headers_onto_device() {
+        let mut sv = OcppSetupView::new();
+        sv.dialog.name.state.set_input("cs-1".to_string());
+        sv.dialog.extra_headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
+        let spec = sv.dialog.resolve().expect("a named client dialog resolves");
+        let device = build_device(&sv.dialog, &spec, &sv.dialog.config_path());
+        assert_eq!(device.extra_headers.len(), 1);
+        assert_eq!(device.extra_headers[0].name, "X-Tenant");
     }
 }
