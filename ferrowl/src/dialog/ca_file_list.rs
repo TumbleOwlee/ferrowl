@@ -109,14 +109,14 @@ impl AddCaFileDialog {
             return Err(format!("Path: {e}"));
         }
         let path = self.path.state.input().trim();
-        let p = std::path::Path::new(path);
-        if !p.exists() {
+        let resolved = ferrowl_util::path::expand(path);
+        if !resolved.exists() {
             return Err(format!("Path: file not found: {path}"));
         }
-        if p.is_dir() {
+        if resolved.is_dir() {
             return Err(format!("Path: is a directory, not a file: {path}"));
         }
-        let has_valid_extension = p
+        let has_valid_extension = resolved
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| {
@@ -235,6 +235,21 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ferrowl_ca_file_list_test_{name}"));
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    /// NF-R-042 — a valid `~/...` path validates the same way it will later load.
+    fn ut_validate_tilde_path_that_exists_succeeds() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let name = format!("ferrowl_ca_file_list_test_tilde_{}.pem", std::process::id());
+        std::fs::write(home.join(&name), b"").unwrap();
+
+        let mut d = AddCaFileDialog::new();
+        type_into(&mut d.path.state, &format!("~/{name}"));
+        let result = d.validate();
+
+        let _ = std::fs::remove_file(home.join(&name));
+        result.expect("a valid ~/-prefixed .pem path must validate");
     }
 
     /// MB-R-136/OC-R-113 — an empty path fails validation; a non-empty, existing one is trimmed

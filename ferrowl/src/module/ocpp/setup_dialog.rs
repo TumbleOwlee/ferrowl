@@ -78,12 +78,12 @@ impl ToLabel for ReconnectChoice {
 impl Validate for ConfigPath {
     fn validate(input: &str) -> ValidateResult {
         let input = input.trim();
-        let path = std::path::Path::new(input);
+        let resolved = ferrowl_util::path::expand(input);
 
         if input.is_empty() {
             ValidateResult::None
         } else if FileType::from_path(input).is_some() {
-            if path.exists() {
+            if resolved.exists() {
                 match crate::config::load_ocpp_device(input) {
                     Ok(_) => ValidateResult::Success,
                     Err(e) => ValidateResult::Error(format!("Config: {e}")),
@@ -912,7 +912,7 @@ impl OcppSetupDialog {
         {
             return *hit;
         }
-        let exists = std::path::Path::new(path).exists();
+        let exists = ferrowl_util::path::expand(path).exists();
         cache.insert(path.to_string(), (exists, now));
         exists
     }
@@ -1340,6 +1340,47 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ferrowl_ocpp_setup_test_{name}"));
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    /// NF-R-042 — a `~/...` config path validates the same way it will later load.
+    fn ut_config_path_validate_expands_tilde() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let name = format!("ferrowl_ocpp_setup_tilde_cfg_{}.toml", std::process::id());
+        ferrowl_util::convert::Converter::save(
+            &crate::module::ocpp::config::device::OcppDeviceConfig::default(),
+            home.join(&name).to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+
+        let result = ConfigPath::validate(&format!("~/{name}"));
+        let _ = std::fs::remove_file(home.join(&name));
+
+        assert!(matches!(result, ValidateResult::Success));
+    }
+
+    #[test]
+    /// NF-R-042 — `path_exists` (wired via `resolve()`'s `validate_security`) expands a leading
+    /// `~` in cert/key paths, so a valid `~/...` path validates the same way TLS material
+    /// loading will.
+    fn ut_resolve_tls_cert_key_tilde_paths_validate() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let cert_name = format!("ferrowl_ocpp_setup_tilde_{}.crt", std::process::id());
+        let key_name = format!("ferrowl_ocpp_setup_tilde_{}.key", std::process::id());
+        std::fs::write(home.join(&cert_name), b"").unwrap();
+        std::fs::write(home.join(&key_name), b"").unwrap();
+
+        let mut d = wss_dialog(1); // Server
+        d.security.state.set_selection(SecurityLevel::Tls.index());
+        set_suggest_text(&mut d.cert_file, &format!("~/{cert_name}"));
+        set_suggest_text(&mut d.key_file, &format!("~/{key_name}"));
+
+        let outcome = d.resolve();
+        let _ = std::fs::remove_file(home.join(&cert_name));
+        let _ = std::fs::remove_file(home.join(&key_name));
+
+        outcome.expect("a valid ~/-prefixed cert/key path must validate");
     }
 
     #[test]
