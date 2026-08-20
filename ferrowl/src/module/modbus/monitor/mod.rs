@@ -5,6 +5,9 @@
 //! `endpoint_to_monitor_config` lands in s4 of the modbus-bus-monitor plan.
 
 mod build;
+mod module;
 
-#[allow(unused_imports)] // consumed starting s4; see module doc
+#[allow(unused_imports)] // consumed by module.rs; not yet by app code outside this submodule
 pub(crate) use build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
+#[allow(unused_imports)] // consumed starting s5 (ModbusMonitorModuleView)
+pub(crate) use module::ModbusMonitorModule;
