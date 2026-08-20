@@ -3,7 +3,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -56,7 +56,8 @@ fn module_log_path(base: &str, name: &str) -> PathBuf {
             }
         })
         .collect();
-    let path = Path::new(base);
+    let base = ferrowl_util::path::expand(base);
+    let path = base.as_path();
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -104,6 +105,29 @@ mod tests {
             module_log_path("out", "m"),
             std::path::PathBuf::from("out.m")
         );
+    }
+
+    #[test]
+    /// NF-R-042 — `module_log_path` expands a leading `~` in `base` to the home directory.
+    fn ut_module_log_path_expands_tilde() {
+        use super::module_log_path;
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        assert_eq!(
+            module_log_path("~/run.log", "cs 1"),
+            home.join("run.cs_1.log")
+        );
+    }
+
+    #[test]
+    /// NF-R-042 — `open_sink` resolves a `~`-prefixed base against the real home directory.
+    fn ut_open_sink_expands_tilde() {
+        use super::{FileSink, open_sink};
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let result = open_sink(&sink, Some("~/ferrowl_nfr042_open_sink_test.log"), "test");
+        assert!(result.is_ok());
+        assert!(sink.lock().unwrap().is_some());
+        let _ = std::fs::remove_file(home.join("ferrowl_nfr042_open_sink_test.test.log"));
     }
 
     #[test]

@@ -67,7 +67,7 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
 /// `<stem>.<sanitized-name>.<ext>` (or `<base>.<name>` without an extension), next to `base`.
 /// Mirrors the Modbus module's own path scheme so OCPP `:log` files sit alongside Modbus ones.
 pub fn module_log_path(base: &str, name: &str) -> std::path::PathBuf {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     let sanitized: String = name
         .chars()
         .map(|c| {
@@ -78,7 +78,8 @@ pub fn module_log_path(base: &str, name: &str) -> std::path::PathBuf {
             }
         })
         .collect();
-    let path = Path::new(base);
+    let base = ferrowl_util::path::expand(base);
+    let path = base.as_path();
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -151,6 +152,16 @@ mod tests {
         // No extension: append the name.
         let p = module_log_path("/tmp/run", "csms");
         assert_eq!(p, std::path::Path::new("/tmp/run.csms"));
+    }
+
+    #[test]
+    /// NF-R-042 — `module_log_path` expands a leading `~` in `base` to the home directory.
+    fn module_log_path_expands_tilde() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        assert_eq!(
+            module_log_path("~/run.log", "cs 1"),
+            home.join("run.cs_1.log")
+        );
     }
 
     #[test]

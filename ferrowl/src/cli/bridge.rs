@@ -43,7 +43,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         Some(path) => match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(path)
+            .open(ferrowl_util::path::expand(path))
         {
             Ok(f) => Some(f),
             Err(e) => {
@@ -389,6 +389,34 @@ mod tests {
         assert!(
             contents.contains("bridge |"),
             "new drained lines must be appended, got:\n{contents}"
+        );
+    }
+
+    #[tokio::test]
+    /// NF-R-042 — `--log-file` expands a leading `~` to the home directory.
+    async fn ut_bridge_log_file_expands_tilde() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let filename = format!("ferrowl_cl_bridge_tilde_{}.log", std::process::id());
+        let expected_path = home.join(&filename);
+        let _ = std::fs::remove_file(&expected_path);
+
+        let downstream_port = free_port();
+        let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 5).await;
+        let upstream_port = free_port();
+        let args = BridgeArgs {
+            upstream: Some(descriptor(upstream_port)),
+            downstream: Some(descriptor(downstream_port)),
+            duration: Some(1),
+            log_file: Some(format!("~/{filename}")),
+            exit_on_error: false,
+        };
+        assert_eq!(run(&args).await, 0);
+
+        let contents = std::fs::read_to_string(&expected_path);
+        let _ = std::fs::remove_file(&expected_path);
+        assert!(
+            contents.unwrap().contains("bridge |"),
+            "expected the log to have been written under the expanded home path"
         );
     }
 }
