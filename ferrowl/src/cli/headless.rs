@@ -630,7 +630,10 @@ mod tests {
     #[tokio::test]
     /// NF-R-042 — `--log-file` expands a leading `~` to the home directory.
     async fn ut_run_log_file_expands_tilde() {
-        let mut args = session_run_args("enabled", true);
+        // Own tag ("tilde"), not "enabled" — sharing a tag with `ut_run_wires_session_sim_and_
+        // drains_its_log` would race both tests over the same temp device/session files under
+        // parallel execution.
+        let mut args = session_run_args("tilde", true);
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let filename = format!("ferrowl_headless_tilde_{}.log", std::process::id());
         args.log_file = Some(format!("~/{filename}"));
