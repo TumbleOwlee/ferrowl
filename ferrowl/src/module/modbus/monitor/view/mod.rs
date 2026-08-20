@@ -20,6 +20,14 @@ use crate::module::view::{
 };
 
 use super::ModbusMonitorModule;
+use super::dialog::AddInterpretationDialog;
+
+/// The single modal overlay over the monitor view (mutually exclusive by construction).
+enum MonitorOverlay {
+    None,
+    /// `:add`/`:a` interpretation dialog (UI-R-061), scoped to the currently selected unit id.
+    Add(Box<AddInterpretationDialog>),
+}
 
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
 /// current `VERSION`, format from the path's extension).
@@ -65,6 +73,7 @@ pub struct ModbusMonitorModuleView {
     selected: usize,
     /// MB-R-143 log lines for the selected unit id, re-derived each tick from `module.log()`.
     messages: Vec<String>,
+    overlay: MonitorOverlay,
     view_focused: bool,
 }
 
@@ -78,12 +87,31 @@ impl ModbusMonitorModuleView {
             unit_ids: Vec::new(),
             selected: 0,
             messages: Vec::new(),
+            overlay: MonitorOverlay::None,
             view_focused: false,
         }
     }
 
     fn selected_unit(&self) -> Option<UnitId> {
         self.unit_ids.get(self.selected).copied()
+    }
+
+    /// Validate the open `Add` overlay's dialog, scope it to the selected unit id (UI-R-061:
+    /// "the dialog never asks for it"), and add it to the module's interpretations (MB-R-145).
+    /// No-op if the overlay isn't open, the dialog is invalid, or nothing is selected.
+    fn confirm_add(&mut self) {
+        let MonitorOverlay::Add(dialog) = &self.overlay else {
+            return;
+        };
+        let Ok((name, mut def)) = dialog.apply() else {
+            return;
+        };
+        let Some(unit) = self.selected_unit() else {
+            return;
+        };
+        def.slave_id = unit.0;
+        self.module.add_interpretation(name, def);
+        self.overlay = MonitorOverlay::None;
     }
 
     /// Interpretations defined for `unit` (MB-R-145), by name.
@@ -136,7 +164,7 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn is_overlay_active(&self) -> bool {
-        false
+        !matches!(self.overlay, MonitorOverlay::None)
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -258,9 +286,47 @@ impl ModuleView for ModbusMonitorModuleView {
         }
     }
 
-    fn render_overlay(&mut self, _frame: &mut Frame, _area: Rect) {}
+    fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
+        if let MonitorOverlay::Add(dialog) = &mut self.overlay {
+            let full_area = frame.area();
+            dialog.render(full_area, frame.buffer_mut());
+        }
+    }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let MonitorOverlay::Add(dialog) = &mut self.overlay {
+            match code {
+                KeyCode::Esc if dialog.add_dialog.is_some() => {
+                    dialog.add_dialog = None;
+                }
+                KeyCode::Esc => {
+                    self.overlay = MonitorOverlay::None;
+                }
+                KeyCode::Enter if dialog.add_dialog.is_some() => {
+                    dialog.confirm_add_dialog();
+                }
+                KeyCode::Enter if dialog.is_confirm_button_focused() => {
+                    self.confirm_add();
+                }
+                KeyCode::Char(' ') => {
+                    dialog.handle_space();
+                }
+                KeyCode::BackTab => {
+                    dialog.focus_previous();
+                }
+                KeyCode::Tab => {
+                    dialog.focus_next();
+                }
+                _ => {
+                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(
+                        dialog.as_mut(),
+                        modifiers,
+                        code,
+                    );
+                }
+            }
+            return EventResult::Consumed;
+        }
         match code {
             KeyCode::Up => {
                 self.selected = self.selected.saturating_sub(1);
@@ -395,7 +461,7 @@ impl ModuleView for ModbusMonitorModuleView {
             }
 
             ModbusMonitorCmd::Add => {
-                // Interpretation-add dialog wiring lands in s6 of the modbus-bus-monitor plan.
+                self.overlay = MonitorOverlay::Add(Box::new(AddInterpretationDialog::new()));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -702,5 +768,70 @@ mod tests {
         let v = view();
         assert_eq!(v.commands().len(), MONITOR_COMMAND_SPECS.len());
         let _log: SharedLog = v.log();
+    }
+
+    /// UI-R-061 — `:add` scopes the new interpretation to the currently selected unit id; the
+    /// dialog never asks for one, and other unit ids' interpretation sets are untouched.
+    #[tokio::test]
+    async fn ut_add_command_scopes_new_interpretation_to_selected_unit_id() {
+        use crate::module::modbus::dialog::set_input;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(1), UnitId(3)];
+        v.selected = 1; // unit 3
+
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.address, "10");
+        v.confirm_add();
+
+        assert_eq!(v.interpretations_for(UnitId(3)).len(), 1);
+        assert_eq!(v.interpretations_for(UnitId(3))[0].0, "power");
+        assert!(v.interpretations_for(UnitId(1)).is_empty());
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    /// MB-R-145 — a newly added interpretation is reflected in the resolved-registers section
+    /// immediately, without a fresh unit-id selection round-trip.
+    #[tokio::test]
+    async fn ut_resolved_registers_table_reflects_new_interpretation_immediately() {
+        use crate::module::modbus::dialog::set_input;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.address, "10");
+        v.confirm_add();
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        let contents =
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .fold(String::new(), |mut acc, cell| {
+                    acc.push_str(cell.symbol());
+                    acc
+                });
+        assert!(contents.contains("Resolved registers"));
+        assert!(contents.contains("power"));
     }
 }

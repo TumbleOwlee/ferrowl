@@ -6,7 +6,7 @@ mod input;
 mod register_dialog;
 mod selection;
 mod subdialog;
-mod widgets;
+pub(crate) mod widgets;
 
 pub use add_value::*;
 pub use confirm::*;
@@ -23,7 +23,7 @@ use ferrowl_codec::{Access, Address, Kind};
 
 /// Parse an address-field value: the literal `virtual` (case-insensitive) selects a virtual
 /// register (no Modbus address), otherwise a `u16` address.
-pub(super) fn parse_address(input: &str) -> Result<Address, String> {
+pub(crate) fn parse_address(input: &str) -> Result<Address, String> {
     let trimmed = input.trim();
     if trimmed.eq_ignore_ascii_case("virtual") {
         Ok(Address::Virtual)
@@ -42,7 +42,7 @@ use ferrowl_ui::{
 use std::fmt::Debug;
 
 #[derive(Debug, Clone)]
-pub struct Format(RegisterFormat);
+pub struct Format(pub(crate) RegisterFormat);
 
 impl ToLabel for Format {
     fn to_label(&self) -> String {
@@ -66,7 +66,7 @@ impl ToLabel for Format {
 }
 
 #[derive(Debug, Clone)]
-pub struct Endian(RegisterEndian);
+pub struct Endian(pub(crate) RegisterEndian);
 
 impl ToLabel for Endian {
     fn to_label(&self) -> String {
@@ -79,7 +79,7 @@ impl ToLabel for Endian {
 }
 
 #[derive(Debug, Clone)]
-pub struct WordOrder(RegisterWordOrder);
+pub struct WordOrder(pub(crate) RegisterWordOrder);
 
 impl ToLabel for WordOrder {
     fn to_label(&self) -> String {
@@ -108,7 +108,7 @@ impl ToLabel for ValueType {
 }
 
 #[derive(Debug, Clone)]
-pub struct Alignment(TextAlignment);
+pub struct Alignment(pub(crate) TextAlignment);
 
 impl ToLabel for Alignment {
     fn to_label(&self) -> String {
@@ -159,7 +159,7 @@ pub(super) fn access_index(access: &Access) -> usize {
 }
 
 /// Index into the `kind` selection (order matches dialog `new()`).
-pub(super) fn kind_index(kind: &Kind) -> usize {
+pub(crate) fn kind_index(kind: &Kind) -> usize {
     match kind {
         Kind::Coil => 0,
         Kind::DiscreteInput => 1,
@@ -168,7 +168,7 @@ pub(super) fn kind_index(kind: &Kind) -> usize {
     }
 }
 
-pub(super) fn set_input<T: Validate>(
+pub(crate) fn set_input<T: Validate>(
     widget: &mut Widget<InputFieldState, InputField<T>>,
     value: &str,
 ) {
@@ -177,21 +177,21 @@ pub(super) fn set_input<T: Validate>(
     widget.state.set_cursor(value.chars().count());
 }
 
-pub(super) fn alignment_index(alignment: &TextAlignment) -> usize {
+pub(crate) fn alignment_index(alignment: &TextAlignment) -> usize {
     match alignment {
         TextAlignment::Left => 0,
         TextAlignment::Right => 1,
     }
 }
 
-pub(super) fn endian_index(endian: &RegisterEndian) -> usize {
+pub(crate) fn endian_index(endian: &RegisterEndian) -> usize {
     match endian {
         RegisterEndian::Big => 0,
         RegisterEndian::Little => 1,
     }
 }
 
-pub(super) fn word_order_index(word_order: &RegisterWordOrder) -> usize {
+pub(crate) fn word_order_index(word_order: &RegisterWordOrder) -> usize {
     match word_order {
         RegisterWordOrder::Normal => 0,
         RegisterWordOrder::Reversed => 1,
@@ -206,7 +206,7 @@ pub(super) fn word_order_index(word_order: &RegisterWordOrder) -> usize {
 /// actually invoked with `Ascii` in practice. It still maps `Ascii` to `0` (same as `U8`) as a
 /// well-defined, documented fallback rather than an unreachable/panic path, so a future caller
 /// that forgets to gate on value type first degrades gracefully instead of panicking.
-pub(super) fn format_index(format: &RegisterFormat) -> usize {
+pub(crate) fn format_index(format: &RegisterFormat) -> usize {
     match format {
         RegisterFormat::U8(_) => 0,
         RegisterFormat::U16(_) => 1,
@@ -224,7 +224,7 @@ pub(super) fn format_index(format: &RegisterFormat) -> usize {
     }
 }
 
-pub(super) fn numeric_parts(
+pub(crate) fn numeric_parts(
     format: &RegisterFormat,
 ) -> (RegisterEndian, RegisterWordOrder, Resolution, BitField) {
     match format {
@@ -252,7 +252,7 @@ pub(super) fn numeric_parts(
 
 /// Whether `format` is an integer type (carries a [`BitField`]); false for
 /// floats and ASCII. Used to gate the bitmask input field in the edit dialogs.
-pub(super) fn is_integer_format(format: &RegisterFormat) -> bool {
+pub(crate) fn is_integer_format(format: &RegisterFormat) -> bool {
     matches!(
         format,
         RegisterFormat::U8(_)
@@ -270,13 +270,13 @@ pub(super) fn is_integer_format(format: &RegisterFormat) -> bool {
 
 /// Whether `format` occupies more than one register (`width > 1`). Used to gate
 /// the register-order selector, which is inert for single-register formats.
-pub(super) fn is_multi_register_format(format: &RegisterFormat) -> bool {
+pub(crate) fn is_multi_register_format(format: &RegisterFormat) -> bool {
     format.width() > 1
 }
 
 /// Parse a bitmask input field (`0x`-prefixed hex or decimal). Empty ⇒ the full
 /// no-op mask. Returns a user-facing error string on a malformed value.
-pub(super) fn parse_bitmask(s: &str) -> Result<BitField, String> {
+pub(crate) fn parse_bitmask(s: &str) -> Result<BitField, String> {
     let t = s.trim();
     if t.is_empty() {
         return Ok(BitField::default());
@@ -293,7 +293,7 @@ pub(super) fn parse_bitmask(s: &str) -> Result<BitField, String> {
 /// Rebuild a numeric format of the same variant as `format` with the given
 /// endian/register-order/resolution. Integer variants also carry `bitfield`;
 /// floats ignore it. Register order is inert for single-register variants.
-pub(super) fn with_numeric_parts(
+pub(crate) fn with_numeric_parts(
     format: &RegisterFormat,
     endian: RegisterEndian,
     word_order: RegisterWordOrder,

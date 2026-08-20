@@ -35,7 +35,7 @@ fn field_margin() -> Margin {
 }
 
 /// An unfocused, bordered, titled input field with a placeholder.
-pub(super) fn input<T: Validate + Clone>(
+pub(crate) fn input<T: Validate + Clone>(
     title: impl Into<Title>,
     placeholder: &str,
 ) -> Widget<InputFieldState, InputField<T>> {
@@ -52,7 +52,7 @@ pub(super) fn input<T: Validate + Clone>(
 }
 
 /// Like [`input`], but rendered multiline (used for the description field).
-pub(super) fn input_multiline<T: Validate + Clone>(
+pub(crate) fn input_multiline<T: Validate + Clone>(
     title: impl Into<Title>,
     placeholder: &str,
 ) -> Widget<InputFieldState, InputField<T>> {
@@ -69,7 +69,7 @@ pub(super) fn input_multiline<T: Validate + Clone>(
 }
 
 /// An unfocused input field pre-filled with `content` (cursor at its end).
-pub(super) fn input_filled<T: Validate + Clone>(
+pub(crate) fn input_filled<T: Validate + Clone>(
     title: impl Into<Title>,
     content: &str,
 ) -> Widget<InputFieldState, InputField<T>> {
@@ -98,7 +98,7 @@ fn input_widget<T: Validate + Clone>(title: impl Into<Title>, multiline: bool) -
 }
 
 /// An unfocused, bordered, titled selection over `values`, with entry `selected` picked.
-pub(super) fn selection<T: ToLabel + Clone>(
+pub(crate) fn selection<T: ToLabel + Clone>(
     title: impl Into<Title>,
     values: Vec<T>,
     selected: usize,
@@ -122,12 +122,12 @@ pub(super) fn selection<T: ToLabel + Clone>(
 }
 
 /// An unfocused, center-aligned button labelled `label`, with `horizontal` outer margin.
-pub(super) fn button(label: &str, horizontal: u16) -> Widget<ButtonState, Button> {
+pub(crate) fn button(label: &str, horizontal: u16) -> Widget<ButtonState, Button> {
     ferrowl_ui::widgets::button(label, ButtonStyle::default(), horizontal)
 }
 
 /// A bordered, titled static text box showing `content`.
-pub(super) fn text_boxed(
+pub(crate) fn text_boxed(
     title: impl Into<Title>,
     content: &str,
     style: TextStyle,
@@ -147,7 +147,7 @@ pub(super) fn text_boxed(
 }
 
 /// The (initially empty) error pane, in the scheme's error colors.
-pub(super) fn error_text() -> Widget<String, Text> {
+pub(crate) fn error_text() -> Widget<String, Text> {
     let style = TextStyle {
         general: ratatui::prelude::Style::default()
             .fg(COLOR_SCHEME.error)
@@ -157,7 +157,7 @@ pub(super) fn error_text() -> Widget<String, Text> {
 }
 
 /// The success pane, in the scheme's success colors.
-pub(super) fn success_text() -> Widget<String, Text> {
+pub(crate) fn success_text() -> Widget<String, Text> {
     let style = TextStyle {
         general: ratatui::prelude::Style::default()
             .fg(COLOR_SCHEME.success)
@@ -167,7 +167,7 @@ pub(super) fn success_text() -> Widget<String, Text> {
 }
 
 /// One borderless, centered keybind help line.
-pub(super) fn keybind(content: &str) -> Widget<String, Text> {
+pub(crate) fn keybind(content: &str) -> Widget<String, Text> {
     Widget {
         state: content.to_string(),
         widget: TextBuilder::default()
@@ -180,7 +180,7 @@ pub(super) fn keybind(content: &str) -> Widget<String, Text> {
 }
 
 /// The register-kind options, in display order.
-pub(super) fn kind_options() -> Vec<KindOption> {
+pub(crate) fn kind_options() -> Vec<KindOption> {
     vec![
         KindOption(Kind::Coil),
         KindOption(Kind::DiscreteInput),
@@ -199,7 +199,7 @@ pub(super) fn access_options() -> Vec<AccessOption> {
 }
 
 /// The numeric format options, in display order.
-pub(super) fn format_options() -> Vec<Format> {
+pub(crate) fn format_options() -> Vec<Format> {
     let n = || {
         (
             RegisterEndian::Big,
@@ -233,12 +233,12 @@ pub(super) fn format_options() -> Vec<Format> {
 }
 
 /// The endianness options, in display order.
-pub(super) fn endian_options() -> Vec<Endian> {
+pub(crate) fn endian_options() -> Vec<Endian> {
     vec![Endian(RegisterEndian::Big), Endian(RegisterEndian::Little)]
 }
 
 /// The register (word) order options, in display order.
-pub(super) fn word_order_options() -> Vec<WordOrder> {
+pub(crate) fn word_order_options() -> Vec<WordOrder> {
     vec![
         WordOrder(RegisterWordOrder::Normal),
         WordOrder(RegisterWordOrder::Reversed),
@@ -246,7 +246,7 @@ pub(super) fn word_order_options() -> Vec<WordOrder> {
 }
 
 /// The text-alignment options, in display order.
-pub(super) fn alignment_options() -> Vec<Alignment> {
+pub(crate) fn alignment_options() -> Vec<Alignment> {
     vec![
         Alignment(TextAlignment::Left),
         Alignment(TextAlignment::Right),
