@@ -13,7 +13,7 @@ pub mod ocpp {
     pub use crate::module::ocpp::config::session::*;
 }
 
-pub use device::DeviceConfig;
+pub use device::{DeviceConfig, MonitorDeviceConfig};
 pub use ocpp::{OcppDeviceConfig, OcppModuleSpec, OcppSpec};
 pub use session::{Endpoint, ModuleSpec, Role, Session};
 
@@ -74,6 +74,17 @@ pub fn load_ocpp_device(path: &str) -> Result<OcppDeviceConfig, ConfigError> {
     load(path)
 }
 
+/// Load a monitor device-type config file. No `migrate_update_scripts`-equivalent needed —
+/// `MonitorRegisterDef` has no `update` field to migrate (MB-R-145).
+///
+/// Forward-declared: real app-side call sites land in s4 of the modbus-bus-monitor plan
+/// (`ModbusMonitorModule` lifecycle wrapper) — `#[allow(dead_code)]`, not a stub, the function
+/// itself is already implemented and tested here.
+#[allow(dead_code)]
+pub fn load_monitor_device(path: &str) -> Result<MonitorDeviceConfig, ConfigError> {
+    load(path)
+}
+
 /// Load a session file.
 pub fn load_session(path: &str) -> Result<Session, ConfigError> {
     load(path)
@@ -101,6 +112,17 @@ mod tests {
         let spath = tmp("ferrowl_cfgmod_session.json");
         Converter::save(&Session::default(), &spath, FileType::Json).unwrap();
         assert_eq!(load_session(&spath).unwrap(), Session::default());
+    }
+
+    #[test]
+    /// api-contract.md §6 — a saved monitor device config file reloads to an equal value.
+    fn ut_load_monitor_device_roundtrip() {
+        let path = tmp("ferrowl_cfgmod_monitor_device.toml");
+        Converter::save(&MonitorDeviceConfig::default(), &path, FileType::Toml).unwrap();
+        assert_eq!(
+            load_monitor_device(&path).unwrap(),
+            MonitorDeviceConfig::default()
+        );
     }
 
     #[test]

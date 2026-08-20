@@ -63,13 +63,15 @@ pub struct ModuleSpec {
     pub endpoint: Endpoint,
 }
 
-/// Whether a module polls a remote device (client) or simulates one (server).
+/// Whether a module polls a remote device (client), simulates one (server), or passively
+/// observes bus traffic between other devices (monitor, MB-R-076/MB-R-140–145).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Client,
     #[default]
     Server,
+    Monitor,
 }
 
 impl std::fmt::Display for Role {
@@ -77,6 +79,7 @@ impl std::fmt::Display for Role {
         match self {
             Role::Client => write!(fmt, "Client"),
             Role::Server => write!(fmt, "Server"),
+            Role::Monitor => write!(fmt, "Monitor"),
         }
     }
 }
@@ -320,6 +323,21 @@ mod tests {
         assert_eq!(Role::Client.to_string(), "Client");
         assert_eq!(Role::Server.to_string(), "Server");
         assert_eq!(Role::default(), Role::Server);
+    }
+
+    /// MB-R-076 — `Role` gains a `monitor` variant: round-trips through serde as `"monitor"`,
+    /// `Display` says `"Monitor"`.
+    #[test]
+    fn ut_role_serde_monitor_tag_and_display() {
+        assert_eq!(Role::Monitor.to_string(), "Monitor");
+        assert_eq!(
+            serde_json::to_value(Role::Monitor).unwrap(),
+            serde_json::json!("monitor")
+        );
+        assert_eq!(
+            serde_json::from_value::<Role>(serde_json::json!("monitor")).unwrap(),
+            Role::Monitor
+        );
     }
 
     #[test]

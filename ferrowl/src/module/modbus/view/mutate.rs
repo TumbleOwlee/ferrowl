@@ -413,6 +413,11 @@ impl ModbusModuleView {
                     }
                 }
             }
+            Role::Monitor => unreachable!(
+                "a monitor has no `:set` command (tui/api-contract.md §2.1 omits it entirely for \
+                 this role) — the monitor view's own command dispatch lands in s5/s6/s7 of the \
+                 modbus-bus-monitor plan and never routes through this client/server `:set` path"
+            ),
         }
     }
 }
