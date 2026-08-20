@@ -16,6 +16,7 @@ mod common;
 mod error;
 mod key;
 mod log;
+pub mod monitor;
 mod operation;
 pub mod rtu;
 pub mod rtu_over_tcp;

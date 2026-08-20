@@ -1,0 +1,650 @@
+//! MB-R-142/143/144 — the monitor's decode/match state machine and receive-loop driver.
+
+use super::table::SharedObservedTable;
+use crate::{Key, LogFn, SlaveKey};
+
+use ferrowl_codec::Kind;
+use rust_modbus::{Framing, RegisterValue, RequestPdu, ResponsePdu, UnitId};
+
+/// State of the monitor's decode/match state machine (MB-R-142): either awaiting the next
+/// request, or awaiting the response to a request already seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MatchState {
+    ExpectRequest,
+    ExpectResponse {
+        slave: UnitId,
+        function: rust_modbus::FunctionCode,
+        request: RequestPdu,
+    },
+}
+
+/// How the monitor's receive-loop driver ended.
+pub(crate) enum MonitorEnd {
+    Terminated,
+    Failed(rust_modbus::Error),
+}
+
+/// MB-R-142 — decode one raw ADU per the transport's framing `F` and advance `state`
+/// accordingly, logging a completed pairing (MB-R-143), an unmatched request (MB-R-143), or a
+/// discarded malformed frame (MB-R-142's CRC/LRC/malformed carve-out) as it goes, and applying
+/// a matched non-exception transaction to `table` (MB-R-144).
+pub(crate) async fn process_frame<F, L>(
+    bytes: Vec<u8>,
+    state: MatchState,
+    log: &L,
+    table: &SharedObservedTable,
+) -> MatchState
+where
+    F: Framing<Header = UnitId>,
+    L: LogFn,
+{
+    match state {
+        MatchState::ExpectRequest => match F::decode_request(&bytes) {
+            Err(e) => {
+                log.invoke(format!("invalid frame discarded: {e}")).await;
+                MatchState::ExpectRequest
+            }
+            Ok((slave, request)) => handle_new_request(slave, request, log, table).await,
+        },
+        MatchState::ExpectResponse {
+            slave,
+            function,
+            request,
+        } => match F::decode_response(&bytes) {
+            Ok((resp_slave, response))
+                if resp_slave == slave && response.function() == function =>
+            {
+                log_complete(slave, &request, Some(&response), log).await;
+                apply_matched(slave, &request, &response, table);
+                MatchState::ExpectRequest
+            }
+            _ => match F::decode_request(&bytes) {
+                Ok((new_slave, new_request)) => {
+                    log_unmatched(slave, &request, log).await;
+                    handle_new_request(new_slave, new_request, log, table).await
+                }
+                Err(_) => {
+                    log.invoke("invalid frame discarded while awaiting response".to_string())
+                        .await;
+                    MatchState::ExpectResponse {
+                        slave,
+                        function,
+                        request,
+                    }
+                }
+            },
+        },
+    }
+}
+
+/// MB-R-142 — begin awaiting a response to `request`, unless `slave` is the broadcast address
+/// (MB-R-101/103), in which case it is logged complete on its own (MB-R-143) and, if
+/// write-shaped, applied to `table` immediately (MB-R-144) — a broadcast never gets a response.
+async fn handle_new_request<L: LogFn>(
+    slave: UnitId,
+    request: RequestPdu,
+    log: &L,
+    table: &SharedObservedTable,
+) -> MatchState {
+    if slave == UnitId(0) {
+        log_complete(slave, &request, None, log).await;
+        apply_broadcast(slave, &request, table);
+        MatchState::ExpectRequest
+    } else {
+        let function = request.function();
+        MatchState::ExpectResponse {
+            slave,
+            function,
+            request,
+        }
+    }
+}
+
+/// MB-R-143 — one log entry per completed request/response pairing (or, for a broadcast, per
+/// request on its own).
+async fn log_complete<L: LogFn>(
+    slave: UnitId,
+    request: &RequestPdu,
+    response: Option<&ResponsePdu>,
+    log: &L,
+) {
+    let msg = match response {
+        Some(response) => {
+            format!("slave {slave} complete: request={request:?} response={response:?}")
+        }
+        None => format!("slave {slave} complete (broadcast): request={request:?}"),
+    };
+    log.invoke(msg).await;
+}
+
+/// MB-R-143 — one log entry per unmatched request: no response frame arrived before the next
+/// request began.
+async fn log_unmatched<L: LogFn>(slave: UnitId, request: &RequestPdu, log: &L) {
+    log.invoke(format!(
+        "slave {slave} unmatched (no response): request={request:?}"
+    ))
+    .await;
+}
+
+/// MB-R-144 — a matched, non-exception transaction updates `table`: a read-shaped request
+/// writes the response's returned words; a write-shaped request writes its own carried
+/// value(s). `ReadWriteMultipleRegisters` is both at once (FR-R-037's read-then-write).
+fn apply_matched(
+    slave: UnitId,
+    request: &RequestPdu,
+    response: &ResponsePdu,
+    table: &SharedObservedTable,
+) {
+    if matches!(response, ResponsePdu::Exception(_)) {
+        return;
+    }
+    match (request, response) {
+        (RequestPdu::ReadCoils { address, .. }, ResponsePdu::ReadCoils { coils }) => {
+            write_bits(slave, Kind::Coil, address.0, coils, table);
+        }
+        (
+            RequestPdu::ReadDiscreteInputs { address, .. },
+            ResponsePdu::ReadDiscreteInputs { inputs },
+        ) => {
+            write_bits(slave, Kind::DiscreteInput, address.0, inputs, table);
+        }
+        (
+            RequestPdu::ReadHoldingRegisters { address, .. },
+            ResponsePdu::ReadHoldingRegisters { registers },
+        ) => {
+            write_regs(slave, Kind::HoldingRegister, address.0, registers, table);
+        }
+        (
+            RequestPdu::ReadInputRegisters { address, .. },
+            ResponsePdu::ReadInputRegisters { registers },
+        ) => {
+            write_regs(slave, Kind::InputRegister, address.0, registers, table);
+        }
+        (RequestPdu::WriteSingleCoil { address, value }, ResponsePdu::WriteSingleCoil { .. }) => {
+            write_bits(
+                slave,
+                Kind::Coil,
+                address.0,
+                std::slice::from_ref(value),
+                table,
+            );
+        }
+        (
+            RequestPdu::WriteSingleRegister { address, value },
+            ResponsePdu::WriteSingleRegister { .. },
+        ) => {
+            write_words(slave, Kind::HoldingRegister, address.0, &[value.0], table);
+        }
+        (
+            RequestPdu::WriteMultipleCoils { address, coils },
+            ResponsePdu::WriteMultipleCoils { .. },
+        ) => {
+            write_bits(slave, Kind::Coil, address.0, coils, table);
+        }
+        (
+            RequestPdu::WriteMultipleRegisters { address, registers },
+            ResponsePdu::WriteMultipleRegisters { .. },
+        ) => {
+            write_regs(slave, Kind::HoldingRegister, address.0, registers, table);
+        }
+        (
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address,
+                write_address,
+                registers,
+                ..
+            },
+            ResponsePdu::ReadWriteMultipleRegisters {
+                registers: read_values,
+            },
+        ) => {
+            write_regs(
+                slave,
+                Kind::HoldingRegister,
+                read_address.0,
+                read_values,
+                table,
+            );
+            write_regs(
+                slave,
+                Kind::HoldingRegister,
+                write_address.0,
+                registers,
+                table,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// MB-R-144 — a broadcast (slave id 0) write-shaped request is applied to `table` immediately,
+/// independent of any response (there never is one). Non-write-shaped requests (a broadcast
+/// read makes no protocol sense but is not itself malformed) are a no-op here.
+fn apply_broadcast(slave: UnitId, request: &RequestPdu, table: &SharedObservedTable) {
+    match request {
+        RequestPdu::WriteSingleCoil { address, value } => {
+            write_bits(
+                slave,
+                Kind::Coil,
+                address.0,
+                std::slice::from_ref(value),
+                table,
+            );
+        }
+        RequestPdu::WriteSingleRegister { address, value } => {
+            write_words(slave, Kind::HoldingRegister, address.0, &[value.0], table);
+        }
+        RequestPdu::WriteMultipleCoils { address, coils } => {
+            write_bits(slave, Kind::Coil, address.0, coils, table);
+        }
+        RequestPdu::WriteMultipleRegisters { address, registers } => {
+            write_regs(slave, Kind::HoldingRegister, address.0, registers, table);
+        }
+        RequestPdu::ReadWriteMultipleRegisters {
+            write_address,
+            registers,
+            ..
+        } => {
+            write_regs(
+                slave,
+                Kind::HoldingRegister,
+                write_address.0,
+                registers,
+                table,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn write_words(
+    slave: UnitId,
+    kind: Kind,
+    address: u16,
+    words: &[u16],
+    table: &SharedObservedTable,
+) {
+    table.write().write_words(
+        Key::new(SlaveKey {
+            slave_id: slave,
+            kind,
+        }),
+        address,
+        words,
+    );
+}
+
+/// MB-R-144 — coil-family values pack into `u16` words the same way the store's
+/// `CellType::Coil` cells already do (`1`/`0`), so the table is a uniform `u16`-per-address map.
+fn write_bits(slave: UnitId, kind: Kind, address: u16, bits: &[bool], table: &SharedObservedTable) {
+    let words: Vec<u16> = bits.iter().map(|b| u16::from(*b)).collect();
+    write_words(slave, kind, address, &words, table);
+}
+
+fn write_regs(
+    slave: UnitId,
+    kind: Kind,
+    address: u16,
+    regs: &[RegisterValue],
+    table: &SharedObservedTable,
+) {
+    let words: Vec<u16> = regs.iter().map(|r| r.0).collect();
+    write_words(slave, kind, address, &words, table);
+}
+
+/// MB-R-141 — drives a monitor's receive loop: decode/match every frame `reader` yields,
+/// racing an incoming [`crate::ServerCommand`] on `commands`. `activity` is set on every
+/// successfully-read frame regardless of decode outcome (MB-R-132's "at least one
+/// request/datagram was read" reset condition, applied by analogy).
+pub(crate) async fn drive_monitor<S, F, L>(
+    mut reader: rust_modbus::AduReader<S, F>,
+    log: L,
+    table: SharedObservedTable,
+    activity: &std::sync::atomic::AtomicBool,
+    commands: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
+) -> MonitorEnd
+where
+    S: tokio::io::AsyncRead + Unpin + Send,
+    F: rust_modbus::Framing<Header = rust_modbus::UnitId>,
+    L: LogFn + Clone,
+{
+    let mut state = MatchState::ExpectRequest;
+    loop {
+        tokio::select! {
+            frame = reader.recv_adu() => match frame {
+                Ok(bytes) => {
+                    activity.store(true, std::sync::atomic::Ordering::Relaxed);
+                    state = process_frame::<F, L>(bytes, state, &log, &table).await;
+                }
+                Err(e) => return MonitorEnd::Failed(e),
+            },
+            _ = commands.recv() => return MonitorEnd::Terminated,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ServerCommand;
+    use parking_lot::RwLock;
+    use rust_modbus::{Direction, Rtu};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use tokio::sync::mpsc;
+
+    fn table() -> SharedObservedTable {
+        Arc::new(RwLock::new(super::super::table::ObservedTable::default()))
+    }
+
+    /// A log sink recording every line sent to it, for assertions.
+    #[derive(Clone, Default)]
+    struct RecordingLog(Arc<std::sync::Mutex<Vec<String>>>);
+    impl LogFn for RecordingLog {
+        fn invoke(&self, msg: String) -> impl std::future::Future<Output = ()> + Send {
+            let inner = self.0.clone();
+            async move {
+                inner.lock().unwrap().push(msg);
+            }
+        }
+    }
+    impl RecordingLog {
+        fn lines(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    fn request_bytes(slave: UnitId, pdu: &RequestPdu) -> Vec<u8> {
+        Rtu::encode_request(&slave, pdu).unwrap()
+    }
+
+    fn response_bytes(slave: UnitId, pdu: &ResponsePdu) -> Vec<u8> {
+        Rtu::encode_response(&slave, pdu).unwrap()
+    }
+
+    /// MB-R-142 — a matched request/response pair returns to `ExpectRequest` and logs one
+    /// "complete" entry (MB-R-143).
+    #[tokio::test]
+    async fn ut_matched_request_response_pair_updates_state_and_logs() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(2),
+        };
+        let bytes = request_bytes(UnitId(1), &request);
+        let state = process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table).await;
+        assert_eq!(
+            state,
+            MatchState::ExpectResponse {
+                slave: UnitId(1),
+                function: rust_modbus::FunctionCode::ReadHoldingRegisters,
+                request: request.clone(),
+            }
+        );
+
+        let response = ResponsePdu::ReadHoldingRegisters {
+            registers: vec![RegisterValue(7), RegisterValue(8)],
+        };
+        let bytes = response_bytes(UnitId(1), &response);
+        let state = process_frame::<Rtu, _>(bytes, state, &log, &table).await;
+        assert_eq!(state, MatchState::ExpectRequest);
+        assert_eq!(log.lines().len(), 1);
+        assert!(log.lines()[0].contains("complete"));
+    }
+
+    /// MB-R-142 — a pending request with no matching response before the next request begins
+    /// is logged unmatched (MB-R-143), and the new request starts a fresh wait.
+    #[tokio::test]
+    async fn ut_pending_request_marked_unmatched_when_next_request_arrives() {
+        let log = RecordingLog::default();
+        let table = table();
+        let first = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &first),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+
+        let second = RequestPdu::ReadInputRegisters {
+            address: rust_modbus::Address(5),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let state =
+            process_frame::<Rtu, _>(request_bytes(UnitId(1), &second), state, &log, &table).await;
+
+        assert_eq!(
+            state,
+            MatchState::ExpectResponse {
+                slave: UnitId(1),
+                function: rust_modbus::FunctionCode::ReadInputRegisters,
+                request: second,
+            }
+        );
+        assert_eq!(log.lines().len(), 1);
+        assert!(log.lines()[0].contains("unmatched"));
+    }
+
+    /// MB-R-142 — a frame that fails CRC validation is logged (Warning-worded, level-independent
+    /// at this crate layer) and discarded; decoding resumes at the next boundary without a state
+    /// change, in `ExpectRequest`.
+    #[tokio::test]
+    async fn ut_crc_failure_logged_warning_and_discarded_without_state_change() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let mut bytes = request_bytes(UnitId(1), &request);
+        *bytes.last_mut().unwrap() ^= 0xFF; // corrupt the CRC's high byte
+
+        let state = process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table).await;
+        assert_eq!(state, MatchState::ExpectRequest);
+        assert_eq!(log.lines().len(), 1);
+        assert!(log.lines()[0].contains("invalid"));
+    }
+
+    /// MB-R-142 — a malformed frame while awaiting a response leaves the awaited state
+    /// unchanged (still waiting — neither the response nor a new request).
+    #[tokio::test]
+    async fn ut_crc_failure_while_expecting_response_does_not_change_state() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let waiting = MatchState::ExpectResponse {
+            slave: UnitId(1),
+            function: rust_modbus::FunctionCode::ReadHoldingRegisters,
+            request: request.clone(),
+        };
+        let mut bytes = request_bytes(UnitId(1), &request);
+        *bytes.last_mut().unwrap() ^= 0xFF;
+
+        let state = process_frame::<Rtu, _>(bytes, waiting.clone(), &log, &table).await;
+        assert_eq!(state, waiting);
+        assert!(log.lines()[0].contains("invalid"));
+    }
+
+    /// MB-R-143 — a broadcast (slave id 0) request is logged complete immediately and never
+    /// marked unmatched: it never enters `ExpectResponse`.
+    #[tokio::test]
+    async fn ut_broadcast_request_logged_complete_never_unmatched() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::WriteSingleRegister {
+            address: rust_modbus::Address(0),
+            value: RegisterValue(42),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(0), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+        assert_eq!(state, MatchState::ExpectRequest);
+        assert_eq!(log.lines().len(), 1);
+        assert!(log.lines()[0].contains("complete"));
+        assert!(!log.lines()[0].contains("unmatched"));
+    }
+
+    /// MB-R-144 — a matched read transaction writes the response's returned words into the
+    /// table at the request's address range.
+    #[tokio::test]
+    async fn ut_matched_read_writes_response_words_into_table() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(10),
+            quantity: rust_modbus::Quantity(2),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+        let response = ResponsePdu::ReadHoldingRegisters {
+            registers: vec![RegisterValue(11), RegisterValue(22)],
+        };
+        process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table).await;
+
+        let key = Key::new(SlaveKey {
+            slave_id: UnitId(1),
+            kind: Kind::HoldingRegister,
+        });
+        assert_eq!(table.read().read_words(&key, 10, 2), Some(vec![11, 22]));
+    }
+
+    /// MB-R-144 — a matched write transaction writes the request's own carried value(s), not
+    /// the response's, into the table.
+    #[tokio::test]
+    async fn ut_matched_write_writes_request_values_into_table() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::WriteSingleRegister {
+            address: rust_modbus::Address(3),
+            value: RegisterValue(99),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+        let response = ResponsePdu::WriteSingleRegister {
+            address: rust_modbus::Address(3),
+            value: RegisterValue(99),
+        };
+        process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table).await;
+
+        let key = Key::new(SlaveKey {
+            slave_id: UnitId(1),
+            kind: Kind::HoldingRegister,
+        });
+        assert_eq!(table.read().read_words(&key, 3, 1), Some(vec![99]));
+    }
+
+    /// MB-R-144 — an unmatched write request never modifies the table.
+    #[tokio::test]
+    async fn ut_unmatched_write_does_not_modify_table() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::WriteSingleRegister {
+            address: rust_modbus::Address(3),
+            value: RegisterValue(99),
+        };
+        process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+        // A different request begins before any response — the pending write is unmatched.
+        let other = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &other),
+            MatchState::ExpectResponse {
+                slave: UnitId(1),
+                function: rust_modbus::FunctionCode::WriteSingleRegister,
+                request,
+            },
+            &log,
+            &table,
+        )
+        .await;
+
+        let key = Key::new(SlaveKey {
+            slave_id: UnitId(1),
+            kind: Kind::HoldingRegister,
+        });
+        assert_eq!(table.read().read_words(&key, 3, 1), None);
+    }
+
+    /// MB-R-144 — a response carrying an exception code never modifies the table, matched or
+    /// not.
+    #[tokio::test]
+    async fn ut_exception_response_does_not_modify_table() {
+        let log = RecordingLog::default();
+        let table = table();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+        )
+        .await;
+        let response = ResponsePdu::Exception(rust_modbus::ExceptionResponse {
+            function: rust_modbus::FunctionCode::ReadHoldingRegisters,
+            exception: rust_modbus::ExceptionCode::IllegalDataAddress,
+        });
+        let state =
+            process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table)
+                .await;
+        assert_eq!(state, MatchState::ExpectRequest);
+
+        let key = Key::new(SlaveKey {
+            slave_id: UnitId(1),
+            kind: Kind::HoldingRegister,
+        });
+        assert_eq!(table.read().read_words(&key, 0, 1), None);
+    }
+
+    /// MB-R-141 — `drive_monitor` terminates on `ServerCommand::Terminate`, independent of
+    /// whatever the reader is doing, and marks `activity` only for frames actually read.
+    #[tokio::test]
+    async fn ut_drive_monitor_terminates_on_command() {
+        let (_client, server) = tokio::io::duplex(64);
+        // `_client` is kept alive (not dropped) so the stream never hits EOF: the reader's
+        // `recv_adu` future stays pending forever, and only the command channel can end this.
+        let reader = rust_modbus::AduReader::<_, Rtu>::new(server, Direction::Request);
+        let table = table();
+        let activity = AtomicBool::new(false);
+        let (tx, mut rx) = mpsc::channel::<ServerCommand>(1);
+        tx.send(ServerCommand::Terminate).await.unwrap();
+
+        let end =
+            drive_monitor::<_, Rtu, _>(reader, RecordingLog::default(), table, &activity, &mut rx)
+                .await;
+        assert!(matches!(end, MonitorEnd::Terminated));
+        assert!(!activity.load(std::sync::atomic::Ordering::Relaxed));
+    }
+}
