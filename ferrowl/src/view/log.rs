@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     /// NF-R-042 — `module_log_path` expands a leading `~` in `base` to the home directory.
-    fn module_log_path_expands_tilde() {
+    fn ut_module_log_path_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         assert_eq!(
             module_log_path("~/run.log", "cs 1"),
