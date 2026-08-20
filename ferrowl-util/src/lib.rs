@@ -1,9 +1,10 @@
 //! Small general-purpose helpers shared across the ferrowl crates:
-//! config file (de)serialization ([`convert`]), tracked tokio task spawning
-//! ([`tokio`]), and a few ergonomic macros and traits.
+//! config file (de)serialization ([`convert`]), user-supplied filesystem path expansion
+//! ([`path`]), tracked tokio task spawning ([`tokio`]), and a few ergonomic macros and traits.
 
 pub mod backoff;
 pub mod convert;
+pub mod path;
 pub mod tls;
 pub mod tokio;
 
