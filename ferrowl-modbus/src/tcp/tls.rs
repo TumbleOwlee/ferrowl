@@ -63,7 +63,9 @@ pub fn new_self_signed_cache() -> SelfSignedCache {
 /// Read a PEM file's raw bytes, mapping a missing/unreadable file to the TLS
 /// configuration-error tier (MB-R-107/108, edge-cases.md "malformed PEM").
 pub(crate) fn read_pem(path: &str) -> Result<Vec<u8>, TcpError> {
-    std::fs::read(path).map_err(|e| TcpError::Configuration(format!("failed to read {path}: {e}")))
+    let resolved = ferrowl_util::path::expand(path);
+    std::fs::read(&resolved)
+        .map_err(|e| TcpError::Configuration(format!("failed to read {path}: {e}")))
 }
 
 /// Map any `rust_modbus` failure encountered while assembling TLS material (a bad
@@ -319,6 +321,21 @@ mod tests {
         ));
         std::fs::write(&path, pem).expect("write test pem");
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    /// NF-R-042 — `read_pem` expands a leading `~` in the cert/key/CA path.
+    fn ut_read_pem_expands_tilde() {
+        use super::read_pem;
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let filename = format!("ferrowl-modbus-tls-tilde-{}.pem", std::process::id());
+        let path = home.join(&filename);
+        std::fs::write(&path, b"PEMDATA").expect("write test pem");
+
+        let result = read_pem(&format!("~/{filename}"));
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(result.unwrap(), b"PEMDATA".to_vec());
     }
 
     fn cert_and_key_pem() -> (String, String) {
