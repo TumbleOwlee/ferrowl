@@ -41,7 +41,7 @@ where
     match state {
         MatchState::ExpectRequest => match F::decode_request(&bytes) {
             Err(e) => {
-                log.invoke(format!("invalid frame discarded: {e}")).await;
+                log.invoke(format!("malformed frame discarded: {e}")).await;
                 MatchState::ExpectRequest
             }
             Ok((slave, request)) => handle_new_request(slave, request, log, table).await,
@@ -64,7 +64,7 @@ where
                     handle_new_request(new_slave, new_request, log, table).await
                 }
                 Err(_) => {
-                    log.invoke("invalid frame discarded while awaiting response".to_string())
+                    log.invoke("malformed frame discarded while awaiting response".to_string())
                         .await;
                     MatchState::ExpectResponse {
                         slave,
@@ -447,7 +447,7 @@ mod tests {
         let state = process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table).await;
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
-        assert!(log.lines()[0].contains("invalid"));
+        assert!(log.lines()[0].contains("malformed frame"));
     }
 
     /// MB-R-142 — a malformed frame while awaiting a response leaves the awaited state
@@ -470,7 +470,7 @@ mod tests {
 
         let state = process_frame::<Rtu, _>(bytes, waiting.clone(), &log, &table).await;
         assert_eq!(state, waiting);
-        assert!(log.lines()[0].contains("invalid"));
+        assert!(log.lines()[0].contains("malformed frame"));
     }
 
     /// MB-R-143 — a broadcast (slave id 0) request is logged complete immediately and never
