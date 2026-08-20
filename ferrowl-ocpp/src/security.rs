@@ -463,7 +463,8 @@ fn pem_io_error(err: pem::Error) -> std::io::Error {
 
 /// Load a PEM certificate chain from `path`.
 fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, Error> {
-    let certs = CertificateDer::pem_file_iter(path)
+    let resolved = ferrowl_util::path::expand(path);
+    let certs = CertificateDer::pem_file_iter(&resolved)
         .map_err(|source| TlsError::Io {
             path: path.to_owned(),
             source: pem_io_error(source),
@@ -481,7 +482,8 @@ fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, Error> {
 
 /// Load a PEM private key from `path`.
 fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>, Error> {
-    match PrivateKeyDer::from_pem_file(path) {
+    let resolved = ferrowl_util::path::expand(path);
+    match PrivateKeyDer::from_pem_file(&resolved) {
         Ok(key) => Ok(key),
         Err(pem::Error::NoItemsFound) => Err(TlsError::NoPrivateKey(path.to_owned()).into()),
         Err(source) => Err(TlsError::Io {
@@ -520,6 +522,39 @@ mod tests {
         let key = rcgen::KeyPair::generate().unwrap();
         let cert = params.self_signed(&key).unwrap();
         (cert.pem(), key.serialize_pem())
+    }
+
+    /// Like [`temp_pem`], but under the real home directory and returned as a `~/...` path, for
+    /// exercising NF-R-042 tilde expansion. Returns `(tilde_path, actual_path)`.
+    fn home_pem(tag: &str, contents: &str) -> (String, std::path::PathBuf) {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let filename = format!(
+            "ferrowl-ocpp-sec-tilde-{tag}-{}-{n}.pem",
+            std::process::id()
+        );
+        let actual = home.join(&filename);
+        std::fs::File::create(&actual)
+            .and_then(|mut f| f.write_all(contents.as_bytes()))
+            .expect("write home pem");
+        (format!("~/{filename}"), actual)
+    }
+
+    #[test]
+    /// NF-R-042 — `load_certs`/`load_private_key` expand a leading `~` to the home directory.
+    fn ut_load_certs_and_key_expand_tilde() {
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let (cert_tilde, cert_actual) = home_pem("cert", &cert_pem);
+        let (key_tilde, key_actual) = home_pem("key", &key_pem);
+
+        let certs = load_certs(&cert_tilde);
+        let key = load_private_key(&key_tilde);
+        let _ = std::fs::remove_file(&cert_actual);
+        let _ = std::fs::remove_file(&key_actual);
+
+        assert_eq!(certs.unwrap().len(), 1);
+        key.expect("key should load via a ~/-prefixed path");
     }
 
     #[test]

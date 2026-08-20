@@ -238,7 +238,7 @@ pub async fn run(args: &RunArgs) -> i32 {
         Some(path) => match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(path)
+            .open(ferrowl_util::path::expand(path))
         {
             Ok(f) => Some(f),
             Err(e) => {
@@ -624,6 +624,30 @@ mod tests {
         assert!(
             contents.contains("session | session-script-ran"),
             "expected a session-prefixed log line, got:\n{contents}"
+        );
+    }
+
+    #[tokio::test]
+    /// NF-R-042 — `--log-file` expands a leading `~` to the home directory.
+    async fn ut_run_log_file_expands_tilde() {
+        // Own tag ("tilde"), not "enabled" — sharing a tag with `ut_run_wires_session_sim_and_
+        // drains_its_log` would race both tests over the same temp device/session files under
+        // parallel execution.
+        let mut args = session_run_args("tilde", true);
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let filename = format!("ferrowl_headless_tilde_{}.log", std::process::id());
+        args.log_file = Some(format!("~/{filename}"));
+        let expected_path = home.join(&filename);
+        let _ = std::fs::remove_file(&expected_path);
+
+        let exit_code = run(&args).await;
+        assert_eq!(exit_code, 0);
+
+        let contents = std::fs::read_to_string(&expected_path);
+        let _ = std::fs::remove_file(&expected_path);
+        assert!(
+            contents.unwrap().contains("session | session-script-ran"),
+            "expected the log to have been written under the expanded home path"
         );
     }
 

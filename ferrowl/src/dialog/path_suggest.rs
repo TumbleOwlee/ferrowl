@@ -7,23 +7,6 @@ use ferrowl_ui::traits::{Suggestion, SuggestionProvider};
 /// Maximum number of suggestions returned by [`complete_path`].
 pub const MAX_SUGGESTIONS: usize = 12;
 
-/// Expand a leading `~/` (or bare `~`) in `input` to `home`, for use as a directory to read.
-///
-/// `home` is injected so callers can supply a fake value in tests; production callers should
-/// pass the real home directory (e.g. from `std::env::home_dir` or the `HOME` env var).
-fn expand_tilde(input: &str, home: Option<&Path>) -> PathBuf {
-    if let Some(rest) = input.strip_prefix("~/") {
-        if let Some(home) = home {
-            return home.join(rest);
-        }
-    } else if input == "~"
-        && let Some(home) = home
-    {
-        return home.to_path_buf();
-    }
-    PathBuf::from(input)
-}
-
 /// Complete a partially typed path.
 ///
 /// Returns `(completed path in the user's prefix form, is_dir)` pairs, directories first, then
@@ -42,8 +25,7 @@ pub fn complete_path(input: &str, extensions: Option<&[&str]>, max: usize) -> Ve
     let read_dir_path = if dir_part.is_empty() {
         PathBuf::from(".")
     } else {
-        let home = std::env::home_dir().or_else(|| std::env::var_os("HOME").map(PathBuf::from));
-        expand_tilde(dir_part, home.as_deref())
+        ferrowl_util::path::expand(dir_part)
     };
 
     let entries = match std::fs::read_dir(&read_dir_path) {
@@ -255,15 +237,25 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-026 — a leading tilde expands to the home directory in completions.
-    fn ut_tilde_expansion_with_fake_home() {
-        let root = setup("ferrowl_pathsuggest_tilde");
-        let expanded = expand_tilde("~/conf", Some(&root));
-        assert_eq!(expanded, root.join("conf"));
-
-        let expanded_bare = expand_tilde("~", Some(&root));
-        assert_eq!(expanded_bare, root);
+    /// NF-R-042 — a leading tilde expands to the real home directory in completions. Note
+    /// `complete_path` returns paths in the user's typed prefix form (`dir_part` + name), so the
+    /// returned string still shows `~/...`; only the internal `read_dir` call resolves it.
+    fn ut_complete_path_expands_tilde_uses_real_home_dir() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let dirname = format!("ferrowl_pathsuggest_tilde_real_{}", std::process::id());
+        let root = home.join(&dirname);
         cleanup(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("probe.toml"), "").unwrap();
+
+        let input = format!("~/{dirname}/");
+        let results = complete_path(&input, None, MAX_SUGGESTIONS);
+        cleanup(&root);
+
+        assert!(
+            results.contains(&(format!("~/{dirname}/probe.toml"), false)),
+            "got: {results:?}"
+        );
     }
 
     #[test]

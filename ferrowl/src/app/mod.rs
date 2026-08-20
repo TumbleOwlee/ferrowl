@@ -717,6 +717,29 @@ mod tests {
     }
 
     #[test]
+    /// NF-R-042 — `LogRing::set_log_file` resolves a `~`-prefixed base against the real home
+    /// directory (via `view::log::module_log_path`, itself tilde-aware).
+    fn ut_log_ring_set_log_file_expands_tilde() {
+        let base = "~/ferrowl_nfr042_logring_test.log";
+        let name = "csms";
+        let path = crate::view::log::module_log_path(base, name);
+        let _ = std::fs::remove_file(&path);
+
+        let mut ring = LogRing::init();
+        ring.set_log_file(Some(base), name);
+        ring.write(Level::Info, "tilde line");
+        ring.flush();
+
+        let mut buffered = String::new();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_string(&mut buffered)
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(buffered.contains("tilde line"));
+    }
+
+    #[test]
     /// UI-R-003 — the app owns an ordered tab list with one active index; switching the active tab
     /// changes only the index, leaving the order intact.
     fn ut_ordered_tab_list_with_single_active_index() {

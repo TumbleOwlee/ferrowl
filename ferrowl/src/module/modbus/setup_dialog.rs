@@ -77,12 +77,12 @@ pub struct ConfigPath;
 impl Validate for ConfigPath {
     fn validate(input: &str) -> ValidateResult {
         let input = input.trim();
-        let path = std::path::Path::new(input);
+        let resolved = ferrowl_util::path::expand(input);
 
         if input.is_empty() {
             ValidateResult::None
         } else if FileType::from_path(input).is_some() {
-            if path.exists() {
+            if resolved.exists() {
                 match crate::config::load_device(input) {
                     Ok(_) => ValidateResult::Success,
                     Err(e) => ValidateResult::Error(format!("Config: {e}")),
@@ -831,7 +831,7 @@ impl SetupDialog {
         let values = self.values()?;
         let device = if self.mode == DialogMode::New {
             let path = self.config_path.state.input().trim().to_string();
-            if path.is_empty() || !std::path::Path::new(&path).exists() {
+            if path.is_empty() || !ferrowl_util::path::expand(&path).exists() {
                 Some((path, DeviceConfig::default()))
             } else {
                 let device =
@@ -1031,7 +1031,9 @@ impl SetupDialog {
                         Role::Client => cfg.server = orig.server.clone(),
                     }
                 }
-                validate_tls(&cfg, role, level, &|p| std::path::Path::new(p).exists())?;
+                validate_tls(&cfg, role, level, &|p| {
+                    ferrowl_util::path::expand(p).exists()
+                })?;
                 Some(Some(cfg))
             }
         } else {
@@ -1427,6 +1429,93 @@ mod tests {
         let path = std::env::temp_dir().join(format!("ferrowl_modbus_setup_test_{name}"));
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    /// NF-R-042 — a `~/...` config path validates the same way `resolve()` will later load it.
+    fn ut_config_path_validate_expands_tilde() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let name = format!("ferrowl_modbus_setup_tilde_cfg_{}.toml", std::process::id());
+        ferrowl_util::convert::Converter::save(
+            &DeviceConfig::default(),
+            home.join(&name).to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+
+        let result = ConfigPath::validate(&format!("~/{name}"));
+        let _ = std::fs::remove_file(home.join(&name));
+
+        assert!(matches!(result, ValidateResult::Success));
+    }
+
+    #[test]
+    /// NF-R-042 — `resolve()`'s config-path existence gate expands a leading `~`.
+    fn ut_resolve_config_path_tilde_loads_device() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let name = format!(
+            "ferrowl_modbus_setup_tilde_resolve_{}.toml",
+            std::process::id()
+        );
+        // A distinguishing (non-default) marker: if `resolve()`'s exists-check gate fails to
+        // expand `~`, it falls back to the "path doesn't exist, use a default device" branch,
+        // which would also produce `Some(...)` -- so a plain `is_some()` assertion wouldn't
+        // actually prove the file was loaded. Asserting the marker survived does.
+        let saved = DeviceConfig {
+            timeout_ms: Some(12345),
+            ..DeviceConfig::default()
+        };
+        ferrowl_util::convert::Converter::save(
+            &saved,
+            home.join(&name).to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        set_suggest_input(&mut dialog.config_path, &format!("~/{name}"));
+
+        let outcome = dialog.resolve();
+        let _ = std::fs::remove_file(home.join(&name));
+
+        let outcome = outcome.expect("a valid ~/-prefixed config path must resolve");
+        let (_, device) = outcome.device.expect("New mode always sets device");
+        assert_eq!(device.timeout_ms, Some(12345));
+    }
+
+    #[test]
+    /// NF-R-042 — `validate_tls`'s existence check (wired via `resolve()`) expands a leading `~`
+    /// in cert/key paths, so a valid `~/...` path validates the same way TLS material loading
+    /// will.
+    fn ut_resolve_tls_cert_key_tilde_paths_validate() {
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let cert_name = format!("ferrowl_modbus_setup_tilde_{}.crt", std::process::id());
+        let key_name = format!("ferrowl_modbus_setup_tilde_{}.key", std::process::id());
+        std::fs::write(home.join(&cert_name), b"").unwrap();
+        std::fs::write(home.join(&key_name), b"").unwrap();
+
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        set_suggest_input(&mut dialog.cert_file, &format!("~/{cert_name}"));
+        set_suggest_input(&mut dialog.key_file, &format!("~/{key_name}"));
+
+        let outcome = dialog.resolve();
+        let _ = std::fs::remove_file(home.join(&cert_name));
+        let _ = std::fs::remove_file(home.join(&key_name));
+
+        outcome.expect("a valid ~/-prefixed cert/key path must validate");
     }
 
     /// Submits the open client-CA add sub-dialog. A fully-typed path that exists on disk always
