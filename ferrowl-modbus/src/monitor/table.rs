@@ -44,6 +44,17 @@ impl ObservedTable {
         Some(out)
     }
 
+    /// All (address, word) pairs observed under `key`, in address order (MB-R-144's read side) —
+    /// the monitor view's memory-layout section has no address range known up front, unlike
+    /// `read_words`, so it needs every address discovered so far rather than a bounded slice.
+    /// Empty (not absent) when `key` has never been written.
+    pub fn dump(&self, key: &crate::Key<SlaveKey>) -> Vec<(u16, u16)> {
+        self.values
+            .get(key)
+            .map(|region| region.iter().map(|(addr, word)| (*addr, *word)).collect())
+            .unwrap_or_default()
+    }
+
     /// Distinct slave ids observed so far, across every table kind, in sorted order (UI-R-060
     /// sorts for display regardless, so any deterministic order is fine here).
     pub fn unit_ids(&self) -> Vec<rust_modbus::UnitId> {
@@ -98,6 +109,26 @@ mod tests {
         let k = key(1, Kind::HoldingRegister);
         table.write_words(k.clone(), 0, &[1]);
         assert_eq!(table.read_words(&k, 0, 2), None);
+    }
+
+    /// MB-R-144 — `dump` returns every (address, word) pair observed under a key, in address
+    /// order, regardless of gaps between them (unlike `read_words`, which needs a known
+    /// contiguous range and fails on any gap).
+    #[test]
+    fn ut_observed_table_dump_returns_all_observed_pairs_in_address_order() {
+        let mut table = ObservedTable::default();
+        let k = key(1, Kind::HoldingRegister);
+        table.write_words(k.clone(), 10, &[5]);
+        table.write_words(k.clone(), 0, &[1, 2]);
+        assert_eq!(table.dump(&k), vec![(0, 1), (1, 2), (10, 5)]);
+    }
+
+    /// MB-R-144 — `dump` is empty, not absent/panicking, for a key that has never been written.
+    #[test]
+    fn ut_observed_table_dump_empty_for_unwritten_key() {
+        let table = ObservedTable::default();
+        let k = key(9, Kind::Coil);
+        assert_eq!(table.dump(&k), Vec::new());
     }
 
     /// MB-R-144 — the table is keyed by (slave id, table kind); `unit_ids` enumerates the
