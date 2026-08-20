@@ -38,7 +38,7 @@ pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_codec::Value>>>;
 /// Classifies a network/status line from the client/server instance for the log ring: outright
 /// disconnects and transport errors are `Error`, degraded-but-recovering states (lost connection,
 /// backoff, retried exceptions) are `Warning`, everything else (request intent, success) is `Info`.
-fn network_log_level(s: &str) -> Level {
+pub(crate) fn network_log_level(s: &str) -> Level {
     let lower = s.to_lowercase();
     if lower.contains("disconnecting")
         || lower.contains("reconnect disabled")
