@@ -133,8 +133,11 @@ One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
 |---|---|---|---|
 | `name` | string | — (required) | tab / instance name |
 | `device` | string | — (required) | path to the device config file |
-| `role` | `client` \| `server` | `server` | |
+| `role` | `client` \| `server` \| `monitor` | `server` | |
 | `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, or `ascii_over_tcp` |
+
+`role = monitor` is valid only with `transport = rtu` or `transport = ascii` (MB-R-140); resolving
+it against any other transport fails configuration resolution.
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -206,6 +209,12 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 The device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are
 what an application-built module actually uses; they deliberately differ from the
 transport-level defaults of `0`.
+
+For `role = monitor`, the device config carries only `version`, `reconnect` (now also gating
+MB-R-141's serial-open retry), and `definitions` (map of name → `MonitorRegisterDef`, §6.3).
+`timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, and `script_interval` are
+dropped for this role: a monitor never initiates a transaction, has no poll loop, and (being
+display-only) has no Lua sim surface.
 
 ### 6.1 `read_ranges`
 

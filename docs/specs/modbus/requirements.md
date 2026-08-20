@@ -279,7 +279,7 @@ behavior, stated limitations).
 
 ## Module lifecycle and device configuration
 
-**MB-R-076** — Each Modbus module instance shall be either a client or a server (never both), over TCP, RTU, RtuOverTcp, Udp, Ascii, or AsciiOverTcp, and shall own one shared register store, one register set, and one log.
+**MB-R-076** — Each Modbus module instance shall be a client, a server, or a monitor (never more than one role), over TCP, RTU, RtuOverTcp, Udp, Ascii, or AsciiOverTcp. A client or server module shall own one shared register store, one register set, and one log. A monitor module (MB-R-140–MB-R-145) shall own one log and one observed-value table in place of a register store, and a set of user-authored display interpretations in place of an access-checked register set.
 
 **MB-R-077** — A module's register store shall be built from its device config's register definitions: each fixed-address register shall declare the range `[address, address + format width)` under the key (slave id, kind).
 
@@ -338,3 +338,17 @@ behavior, stated limitations).
 **MB-R-112** — The RTU connection config shall carry no `tls` field; TLS applies to the TCP transport only.
 
 **MB-R-129** — When `Memory::add_ranges` returns `false` at a module-construction, module-reconfiguration, or runtime register-edit call site, the module shall log the rejection to its message log at Warning level, identifying: the register name (for a call site declaring a single named register) or "read-range gap cell" plus the slave id and register kind (for a call site declaring an explicit-read-range gap), the address/range that was rejected, and that the declaration was rejected for an incompatible overlap. `add_ranges`'s own return value and the fact that the declaration silently fails to apply are unchanged — this only makes the failure observable.
+
+## Monitor
+
+**MB-R-140** — A monitor module shall be configurable only on the `Rtu` or `Ascii` transport; `RtuOverTcp`, `AsciiOverTcp`, `Tcp`, and `Udp` are not valid transports for the monitor role, since only a physical serial bus carries traffic between devices other than ferrowl for the monitor to observe. Resolving a module instance spec with `role = monitor` on any other transport shall fail configuration resolution with a role/transport compatibility error, the same class of failure as an existing invalid-combination case (e.g. MB-R-107).
+
+**MB-R-141** — A monitor module shall never write to its serial port. It shall open the port receive-only and decode whatever RTU (or Ascii) frames pass on the wire — traffic produced entirely by other devices' own client/server exchanges — without participating in any transaction. A monitor's serial-port open or read failure shall retry using the same backoff policy already applied to a server's serial-port open failure (MB-R-130–MB-R-134), gated by the monitor device config's own `reconnect` field (default enabled).
+
+**MB-R-142** — A monitor module shall decode each frame per the transport's framing (MB-R-114 for RTU-style, the Ascii equivalent) into a slave id, function code, address, quantity/value(s), and, for an exception response (function code with bit `0x80` set), an exception code. It shall treat the first decoded frame after the bus falls idle as a request, and the next decoded frame carrying the same slave id and function code (or that function code with `0x80` set) as its matched response. A request for which no such frame arrives before the next request begins shall be logged as unmatched, with no response. A frame that fails CRC (RTU) or LRC (Ascii) validation, or is otherwise malformed, shall be logged to the monitor's message log at Warning level and discarded; decoding resumes at the next frame boundary without being treated as a request or response.
+
+**MB-R-143** — The monitor's log shall carry one entry per completed request/response pairing and one entry per unmatched request, each with the decoded fields of MB-R-142 plus a timestamp. A request addressed to slave id 0 (broadcast) shall be logged as complete on its own, per MB-R-102's fire-and-forget semantics, and shall never be marked unmatched.
+
+**MB-R-144** — A monitor module shall maintain an observed-value table keyed by (slave id, table kind), the same key shape as MB-R-026. A successful (non-exception) read transaction shall write the response's returned words into the table at the request's address range. A write transaction shall write the request's own carried value(s) into the table at its address range — matched or, for a broadcast, immediately — independent of any response. An unmatched request, or a response carrying an exception code, shall not modify the table.
+
+**MB-R-145** — A monitor module shall let the user author display-only register definitions against its observed-value table: (slave id, table kind, address, format), the same format machinery as a `RegisterDef` (data-contract.md §6) but with no access-direction field. Applying an interpretation shall decode the table's current raw words at that address the same way a store cell is decoded; an address with no value observed yet shall render as not-yet-observed rather than decoding zeroed memory as a real value.

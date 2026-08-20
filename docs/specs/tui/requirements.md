@@ -159,3 +159,9 @@ only the in-TUI `:` command line is owned here.
 **UI-R-049** — A view shall be composable as a focusable node: it exposes set/query-focus and next/previous-focus stepping, so the tab that owns it can treat "switch content↔log" as one focus step and toggle the whole tab's focus recursively into whichever pane is active. A focusable container's focus cycle shall skip fields whose enabling condition is currently false.
 
 **UI-R-050** — The color scheme shall be a single compile-time constant selected by build feature; the running application shall not switch color schemes at runtime.
+
+## Modbus monitor view
+
+**UI-R-060** — A Modbus monitor module's content view shall have a left panel listing every unit id observed so far (updated live as new ones appear) and, on the right, sections scoped to the currently selected unit id: a message table (MB-R-143 entries for that unit id), a memory layout (MB-R-144's observed-value table for that unit id, grouped by table kind), and a resolved-registers table (MB-R-145 interpretations applied to that unit id's memory layout) — the resolved-registers table shall be hidden entirely when no interpretation is defined for the selected unit id, reappearing once one exists. As with every module tab, the module's own scrolling log occupies the bottom log pane per UI-R-003, independent of these sections.
+
+**UI-R-061** — On a monitor view, `:add`/`:a` shall open a dialog to add a register interpretation (MB-R-145) scoped to the currently selected unit id in the left panel, mirroring the existing client/server `:add` add-register dialog (`api-contract.md`). The new interpretation shall be added to that unit id's interpretation set; the resolved-registers table shall reflect it immediately.

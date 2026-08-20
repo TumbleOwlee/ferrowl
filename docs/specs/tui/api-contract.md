@@ -67,6 +67,24 @@ command-help popup.
 | `:script` | — | Open the Lua script manager dialog |
 | `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears the sort |
 
+Modbus monitor module (`role = monitor`, MB-R-140–145):
+
+| Command | Arguments | Purpose (→ modbus) |
+|---|---|---|
+| `:edit` / `:e` | — | Open the module setup dialog |
+| `:add` / `:a` | — | Open the add-register-interpretation dialog (UI-R-061) |
+| `:start` | — | Start the module (open the serial port receive-only) |
+| `:stop` | — | Stop the module |
+| `:restart` | — | Stop then start |
+| `:reload` | — | Reload the device config from disk and restart the module |
+| `:compact` | — | Toggle compact table rows |
+| `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file |
+| `:log <file>` | file base path | Set the module's log-file sink base |
+| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table by column; bare `:order` clears the sort |
+
+`:set` (nothing to write) and `:script` (no Lua surface) are omitted entirely for this role — both
+are unrecognized commands on a monitor view rather than erroring.
+
 ### 2.2 OCPP client module
 
 | Command | Arguments | Purpose (→ ocpp) |

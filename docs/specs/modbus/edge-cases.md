@@ -27,6 +27,14 @@ mistaken for an oversight and silently "fixed".
 
 ---
 
+## Monitor boundaries
+
+| Condition | Behavior |
+|---|---|
+| A monitor observes a frame that fails CRC (RTU) or LRC (Ascii) validation, or is otherwise malformed | logged to the monitor's message log at Warning level and discarded, rather than silently dropped — expected during normal operation on a live multi-drop bus (noise, a device's own retry, or the monitor attaching mid-frame), and the visibility is worth the log volume |
+
+---
+
 ## 2. Store boundaries
 
 | Condition | Behavior |
