@@ -21,12 +21,15 @@ use crate::module::view::{
 
 use super::ModbusMonitorModule;
 use super::dialog::AddInterpretationDialog;
+use super::setup_dialog::MonitorSetupDialog;
 
 /// The single modal overlay over the monitor view (mutually exclusive by construction).
 enum MonitorOverlay {
     None,
     /// `:add`/`:a` interpretation dialog (UI-R-061), scoped to the currently selected unit id.
     Add(Box<AddInterpretationDialog>),
+    /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device.
+    Edit(Box<MonitorSetupDialog>),
 }
 
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
@@ -111,6 +114,32 @@ impl ModbusMonitorModuleView {
         };
         def.slave_id = unit.0;
         self.module.add_interpretation(name, def);
+        self.overlay = MonitorOverlay::None;
+    }
+
+    /// Resolve the open `Edit` overlay's dialog and rebuild `spec`/`device`/`module` from it
+    /// (MB-R-140), mirroring `:reload`'s "stop the old task, build a fresh module" shape but
+    /// without an implicit restart — the user starts the monitor explicitly, same as after any
+    /// other setup edit. No-op if the overlay isn't open or the dialog doesn't resolve.
+    fn confirm_edit(&mut self) {
+        let MonitorOverlay::Edit(dialog) = &self.overlay else {
+            return;
+        };
+        let Ok(outcome) = dialog.resolve() else {
+            return;
+        };
+        let device = if let Some((path, device)) = outcome.device {
+            self.spec.device = path;
+            device
+        } else {
+            self.device.clone()
+        };
+        self.spec.name = outcome.values.name;
+        self.spec.endpoint = outcome.values.endpoint;
+        let mut device = device;
+        device.reconnect = Some(outcome.values.reconnect);
+        self.module = ModbusMonitorModule::new(&self.spec, &device);
+        self.device = device;
         self.overlay = MonitorOverlay::None;
     }
 
@@ -287,13 +316,29 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
-        if let MonitorOverlay::Add(dialog) = &mut self.overlay {
-            let full_area = frame.area();
-            dialog.render(full_area, frame.buffer_mut());
+        let full_area = frame.area();
+        match &mut self.overlay {
+            MonitorOverlay::Add(dialog) => dialog.render(full_area, frame.buffer_mut()),
+            MonitorOverlay::Edit(dialog) => dialog.render(full_area, frame.buffer_mut()),
+            MonitorOverlay::None => {}
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        if let MonitorOverlay::Edit(dialog) = &mut self.overlay {
+            match code {
+                KeyCode::Esc => {
+                    self.overlay = MonitorOverlay::None;
+                }
+                KeyCode::Enter => {
+                    self.confirm_edit();
+                }
+                _ => {
+                    let _ = dialog.handle_events(modifiers, code);
+                }
+            }
+            return EventResult::Consumed;
+        }
         if let MonitorOverlay::Add(dialog) = &mut self.overlay {
             match code {
                 KeyCode::Esc if dialog.add_dialog.is_some() => {
@@ -456,7 +501,8 @@ impl ModuleView for ModbusMonitorModuleView {
             }),
 
             ModbusMonitorCmd::Edit => {
-                // Setup/:edit dialog wiring lands in s7 of the modbus-bus-monitor plan.
+                let dialog = MonitorSetupDialog::edit(&self.spec.name, &self.spec, &self.device);
+                self.overlay = MonitorOverlay::Edit(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -833,5 +879,26 @@ mod tests {
                 });
         assert!(contents.contains("Resolved registers"));
         assert!(contents.contains("power"));
+    }
+
+    /// MB-R-140 — `:edit` opens the setup dialog prefilled from the current spec, and confirming
+    /// it rebuilds `spec`/`device`/`module` from the resolved values.
+    #[tokio::test]
+    async fn ut_edit_command_opens_setup_dialog_prefilled_and_reconfigures_on_confirm() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        let MonitorOverlay::Edit(dialog) = &v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        assert_eq!(dialog.path.state.input(), "/dev/none");
+
+        let MonitorOverlay::Edit(dialog) = &mut v.overlay else {
+            unreachable!()
+        };
+        super::super::setup_dialog::set_input(&mut dialog.name, "renamed");
+        v.confirm_edit();
+
+        assert_eq!(v.spec.name, "renamed");
+        assert!(matches!(v.overlay, MonitorOverlay::None));
     }
 }

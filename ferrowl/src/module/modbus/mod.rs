@@ -16,7 +16,7 @@ pub mod view;
 mod build;
 mod log;
 mod module;
-mod monitor;
+pub mod monitor;
 
 pub use module::{ModbusModule, ModuleLog, ModuleMemory, VirtualStore};
 

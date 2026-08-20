@@ -7,6 +7,8 @@
 mod build;
 mod dialog;
 mod module;
+pub mod setup;
+mod setup_dialog;
 mod view;
 
 #[allow(unused_imports)] // consumed by view/mod.rs's Add command wiring
