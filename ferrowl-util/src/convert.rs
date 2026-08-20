@@ -49,7 +49,8 @@ pub struct Converter {}
 impl Converter {
     /// Deserialize a value from a file of the given type.
     pub fn load<T: DeserializeOwned>(path: &str, ty: FileType) -> Result<T, Error> {
-        let content = std::fs::read_to_string(path)
+        let resolved = crate::path::expand(path);
+        let content = std::fs::read_to_string(&resolved)
             .map_err(|e| Error::Deserialize(format!("Failed to read {} [{}].", path, e)))?;
         match ty {
             FileType::Toml => toml::from_str::<T>(&content)
@@ -77,7 +78,8 @@ impl Converter {
             FileType::Json => serde_json::to_string_pretty(value)
                 .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))?,
         };
-        let mut file = File::create(path)
+        let resolved = crate::path::expand(path);
+        let mut file = File::create(&resolved)
             .map_err(|e| Error::Serialize(format!("Failed to create {} [{}].", path, e)))?;
         write!(file, "{}", content)
             .map_err(|e| Error::Serialize(format!("Failed to write {} [{}].", path, e)))
@@ -90,15 +92,16 @@ impl Converter {
         dest: &str,
         dest_type: FileType,
     ) -> Result<(), Error> {
+        let resolved_src = crate::path::expand(src);
         let data: T = match src_type {
             FileType::Toml => {
-                let content = std::fs::read_to_string(src)
+                let content = std::fs::read_to_string(&resolved_src)
                     .map_err(|e| Error::Serialize(format!("Failed to read TOML file [{}].", e)))?;
                 toml::from_str::<T>(&content)
                     .map_err(|e| Error::Serialize(format!("Failed to deserialize TOML [{}].", e)))?
             }
             FileType::Json => {
-                let file = File::open(src)
+                let file = File::open(&resolved_src)
                     .map_err(|e| Error::Serialize(format!("Failed to open JSON file [{}].", e)))?;
                 let reader = BufReader::new(file);
                 serde_json::from_reader(reader)
@@ -106,11 +109,12 @@ impl Converter {
             }
         };
 
+        let resolved_dest = crate::path::expand(dest);
         match dest_type {
             FileType::Toml => {
                 let content = toml::to_string::<T>(&data)
                     .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?;
-                let mut file = File::create(dest).map_err(|e| {
+                let mut file = File::create(&resolved_dest).map_err(|e| {
                     Error::Serialize(format!("Failed to create TOML file [{}].", e))
                 })?;
                 write!(file, "{}", content)
@@ -119,7 +123,7 @@ impl Converter {
             FileType::Json => {
                 let content = serde_json::to_string_pretty::<T>(&data)
                     .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))?;
-                let mut file = File::create(dest).map_err(|e| {
+                let mut file = File::create(&resolved_dest).map_err(|e| {
                     Error::Serialize(format!("Failed to create JSON file [{}].", e))
                 })?;
                 write!(file, "{}", content)
@@ -433,5 +437,77 @@ mod tests {
         let r = Converter::load::<Sample>(&path, FileType::Json);
         assert!(matches!(r, Err(Error::Deserialize(_))));
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A unique `~/<name>` string plus the real, joined `PathBuf` it should expand to, for
+    /// exercising NF-R-042 tilde expansion. Rooted under the real home directory rather than
+    /// `std::env::temp_dir()` (unlike [`tmp_path`]) since that's the whole point under test.
+    fn home_tilde_path(ext: &str) -> (String, std::path::PathBuf) {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let home = std::env::home_dir().expect("HOME must resolve in test environment");
+        let name = format!(
+            "ferrowl_util_convert_tilde_{}_{}.{}",
+            std::process::id(),
+            n,
+            ext
+        );
+        (format!("~/{name}"), home.join(name))
+    }
+
+    #[test]
+    /// NF-R-042 — `Converter::load` expands a leading `~` in `path`.
+    fn ut_load_expands_tilde() {
+        let (tilde, actual) = home_tilde_path("toml");
+        let value = Sample {
+            a: 7,
+            b: "hello".into(),
+        };
+        Converter::save(&value, actual.to_str().unwrap(), FileType::Toml).unwrap();
+
+        let loaded: Result<Sample, Error> = Converter::load(&tilde, FileType::Toml);
+        let _ = std::fs::remove_file(&actual);
+
+        assert_eq!(loaded.unwrap(), value);
+    }
+
+    #[test]
+    /// NF-R-042 — `Converter::save` expands a leading `~` in `path`.
+    fn ut_save_expands_tilde() {
+        let (tilde, actual) = home_tilde_path("toml");
+        let value = Sample {
+            a: 9,
+            b: "world".into(),
+        };
+        Converter::save(&value, &tilde, FileType::Toml).unwrap();
+
+        // Read back via the real, joined path -- confirms the file landed under home, not
+        // literally in a directory named `~`.
+        let contents = std::fs::read_to_string(&actual);
+        let _ = std::fs::remove_file(&actual);
+
+        assert!(contents.is_ok(), "expected a file at {actual:?}");
+    }
+
+    #[test]
+    /// NF-R-042 — `Converter::convert` expands a leading `~` on both `src` and `dest`.
+    fn ut_convert_expands_tilde_both_sides() {
+        let (src_tilde, src_actual) = home_tilde_path("json");
+        let (dst_tilde, dst_actual) = home_tilde_path("toml");
+        let value = Sample {
+            a: 3,
+            b: "convert".into(),
+        };
+        Converter::save(&value, src_actual.to_str().unwrap(), FileType::Json).unwrap();
+
+        let result =
+            Converter::convert::<Sample>(&src_tilde, FileType::Json, &dst_tilde, FileType::Toml);
+        let loaded: Result<Sample, Error> = Converter::load(&dst_tilde, FileType::Toml);
+
+        let _ = std::fs::remove_file(&src_actual);
+        let _ = std::fs::remove_file(&dst_actual);
+
+        result.unwrap();
+        assert_eq!(loaded.unwrap(), value);
     }
 }
