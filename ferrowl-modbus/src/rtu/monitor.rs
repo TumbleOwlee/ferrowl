@@ -1,6 +1,6 @@
 // Crate
 use crate::common::serial_config_from;
-use crate::monitor::{MonitorEnd, SharedObservedTable, drive_monitor};
+use crate::monitor::{MonitorEnd, SharedObservedTable, SharedRecordLog, drive_monitor};
 use crate::rtu::Config;
 use crate::server_core::wait_reconnect_backoff;
 use crate::{Error, LogFn, SerialError, ServerCommand};
@@ -23,11 +23,20 @@ use tokio::task::JoinHandle;
 pub struct MonitorBuilder {
     config: Arc<RwLock<Config>>,
     table: SharedObservedTable,
+    records: SharedRecordLog,
 }
 
 impl MonitorBuilder {
-    pub fn new(config: Arc<RwLock<Config>>, table: SharedObservedTable) -> Self {
-        Self { config, table }
+    pub fn new(
+        config: Arc<RwLock<Config>>,
+        table: SharedObservedTable,
+        records: SharedRecordLog,
+    ) -> Self {
+        Self {
+            config,
+            table,
+            records,
+        }
     }
 
     /// Spawns the receive loop as a tokio task and always returns `Ok` (mirrors
@@ -46,8 +55,9 @@ impl MonitorBuilder {
     {
         let config = self.config.clone();
         let table = self.table.clone();
+        let records = self.records.clone();
         Ok(tokio::task::spawn(run(
-            config, table, receiver, log, status,
+            config, table, records, receiver, log, status,
         )))
     }
 }
@@ -57,6 +67,7 @@ impl MonitorBuilder {
 async fn run<L, St>(
     config: Arc<RwLock<Config>>,
     table: SharedObservedTable,
+    records: SharedRecordLog,
     receiver: Receiver<ServerCommand>,
     log: L,
     status: St,
@@ -71,6 +82,7 @@ where
     let attempt = || {
         let config = config.clone();
         let table = table.clone();
+        let records = records.clone();
         let log = log.clone();
         let activity = activity.clone();
         let receiver = &receiver;
@@ -123,6 +135,7 @@ where
                         reader,
                         log.clone(),
                         table.clone(),
+                        records.clone(),
                         &activity,
                         &mut receiver,
                     )

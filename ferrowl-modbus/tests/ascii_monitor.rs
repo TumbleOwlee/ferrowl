@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferrowl_modbus::ServerCommand;
 use ferrowl_modbus::ascii;
-use ferrowl_modbus::monitor::ObservedTable;
+use ferrowl_modbus::monitor::{ObservedTable, RecordLog};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -21,6 +21,10 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
 
 fn empty_table() -> ferrowl_modbus::monitor::SharedObservedTable {
     Arc::new(MemLock::new(ObservedTable::default()))
+}
+
+fn empty_records() -> ferrowl_modbus::monitor::SharedRecordLog {
+    Arc::new(MemLock::new(RecordLog::default()))
 }
 
 /// A serial path that cannot be opened, so `SerialStream::open` fails. `ascii::MonitorBuilder`
@@ -47,10 +51,14 @@ fn bad_config(reconnect: bool) -> ferrowl_modbus::rtu::Config {
 /// on the shared backoff policy instead of ending.
 async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::MonitorBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_table())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok");
+    let handle = ascii::MonitorBuilder::new(
+        Arc::new(RwLock::new(bad_config(true))),
+        empty_table(),
+        empty_records(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn always returns Ok");
     sleep(Duration::from_millis(200)).await;
     assert!(
         !handle.is_finished(),
@@ -64,11 +72,14 @@ async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
 /// still returns `Ok(handle)`, but the joined task carries the serial error.
 async fn ut_monitor_open_failure_reconnect_false_ends_task() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle =
-        ascii::MonitorBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_table())
-            .spawn(rx, sink(), sink())
-            .await
-            .expect("spawn always returns Ok");
+    let handle = ascii::MonitorBuilder::new(
+        Arc::new(RwLock::new(bad_config(false))),
+        empty_table(),
+        empty_records(),
+    )
+    .spawn(rx, sink(), sink())
+    .await
+    .expect("spawn always returns Ok");
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")

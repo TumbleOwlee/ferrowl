@@ -1,10 +1,12 @@
 //! MB-R-142/143/144 — the monitor's decode/match state machine and receive-loop driver.
 
+use super::record::{MonitorRecord, RecordStatus, SharedRecordLog, TableShape};
 use super::table::SharedObservedTable;
 use crate::{Key, LogFn, SlaveKey};
 
 use ferrowl_codec::Kind;
 use rust_modbus::{Framing, RegisterValue, RequestPdu, ResponsePdu, UnitId};
+use std::time::Instant;
 
 /// State of the monitor's decode/match state machine (MB-R-142): either awaiting the next
 /// request, or awaiting the response to a request already seen.
@@ -33,6 +35,7 @@ pub(crate) async fn process_frame<F, L>(
     state: MatchState,
     log: &L,
     table: &SharedObservedTable,
+    records: &SharedRecordLog,
 ) -> MatchState
 where
     F: Framing<Header = UnitId>,
@@ -44,7 +47,7 @@ where
                 log.invoke(format!("malformed frame discarded: {e}")).await;
                 MatchState::ExpectRequest
             }
-            Ok((slave, request)) => handle_new_request(slave, request, log, table).await,
+            Ok((slave, request)) => handle_new_request(slave, request, log, table, records).await,
         },
         MatchState::ExpectResponse {
             slave,
@@ -55,13 +58,15 @@ where
                 if resp_slave == slave && response.function() == function =>
             {
                 log_complete(slave, &request, Some(&response), log).await;
+                push_matched_record(slave, &request, &response, records);
                 apply_matched(slave, &request, &response, table);
                 MatchState::ExpectRequest
             }
             _ => match F::decode_request(&bytes) {
                 Ok((new_slave, new_request)) => {
                     log_unmatched(slave, &request, log).await;
-                    handle_new_request(new_slave, new_request, log, table).await
+                    push_unmatched_record(slave, &request, records);
+                    handle_new_request(new_slave, new_request, log, table, records).await
                 }
                 Err(_) => {
                     log.invoke("malformed frame discarded while awaiting response".to_string())
@@ -85,9 +90,11 @@ async fn handle_new_request<L: LogFn>(
     request: RequestPdu,
     log: &L,
     table: &SharedObservedTable,
+    records: &SharedRecordLog,
 ) -> MatchState {
     if slave == UnitId(0) {
         log_complete(slave, &request, None, log).await;
+        push_broadcast_record(slave, &request, records);
         apply_broadcast(slave, &request, table);
         MatchState::ExpectRequest
     } else {
@@ -124,6 +131,315 @@ async fn log_unmatched<L: LogFn>(slave: UnitId, request: &RequestPdu, log: &L) {
         "slave {slave} unmatched (no response): request={request:?}"
     ))
     .await;
+}
+
+/// MB-R-146 — a matched pair's captured record: `Ok` unless the response carries an exception
+/// code (`Exception(code)`), in which case the shape is derived from the request alone (no
+/// value was transacted, per the record-status-to-value gating note).
+fn push_matched_record(
+    slave: UnitId,
+    request: &RequestPdu,
+    response: &ResponsePdu,
+    records: &SharedRecordLog,
+) {
+    let operation = request.function();
+    let (status, shape) = match response {
+        ResponsePdu::Exception(e) => (
+            RecordStatus::Exception(e.exception),
+            shape_address_only(request),
+        ),
+        _ => (RecordStatus::Ok, shape_from_pair(request, response)),
+    };
+    records.write().push(
+        slave,
+        MonitorRecord {
+            timestamp: Instant::now(),
+            status,
+            operation,
+            shape,
+        },
+    );
+}
+
+/// MB-R-146 — an unmatched request's captured record: address/quantity known from the request
+/// alone, no values (nothing was transacted).
+fn push_unmatched_record(slave: UnitId, request: &RequestPdu, records: &SharedRecordLog) {
+    records.write().push(
+        slave,
+        MonitorRecord {
+            timestamp: Instant::now(),
+            status: RecordStatus::Unmatched,
+            operation: request.function(),
+            shape: shape_address_only(request),
+        },
+    );
+}
+
+/// MB-R-146 — a broadcast request's captured record: always `Ok` (a broadcast never gets a
+/// response to fail), shape/values from the request's own carried value(s), same as
+/// `apply_broadcast`'s table write.
+fn push_broadcast_record(slave: UnitId, request: &RequestPdu, records: &SharedRecordLog) {
+    records.write().push(
+        slave,
+        MonitorRecord {
+            timestamp: Instant::now(),
+            status: RecordStatus::Ok,
+            operation: request.function(),
+            shape: shape_from_broadcast(request),
+        },
+    );
+}
+
+/// MB-R-146's `TableShape` for a matched, non-exception pair — same 9-operation coverage as
+/// `apply_matched`'s own match, but returning the shape instead of writing to the table.
+fn shape_from_pair(request: &RequestPdu, response: &ResponsePdu) -> Option<TableShape> {
+    match (request, response) {
+        (RequestPdu::ReadCoils { address, quantity }, ResponsePdu::ReadCoils { coils }) => {
+            Some(TableShape {
+                kind: Kind::Coil,
+                address: address.0,
+                quantity: quantity.0,
+                write_address: None,
+                write_quantity: None,
+                values: coils.iter().map(|b| u16::from(*b)).collect(),
+            })
+        }
+        (
+            RequestPdu::ReadDiscreteInputs { address, quantity },
+            ResponsePdu::ReadDiscreteInputs { inputs },
+        ) => Some(TableShape {
+            kind: Kind::DiscreteInput,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: inputs.iter().map(|b| u16::from(*b)).collect(),
+        }),
+        (
+            RequestPdu::ReadHoldingRegisters { address, quantity },
+            ResponsePdu::ReadHoldingRegisters { registers },
+        ) => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: registers.iter().map(|r| r.0).collect(),
+        }),
+        (
+            RequestPdu::ReadInputRegisters { address, quantity },
+            ResponsePdu::ReadInputRegisters { registers },
+        ) => Some(TableShape {
+            kind: Kind::InputRegister,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: registers.iter().map(|r| r.0).collect(),
+        }),
+        (RequestPdu::WriteSingleCoil { address, value }, ResponsePdu::WriteSingleCoil { .. }) => {
+            Some(TableShape {
+                kind: Kind::Coil,
+                address: address.0,
+                quantity: 1,
+                write_address: None,
+                write_quantity: None,
+                values: vec![u16::from(*value)],
+            })
+        }
+        (
+            RequestPdu::WriteSingleRegister { address, value },
+            ResponsePdu::WriteSingleRegister { .. },
+        ) => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: 1,
+            write_address: None,
+            write_quantity: None,
+            values: vec![value.0],
+        }),
+        (
+            RequestPdu::WriteMultipleCoils { address, coils },
+            ResponsePdu::WriteMultipleCoils { .. },
+        ) => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: coils.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: coils.iter().map(|b| u16::from(*b)).collect(),
+        }),
+        (
+            RequestPdu::WriteMultipleRegisters { address, registers },
+            ResponsePdu::WriteMultipleRegisters { .. },
+        ) => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: registers.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: registers.iter().map(|r| r.0).collect(),
+        }),
+        (
+            RequestPdu::ReadWriteMultipleRegisters {
+                read_address,
+                read_quantity,
+                write_address,
+                registers,
+                ..
+            },
+            ResponsePdu::ReadWriteMultipleRegisters {
+                registers: read_values,
+            },
+        ) => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: read_address.0,
+            quantity: read_quantity.0,
+            write_address: Some(write_address.0),
+            write_quantity: Some(registers.len() as u16),
+            values: read_values.iter().map(|r| r.0).collect(),
+        }),
+        _ => None,
+    }
+}
+
+/// MB-R-146's `TableShape` for a broadcast request — same 5-operation coverage as
+/// `apply_broadcast`'s own match, values from the request's own carried value(s).
+fn shape_from_broadcast(request: &RequestPdu) -> Option<TableShape> {
+    match request {
+        RequestPdu::WriteSingleCoil { address, value } => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: 1,
+            write_address: None,
+            write_quantity: None,
+            values: vec![u16::from(*value)],
+        }),
+        RequestPdu::WriteSingleRegister { address, value } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: 1,
+            write_address: None,
+            write_quantity: None,
+            values: vec![value.0],
+        }),
+        RequestPdu::WriteMultipleCoils { address, coils } => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: coils.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: coils.iter().map(|b| u16::from(*b)).collect(),
+        }),
+        RequestPdu::WriteMultipleRegisters { address, registers } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: registers.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: registers.iter().map(|r| r.0).collect(),
+        }),
+        RequestPdu::ReadWriteMultipleRegisters {
+            write_address,
+            registers,
+            ..
+        } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: write_address.0,
+            quantity: registers.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: registers.iter().map(|r| r.0).collect(),
+        }),
+        _ => None,
+    }
+}
+
+/// MB-R-146's `TableShape` for a request with no response available (an unmatched request, or
+/// the request-only half of an exception): address/quantity are known from the request alone;
+/// `values` stays empty — nothing was transacted (see the record-status-to-value gating note).
+fn shape_address_only(request: &RequestPdu) -> Option<TableShape> {
+    match request {
+        RequestPdu::ReadCoils { address, quantity } => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::ReadDiscreteInputs { address, quantity } => Some(TableShape {
+            kind: Kind::DiscreteInput,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::ReadHoldingRegisters { address, quantity } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::ReadInputRegisters { address, quantity } => Some(TableShape {
+            kind: Kind::InputRegister,
+            address: address.0,
+            quantity: quantity.0,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::WriteSingleCoil { address, .. } => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: 1,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::WriteSingleRegister { address, .. } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: 1,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::WriteMultipleCoils { address, coils } => Some(TableShape {
+            kind: Kind::Coil,
+            address: address.0,
+            quantity: coils.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::WriteMultipleRegisters { address, registers } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: address.0,
+            quantity: registers.len() as u16,
+            write_address: None,
+            write_quantity: None,
+            values: vec![],
+        }),
+        RequestPdu::ReadWriteMultipleRegisters {
+            read_address,
+            read_quantity,
+            write_address,
+            registers,
+            ..
+        } => Some(TableShape {
+            kind: Kind::HoldingRegister,
+            address: read_address.0,
+            quantity: read_quantity.0,
+            write_address: Some(write_address.0),
+            write_quantity: Some(registers.len() as u16),
+            values: vec![],
+        }),
+        _ => None,
+    }
 }
 
 /// MB-R-144 — a matched, non-exception transaction updates `table`: a read-shaped request
@@ -300,6 +616,7 @@ pub(crate) async fn drive_monitor<S, F, L>(
     mut reader: rust_modbus::AduReader<S, F>,
     log: L,
     table: SharedObservedTable,
+    records: SharedRecordLog,
     activity: &std::sync::atomic::AtomicBool,
     commands: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
 ) -> MonitorEnd
@@ -314,7 +631,7 @@ where
             frame = reader.recv_adu() => match frame {
                 Ok(bytes) => {
                     activity.store(true, std::sync::atomic::Ordering::Relaxed);
-                    state = process_frame::<F, L>(bytes, state, &log, &table).await;
+                    state = process_frame::<F, L>(bytes, state, &log, &table, &records).await;
                 }
                 Err(e) => return MonitorEnd::Failed(e),
             },
@@ -335,6 +652,10 @@ mod tests {
 
     fn table() -> SharedObservedTable {
         Arc::new(RwLock::new(super::super::table::ObservedTable::default()))
+    }
+
+    fn records() -> SharedRecordLog {
+        Arc::new(RwLock::new(super::super::record::RecordLog::default()))
     }
 
     /// A log sink recording every line sent to it, for assertions.
@@ -368,12 +689,14 @@ mod tests {
     async fn ut_matched_request_response_pair_updates_state_and_logs() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(0),
             quantity: rust_modbus::Quantity(2),
         };
         let bytes = request_bytes(UnitId(1), &request);
-        let state = process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table).await;
+        let state =
+            process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table, &records).await;
         assert_eq!(
             state,
             MatchState::ExpectResponse {
@@ -387,7 +710,7 @@ mod tests {
             registers: vec![RegisterValue(7), RegisterValue(8)],
         };
         let bytes = response_bytes(UnitId(1), &response);
-        let state = process_frame::<Rtu, _>(bytes, state, &log, &table).await;
+        let state = process_frame::<Rtu, _>(bytes, state, &log, &table, &records).await;
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("complete"));
@@ -399,6 +722,7 @@ mod tests {
     async fn ut_pending_request_marked_unmatched_when_next_request_arrives() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let first = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(0),
             quantity: rust_modbus::Quantity(1),
@@ -408,6 +732,7 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
 
@@ -415,8 +740,14 @@ mod tests {
             address: rust_modbus::Address(5),
             quantity: rust_modbus::Quantity(1),
         };
-        let state =
-            process_frame::<Rtu, _>(request_bytes(UnitId(1), &second), state, &log, &table).await;
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &second),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
 
         assert_eq!(
             state,
@@ -437,6 +768,7 @@ mod tests {
     async fn ut_crc_failure_logged_warning_and_discarded_without_state_change() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(0),
             quantity: rust_modbus::Quantity(1),
@@ -444,7 +776,8 @@ mod tests {
         let mut bytes = request_bytes(UnitId(1), &request);
         *bytes.last_mut().unwrap() ^= 0xFF; // corrupt the CRC's high byte
 
-        let state = process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table).await;
+        let state =
+            process_frame::<Rtu, _>(bytes, MatchState::ExpectRequest, &log, &table, &records).await;
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("malformed frame"));
@@ -456,6 +789,7 @@ mod tests {
     async fn ut_crc_failure_while_expecting_response_does_not_change_state() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(0),
             quantity: rust_modbus::Quantity(1),
@@ -468,7 +802,7 @@ mod tests {
         let mut bytes = request_bytes(UnitId(1), &request);
         *bytes.last_mut().unwrap() ^= 0xFF;
 
-        let state = process_frame::<Rtu, _>(bytes, waiting.clone(), &log, &table).await;
+        let state = process_frame::<Rtu, _>(bytes, waiting.clone(), &log, &table, &records).await;
         assert_eq!(state, waiting);
         assert!(log.lines()[0].contains("malformed frame"));
     }
@@ -479,6 +813,7 @@ mod tests {
     async fn ut_broadcast_request_logged_complete_never_unmatched() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::WriteSingleRegister {
             address: rust_modbus::Address(0),
             value: RegisterValue(42),
@@ -488,6 +823,7 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
         assert_eq!(state, MatchState::ExpectRequest);
@@ -502,6 +838,7 @@ mod tests {
     async fn ut_matched_read_writes_response_words_into_table() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(10),
             quantity: rust_modbus::Quantity(2),
@@ -511,12 +848,20 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
         let response = ResponsePdu::ReadHoldingRegisters {
             registers: vec![RegisterValue(11), RegisterValue(22)],
         };
-        process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table).await;
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
 
         let key = Key::new(SlaveKey {
             slave_id: UnitId(1),
@@ -531,6 +876,7 @@ mod tests {
     async fn ut_matched_write_writes_request_values_into_table() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::WriteSingleRegister {
             address: rust_modbus::Address(3),
             value: RegisterValue(99),
@@ -540,13 +886,21 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
         let response = ResponsePdu::WriteSingleRegister {
             address: rust_modbus::Address(3),
             value: RegisterValue(99),
         };
-        process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table).await;
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
 
         let key = Key::new(SlaveKey {
             slave_id: UnitId(1),
@@ -560,6 +914,7 @@ mod tests {
     async fn ut_unmatched_write_does_not_modify_table() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::WriteSingleRegister {
             address: rust_modbus::Address(3),
             value: RegisterValue(99),
@@ -569,6 +924,7 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
         // A different request begins before any response — the pending write is unmatched.
@@ -585,6 +941,7 @@ mod tests {
             },
             &log,
             &table,
+            &records,
         )
         .await;
 
@@ -601,6 +958,7 @@ mod tests {
     async fn ut_exception_response_does_not_modify_table() {
         let log = RecordingLog::default();
         let table = table();
+        let records = records();
         let request = RequestPdu::ReadHoldingRegisters {
             address: rust_modbus::Address(0),
             quantity: rust_modbus::Quantity(1),
@@ -610,15 +968,21 @@ mod tests {
             MatchState::ExpectRequest,
             &log,
             &table,
+            &records,
         )
         .await;
         let response = ResponsePdu::Exception(rust_modbus::ExceptionResponse {
             function: rust_modbus::FunctionCode::ReadHoldingRegisters,
             exception: rust_modbus::ExceptionCode::IllegalDataAddress,
         });
-        let state =
-            process_frame::<Rtu, _>(response_bytes(UnitId(1), &response), state, &log, &table)
-                .await;
+        let state = process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
         assert_eq!(state, MatchState::ExpectRequest);
 
         let key = Key::new(SlaveKey {
@@ -626,6 +990,236 @@ mod tests {
             kind: Kind::HoldingRegister,
         });
         assert_eq!(table.read().read_words(&key, 0, 1), None);
+    }
+
+    /// MB-R-146 — a matched, non-exception pair captures an `Ok` record with the response's own
+    /// shape (mirrors `ut_matched_read_writes_response_words_into_table`'s fixture values).
+    #[tokio::test]
+    async fn ut_matched_pair_pushes_ok_record_with_shape() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(10),
+            quantity: rust_modbus::Quantity(2),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+        let response = ResponsePdu::ReadHoldingRegisters {
+            registers: vec![RegisterValue(11), RegisterValue(22)],
+        };
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        let pushed = records.read().records_for(UnitId(1));
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(pushed[0].status, RecordStatus::Ok);
+        assert_eq!(
+            pushed[0].operation,
+            rust_modbus::FunctionCode::ReadHoldingRegisters
+        );
+        let shape = pushed[0]
+            .shape
+            .as_ref()
+            .expect("read op must carry a shape");
+        assert_eq!(shape.kind, Kind::HoldingRegister);
+        assert_eq!(shape.address, 10);
+        assert_eq!(shape.quantity, 2);
+        assert_eq!(shape.values, vec![11, 22]);
+    }
+
+    /// MB-R-146 — an unmatched request still captures a record: address/quantity known, but no
+    /// values (nothing was transacted).
+    #[tokio::test]
+    async fn ut_unmatched_request_pushes_unmatched_record_with_empty_values() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let first = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &first),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+        let second = RequestPdu::ReadInputRegisters {
+            address: rust_modbus::Address(5),
+            quantity: rust_modbus::Quantity(1),
+        };
+        process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &second),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        let pushed = records.read().records_for(UnitId(1));
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(pushed[0].status, RecordStatus::Unmatched);
+        let shape = pushed[0]
+            .shape
+            .as_ref()
+            .expect("read op must carry a shape");
+        assert_eq!(shape.address, 0);
+        assert_eq!(shape.quantity, 1);
+        assert!(shape.values.is_empty());
+    }
+
+    /// MB-R-146 — a response carrying an exception code captures `Exception(code)`, shape known
+    /// from the request alone, no values.
+    #[tokio::test]
+    async fn ut_exception_response_pushes_exception_record_with_empty_values() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+        let response = ResponsePdu::Exception(rust_modbus::ExceptionResponse {
+            function: rust_modbus::FunctionCode::ReadHoldingRegisters,
+            exception: rust_modbus::ExceptionCode::IllegalDataAddress,
+        });
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        let pushed = records.read().records_for(UnitId(1));
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(
+            pushed[0].status,
+            RecordStatus::Exception(rust_modbus::ExceptionCode::IllegalDataAddress)
+        );
+        let shape = pushed[0]
+            .shape
+            .as_ref()
+            .expect("read op must carry a shape");
+        assert_eq!(shape.address, 0);
+        assert_eq!(shape.quantity, 1);
+        assert!(shape.values.is_empty());
+    }
+
+    /// MB-R-146 — a matched pair whose operation isn't one of the 9 table-shaping ops still
+    /// captures a record, but with no `TableShape`.
+    #[tokio::test]
+    async fn ut_non_table_shaping_operation_has_no_shape() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let request = RequestPdu::MaskWriteRegister {
+            address: rust_modbus::Address(4),
+            and_mask: rust_modbus::Mask(0x00FF),
+            or_mask: rust_modbus::Mask(0x0F00),
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+        let response = ResponsePdu::MaskWriteRegister {
+            address: rust_modbus::Address(4),
+            and_mask: rust_modbus::Mask(0x00FF),
+            or_mask: rust_modbus::Mask(0x0F00),
+        };
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        let pushed = records.read().records_for(UnitId(1));
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(pushed[0].status, RecordStatus::Ok);
+        assert_eq!(
+            pushed[0].operation,
+            rust_modbus::FunctionCode::MaskWriteRegister
+        );
+        assert!(pushed[0].shape.is_none());
+    }
+
+    /// Edge case (edge-cases.md's Monitor boundaries table) — `ReadWriteMultipleRegisters`
+    /// carries both its own read and write address/quantity pairs; captured `values` come from
+    /// the *read* response only, never the request's own written values.
+    #[tokio::test]
+    async fn ut_read_write_multiple_registers_shape_has_both_addresses_and_read_values_only() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let request = RequestPdu::ReadWriteMultipleRegisters {
+            read_address: rust_modbus::Address(10),
+            read_quantity: rust_modbus::Quantity(2),
+            write_address: rust_modbus::Address(50),
+            registers: vec![RegisterValue(111), RegisterValue(222)],
+        };
+        let state = process_frame::<Rtu, _>(
+            request_bytes(UnitId(1), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+        let response = ResponsePdu::ReadWriteMultipleRegisters {
+            registers: vec![RegisterValue(11), RegisterValue(22)],
+        };
+        process_frame::<Rtu, _>(
+            response_bytes(UnitId(1), &response),
+            state,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        let pushed = records.read().records_for(UnitId(1));
+        assert_eq!(pushed.len(), 1);
+        let shape = pushed[0]
+            .shape
+            .as_ref()
+            .expect("ReadWriteMultipleRegisters must carry a shape");
+        assert_eq!(shape.address, 10);
+        assert_eq!(shape.quantity, 2);
+        assert_eq!(shape.write_address, Some(50));
+        assert_eq!(shape.write_quantity, Some(2));
+        assert_eq!(shape.values, vec![11, 22]);
     }
 
     /// MB-R-141 — `drive_monitor` terminates on `ServerCommand::Terminate`, independent of
@@ -637,13 +1231,20 @@ mod tests {
         // `recv_adu` future stays pending forever, and only the command channel can end this.
         let reader = rust_modbus::AduReader::<_, Rtu>::new(server, Direction::Request);
         let table = table();
+        let records = records();
         let activity = AtomicBool::new(false);
         let (tx, mut rx) = mpsc::channel::<ServerCommand>(1);
         tx.send(ServerCommand::Terminate).await.unwrap();
 
-        let end =
-            drive_monitor::<_, Rtu, _>(reader, RecordingLog::default(), table, &activity, &mut rx)
-                .await;
+        let end = drive_monitor::<_, Rtu, _>(
+            reader,
+            RecordingLog::default(),
+            table,
+            records,
+            &activity,
+            &mut rx,
+        )
+        .await;
         assert!(matches!(end, MonitorEnd::Terminated));
         assert!(!activity.load(std::sync::atomic::Ordering::Relaxed));
     }
