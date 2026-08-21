@@ -6,12 +6,22 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_codec::Kind;
+use ferrowl_modbus::monitor::{MonitorRecord, RecordStatus};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ui::EventResult;
+use ferrowl_ui::traits::{HandleEvents, SetFocus};
+use ferrowl_ui::{
+    Border,
+    state::{TableState, TableStateBuilder},
+    style::TableStyleBuilder,
+    widgets::{Table, TableBuilder, Widget},
+};
+use ferrowl_ui_derive::TableEntry;
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::widgets::StatefulWidget;
 
-use crate::app::{LOG_SIZE, Level};
+use crate::app::Level;
 use crate::config::device::MonitorRegisterDef;
 use crate::config::{ModuleSpec, MonitorDeviceConfig};
 use crate::module::view::{
@@ -93,6 +103,110 @@ const TABLE_KINDS: [Kind; 4] = [
     Kind::InputRegister,
 ];
 
+/// UI-R-062 — one row of the Messages table: a `MonitorRecord`, sourced from `module.records()`,
+/// rendered most-recent-first in this fixed column order.
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = MessageHeader)]
+struct MessageRow {
+    #[column(name = "Time", min = 12, max = 12)]
+    time: String,
+    #[column(name = "Status", min = 10, max = 16)]
+    status: String,
+    #[column(name = "Slave", min = 6, max = 6)]
+    slave: String,
+    #[column(name = "Operation", min = 14, max = 30)]
+    operation: String,
+    #[column(name = "Address", min = 8, max = 16)]
+    address: String,
+    #[column(name = "Quantity", min = 8, max = 16)]
+    quantity: String,
+    #[column(name = "Values/Payload", min = 10, max = 800)]
+    payload: String,
+}
+
+type MessageTable = Widget<TableState<MessageRow, 7>, Table<MessageRow, MessageHeader, 7>>;
+
+/// UI-R-062 — build a fresh, empty `MessageTable` widget/state pair, same builder shape
+/// `ferrowl/src/module/modbus/table.rs`'s `TableView::new` already uses.
+fn new_message_table() -> MessageTable {
+    Widget {
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .expect("all required builder fields are set"),
+        widget: TableBuilder::default()
+            .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
+            .title(Some("Messages".into()))
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
+            .build()
+            .expect("all required builder fields are set"),
+    }
+}
+
+/// UI-R-062's `Status` column text.
+fn format_record_status(status: &RecordStatus) -> String {
+    match status {
+        RecordStatus::Ok => "OK".to_string(),
+        RecordStatus::Unmatched => "Unmatched".to_string(),
+        RecordStatus::Exception(code) => format!("Exception({code:?})"),
+    }
+}
+
+/// UI-R-062's `Values/Payload` column text — empty for no shape or no values (MB-R-146's
+/// record-status-to-value gating, Shared); one digit per bit for coil-family kinds, 4-digit
+/// lowercase hex per word for register-family kinds.
+fn format_record_payload(record: &MonitorRecord) -> String {
+    let Some(shape) = &record.shape else {
+        return String::new();
+    };
+    if shape.values.is_empty() {
+        return String::new();
+    }
+    let cells: Vec<String> = match shape.kind {
+        Kind::Coil | Kind::DiscreteInput => shape.values.iter().map(u16::to_string).collect(),
+        Kind::HoldingRegister | Kind::InputRegister => {
+            shape.values.iter().map(|v| format!("{v:04x}")).collect()
+        }
+    };
+    format!("[{}]", cells.join(" "))
+}
+
+/// UI-R-062's `Address`/`Quantity` columns — empty for no shape; `edge-cases.md`'s
+/// `ReadWriteMultipleRegisters` row (both a read and a write address/quantity pair) renders
+/// slash-separated, otherwise the single address/quantity.
+fn format_record_address_quantity(record: &MonitorRecord) -> (String, String) {
+    let Some(shape) = &record.shape else {
+        return (String::new(), String::new());
+    };
+    match (shape.write_address, shape.write_quantity) {
+        (Some(write_address), Some(write_quantity)) => (
+            format!("{}/{}", shape.address, write_address),
+            format!("{}/{}", shape.quantity, write_quantity),
+        ),
+        _ => (shape.address.to_string(), shape.quantity.to_string()),
+    }
+}
+
+/// UI-R-062 — build one `MessageRow` for `unit`'s Messages table from a captured record.
+/// `time` has no wall-clock reference available from `MonitorRecord.timestamp` (an `Instant`),
+/// so it renders elapsed-seconds-ago relative to `now`.
+fn message_row(unit: UnitId, record: &MonitorRecord, now: std::time::Instant) -> MessageRow {
+    let (address, quantity) = format_record_address_quantity(record);
+    MessageRow {
+        time: format!("{}s ago", now.duration_since(record.timestamp).as_secs()),
+        status: format_record_status(&record.status),
+        slave: unit.to_string(),
+        operation: format!("{:?}", record.operation),
+        address,
+        quantity,
+        payload: format_record_payload(record),
+    }
+}
+
 // Forward-declared: real app-side construction lands in s8 of the modbus-bus-monitor plan (wiring the 3 construction call sites); already fully implemented and tested here.
 #[allow(dead_code)]
 pub struct ModbusMonitorModuleView {
@@ -103,8 +217,9 @@ pub struct ModbusMonitorModuleView {
     unit_ids: Vec<UnitId>,
     /// Index into `unit_ids` of the left panel's current selection.
     selected: usize,
-    /// MB-R-143 log lines for the selected unit id, re-derived each tick from `module.log()`.
-    messages: Vec<String>,
+    /// UI-R-062 Messages table for the selected unit id, re-derived each tick from
+    /// `module.records()`.
+    messages_table: MessageTable,
     overlay: MonitorOverlay,
     view_focused: bool,
     /// Which panel is Tab-focused within this view (UI-R-060/061 parity with OCPP's per-panel
@@ -128,7 +243,7 @@ impl ModbusMonitorModuleView {
             device,
             unit_ids: Vec::new(),
             selected: 0,
-            messages: Vec::new(),
+            messages_table: new_message_table(),
             overlay: MonitorOverlay::None,
             view_focused: false,
             panel_focus: MonitorPanel::default(),
@@ -292,7 +407,6 @@ impl ModuleView for ModbusMonitorModuleView {
                 .bg(COLOR_SCHEME.bg)
         };
         let units_style = style_for(MonitorPanel::Units);
-        let messages_style = style_for(MonitorPanel::Messages);
         let memory_style = style_for(MonitorPanel::Memory);
         let resolved_style = Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg);
 
@@ -336,17 +450,15 @@ impl ModuleView for ModbusMonitorModuleView {
         };
         let section_areas = Layout::vertical(sections).split(right_area);
 
-        // Message table (MB-R-143).
-        let messages_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(messages_style)
-            .title("Messages");
-        let messages_inner = messages_block.inner(section_areas[0]);
-        ratatui::widgets::Widget::render(messages_block, section_areas[0], buf);
-        ratatui::widgets::Widget::render(
-            ratatui::widgets::Paragraph::new(self.messages.join("\n")),
-            messages_inner,
+        // Message table (MB-R-143/146, UI-R-062).
+        self.messages_table
+            .state
+            .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Messages);
+        StatefulWidget::render(
+            &self.messages_table.widget,
+            section_areas[0],
             buf,
+            &mut self.messages_table.state,
         );
 
         // Memory layout, grouped by table kind (MB-R-144).
@@ -501,6 +613,9 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
                 EventResult::Consumed
             }
+            _ if self.panel_focus == MonitorPanel::Messages => {
+                self.messages_table.state.handle_events(modifiers, code)
+            }
             _ => EventResult::Unhandled(modifiers, code),
         }
     }
@@ -516,18 +631,19 @@ impl ModuleView for ModbusMonitorModuleView {
                 self.selected = self.unit_ids.len().saturating_sub(1);
             }
 
-            let lines = self.module.log().read().await.peek_n(LOG_SIZE);
-            self.messages = match self.selected_unit() {
+            let rows = match self.selected_unit() {
                 Some(unit) => {
-                    let prefix = format!("slave {unit} ");
-                    lines
-                        .into_iter()
-                        .filter(|(_, _, s)| s.starts_with(&prefix))
-                        .map(|(_, _, s)| s)
+                    let now = std::time::Instant::now();
+                    let mut records = self.module.records().read().records_for(unit);
+                    records.reverse(); // most-recent-first (UI-R-062)
+                    records
+                        .iter()
+                        .map(|record| message_row(unit, record, now))
                         .collect()
                 }
                 None => Vec::new(),
             };
+            self.messages_table.state.set_values(rows);
         })
     }
 
@@ -803,6 +919,7 @@ mod tests {
     use super::*;
     use crate::config::{Endpoint, Role};
     use ferrowl_modbus::UnitId;
+    use ferrowl_ui::widgets::TableEntry as TableEntryTrait;
 
     fn spec() -> ModuleSpec {
         ModuleSpec {
@@ -1254,5 +1371,208 @@ mod tests {
             CommandResult::Handled(Some((Level::Warning, _)))
         ));
         assert!(v.sort.is_none());
+    }
+
+    /// Write a word into `unit`'s observed table so `refresh()`'s own `unit_ids` re-derivation
+    /// (which runs before the Messages table re-derivation) keeps `unit` selectable, matching
+    /// `ut_refresh_populates_unit_ids_from_observed_table`'s own fixture pattern.
+    fn seed_unit(v: &ModbusMonitorModuleView, unit: UnitId) {
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: unit,
+                kind: Kind::HoldingRegister,
+            }),
+            0,
+            &[0],
+        );
+    }
+
+    fn shaped_record(
+        status: RecordStatus,
+        operation: ferrowl_modbus::FunctionCode,
+        shape: Option<ferrowl_modbus::monitor::TableShape>,
+        age: std::time::Duration,
+    ) -> MonitorRecord {
+        MonitorRecord {
+            timestamp: std::time::Instant::now() - age,
+            status,
+            operation,
+            shape,
+        }
+    }
+
+    fn shape(
+        kind: Kind,
+        address: u16,
+        quantity: u16,
+        write_address: Option<u16>,
+        write_quantity: Option<u16>,
+        values: Vec<u16>,
+    ) -> ferrowl_modbus::monitor::TableShape {
+        ferrowl_modbus::monitor::TableShape {
+            kind,
+            address,
+            quantity,
+            write_address,
+            write_quantity,
+            values,
+        }
+    }
+
+    /// UI-R-062 — one row per captured record, most-recent-first, in the fixed 7-column order
+    /// (Time, Status, Slave, Operation, Address, Quantity, Values/Payload).
+    #[tokio::test]
+    async fn ut_messages_table_renders_records_most_recent_first_in_fixed_column_order() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        let older = shaped_record(
+            RecordStatus::Ok,
+            ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+            Some(shape(Kind::HoldingRegister, 10, 1, None, None, vec![7])),
+            std::time::Duration::from_secs(5),
+        );
+        let newer = shaped_record(
+            RecordStatus::Ok,
+            ferrowl_modbus::FunctionCode::WriteSingleRegister,
+            Some(shape(Kind::HoldingRegister, 20, 1, None, None, vec![9])),
+            std::time::Duration::from_secs(1),
+        );
+        v.module.records().write().push(UnitId(3), older);
+        v.module.records().write().push(UnitId(3), newer);
+
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].values()[3], "WriteSingleRegister");
+        assert_eq!(rows[0].values()[4], "20");
+        assert_eq!(rows[1].values()[3], "ReadHoldingRegisters");
+        assert_eq!(rows[1].values()[4], "10");
+    }
+
+    /// UI-R-062 — a register-shaped record's Values/Payload renders 4-digit lowercase hex per
+    /// word.
+    #[tokio::test]
+    async fn ut_messages_table_formats_register_payload_as_hex_words() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(
+                    Kind::HoldingRegister,
+                    0,
+                    2,
+                    None,
+                    None,
+                    vec![0x00AB, 0x1234],
+                )),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows[0].values()[6], "[00ab 1234]");
+    }
+
+    /// UI-R-062 — a coil-shaped record's Values/Payload renders one digit per bit.
+    #[tokio::test]
+    async fn ut_messages_table_formats_coil_payload_as_bit_digits() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadCoils,
+                Some(shape(Kind::Coil, 0, 3, None, None, vec![1, 0, 1])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows[0].values()[6], "[1 0 1]");
+    }
+
+    /// UI-R-062 — a record whose operation isn't one of the 9 table-shaping ops renders empty
+    /// Address/Quantity/Values-Payload columns.
+    #[tokio::test]
+    async fn ut_messages_table_non_table_shaping_operation_has_empty_shape_columns() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::MaskWriteRegister,
+                None,
+                std::time::Duration::from_millis(100),
+            ),
+        );
+
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows[0].values()[4], "");
+        assert_eq!(rows[0].values()[5], "");
+        assert_eq!(rows[0].values()[6], "");
+    }
+
+    /// Edge-cases.md's Monitor boundaries row — `ReadWriteMultipleRegisters`'s shape carries both
+    /// its own read and write address/quantity pairs; the table renders them slash-separated.
+    #[tokio::test]
+    async fn ut_messages_table_read_write_multiple_registers_renders_slash_separated_address_and_quantity()
+     {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadWriteMultipleRegisters,
+                Some(shape(
+                    Kind::HoldingRegister,
+                    10,
+                    2,
+                    Some(50),
+                    Some(2),
+                    vec![11, 22],
+                )),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows[0].values()[4], "10/50");
+        assert_eq!(rows[0].values()[5], "2/2");
+    }
+
+    /// UI-R-062 (horizontal-overflow scrolling reuses `TableState::handle_events` unchanged,
+    /// Shared) — `Left`/`Right` reach the Messages table's own scroll handling when it's the
+    /// panel-focused one, not the view's own unhandled fallback.
+    #[test]
+    fn ut_messages_panel_routes_left_right_to_table_horizontal_scroll() {
+        let mut v = view();
+        v.panel_focus = MonitorPanel::Messages;
+        let result = v.handle_events(KeyModifiers::NONE, KeyCode::Right);
+        assert!(matches!(result, EventResult::Consumed));
     }
 }
