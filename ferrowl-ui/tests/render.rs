@@ -672,6 +672,97 @@ fn table_show_selection_marker_false_suppresses_bar_keeps_row_highlight() {
     );
 }
 
+#[test]
+/// Manual-exercise follow-up to `show_selection_marker(false)` — the marker column must
+/// collapse entirely (no leftover whitespace prefix) rather than stay reserved-but-blank.
+/// Comparing against the marker-`true` render of the identical rows/area: every row's first
+/// non-border, non-header content column starts one cell further left once the marker is gone.
+fn table_show_selection_marker_false_collapses_marker_column() {
+    let rows = || {
+        vec![
+            Row("alpha".to_string(), "one".to_string()),
+            Row("beta".to_string(), "two".to_string()),
+        ]
+    };
+
+    let with_marker = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .build()
+        .unwrap();
+    let mut st_with = TableStateBuilder::default().values(rows()).build().unwrap();
+    let mut b_with = buffer(30, 6);
+    StatefulWidget::render(
+        &with_marker,
+        Rect::new(0, 0, 30, 6),
+        &mut b_with,
+        &mut st_with,
+    );
+
+    let without_marker = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st_without = TableStateBuilder::default().values(rows()).build().unwrap();
+    let mut b_without = buffer(30, 6);
+    StatefulWidget::render(
+        &without_marker,
+        Rect::new(0, 0, 30, 6),
+        &mut b_without,
+        &mut st_without,
+    );
+
+    // Row 2 is the first data row ("alpha"). With the marker column reserved, its 'a' starts
+    // further right than without it (the marker column no longer eats horizontal space).
+    let first_char_x = |b: &Buffer| {
+        (0..30u16)
+            .find(|&x| b[(x, 2)].symbol() == "a")
+            .expect("row must render its 'alpha' text somewhere on row 2")
+    };
+    let x_with = first_char_x(&b_with);
+    let x_without = first_char_x(&b_without);
+    assert!(
+        x_without < x_with,
+        "collapsing the marker column must shift row content left \
+         (with marker: x={x_with}, without marker: x={x_without})"
+    );
+}
+
+#[test]
+/// Manual-exercise follow-up — without the bar glyph, the selected row's own background is the
+/// only remaining selection cue, so it must stay clearly visible even while the table itself
+/// isn't the currently focused panel (previously `unfocused_selected` was used in that case,
+/// which visually collapses back into the unselected row background of catppuccin's palette).
+fn table_show_selection_marker_false_keeps_selected_row_visibly_highlighted_when_unfocused() {
+    let rows = vec![
+        Row("alpha".to_string(), "one".to_string()),
+        Row("beta".to_string(), "two".to_string()),
+    ];
+
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(rows)
+        .focused(false)
+        .build()
+        .unwrap();
+    let mut b = buffer(30, 6);
+    StatefulWidget::render(&w, Rect::new(0, 0, 30, 6), &mut b, &mut st);
+
+    // Row 2 (the selected first data row) must use the same strong `focused` background as a
+    // focused selection would, not the subtler `unfocused_selected` one.
+    let style = TableStyle::default();
+    assert_eq!(
+        b[(2, 2)].bg,
+        style.focused().bg.expect("focused style always sets a bg"),
+        "selected row must stay highlighted with the strong `focused` background even while \
+         the table itself is unfocused, once the marker glyph is gone"
+    );
+}
+
 #[derive(Clone, Default)]
 struct SpanRow;
 

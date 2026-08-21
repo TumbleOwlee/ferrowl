@@ -1304,15 +1304,19 @@ impl ModuleView for ModbusMonitorModuleView {
                 self.panel_focus = prev;
                 EventResult::Consumed
             }
-            KeyCode::Up if self.panel_focus == MonitorPanel::Units => {
-                self.selected = self.selected.saturating_sub(1);
-                EventResult::Consumed
-            }
-            KeyCode::Down if self.panel_focus == MonitorPanel::Units => {
-                if self.selected + 1 < self.unit_ids.len() {
-                    self.selected += 1;
+            // UI-R-065 — Units shares the same `TableState::handle_events` navigation as
+            // every other panel (Up/Down/PageUp/PageDown/Home/End/left-right scroll, whatever
+            // the shared widget supports) instead of its own hand-rolled +/-1 Up/Down. `selected`
+            // stays the source of truth other panels key off (which unit id's data they show),
+            // but input now flows table -> selected: the table handles the keypress first, then
+            // `selected` picks up the resulting `table_state().selected()` index (the reverse of
+            // render's existing `select_index(self.selected)` sync).
+            _ if self.panel_focus == MonitorPanel::Units => {
+                let result = self.units_table.state.handle_events(modifiers, code);
+                if let Some(idx) = self.units_table.state.table_state().selected() {
+                    self.selected = idx;
                 }
-                EventResult::Consumed
+                result
             }
             _ if self.panel_focus == MonitorPanel::Messages => {
                 self.messages_table.state.handle_events(modifiers, code)
@@ -1323,6 +1327,9 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             _ if self.panel_focus == MonitorPanel::Resolved => {
                 self.resolved_table.state.handle_events(modifiers, code)
+            }
+            _ if self.panel_focus == MonitorPanel::Memory => {
+                self.memory_table.state.handle_events(modifiers, code)
             }
             _ => EventResult::Unhandled(modifiers, code),
         }
@@ -1719,6 +1726,105 @@ mod tests {
     fn ut_units_panel_disables_selection_marker() {
         let v = view();
         assert!(!v.units_table.widget.show_selection_marker());
+    }
+
+    /// UI-R-065 (manual-exercise follow-up) — Units shares the same `TableState::handle_events`
+    /// navigation keys as every other panel (`j`/`k`/Up/Down here, but also Home/End/`g`/`G`)
+    /// instead of its own hand-rolled +/-1 Up/Down that only understood Up/Down. `selected`
+    /// (which drives which unit id's data the other panels show) follows the table's own
+    /// resulting selection index.
+    #[test]
+    fn ut_units_panel_navigation_matches_other_panels_table_state_keys() {
+        let mut v = view();
+        v.set_focused(true);
+        v.unit_ids = vec![UnitId(1), UnitId(3), UnitId(5)];
+        v.selected = 0;
+        v.panel_focus = MonitorPanel::Units;
+        // Render once so `units_table.state.values()` is populated (mirrors real event loop:
+        // render() -> handle_events() -> render() ...).
+        {
+            use ratatui::Terminal;
+            use ratatui::backend::TestBackend;
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+            terminal
+                .draw(|frame| v.render(frame, frame.area()))
+                .unwrap();
+        }
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        assert_eq!(
+            v.units_table.state.table_state().selected(),
+            Some(1),
+            "Down must move the table's own selection"
+        );
+        assert_eq!(
+            v.selected, 1,
+            "selected must follow the table's resulting index"
+        );
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Char('G'));
+        assert_eq!(
+            v.units_table.state.table_state().selected(),
+            Some(2),
+            "'G' (move_to_bottom) must be handled just like on Messages/Resolved"
+        );
+        assert_eq!(v.selected, 2);
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Home);
+        // Home is `move_to_left` (horizontal scroll), not a row-selection key — it must still be
+        // Consumed by the table (not fall through to Unhandled), and must leave `selected` (a
+        // row index) untouched.
+        assert_eq!(v.selected, 2);
+    }
+
+    /// UI-R-065 (manual-exercise follow-up) — Memory previously had no navigation arm at all
+    /// (`_ => EventResult::Unhandled`); it now delegates straight to its own `TableState`, same
+    /// as Messages/Resolved.
+    #[test]
+    fn ut_memory_panel_navigation_delegates_to_its_own_table_state() {
+        let mut v = view();
+        v.set_focused(true);
+        v.unit_ids = vec![UnitId(1)];
+        v.selected = 0;
+        v.panel_focus = MonitorPanel::Memory;
+        // Two writes far enough apart to span multiple 8-address hex-editor lines (with a `Gap`
+        // row between them, MB-R-144), so the Memory table has more than one row to navigate.
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            }),
+            0,
+            &[1, 2, 3],
+        );
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            }),
+            20,
+            &[4, 5, 6],
+        );
+        {
+            use ratatui::Terminal;
+            use ratatui::backend::TestBackend;
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+            terminal
+                .draw(|frame| v.render(frame, frame.area()))
+                .unwrap();
+        }
+
+        let before = v.memory_table.state.table_state().selected();
+        let result = v.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        assert!(
+            matches!(result, EventResult::Consumed),
+            "Memory must consume Down instead of falling through to Unhandled"
+        );
+        assert_ne!(
+            v.memory_table.state.table_state().selected(),
+            before,
+            "Down must move the Memory table's own selection"
+        );
     }
 
     /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer

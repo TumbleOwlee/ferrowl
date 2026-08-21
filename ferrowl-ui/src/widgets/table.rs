@@ -214,7 +214,11 @@ where
         let column_spacings = 2 * (N as u16) + (N as u16 - 1);
         let table_width = column_widths.iter().fold(column_spacings, |acc, w| acc + w) + 3;
 
-        let selected_style = if state.focused() {
+        // `show_selection_marker == false`: once the bar glyph is gone, the selected row's own
+        // background is the *only* remaining selection cue, so it always uses the stronger
+        // `focused` style (never the subtler `unfocused_selected`, which can visually collapse
+        // into the ordinary row background) — even while the table itself isn't panel-focused.
+        let selected_style = if !self.show_selection_marker || state.focused() {
             &self.style.focused
         } else {
             &self.style.unfocused_selected
@@ -357,14 +361,10 @@ where
             })
             .collect::<Vec<_>>();
 
-        // `show_selection_marker == false` keeps the reserved column width (so disabling it
-        // doesn't shift row content) but blanks the bar glyph itself; `row_highlight_style`
-        // below still applies the selected row's background/foreground either way.
-        let bar = if self.show_selection_marker {
-            " █ "
-        } else {
-            "   "
-        };
+        // `show_selection_marker == false` collapses the marker column entirely (ratatui's
+        // `HighlightSpacing::Never` — no reserved-but-blank whitespace prefix on every line);
+        // `row_highlight_style` below still applies the selected row's background/foreground
+        // either way, which is what actually conveys the current selection once the bar is gone.
         let t = UiTable::new(rows, constraints)
             .header(header)
             .row_highlight_style(*selected_style)
@@ -373,14 +373,18 @@ where
                     let spacing = itertools::repeat_n("".into(), self.row_margin.vertical as usize);
                     spacing
                         .clone()
-                        .chain(itertools::repeat_n(bar.into(), bar_height as usize))
+                        .chain(itertools::repeat_n(" █ ".into(), bar_height as usize))
                         .chain(spacing)
                         .collect::<Vec<Line>>()
                 })
                 .style(*bar_style)
             })
             .column_spacing(1)
-            .highlight_spacing(HighlightSpacing::Always);
+            .highlight_spacing(if self.show_selection_marker {
+                HighlightSpacing::Always
+            } else {
+                HighlightSpacing::Never
+            });
 
         state.set_visible_width(area.width);
         if state.total_width() <= area.width {
