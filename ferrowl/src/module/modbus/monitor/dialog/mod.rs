@@ -17,7 +17,7 @@ use ferrowl_codec::format::{
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
-    traits::HandleEvents,
+    traits::{HandleEvents, SetFocus},
     widgets::{Button, GetValue, InputField, Selection, Text, Validate, ValidateResult, Widget},
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -34,8 +34,10 @@ use crate::config::device::{
 };
 use crate::dialog::NonEmpty;
 use crate::module::modbus::dialog::{
-    AddNamedValueDialog, Alignment, Endian, Format, KindOption, ValueType, WordOrder,
-    is_integer_format, is_multi_register_format, parse_address, parse_bitmask, widgets,
+    AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption, ValueType,
+    WordOrder, alignment_index, endian_index, format_index, is_integer_format,
+    is_multi_register_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
+    widgets, word_order_index,
 };
 
 #[focusable]
@@ -491,6 +493,547 @@ impl AddInterpretationDialog {
     }
 }
 
+/// MB-R-148 — the `:edit`-on-a-Resolved-registers-row dialog: `AddInterpretationDialog`'s field
+/// set plus a Delete button/confirmation flow and prefill-from-existing-row support. A new,
+/// small struct rather than a mode bolted onto `EditInputDialog`, for the same reason
+/// `AddInterpretationDialog`'s own doc comment gives (Shared): no `access`/`value`/
+/// `default_value` fields apply to a monitor interpretation.
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+pub struct EditInterpretationDialog {
+    #[focus]
+    pub label: Widget<InputFieldState, InputField<NonEmpty>>,
+    #[focus]
+    pub description: Widget<InputFieldState, InputField<String>>,
+    #[focus]
+    pub address: Widget<InputFieldState, InputField<crate::dialog::Address>>,
+    #[focus]
+    pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
+    #[focus(when = { !self.is_boolean_kind() })]
+    pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
+    pub boolean_type: Widget<String, Text>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
+    pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
+    pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0) })]
+    pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
+    pub number_resolution: Widget<InputFieldState, InputField<f64>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0) })]
+    pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
+    pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
+    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
+    pub text_width: Widget<InputFieldState, InputField<usize>>,
+    #[focus]
+    pub add_button: Widget<ButtonState, Button>,
+    #[focus]
+    pub confirm_button: Widget<ButtonState, Button>,
+    /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — mirrors
+    /// `EditInputDialog`'s `delete_register_button` (Shared).
+    #[focus]
+    pub delete_button: Widget<ButtonState, Button>,
+    pub error: Widget<String, Text>,
+    pub keybinds: [Widget<String, Text>; 2],
+    #[builder(default)]
+    pub add_dialog: Option<AddNamedValueDialog>,
+    #[builder(default)]
+    pub pending_named_values: Vec<NamedValue>,
+    /// Guards `delete_button` (MB-R-148) — reuses `ConfirmDeleteDialog` verbatim, already
+    /// generic sub-dialog plumbing (Shared), not `EditInputDialog`-specific.
+    #[builder(default)]
+    pub confirm_delete: Option<ConfirmDeleteDialog>,
+}
+
+impl EditInterpretationDialog {
+    pub fn new() -> Self {
+        let mut label = widgets::input::<NonEmpty>("Label", "Custom label...");
+        ferrowl_ui::traits::SetFocus::set_focused(&mut label.state, true);
+
+        EditInterpretationDialogBuilder::default()
+            .label(label)
+            .description(widgets::input_multiline::<String>(
+                "Description",
+                "Some description...",
+            ))
+            .address(widgets::input::<crate::dialog::Address>(
+                "Address",
+                "100 or 'virtual'",
+            ))
+            .kind(widgets::selection("Kind", widgets::kind_options(), 0))
+            .value_type(widgets::selection(
+                ("Type", HorizontalAlignment::Right),
+                vec![ValueType::Number, ValueType::Text],
+                0,
+            ))
+            .boolean_type(widgets::text_boxed(
+                ("Type", HorizontalAlignment::Right),
+                "Boolean",
+                Default::default(),
+                false,
+            ))
+            .number_format(widgets::selection(
+                ("Format", HorizontalAlignment::Left),
+                widgets::format_options(),
+                0,
+            ))
+            .number_endian(widgets::selection(
+                ("Endian", HorizontalAlignment::Center),
+                widgets::endian_options(),
+                0,
+            ))
+            .number_word_order(widgets::selection(
+                ("Order", HorizontalAlignment::Center),
+                widgets::word_order_options(),
+                0,
+            ))
+            .number_resolution(widgets::input_filled::<f64>(
+                ("Resolution", HorizontalAlignment::Center),
+                "1.0",
+            ))
+            .number_bitmask(widgets::input::<crate::dialog::Bitmask>(
+                ("Bitmask", HorizontalAlignment::Right),
+                "0xFFFF",
+            ))
+            .text_alignment(widgets::selection(
+                "Alignment",
+                widgets::alignment_options(),
+                0,
+            ))
+            .text_width(widgets::input::<usize>(
+                ("Width", HorizontalAlignment::Right),
+                "1",
+            ))
+            .add_button(widgets::button("ADD PREDEFINED", 1))
+            .confirm_button(widgets::button("CONFIRM", 1))
+            .delete_button(widgets::button("DELETE", 1))
+            .error(widgets::error_text())
+            .keybinds([
+                widgets::keybind("<Space>: press button | <C-f>: fill value | <Tab>: next"),
+                widgets::keybind("<Esc>: close | <Enter>: confirm / newline"),
+            ])
+            .focus(EditInterpretationDialogFocus::Label)
+            .build()
+            .expect("all EditInterpretationDialog fields are set")
+    }
+
+    /// Build the dialog pre-filled from `name`/`def` (MB-R-148). Focus starts on Address (the
+    /// common edit target), same reasoning `EditInputDialog::from_register`'s own doc comment
+    /// gives for starting on Value there.
+    pub fn from_interpretation(name: &str, def: &MonitorRegisterDef) -> Self {
+        let mut dialog = Self::new();
+        set_input(&mut dialog.label, name);
+        set_input(&mut dialog.description, &def.description);
+        match def.address() {
+            ferrowl_codec::Address::Fixed(a) => set_input(&mut dialog.address, &a.to_string()),
+            ferrowl_codec::Address::Virtual => set_input(&mut dialog.address, "virtual"),
+        }
+        dialog.kind.state.set_selection(kind_index(&def.kind));
+
+        match def.format() {
+            RegisterFormat::Ascii((align, width)) => {
+                dialog.value_type.state.set_selection(1);
+                dialog
+                    .text_alignment
+                    .state
+                    .set_selection(alignment_index(&align));
+                set_input(&mut dialog.text_width, &width.0.to_string());
+            }
+            numeric => {
+                let (endian, word_order, resolution, bitfield) = numeric_parts(&numeric);
+                dialog.value_type.state.set_selection(0);
+                dialog
+                    .number_format
+                    .state
+                    .set_selection(format_index(&numeric));
+                dialog
+                    .number_endian
+                    .state
+                    .set_selection(endian_index(&endian));
+                dialog
+                    .number_word_order
+                    .state
+                    .set_selection(word_order_index(&word_order));
+                set_input(&mut dialog.number_resolution, &resolution.0.to_string());
+                if !bitfield.is_full() {
+                    set_input(
+                        &mut dialog.number_bitmask,
+                        &format!("0x{:X}", bitfield.mask),
+                    );
+                }
+            }
+        }
+        dialog.pending_named_values = def.values.clone();
+        dialog.label.state.set_focused(false);
+        dialog.address.state.set_focused(true);
+        dialog.focus = EditInterpretationDialogFocus::Address;
+        dialog
+    }
+
+    fn is_boolean_kind(&self) -> bool {
+        matches!(
+            self.kind.state.get_value().0,
+            Kind::Coil | Kind::DiscreteInput
+        )
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
+            return Err(format!("Label: {e}"));
+        } else if let Err(e) = parse_address(self.address.state.input()) {
+            return Err(format!("Address: {e}"));
+        }
+
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    if let ValidateResult::Error(e) =
+                        f64::validate(self.number_resolution.state.input())
+                    {
+                        return Err(format!("Resolution: {e}"));
+                    }
+                    let format =
+                        &self.number_format.state.values()[self.number_format.state.selection()].0;
+                    if is_integer_format(format)
+                        && let Err(e) = parse_bitmask(self.number_bitmask.state.input())
+                    {
+                        return Err(format!("Bitmask: {e}"));
+                    }
+                }
+                ValueType::Text => {
+                    if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
+                    {
+                        return Err(format!("Width: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate and produce `(name, MonitorRegisterDef)`. `slave_id` is left at its default
+    /// (`0`) — the caller (the view) scopes it to the unit id being edited, same as
+    /// `AddInterpretationDialog::apply` (Shared).
+    pub fn apply(&self) -> Result<(String, MonitorRegisterDef), String> {
+        self.validate()?;
+        let name = self.label.state.input().trim().to_string();
+        let description = self.description.state.input().trim().to_string();
+        let address = parse_address(self.address.state.input())?;
+        let address = match address {
+            ferrowl_codec::Address::Fixed(a) => Some(a),
+            ferrowl_codec::Address::Virtual => None,
+        };
+        let is_virtual = address.is_none();
+        let kind = self.kind.state.get_value().0.clone();
+
+        let (value_type, endian, word_order, resolution, bitmask, alignment, length) =
+            if self.is_boolean_kind() {
+                (
+                    crate::config::device::ValueType::U16,
+                    EndianCfg::Big,
+                    WordOrderCfg::Normal,
+                    1.0,
+                    None,
+                    AlignmentCfg::Left,
+                    1usize,
+                )
+            } else {
+                match self.value_type.state.get_value() {
+                    ValueType::Number => {
+                        let selected = self.number_format.state.get_value();
+                        let endian = self.number_endian.state.get_value().0.clone();
+                        let word_order = self.number_word_order.state.get_value().0;
+                        let resolution = self
+                            .number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?;
+                        let bitfield = if is_integer_format(&selected.0) {
+                            parse_bitmask(self.number_bitmask.state.input())
+                                .map_err(|e| format!("Bitmask {e}."))?
+                        } else {
+                            BitField::default()
+                        };
+                        let bitmask = if bitfield.is_full() {
+                            None
+                        } else {
+                            Some(format!("0x{:X}", bitfield.mask))
+                        };
+                        (
+                            value_type_from_format(&selected.0),
+                            endian_cfg(&endian),
+                            word_order_cfg(word_order),
+                            resolution,
+                            bitmask,
+                            AlignmentCfg::Left,
+                            1,
+                        )
+                    }
+                    ValueType::Text => {
+                        let alignment = self.text_alignment.state.get_value().0;
+                        let width = self
+                            .text_width
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<usize>()
+                            .map_err(|_| "Width must be a number.".to_string())?;
+                        (
+                            crate::config::device::ValueType::Ascii,
+                            EndianCfg::Big,
+                            WordOrderCfg::Normal,
+                            1.0,
+                            None,
+                            alignment_cfg(alignment),
+                            width,
+                        )
+                    }
+                }
+            };
+
+        let def = MonitorRegisterDef {
+            slave_id: 0,
+            kind,
+            address,
+            is_virtual,
+            value_type,
+            endian,
+            word_order,
+            resolution,
+            bitmask,
+            length,
+            alignment,
+            values: self.pending_named_values.clone(),
+            description,
+            default: None,
+        };
+        Ok((name, def))
+    }
+
+    pub fn open_add_dialog(&mut self) {
+        self.add_dialog = Some(AddNamedValueDialog::new());
+    }
+
+    pub fn confirm_add_dialog(&mut self) {
+        let result = self.add_dialog.as_ref().map(|d| d.apply());
+        match result {
+            Some(Ok(nv)) => {
+                self.pending_named_values.push(nv);
+                self.add_dialog = None;
+            }
+            Some(Err(e)) => {
+                if let Some(d) = self.add_dialog.as_mut() {
+                    d.error.state = e;
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Open the delete-confirmation popup (MB-R-148), named after the dialog's current label
+    /// input (mirrors `SubDialogs::open_confirm_delete`'s `register_label`, Shared).
+    pub fn open_confirm_delete(&mut self) {
+        let name = self.label.state.input().to_string();
+        self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
+    }
+
+    pub fn handle_space(&mut self) {
+        match self.focus {
+            EditInterpretationDialogFocus::AddButton => self.open_add_dialog(),
+            EditInterpretationDialogFocus::DeleteButton => self.open_confirm_delete(),
+            _ => {
+                let _ = HandleEvents::handle_events(self, KeyModifiers::NONE, KeyCode::Char(' '));
+            }
+        }
+    }
+
+    pub fn is_confirm_button_focused(&self) -> bool {
+        matches!(self.focus, EditInterpretationDialogFocus::ConfirmButton)
+    }
+
+    pub fn is_delete_button_focused(&self) -> bool {
+        matches!(self.focus, EditInterpretationDialogFocus::DeleteButton)
+    }
+
+    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        match self.validate() {
+            Ok(()) => self.error.state.clear(),
+            Err(e) => self.error.state = e,
+        }
+
+        let horizontal_layout: [Rect; 3] =
+            Layout::horizontal([Constraint::Min(1), Constraint::Max(76), Constraint::Min(1)])
+                .areas(area);
+        let vertical_layout: [Rect; 3] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(36),
+            Constraint::Min(1),
+        ])
+        .areas(horizontal_layout[1]);
+
+        let block = Block::bordered()
+            .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
+            .title_alignment(HorizontalAlignment::Center)
+            .title("Edit interpretation");
+        let dialog_box = vertical_layout[1];
+        let block_inner = block.inner(dialog_box);
+        let area = block_inner.inner(Margin::new(2, 1));
+        ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
+        block.render(dialog_box, buf);
+
+        let rows: [Rect; 12] = Layout::vertical([
+            Constraint::Length(3), // 0 label
+            Constraint::Length(3), // 1 description
+            Constraint::Length(3), // 2 address
+            Constraint::Length(3), // 3 kind
+            Constraint::Length(3), // 4 type (value_type / boolean_type)
+            Constraint::Length(3), // 5 Number/Text-conditional fields
+            Constraint::Length(3), // 6 add_button
+            Constraint::Length(3), // 7 confirm_button
+            Constraint::Length(3), // 8 delete_button
+            Constraint::Length(3), // 9 error
+            Constraint::Length(1), // 10 keybind0
+            Constraint::Length(1), // 11 keybind1
+        ])
+        .areas(area);
+
+        StatefulWidget::render(&self.label.widget, rows[0], buf, &mut self.label.state);
+        StatefulWidget::render(
+            &self.description.widget,
+            rows[1],
+            buf,
+            &mut self.description.state,
+        );
+        StatefulWidget::render(&self.address.widget, rows[2], buf, &mut self.address.state);
+        StatefulWidget::render(&self.kind.widget, rows[3], buf, &mut self.kind.state);
+        if self.is_boolean_kind() {
+            StatefulWidget::render(
+                &self.boolean_type.widget,
+                rows[4],
+                buf,
+                &mut self.boolean_type.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.value_type.widget,
+                rows[4],
+                buf,
+                &mut self.value_type.state,
+            );
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    let integer = is_integer_format(&self.number_format.get_value().0);
+                    let multi = is_multi_register_format(&self.number_format.get_value().0);
+                    let columns = 3 + multi as usize + integer as usize;
+                    let cells =
+                        Layout::horizontal(vec![Constraint::Min(1); columns]).split(rows[5]);
+
+                    let mut col = 0;
+                    StatefulWidget::render(
+                        &self.number_format.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_format.state,
+                    );
+                    col += 1;
+
+                    StatefulWidget::render(
+                        &self.number_endian.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_endian.state,
+                    );
+                    col += 1;
+
+                    if multi {
+                        StatefulWidget::render(
+                            &self.number_word_order.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_word_order.state,
+                        );
+                        col += 1;
+                    }
+
+                    StatefulWidget::render(
+                        &self.number_resolution.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_resolution.state,
+                    );
+                    col += 1;
+
+                    if integer {
+                        StatefulWidget::render(
+                            &self.number_bitmask.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_bitmask.state,
+                        );
+                    }
+                }
+                ValueType::Text => {
+                    let cells: [Rect; 2] =
+                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[5]);
+                    StatefulWidget::render(
+                        &self.text_alignment.widget,
+                        cells[0],
+                        buf,
+                        &mut self.text_alignment.state,
+                    );
+                    StatefulWidget::render(
+                        &self.text_width.widget,
+                        cells[1],
+                        buf,
+                        &mut self.text_width.state,
+                    );
+                }
+            }
+        }
+        StatefulWidget::render(
+            &self.add_button.widget,
+            rows[6],
+            buf,
+            &mut self.add_button.state,
+        );
+        StatefulWidget::render(
+            &self.confirm_button.widget,
+            rows[7],
+            buf,
+            &mut self.confirm_button.state,
+        );
+        StatefulWidget::render(
+            &self.delete_button.widget,
+            rows[8],
+            buf,
+            &mut self.delete_button.state,
+        );
+        StatefulWidget::render(&self.error.widget, rows[9], buf, &mut self.error.state);
+        StatefulWidget::render(
+            &self.keybinds[0].widget,
+            rows[10],
+            buf,
+            &mut self.keybinds[0].state,
+        );
+        StatefulWidget::render(
+            &self.keybinds[1].widget,
+            rows[11],
+            buf,
+            &mut self.keybinds[1].state,
+        );
+
+        if let Some(dialog) = self.add_dialog.as_mut() {
+            dialog.render(area, buf);
+        }
+        if let Some(confirm) = self.confirm_delete.as_mut() {
+            confirm.render(area, buf);
+        }
+    }
+}
+
 fn endian_cfg(e: &RegisterEndian) -> EndianCfg {
     match e {
         RegisterEndian::Big => EndianCfg::Big,
@@ -675,5 +1218,68 @@ mod tests {
         assert!(dialog.add_dialog.is_none());
         assert_eq!(dialog.pending_named_values.len(), 1);
         assert_eq!(dialog.pending_named_values[0].name, "on");
+    }
+
+    fn sample_def() -> MonitorRegisterDef {
+        MonitorRegisterDef {
+            slave_id: 3,
+            kind: Kind::HoldingRegister,
+            address: Some(10),
+            is_virtual: false,
+            value_type: crate::config::device::ValueType::U16,
+            endian: EndianCfg::Big,
+            word_order: WordOrderCfg::Normal,
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: AlignmentCfg::Left,
+            values: vec![],
+            description: "Active power draw".to_string(),
+            default: None,
+        }
+    }
+
+    /// MB-R-148 — `from_interpretation` prefills every field from the existing row: label,
+    /// description, address, kind, and (for a Number/HoldingRegister row) format/endian/
+    /// resolution.
+    #[test]
+    fn ut_edit_interpretation_dialog_prefills_from_existing_row() {
+        let def = sample_def();
+        let dialog = EditInterpretationDialog::from_interpretation("power", &def);
+        assert_eq!(dialog.label.state.input(), "power");
+        assert_eq!(dialog.description.state.input(), "Active power draw");
+        assert_eq!(dialog.address.state.input(), "10");
+        assert_eq!(
+            dialog.kind.state.selection(),
+            kind_index(&Kind::HoldingRegister)
+        );
+        assert_eq!(dialog.value_type.state.selection(), 0); // Number
+        assert_eq!(dialog.number_resolution.state.input(), "1");
+    }
+
+    /// MB-R-148 — `apply()` over a prefilled, unmodified dialog round-trips back to an
+    /// equivalent `MonitorRegisterDef` (`slave_id` is always reset to 0: the caller scopes it).
+    #[test]
+    fn ut_edit_interpretation_dialog_apply_round_trips_unmodified() {
+        let def = sample_def();
+        let dialog = EditInterpretationDialog::from_interpretation("power", &def);
+        let (name, applied) = dialog.apply().expect("valid dialog applies");
+        assert_eq!(name, "power");
+        assert_eq!(applied.description, def.description);
+        assert_eq!(applied.address, def.address);
+        assert_eq!(applied.kind, def.kind);
+        assert_eq!(applied.value_type, def.value_type);
+        assert_eq!(applied.slave_id, 0);
+    }
+
+    /// MB-R-148 — pressing Space on the focused Delete button opens the confirmation popup, not
+    /// an immediate delete.
+    #[test]
+    fn ut_delete_button_space_opens_confirm_delete_not_immediate_delete() {
+        let mut dialog = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        assert!(dialog.confirm_delete.is_none());
+        dialog.focus = EditInterpretationDialogFocus::DeleteButton;
+        dialog.handle_space();
+        assert!(dialog.confirm_delete.is_some());
     }
 }
