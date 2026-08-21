@@ -247,9 +247,19 @@ impl MonitorSetupDialog {
                 select_u8(&mut dialog.data_bits.state, *data_bits);
                 select_u8(&mut dialog.stop_bits.state, *stop_bits);
             }
-            // MB-R-140 — a monitor's endpoint can only ever be Rtu/Ascii; `endpoint_to_monitor_config`
-            // is the resolve-time enforcement, this arm just documents the invariant here too.
-            _ => unreachable!("a monitor's endpoint is always Rtu or Ascii (MB-R-140)"),
+            // MB-R-140 is only enforced at `ModbusMonitorModule::start()`, never at
+            // construction — a hand-edited session file can carry `role = "monitor"` with a
+            // non-serial transport (e.g. `transport = "tcp"`). Such a tab loads fine and fails
+            // `:start` gracefully (logged); `:edit` on it must not panic either. Degrade to the
+            // dialog's own Rtu default instead (leaves path/baud/parity/data_bits/stop_bits at
+            // their placeholder defaults, since a Tcp/Udp/RtuOverTcp/AsciiOverTcp endpoint
+            // carries no equivalent serial fields to prefill from).
+            Endpoint::Tcp { .. }
+            | Endpoint::RtuOverTcp { .. }
+            | Endpoint::Udp { .. }
+            | Endpoint::AsciiOverTcp { .. } => {
+                dialog.transport.state.set_selection(0);
+            }
         }
         dialog.reconnect.state.set_selection(
             if device
@@ -692,5 +702,25 @@ mod tests {
         let dialog = MonitorSetupDialog::edit("mon1", &spec, &device);
         assert_eq!(dialog.transport.state.get_value(), Transport::Ascii);
         assert_eq!(dialog.path.state.input(), "/dev/ttyS0");
+    }
+
+    /// Regression (gate 3 blocker) — MB-R-140 is only enforced at
+    /// `ModbusMonitorModule::start()`, never at construction, so a hand-edited session file can
+    /// carry `role = "monitor"` with a non-serial transport. `:edit`ing such a tab must not
+    /// panic; it degrades to the dialog's Rtu default instead.
+    #[test]
+    fn ut_edit_does_not_panic_on_non_serial_endpoint() {
+        let spec = ModuleSpec {
+            name: "mon1".to_string(),
+            device: String::new(),
+            role: crate::config::Role::Monitor,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 502,
+            },
+        };
+        let device = MonitorDeviceConfig::default();
+        let dialog = MonitorSetupDialog::edit("mon1", &spec, &device);
+        assert_eq!(dialog.transport.state.get_value(), Transport::Rtu);
     }
 }

@@ -78,6 +78,13 @@ pub struct ModbusMonitorModuleView {
     messages: Vec<String>,
     overlay: MonitorOverlay,
     view_focused: bool,
+    /// `:compact` toggle (tui/api-contract.md §2.1) — collapses the resolved-registers section
+    /// to one line per interpretation (name + observed value only), dropping the description
+    /// line shown in the default (expanded) layout.
+    compact: bool,
+    /// `:order [col] [asc|desc]` (tui/api-contract.md §2.1) — sorts the resolved-registers
+    /// section by column; `None` is the unsorted (definition/name) order. `bool` is "descending".
+    sort: Option<(String, bool)>,
 }
 
 #[allow(dead_code)] // forward-declared; see struct's note
@@ -92,6 +99,8 @@ impl ModbusMonitorModuleView {
             messages: Vec::new(),
             overlay: MonitorOverlay::None,
             view_focused: false,
+            compact: false,
+            sort: None,
         }
     }
 
@@ -143,14 +152,51 @@ impl ModbusMonitorModuleView {
         self.overlay = MonitorOverlay::None;
     }
 
-    /// Interpretations defined for `unit` (MB-R-145), by name.
+    /// Interpretations defined for `unit` (MB-R-145), by name — in `:order`'s current sort
+    /// order (tui/api-contract.md §2.1), or definition order (`None`).
     fn interpretations_for(&self, unit: UnitId) -> Vec<(&String, &MonitorRegisterDef)> {
-        self.module
+        let mut rows: Vec<(&String, &MonitorRegisterDef)> = self
+            .module
             .interpretations()
             .iter()
             .filter(|(_, def)| def.slave_id == unit.0)
             .map(|(name, def)| (name, def))
-            .collect()
+            .collect();
+        if let Some((col, desc)) = &self.sort {
+            rows.sort_by(|a, b| Self::order_key(col, a).cmp(&Self::order_key(col, b)));
+            if *desc {
+                rows.reverse();
+            }
+        }
+        rows
+    }
+
+    /// The sort key for one row under `:order`'s `col` argument (tui/api-contract.md §2.1):
+    /// `name`, `address` (unset/virtual sorts first), `kind`, or `type`. An unrecognized column
+    /// falls back to `name` — `apply_order` below is what actually validates the column and
+    /// reports an error, so this only needs a total order, never to reject.
+    fn order_key(col: &str, row: &(&String, &MonitorRegisterDef)) -> (u16, String) {
+        let (name, def) = row;
+        match col {
+            "address" => (def.address.unwrap_or(0), String::new()),
+            "kind" => (0, format!("{:?}", def.kind)),
+            "type" => (0, format!("{:?}", def.value_type)),
+            _ => (0, (*name).clone()),
+        }
+    }
+
+    /// Validate `:order`'s optional column argument (tui/api-contract.md §2.1) and set the
+    /// sort; `Err` for an unrecognized column name.
+    fn apply_order(&mut self, col: &str, desc: bool) -> Result<(), String> {
+        const COLUMNS: [&str; 4] = ["name", "address", "kind", "type"];
+        if !COLUMNS.contains(&col) {
+            return Err(format!(
+                "unknown column '{col}' (expected one of: {})",
+                COLUMNS.join(", ")
+            ));
+        }
+        self.sort = Some((col.to_string(), desc));
+        Ok(())
     }
 
     /// Memory layout for `unit`, grouped by table kind (MB-R-144), non-empty kinds only.
@@ -298,11 +344,17 @@ impl ModuleView for ModbusMonitorModuleView {
                         ferrowl_codec::Address::Virtual => 0,
                     };
                     let width = def.format().width();
-                    match table.read_words(&key, address, width) {
-                        Some(words) => {
-                            format!("{name}: {words:?}")
-                        }
-                        None => format!("{name}: (not yet observed)"),
+                    let value = match table.read_words(&key, address, width) {
+                        Some(words) => format!("{words:?}"),
+                        None => "(not yet observed)".to_string(),
+                    };
+                    // `:compact` (tui/api-contract.md §2.1): the expanded (default) layout adds
+                    // the interpretation's description on its own line; compact drops it to one
+                    // line per interpretation.
+                    if self.compact || def.description.is_empty() {
+                        format!("{name}: {value}")
+                    } else {
+                        format!("{name}: {value}\n  {}", def.description)
                     }
                 })
                 .collect::<Vec<_>>()
@@ -511,7 +563,10 @@ impl ModuleView for ModbusMonitorModuleView {
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
-            ModbusMonitorCmd::Compact => Box::pin(std::future::ready(CommandResult::Handled(None))),
+            ModbusMonitorCmd::Compact => {
+                self.compact = !self.compact;
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
 
             ModbusMonitorCmd::WriteDevice(rest) => {
                 let path = rest.unwrap_or_else(|| self.spec.device.clone());
@@ -535,8 +590,24 @@ impl ModuleView for ModbusMonitorModuleView {
                 )))))
             }
 
-            ModbusMonitorCmd::Order(_) => {
-                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            ModbusMonitorCmd::Order(rest) => {
+                let parts: Vec<&str> = rest.as_deref().unwrap_or("").split_whitespace().collect();
+                let result = match parts.as_slice() {
+                    [] => {
+                        self.sort = None;
+                        CommandResult::Handled(Some((Level::Info, "Order cleared".to_string())))
+                    }
+                    [col] | [col, "asc"] => match self.apply_order(col, false) {
+                        Ok(()) => CommandResult::Handled(None),
+                        Err(e) => CommandResult::Handled(Some((Level::Warning, e))),
+                    },
+                    [col, "desc"] => match self.apply_order(col, true) {
+                        Ok(()) => CommandResult::Handled(None),
+                        Err(e) => CommandResult::Handled(Some((Level::Warning, e))),
+                    },
+                    _ => CommandResult::Unhandled,
+                };
+                Box::pin(std::future::ready(result))
             }
         }
     }
@@ -900,5 +971,111 @@ mod tests {
 
         assert_eq!(v.spec.name, "renamed");
         assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    fn def(address: u16, description: &str) -> MonitorRegisterDef {
+        MonitorRegisterDef {
+            slave_id: 3,
+            kind: Kind::HoldingRegister,
+            address: Some(address),
+            is_virtual: false,
+            value_type: crate::config::device::ValueType::U16,
+            endian: Default::default(),
+            word_order: Default::default(),
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: Default::default(),
+            values: vec![],
+            description: description.to_string(),
+            default: None,
+        }
+    }
+
+    fn buffer_text(v: &mut ModbusMonitorModuleView) -> String {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .fold(String::new(), |mut acc, cell| {
+                acc.push_str(cell.symbol());
+                acc
+            })
+    }
+
+    /// tui/api-contract.md §2.1 — `:compact` toggles the resolved-registers section between the
+    /// default (expanded, description shown) layout and the compact (name + value only) layout.
+    #[tokio::test]
+    async fn ut_compact_command_toggles_resolved_registers_description_line() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation("power".to_string(), def(10, "Active power draw"));
+
+        assert!(!v.compact);
+        let expanded = buffer_text(&mut v);
+        assert!(expanded.contains("Active power draw"));
+
+        v.handle_command("compact").await;
+        assert!(v.compact);
+        let compact = buffer_text(&mut v);
+        assert!(!compact.contains("Active power draw"));
+
+        v.handle_command("compact").await;
+        assert!(!v.compact);
+    }
+
+    /// tui/api-contract.md §2.1 — `:order <col> [asc|desc]` sorts the resolved-registers section
+    /// by column; bare `:order` clears the sort back to definition order.
+    #[tokio::test]
+    async fn ut_order_command_sorts_resolved_registers_by_column() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation("low".to_string(), def(1, "low addr"));
+        v.module
+            .add_interpretation("high".to_string(), def(99, "high addr"));
+
+        v.handle_command("order address desc").await;
+        let rows = v.interpretations_for(UnitId(3));
+        assert_eq!(
+            rows.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["high", "low"]
+        );
+
+        v.handle_command("order address asc").await;
+        let rows = v.interpretations_for(UnitId(3));
+        assert_eq!(
+            rows.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["low", "high"]
+        );
+
+        v.handle_command("order").await;
+        assert!(v.sort.is_none());
+    }
+
+    /// tui/api-contract.md §2.1 — an unrecognized `:order` column is reported (Warning), not
+    /// silently accepted, and leaves the current sort untouched.
+    #[tokio::test]
+    async fn ut_order_command_rejects_unknown_column() {
+        let mut v = view();
+        let result = v.handle_command("order bogus").await;
+        assert!(matches!(
+            result,
+            CommandResult::Handled(Some((Level::Warning, _)))
+        ));
+        assert!(v.sort.is_none());
     }
 }
