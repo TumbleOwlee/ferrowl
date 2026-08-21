@@ -14,6 +14,7 @@ use ferrowl_codec::Kind;
 use ferrowl_codec::format::{
     BitField, Endian as RegisterEndian, Format as RegisterFormat, WordOrder as RegisterWordOrder,
 };
+use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
     state::{ButtonState, InputFieldState, SelectionState},
     traits::HandleEvents,
@@ -23,6 +24,7 @@ use ferrowl_ui_derive::{Focus, focusable};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
+    style::Style,
     widgets::{Block, StatefulWidget, Widget as UiWidget},
 };
 use std::fmt::Debug;
@@ -331,12 +333,13 @@ impl AddInterpretationDialog {
                 .areas(area);
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(30),
+            Constraint::Length(33),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
 
         let block = Block::bordered()
+            .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
             .title_alignment(HorizontalAlignment::Center)
             .title("Add interpretation");
         let dialog_box = vertical_layout[1];
@@ -345,17 +348,18 @@ impl AddInterpretationDialog {
         ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
         block.render(dialog_box, buf);
 
-        let rows: [Rect; 10] = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Length(1),
+        let rows: [Rect; 11] = Layout::vertical([
+            Constraint::Length(3), // 0 label
+            Constraint::Length(3), // 1 description
+            Constraint::Length(3), // 2 address
+            Constraint::Length(3), // 3 kind
+            Constraint::Length(3), // 4 type (value_type / boolean_type)
+            Constraint::Length(3), // 5 Number/Text-conditional fields
+            Constraint::Length(3), // 6 add_button
+            Constraint::Length(3), // 7 confirm_button
+            Constraint::Length(3), // 8 error
+            Constraint::Length(1), // 9 keybind0
+            Constraint::Length(1), // 10 keybind1
         ])
         .areas(area);
 
@@ -382,29 +386,101 @@ impl AddInterpretationDialog {
                 buf,
                 &mut self.value_type.state,
             );
+            // Mirrors EditInputDialog's render.rs Number/Text branch — the fields that were
+            // missing entirely here (struct fields existed and `apply()` already read them,
+            // but render() never drew them, so the user had no way to see or edit them).
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    let integer = is_integer_format(&self.number_format.get_value().0);
+                    let multi = is_multi_register_format(&self.number_format.get_value().0);
+                    let columns = 3 + multi as usize + integer as usize;
+                    let cells =
+                        Layout::horizontal(vec![Constraint::Min(1); columns]).split(rows[5]);
+
+                    let mut col = 0;
+                    StatefulWidget::render(
+                        &self.number_format.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_format.state,
+                    );
+                    col += 1;
+
+                    StatefulWidget::render(
+                        &self.number_endian.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_endian.state,
+                    );
+                    col += 1;
+
+                    if multi {
+                        StatefulWidget::render(
+                            &self.number_word_order.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_word_order.state,
+                        );
+                        col += 1;
+                    }
+
+                    StatefulWidget::render(
+                        &self.number_resolution.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_resolution.state,
+                    );
+                    col += 1;
+
+                    if integer {
+                        StatefulWidget::render(
+                            &self.number_bitmask.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_bitmask.state,
+                        );
+                    }
+                }
+                ValueType::Text => {
+                    let cells: [Rect; 2] =
+                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[5]);
+                    StatefulWidget::render(
+                        &self.text_alignment.widget,
+                        cells[0],
+                        buf,
+                        &mut self.text_alignment.state,
+                    );
+                    StatefulWidget::render(
+                        &self.text_width.widget,
+                        cells[1],
+                        buf,
+                        &mut self.text_width.state,
+                    );
+                }
+            }
         }
         StatefulWidget::render(
             &self.add_button.widget,
-            rows[5],
+            rows[6],
             buf,
             &mut self.add_button.state,
         );
         StatefulWidget::render(
             &self.confirm_button.widget,
-            rows[6],
+            rows[7],
             buf,
             &mut self.confirm_button.state,
         );
-        StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
+        StatefulWidget::render(&self.error.widget, rows[8], buf, &mut self.error.state);
         StatefulWidget::render(
             &self.keybinds[0].widget,
-            rows[8],
+            rows[9],
             buf,
             &mut self.keybinds[0].state,
         );
         StatefulWidget::render(
             &self.keybinds[1].widget,
-            rows[9],
+            rows[10],
             buf,
             &mut self.keybinds[1].state,
         );
@@ -482,6 +558,105 @@ mod tests {
         assert_eq!(def.kind, Kind::HoldingRegister);
         assert_eq!(def.value_type, crate::config::device::ValueType::U16);
         assert_eq!(def.slave_id, 0);
+    }
+
+    /// Regression — selecting Number (or Text) value type must show its associated fields
+    /// (Format/Endian/Resolution/[Order]/[Bitmask], or Alignment/Width); previously the struct
+    /// held these fields and `apply()` already read them, but `render()` never drew any of them
+    /// at all, so the user had no way to see or edit a Number/Text interpretation's format.
+    #[test]
+    fn ut_render_shows_number_format_fields_when_number_type_selected() {
+        let mut dialog = AddInterpretationDialog::new();
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
+        // ValueType::Number is index 0 per AddInterpretationDialog::new()'s selection order.
+        dialog.value_type.state.set_selection(0);
+
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        for field in ["Format", "Endian", "Resolution"] {
+            assert!(text.contains(field), "missing field '{field}':\n{text}");
+        }
+    }
+
+    /// Same regression, for the Text branch's Alignment/Width fields.
+    #[test]
+    fn ut_render_shows_text_format_fields_when_text_type_selected() {
+        let mut dialog = AddInterpretationDialog::new();
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
+        // ValueType::Text is index 1 per AddInterpretationDialog::new()'s selection order.
+        dialog.value_type.state.set_selection(1);
+
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        for field in ["Alignment", "Width"] {
+            assert!(text.contains(field), "missing field '{field}':\n{text}");
+        }
+    }
+
+    fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Regression — the dialog's border must be styled like every other setup/edit popup in
+    /// the crate (blue border, themed background), not the terminal's plain default; previously
+    /// `Block::bordered()` had no `.style(...)` at all.
+    #[test]
+    fn ut_render_styles_the_border_with_the_theme_colors() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut dialog = AddInterpretationDialog::new();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                dialog.render(area, frame.buffer_mut());
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let [_, hcenter, _] = ratatui::layout::Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Max(76),
+            Constraint::Min(1),
+        ])
+        .areas(area_full(buf));
+        let [_, vcenter, _] = ratatui::layout::Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(33),
+            Constraint::Min(1),
+        ])
+        .areas(hcenter);
+        assert_eq!(
+            buf[(vcenter.x, vcenter.y)].fg,
+            COLOR_SCHEME.hi,
+            "dialog border must use the theme highlight color"
+        );
+        assert_eq!(
+            buf[(vcenter.x, vcenter.y)].bg,
+            COLOR_SCHEME.bg,
+            "dialog border must use the theme background color"
+        );
+    }
+
+    fn area_full(buf: &ratatui::buffer::Buffer) -> Rect {
+        buf.area
     }
 
     /// Regression guard: `AddNamedValueDialog` still behaves as `dialog/add_value.rs`'s own
