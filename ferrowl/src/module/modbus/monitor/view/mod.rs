@@ -207,6 +207,247 @@ fn message_row(unit: UnitId, record: &MonitorRecord, now: std::time::Instant) ->
     }
 }
 
+/// UI-R-063 — one hex-editor cell of the Memory-layout panel: an observed-or-not raw value at
+/// one raw address (coil-family: one packed byte covering 8 bit addresses; register-family: one
+/// word at one word address).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MemoryCell {
+    observed: bool,
+    value: u16,
+}
+
+/// UI-R-063 — `(raw addresses per cell, cells per rendered line)` for `kind`: coil-family packs
+/// 8 bits per byte-cell, 16 bytes (128 bit addresses) per line; register-family is 1 word per
+/// cell, 8 words per line.
+fn memory_cell_shape(kind: Kind) -> (u16, u16) {
+    match kind {
+        Kind::Coil | Kind::DiscreteInput => (8, 16),
+        Kind::HoldingRegister | Kind::InputRegister => (1, 8),
+    }
+}
+
+/// UI-R-063 — group `pairs` (from [`ModbusMonitorModuleView::memory_rows`], already
+/// address-ordered `(address, value)` pairs) into fixed-width hex-editor lines per
+/// `memory_cell_shape`, MSB-first bit-packed for coil-family kinds. Only lines containing at
+/// least one observed cell are returned, sorted by starting address. A cell within an otherwise
+/// -observed line that itself has no observed constituent bit/word renders unobserved
+/// (`MemoryCell::observed == false`, `value == 0`) — for coil-family kinds this is a documented
+/// sub-byte-granularity call: a byte with only some of its 8 bits observed still counts as an
+/// observed cell, with its unobserved bits packed as `0`.
+fn memory_lines(kind: Kind, pairs: &[(u16, u16)]) -> Vec<(u16, Vec<MemoryCell>)> {
+    let (unit_per_cell, cells_per_line) = memory_cell_shape(kind);
+    let observed: std::collections::HashMap<u16, u16> = pairs.iter().copied().collect();
+
+    let mut line_starts: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+    for &(address, _) in pairs {
+        let cell_addr = address / unit_per_cell;
+        let line_start_cell = (cell_addr / cells_per_line) * cells_per_line;
+        line_starts.insert(line_start_cell * unit_per_cell);
+    }
+
+    line_starts
+        .into_iter()
+        .map(|line_start_address| {
+            let line_start_cell = line_start_address / unit_per_cell;
+            let cells = (0..cells_per_line)
+                .map(|i| {
+                    let cell_addr = line_start_cell + i;
+                    if unit_per_cell == 8 {
+                        let mut value: u16 = 0;
+                        let mut cell_observed = false;
+                        for bit in 0..8u16 {
+                            let raw = cell_addr * 8 + bit;
+                            if let Some(&bit_value) = observed.get(&raw) {
+                                cell_observed = true;
+                                if bit_value != 0 {
+                                    value |= 1 << (7 - bit);
+                                }
+                            }
+                        }
+                        MemoryCell {
+                            observed: cell_observed,
+                            value,
+                        }
+                    } else {
+                        match observed.get(&cell_addr) {
+                            Some(&v) => MemoryCell {
+                                observed: true,
+                                value: v,
+                            },
+                            None => MemoryCell {
+                                observed: false,
+                                value: 0,
+                            },
+                        }
+                    }
+                })
+                .collect();
+            (line_start_address, cells)
+        })
+        .collect()
+}
+
+/// Whether `value`'s low byte is a printable ASCII character (space or graphic) — the same
+/// printable-vs-`.` convention `Definition::values()` uses (`ferrowl/src/module/modbus/table.rs`).
+fn is_printable_low_byte(value: u16) -> bool {
+    let byte = (value & 0xFF) as u8;
+    byte == b' ' || byte.is_ascii_graphic()
+}
+
+/// UI-R-063's value-class color for one cell: unobserved or an observed zero reads as neutral
+/// (`placeholder`); an observed printable-ASCII low byte as normal text; any other observed
+/// non-zero value flagged (`warning`).
+fn memory_cell_value_style(cell: &MemoryCell) -> ratatui::style::Color {
+    use ferrowl_ui::COLOR_SCHEME;
+    if !cell.observed || cell.value == 0 {
+        COLOR_SCHEME.placeholder
+    } else if is_printable_low_byte(cell.value) {
+        COLOR_SCHEME.text
+    } else {
+        COLOR_SCHEME.warning
+    }
+}
+
+/// The character-representation column for one cell: `.` when unobserved or non-printable, else
+/// the printable low-byte character (`Definition::values()`'s convention).
+fn memory_cell_char(cell: &MemoryCell) -> char {
+    if cell.observed && is_printable_low_byte(cell.value) {
+        (cell.value & 0xFF) as u8 as char
+    } else {
+        '.'
+    }
+}
+
+/// UI-R-063 — one row of the Memory-layout hex-editor render: either a table-kind line (its
+/// starting address + cells) or a blank `gap_bg` separator between two non-adjacent lines.
+enum MemoryLine {
+    Line {
+        kind: Kind,
+        address: u16,
+        cells: Vec<MemoryCell>,
+    },
+    Gap,
+}
+
+/// UI-R-063 — flatten `memory_rows`'s per-kind pair-lists into one ordered sequence of
+/// hex-editor lines, inserting a `Gap` wherever the previous line and this one are not
+/// address-contiguous within the same table kind (a table-kind change is always non-contiguous
+/// by construction).
+fn memory_layout_lines(kind_rows: &[(Kind, Vec<(u16, u16)>)]) -> Vec<MemoryLine> {
+    let mut out = Vec::new();
+    let mut prev_end: Option<(Kind, u16)> = None;
+    for (kind, pairs) in kind_rows {
+        let (unit_per_cell, cells_per_line) = memory_cell_shape(kind.clone());
+        let span = unit_per_cell * cells_per_line;
+        for (address, cells) in memory_lines(kind.clone(), pairs) {
+            let contiguous = prev_end
+                .as_ref()
+                .map(|(prev_kind, prev_end_addr)| *prev_kind == *kind && *prev_end_addr == address)
+                .unwrap_or(true);
+            if !out.is_empty() && !contiguous {
+                out.push(MemoryLine::Gap);
+            }
+            prev_end = Some((kind.clone(), address.saturating_add(span)));
+            out.push(MemoryLine::Line {
+                kind: kind.clone(),
+                address,
+                cells,
+            });
+        }
+    }
+    out
+}
+
+/// Whether any of `cell_address`'s `unit_per_cell` constituent raw addresses is MB-R-147
+/// recency-active (Shared) as of `now`.
+fn memory_cell_recency_active(
+    kind: Kind,
+    cell_address: u16,
+    unit_per_cell: u16,
+    records: &[MonitorRecord],
+    now: std::time::Instant,
+) -> bool {
+    (0..unit_per_cell).any(|i| {
+        ferrowl_modbus::monitor::recency_active_at(records, kind.clone(), cell_address + i, now)
+    })
+}
+
+/// UI-R-063 — paint `lines` into `area` of `buf`: per line, a `{address:04x}` prefix, hex cell
+/// values (coil-family bytes as `{:02x}`, register-family words as `{:04x}`), then a
+/// `|char...|` representation column; a `Gap` line paints its full width in `gap_bg`. A cell
+/// covered by an active MB-R-147 recency marker paints `hi`, overriding its value-class color
+/// (mirrors `Definition::cell_styles`'s highlight-overrides-base-style precedence).
+fn render_memory_layout(
+    buf: &mut ratatui::buffer::Buffer,
+    area: Rect,
+    lines: &[MemoryLine],
+    records: &[MonitorRecord],
+    now: std::time::Instant,
+) {
+    use ferrowl_ui::COLOR_SCHEME;
+    use ratatui::style::Style;
+
+    for (row, line) in lines.iter().enumerate() {
+        let y = area.y.saturating_add(row as u16);
+        if y >= area.y + area.height {
+            break;
+        }
+        match line {
+            MemoryLine::Gap => {
+                buf.set_style(
+                    Rect {
+                        x: area.x,
+                        y,
+                        width: area.width,
+                        height: 1,
+                    },
+                    Style::default().bg(COLOR_SCHEME.gap_bg),
+                );
+            }
+            MemoryLine::Line {
+                kind,
+                address,
+                cells,
+            } => {
+                let unit_per_cell = memory_cell_shape(kind.clone()).0;
+                let mut x = area.x;
+                let prefix = format!("{address:04x} ");
+                buf.set_string(x, y, &prefix, Style::default().fg(COLOR_SCHEME.border));
+                x += prefix.len() as u16;
+                let mut chars = String::new();
+                for (i, cell) in cells.iter().enumerate() {
+                    let cell_address = address.saturating_add((i as u16) * unit_per_cell);
+                    let hex = if unit_per_cell == 8 {
+                        format!("{:02x}", cell.value)
+                    } else {
+                        format!("{:04x}", cell.value)
+                    };
+                    let color = if memory_cell_recency_active(
+                        kind.clone(),
+                        cell_address,
+                        unit_per_cell,
+                        records,
+                        now,
+                    ) {
+                        COLOR_SCHEME.hi
+                    } else {
+                        memory_cell_value_style(cell)
+                    };
+                    buf.set_string(x, y, &hex, Style::default().fg(color));
+                    x += hex.len() as u16 + 1;
+                    chars.push(memory_cell_char(cell));
+                }
+                buf.set_string(
+                    x,
+                    y,
+                    format!("|{chars}|"),
+                    Style::default().fg(COLOR_SCHEME.text),
+                );
+            }
+        }
+    }
+}
+
 // Forward-declared: real app-side construction lands in s8 of the modbus-bus-monitor plan (wiring the 3 construction call sites); already fully implemented and tested here.
 #[allow(dead_code)]
 pub struct ModbusMonitorModuleView {
@@ -468,27 +709,18 @@ impl ModuleView for ModbusMonitorModuleView {
             .title("Memory layout");
         let memory_inner = memory_block.inner(section_areas[1]);
         ratatui::widgets::Widget::render(memory_block, section_areas[1], buf);
-        let memory_text = if let Some(unit) = selected {
-            self.memory_rows(unit)
-                .into_iter()
-                .map(|(kind, pairs)| {
-                    let pairs_str = pairs
-                        .iter()
-                        .map(|(addr, word)| format!("{addr}={word}"))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    format!("{kind:?}: {pairs_str}")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            String::new()
-        };
-        ratatui::widgets::Widget::render(
-            ratatui::widgets::Paragraph::new(memory_text),
-            memory_inner,
-            buf,
-        );
+        if let Some(unit) = selected {
+            let kind_rows = self.memory_rows(unit);
+            let lines = memory_layout_lines(&kind_rows);
+            let records = self.module.records().read().records_for(unit);
+            render_memory_layout(
+                buf,
+                memory_inner,
+                &lines,
+                &records,
+                std::time::Instant::now(),
+            );
+        }
 
         // Resolved registers (MB-R-145) — omitted entirely when no interpretation exists for
         // the selected unit id (UI-R-061).
@@ -1574,5 +1806,163 @@ mod tests {
         v.panel_focus = MonitorPanel::Messages;
         let result = v.handle_events(KeyModifiers::NONE, KeyCode::Right);
         assert!(matches!(result, EventResult::Consumed));
+    }
+
+    /// UI-R-063 — two far-apart observed addresses produce only their own two lines, not every
+    /// unobserved line in between.
+    #[test]
+    fn ut_memory_layout_omits_unobserved_lines_renders_observed_ones() {
+        let lines = memory_lines(Kind::HoldingRegister, &[(0, 1), (20, 2)]);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].0, 0);
+        assert_eq!(lines[1].0, 16); // address 20's line starts at cell 16 (8 words/line)
+    }
+
+    /// UI-R-063 — within an otherwise-observed line, a cell with no observed constituent
+    /// bit/word renders unobserved, not a silent zero.
+    #[test]
+    fn ut_memory_layout_unobserved_cell_renders_as_dim_placeholder_not_zero() {
+        let lines = memory_lines(Kind::HoldingRegister, &[(0, 7)]);
+        let cells = &lines[0].1;
+        assert!(cells[0].observed);
+        assert_eq!(cells[0].value, 7);
+        assert!(!cells[3].observed, "address 3 was never observed");
+        assert_eq!(cells[3].value, 0);
+        assert_eq!(
+            memory_cell_value_style(&cells[3]),
+            ferrowl_ui::COLOR_SCHEME.placeholder
+        );
+    }
+
+    /// UI-R-063 — value-class coloring: unobserved/observed-zero is neutral, observed
+    /// printable-ASCII is normal text, any other observed non-zero value is flagged.
+    #[test]
+    fn ut_memory_layout_value_class_coloring_zero_ascii_other() {
+        use ferrowl_ui::COLOR_SCHEME;
+        let unobserved = MemoryCell {
+            observed: false,
+            value: 0,
+        };
+        let zero = MemoryCell {
+            observed: true,
+            value: 0,
+        };
+        let ascii = MemoryCell {
+            observed: true,
+            value: b'A' as u16,
+        };
+        let other = MemoryCell {
+            observed: true,
+            value: 0x0100, // low byte 0x00, not printable
+        };
+        assert_eq!(
+            memory_cell_value_style(&unobserved),
+            COLOR_SCHEME.placeholder
+        );
+        assert_eq!(memory_cell_value_style(&zero), COLOR_SCHEME.placeholder);
+        assert_eq!(memory_cell_value_style(&ascii), COLOR_SCHEME.text);
+        assert_eq!(memory_cell_value_style(&other), COLOR_SCHEME.warning);
+    }
+
+    /// MB-R-147/UI-R-063 — a cell's active recency marker paints `hi`, overriding its
+    /// value-class color; once the marker lapses (>2s old), the value-class color shows again.
+    #[test]
+    fn ut_memory_layout_recency_marker_overrides_value_class_color_while_active() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::buffer::Buffer;
+
+        let area = Rect::new(0, 0, 40, 2);
+        let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1)])]);
+        let now = std::time::Instant::now();
+
+        let fresh = shaped_record(
+            RecordStatus::Ok,
+            ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+            Some(shape(Kind::HoldingRegister, 0, 1, None, None, vec![1])),
+            std::time::Duration::from_millis(100),
+        );
+        let mut buf = Buffer::empty(area);
+        render_memory_layout(&mut buf, area, &lines, std::slice::from_ref(&fresh), now);
+        // prefix "0000 " is 5 chars, so the first hex cell (value=1, non-printable low byte)
+        // lands at x=5.
+        assert_eq!(buf[(5, 0)].fg, COLOR_SCHEME.hi);
+
+        let stale = shaped_record(
+            RecordStatus::Ok,
+            ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+            Some(shape(Kind::HoldingRegister, 0, 1, None, None, vec![1])),
+            std::time::Duration::from_secs(3),
+        );
+        let mut buf2 = Buffer::empty(area);
+        render_memory_layout(&mut buf2, area, &lines, std::slice::from_ref(&stale), now);
+        assert_eq!(buf2[(5, 0)].fg, COLOR_SCHEME.warning);
+    }
+
+    /// UI-R-063 — a blank line separates two non-address-contiguous lines, painted in
+    /// `gap_bg` across the full width; two contiguous lines get no gap between them.
+    #[test]
+    fn ut_memory_layout_gap_separator_between_non_adjacent_lines_uses_gap_bg() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::buffer::Buffer;
+
+        let area = Rect::new(0, 0, 40, 3);
+        let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1), (20, 2)])]);
+        assert_eq!(
+            lines.len(),
+            3,
+            "two non-adjacent lines plus one gap between them"
+        );
+        assert!(matches!(lines[1], MemoryLine::Gap));
+
+        let mut buf = Buffer::empty(area);
+        render_memory_layout(&mut buf, area, &lines, &[], std::time::Instant::now());
+        assert_eq!(buf[(0, 1)].bg, COLOR_SCHEME.gap_bg);
+        assert_eq!(buf[(39, 1)].bg, COLOR_SCHEME.gap_bg);
+        assert_ne!(buf[(0, 0)].bg, COLOR_SCHEME.gap_bg);
+    }
+
+    /// UI-R-063 (regression on `memory_rows`'s existing filter, Shared) — a table kind with no
+    /// observed traffic for the selected unit is omitted entirely, not rendered as an empty
+    /// section.
+    #[tokio::test]
+    async fn ut_memory_layout_omits_table_kind_with_no_traffic_entirely() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        let kind_rows = v.memory_rows(UnitId(3));
+        assert_eq!(kind_rows.len(), 1);
+        assert_eq!(kind_rows[0].0, Kind::HoldingRegister);
+    }
+
+    /// UI-R-063 — coil-family kinds pack 8 bits per byte-cell, MSB-first, 16 bytes per line.
+    #[test]
+    fn ut_memory_layout_coil_packs_8_bits_per_byte_16_bytes_per_line() {
+        // Bits 0 and 7 of the first byte set; bit 8 (second byte) also set.
+        let pairs = vec![(0, 1), (7, 1), (8, 1)];
+        let lines = memory_lines(Kind::Coil, &pairs);
+        assert_eq!(lines.len(), 1);
+        let (start, cells) = &lines[0];
+        assert_eq!(*start, 0);
+        assert_eq!(cells.len(), 16, "16 bytes per coil-family line");
+        // bit 0 -> MSB (0x80), bit 7 -> LSB (0x01)
+        assert_eq!(cells[0].value, 0b1000_0001);
+        assert!(cells[0].observed);
+        assert_eq!(cells[1].value, 0b1000_0000);
+        assert!(cells[1].observed);
+        assert!(!cells[2].observed);
+    }
+
+    /// UI-R-063 — register-family kinds are 1 word per cell, 8 words per line.
+    #[test]
+    fn ut_memory_layout_register_8_addresses_per_line() {
+        let lines = memory_lines(Kind::HoldingRegister, &[(0, 10), (7, 20)]);
+        assert_eq!(lines.len(), 1);
+        let (start, cells) = &lines[0];
+        assert_eq!(*start, 0);
+        assert_eq!(cells.len(), 8, "8 words per register-family line");
+        assert_eq!(cells[0].value, 10);
+        assert_eq!(cells[7].value, 20);
+        assert!(!cells[3].observed);
     }
 }
