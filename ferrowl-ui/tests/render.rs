@@ -606,3 +606,59 @@ fn table_render_variants() {
     let mut b = buffer(14, 8);
     StatefulWidget::render(&w, Rect::new(0, 0, 14, 8), &mut b, &mut st);
 }
+
+#[derive(Clone, Default)]
+struct SpanRow;
+
+impl TableEntry<2> for SpanRow {
+    fn values(&self) -> [String; 2] {
+        ["ab".to_string(), "plain".to_string()]
+    }
+    fn height(&self) -> u16 {
+        1
+    }
+    fn cell_spans(&self) -> [Option<Vec<(String, ratatui::style::Style)>>; 2] {
+        [
+            Some(vec![
+                (
+                    "a".to_string(),
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Red),
+                ),
+                (
+                    "b".to_string(),
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Blue),
+                ),
+            ]),
+            None,
+        ]
+    }
+}
+
+#[test]
+/// A `cell_spans`-returning column renders each span with its own color, distinct from its
+/// neighbor's, rather than one flat cell color; a `None` column (col 1) renders exactly as
+/// before this method existed.
+fn table_cell_spans_render_distinct_per_span_colors() {
+    let w = TableBuilder::<SpanRow, Cols, 2>::default().build().unwrap();
+    // Two rows so row index 1 (rendered on buffer row 2) is unselected — the table's default
+    // first-row selection patches `focused`'s own fg over cell content, which would otherwise
+    // mask the spans' colors this test asserts on.
+    let mut st = TableStateBuilder::default()
+        .values(vec![SpanRow, SpanRow])
+        .build()
+        .unwrap();
+    let mut b = buffer(40, 8);
+    StatefulWidget::render(&w, Rect::new(0, 0, 40, 8), &mut b, &mut st);
+
+    // Buffer row 2 = data row 1 (row 0 is the header, buffer row 1 = data row 0, selected); x=0
+    // padding, x=1 padding, x=2 padding, then the first data column's spans: 'a' at x=3, 'b' at
+    // x=4, rendered adjacently (same column layout as the selected row's own highlight-bar
+    // column, which is blank — not `█` — on an unselected row).
+    let a_cell = &b[(3, 2)];
+    let b_cell = &b[(4, 2)];
+    assert_eq!(a_cell.symbol(), "a");
+    assert_eq!(b_cell.symbol(), "b");
+    assert_eq!(a_cell.fg, ratatui::style::Color::Red);
+    assert_eq!(b_cell.fg, ratatui::style::Color::Blue);
+    assert_ne!(a_cell.fg, b_cell.fg);
+}

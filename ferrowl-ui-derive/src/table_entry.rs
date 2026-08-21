@@ -14,6 +14,7 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     // Struct-level attributes.
     let mut header_ident: Option<Ident> = None;
     let mut styles_path: Option<syn::Path> = None;
+    let mut spans_path: Option<syn::Path> = None;
     let mut height: u16 = 1;
 
     for attr in &input.attrs {
@@ -23,10 +24,12 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                     header_ident = Some(m.value()?.parse()?);
                 } else if m.path.is_ident("styles") {
                     styles_path = Some(m.value()?.parse()?);
+                } else if m.path.is_ident("spans") {
+                    spans_path = Some(m.value()?.parse()?);
                 } else {
-                    return Err(
-                        m.error("unknown `table_entry` key (expected `header` or `styles`)")
-                    );
+                    return Err(m.error(
+                        "unknown `table_entry` key (expected `header`, `styles`, or `spans`)",
+                    ));
                 }
                 Ok(())
             })?;
@@ -118,6 +121,17 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     });
 
+    let cell_spans_impl = spans_path.map(|path| {
+        quote! {
+            fn cell_spans(
+                &self,
+            ) -> [::core::option::Option<::std::vec::Vec<(::std::string::String, ratatui::style::Style)>>; #n]
+            {
+                #path(self)
+            }
+        }
+    });
+
     Ok(quote! {
         impl #impl_generic ferrowl_ui::widgets::TableEntry<#n> for #ident #ty_generic #where_clause {
             fn values(&self) -> [::std::string::String; #n] {
@@ -127,6 +141,7 @@ pub fn expand_table_entry(input: syn::DeriveInput) -> syn::Result<TokenStream> {
                 #height
             }
             #cell_styles_impl
+            #cell_spans_impl
         }
 
         #[derive(Clone, Copy, Debug, Default)]

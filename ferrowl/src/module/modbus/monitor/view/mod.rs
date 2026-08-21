@@ -564,16 +564,13 @@ fn memory_cell_recency_active(
 /// between two non-adjacent lines. Real `Table`/`TableEntry` machinery (`s12`/`s14`'s own
 /// pattern, Shared) replaces the previous hand-painted-into-the-buffer render.
 ///
-/// `Table`'s `cell_styles` is one `ratatui::style::Style` per (row, column) — there is no way to
-/// attach a distinct color to each individual byte/word within a single Hex/Ascii cell's string
-/// the way the previous buffer-painted render could. `style` is therefore the *whole line's*
-/// highest-priority color across its cells (`memory_row_style_for_line`'s
-/// recency-active-`hi` > `warning` > `text` > `placeholder` precedence) — a deliberate,
-/// documented granularity trade-off forced by adopting the shared column-based widget, not a
-/// silent loss: every cell that would have painted `hi`/`warning` still drives the whole row to
-/// that color, so a byte/word actually needing attention is never masked by its neighbors.
+/// UI-R-063 requires each individual byte/word to carry its own value-class/recency color; the
+/// Hex/Ascii columns use `TableEntry::cell_spans` (Shared, `ferrowl-ui/src/widgets/table.rs`) to
+/// carry one `(text, style)` span per cell, so every byte/word keeps its own color — not the
+/// row's plain `cell_styles` (`Style`-per-whole-cell), which the Address column still uses since
+/// it has no sub-cell structure to color independently.
 #[derive(Clone, Debug, Default, TableEntry)]
-#[table_entry(header = MemoryHeader, styles = memory_row_styles)]
+#[table_entry(header = MemoryHeader, styles = memory_row_styles, spans = memory_row_spans)]
 struct MemoryRow {
     #[column(name = "Address", min = 6, max = 10)]
     address: String,
@@ -584,6 +581,12 @@ struct MemoryRow {
     /// Not a `#[column]` — carries the row's on-screen style, consumed by `memory_row_styles`.
     is_gap: bool,
     style: ratatui::style::Style,
+    /// Not a `#[column]` — per-cell `(hex text, style)` spans for the Hex column, consumed by
+    /// `memory_row_spans`; empty for a `Gap` row.
+    hex_spans: Vec<(String, ratatui::style::Style)>,
+    /// Not a `#[column]` — per-cell `(ascii char, style)` spans for the Ascii column, consumed by
+    /// `memory_row_spans`; empty for a `Gap` row.
+    ascii_spans: Vec<(String, ratatui::style::Style)>,
 }
 
 type MemoryTable = Widget<TableState<MemoryRow, 3>, Table<MemoryRow, MemoryHeader, 3>>;
@@ -610,8 +613,10 @@ fn new_memory_table() -> MemoryTable {
 }
 
 /// `Gap` rows paint their whole row `gap_bg`-background (`style` already carries that); real
-/// lines color Hex/Ascii by `style`, Address by the same neutral border color the previous
-/// render's `{address:04x} ` prefix used.
+/// lines color Address by the same neutral border color the previous render's `{address:04x} `
+/// prefix used — Hex/Ascii get their color from `memory_row_spans` instead (per-cell, not
+/// per-row), so this returns `None` for those two columns on a real line (the render loop treats
+/// a `Some` `cell_spans` entry as taking over that column's coloring entirely, Shared).
 fn memory_row_styles(row: &MemoryRow) -> [Option<ratatui::style::Style>; 3] {
     if row.is_gap {
         [Some(row.style); 3]
@@ -619,59 +624,49 @@ fn memory_row_styles(row: &MemoryRow) -> [Option<ratatui::style::Style>; 3] {
         use ferrowl_ui::COLOR_SCHEME;
         [
             Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border)),
-            Some(row.style),
-            Some(row.style),
+            None,
+            None,
         ]
     }
 }
 
-/// UI-R-063/MB-R-147 — one line's whole-row color: the highest-priority class across its cells
-/// (`hi` for an active recency marker, else `memory_cell_value_style`'s own
-/// `warning`/`text`/`placeholder`, ranked in that order) — see `MemoryRow`'s own doc comment for
-/// why this is line-granular, not per-cell.
-fn memory_row_style_for_line(
+/// UI-R-063 — per-cell spans for the Hex/Ascii columns of a real (non-gap) line: `row.hex_spans`/
+/// `row.ascii_spans` already carry each cell's own `(text, style)` pair (computed in
+/// `memory_table_rows`); `None` for a `Gap` row (styled instead via `memory_row_styles`) and for
+/// the Address column (no sub-cell structure to color independently).
+fn memory_row_spans(row: &MemoryRow) -> [Option<Vec<(String, ratatui::style::Style)>>; 3] {
+    if row.is_gap {
+        [None, None, None]
+    } else {
+        [
+            None,
+            Some(row.hex_spans.clone()),
+            Some(row.ascii_spans.clone()),
+        ]
+    }
+}
+
+/// UI-R-063/MB-R-147 — one cell's own color: `hi` while an MB-R-147 recency marker is active for
+/// any of its constituent raw addresses, else `memory_cell_value_style`'s value-class color.
+fn memory_cell_style(
     kind: Kind,
-    address: u16,
-    cells: &[MemoryCell],
+    cell_address: u16,
+    unit_per_cell: u16,
+    cell: &MemoryCell,
     records: &[MonitorRecord],
     now: std::time::Instant,
-) -> ratatui::style::Style {
+) -> ratatui::style::Color {
     use ferrowl_ui::COLOR_SCHEME;
-    let unit_per_cell = memory_cell_shape(kind.clone()).0;
-    let rank = |color: ratatui::style::Color| -> u8 {
-        if color == COLOR_SCHEME.hi {
-            3
-        } else if color == COLOR_SCHEME.warning {
-            2
-        } else if color == COLOR_SCHEME.text {
-            1
-        } else {
-            0
-        }
-    };
-    let mut best = COLOR_SCHEME.placeholder;
-    for (i, cell) in cells.iter().enumerate() {
-        let cell_address = address.saturating_add((i as u16) * unit_per_cell);
-        let color = if memory_cell_recency_active(
-            kind.clone(),
-            cell_address,
-            unit_per_cell,
-            records,
-            now,
-        ) {
-            COLOR_SCHEME.hi
-        } else {
-            memory_cell_value_style(cell)
-        };
-        if rank(color) > rank(best) {
-            best = color;
-        }
+    if memory_cell_recency_active(kind, cell_address, unit_per_cell, records, now) {
+        COLOR_SCHEME.hi
+    } else {
+        memory_cell_value_style(cell)
     }
-    ratatui::style::Style::default().fg(best)
 }
 
 /// Gate3#4 — build the Memory-layout table's rows from `lines`: real lines get their hex/ascii
-/// text and `memory_row_style_for_line`'s whole-row color; a `Gap` becomes one blank row styled
+/// text plus one `(text, style)` span per cell (UI-R-063/MB-R-147, true per-byte/word
+/// granularity via `TableEntry::cell_spans`, Shared); a `Gap` becomes one blank row styled
 /// `gap_bg`.
 fn memory_table_rows(
     lines: &[MemoryLine],
@@ -688,6 +683,8 @@ fn memory_table_rows(
                 ascii: String::new(),
                 is_gap: true,
                 style: ratatui::style::Style::default().bg(COLOR_SCHEME.gap_bg),
+                hex_spans: Vec::new(),
+                ascii_spans: Vec::new(),
             },
             MemoryLine::Line {
                 kind,
@@ -707,12 +704,56 @@ fn memory_table_rows(
                     .collect::<Vec<_>>()
                     .join(" ");
                 let ascii: String = cells.iter().map(memory_cell_char).collect();
+                let last = cells.len().saturating_sub(1);
+                let hex_spans = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cell)| {
+                        let cell_address = address.saturating_add((i as u16) * unit_per_cell);
+                        let color = memory_cell_style(
+                            kind.clone(),
+                            cell_address,
+                            unit_per_cell,
+                            cell,
+                            records,
+                            now,
+                        );
+                        let text = if unit_per_cell == 8 {
+                            format!("{:02x}", cell.value)
+                        } else {
+                            format!("{:04x}", cell.value)
+                        };
+                        let text = if i == last { text } else { format!("{text} ") };
+                        (text, ratatui::style::Style::default().fg(color))
+                    })
+                    .collect();
+                let ascii_spans = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cell)| {
+                        let cell_address = address.saturating_add((i as u16) * unit_per_cell);
+                        let color = memory_cell_style(
+                            kind.clone(),
+                            cell_address,
+                            unit_per_cell,
+                            cell,
+                            records,
+                            now,
+                        );
+                        (
+                            memory_cell_char(cell).to_string(),
+                            ratatui::style::Style::default().fg(color),
+                        )
+                    })
+                    .collect();
                 MemoryRow {
                     address: format!("{address:04x}"),
                     hex,
                     ascii,
                     is_gap: false,
-                    style: memory_row_style_for_line(kind.clone(), *address, cells, records, now),
+                    style: ratatui::style::Style::default(),
+                    hex_spans,
+                    ascii_spans,
                 }
             }
         })
@@ -2370,10 +2411,7 @@ mod tests {
         );
         let rows = memory_table_rows(&lines, std::slice::from_ref(&fresh), now);
         assert_eq!(rows.len(), 1);
-        assert_eq!(
-            memory_row_styles(&rows[0])[1],
-            Some(Style::default().fg(COLOR_SCHEME.hi))
-        );
+        assert_eq!(rows[0].hex_spans[0].1, Style::default().fg(COLOR_SCHEME.hi));
 
         let stale = shaped_record(
             RecordStatus::Ok,
@@ -2383,8 +2421,8 @@ mod tests {
         );
         let rows = memory_table_rows(&lines, std::slice::from_ref(&stale), now);
         assert_eq!(
-            memory_row_styles(&rows[0])[1],
-            Some(Style::default().fg(COLOR_SCHEME.warning))
+            rows[0].hex_spans[0].1,
+            Style::default().fg(COLOR_SCHEME.warning)
         );
     }
 
@@ -2414,6 +2452,41 @@ mod tests {
         let gap_style = Some(Style::default().bg(COLOR_SCHEME.gap_bg));
         assert_eq!(memory_row_styles(&rows[1]), [gap_style; 3]);
         assert_ne!(memory_row_styles(&rows[0])[0], gap_style);
+    }
+
+    /// UI-R-063 — true per-cell granularity via `TableEntry::cell_spans`: two adjacent cells on
+    /// the same line with different value classes (printable-ASCII `text` vs. non-printable
+    /// `warning`) render as two separately-colored spans within the Hex column's single cell, not
+    /// a single line-wide color.
+    #[test]
+    fn ut_memory_layout_two_adjacent_cells_render_with_distinct_per_cell_colors() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ferrowl_ui::widgets::TableEntry;
+        use ratatui::style::Style;
+
+        let lines =
+            memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, b'A' as u16), (1, 0x0100)])]);
+        let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
+        assert_eq!(rows.len(), 1);
+
+        let spans = TableEntry::<3>::cell_spans(&rows[0]);
+        let hex_spans = spans[1]
+            .as_ref()
+            .expect("Hex column carries per-cell spans for a real (non-gap) line");
+        assert_eq!(
+            hex_spans[0].1,
+            Style::default().fg(COLOR_SCHEME.text),
+            "cell 0 (0x0041, printable low byte 'A') is `text`-colored"
+        );
+        assert_eq!(
+            hex_spans[1].1,
+            Style::default().fg(COLOR_SCHEME.warning),
+            "cell 1 (0x0100, non-printable low byte) is `warning`-colored"
+        );
+        assert_ne!(
+            hex_spans[0].1, hex_spans[1].1,
+            "two adjacent cells on one line render with two different colors"
+        );
     }
 
     /// UI-R-063 (regression on `memory_rows`'s existing filter, Shared) — a table kind with no

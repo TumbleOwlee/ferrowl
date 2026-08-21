@@ -41,6 +41,23 @@ pub trait TableEntry<const N: usize> {
     fn cell_styles(&self) -> [Option<ratatui::style::Style>; N] {
         [None; N]
     }
+    /// Optional true per-character-span styling for a column (UI-R-063: each byte/word of the
+    /// Memory-layout panel's Hex/Ascii cells carries its own value-class/recency color, which a
+    /// single per-cell [`Style`](ratatui::style::Style) from `cell_styles` cannot express).
+    /// `Some(spans)` renders that column from these `(text, style)` pairs as individually colored
+    /// `Span`s instead of `values()`'s plain string under `cell_styles`' one `Style` — that
+    /// column's `cell_styles` entry is then ignored. `None` (the default; every `TableEntry` impl
+    /// predating this method implicitly returns it) renders byte-for-byte as before this method
+    /// existed.
+    ///
+    /// A spans cell is never word-wrapped — Shared with the render loop's own doc comment: only
+    /// content already guaranteed to fit the column's width should use this (the Memory-layout
+    /// table's Hex/Ascii columns are sized for their fixed per-line byte/word count and never
+    /// wrap in practice). Content that doesn't fit simply overflows/truncates per the column's
+    /// width constraint rather than wrapping.
+    fn cell_spans(&self) -> [Option<Vec<(String, ratatui::style::Style)>>; N] {
+        [const { None }; N]
+    }
 }
 
 /// A scrollable table of [`TableEntry`] rows with an `N`-column [`Header`],
@@ -208,6 +225,7 @@ where
             let spacing =
                 itertools::repeat_n('\n', self.row_margin.vertical as usize).collect::<String>();
             let cell_styles = item.cell_styles();
+            let cell_spans = item.cell_spans();
             let mut max_line_cnt = 0;
             let row = item
                 .values()
@@ -215,6 +233,30 @@ where
                 .zip(&column_widths)
                 .enumerate()
                 .map(|(col, (content, width))| {
+                    if let Some(spans) = &cell_spans[col] {
+                        // Spans path (see `TableEntry::cell_spans`'s own doc comment): each
+                        // `(text, style)` pair keeps its own color; no word-wrap is attempted
+                        // here, content simply overflows/truncates per the column's width. The
+                        // row's vertical margin is still honored via blank lines above/below,
+                        // matching the plain-text path's `{spacing}{output}{spacing}` framing.
+                        max_line_cnt = std::cmp::max(1, max_line_cnt);
+                        let content_line = Line::from(
+                            spans
+                                .iter()
+                                .map(|(text, style)| {
+                                    ratatui::text::Span::styled(text.clone(), *style)
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                        let blank =
+                            itertools::repeat_n(Line::default(), self.row_margin.vertical as usize);
+                        let lines: Vec<Line> = blank
+                            .clone()
+                            .chain(std::iter::once(content_line))
+                            .chain(blank)
+                            .collect();
+                        return Cell::from(Text::from(lines));
+                    }
                     let mut line_cnt = 0;
                     let mut line = String::with_capacity(*width as usize);
                     let mut output = String::with_capacity(
