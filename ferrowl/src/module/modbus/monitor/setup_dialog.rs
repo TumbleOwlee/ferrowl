@@ -12,7 +12,7 @@ use ferrowl_ui::{
         SuggestInputState, SuggestInputStateBuilder,
     },
     style::{InputFieldStyle, SelectionStyle, TextStyle},
-    traits::{HandleEvents, ToLabel},
+    traits::{HandleEvents, SetFocus, ToLabel},
     widgets::{
         GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
@@ -192,13 +192,13 @@ pub struct MonitorSetupDialog {
     #[focus]
     pub(crate) baud: Widget<InputFieldState, InputField<String>>,
     #[focus]
+    pub(crate) reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
+    #[focus]
     pub(crate) parity: Widget<SelectionState<Parity>, Selection<Parity>>,
     #[focus]
     pub(crate) data_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
     #[focus]
     pub(crate) stop_bits: Widget<SelectionState<U8Choice>, Selection<U8Choice>>,
-    #[focus]
-    pub(crate) reconnect: Widget<SelectionState<ReconnectChoice>, Selection<ReconnectChoice>>,
     error: Widget<String, Text>,
     keybinds: Widget<String, Text>,
     mode: DialogMode,
@@ -292,6 +292,7 @@ impl MonitorSetupDialog {
         };
 
         let mut name_field = input("Name", "module name", &input_style);
+        name_field.state.set_focused(true);
         set_input(&mut name_field, name);
         let mut config_path_field = suggest_input(
             "Config Path [TOML/JSON] (optional)",
@@ -493,9 +494,9 @@ impl MonitorSetupDialog {
             Err(e) => self.error.state = e,
         }
 
-        // border(2) + name(3) + config_path(3) + transport(3) + endpoint(6: path/baud/reconnect,
-        // parity/data_bits/stop_bits) + error(4) + keybinds(1).
-        let box_height = 22;
+        // border(2) + margin(2) + name(3) + config_path(3) + transport(3) + endpoint(6:
+        // path/baud/reconnect, parity/data_bits/stop_bits) + error(4) + keybinds(1).
+        let box_height = 24;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -511,11 +512,18 @@ impl MonitorSetupDialog {
         .areas(hcenter);
 
         Clear.render(vcenter, buf);
-        let block = Block::bordered().title(match self.mode {
-            DialogMode::New => " New Modbus Monitor ",
-            DialogMode::Edit => " Edit Modbus Monitor ",
-        });
-        let inner = block.inner(vcenter);
+        let block = Block::bordered()
+            .style(
+                ratatui::style::Style::default()
+                    .fg(COLOR_SCHEME.hi)
+                    .bg(COLOR_SCHEME.bg),
+            )
+            .title_alignment(HorizontalAlignment::Center)
+            .title(match self.mode {
+                DialogMode::New => "New Modbus Monitor",
+                DialogMode::Edit => "Edit Modbus Monitor",
+            });
+        let inner = block.inner(vcenter).inner(Margin::new(2, 1));
         block.render(vcenter, buf);
 
         let rows = Layout::vertical([
@@ -752,6 +760,106 @@ mod tests {
             combined[path_row].contains("Baud") && combined[path_row].contains("Reconnect"),
             "Serial Path, Baud and Reconnect must render on the same row, got: {:?}",
             combined[path_row]
+        );
+    }
+
+    /// Regression — Tab order must follow the visual row layout (Serial Path, Baud, Reconnect
+    /// on one row; Parity, Data Bits, Stop Bits on the next), same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`'s RTU field order; previously Reconnect was
+    /// declared last, so Tab visited Path, Baud, Parity, Data Bits, Stop Bits, Reconnect.
+    #[test]
+    fn ut_tab_order_follows_path_baud_reconnect_then_parity_data_bits_stop_bits() {
+        let mut dialog = MonitorSetupDialog::create();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Name);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::ConfigPath);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Transport);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Path);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Baud);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Reconnect);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::Parity);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::DataBits);
+        dialog.focus_next();
+        assert_eq!(dialog.focus, MonitorSetupDialogFocus::StopBits);
+    }
+
+    /// Regression — the name field must be focused (cursor visible) as soon as the dialog opens,
+    /// same as `module/modbus/setup_dialog.rs::SetupDialog`; previously every field, including
+    /// name, started unfocused, so no cursor showed until the user tabbed away and back.
+    #[test]
+    fn ut_create_focuses_the_name_field_by_default() {
+        let dialog = MonitorSetupDialog::create();
+        assert!(dialog.name.state.focused());
+    }
+
+    /// Regression — there must be a 1-cell margin between the dialog's border and its content
+    /// on every side, same as `module/modbus/setup_dialog.rs::SetupDialog`; previously fields
+    /// were laid out flush against the border with no gap.
+    #[test]
+    fn ut_render_leaves_a_margin_between_border_and_content() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        // The box is centered in a 60-wide, 24-tall region starting at x=20, y=18.
+        let border_top_y = 18;
+        let border_left_x = 20;
+
+        // The row directly under the top border must be a blank vertical-margin row (no field
+        // content drawn there yet).
+        let margin_row: String = (border_left_x + 1..80 - 1)
+            .map(|x| buf[(x, border_top_y + 1)].symbol())
+            .collect();
+        assert!(
+            margin_row.trim().is_empty(),
+            "row directly under the top border must be blank, got: {margin_row:?}"
+        );
+
+        // The column directly right of the left border, on the first field's row, must be a
+        // blank horizontal-margin column (the field's own border starts one cell further in).
+        let first_field_row_y = border_top_y + 2;
+        assert_eq!(
+            buf[(border_left_x + 1, first_field_row_y)].symbol(),
+            " ",
+            "column directly right of the left border must be blank"
+        );
+    }
+
+    /// Regression — the dialog's border/background must use `COLOR_SCHEME.hi`/`COLOR_SCHEME.bg`
+    /// and its title must be centered, same as `module/modbus/setup_dialog.rs::SetupDialog`;
+    /// previously the block had no style (default fg/bg, unpainted background) and a
+    /// left-aligned title.
+    #[test]
+    fn ut_render_styles_the_border_and_centers_the_title() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        // The box is centered in a 60-wide, 24-tall region starting at x=20, y=18.
+        let top_border_cell = &buf[(20, 18)];
+        assert_eq!(top_border_cell.fg, COLOR_SCHEME.hi);
+        assert_eq!(top_border_cell.bg, COLOR_SCHEME.bg);
+
+        let title_chars: Vec<&str> = (20..80).map(|x| buf[(x, 18)].symbol()).collect();
+        let title_row: String = title_chars.concat();
+        assert!(title_row.contains("New Modbus Monitor"));
+        // Centered within the 60-wide box: left padding to the title must roughly match right
+        // padding (offset measured in cells, not bytes — border glyphs are multi-byte UTF-8).
+        let title_start = title_chars
+            .iter()
+            .position(|c| *c == "N")
+            .expect("title starts with 'N'");
+        assert!(
+            (15..25).contains(&title_start),
+            "title should be roughly centered, started at cell offset {title_start}"
         );
     }
 
