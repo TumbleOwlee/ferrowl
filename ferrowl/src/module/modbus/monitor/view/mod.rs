@@ -148,14 +148,13 @@ impl ModbusMonitorModuleView {
         let MonitorOverlay::Add(dialog) = &self.overlay else {
             return;
         };
-        let Ok((name, mut def)) = dialog.apply() else {
+        let Ok((name, def)) = dialog.apply() else {
             return;
         };
         let Some(unit) = self.selected_unit() else {
             return;
         };
-        def.slave_id = unit.0;
-        self.module.add_interpretation(name, def);
+        self.module.add_interpretation(unit, name, def);
         self.overlay = MonitorOverlay::None;
     }
 
@@ -190,9 +189,8 @@ impl ModbusMonitorModuleView {
     fn interpretations_for(&self, unit: UnitId) -> Vec<(&String, &MonitorRegisterDef)> {
         let mut rows: Vec<(&String, &MonitorRegisterDef)> = self
             .module
-            .interpretations()
+            .interpretations_for(unit)
             .iter()
-            .filter(|(_, def)| def.slave_id == unit.0)
             .map(|(name, def)| (name, def))
             .collect();
         if let Some((col, desc)) = &self.sort {
@@ -882,6 +880,7 @@ mod tests {
         assert!(!contents.contains("Resolved registers"));
 
         v.module.add_interpretation(
+            UnitId(3),
             "power".to_string(),
             MonitorRegisterDef {
                 slave_id: 3,
@@ -930,7 +929,7 @@ mod tests {
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
         v.module
-            .add_interpretation("power".to_string(), def(10, "Active power draw"));
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         let contents = buffer_text(&mut v);
         assert!(contents.contains("Messages"));
         assert!(contents.contains("Memory layout"));
@@ -1199,7 +1198,7 @@ mod tests {
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
         v.module
-            .add_interpretation("power".to_string(), def(10, "Active power draw"));
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
 
         assert!(!v.compact);
         let expanded = buffer_text(&mut v);
@@ -1222,9 +1221,9 @@ mod tests {
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
         v.module
-            .add_interpretation("low".to_string(), def(1, "low addr"));
+            .add_interpretation(UnitId(3), "low".to_string(), def(1, "low addr"));
         v.module
-            .add_interpretation("high".to_string(), def(99, "high addr"));
+            .add_interpretation(UnitId(3), "high".to_string(), def(99, "high addr"));
 
         v.handle_command("order address desc").await;
         let rows = v.interpretations_for(UnitId(3));
