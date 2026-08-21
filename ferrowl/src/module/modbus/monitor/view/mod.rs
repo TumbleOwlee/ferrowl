@@ -23,6 +23,35 @@ use super::ModbusMonitorModule;
 use super::dialog::AddInterpretationDialog;
 use super::setup_dialog::MonitorSetupDialog;
 
+/// Which of the view's Tab-cyclable panels currently has focus (default `Units`), matching
+/// the OCPP module view's per-panel border-highlight pattern. The resolved-registers panel is
+/// display-only and not part of the cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum MonitorPanel {
+    #[default]
+    Units,
+    Messages,
+    Memory,
+}
+
+impl MonitorPanel {
+    fn next(self) -> Self {
+        match self {
+            MonitorPanel::Units => MonitorPanel::Messages,
+            MonitorPanel::Messages => MonitorPanel::Memory,
+            MonitorPanel::Memory => MonitorPanel::Units,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            MonitorPanel::Units => MonitorPanel::Memory,
+            MonitorPanel::Messages => MonitorPanel::Units,
+            MonitorPanel::Memory => MonitorPanel::Messages,
+        }
+    }
+}
+
 /// The single modal overlay over the monitor view (mutually exclusive by construction).
 enum MonitorOverlay {
     None,
@@ -78,6 +107,9 @@ pub struct ModbusMonitorModuleView {
     messages: Vec<String>,
     overlay: MonitorOverlay,
     view_focused: bool,
+    /// Which panel is Tab-focused within this view (UI-R-060/061 parity with OCPP's per-panel
+    /// border highlight); only meaningful while `view_focused` is `true`.
+    panel_focus: MonitorPanel,
     /// `:compact` toggle (tui/api-contract.md §2.1) — collapses the resolved-registers section
     /// to one line per interpretation (name + observed value only), dropping the description
     /// line shown in the default (expanded) layout.
@@ -99,6 +131,7 @@ impl ModbusMonitorModuleView {
             messages: Vec::new(),
             overlay: MonitorOverlay::None,
             view_focused: false,
+            panel_focus: MonitorPanel::default(),
             compact: false,
             sort: None,
         }
@@ -243,8 +276,27 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
+        use ferrowl_ui::COLOR_SCHEME;
         use ratatui::layout::{Constraint, Layout};
+        use ratatui::style::Style;
         use ratatui::widgets::{Block, Borders, List, ListItem};
+
+        // Each Tab-cyclable panel's border tracks whether it is the panel-focused one AND the
+        // view itself has focus (blue), light gray otherwise — same per-panel highlight pattern
+        // as the OCPP module view. The resolved-registers panel is display-only, always gray.
+        let style_for = |panel: MonitorPanel| {
+            Style::default()
+                .fg(if self.view_focused && self.panel_focus == panel {
+                    COLOR_SCHEME.hi
+                } else {
+                    COLOR_SCHEME.border
+                })
+                .bg(COLOR_SCHEME.bg)
+        };
+        let units_style = style_for(MonitorPanel::Units);
+        let messages_style = style_for(MonitorPanel::Messages);
+        let memory_style = style_for(MonitorPanel::Memory);
+        let resolved_style = Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg);
 
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(area);
@@ -264,7 +316,12 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
             })
             .collect();
-        let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Units"));
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(units_style)
+                .title("Units"),
+        );
         ratatui::widgets::Widget::render(list, left_area, buf);
 
         let selected = self.selected_unit();
@@ -284,7 +341,8 @@ impl ModuleView for ModbusMonitorModuleView {
         // Message table (MB-R-143).
         let messages_block = Block::default()
             .borders(Borders::ALL)
-            .title("Messages (MB-R-143)");
+            .border_style(messages_style)
+            .title("Messages");
         let messages_inner = messages_block.inner(section_areas[0]);
         ratatui::widgets::Widget::render(messages_block, section_areas[0], buf);
         ratatui::widgets::Widget::render(
@@ -296,7 +354,8 @@ impl ModuleView for ModbusMonitorModuleView {
         // Memory layout, grouped by table kind (MB-R-144).
         let memory_block = Block::default()
             .borders(Borders::ALL)
-            .title("Memory layout (MB-R-144)");
+            .border_style(memory_style)
+            .title("Memory layout");
         let memory_inner = memory_block.inner(section_areas[1]);
         ratatui::widgets::Widget::render(memory_block, section_areas[1], buf);
         let memory_text = if let Some(unit) = selected {
@@ -326,7 +385,8 @@ impl ModuleView for ModbusMonitorModuleView {
         if has_interpretation && let Some(unit) = selected {
             let resolved_block = Block::default()
                 .borders(Borders::ALL)
-                .title("Resolved registers (MB-R-145)");
+                .border_style(resolved_style)
+                .title("Resolved registers");
             let resolved_inner = resolved_block.inner(section_areas[2]);
             ratatui::widgets::Widget::render(resolved_block, section_areas[2], buf);
             let table = self.module.table();
@@ -425,11 +485,19 @@ impl ModuleView for ModbusMonitorModuleView {
             return EventResult::Consumed;
         }
         match code {
-            KeyCode::Up => {
+            KeyCode::Tab if modifiers == KeyModifiers::NONE => {
+                self.panel_focus = self.panel_focus.next();
+                EventResult::Consumed
+            }
+            KeyCode::BackTab => {
+                self.panel_focus = self.panel_focus.previous();
+                EventResult::Consumed
+            }
+            KeyCode::Up if self.panel_focus == MonitorPanel::Units => {
                 self.selected = self.selected.saturating_sub(1);
                 EventResult::Consumed
             }
-            KeyCode::Down => {
+            KeyCode::Down if self.panel_focus == MonitorPanel::Units => {
                 if self.selected + 1 < self.unit_ids.len() {
                     self.selected += 1;
                 }
@@ -851,6 +919,116 @@ mod tests {
                     acc
                 });
         assert!(contents.contains("Resolved registers"));
+    }
+
+    /// Regression — panel titles must not show requirement IDs; they're not useful to the
+    /// application's user. Previously "Messages (MB-R-143)", "Memory layout (MB-R-144)" and
+    /// "Resolved registers (MB-R-145)" leaked the spec IDs into the rendered UI.
+    #[test]
+    fn ut_panel_titles_have_no_requirement_ids() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation("power".to_string(), def(10, "Active power draw"));
+        let contents = buffer_text(&mut v);
+        assert!(contents.contains("Messages"));
+        assert!(contents.contains("Memory layout"));
+        assert!(contents.contains("Resolved registers"));
+        assert!(!contents.contains("MB-R-143"));
+        assert!(!contents.contains("MB-R-144"));
+        assert!(!contents.contains("MB-R-145"));
+    }
+
+    /// Regression — every panel's border must track the view's own focus (blue when focused,
+    /// light gray otherwise), same as every other module content view; previously every border
+    /// used the terminal's plain default color with no focus differentiation at all.
+    #[test]
+    fn ut_panel_borders_track_view_focus() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ferrowl_ui::traits::SetFocus;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut v = view();
+        v.set_focused(false);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            COLOR_SCHEME.border,
+            "unfocused panel border must use the unfocused border color"
+        );
+
+        v.set_focused(true);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            COLOR_SCHEME.hi,
+            "focused panel border must use the highlight color"
+        );
+    }
+
+    /// Regression — previously every panel shared one `panel_style` driven only by
+    /// `view_focused`, so all panels turned blue together with no way to tell which one had
+    /// input focus. Now exactly one Tab-cyclable panel is highlighted at a time, defaulting to
+    /// Units, and Tab/BackTab cycle Units -> Messages -> Memory -> Units (and back).
+    #[test]
+    fn ut_tab_cycles_panel_focus_units_messages_memory_and_back() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ferrowl_ui::traits::SetFocus;
+
+        let mut v = view();
+        v.set_focused(true);
+        assert_eq!(v.panel_focus, MonitorPanel::Units);
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.panel_focus, MonitorPanel::Messages);
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.panel_focus, MonitorPanel::Memory);
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(
+            v.panel_focus,
+            MonitorPanel::Units,
+            "Tab must wrap back to Units"
+        );
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::BackTab);
+        assert_eq!(
+            v.panel_focus,
+            MonitorPanel::Memory,
+            "BackTab must cycle in reverse"
+        );
+
+        // Only the currently panel-focused block's top-left border cell is highlighted.
+        v.panel_focus = MonitorPanel::Units;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            COLOR_SCHEME.hi,
+            "Units panel border must be highlighted while it is panel-focused"
+        );
     }
 
     /// tui/api-contract.md's monitor command table — `:set`/`:script` are simply absent, so
