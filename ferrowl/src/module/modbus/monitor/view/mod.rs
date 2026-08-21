@@ -22,8 +22,9 @@ use ratatui::layout::Rect;
 use ratatui::widgets::StatefulWidget;
 
 use crate::app::Level;
-use crate::config::device::MonitorRegisterDef;
+use crate::config::device::{MonitorRegisterDef, Scalar};
 use crate::config::{ModuleSpec, MonitorDeviceConfig};
+use crate::module::modbus::dialog::parse_raw_value;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
     SharedLog, parse_command,
@@ -376,11 +377,23 @@ fn resolved_row(
         // raw `{words:?}` debug dump. Gate3#5 — no `[...]` wrapping on Value (Raw Value keeps
         // its own bracketed hex format via `hex_words`).
         Some(words) => {
-            let value = match ferrowl_codec::decode(&def.format(), &words) {
+            let mut value = match ferrowl_codec::decode(&def.format(), &words) {
                 Ok(v) => v.to_string(),
                 Err(_) => "Error".to_string(),
             };
-            (value, hex_words(&words))
+            let raw_value = hex_words(&words);
+            // Item 6 — when the decoded value exactly matches one of the interpretation's
+            // named values, show the label alone (not "label (value)", unlike the full modbus
+            // module's own `Definition::values` — Shared/api-contract), using the same
+            // `Scalar::Int`-vs-raw-int-or-string matching logic (`table.rs`'s own `values()`).
+            let raw_int = parse_raw_value(&raw_value);
+            if let Some(named) = def.values.iter().find(|nv| match &nv.value {
+                Scalar::Int(v) => raw_int == Some(*v) || value == v.to_string(),
+                other => value == other.to_string(),
+            }) {
+                value = named.name.clone();
+            }
+            (value, raw_value)
         }
         None => ("(not yet observed)".to_string(), String::new()),
     };
@@ -854,6 +867,11 @@ impl ModbusMonitorModuleView {
             return;
         };
         self.module.add_interpretation(unit, name, def);
+        // Manual-exercise fix (interpretations-per-unit-id persistence) — keep
+        // `self.device.definitions` (the flat, on-disk map `:write` saves verbatim) in sync
+        // with the module's live interpretations, mirroring `ModbusModule::apply_add`'s own
+        // `self.device.definitions.insert(...)` (Shared).
+        self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
 
@@ -868,17 +886,30 @@ impl ModbusMonitorModuleView {
         let Ok(outcome) = dialog.resolve() else {
             return;
         };
-        let device = if let Some((path, device)) = outcome.device {
-            self.spec.device = path;
-            device
-        } else {
-            self.device.clone()
-        };
+        // Item 2 — `outcome.device` is only ever `Some` in New mode (`resolve()` never re-loads
+        // the device config file from a possibly-edited path in Edit mode, matching the full
+        // client/server module's own edit-confirm, Shared); the device-path *field* itself must
+        // still apply on every edit-confirm regardless, so it comes from `values.config_path`
+        // unconditionally rather than being silently dropped whenever `outcome.device` is `None`.
+        self.spec.device = outcome.values.config_path.clone();
+        let mut device = outcome
+            .device
+            .map(|(_, d)| d)
+            .unwrap_or_else(|| self.device.clone());
         self.spec.name = outcome.values.name;
         self.spec.endpoint = outcome.values.endpoint;
-        let mut device = device;
         device.reconnect = Some(outcome.values.reconnect);
-        self.module = ModbusMonitorModule::new(&self.spec, &device);
+        // Item 1 — `reconfigure` (Shared) carries the running module's accumulated `table`/
+        // `records`/`log`/`interpretations` over instead of `ModbusMonitorModule::new()`'s
+        // always-fresh-and-empty construction.
+        let placeholder = ModbusMonitorModule::new(&self.spec, &device);
+        self.module =
+            std::mem::replace(&mut self.module, placeholder).reconfigure(&self.spec, &device);
+        // Manual-exercise fix (interpretations-per-unit-id persistence) — resync `definitions`
+        // from the reconfigured module's own live map (kept in sync at every `:add`/edit/delete,
+        // Shared/confirm_add) rather than trusting whatever `device.definitions` was seeded with
+        // above, so a runtime-added interpretation never regresses to a stale on-disk snapshot.
+        device.definitions = self.module.definitions();
         self.device = device;
         self.overlay = MonitorOverlay::None;
     }
@@ -923,6 +954,8 @@ impl ModbusMonitorModuleView {
         };
         self.module
             .edit_interpretation(unit, original_name, new_name, def);
+        // Manual-exercise fix (interpretations-per-unit-id persistence) — see Shared/confirm_add.
+        self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
 
@@ -937,6 +970,8 @@ impl ModbusMonitorModuleView {
             return;
         };
         self.module.remove_interpretation(unit, original_name);
+        // Manual-exercise fix (interpretations-per-unit-id persistence) — see Shared/confirm_add.
+        self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
 
@@ -1036,7 +1071,13 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        use ratatui::layout::{Constraint, Layout};
+        use ratatui::layout::{Constraint, HorizontalAlignment, Layout};
+
+        // Item 3 — an ONLINE/OFFLINE status bar, same shape/position as `ModbusModuleView`'s own
+        // (Shared): one line tall, below the module's own panels (`content_area`), which the
+        // outer app-level compositor then draws the shared log pane below in turn.
+        let [content_area, status_area] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
         // Every Tab-cyclable panel is now a real `Table` widget (Gate3#4/#6) whose own border
         // color already tracks `state.focused()` (`ferrowl_ui::style::TableStyle`'s
@@ -1044,7 +1085,7 @@ impl ModuleView for ModbusMonitorModuleView {
         // && panel_focus == <panel>)` before rendering, no separate `style_for` computation
         // needed here anymore.
         let [left_area, right_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(content_area);
 
         let buf = frame.buffer_mut();
 
@@ -1135,6 +1176,27 @@ impl ModuleView for ModbusMonitorModuleView {
                 &mut self.resolved_table.state,
             );
         }
+
+        // Item 3 — `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP
+        // server), so the label is always the bare "ONLINE"/"OFFLINE" (no address to append),
+        // driven by `is_running()` instead of a bound-address `Option`.
+        let online = self.module.is_running();
+        let status_widget = ferrowl_ui::widgets::TextBuilder::default()
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .style(ferrowl_ui::style::TextStyle {
+                general: ratatui::style::Style::default()
+                    .bg(if online {
+                        ferrowl_ui::COLOR_SCHEME.success
+                    } else {
+                        ferrowl_ui::COLOR_SCHEME.error
+                    })
+                    .fg(ferrowl_ui::COLOR_SCHEME.text_status)
+                    .bold(),
+            })
+            .build()
+            .expect("all required builder fields are set");
+        let mut label = if online { "ONLINE" } else { "OFFLINE" }.to_string();
+        StatefulWidget::render(&status_widget, status_area, buf, &mut label);
     }
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
@@ -1827,6 +1889,44 @@ mod tests {
         );
     }
 
+    /// Manual-exercise addition (item 3) — an ONLINE/OFFLINE status bar, same shape as
+    /// `ModbusModuleView`'s own (`module/modbus/view/mod.rs`, Shared): centered, one line tall,
+    /// `COLOR_SCHEME.success`/`error` background, positioned below the module's own panels
+    /// (which the outer app-level compositor then draws the shared log pane below in turn,
+    /// `app/render.rs`'s `[view_area, log_area]` split — no extra coordination needed here).
+    /// `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP server), so this
+    /// drives off `is_running()` instead and always shows the bare "ONLINE"/"OFFLINE" label (no
+    /// address to append).
+    #[test]
+    fn ut_render_shows_online_offline_status_bar() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut v = view();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| v.render(frame, frame.area()))
+            .unwrap();
+        let last_row = terminal.backend().buffer().area.height - 1;
+        let contents: String = (0..120)
+            .map(|x| {
+                terminal.backend().buffer()[(x, last_row)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            contents.contains("OFFLINE"),
+            "not-yet-started monitor must show OFFLINE: {contents:?}"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(0, last_row)].bg,
+            COLOR_SCHEME.error,
+            "OFFLINE row must use the error background"
+        );
+    }
+
     /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer
     /// when no interpretation exists for the selected unit id, and reappears once one does.
     #[test]
@@ -2105,6 +2205,127 @@ mod tests {
         assert!(matches!(v.overlay, MonitorOverlay::None));
     }
 
+    /// Manual-exercise fix (interpretations-per-unit-id persistence) — `:add` must sync the
+    /// new interpretation into `self.device.definitions` too, not just `self.module`'s live
+    /// map, or `:write` silently drops it (it saves `self.device` verbatim).
+    #[tokio::test]
+    async fn ut_confirm_add_syncs_device_definitions() {
+        use crate::module::modbus::dialog::set_input;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.address, "10");
+        v.confirm_add();
+
+        assert!(
+            v.device.definitions.contains_key("power"),
+            "device.definitions must be kept in sync so ':write' persists it"
+        );
+    }
+
+    /// Manual-exercise fix (interpretations-per-unit-id persistence) — MB-R-148's edit/delete
+    /// must also keep `self.device.definitions` in sync (rename moves the key, delete removes
+    /// it), same parity requirement as `:add`.
+    #[tokio::test]
+    async fn ut_confirm_edit_interpretation_syncs_device_definitions() {
+        use crate::module::modbus::dialog::set_input;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        v.device
+            .definitions
+            .insert("power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+
+        v.open_edit_interpretation();
+        let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+            panic!("Enter did not open the edit/delete dialog")
+        };
+        set_input(&mut dialog.label, "power2");
+        v.confirm_edit_interpretation();
+
+        assert!(
+            !v.device.definitions.contains_key("power"),
+            "the old name must not linger in device.definitions after a rename"
+        );
+        assert!(
+            v.device.definitions.contains_key("power2"),
+            "the renamed interpretation must be present in device.definitions"
+        );
+    }
+
+    /// Manual-exercise fix (interpretations-per-unit-id persistence) — deleting an
+    /// interpretation must remove it from `self.device.definitions`, not just the module's
+    /// in-memory map, or a stale copy resurfaces on the next `:write`.
+    #[tokio::test]
+    async fn ut_delete_interpretation_syncs_device_definitions() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        v.device
+            .definitions
+            .insert("power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+
+        v.open_edit_interpretation();
+        v.delete_interpretation();
+
+        assert!(
+            !v.device.definitions.contains_key("power"),
+            "device.definitions must drop the deleted interpretation too"
+        );
+    }
+
+    /// Manual-exercise fix (interpretations-per-unit-id persistence) — end to end: an
+    /// interpretation added purely at runtime (never in the file `:o`/`:oc` originally loaded)
+    /// must actually appear in the file after `:write`, not be silently dropped.
+    #[tokio::test]
+    async fn ut_write_device_command_persists_runtime_added_interpretation() {
+        use crate::module::modbus::dialog::set_input;
+        use ferrowl_util::convert::{Converter, FileType};
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "ferrowl-monitor-write-test-{}.toml",
+            std::process::id()
+        ));
+        let path_str = path.to_str().unwrap().to_string();
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.address, "10");
+        v.confirm_add();
+
+        v.handle_command(&format!("wd {path_str}")).await;
+
+        let loaded: MonitorDeviceConfig =
+            Converter::load(&path_str, FileType::Toml).expect("save must succeed");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            loaded.definitions.contains_key("power"),
+            "an interpretation added purely at runtime must be persisted by :write"
+        );
+    }
+
     /// MB-R-145 — a newly added interpretation is reflected in the resolved-registers section
     /// immediately, without a fresh unit-id selection round-trip.
     #[tokio::test]
@@ -2165,6 +2386,56 @@ mod tests {
 
         assert_eq!(v.spec.name, "renamed");
         assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    /// Manual-exercise fix (item 2) — the device-config-path field must actually apply on
+    /// edit-confirm; previously `MonitorSetupOutcome::device` was always `None` in Edit mode, so
+    /// `confirm_edit` silently discarded whatever the user typed there and reset `spec.device`
+    /// to `""` on every single edit.
+    #[tokio::test]
+    async fn ut_edit_confirm_applies_device_path_field() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        super::super::setup_dialog::set_suggest_input(&mut dialog.config_path, "new-device.toml");
+        v.confirm_edit();
+
+        assert_eq!(v.spec.device, "new-device.toml");
+    }
+
+    /// Manual-exercise fix (item 1) — editing setup must not reset the running monitor's
+    /// accumulated state: known unit ids' observed table, message records, and interpretations
+    /// added at runtime (MB-R-148's `:add`/`:edit`) all survive an edit-confirm.
+    #[tokio::test]
+    async fn ut_edit_confirm_preserves_accumulated_monitor_state() {
+        let mut v = view();
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        let table_before = v.module.table();
+        let records_before = v.module.records();
+
+        v.handle_command("edit").await;
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        super::super::setup_dialog::set_input(&mut dialog.name, "renamed");
+        v.confirm_edit();
+
+        assert!(
+            std::sync::Arc::ptr_eq(&table_before, &v.module.table()),
+            "table must be the same shared instance across an edit-confirm"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&records_before, &v.module.records()),
+            "records must be the same shared instance across an edit-confirm"
+        );
+        assert_eq!(
+            v.module.interpretations_for(UnitId(3)).len(),
+            1,
+            "an interpretation added at runtime must survive an edit-confirm"
+        );
     }
 
     fn def(address: u16, description: &str) -> MonitorRegisterDef {
@@ -2845,6 +3116,69 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].values()[7], "50");
         assert_eq!(rows[0].values()[8], "[0064]");
+    }
+
+    /// Manual-exercise fix (item 6) — when the decoded value exactly matches one of the
+    /// interpretation's named values, the Value column shows the label alone (not
+    /// "label (value)", unlike the full modbus module's own `Definition::values` — Shared),
+    /// using the same `Scalar::Int`-vs-raw-int-or-string matching logic.
+    #[tokio::test]
+    async fn ut_resolved_registers_table_value_shows_named_value_label_when_matched() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(3),
+                kind: Kind::HoldingRegister,
+            }),
+            10,
+            &[1],
+        );
+        let mut named = def(10, "Kettle state");
+        named.values = vec![crate::config::device::NamedValue {
+            name: "kettle-on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }];
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), named);
+
+        buffer_text(&mut v);
+        let rows = v.resolved_table.state.values();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].values()[7],
+            "kettle-on",
+            "the label alone must render, not 'kettle-on (1)' or the raw '1'"
+        );
+    }
+
+    /// Manual-exercise fix (item 6) — no match means the decoded value renders as-is, unchanged.
+    #[tokio::test]
+    async fn ut_resolved_registers_table_value_renders_decoded_when_no_named_value_matches() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(3),
+                kind: Kind::HoldingRegister,
+            }),
+            10,
+            &[2],
+        );
+        let mut named = def(10, "Kettle state");
+        named.values = vec![crate::config::device::NamedValue {
+            name: "kettle-on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }];
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), named);
+
+        buffer_text(&mut v);
+        let rows = v.resolved_table.state.values();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[7], "2");
     }
 
     /// UI-R-065 — Tab cycles all 4 panels (Units→Messages→Memory→Resolved→Units) when the

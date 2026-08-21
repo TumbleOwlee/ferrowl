@@ -92,6 +92,49 @@ impl ModbusMonitorModule {
         }
     }
 
+    /// Manual-exercise fix (items 1/2) — reconfigure an existing monitor instance from a
+    /// (possibly edited) spec/device without resetting its accumulated observed state: the
+    /// counterpart to `ModbusModule::reconfigure` (`module/modbus/module.rs`), but consuming
+    /// `self` and returning a new `Self` rather than mutating in place, since (unlike the full
+    /// client/server module) a monitor's edit-confirm path is not `async` and so cannot
+    /// gracefully `.await` a stop/restart choreography here.
+    ///
+    /// `table`/`records`/`log`/`interpretations` carry over unchanged (the same `Arc`-shared
+    /// instances, not fresh empty ones) — the whole point of this method over calling `new()`
+    /// again. `name`/`endpoint`/`reconnect`/`file_sink` rebuild from `spec`/`device`, exactly as
+    /// `new()` would.
+    ///
+    /// Any previously running connection (`command_tx`/`task`) is dropped rather than carried
+    /// over: the sender is simply dropped (closing the channel), and any still-running task is
+    /// `abort()`ed outright (the same fallback `stop()` itself uses when a graceful
+    /// `Terminate`-then-wait doesn't finish in time) since there is no `async` context here to
+    /// await a graceful stop. The caller is expected to `:start` again afterwards, exactly as it
+    /// already had to after a fresh `new()`'d module — this method changes what carries over,
+    /// not the start/stop lifecycle itself.
+    pub fn reconfigure(self, spec: &ModuleSpec, device: &MonitorDeviceConfig) -> Self {
+        if let Some(task) = self.task {
+            task.abort();
+        }
+
+        let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
+        let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
+
+        Self {
+            name: spec.name.clone(),
+            endpoint: spec.endpoint.clone(),
+            reconnect: device
+                .reconnect
+                .unwrap_or(crate::config::device::DEFAULT_RECONNECT),
+            interpretations: self.interpretations,
+            table: self.table,
+            records: self.records,
+            log: self.log,
+            file_sink,
+            command_tx: None,
+            task: None,
+        }
+    }
+
     pub fn table(&self) -> SharedObservedTable {
         self.table.clone()
     }
@@ -102,6 +145,32 @@ impl ModbusMonitorModule {
 
     pub fn log(&self) -> ModuleLog {
         self.log.clone()
+    }
+
+    /// Manual-exercise addition — whether the monitor's receive task is currently running
+    /// (started and not yet stopped), the connection-state signal the view's ONLINE/OFFLINE
+    /// status line (item 3) drives off of, mirroring `ModbusModule::bound_addr` for the full
+    /// client/server module (a monitor is RTU/ASCII-only, so there is no bound TCP address to
+    /// report instead).
+    pub fn is_running(&self) -> bool {
+        self.command_tx.is_some()
+    }
+
+    /// Manual-exercise fix (interpretations-per-unit-id persistence) — rebuild the flat,
+    /// on-disk `definitions` map (`MonitorDeviceConfig::definitions`) from the live in-memory
+    /// interpretations, keyed by name with each entry's own `slave_id` field already correct
+    /// (kept in sync by `add_interpretation`/`edit_interpretation`). The caller assigns this
+    /// into `self.device.definitions` after any interpretation add/edit/delete so `:write` (and
+    /// any path that reconstructs from `self.device`) never silently drops a runtime change —
+    /// mirroring `ModbusModule`'s own `apply_add`/`delete_register_by_name`
+    /// (`module/modbus/view/mutate.rs`), which keep `self.device.definitions` in sync at each
+    /// mutation site rather than only at save time.
+    pub fn definitions(&self) -> std::collections::BTreeMap<String, MonitorRegisterDef> {
+        self.interpretations
+            .values()
+            .flatten()
+            .map(|(name, def)| (name.clone(), def.clone()))
+            .collect()
     }
 
     /// Interpretations for one unit id, empty (not absent/panicking) for a unit id with none.
@@ -464,6 +533,23 @@ mod tests {
         );
     }
 
+    /// Manual-exercise addition (item 3) — `is_running` tracks the receive task's own
+    /// started/stopped state, the ONLINE/OFFLINE signal for the status line.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_is_running_tracks_start_stop() {
+        let mut device = device_with_defs();
+        device.reconnect = Some(false);
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+        assert!(!module.is_running(), "not running before start()");
+        module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        assert!(module.is_running(), "running once start() succeeds");
+        module.stop().await.expect("stop");
+        assert!(!module.is_running(), "not running once stop() completes");
+    }
+
     /// MB-R-140 — a monitor's start() rejects a non-serial endpoint with the role/transport
     /// compatibility error, the enforcement point nothing can bypass (a hand-edited session
     /// file skips the setup dialog's own check).
@@ -515,11 +601,113 @@ mod tests {
         .expect("task should end promptly, not retry, with reconnect disabled");
     }
 
+    /// Manual-exercise fix — editing a running monitor's setup must not reset its accumulated
+    /// `table`/`records`/`log`/`interpretations`: `reconfigure` carries the same `Arc`-shared
+    /// instances over (`Arc::ptr_eq`, not just equal-by-value) rather than building fresh ones.
+    #[test]
+    fn ut_reconfigure_preserves_shared_state_arcs() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        module.add_interpretation(
+            ferrowl_modbus::UnitId(9),
+            "extra".to_string(),
+            device_with_defs().definitions.get("power").unwrap().clone(),
+        );
+        let table_before = module.table();
+        let records_before = module.records();
+        let log_before = module.log();
+
+        let new_spec = spec(bad_rtu_endpoint());
+        let reconfigured = module.reconfigure(&new_spec, &device_with_defs());
+
+        assert!(
+            Arc::ptr_eq(&table_before, &reconfigured.table()),
+            "table must be the same shared instance, not a fresh empty one"
+        );
+        assert!(
+            Arc::ptr_eq(&records_before, &reconfigured.records()),
+            "records must be the same shared instance, not a fresh empty one"
+        );
+        assert!(
+            Arc::ptr_eq(&log_before, &reconfigured.log()),
+            "log must be the same shared instance, not a fresh empty one"
+        );
+        assert_eq!(
+            reconfigured
+                .interpretations_for(ferrowl_modbus::UnitId(9))
+                .len(),
+            1,
+            "interpretations added at runtime must survive a reconfigure"
+        );
+    }
+
+    /// Manual-exercise fix — `reconfigure` rebuilds identity/connection fields (name, endpoint,
+    /// reconnect) from the new spec/device, same as a fresh `new()`.
+    #[test]
+    fn ut_reconfigure_rebuilds_identity_fields_from_new_spec_and_device() {
+        let module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+
+        let new_endpoint = Endpoint::Rtu {
+            path: "/dev/ttyUSB9".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        let mut new_spec = spec(new_endpoint.clone());
+        new_spec.name = "mon2".to_string();
+        let mut new_device = device_with_defs();
+        new_device.reconnect = Some(false);
+
+        let reconfigured = module.reconfigure(&new_spec, &new_device);
+        assert_eq!(reconfigured.name, "mon2");
+        assert_eq!(reconfigured.endpoint, new_endpoint);
+        assert!(!reconfigured.reconnect);
+    }
+
+    /// Manual-exercise fix — `reconfigure` never leaves a previously running task's `command_tx`/
+    /// `task` handle behind (would leak a detached background task); the reconfigured instance
+    /// always starts in the same not-yet-started state a fresh `new()` would.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_reconfigure_drops_any_previously_running_connection() {
+        let mut device = device_with_defs();
+        device.reconnect = Some(true);
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+        module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
+        assert!(reconfigured.command_tx.is_none());
+        assert!(reconfigured.task.is_none());
+    }
+
     /// network_log_level's monitor-specific Warning branch: a discarded malformed-frame line
     /// classifies as Warning, matching `s2`'s decode/match state machine's log wording.
     #[test]
     fn ut_network_log_level_classifies_malformed_frame_as_warning() {
         let line = "Discarding malformed frame (checksum mismatch): 01 02 03";
         assert_eq!(network_log_level(line), crate::app::Level::Warning);
+    }
+
+    /// Manual-exercise fix — `definitions()` rebuilds the flat on-disk map from whatever is
+    /// currently in the in-memory interpretations map, including entries added purely at
+    /// runtime (never present in the `MonitorDeviceConfig` the module was constructed from).
+    #[test]
+    fn ut_definitions_rebuilds_flat_map_including_runtime_additions() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(9), "extra".to_string(), def);
+
+        let defs = module.definitions();
+        assert!(defs.contains_key("power"), "original def must survive");
+        assert!(
+            defs.contains_key("extra"),
+            "runtime-added def must be included, not silently dropped"
+        );
+        assert_eq!(defs["extra"].slave_id, 9);
     }
 }

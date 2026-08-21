@@ -38,6 +38,12 @@ pub struct MonitorSetupValues {
     pub name: String,
     pub endpoint: Endpoint,
     pub reconnect: bool,
+    /// The device-config-path field's current value, always populated regardless of
+    /// `New`/`Edit` mode (unlike `MonitorSetupOutcome::device`, which only re-loads the device
+    /// config file in `New` mode) — items 1/2's fix: an edit-confirm must apply this field even
+    /// though it never re-loads a device config from it, mirroring `SetupValues::config_path`'s
+    /// own always-populated shape in the full client/server module's setup dialog (Shared).
+    pub config_path: String,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or `""`)
@@ -484,6 +490,7 @@ impl MonitorSetupDialog {
             name,
             endpoint,
             reconnect,
+            config_path,
         })
     }
 

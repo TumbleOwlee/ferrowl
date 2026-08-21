@@ -68,8 +68,22 @@ pub struct AddInterpretationDialog {
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
+    /// Item 5 — the named-value list + delete UI, parity with `EditSelectionDialog<NamedValue>`
+    /// (Shared): a single-line selectable list of `pending_named_values`, kept in sync with it
+    /// on every `render()` (the list of `Vec<NamedValue>`, not a `SelectionState<NamedValue>`,
+    /// stays the source of truth `apply()` already reads — this is purely the display/pick/
+    /// delete widget over it).
+    #[focus(when = { !self.pending_named_values.is_empty() })]
+    pub value_list: Widget<SelectionState<NamedValue>, Selection<NamedValue>>,
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
+    /// Item 5 — deletes the `value_list`-selected named value from `pending_named_values`
+    /// (`delete_selected_named_value`), immediately (no confirm popup — mirrors
+    /// `EditSelectionDialog::delete_selected`'s own no-confirm shape, Shared; this is distinct
+    /// from `EditInterpretationDialog::delete_button`, which deletes the whole interpretation
+    /// and is confirm-guarded).
+    #[focus(when = { !self.pending_named_values.is_empty() })]
+    pub delete_value_button: Widget<ButtonState, Button>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
     pub error: Widget<String, Text>,
@@ -139,7 +153,9 @@ impl AddInterpretationDialog {
                 ("Width", HorizontalAlignment::Right),
                 "1",
             ))
+            .value_list(widgets::selection("Value", Vec::<NamedValue>::new(), 0))
             .add_button(widgets::button("ADD PREDEFINED", 1))
+            .delete_value_button(widgets::button("DEL", 0))
             .confirm_button(widgets::button("CONFIRM", 1))
             .error(widgets::error_text())
             .keybinds([
@@ -149,6 +165,25 @@ impl AddInterpretationDialog {
             .focus(AddInterpretationDialogFocus::Label)
             .build()
             .expect("all AddInterpretationDialog fields are set")
+    }
+
+    /// Item 5 — remove the `value_list`-selected named value from `pending_named_values`
+    /// immediately (mirrors `EditSelectionDialog::delete_selected`'s no-confirm shape, Shared,
+    /// minus its `default_value` bookkeeping — `AddInterpretationDialog` has no default-value
+    /// field). No-op if the list is already empty.
+    pub fn delete_selected_named_value(&mut self) {
+        if self.pending_named_values.is_empty() {
+            return;
+        }
+        let idx = self
+            .value_list
+            .state
+            .selection()
+            .min(self.pending_named_values.len() - 1);
+        self.pending_named_values.remove(idx);
+        if self.pending_named_values.is_empty() {
+            self.focus_previous();
+        }
     }
 
     fn is_boolean_kind(&self) -> bool {
@@ -313,10 +348,12 @@ impl AddInterpretationDialog {
     }
 
     pub fn handle_space(&mut self) {
-        if matches!(self.focus, AddInterpretationDialogFocus::AddButton) {
-            self.open_add_dialog();
-        } else {
-            let _ = HandleEvents::handle_events(self, KeyModifiers::NONE, KeyCode::Char(' '));
+        match self.focus {
+            AddInterpretationDialogFocus::AddButton => self.open_add_dialog(),
+            AddInterpretationDialogFocus::DeleteValueButton => self.delete_selected_named_value(),
+            _ => {
+                let _ = HandleEvents::handle_events(self, KeyModifiers::NONE, KeyCode::Char(' '));
+            }
         }
     }
 
@@ -461,9 +498,52 @@ impl AddInterpretationDialog {
                 }
             }
         }
+        // Item 5 — named-value list + delete, parity with `EditSelectionDialog<NamedValue>`'s
+        // own value/add/delete row (Shared). `value_list.state` is kept in sync with
+        // `pending_named_values` on every render, same source-of-truth split as `apply()`
+        // already reads (`pending_named_values`, not `value_list.state`).
+        self.value_list
+            .state
+            .set_values(self.pending_named_values.clone());
+        let value_row: [Rect; 4] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(18),
+            Constraint::Length(7),
+            Constraint::Length(1),
+        ])
+        .areas(rows[6]);
+        if self.pending_named_values.is_empty() {
+            let text = ferrowl_ui::widgets::TextBuilder::default()
+                .margin(Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                })
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .style(ferrowl_ui::style::TextStyle {
+                    general: Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+                })
+                .multiline(true)
+                .build()
+                .expect("all required builder fields are set");
+            let mut message: String = "No predefined values — reopen to use free-text input".into();
+            StatefulWidget::render(&text, value_row[0], buf, &mut message);
+        } else {
+            StatefulWidget::render(
+                &self.value_list.widget,
+                value_row[0],
+                buf,
+                &mut self.value_list.state,
+            );
+            StatefulWidget::render(
+                &self.delete_value_button.widget,
+                value_row[2],
+                buf,
+                &mut self.delete_value_button.state,
+            );
+        }
         StatefulWidget::render(
             &self.add_button.widget,
-            rows[6],
+            value_row[1],
             buf,
             &mut self.add_button.state,
         );
@@ -473,7 +553,11 @@ impl AddInterpretationDialog {
             buf,
             &mut self.confirm_button.state,
         );
-        StatefulWidget::render(&self.error.widget, rows[8], buf, &mut self.error.state);
+        // Item 4 — same class of bug as `setup_dialog::MonitorSetupDialog::render` (Shared): no
+        // error box drawn at all while the dialog validates cleanly.
+        if !self.error.state.is_empty() {
+            StatefulWidget::render(&self.error.widget, rows[8], buf, &mut self.error.state);
+        }
         StatefulWidget::render(
             &self.keybinds[0].widget,
             rows[9],
@@ -526,8 +610,17 @@ pub struct EditInterpretationDialog {
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
+    /// Item 5 (parity fix) — same named-value list + delete UI as `AddInterpretationDialog`'s
+    /// own `value_list` (Shared).
+    #[focus(when = { !self.pending_named_values.is_empty() })]
+    pub value_list: Widget<SelectionState<NamedValue>, Selection<NamedValue>>,
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
+    /// Item 5 (parity fix) — deletes the `value_list`-selected named value, distinct from
+    /// `delete_button` (which deletes the whole interpretation); see
+    /// `AddInterpretationDialog::delete_value_button` (Shared).
+    #[focus(when = { !self.pending_named_values.is_empty() })]
+    pub delete_value_button: Widget<ButtonState, Button>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
     /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — mirrors
@@ -605,7 +698,9 @@ impl EditInterpretationDialog {
                 ("Width", HorizontalAlignment::Right),
                 "1",
             ))
+            .value_list(widgets::selection("Value", Vec::<NamedValue>::new(), 0))
             .add_button(widgets::button("ADD PREDEFINED", 1))
+            .delete_value_button(widgets::button("DEL", 0))
             .confirm_button(widgets::button("CONFIRM", 1))
             .delete_button(widgets::button("DELETE", 1))
             .error(widgets::error_text())
@@ -840,9 +935,26 @@ impl EditInterpretationDialog {
         self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
     }
 
+    /// Item 5 (parity fix) — see `AddInterpretationDialog::delete_selected_named_value` (Shared).
+    pub fn delete_selected_named_value(&mut self) {
+        if self.pending_named_values.is_empty() {
+            return;
+        }
+        let idx = self
+            .value_list
+            .state
+            .selection()
+            .min(self.pending_named_values.len() - 1);
+        self.pending_named_values.remove(idx);
+        if self.pending_named_values.is_empty() {
+            self.focus_previous();
+        }
+    }
+
     pub fn handle_space(&mut self) {
         match self.focus {
             EditInterpretationDialogFocus::AddButton => self.open_add_dialog(),
+            EditInterpretationDialogFocus::DeleteValueButton => self.delete_selected_named_value(),
             EditInterpretationDialogFocus::DeleteButton => self.open_confirm_delete(),
             _ => {
                 let _ = HandleEvents::handle_events(self, KeyModifiers::NONE, KeyCode::Char(' '));
@@ -989,9 +1101,49 @@ impl EditInterpretationDialog {
                 }
             }
         }
+        // Item 5 (parity fix) — see `AddInterpretationDialog::render`'s own value-row (Shared).
+        self.value_list
+            .state
+            .set_values(self.pending_named_values.clone());
+        let value_row: [Rect; 4] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(18),
+            Constraint::Length(7),
+            Constraint::Length(1),
+        ])
+        .areas(rows[6]);
+        if self.pending_named_values.is_empty() {
+            let text = ferrowl_ui::widgets::TextBuilder::default()
+                .margin(Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                })
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .style(ferrowl_ui::style::TextStyle {
+                    general: Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
+                })
+                .multiline(true)
+                .build()
+                .expect("all required builder fields are set");
+            let mut message: String = "No predefined values — reopen to use free-text input".into();
+            StatefulWidget::render(&text, value_row[0], buf, &mut message);
+        } else {
+            StatefulWidget::render(
+                &self.value_list.widget,
+                value_row[0],
+                buf,
+                &mut self.value_list.state,
+            );
+            StatefulWidget::render(
+                &self.delete_value_button.widget,
+                value_row[2],
+                buf,
+                &mut self.delete_value_button.state,
+            );
+        }
         StatefulWidget::render(
             &self.add_button.widget,
-            rows[6],
+            value_row[1],
             buf,
             &mut self.add_button.state,
         );
@@ -1007,7 +1159,11 @@ impl EditInterpretationDialog {
             buf,
             &mut self.delete_button.state,
         );
-        StatefulWidget::render(&self.error.widget, rows[9], buf, &mut self.error.state);
+        // Item 4 (parity fix) — same class of bug as `AddInterpretationDialog::render` (Shared):
+        // no error box drawn at all while the dialog validates cleanly.
+        if !self.error.state.is_empty() {
+            StatefulWidget::render(&self.error.widget, rows[9], buf, &mut self.error.state);
+        }
         StatefulWidget::render(
             &self.keybinds[0].widget,
             rows[10],
@@ -1140,6 +1296,106 @@ mod tests {
         for field in ["Alignment", "Width"] {
             assert!(text.contains(field), "missing field '{field}':\n{text}");
         }
+    }
+
+    /// Manual-exercise fix (item 4) — same class of bug as
+    /// `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid` (Shared):
+    /// the error box must not draw at all while the dialog validates cleanly, only once it
+    /// doesn't.
+    #[test]
+    fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
+        let area = Rect::new(0, 0, 120, 40);
+
+        let mut valid = AddInterpretationDialog::new();
+        set_input(&mut valid.label, "power");
+        set_input(&mut valid.description, "Active power");
+        set_input(&mut valid.address, "10");
+        valid
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
+        valid.number_format.state.set_selection(1); // U16
+        let mut buf = Buffer::empty(area);
+        valid.render(area, &mut buf);
+        assert!(
+            !buffer_text(&buf).contains("Error"),
+            "no error box should be drawn while the dialog is valid"
+        );
+
+        let mut invalid = AddInterpretationDialog::new(); // empty label -> invalid
+        let mut buf = Buffer::empty(area);
+        invalid.render(area, &mut buf);
+        assert!(
+            buffer_text(&buf).contains("Error"),
+            "the error box must be visible once the dialog is invalid"
+        );
+    }
+
+    /// Item 5 — the empty-list placeholder shows instead of the value list/delete button while
+    /// `pending_named_values` is empty, and the list itself (with each value's label, e.g. "on")
+    /// renders once values are present, parity with `EditSelectionDialog`'s own value/DEL row.
+    #[test]
+    fn ut_render_shows_named_value_list_and_placeholder_when_empty() {
+        let area = Rect::new(0, 0, 120, 40);
+
+        let mut empty = AddInterpretationDialog::new();
+        let mut buf = Buffer::empty(area);
+        empty.render(area, &mut buf);
+        assert!(
+            buffer_text(&buf).contains("No predefined values"),
+            "the empty-list placeholder must show when there are no named values yet"
+        );
+
+        let mut with_values = AddInterpretationDialog::new();
+        with_values.pending_named_values.push(NamedValue {
+            name: "kettle-on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        });
+        let mut buf = Buffer::empty(area);
+        with_values.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("No predefined values"),
+            "the placeholder must not show once a named value exists"
+        );
+        assert!(
+            text.contains("kettle-on"),
+            "the named value's own label must render (value_list.state must be kept in sync \
+             with pending_named_values on render, not left stale/empty):\n{text}"
+        );
+        assert!(
+            text.contains("DEL"),
+            "the delete button must render:\n{text}"
+        );
+    }
+
+    /// Item 5 — `delete_selected_named_value` (routed via `handle_space` on the delete button's
+    /// own focus variant) removes exactly the `value_list`-selected entry from
+    /// `pending_named_values`, parity with `EditSelectionDialog::delete_selected`.
+    #[test]
+    fn ut_delete_value_button_removes_selected_named_value() {
+        let mut dialog = AddInterpretationDialog::new();
+        dialog.pending_named_values.push(NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        });
+        dialog.pending_named_values.push(NamedValue {
+            name: "off".to_string(),
+            value: crate::config::device::Scalar::Int(0),
+        });
+        // Render once first so `value_list.state` is synced from `pending_named_values` (render
+        // is what performs that sync — mirrors production: the widget is always rendered at
+        // least once before the user can select/act on it).
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        dialog.value_list.state.set_selection(1); // "off"
+
+        dialog.focus = AddInterpretationDialogFocus::DeleteValueButton;
+        dialog.handle_space();
+
+        assert_eq!(dialog.pending_named_values.len(), 1);
+        assert_eq!(dialog.pending_named_values[0].name, "on");
     }
 
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
@@ -1277,5 +1533,92 @@ mod tests {
         dialog.focus = EditInterpretationDialogFocus::DeleteButton;
         dialog.handle_space();
         assert!(dialog.confirm_delete.is_some());
+    }
+
+    /// Manual-exercise fix (item 4), applied here too for parity — `EditInterpretationDialog`
+    /// has the identical error-box-always-drawn bug as `AddInterpretationDialog` (Shared).
+    #[test]
+    fn ut_edit_interpretation_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
+        let area = Rect::new(0, 0, 120, 40);
+
+        let mut valid = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        let mut buf = Buffer::empty(area);
+        valid.render(area, &mut buf);
+        assert!(
+            !buffer_text(&buf).contains("Error"),
+            "no error box should be drawn while the dialog is valid"
+        );
+
+        let mut invalid = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        set_input(&mut invalid.address, ""); // empty address fails `parse_address` -> invalid
+        let mut buf = Buffer::empty(area);
+        invalid.render(area, &mut buf);
+        assert!(
+            buffer_text(&buf).contains("Error"),
+            "the error box must be visible once the dialog is invalid"
+        );
+    }
+
+    /// Item 5 (parity fix) — `EditInterpretationDialog` gets the same named-value list +
+    /// delete UI as `AddInterpretationDialog` (Shared): placeholder when empty, list + DEL
+    /// button once `pending_named_values` is populated.
+    #[test]
+    fn ut_edit_interpretation_render_shows_named_value_list_and_placeholder_when_empty() {
+        let area = Rect::new(0, 0, 120, 40);
+
+        let mut empty = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        let mut buf = Buffer::empty(area);
+        empty.render(area, &mut buf);
+        assert!(
+            buffer_text(&buf).contains("No predefined values"),
+            "the empty-list placeholder must show when there are no named values yet"
+        );
+
+        let mut with_values = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        with_values.pending_named_values.push(NamedValue {
+            name: "kettle-on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        });
+        let mut buf = Buffer::empty(area);
+        with_values.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("No predefined values"),
+            "the placeholder must not show once a named value exists"
+        );
+        assert!(
+            text.contains("kettle-on"),
+            "the named value's own label must render:\n{text}"
+        );
+        assert!(
+            text.contains("DEL"),
+            "the delete button must render:\n{text}"
+        );
+    }
+
+    /// Item 5 (parity fix) — `delete_selected_named_value` removes exactly the
+    /// `value_list`-selected entry from `pending_named_values`, same as
+    /// `AddInterpretationDialog`'s own (Shared).
+    #[test]
+    fn ut_edit_interpretation_delete_value_button_removes_selected_named_value() {
+        let mut dialog = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        dialog.pending_named_values.push(NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        });
+        dialog.pending_named_values.push(NamedValue {
+            name: "off".to_string(),
+            value: crate::config::device::Scalar::Int(0),
+        });
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        dialog.value_list.state.set_selection(1); // "off"
+
+        dialog.focus = EditInterpretationDialogFocus::DeleteValueButton;
+        dialog.handle_space();
+
+        assert_eq!(dialog.pending_named_values.len(), 1);
+        assert_eq!(dialog.pending_named_values[0].name, "on");
     }
 }
