@@ -14,7 +14,7 @@ use ferrowl_ui::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    widgets::{Table, TableBuilder, Widget},
+    widgets::{Header, Table, TableBuilder, Widget},
 };
 use ferrowl_ui_derive::TableEntry;
 use ratatui::Frame;
@@ -42,6 +42,10 @@ enum MonitorPanel {
     Units,
     Messages,
     Memory,
+    /// UI-R-065 — only reachable in the Tab cycle while the selected unit id has at least one
+    /// interpretation (`handle_events`' Tab/BackTab handling skips it otherwise, since `next`/
+    /// `previous` here have no access to that dynamic state).
+    Resolved,
 }
 
 impl MonitorPanel {
@@ -49,15 +53,17 @@ impl MonitorPanel {
         match self {
             MonitorPanel::Units => MonitorPanel::Messages,
             MonitorPanel::Messages => MonitorPanel::Memory,
-            MonitorPanel::Memory => MonitorPanel::Units,
+            MonitorPanel::Memory => MonitorPanel::Resolved,
+            MonitorPanel::Resolved => MonitorPanel::Units,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            MonitorPanel::Units => MonitorPanel::Memory,
+            MonitorPanel::Units => MonitorPanel::Resolved,
             MonitorPanel::Messages => MonitorPanel::Units,
             MonitorPanel::Memory => MonitorPanel::Messages,
+            MonitorPanel::Resolved => MonitorPanel::Memory,
         }
     }
 }
@@ -156,6 +162,19 @@ fn format_record_status(status: &RecordStatus) -> String {
     }
 }
 
+/// Shared hex-words formatting (UI-R-062's Messages payload, UI-R-064's resolved-registers raw
+/// value): 4-digit lowercase hex per word, bracket-wrapped, space-separated.
+fn hex_words(words: &[u16]) -> String {
+    format!(
+        "[{}]",
+        words
+            .iter()
+            .map(|v| format!("{v:04x}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
 /// UI-R-062's `Values/Payload` column text — empty for no shape or no values (MB-R-146's
 /// record-status-to-value gating, Shared); one digit per bit for coil-family kinds, 4-digit
 /// lowercase hex per word for register-family kinds.
@@ -166,13 +185,18 @@ fn format_record_payload(record: &MonitorRecord) -> String {
     if shape.values.is_empty() {
         return String::new();
     }
-    let cells: Vec<String> = match shape.kind {
-        Kind::Coil | Kind::DiscreteInput => shape.values.iter().map(u16::to_string).collect(),
-        Kind::HoldingRegister | Kind::InputRegister => {
-            shape.values.iter().map(|v| format!("{v:04x}")).collect()
-        }
-    };
-    format!("[{}]", cells.join(" "))
+    match shape.kind {
+        Kind::Coil | Kind::DiscreteInput => format!(
+            "[{}]",
+            shape
+                .values
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Kind::HoldingRegister | Kind::InputRegister => hex_words(&shape.values),
+    }
 }
 
 /// UI-R-062's `Address`/`Quantity` columns — empty for no shape; `edge-cases.md`'s
@@ -204,6 +228,99 @@ fn message_row(unit: UnitId, record: &MonitorRecord, now: std::time::Instant) ->
         address,
         quantity,
         payload: format_record_payload(record),
+    }
+}
+
+/// UI-R-064 — one row of the Resolved-registers table: the same column set as
+/// `ferrowl::module::modbus::table::TableHeader` minus Slave ID/Access (Shared).
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = ResolvedHeader)]
+struct ResolvedRow {
+    #[column(name = "Name", min = 15, max = 30)]
+    name: String,
+    #[column(name = "Description", min = 25, max = 40)]
+    description: String,
+    #[column(name = "Address", min = 10, max = 20)]
+    address: String,
+    #[column(name = "Kind", min = 20, max = 30)]
+    kind: String,
+    #[column(name = "Format", min = 10, max = 20)]
+    format: String,
+    #[column(name = "Length", min = 10, max = 20)]
+    length: String,
+    #[column(name = "Resolution", min = 10, max = 20)]
+    resolution: String,
+    #[column(name = "Value", min = 5, max = 40)]
+    value: String,
+    #[column(name = "Raw Value", min = 0, max = 800)]
+    raw_value: String,
+}
+
+type ResolvedTable = Widget<TableState<ResolvedRow, 9>, Table<ResolvedRow, ResolvedHeader, 9>>;
+
+/// UI-R-064 — build a fresh, empty `ResolvedTable` widget/state pair, same builder shape as
+/// `new_message_table` (Shared).
+fn new_resolved_table() -> ResolvedTable {
+    Widget {
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .expect("all required builder fields are set"),
+        widget: TableBuilder::default()
+            .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
+            .title(Some("Resolved registers".into()))
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
+            // Expanded (non-compact) is the default (tui/api-contract.md §2.1): 1 row of
+            // vertical padding, same as `TableView::new`'s own default (Shared).
+            .row_margin(ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            })
+            .build()
+            .expect("all required builder fields are set"),
+    }
+}
+
+/// UI-R-064 — build one `ResolvedRow` for `name`/`def`, reading `unit`'s currently observed
+/// words from `table`. `value`/`raw_value` render `"(not yet observed)"`/empty when nothing has
+/// been observed at `def`'s address yet.
+fn resolved_row(
+    name: &str,
+    def: &MonitorRegisterDef,
+    table: &ferrowl_modbus::monitor::ObservedTable,
+    unit: UnitId,
+) -> ResolvedRow {
+    let key = Key::new(SlaveKey {
+        slave_id: unit,
+        kind: def.kind.clone(),
+    });
+    let address = match def.address() {
+        ferrowl_codec::Address::Fixed(a) => a,
+        ferrowl_codec::Address::Virtual => 0,
+    };
+    let width = def.format().width();
+    let (value, raw_value) = match table.read_words(&key, address, width) {
+        Some(words) => (format!("{words:?}"), hex_words(&words)),
+        None => ("(not yet observed)".to_string(), String::new()),
+    };
+    let resolution = match def.format().resolution() {
+        Some(v) => format!("{v}"),
+        None => "None".to_string(),
+    };
+    ResolvedRow {
+        name: name.to_string(),
+        description: def.description.clone(),
+        address: address.to_string(),
+        kind: format!("{:?}", def.kind),
+        format: format!("{}", def.format()),
+        length: format!("{width}"),
+        resolution,
+        value,
+        raw_value,
     }
 }
 
@@ -461,18 +578,24 @@ pub struct ModbusMonitorModuleView {
     /// UI-R-062 Messages table for the selected unit id, re-derived each tick from
     /// `module.records()`.
     messages_table: MessageTable,
+    /// UI-R-064 Resolved-registers table for the selected unit id, re-derived each tick (Shared
+    /// with the Messages table's own re-derivation pattern).
+    resolved_table: ResolvedTable,
     overlay: MonitorOverlay,
     view_focused: bool,
     /// Which panel is Tab-focused within this view (UI-R-060/061 parity with OCPP's per-panel
     /// border highlight); only meaningful while `view_focused` is `true`.
     panel_focus: MonitorPanel,
-    /// `:compact` toggle (tui/api-contract.md §2.1) — collapses the resolved-registers section
-    /// to one line per interpretation (name + observed value only), dropping the description
-    /// line shown in the default (expanded) layout.
+    /// `:compact` toggle (tui/api-contract.md §2.1) — a real row-margin toggle on
+    /// `resolved_table.widget` (mirrors `TableView::set_compact`, Shared), not string formatting.
     compact: bool,
     /// `:order [col] [asc|desc]` (tui/api-contract.md §2.1) — sorts the resolved-registers
-    /// section by column; `None` is the unsorted (definition/name) order. `bool` is "descending".
-    sort: Option<(String, bool)>,
+    /// table by column *index* (resolved from the name once, at `:order` parse time, via
+    /// `column_index_for::<ResolvedHeader, 9>`); `None` is definition order. `bool` is
+    /// "descending". Re-applied every `refresh()` tick (not just once at `:order` time) so newly
+    /// added interpretations stay correctly ordered — a deliberate implementation choice, not
+    /// spec-mandated (either satisfies UI-R-064/tui/api-contract.md).
+    sort: Option<(usize, bool)>,
 }
 
 #[allow(dead_code)] // forward-declared; see struct's note
@@ -485,6 +608,7 @@ impl ModbusMonitorModuleView {
             unit_ids: Vec::new(),
             selected: 0,
             messages_table: new_message_table(),
+            resolved_table: new_resolved_table(),
             overlay: MonitorOverlay::None,
             view_focused: false,
             panel_focus: MonitorPanel::default(),
@@ -540,50 +664,56 @@ impl ModbusMonitorModuleView {
         self.overlay = MonitorOverlay::None;
     }
 
-    /// Interpretations defined for `unit` (MB-R-145), by name — in `:order`'s current sort
-    /// order (tui/api-contract.md §2.1), or definition order (`None`).
+    /// Interpretations defined for `unit` (MB-R-145), by name, in definition order — the
+    /// Resolved-registers table's own real column sort (UI-R-064) applies separately, on the
+    /// built `ResolvedRow`s (see `resolved_rows`/`apply_order`).
     fn interpretations_for(&self, unit: UnitId) -> Vec<(&String, &MonitorRegisterDef)> {
-        let mut rows: Vec<(&String, &MonitorRegisterDef)> = self
-            .module
+        self.module
             .interpretations_for(unit)
             .iter()
             .map(|(name, def)| (name, def))
+            .collect()
+    }
+
+    /// Whether `unit` has at least one interpretation (MB-R-145) — drives both the
+    /// Resolved-registers section's visibility (UI-R-061) and whether `MonitorPanel::Resolved`
+    /// is reachable in the Tab cycle (UI-R-065).
+    fn has_interpretation(&self, unit: UnitId) -> bool {
+        !self.interpretations_for(unit).is_empty()
+    }
+
+    /// The selected unit id's `ResolvedRow`s (UI-R-064), definition order unless `self.sort` is
+    /// set, in which case sorted by that column index via `cmp_table_entry` (Shared).
+    fn resolved_rows(&self, unit: UnitId) -> Vec<ResolvedRow> {
+        let table = self.module.table();
+        let table = table.read();
+        let mut rows: Vec<ResolvedRow> = self
+            .interpretations_for(unit)
+            .into_iter()
+            .map(|(name, def)| resolved_row(name, def, &table, unit))
             .collect();
-        if let Some((col, desc)) = &self.sort {
-            rows.sort_by(|a, b| Self::order_key(col, a).cmp(&Self::order_key(col, b)));
-            if *desc {
-                rows.reverse();
-            }
+        if let Some((column, descending)) = self.sort {
+            rows.sort_by(|a, b| {
+                crate::module::modbus::table::cmp_table_entry(a, b, column, descending)
+            });
         }
         rows
     }
 
-    /// The sort key for one row under `:order`'s `col` argument (tui/api-contract.md §2.1):
-    /// `name`, `address` (unset/virtual sorts first), `kind`, or `type`. An unrecognized column
-    /// falls back to `name` — `apply_order` below is what actually validates the column and
-    /// reports an error, so this only needs a total order, never to reject.
-    fn order_key(col: &str, row: &(&String, &MonitorRegisterDef)) -> (u16, String) {
-        let (name, def) = row;
-        match col {
-            "address" => (def.address.unwrap_or(0), String::new()),
-            "kind" => (0, format!("{:?}", def.kind)),
-            "type" => (0, format!("{:?}", def.value_type)),
-            _ => (0, (*name).clone()),
-        }
-    }
-
-    /// Validate `:order`'s optional column argument (tui/api-contract.md §2.1) and set the
-    /// sort; `Err` for an unrecognized column name.
+    /// Validate `:order`'s optional column argument (tui/api-contract.md §2.1) against the
+    /// Resolved-registers table's real columns and set the sort; `Err` for an unrecognized
+    /// column name.
     fn apply_order(&mut self, col: &str, desc: bool) -> Result<(), String> {
-        const COLUMNS: [&str; 4] = ["name", "address", "kind", "type"];
-        if !COLUMNS.contains(&col) {
-            return Err(format!(
+        match crate::module::modbus::table::column_index_for::<ResolvedHeader, 9>(col) {
+            Some(idx) => {
+                self.sort = Some((idx, desc));
+                Ok(())
+            }
+            None => Err(format!(
                 "unknown column '{col}' (expected one of: {})",
-                COLUMNS.join(", ")
-            ));
+                ResolvedHeader::header().join(", ")
+            )),
         }
-        self.sort = Some((col.to_string(), desc));
-        Ok(())
     }
 
     /// Memory layout for `unit`, grouped by table kind (MB-R-144), non-empty kinds only.
@@ -649,7 +779,6 @@ impl ModuleView for ModbusMonitorModuleView {
         };
         let units_style = style_for(MonitorPanel::Units);
         let memory_style = style_for(MonitorPanel::Memory);
-        let resolved_style = Style::default().fg(COLOR_SCHEME.border).bg(COLOR_SCHEME.bg);
 
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(area);
@@ -678,7 +807,7 @@ impl ModuleView for ModbusMonitorModuleView {
         ratatui::widgets::Widget::render(list, left_area, buf);
 
         let selected = self.selected_unit();
-        let has_interpretation = selected.is_some_and(|u| !self.interpretations_for(u).is_empty());
+        let has_interpretation = selected.is_some_and(|u| self.has_interpretation(u));
 
         let sections: Vec<Constraint> = if has_interpretation {
             vec![
@@ -722,49 +851,23 @@ impl ModuleView for ModbusMonitorModuleView {
             );
         }
 
-        // Resolved registers (MB-R-145) — omitted entirely when no interpretation exists for
-        // the selected unit id (UI-R-061).
+        // Resolved registers (MB-R-145, UI-R-064) — omitted entirely when no interpretation
+        // exists for the selected unit id (UI-R-061). Rebuilt live here (not cached in
+        // `refresh()`, unlike the Messages table) so a newly added interpretation shows up
+        // immediately, without a fresh refresh tick — same invariant the previous
+        // `Paragraph`-based render held.
         if has_interpretation && let Some(unit) = selected {
-            let resolved_block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(resolved_style)
-                .title("Resolved registers");
-            let resolved_inner = resolved_block.inner(section_areas[2]);
-            ratatui::widgets::Widget::render(resolved_block, section_areas[2], buf);
-            let table = self.module.table();
-            let table = table.read();
-            let text = self
-                .interpretations_for(unit)
-                .into_iter()
-                .map(|(name, def)| {
-                    let key = Key::new(SlaveKey {
-                        slave_id: unit,
-                        kind: def.kind.clone(),
-                    });
-                    let address = match def.address() {
-                        ferrowl_codec::Address::Fixed(a) => a,
-                        ferrowl_codec::Address::Virtual => 0,
-                    };
-                    let width = def.format().width();
-                    let value = match table.read_words(&key, address, width) {
-                        Some(words) => format!("{words:?}"),
-                        None => "(not yet observed)".to_string(),
-                    };
-                    // `:compact` (tui/api-contract.md §2.1): the expanded (default) layout adds
-                    // the interpretation's description on its own line; compact drops it to one
-                    // line per interpretation.
-                    if self.compact || def.description.is_empty() {
-                        format!("{name}: {value}")
-                    } else {
-                        format!("{name}: {value}\n  {}", def.description)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            ratatui::widgets::Widget::render(
-                ratatui::widgets::Paragraph::new(text),
-                resolved_inner,
+            self.resolved_table
+                .state
+                .set_values(self.resolved_rows(unit));
+            self.resolved_table
+                .state
+                .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Resolved);
+            StatefulWidget::render(
+                &self.resolved_table.widget,
+                section_areas[2],
                 buf,
+                &mut self.resolved_table.state,
             );
         }
     }
@@ -826,13 +929,27 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             return EventResult::Consumed;
         }
+        // UI-R-065 — `Resolved` is only reachable while the selected unit id has an
+        // interpretation; `next`/`previous` alone don't know that, so skip it here at the call
+        // site (Shared's `MonitorPanel` doc comment).
+        let resolved_visible = self
+            .selected_unit()
+            .is_some_and(|u| self.has_interpretation(u));
         match code {
             KeyCode::Tab if modifiers == KeyModifiers::NONE => {
-                self.panel_focus = self.panel_focus.next();
+                let mut next = self.panel_focus.next();
+                if next == MonitorPanel::Resolved && !resolved_visible {
+                    next = next.next();
+                }
+                self.panel_focus = next;
                 EventResult::Consumed
             }
             KeyCode::BackTab => {
-                self.panel_focus = self.panel_focus.previous();
+                let mut prev = self.panel_focus.previous();
+                if prev == MonitorPanel::Resolved && !resolved_visible {
+                    prev = prev.previous();
+                }
+                self.panel_focus = prev;
                 EventResult::Consumed
             }
             KeyCode::Up if self.panel_focus == MonitorPanel::Units => {
@@ -847,6 +964,9 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             _ if self.panel_focus == MonitorPanel::Messages => {
                 self.messages_table.state.handle_events(modifiers, code)
+            }
+            _ if self.panel_focus == MonitorPanel::Resolved => {
+                self.resolved_table.state.handle_events(modifiers, code)
             }
             _ => EventResult::Unhandled(modifiers, code),
         }
@@ -979,6 +1099,15 @@ impl ModuleView for ModbusMonitorModuleView {
 
             ModbusMonitorCmd::Compact => {
                 self.compact = !self.compact;
+                // Real row-padding toggle (UI-R-064), mirroring `TableView::set_compact`
+                // (Shared): 1 row of vertical margin expanded, 0 compact.
+                let vertical = if self.compact { 0 } else { 1 };
+                self.resolved_table
+                    .widget
+                    .set_row_margin(ratatui::layout::Margin {
+                        vertical,
+                        horizontal: 0,
+                    });
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -1542,7 +1671,7 @@ mod tests {
     /// tui/api-contract.md §2.1 — `:compact` toggles the resolved-registers section between the
     /// default (expanded, description shown) layout and the compact (name + value only) layout.
     #[tokio::test]
-    async fn ut_compact_command_toggles_resolved_registers_description_line() {
+    async fn ut_compact_command_toggles_resolved_table_row_margin() {
         let mut v = view();
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
@@ -1550,22 +1679,22 @@ mod tests {
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
 
         assert!(!v.compact);
-        let expanded = buffer_text(&mut v);
-        assert!(expanded.contains("Active power draw"));
+        assert_eq!(v.resolved_table.widget.row_margin().vertical, 1);
 
         v.handle_command("compact").await;
         assert!(v.compact);
-        let compact = buffer_text(&mut v);
-        assert!(!compact.contains("Active power draw"));
+        assert_eq!(v.resolved_table.widget.row_margin().vertical, 0);
 
         v.handle_command("compact").await;
         assert!(!v.compact);
+        assert_eq!(v.resolved_table.widget.row_margin().vertical, 1);
     }
 
-    /// tui/api-contract.md §2.1 — `:order <col> [asc|desc]` sorts the resolved-registers section
-    /// by column; bare `:order` clears the sort back to definition order.
+    /// tui/api-contract.md §2.1/UI-R-064 — `:order <col> [asc|desc]` sorts the
+    /// Resolved-registers table by the real column index; bare `:order` clears the sort back to
+    /// definition order.
     #[tokio::test]
-    async fn ut_order_command_sorts_resolved_registers_by_column() {
+    async fn ut_order_command_sorts_resolved_table_by_column_index() {
         let mut v = view();
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
@@ -1575,18 +1704,26 @@ mod tests {
             .add_interpretation(UnitId(3), "high".to_string(), def(99, "high addr"));
 
         v.handle_command("order address desc").await;
-        let rows = v.interpretations_for(UnitId(3));
-        assert_eq!(
-            rows.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
-            ["high", "low"]
-        );
+        buffer_text(&mut v); // renders, which rebuilds `resolved_table`'s rows under the sort
+        let names: Vec<String> = v
+            .resolved_table
+            .state
+            .values()
+            .iter()
+            .map(|r| r.values()[0].clone())
+            .collect();
+        assert_eq!(names, vec!["high".to_string(), "low".to_string()]);
 
         v.handle_command("order address asc").await;
-        let rows = v.interpretations_for(UnitId(3));
-        assert_eq!(
-            rows.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
-            ["low", "high"]
-        );
+        buffer_text(&mut v);
+        let names: Vec<String> = v
+            .resolved_table
+            .state
+            .values()
+            .iter()
+            .map(|r| r.values()[0].clone())
+            .collect();
+        assert_eq!(names, vec!["low".to_string(), "high".to_string()]);
 
         v.handle_command("order").await;
         assert!(v.sort.is_none());
@@ -1964,5 +2101,125 @@ mod tests {
         assert_eq!(cells[0].value, 10);
         assert_eq!(cells[7].value, 20);
         assert!(!cells[3].observed);
+    }
+
+    /// UI-R-064 — the Resolved-registers table has exactly `TableHeader`'s 9 non-Slave-ID/Access
+    /// columns, in order.
+    #[test]
+    fn ut_resolved_registers_table_has_expected_9_columns_in_order() {
+        assert_eq!(
+            ResolvedHeader::header(),
+            [
+                "Name",
+                "Description",
+                "Address",
+                "Kind",
+                "Format",
+                "Length",
+                "Resolution",
+                "Value",
+                "Raw Value",
+            ]
+        );
+    }
+
+    /// UI-R-064 — the Raw Value column renders 4-digit lowercase hex per observed word, same
+    /// convention as the Messages table's payload column.
+    #[tokio::test]
+    async fn ut_resolved_registers_table_raw_value_renders_hex_words() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(3),
+                kind: Kind::HoldingRegister,
+            }),
+            10,
+            &[5],
+        );
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+
+        buffer_text(&mut v);
+        let rows = v.resolved_table.state.values();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[8], "[0005]");
+    }
+
+    /// UI-R-065 — Tab cycles all 4 panels (Units→Messages→Memory→Resolved→Units) when the
+    /// selected unit id has an interpretation.
+    #[test]
+    fn ut_tab_cycles_all_4_panels_when_resolved_registers_visible() {
+        let mut v = view();
+        v.set_focused(true);
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+
+        assert_eq!(v.panel_focus, MonitorPanel::Units);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.panel_focus, MonitorPanel::Messages);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.panel_focus, MonitorPanel::Memory);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.panel_focus, MonitorPanel::Resolved);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(
+            v.panel_focus,
+            MonitorPanel::Units,
+            "Tab must wrap back to Units"
+        );
+    }
+
+    /// UI-R-065 — the Resolved-registers panel is skipped in the Tab cycle when the selected
+    /// unit id has no interpretation (hidden, per UI-R-061).
+    #[test]
+    fn ut_tab_skips_resolved_registers_panel_when_hidden() {
+        let mut v = view();
+        v.set_focused(true);
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        // No interpretation added: Resolved stays hidden.
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> Messages
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> Memory
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // would be Resolved, skipped -> Units
+        assert_eq!(v.panel_focus, MonitorPanel::Units);
+    }
+
+    /// UI-R-065 — each panel's selection/scroll is independent: switching panel focus away and
+    /// back leaves the Messages table's own row selection untouched.
+    #[tokio::test]
+    async fn ut_panel_focus_switch_preserves_each_panels_own_selection() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        for i in 0..3 {
+            v.module.records().write().push(
+                UnitId(3),
+                shaped_record(
+                    RecordStatus::Ok,
+                    ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                    Some(shape(Kind::HoldingRegister, i, 1, None, None, vec![i])),
+                    std::time::Duration::from_secs(1),
+                ),
+            );
+        }
+        v.refresh().await;
+        v.panel_focus = MonitorPanel::Messages;
+        v.messages_table.state.select_index(2);
+        assert_eq!(v.messages_table.state.table_state().selected(), Some(2));
+
+        v.panel_focus = MonitorPanel::Memory;
+        v.panel_focus = MonitorPanel::Messages;
+
+        assert_eq!(
+            v.messages_table.state.table_state().selected(),
+            Some(2),
+            "switching panel focus away and back must not disturb the Messages table's own selection"
+        );
     }
 }
