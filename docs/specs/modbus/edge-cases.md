@@ -32,6 +32,8 @@ mistaken for an oversight and silently "fixed".
 | Condition | Behavior |
 |---|---|
 | A monitor observes a frame that fails CRC (RTU) or LRC (Ascii) validation, or is otherwise malformed | logged to the monitor's message log at Warning level and discarded, rather than silently dropped — expected during normal operation on a live multi-drop bus (noise, a device's own retry, or the monitor attaching mid-frame), and the visibility is worth the log volume |
+| A completed pairing's operation (MB-R-146) is `ReadWriteMultipleRegisters` — the one tracked operation with two addresses and two quantities | Address renders as `read_address/write_address`; Quantity as `read_quantity/write_quantity`; Values/Payload shows the read response's registers only — the write's own carried values are already visible in Memory layout once applied, and showing both payloads in one row would double the column's width for a rarely-used operation |
+| A monitor observes no traffic at all for a table kind on the selected unit id | that table kind's hex-editor block (UI-R-063) is omitted entirely from Memory layout, same as MB-R-144's existing "grouped by table kind, non-empty kinds only" — an unobserved kind is not shown as an empty block |
 
 ---
 
