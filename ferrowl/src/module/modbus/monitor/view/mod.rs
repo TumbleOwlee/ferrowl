@@ -161,12 +161,14 @@ fn new_message_table() -> MessageTable {
     }
 }
 
-/// UI-R-062's `Status` column text.
+/// UI-R-062's `Status` column text. Gate3#3 — the exception case renders the bare
+/// `ExceptionCode` variant name (e.g. `IllegalDataAddress`), not the Debug-derived
+/// `Exception(...)` wrapper around it.
 fn format_record_status(status: &RecordStatus) -> String {
     match status {
         RecordStatus::Ok => "OK".to_string(),
         RecordStatus::Unmatched => "Unmatched".to_string(),
-        RecordStatus::Exception(code) => format!("Exception({code:?})"),
+        RecordStatus::Exception(code) => format!("{code:?}"),
     }
 }
 
@@ -224,12 +226,28 @@ fn format_record_address_quantity(record: &MonitorRecord) -> (String, String) {
 }
 
 /// UI-R-062 — build one `MessageRow` for `unit`'s Messages table from a captured record.
-/// `time` has no wall-clock reference available from `MonitorRecord.timestamp` (an `Instant`),
-/// so it renders elapsed-seconds-ago relative to `now`.
-fn message_row(unit: UnitId, record: &MonitorRecord, now: std::time::Instant) -> MessageRow {
+/// Gate3#2 — `MonitorRecord.timestamp` is a monotonic `Instant` with no wall-clock reference of
+/// its own, so `time` is derived by projecting the record's age (relative to `now`, an
+/// `Instant` captured at the same moment as `wall_now`) back from `wall_now`, then formatted
+/// with the same full-timestamp format the log pane uses
+/// (`crate::view::log::format_timestamp`), not a relative "Xs ago" string.
+fn message_row(
+    unit: UnitId,
+    record: &MonitorRecord,
+    now: std::time::Instant,
+    wall_now: std::time::SystemTime,
+) -> MessageRow {
     let (address, quantity) = format_record_address_quantity(record);
+    let elapsed = now.duration_since(record.timestamp);
+    let wall = wall_now
+        .checked_sub(elapsed)
+        .unwrap_or(std::time::UNIX_EPOCH);
+    let ms = wall
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
     MessageRow {
-        time: format!("{}s ago", now.duration_since(record.timestamp).as_secs()),
+        time: crate::view::log::format_timestamp(ms),
         status: format_record_status(&record.status),
         slave: unit.to_string(),
         operation: format!("{:?}", record.operation),
@@ -312,7 +330,18 @@ fn resolved_row(
     };
     let width = def.format().width();
     let (value, raw_value) = match table.read_words(&key, address, width) {
-        Some(words) => (format!("{words:?}"), hex_words(&words)),
+        // Gate3#1 — decode via the same path the modbus module's own `Definition::values`
+        // (`ferrowl/src/module/modbus/table.rs`) uses for its Value column
+        // (`self.register.decode(&raw)`, itself `ferrowl_codec::decode(&format, &raw)`), not a
+        // raw `{words:?}` debug dump. Gate3#5 — no `[...]` wrapping on Value (Raw Value keeps
+        // its own bracketed hex format via `hex_words`).
+        Some(words) => {
+            let value = match ferrowl_codec::decode(&def.format(), &words) {
+                Ok(v) => v.to_string(),
+                Err(_) => "Error".to_string(),
+            };
+            (value, hex_words(&words))
+        }
         None => ("(not yet observed)".to_string(), String::new()),
     };
     let resolution = match def.format().resolution() {
@@ -1101,11 +1130,12 @@ impl ModuleView for ModbusMonitorModuleView {
             let rows = match self.selected_unit() {
                 Some(unit) => {
                     let now = std::time::Instant::now();
+                    let wall_now = std::time::SystemTime::now();
                     let mut records = self.module.records().read().records_for(unit);
                     records.reverse(); // most-recent-first (UI-R-062)
                     records
                         .iter()
-                        .map(|record| message_row(unit, record, now))
+                        .map(|record| message_row(unit, record, now, wall_now))
                         .collect()
                 }
                 None => Vec::new(),
@@ -1990,6 +2020,51 @@ mod tests {
         assert_eq!(rows[0].values()[6], "[1 0 1]");
     }
 
+    /// Gate3#2 — the Time column renders the full wall-clock timestamp (same
+    /// `crate::view::log::format_timestamp` format the log pane already uses), not a relative
+    /// "Xs ago" string.
+    #[test]
+    fn ut_message_row_time_renders_full_timestamp_not_relative_ago() {
+        let now = std::time::Instant::now();
+        let wall_now = std::time::SystemTime::now();
+        let record = shaped_record(
+            RecordStatus::Ok,
+            ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+            None,
+            std::time::Duration::from_secs(5),
+        );
+        let row = message_row(UnitId(3), &record, now, wall_now);
+
+        let elapsed = now.duration_since(record.timestamp);
+        let expected_wall = wall_now
+            .checked_sub(elapsed)
+            .expect("test elapsed fits in SystemTime");
+        let ms = expected_wall
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("post-epoch")
+            .as_millis() as u64;
+        let expected = crate::view::log::format_timestamp(ms);
+
+        assert_eq!(row.values()[0], expected);
+        assert!(!row.values()[0].contains("ago"));
+    }
+
+    /// Gate3#3 — the Status column's exception case renders just the bare `ExceptionCode`
+    /// variant name (`IllegalDataAddress`), not the Debug-derived `Exception(...)` wrapper.
+    #[test]
+    fn ut_message_row_exception_status_renders_bare_variant_name() {
+        let now = std::time::Instant::now();
+        let wall_now = std::time::SystemTime::now();
+        let record = shaped_record(
+            RecordStatus::Exception(ferrowl_modbus::ExceptionCode::IllegalDataAddress),
+            ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+            None,
+            std::time::Duration::from_millis(10),
+        );
+        let row = message_row(UnitId(3), &record, now, wall_now);
+        assert_eq!(row.values()[1], "IllegalDataAddress");
+    }
+
     /// UI-R-062 — a record whose operation isn't one of the 9 table-shaping ops renders empty
     /// Address/Quantity/Values-Payload columns.
     #[tokio::test]
@@ -2260,6 +2335,36 @@ mod tests {
         let rows = v.resolved_table.state.values();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].values()[8], "[0005]");
+    }
+
+    /// UI-R-064/Gate3#1 — the Value column renders the *decoded* reading (same decode path
+    /// `ferrowl::module::modbus::table::Definition`'s own Value column uses), not a raw
+    /// `{words:?}` debug dump, and (Gate3#5) with no surrounding `[...]` brackets (Raw Value
+    /// keeps those). A resolution of `0.5` on a raw word of `100` proves the scaling actually
+    /// ran, not just a hex reformat.
+    #[tokio::test]
+    async fn ut_resolved_registers_table_value_renders_decoded_scaled_reading() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module.table().write().write_words(
+            Key::new(SlaveKey {
+                slave_id: UnitId(3),
+                kind: Kind::HoldingRegister,
+            }),
+            10,
+            &[100],
+        );
+        let mut scaled = def(10, "Scaled reading");
+        scaled.resolution = 0.5;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), scaled);
+
+        buffer_text(&mut v);
+        let rows = v.resolved_table.state.values();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[7], "50");
+        assert_eq!(rows[0].values()[8], "[0064]");
     }
 
     /// UI-R-065 — Tab cycles all 4 panels (Units→Messages→Memory→Resolved→Units) when the

@@ -36,4 +36,4 @@ pub use run_config::RunConfig;
 pub use scalar::{Address, Coil, Word};
 pub use transport::Transport;
 
-pub use rust_modbus::{FunctionCode, Quantity, UnitId};
+pub use rust_modbus::{ExceptionCode, FunctionCode, Quantity, UnitId};
