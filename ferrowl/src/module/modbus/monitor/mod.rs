@@ -16,6 +16,5 @@ pub(crate) use dialog::AddInterpretationDialog;
 
 #[allow(unused_imports)] // consumed by module.rs; not yet by app code outside this submodule
 pub(crate) use build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
-pub(crate) use module::ModbusMonitorModule;
-#[allow(unused_imports)] // consumed starting s8 (wiring the 3 construction call sites)
-pub(crate) use view::ModbusMonitorModuleView;
+pub use module::ModbusMonitorModule;
+pub use view::ModbusMonitorModuleView;

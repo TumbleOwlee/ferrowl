@@ -19,6 +19,7 @@ mod module;
 pub mod monitor;
 
 pub use module::{ModbusModule, ModuleLog, ModuleMemory, VirtualStore};
+pub use monitor::{ModbusMonitorModule, ModbusMonitorModuleView};
 
 pub(crate) use build::{default_value, str_to_value};
 pub(crate) use log::{FileSink, append};

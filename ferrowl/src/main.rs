@@ -39,6 +39,7 @@ use crate::config::{
 };
 use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
+use crate::module::modbus::{ModbusMonitorModule as MonitorModule, ModbusMonitorModuleView};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView};
@@ -261,22 +262,40 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
 
     let mut tabs = Vec::new();
     for (spec, resolved_name) in specs.iter().zip(&resolved) {
-        let device = match config::load_device(&spec.device) {
-            Ok(device) => device,
-            Err(e) => {
-                eprintln!(
-                    "Skipping '{}': failed to load '{}': {e}",
-                    spec.name, spec.device
-                );
-                continue;
-            }
-        };
         let mut spec = spec.clone();
         let renamed = *resolved_name != spec.name;
         spec.name = resolved_name.clone();
-        let module = Module::new(&spec, &device);
-        let view: Box<dyn ModuleView> =
-            Box::new(ModbusModuleView::new(module, spec.clone(), device));
+
+        let view: Box<dyn ModuleView> = match spec.role {
+            Role::Monitor => {
+                let device = match config::load_monitor_device(&spec.device) {
+                    Ok(device) => device,
+                    Err(e) => {
+                        eprintln!(
+                            "Skipping '{}': failed to load '{}': {e}",
+                            spec.name, spec.device
+                        );
+                        continue;
+                    }
+                };
+                let module = MonitorModule::new(&spec, &device);
+                Box::new(ModbusMonitorModuleView::new(module, spec.clone(), device))
+            }
+            Role::Client | Role::Server => {
+                let device = match config::load_device(&spec.device) {
+                    Ok(device) => device,
+                    Err(e) => {
+                        eprintln!(
+                            "Skipping '{}': failed to load '{}': {e}",
+                            spec.name, spec.device
+                        );
+                        continue;
+                    }
+                };
+                let module = Module::new(&spec, &device);
+                Box::new(ModbusModuleView::new(module, spec.clone(), device))
+            }
+        };
         let mut tab = Tab::new_from_view(spec.name.clone(), view);
         if renamed {
             tab.log.write().await.write(
