@@ -30,7 +30,7 @@ use crate::module::view::{
 };
 
 use super::ModbusMonitorModule;
-use super::dialog::AddInterpretationDialog;
+use super::dialog::{AddInterpretationDialog, EditInterpretationDialog};
 use super::setup_dialog::MonitorSetupDialog;
 
 /// Which of the view's Tab-cyclable panels currently has focus (default `Units`), matching
@@ -73,8 +73,16 @@ enum MonitorOverlay {
     None,
     /// `:add`/`:a` interpretation dialog (UI-R-061), scoped to the currently selected unit id.
     Add(Box<AddInterpretationDialog>),
-    /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device.
-    Edit(Box<MonitorSetupDialog>),
+    /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device. Renamed from
+    /// `Edit` (mechanical rename, `s15`) to make room for `EditInterpretation` below, which
+    /// this could otherwise be confused with.
+    EditSetup(Box<MonitorSetupDialog>),
+    /// MB-R-148 — `Enter` on a Resolved-registers row (`s14`) opens this, prefilled from the
+    /// selected row. The `String` is the interpretation's original name, needed for the
+    /// edit-in-place lookup (`module.edit_interpretation`'s `old_name` — a confirmed rename
+    /// changes the map key, so the dialog's own current label input isn't enough once the user
+    /// edits it).
+    EditInterpretation(Box<EditInterpretationDialog>, String),
 }
 
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
@@ -643,7 +651,7 @@ impl ModbusMonitorModuleView {
     /// without an implicit restart — the user starts the monitor explicitly, same as after any
     /// other setup edit. No-op if the overlay isn't open or the dialog doesn't resolve.
     fn confirm_edit(&mut self) {
-        let MonitorOverlay::Edit(dialog) = &self.overlay else {
+        let MonitorOverlay::EditSetup(dialog) = &self.overlay else {
             return;
         };
         let Ok(outcome) = dialog.resolve() else {
@@ -661,6 +669,63 @@ impl ModbusMonitorModuleView {
         device.reconnect = Some(outcome.values.reconnect);
         self.module = ModbusMonitorModule::new(&self.spec, &device);
         self.device = device;
+        self.overlay = MonitorOverlay::None;
+    }
+
+    /// MB-R-148 — `Enter` on a Resolved-registers row (with the panel focused, `s14`) opens the
+    /// edit/delete dialog prefilled from that row. No-op if nothing is selected in either table.
+    fn open_edit_interpretation(&mut self) {
+        let Some(unit) = self.selected_unit() else {
+            return;
+        };
+        let Some(idx) = self.resolved_table.state.table_state().selected() else {
+            return;
+        };
+        // UI-R-064's `:order` may have sorted `resolved_table` out of `interpretations_for`'s
+        // definition order, so look up by the selected row's own `name`, not by `idx` into
+        // `interpretations_for` directly.
+        let Some(row) = self.resolved_table.state.values().get(idx) else {
+            return;
+        };
+        let name = row.name.clone();
+        let interpretations = self.interpretations_for(unit);
+        let Some((_, def)) = interpretations.iter().find(|(n, _)| **n == name) else {
+            return;
+        };
+        let dialog = EditInterpretationDialog::from_interpretation(&name, def);
+        self.overlay = MonitorOverlay::EditInterpretation(Box::new(dialog), name);
+    }
+
+    /// MB-R-148 — apply the open `EditInterpretation` overlay's Confirm: edit the interpretation
+    /// in place under its (possibly new) name. Never touches `module.table()` (Shared: "neither
+    /// operation writes to the bus or otherwise touches the slave's observed-value table").
+    /// No-op if the overlay isn't open, the dialog is invalid, or nothing is selected.
+    fn confirm_edit_interpretation(&mut self) {
+        let MonitorOverlay::EditInterpretation(dialog, original_name) = &self.overlay else {
+            return;
+        };
+        let Ok((new_name, def)) = dialog.apply() else {
+            return;
+        };
+        let Some(unit) = self.selected_unit() else {
+            return;
+        };
+        self.module
+            .edit_interpretation(unit, original_name, new_name, def);
+        self.overlay = MonitorOverlay::None;
+    }
+
+    /// MB-R-148 — apply the open `EditInterpretation` overlay's confirmed Delete: remove the
+    /// interpretation outright. Never touches `module.table()` (Shared, see
+    /// `confirm_edit_interpretation`). No-op if the overlay isn't open or nothing is selected.
+    fn delete_interpretation(&mut self) {
+        let MonitorOverlay::EditInterpretation(_, original_name) = &self.overlay else {
+            return;
+        };
+        let Some(unit) = self.selected_unit() else {
+            return;
+        };
+        self.module.remove_interpretation(unit, original_name);
         self.overlay = MonitorOverlay::None;
     }
 
@@ -876,13 +941,16 @@ impl ModuleView for ModbusMonitorModuleView {
         let full_area = frame.area();
         match &mut self.overlay {
             MonitorOverlay::Add(dialog) => dialog.render(full_area, frame.buffer_mut()),
-            MonitorOverlay::Edit(dialog) => dialog.render(full_area, frame.buffer_mut()),
+            MonitorOverlay::EditSetup(dialog) => dialog.render(full_area, frame.buffer_mut()),
+            MonitorOverlay::EditInterpretation(dialog, _) => {
+                dialog.render(full_area, frame.buffer_mut())
+            }
             MonitorOverlay::None => {}
         }
     }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
-        if let MonitorOverlay::Edit(dialog) = &mut self.overlay {
+        if let MonitorOverlay::EditSetup(dialog) = &mut self.overlay {
             match code {
                 KeyCode::Esc => {
                     self.overlay = MonitorOverlay::None;
@@ -909,6 +977,49 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
                 KeyCode::Enter if dialog.is_confirm_button_focused() => {
                     self.confirm_add();
+                }
+                KeyCode::Char(' ') => {
+                    dialog.handle_space();
+                }
+                KeyCode::BackTab => {
+                    dialog.focus_previous();
+                }
+                KeyCode::Tab => {
+                    dialog.focus_next();
+                }
+                _ => {
+                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(
+                        dialog.as_mut(),
+                        modifiers,
+                        code,
+                    );
+                }
+            }
+            return EventResult::Consumed;
+        }
+        if let MonitorOverlay::EditInterpretation(dialog, _) = &mut self.overlay {
+            use crate::module::modbus::dialog::{DeleteConfirmOutcome, route_delete_confirm};
+            if dialog.confirm_delete.is_some() {
+                match route_delete_confirm(&mut dialog.confirm_delete, modifiers, code) {
+                    DeleteConfirmOutcome::Confirmed => {
+                        self.delete_interpretation();
+                    }
+                    DeleteConfirmOutcome::Consumed | DeleteConfirmOutcome::NotActive => {}
+                }
+                return EventResult::Consumed;
+            }
+            match code {
+                KeyCode::Esc if dialog.add_dialog.is_some() => {
+                    dialog.add_dialog = None;
+                }
+                KeyCode::Esc => {
+                    self.overlay = MonitorOverlay::None;
+                }
+                KeyCode::Enter if dialog.add_dialog.is_some() => {
+                    dialog.confirm_add_dialog();
+                }
+                KeyCode::Enter if dialog.is_confirm_button_focused() => {
+                    self.confirm_edit_interpretation();
                 }
                 KeyCode::Char(' ') => {
                     dialog.handle_space();
@@ -964,6 +1075,10 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             _ if self.panel_focus == MonitorPanel::Messages => {
                 self.messages_table.state.handle_events(modifiers, code)
+            }
+            KeyCode::Enter if self.panel_focus == MonitorPanel::Resolved => {
+                self.open_edit_interpretation();
+                EventResult::Consumed
             }
             _ if self.panel_focus == MonitorPanel::Resolved => {
                 self.resolved_table.state.handle_events(modifiers, code)
@@ -1088,7 +1203,7 @@ impl ModuleView for ModbusMonitorModuleView {
 
             ModbusMonitorCmd::Edit => {
                 let dialog = MonitorSetupDialog::edit(&self.spec.name, &self.spec, &self.device);
-                self.overlay = MonitorOverlay::Edit(Box::new(dialog));
+                self.overlay = MonitorOverlay::EditSetup(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -1613,12 +1728,12 @@ mod tests {
     async fn ut_edit_command_opens_setup_dialog_prefilled_and_reconfigures_on_confirm() {
         let mut v = view();
         v.handle_command("edit").await;
-        let MonitorOverlay::Edit(dialog) = &v.overlay else {
+        let MonitorOverlay::EditSetup(dialog) = &v.overlay else {
             panic!(":edit did not open the setup dialog");
         };
         assert_eq!(dialog.path.state.input(), "/dev/none");
 
-        let MonitorOverlay::Edit(dialog) = &mut v.overlay else {
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
             unreachable!()
         };
         super::super::setup_dialog::set_input(&mut dialog.name, "renamed");
@@ -2220,6 +2335,144 @@ mod tests {
             v.messages_table.state.table_state().selected(),
             Some(2),
             "switching panel focus away and back must not disturb the Messages table's own selection"
+        );
+    }
+
+    /// MB-R-148 — `Enter` on the Resolved-registers panel, with a row selected, opens
+    /// `MonitorOverlay::EditInterpretation` prefilled from that row (by name, not raw table
+    /// index, since `:order` may have reordered the displayed rows away from definition order).
+    #[tokio::test]
+    async fn ut_enter_on_resolved_row_opens_edit_dialog_prefilled() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+        buffer_text(&mut v); // renders, which populates `resolved_table`'s rows
+        v.panel_focus = MonitorPanel::Resolved;
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        let MonitorOverlay::EditInterpretation(dialog, original_name) = &v.overlay else {
+            panic!("Enter on the Resolved panel did not open the edit-interpretation dialog");
+        };
+        assert_eq!(original_name, "power");
+        assert_eq!(dialog.label.state.input(), "power");
+        assert_eq!(dialog.description.state.input(), "Active power draw");
+        assert_eq!(dialog.address.state.input(), "10");
+    }
+
+    /// MB-R-148 — confirming the edit dialog replaces the interpretation in place, under a
+    /// (possibly new) name, mirroring `s11`'s module-level `edit_interpretation` test one layer
+    /// up, through the dialog/view.
+    #[tokio::test]
+    async fn ut_confirm_edit_interpretation_replaces_in_place_under_new_name() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+        buffer_text(&mut v);
+        v.panel_focus = MonitorPanel::Resolved;
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        {
+            let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+                panic!("edit-interpretation dialog did not open");
+            };
+            super::super::setup_dialog::set_input(&mut dialog.label, "power2");
+        }
+        // Same as `ut_add_command_scopes_new_interpretation_to_selected_unit_id`'s own
+        // `v.confirm_add()`: call the confirming method directly rather than routing the
+        // Confirm-button focus/keypress through `handle_events`.
+        v.confirm_edit_interpretation();
+
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+        let interpretations = v.module.interpretations_for(UnitId(3));
+        assert_eq!(interpretations.len(), 1);
+        assert_eq!(interpretations[0].0, "power2");
+        assert_eq!(interpretations[0].1.description, "Active power draw");
+    }
+
+    /// MB-R-148 — the Delete flow removes the interpretation outright, gated by the dialog's own
+    /// `confirm_delete` popup (Space on Delete opens it, Enter on its DELETE button confirms).
+    #[tokio::test]
+    async fn ut_delete_interpretation_removes_via_confirm_delete_flow() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+        buffer_text(&mut v);
+        v.panel_focus = MonitorPanel::Resolved;
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        {
+            let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+                panic!("edit-interpretation dialog did not open");
+            };
+            dialog.open_confirm_delete();
+            assert!(dialog.confirm_delete.is_some());
+        }
+        // The confirm-delete popup defaults to CANCEL focused; Tab to DELETE, then Enter.
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+        assert!(v.module.interpretations_for(UnitId(3)).is_empty());
+    }
+
+    /// MB-R-148 — neither edit nor delete ever touches `module.table()` (the slave's observed-
+    /// value table): a value written there survives both operations unchanged.
+    #[tokio::test]
+    async fn ut_edit_and_delete_interpretation_never_touch_observed_table() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+        let key = Key::new(SlaveKey {
+            slave_id: UnitId(3),
+            kind: Kind::HoldingRegister,
+        });
+        v.module.table().write().write_words(key.clone(), 10, &[42]);
+        let observed_before = v.module.table().read().read_words(&key, 10, 1);
+
+        buffer_text(&mut v);
+        v.panel_focus = MonitorPanel::Resolved;
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        {
+            let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+                panic!("edit-interpretation dialog did not open");
+            };
+            super::super::setup_dialog::set_input(&mut dialog.label, "power2");
+        }
+        v.confirm_edit_interpretation();
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "edit did not confirm"
+        );
+        assert_eq!(v.module.interpretations_for(UnitId(3))[0].0, "power2");
+        assert_eq!(
+            v.module.table().read().read_words(&key, 10, 1),
+            observed_before
+        );
+
+        buffer_text(&mut v);
+        v.panel_focus = MonitorPanel::Resolved;
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        {
+            let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+                panic!("edit-interpretation dialog did not open");
+            };
+            dialog.open_confirm_delete();
+        }
+        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(v.module.interpretations_for(UnitId(3)).is_empty());
+        assert_eq!(
+            v.module.table().read().read_words(&key, 10, 1),
+            observed_before
         );
     }
 }

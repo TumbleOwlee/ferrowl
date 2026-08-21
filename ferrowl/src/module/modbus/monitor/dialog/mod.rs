@@ -854,10 +854,6 @@ impl EditInterpretationDialog {
         matches!(self.focus, EditInterpretationDialogFocus::ConfirmButton)
     }
 
-    pub fn is_delete_button_focused(&self) -> bool {
-        matches!(self.focus, EditInterpretationDialogFocus::DeleteButton)
-    }
-
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         match self.validate() {
             Ok(()) => self.error.state.clear(),
