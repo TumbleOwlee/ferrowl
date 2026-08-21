@@ -607,6 +607,71 @@ fn table_render_variants() {
     StatefulWidget::render(&w, Rect::new(0, 0, 14, 8), &mut b, &mut st);
 }
 
+#[test]
+/// A `Table` with fewer rows than its area's height fills the whole bordered area with the
+/// table's own background — the row/header area below the last row must not be left at the
+/// buffer's default (uncleared) style, matching every other bordered widget's own filled
+/// background. Narrow enough that `total_width > area.width` (the h-scroll copy path, Shared
+/// with `table_render_variants`'s own narrow-area case) — that path renders into a fresh, blank
+/// `Buffer` before copying the visible slice back, which previously dropped the border's
+/// already-painted background for any row/header area the table itself didn't touch.
+fn table_fills_unused_row_area_with_its_own_background_not_default() {
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(vec![Row("only".to_string(), "row".to_string())])
+        .build()
+        .unwrap();
+    let mut b = buffer(10, 10);
+    StatefulWidget::render(&w, Rect::new(0, 0, 10, 10), &mut b, &mut st);
+
+    // Row 0 is the border, row 1 the header, row 2 the one data row; row 5 is well past the
+    // single data row but still inside the bordered area — it must carry the table's own
+    // (non-default) background, not `Color::Reset`.
+    let below_last_row = &b[(5, 5)];
+    assert_ne!(
+        below_last_row.bg,
+        ratatui::style::Color::Reset,
+        "area below the last row must be filled with the table's own background"
+    );
+}
+
+#[test]
+/// `show_selection_marker(false)` (default `true`, every other table unaffected) suppresses the
+/// selection highlight bar glyph (`█`) entirely, while the selected row's own background still
+/// distinguishes it from unselected rows.
+fn table_show_selection_marker_false_suppresses_bar_keeps_row_highlight() {
+    let rows = vec![
+        Row("alpha".to_string(), "one".to_string()),
+        Row("beta".to_string(), "two".to_string()),
+    ];
+
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default().values(rows).build().unwrap();
+    let mut b = buffer(30, 6);
+    StatefulWidget::render(&w, Rect::new(0, 0, 30, 6), &mut b, &mut st);
+
+    let has_bar = (0..30u16)
+        .flat_map(|x| (0..6u16).map(move |y| (x, y)))
+        .any(|(x, y)| b[(x, y)].symbol() == "█");
+    assert!(!has_bar, "no selection bar glyph anywhere in the buffer");
+
+    // Row 1 (border) is the header, row 2 the first (selected) data row, row 3 the second
+    // (unselected) data row — their backgrounds must still differ, so selection stays visible.
+    let selected_bg = b[(2, 2)].bg;
+    let unselected_bg = b[(2, 3)].bg;
+    assert_ne!(
+        selected_bg, unselected_bg,
+        "selected row's background still distinguishes it without the bar"
+    );
+}
+
 #[derive(Clone, Default)]
 struct SpanRow;
 

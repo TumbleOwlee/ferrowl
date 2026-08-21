@@ -145,6 +145,11 @@ fn new_units_table() -> UnitsTable {
                     .build()
                     .expect("all required builder fields are set"),
             )
+            // Manual-exercise fix: the Units panel is a single narrow column (unit ids only) —
+            // the selected row's own background/foreground change (still applied via
+            // `row_highlight_style`, Shared) already conveys focus without the extra `█` bar,
+            // which crowded the one data column.
+            .show_selection_marker(false)
             .build()
             .expect("all required builder fields are set"),
     }
@@ -155,7 +160,9 @@ fn new_units_table() -> UnitsTable {
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = MessageHeader)]
 struct MessageRow {
-    #[column(name = "Time", min = 12, max = 12)]
+    // Wide enough for `format_timestamp`'s full "YYYY-MM-DD HH:MM:SS.mmm" (23 chars, Gate3#2)
+    // to render on one line, not wrap/truncate.
+    #[column(name = "Time", min = 23, max = 23)]
     time: String,
     #[column(name = "Status", min = 10, max = 16)]
     status: String,
@@ -572,6 +579,11 @@ fn memory_cell_recency_active(
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = MemoryHeader, styles = memory_row_styles, spans = memory_row_spans)]
 struct MemoryRow {
+    // UI-R-063 (amended, commit 5574858) — the line's table kind, same `Kind` `Display` naming
+    // the modbus module's own register table uses; empty for a `Gap` row, consistent with its
+    // other blank cells.
+    #[column(name = "Kind", min = 16, max = 16)]
+    kind: String,
     #[column(name = "Address", min = 6, max = 10)]
     address: String,
     #[column(name = "Hex", min = 20, max = 80)]
@@ -589,7 +601,7 @@ struct MemoryRow {
     ascii_spans: Vec<(String, ratatui::style::Style)>,
 }
 
-type MemoryTable = Widget<TableState<MemoryRow, 3>, Table<MemoryRow, MemoryHeader, 3>>;
+type MemoryTable = Widget<TableState<MemoryRow, 4>, Table<MemoryRow, MemoryHeader, 4>>;
 
 /// Gate3#4 — build a fresh, empty `MemoryTable` widget/state pair, same builder shape as
 /// `new_message_table`/`new_resolved_table` (Shared).
@@ -613,32 +625,31 @@ fn new_memory_table() -> MemoryTable {
 }
 
 /// `Gap` rows paint their whole row `gap_bg`-background (`style` already carries that); real
-/// lines color Address by the same neutral border color the previous render's `{address:04x} `
-/// prefix used — Hex/Ascii get their color from `memory_row_spans` instead (per-cell, not
-/// per-row), so this returns `None` for those two columns on a real line (the render loop treats
-/// a `Some` `cell_spans` entry as taking over that column's coloring entirely, Shared).
-fn memory_row_styles(row: &MemoryRow) -> [Option<ratatui::style::Style>; 3] {
+/// lines color Kind/Address by the same neutral border color the previous render's
+/// `{address:04x} ` prefix used — Hex/Ascii get their color from `memory_row_spans` instead
+/// (per-cell, not per-row), so this returns `None` for those two columns on a real line (the
+/// render loop treats a `Some` `cell_spans` entry as taking over that column's coloring entirely,
+/// Shared).
+fn memory_row_styles(row: &MemoryRow) -> [Option<ratatui::style::Style>; 4] {
     if row.is_gap {
-        [Some(row.style); 3]
+        [Some(row.style); 4]
     } else {
         use ferrowl_ui::COLOR_SCHEME;
-        [
-            Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border)),
-            None,
-            None,
-        ]
+        let neutral = Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border));
+        [neutral, neutral, None, None]
     }
 }
 
 /// UI-R-063 — per-cell spans for the Hex/Ascii columns of a real (non-gap) line: `row.hex_spans`/
 /// `row.ascii_spans` already carry each cell's own `(text, style)` pair (computed in
 /// `memory_table_rows`); `None` for a `Gap` row (styled instead via `memory_row_styles`) and for
-/// the Address column (no sub-cell structure to color independently).
-fn memory_row_spans(row: &MemoryRow) -> [Option<Vec<(String, ratatui::style::Style)>>; 3] {
+/// the Kind/Address columns (no sub-cell structure to color independently).
+fn memory_row_spans(row: &MemoryRow) -> [Option<Vec<(String, ratatui::style::Style)>>; 4] {
     if row.is_gap {
-        [None, None, None]
+        [None, None, None, None]
     } else {
         [
+            None,
             None,
             Some(row.hex_spans.clone()),
             Some(row.ascii_spans.clone()),
@@ -678,6 +689,7 @@ fn memory_table_rows(
         .iter()
         .map(|line| match line {
             MemoryLine::Gap => MemoryRow {
+                kind: String::new(),
                 address: String::new(),
                 hex: String::new(),
                 ascii: String::new(),
@@ -747,6 +759,7 @@ fn memory_table_rows(
                     })
                     .collect();
                 MemoryRow {
+                    kind: kind.to_string(),
                     address: format!("{address:04x}"),
                     hex,
                     ascii,
@@ -1152,15 +1165,37 @@ impl ModuleView for ModbusMonitorModuleView {
             return EventResult::Consumed;
         }
         if let MonitorOverlay::Add(dialog) = &mut self.overlay {
-            match code {
-                KeyCode::Esc if dialog.add_dialog.is_some() => {
-                    dialog.add_dialog = None;
+            // Manual-exercise fix — while the "Add predefined" named-value sub-popup is open,
+            // *every* key (not just Esc/Enter) must route to it, not the parent dialog's own
+            // fields; mirrors the modbus module's own `RegisterDialog` sub-dialog gate
+            // (`ferrowl/src/module/modbus/view/mod.rs`'s `if overlay.has_sub_dialog() { ... }`,
+            // which returns early before any parent-dialog routing runs).
+            if dialog.add_dialog.is_some() {
+                match code {
+                    KeyCode::Esc => dialog.add_dialog = None,
+                    KeyCode::Enter => dialog.confirm_add_dialog(),
+                    KeyCode::Tab => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            d.focus_next();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            d.focus_previous();
+                        }
+                    }
+                    _ => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            let _ =
+                                ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
+                        }
+                    }
                 }
+                return EventResult::Consumed;
+            }
+            match code {
                 KeyCode::Esc => {
                     self.overlay = MonitorOverlay::None;
-                }
-                KeyCode::Enter if dialog.add_dialog.is_some() => {
-                    dialog.confirm_add_dialog();
                 }
                 KeyCode::Enter if dialog.is_confirm_button_focused() => {
                     self.confirm_add();
@@ -1195,15 +1230,34 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
                 return EventResult::Consumed;
             }
-            match code {
-                KeyCode::Esc if dialog.add_dialog.is_some() => {
-                    dialog.add_dialog = None;
+            // Manual-exercise fix — same "Add predefined" sub-popup gate as `MonitorOverlay::Add`
+            // above (Shared): every key routes to the open sub-popup, not the parent dialog.
+            if dialog.add_dialog.is_some() {
+                match code {
+                    KeyCode::Esc => dialog.add_dialog = None,
+                    KeyCode::Enter => dialog.confirm_add_dialog(),
+                    KeyCode::Tab => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            d.focus_next();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            d.focus_previous();
+                        }
+                    }
+                    _ => {
+                        if let Some(d) = dialog.add_dialog.as_mut() {
+                            let _ =
+                                ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
+                        }
+                    }
                 }
+                return EventResult::Consumed;
+            }
+            match code {
                 KeyCode::Esc => {
                     self.overlay = MonitorOverlay::None;
-                }
-                KeyCode::Enter if dialog.add_dialog.is_some() => {
-                    dialog.confirm_add_dialog();
                 }
                 KeyCode::Enter if dialog.is_confirm_button_focused() => {
                     self.confirm_edit_interpretation();
@@ -1658,6 +1712,15 @@ mod tests {
         assert_eq!(v.units_table.state.table_state().selected(), Some(1));
     }
 
+    /// Manual-exercise fix — the Units panel disables the shared `Table` widget's selection bar
+    /// (its one narrow "Unit" column already conveys focus via the selected row's own
+    /// background/foreground change).
+    #[test]
+    fn ut_units_panel_disables_selection_marker() {
+        let v = view();
+        assert!(!v.units_table.widget.show_selection_marker());
+    }
+
     /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer
     /// when no interpretation exists for the selected unit id, and reappears once one does.
     #[test]
@@ -1872,6 +1935,44 @@ mod tests {
         let v = view();
         assert_eq!(v.commands().len(), MONITOR_COMMAND_SPECS.len());
         let _log: SharedLog = v.log();
+    }
+
+    /// Manual-exercise fix — once "Add predefined" opens the named-value sub-popup, keyboard
+    /// input (typed characters, Tab) reaches the sub-popup's own fields, not the parent
+    /// `AddInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog` sub-dialog
+    /// routing, `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
+    #[tokio::test]
+    async fn ut_add_predefined_popup_receives_keyboard_focus() {
+        let mut v = view();
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        dialog.open_add_dialog();
+        assert!(dialog.add_dialog.is_some());
+        let parent_label_before = dialog.label.state.input().to_string();
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+
+        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert_eq!(
+            dialog
+                .add_dialog
+                .as_ref()
+                .expect("sub-popup stays open")
+                .label
+                .state
+                .input(),
+            "x",
+            "the typed character reaches the sub-popup's own label field"
+        );
+        assert_eq!(
+            dialog.label.state.input(),
+            &parent_label_before,
+            "the parent dialog's own label field is untouched while the sub-popup is open"
+        );
     }
 
     /// UI-R-061 — `:add` scopes the new interpretation to the currently selected unit id; the
@@ -2236,6 +2337,22 @@ mod tests {
         assert!(!row.values()[0].contains("ago"));
     }
 
+    /// Manual-exercise fix — the Time column's `#[column(min, max)]` bounds are wide enough for
+    /// `format_timestamp`'s full `"YYYY-MM-DD HH:MM:SS.mmm"` output (23 chars) to render on one
+    /// line, not wrap/truncate.
+    #[test]
+    fn ut_message_time_column_width_fits_full_timestamp() {
+        let full_timestamp_len = crate::view::log::format_timestamp(0).chars().count();
+        let time_width = &MessageHeader::widths()[0];
+        assert!(
+            time_width.min >= full_timestamp_len && time_width.max >= full_timestamp_len,
+            "Time column (min={}, max={}) too narrow for a {}-char timestamp",
+            time_width.min,
+            time_width.max,
+            full_timestamp_len
+        );
+    }
+
     /// Gate3#3 — the Status column's exception case renders just the bare `ExceptionCode`
     /// variant name (`IllegalDataAddress`), not the Debug-derived `Exception(...)` wrapper.
     #[test]
@@ -2378,17 +2495,32 @@ mod tests {
         assert_eq!(memory_cell_value_style(&other), COLOR_SCHEME.warning);
     }
 
-    /// Gate3#4 — the Memory table has exactly 3 columns, Address/Hex/Ascii, in order.
+    /// UI-R-063 (amended, commit 5574858) — the Memory table has exactly 4 columns,
+    /// Kind/Address/Hex/Ascii, in order.
     #[test]
-    fn ut_memory_table_has_exactly_3_columns_address_hex_ascii() {
+    fn ut_memory_table_has_exactly_4_columns_kind_address_hex_ascii() {
         assert_eq!(
             MemoryHeader::header(),
             [
+                "Kind".to_string(),
                 "Address".to_string(),
                 "Hex".to_string(),
                 "Ascii".to_string()
             ]
         );
+    }
+
+    /// UI-R-063 (amended, commit 5574858) — a real line's Kind cell renders the line's table
+    /// kind with the same `Kind` `Display` naming the modbus module's own register table uses; a
+    /// `Gap` row's Kind cell is empty, consistent with its other blank cells.
+    #[test]
+    fn ut_memory_table_kind_column_shows_line_kind_empty_for_gap() {
+        let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1), (20, 2)])]);
+        let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
+        assert_eq!(rows.len(), 3, "two non-adjacent lines plus one gap");
+        assert_eq!(rows[0].kind, "Holding Register");
+        assert_eq!(rows[1].kind, "", "gap row's Kind cell is empty");
+        assert_eq!(rows[2].kind, "Holding Register");
     }
 
     /// MB-R-147/UI-R-063 — a line with an active recency marker on any of its cells renders its
@@ -2446,12 +2578,13 @@ mod tests {
         assert!(!rows[0].is_gap);
         assert!(rows[1].is_gap);
         assert!(!rows[2].is_gap);
+        assert_eq!(rows[1].kind, "");
         assert_eq!(rows[1].address, "");
         assert_eq!(rows[1].hex, "");
         assert_eq!(rows[1].ascii, "");
         let gap_style = Some(Style::default().bg(COLOR_SCHEME.gap_bg));
-        assert_eq!(memory_row_styles(&rows[1]), [gap_style; 3]);
-        assert_ne!(memory_row_styles(&rows[0])[0], gap_style);
+        assert_eq!(memory_row_styles(&rows[1]), [gap_style; 4]);
+        assert_ne!(memory_row_styles(&rows[0])[1], gap_style);
     }
 
     /// UI-R-063 — true per-cell granularity via `TableEntry::cell_spans`: two adjacent cells on
@@ -2469,8 +2602,8 @@ mod tests {
         let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
         assert_eq!(rows.len(), 1);
 
-        let spans = TableEntry::<3>::cell_spans(&rows[0]);
-        let hex_spans = spans[1]
+        let spans = TableEntry::<4>::cell_spans(&rows[0]);
+        let hex_spans = spans[2]
             .as_ref()
             .expect("Hex column carries per-cell spans for a real (non-gap) line");
         assert_eq!(
@@ -2706,6 +2839,50 @@ mod tests {
         assert_eq!(dialog.label.state.input(), "power");
         assert_eq!(dialog.description.state.input(), "Active power draw");
         assert_eq!(dialog.address.state.input(), "10");
+    }
+
+    /// Manual-exercise fix — same "Add predefined" sub-popup routing fix as
+    /// `ut_add_predefined_popup_receives_keyboard_focus`, but from `EditInterpretationDialog`'s
+    /// own "Add predefined" flow (`:edit`/Enter-on-Resolved-row), not `:add`'s.
+    #[tokio::test]
+    async fn ut_edit_interpretation_add_predefined_popup_receives_keyboard_focus() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
+        buffer_text(&mut v);
+        v.panel_focus = MonitorPanel::Resolved;
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+            panic!("Enter on the Resolved panel did not open the edit-interpretation dialog");
+        };
+        dialog.open_add_dialog();
+        assert!(dialog.add_dialog.is_some());
+        let parent_label_before = dialog.label.state.input().to_string();
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+
+        let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert_eq!(
+            dialog
+                .add_dialog
+                .as_ref()
+                .expect("sub-popup stays open")
+                .label
+                .state
+                .input(),
+            "x",
+            "the typed character reaches the sub-popup's own label field"
+        );
+        assert_eq!(
+            dialog.label.state.input(),
+            &parent_label_before,
+            "the parent dialog's own label field is untouched while the sub-popup is open"
+        );
     }
 
     /// MB-R-148 — confirming the edit dialog replaces the interpretation in place, under a

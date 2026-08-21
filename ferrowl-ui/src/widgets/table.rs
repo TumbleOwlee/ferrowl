@@ -88,6 +88,14 @@ where
     #[getset(get = "pub")]
     #[builder(default = "[true; N]")]
     split_by_whitespace: [bool; N],
+    /// Whether the selected row's highlight bar (`" █ "`) is drawn (default `true`, every
+    /// existing table unaffected). The selected row's own background/foreground
+    /// (`TableStyle::focused`/`unfocused_selected`, via `row_highlight_style`) is applied either
+    /// way — this only suppresses the extra bar glyph, for a panel (e.g. Units) that already
+    /// conveys focus through that background change alone.
+    #[getset(get = "pub")]
+    #[builder(default = "true")]
+    show_selection_marker: bool,
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<V>,
@@ -349,7 +357,14 @@ where
             })
             .collect::<Vec<_>>();
 
-        let bar = " █ ";
+        // `show_selection_marker == false` keeps the reserved column width (so disabling it
+        // doesn't shift row content) but blanks the bar glyph itself; `row_highlight_style`
+        // below still applies the selected row's background/foreground either way.
+        let bar = if self.show_selection_marker {
+            " █ "
+        } else {
+            "   "
+        };
         let t = UiTable::new(rows, constraints)
             .header(header)
             .row_highlight_style(*selected_style)
@@ -379,6 +394,14 @@ where
             };
 
             let mut buffer = Buffer::empty(rect);
+            // The h-scroll path renders into a brand-new, blank `Buffer` (unlike the direct
+            // path, which draws straight onto `buf` and so keeps the border `Block`'s own
+            // already-painted background beneath any row/header area `UiTable` doesn't touch,
+            // e.g. rows past the last data row). Pre-fill it with `border_style` — the same
+            // style the outer border/background already used — so that background carries over
+            // through the copy below instead of every cell not explicitly repainted by a row or
+            // the header reverting to the buffer's untouched (uncleared) default.
+            buffer.set_style(rect, border_style);
             ratatui::widgets::StatefulWidget::render(
                 t,
                 rect,
