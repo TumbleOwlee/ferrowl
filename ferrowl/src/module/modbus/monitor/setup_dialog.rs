@@ -6,7 +6,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
-    Border, COLOR_SCHEME, EventResult,
+    Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
         InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
         SuggestInputState, SuggestInputStateBuilder,
@@ -487,9 +487,15 @@ impl MonitorSetupDialog {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        // border(2) + name(3) + config_path(3) + transport(3) + path(3) + baud(3) + parity(3)
-        // + data_bits(3) + stop_bits(3) + reconnect(3) + error(3) + keybinds(1).
-        let box_height = 33;
+        // Reflect validation state in the error field.
+        match self.resolve() {
+            Ok(_) => self.error.state.clear(),
+            Err(e) => self.error.state = e,
+        }
+
+        // border(2) + name(3) + config_path(3) + transport(3) + endpoint(6: path/baud/reconnect,
+        // parity/data_bits/stop_bits) + error(4) + keybinds(1).
+        let box_height = 22;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -516,59 +522,29 @@ impl MonitorSetupDialog {
             Constraint::Length(3), // name
             Constraint::Length(3), // config path
             Constraint::Length(3), // transport
-            Constraint::Length(3), // path
-            Constraint::Length(3), // baud
-            Constraint::Length(3), // parity
-            Constraint::Length(3), // data bits
-            Constraint::Length(3), // stop bits
-            Constraint::Length(3), // reconnect
-            Constraint::Length(3), // error
+            Constraint::Length(6), // endpoint (path/baud/reconnect, parity/data_bits/stop_bits)
+            Constraint::Length(4), // error
             Constraint::Length(1), // keybinds
         ])
         .split(inner);
 
-        use ratatui::widgets::StatefulWidget;
-        StatefulWidget::render(&self.name.widget, rows[0], buf, &mut self.name.state);
-        StatefulWidget::render(
-            &self.config_path.widget,
-            rows[1],
-            buf,
-            &mut self.config_path.state,
+        render_field!(self, name, rows[0], buf);
+        render_field!(self, config_path, rows[1], buf);
+        render_field!(self, transport, rows[2], buf);
+
+        let [row0, row1] =
+            Layout::vertical([Constraint::Length(3), Constraint::Length(3)]).areas(rows[3]);
+        render_row!(self, row0, buf; path, baud, reconnect);
+        render_row!(self, row1, buf;
+            parity => Constraint::Percentage(35),
+            data_bits => Constraint::Percentage(30),
+            stop_bits => Constraint::Percentage(35)
         );
-        StatefulWidget::render(
-            &self.transport.widget,
-            rows[2],
-            buf,
-            &mut self.transport.state,
-        );
-        StatefulWidget::render(&self.path.widget, rows[3], buf, &mut self.path.state);
-        StatefulWidget::render(&self.baud.widget, rows[4], buf, &mut self.baud.state);
-        StatefulWidget::render(&self.parity.widget, rows[5], buf, &mut self.parity.state);
-        StatefulWidget::render(
-            &self.data_bits.widget,
-            rows[6],
-            buf,
-            &mut self.data_bits.state,
-        );
-        StatefulWidget::render(
-            &self.stop_bits.widget,
-            rows[7],
-            buf,
-            &mut self.stop_bits.state,
-        );
-        StatefulWidget::render(
-            &self.reconnect.widget,
-            rows[8],
-            buf,
-            &mut self.reconnect.state,
-        );
-        StatefulWidget::render(&self.error.widget, rows[9], buf, &mut self.error.state);
-        StatefulWidget::render(
-            &self.keybinds.widget,
-            rows[10],
-            buf,
-            &mut self.keybinds.state,
-        );
+
+        if !self.error.state.is_empty() {
+            render_field!(self, error, rows[4], buf);
+        }
+        render_field!(self, keybinds, rows[5], buf);
 
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
@@ -702,6 +678,80 @@ mod tests {
             buf[(99, 59)].symbol(),
             " ",
             "bottom-right corner must stay blank"
+        );
+    }
+
+    /// Regression — `render` must populate `error.state` from `resolve()`, same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`; previously the error field's state was
+    /// never written, so an invalid dialog (e.g. empty name) never showed its error message.
+    #[test]
+    fn ut_render_populates_error_state_from_resolve() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+
+        dialog.render(area, &mut buf); // empty name -> invalid
+        assert!(!dialog.error.state.is_empty());
+        assert!(dialog.error.state.contains("Name is required"));
+
+        set_input(&mut dialog.name, "mon1");
+        dialog.render(area, &mut buf); // valid now
+        assert!(dialog.error.state.is_empty());
+    }
+
+    /// Regression — the error box must stay hidden (no border/title drawn) while there is no
+    /// error, and must show the error message once one is present; previously the empty box
+    /// always drew regardless of validity.
+    #[test]
+    fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
+        let area = Rect::new(0, 0, 100, 60);
+
+        let mut valid = MonitorSetupDialog::create();
+        set_input(&mut valid.name, "mon1");
+        let mut buf = Buffer::empty(area);
+        valid.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            !text.contains("Error"),
+            "no error box should be drawn while the dialog is valid"
+        );
+
+        let mut invalid = MonitorSetupDialog::create(); // empty name -> invalid
+        let mut buf = Buffer::empty(area);
+        invalid.render(area, &mut buf);
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            text.contains("Name is required"),
+            "the error message must be visible once the dialog is invalid"
+        );
+    }
+
+    /// Regression — Serial path/baud/reconnect must share one row and parity/data bits/stop
+    /// bits must share the next, same as `module/modbus/setup_dialog.rs::SetupDialog`'s RTU
+    /// layout; previously every field got its own full-width row.
+    #[test]
+    fn ut_render_lays_out_endpoint_fields_in_two_shared_rows() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        let row_text = |y: u16| -> String {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect()
+        };
+        // The dialog is horizontally centered in a 60-wide box, so its rows start at x=20.
+        // The path/baud/reconnect titles must appear on the same rendered row.
+        let combined = (0..area.height).map(row_text).collect::<Vec<_>>();
+        let path_row = combined
+            .iter()
+            .position(|l| l.contains("Serial Path"))
+            .expect("Serial Path row present");
+        assert!(
+            combined[path_row].contains("Baud") && combined[path_row].contains("Reconnect"),
+            "Serial Path, Baud and Reconnect must render on the same row, got: {:?}",
+            combined[path_row]
         );
     }
 
