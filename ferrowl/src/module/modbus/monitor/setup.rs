@@ -41,6 +41,10 @@ impl SetupView for MonitorSetupView {
         self.dialog.focus_previous();
     }
 
+    fn close_requested(&mut self) -> bool {
+        self.dialog.take_close_request()
+    }
+
     fn confirm(&self) -> Option<(String, ModuleViewFactory)> {
         let outcome = self.dialog.resolve().ok()?;
         let (device_path, device) = outcome
@@ -108,5 +112,20 @@ mod tests {
         sv.render(area, &mut buf);
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(!text.trim().is_empty());
+    }
+
+    // Regression: the `SetupView::close_requested` default trait method must be overridden here
+    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
+    // silently do nothing for a Modbus Monitor module setup (mirrors `ModbusSetupView`'s own
+    // regression test).
+    #[test]
+    fn ut_close_requested_delegates_to_dialog_take_close_request() {
+        let mut sv = MonitorSetupView::new_create();
+        assert!(!sv.close_requested());
+        // Esc opens the close-confirm popup; Enter confirms it.
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        sv.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(sv.close_requested());
+        assert!(!sv.close_requested(), "flag must clear after take");
     }
 }

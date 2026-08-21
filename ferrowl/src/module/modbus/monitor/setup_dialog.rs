@@ -28,6 +28,7 @@ use ratatui::{
 
 use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig};
 use crate::dialog::NonEmpty;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
 
 use super::build::endpoint_to_monitor_config;
@@ -201,6 +202,13 @@ pub struct MonitorSetupDialog {
     error: Widget<String, Text>,
     keybinds: Widget<String, Text>,
     mode: DialogMode,
+    /// Confirm-close popup, opened with Esc.
+    #[builder(default)]
+    close_confirm: Option<CloseConfirmDialog>,
+    /// Set once the close-confirm popup is confirmed; the host checks this via
+    /// `take_close_request` and closes the dialog.
+    #[builder(default)]
+    close_requested: bool,
 }
 
 impl MonitorSetupDialog {
@@ -371,6 +379,15 @@ impl MonitorSetupDialog {
     }
 
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        match route_close_confirm(&mut self.close_confirm, modifiers, code) {
+            CloseConfirmOutcome::NotActive => {}
+            CloseConfirmOutcome::Close => {
+                self.close_requested = true;
+                return EventResult::Consumed;
+            }
+            CloseConfirmOutcome::Consumed => return EventResult::Consumed,
+        }
+
         if code == KeyCode::Tab && modifiers == KeyModifiers::NONE {
             self.focus_next();
             return EventResult::Consumed;
@@ -379,7 +396,16 @@ impl MonitorSetupDialog {
             self.focus_previous();
             return EventResult::Consumed;
         }
+        if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+            self.close_confirm = Some(CloseConfirmDialog::new());
+            return EventResult::Consumed;
+        }
         HandleEvents::handle_events(self, modifiers, code)
+    }
+
+    /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
     }
 
     /// Resolve the dialog's current field values, validating the transport (MB-R-140,
@@ -461,13 +487,30 @@ impl MonitorSetupDialog {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        Clear.render(area, buf);
+        // border(2) + name(3) + config_path(3) + transport(3) + path(3) + baud(3) + parity(3)
+        // + data_bits(3) + stop_bits(3) + reconnect(3) + error(3) + keybinds(1).
+        let box_height = 33;
+
+        let [_, hcenter, _] = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(60),
+            Constraint::Min(1),
+        ])
+        .areas(area);
+        let [_, vcenter, _] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(box_height),
+            Constraint::Min(1),
+        ])
+        .areas(hcenter);
+
+        Clear.render(vcenter, buf);
         let block = Block::bordered().title(match self.mode {
             DialogMode::New => " New Modbus Monitor ",
             DialogMode::Edit => " Edit Modbus Monitor ",
         });
-        let inner = block.inner(area);
-        block.render(area, buf);
+        let inner = block.inner(vcenter);
+        block.render(vcenter, buf);
 
         let rows = Layout::vertical([
             Constraint::Length(3), // name
@@ -526,6 +569,10 @@ impl MonitorSetupDialog {
             buf,
             &mut self.keybinds.state,
         );
+
+        if let Some(d) = self.close_confirm.as_mut() {
+            d.render(vcenter, buf);
+        }
     }
 }
 
@@ -639,6 +686,38 @@ pub(crate) fn set_suggest_input<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression — the monitor setup dialog must render as a centered floating popup, same as
+    /// every other setup dialog (`module/modbus/setup_dialog.rs::SetupDialog`), not fill the
+    /// whole given area. A far corner of a larger area must stay untouched by the dialog's own
+    /// border/content.
+    #[test]
+    fn ut_render_centers_the_dialog_instead_of_filling_the_area() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        assert_eq!(buf[(0, 0)].symbol(), " ", "top-left corner must stay blank");
+        assert_eq!(
+            buf[(99, 59)].symbol(),
+            " ",
+            "bottom-right corner must stay blank"
+        );
+    }
+
+    /// Regression — Esc must open the close-confirm popup and Enter must confirm it, same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`; previously Esc did nothing at all, so the
+    /// dialog could not be cancelled.
+    #[test]
+    fn ut_esc_then_enter_sets_close_request_and_clears_after_take() {
+        let mut dialog = MonitorSetupDialog::create();
+        assert!(!dialog.take_close_request());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(dialog.close_confirm.is_some());
+        dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(dialog.take_close_request());
+        assert!(!dialog.take_close_request(), "flag must clear after take");
+    }
 
     /// MB-R-140 — the monitor setup dialog offers exactly the two serial transports.
     #[test]
