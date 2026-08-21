@@ -117,6 +117,39 @@ const TABLE_KINDS: [Kind; 4] = [
     Kind::InputRegister,
 ];
 
+/// Gate3#6 — one row of the Units panel: one observed unit id. A real `Table`/`TableEntry` row
+/// (`s12`/`s14`'s own pattern, Shared), replacing the previous hand-built `List`/`ListItem`, for
+/// rendering consistency with the other 3 panels.
+#[derive(Clone, Debug, Default, TableEntry)]
+#[table_entry(header = UnitHeader)]
+struct UnitRow {
+    #[column(name = "Unit", min = 8, max = 20)]
+    unit: String,
+}
+
+type UnitsTable = Widget<TableState<UnitRow, 1>, Table<UnitRow, UnitHeader, 1>>;
+
+/// Gate3#6 — build a fresh, empty `UnitsTable` widget/state pair, same builder shape as
+/// `new_message_table`/`new_resolved_table` (Shared).
+fn new_units_table() -> UnitsTable {
+    Widget {
+        state: TableStateBuilder::default()
+            .values(Vec::new())
+            .build()
+            .expect("all required builder fields are set"),
+        widget: TableBuilder::default()
+            .border(Border::Full(ratatui::layout::Margin::new(1, 0)))
+            .title(Some("Units".into()))
+            .style(
+                TableStyleBuilder::default()
+                    .build()
+                    .expect("all required builder fields are set"),
+            )
+            .build()
+            .expect("all required builder fields are set"),
+    }
+}
+
 /// UI-R-062 — one row of the Messages table: a `MonitorRecord`, sourced from `module.records()`,
 /// rendered most-recent-first in this fixed column order.
 #[derive(Clone, Debug, Default, TableEntry)]
@@ -696,6 +729,10 @@ pub struct ModbusMonitorModuleView {
     unit_ids: Vec<UnitId>,
     /// Index into `unit_ids` of the left panel's current selection.
     selected: usize,
+    /// Gate3#6 — Units panel table, rebuilt live in `render()` from `unit_ids`; `selected`
+    /// remains the single source of truth for which row is selected (unchanged, everything else
+    /// already keys off it) — this only drives which row the table highlights.
+    units_table: UnitsTable,
     /// UI-R-062 Messages table for the selected unit id, re-derived each tick from
     /// `module.records()`.
     messages_table: MessageTable,
@@ -733,6 +770,7 @@ impl ModbusMonitorModuleView {
             device,
             unit_ids: Vec::new(),
             selected: 0,
+            units_table: new_units_table(),
             messages_table: new_message_table(),
             memory_table: new_memory_table(),
             resolved_table: new_resolved_table(),
@@ -944,50 +982,37 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        use ferrowl_ui::COLOR_SCHEME;
         use ratatui::layout::{Constraint, Layout};
-        use ratatui::style::Style;
-        use ratatui::widgets::{Block, Borders, List, ListItem};
 
-        // Each Tab-cyclable panel's border tracks whether it is the panel-focused one AND the
-        // view itself has focus (blue), light gray otherwise — same per-panel highlight pattern
-        // as the OCPP module view. The resolved-registers panel is display-only, always gray.
-        let style_for = |panel: MonitorPanel| {
-            Style::default()
-                .fg(if self.view_focused && self.panel_focus == panel {
-                    COLOR_SCHEME.hi
-                } else {
-                    COLOR_SCHEME.border
-                })
-                .bg(COLOR_SCHEME.bg)
-        };
-        let units_style = style_for(MonitorPanel::Units);
-
+        // Every Tab-cyclable panel is now a real `Table` widget (Gate3#4/#6) whose own border
+        // color already tracks `state.focused()` (`ferrowl_ui::style::TableStyle`'s
+        // `border`/`general`, Shared) — each panel below just calls `.set_focused(view_focused
+        // && panel_focus == <panel>)` before rendering, no separate `style_for` computation
+        // needed here anymore.
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(area);
 
         let buf = frame.buffer_mut();
 
-        let items: Vec<ListItem> = self
-            .unit_ids
-            .iter()
-            .enumerate()
-            .map(|(idx, unit)| {
-                let label = format!("{unit}");
-                if idx == self.selected {
-                    ListItem::new(format!("> {label}"))
-                } else {
-                    ListItem::new(format!("  {label}"))
-                }
-            })
-            .collect();
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(units_style)
-                .title("Units"),
+        // Units panel (Gate3#6, a real Table/TableEntry — was a hand-built List/ListItem).
+        self.units_table.state.set_values(
+            self.unit_ids
+                .iter()
+                .map(|unit| UnitRow {
+                    unit: unit.to_string(),
+                })
+                .collect(),
         );
-        ratatui::widgets::Widget::render(list, left_area, buf);
+        self.units_table.state.select_index(self.selected);
+        self.units_table
+            .state
+            .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Units);
+        StatefulWidget::render(
+            &self.units_table.widget,
+            left_area,
+            buf,
+            &mut self.units_table.state,
+        );
 
         let selected = self.selected_unit();
         let has_interpretation = selected.is_some_and(|u| self.has_interpretation(u));
@@ -1561,6 +1586,35 @@ mod tests {
         }
         v.refresh().await;
         assert_eq!(v.unit_ids, vec![UnitId(3)]);
+    }
+
+    /// Gate3#6 — the Units panel is a real Table/TableEntry: exactly 1 column ("Unit"), rows
+    /// track `unit_ids`, and the highlighted row tracks `selected` (`selected` itself remains
+    /// the single source of truth — the table only mirrors it for rendering).
+    #[test]
+    fn ut_units_panel_is_a_real_table_tracking_unit_ids_and_selected() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        assert_eq!(UnitHeader::header(), ["Unit".to_string()]);
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(1), UnitId(3)];
+        v.selected = 1;
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+
+        let rows = v.units_table.state.values();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].unit, "1");
+        assert_eq!(rows[1].unit, "3");
+        assert_eq!(v.units_table.state.table_state().selected(), Some(1));
     }
 
     /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer
