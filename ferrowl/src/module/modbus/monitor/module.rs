@@ -14,7 +14,8 @@ use crate::config::device::MonitorRegisterDef;
 use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig};
 use ferrowl_modbus::LogFn;
 use ferrowl_modbus::ServerCommand;
-use ferrowl_modbus::monitor::SharedObservedTable;
+use ferrowl_modbus::UnitId;
+use ferrowl_modbus::monitor::{RecordLog, SharedObservedTable, SharedRecordLog};
 
 use super::super::log::{FileSink, open_sink};
 use super::build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
@@ -44,8 +45,9 @@ pub struct ModbusMonitorModule {
     name: String,
     endpoint: Endpoint,
     reconnect: bool,
-    interpretations: Vec<(String, MonitorRegisterDef)>,
+    interpretations: std::collections::BTreeMap<UnitId, Vec<(String, MonitorRegisterDef)>>,
     table: SharedObservedTable,
+    records: SharedRecordLog,
     log: ModuleLog,
     file_sink: FileSink,
     command_tx: Option<Sender<ServerCommand>>,
@@ -58,11 +60,16 @@ impl ModbusMonitorModule {
     /// endpoint/transport is validated later, at [`start`](Self::start) — construction never
     /// fails.
     pub fn new(spec: &ModuleSpec, device: &MonitorDeviceConfig) -> Self {
-        let interpretations: Vec<(String, MonitorRegisterDef)> = device
-            .definitions
-            .iter()
-            .map(|(name, def)| (name.clone(), def.clone()))
-            .collect();
+        let mut interpretations: std::collections::BTreeMap<
+            UnitId,
+            Vec<(String, MonitorRegisterDef)>,
+        > = std::collections::BTreeMap::new();
+        for (name, def) in device.definitions.iter() {
+            interpretations
+                .entry(UnitId(def.slave_id))
+                .or_default()
+                .push((name.clone(), def.clone()));
+        }
 
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
@@ -77,6 +84,7 @@ impl ModbusMonitorModule {
             table: Arc::new(parking_lot::RwLock::new(
                 ferrowl_modbus::monitor::ObservedTable::default(),
             )),
+            records: Arc::new(parking_lot::RwLock::new(RecordLog::default())),
             log: Arc::new(RwLock::new(LogRing::init())),
             file_sink,
             command_tx: None,
@@ -88,22 +96,57 @@ impl ModbusMonitorModule {
         self.table.clone()
     }
 
+    pub fn records(&self) -> SharedRecordLog {
+        self.records.clone()
+    }
+
     pub fn log(&self) -> ModuleLog {
         self.log.clone()
     }
 
-    pub fn interpretations(&self) -> &[(String, MonitorRegisterDef)] {
-        &self.interpretations
+    /// Interpretations for one unit id, empty (not absent/panicking) for a unit id with none.
+    pub fn interpretations_for(&self, unit: UnitId) -> &[(String, MonitorRegisterDef)] {
+        self.interpretations
+            .get(&unit)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
-    /// Append a brand-new interpretation to the module's cached list.
-    pub fn add_interpretation(&mut self, name: String, def: MonitorRegisterDef) {
-        self.interpretations.push((name, def));
+    /// Append a brand-new interpretation to `unit`'s cached list, forcing `def.slave_id` to
+    /// match `unit` so the map key and the def's own field never drift.
+    pub fn add_interpretation(&mut self, unit: UnitId, name: String, mut def: MonitorRegisterDef) {
+        def.slave_id = unit.0;
+        self.interpretations
+            .entry(unit)
+            .or_default()
+            .push((name, def));
     }
 
-    /// Remove an interpretation from the module's cached list by name (no-op if absent).
-    pub fn remove_interpretation_by_name(&mut self, name: &str) {
-        self.interpretations.retain(|(n, _)| n != name);
+    /// MB-R-148 — edit an existing interpretation in place, possibly under a new name.
+    /// No-op (returns `false`) if `unit`/`old_name` isn't found.
+    pub fn edit_interpretation(
+        &mut self,
+        unit: UnitId,
+        old_name: &str,
+        new_name: String,
+        mut def: MonitorRegisterDef,
+    ) -> bool {
+        def.slave_id = unit.0;
+        let Some(list) = self.interpretations.get_mut(&unit) else {
+            return false;
+        };
+        let Some(entry) = list.iter_mut().find(|(n, _)| n == old_name) else {
+            return false;
+        };
+        *entry = (new_name, def);
+        true
+    }
+
+    /// MB-R-148 — remove an interpretation from `unit`'s cached list by name (no-op if absent).
+    pub fn remove_interpretation(&mut self, unit: UnitId, name: &str) {
+        if let Some(list) = self.interpretations.get_mut(&unit) {
+            list.retain(|(n, _)| n != name);
+        }
     }
 
     /// Start the monitor: validate the endpoint/transport (MB-R-140), spawn the receive-only
@@ -145,16 +188,21 @@ impl ModbusMonitorModule {
         };
 
         let table = self.table.clone();
+        let records = self.records.clone();
         let handle = match net_config {
             MonitorNetConfig::Rtu(cfg) => {
-                ferrowl_modbus::rtu::MonitorBuilder::new(Arc::new(RwLock::new(cfg)), table)
+                ferrowl_modbus::rtu::MonitorBuilder::new(Arc::new(RwLock::new(cfg)), table, records)
                     .spawn(rx, log_cb, status_cb)
                     .await?
             }
             MonitorNetConfig::Ascii(cfg) => {
-                ferrowl_modbus::ascii::MonitorBuilder::new(Arc::new(RwLock::new(cfg)), table)
-                    .spawn(rx, log_cb, status_cb)
-                    .await?
+                ferrowl_modbus::ascii::MonitorBuilder::new(
+                    Arc::new(RwLock::new(cfg)),
+                    table,
+                    records,
+                )
+                .spawn(rx, log_cb, status_cb)
+                .await?
             }
         };
 
@@ -256,14 +304,164 @@ mod tests {
         }
     }
 
-    /// MB-R-076 — a monitor module seeds its interpretations from the device config's
-    /// definitions and starts with an empty observed-value table, no register set.
+    /// MB-R-076/145 — a monitor module buckets its interpretations by their own `slave_id` at
+    /// construction, and starts with an empty observed-value table, no register set.
     #[test]
-    fn ut_monitor_module_new_seeds_interpretations_and_empty_table() {
-        let module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
-        assert_eq!(module.interpretations().len(), 1);
-        assert_eq!(module.interpretations()[0].0, "power");
+    fn ut_monitor_module_new_buckets_interpretations_by_slave_id() {
+        let mut device = device_with_defs();
+        let mut current = device
+            .definitions
+            .get("power")
+            .expect("power def present")
+            .clone();
+        current.slave_id = 3;
+        device.definitions.insert(
+            "voltage".to_string(),
+            MonitorRegisterDef {
+                slave_id: 7,
+                address: Some(20),
+                ..current.clone()
+            },
+        );
+        device.definitions.insert("power".to_string(), current);
+
+        let module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+        let unit3 = module.interpretations_for(ferrowl_modbus::UnitId(3));
+        let unit7 = module.interpretations_for(ferrowl_modbus::UnitId(7));
+        assert_eq!(unit3.len(), 1);
+        assert_eq!(unit3[0].0, "power");
+        assert_eq!(unit7.len(), 1);
+        assert_eq!(unit7[0].0, "voltage");
         assert!(module.table().read().unit_ids().is_empty());
+    }
+
+    /// MB-R-148 — editing an interpretation replaces it in place, under a new name if given, and
+    /// the module keeps `MonitorRegisterDef::slave_id` in sync with its map key.
+    #[test]
+    fn ut_edit_interpretation_replaces_in_place_under_new_name() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(3), "power".to_string(), def.clone());
+
+        let mut edited = def.clone();
+        edited.address = Some(99);
+        let replaced = module.edit_interpretation(
+            ferrowl_modbus::UnitId(3),
+            "power",
+            "power2".to_string(),
+            edited,
+        );
+        assert!(replaced);
+
+        let unit3 = module.interpretations_for(ferrowl_modbus::UnitId(3));
+        assert_eq!(unit3.len(), 1);
+        assert_eq!(unit3[0].0, "power2");
+        assert_eq!(unit3[0].1.address, Some(99));
+        assert_eq!(unit3[0].1.slave_id, 3);
+    }
+
+    /// MB-R-148 — editing a name/unit that doesn't exist is a no-op, not a panic.
+    #[test]
+    fn ut_edit_interpretation_noop_if_absent() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        let replaced = module.edit_interpretation(
+            ferrowl_modbus::UnitId(9),
+            "nope",
+            "still-nope".to_string(),
+            def,
+        );
+        assert!(!replaced);
+    }
+
+    /// MB-R-148 — removing an interpretation deletes it outright, without touching any value
+    /// already written into the observed table.
+    #[test]
+    fn ut_remove_interpretation_deletes_without_touching_table() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(3), "power".to_string(), def);
+
+        let key = ferrowl_modbus::Key::new(ferrowl_modbus::SlaveKey {
+            slave_id: ferrowl_modbus::UnitId(3),
+            kind: ferrowl_codec::Kind::HoldingRegister,
+        });
+        module.table.write().write_words(key.clone(), 10, &[42]);
+
+        module.remove_interpretation(ferrowl_modbus::UnitId(3), "power");
+        assert!(
+            module
+                .interpretations_for(ferrowl_modbus::UnitId(3))
+                .is_empty()
+        );
+        assert_eq!(
+            module.table().read().read_words(&key, 10, 1),
+            Some(vec![42])
+        );
+    }
+
+    /// Per-unit-id isolation: editing/removing on one unit id never touches another's set, even
+    /// when both hold an interpretation of the same name.
+    #[test]
+    fn ut_edit_and_remove_scoped_to_their_own_unit_id() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(3), "power".to_string(), def.clone());
+        module.add_interpretation(ferrowl_modbus::UnitId(5), "power".to_string(), def);
+
+        module.remove_interpretation(ferrowl_modbus::UnitId(3), "power");
+        assert!(
+            module
+                .interpretations_for(ferrowl_modbus::UnitId(3))
+                .is_empty()
+        );
+        assert_eq!(
+            module.interpretations_for(ferrowl_modbus::UnitId(5)).len(),
+            1
+        );
+
+        let mut edited = module.interpretations_for(ferrowl_modbus::UnitId(5))[0]
+            .1
+            .clone();
+        edited.address = Some(77);
+        module.edit_interpretation(
+            ferrowl_modbus::UnitId(5),
+            "power",
+            "power".to_string(),
+            edited,
+        );
+        assert_eq!(
+            module.interpretations_for(ferrowl_modbus::UnitId(5))[0]
+                .1
+                .address,
+            Some(77)
+        );
+        assert!(
+            module
+                .interpretations_for(ferrowl_modbus::UnitId(3))
+                .is_empty()
+        );
+    }
+
+    /// `records()` mirrors `table()`'s own accessor shape and starts empty.
+    #[test]
+    fn ut_monitor_module_records_accessor_starts_empty() {
+        let module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        assert!(
+            module
+                .records()
+                .read()
+                .records_for(ferrowl_modbus::UnitId(1))
+                .is_empty()
+        );
     }
 
     /// MB-R-140 — a monitor's start() rejects a non-serial endpoint with the role/transport
