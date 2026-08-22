@@ -46,10 +46,6 @@ pub struct ColorScheme {
     pub border: Color,
     pub row: [Color; 2],
     pub placeholder: Color,
-    /// UI-R-063's memory-layout gap separator: a blank line's background between two
-    /// non-adjacent rendered lines — visibly lighter than `bg`/`row`, distinct from
-    /// `border`/`hi_bg`.
-    pub gap_bg: Color,
     pub error: Color,
     pub success: Color,
     pub info: Color,
@@ -82,7 +78,6 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     border: Color::Rgb(108, 112, 134),       // overlay0   #6C7086
     row: [Color::Rgb(38, 38, 38), Color::Rgb(48, 48, 48)], // gray elevations
     placeholder: Color::Rgb(127, 132, 156),  // overlay1   #7F849C
-    gap_bg: Color::Rgb(88, 91, 112),         // surface2   #585B70
     error: Color::Rgb(243, 139, 168),        // red   #F38BA8
     success: Color::Rgb(166, 227, 161),      // green   #A6E3A1
     info: Color::Rgb(137, 180, 250),         // blue   #89B4FA
@@ -115,7 +110,6 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     border: Color::Rgb(124, 111, 100),       // bg4   #7C6F64
     row: [Color::Rgb(38, 38, 38), Color::Rgb(48, 48, 48)], // gray elevations
     placeholder: Color::Rgb(146, 131, 116),  // gray   #928374
-    gap_bg: Color::Rgb(102, 92, 84),         // bg3   #665C54
     error: Color::Rgb(251, 73, 52),          // bright red   #FB4934
     success: Color::Rgb(142, 192, 124),      // aqua green   #8EC07C
     info: Color::Rgb(131, 165, 152),         // blue   #83A598
@@ -151,7 +145,6 @@ pub const COLOR_SCHEME: ColorScheme = ColorScheme {
     border: Color::Rgb(110, 118, 129),       // gray   #6E7681
     row: [Color::Rgb(37, 37, 38), Color::Rgb(45, 45, 48)], // gray elevations
     placeholder: Color::Rgb(128, 128, 128),  // dim gray   #808080
-    gap_bg: Color::Rgb(126, 134, 145),       // a step lighter than border #6E7681   #7E8691
     error: Color::Rgb(241, 76, 76),          // vs red   #F14C4C
     success: Color::Rgb(137, 209, 133),      // vs green   #89D185
     info: Color::Rgb(86, 156, 214),          // vs blue   #569CD6

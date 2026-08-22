@@ -7,8 +7,7 @@ use ratatui::{
     layout::{Constraint as LConstraint, Layout, Margin, Rect},
     text::{Line, Text},
     widgets::{
-        Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, StatefulWidget,
-        Table as UiTable, Widget,
+        Cell, Row, Scrollbar, ScrollbarOrientation, StatefulWidget, Table as UiTable, Widget,
     },
 };
 

@@ -655,37 +655,21 @@ fn memory_cell_char(cell: &MemoryCell) -> char {
     }
 }
 
-/// UI-R-063 — one row of the Memory-layout hex-editor render: either a table-kind line (its
-/// starting address + cells) or a blank `gap_bg` separator between two non-adjacent lines.
-enum MemoryLine {
-    Line {
-        kind: Kind,
-        address: u16,
-        cells: Vec<MemoryCell>,
-    },
-    Gap,
+/// UI-R-063 — one row of the Memory-layout hex-editor render: a table-kind line, its starting
+/// address, and its cells.
+struct MemoryLine {
+    kind: Kind,
+    address: u16,
+    cells: Vec<MemoryCell>,
 }
 
 /// UI-R-063 — flatten `memory_rows`'s per-kind pair-lists into one ordered sequence of
-/// hex-editor lines, inserting a `Gap` wherever the previous line and this one are not
-/// address-contiguous within the same table kind (a table-kind change is always non-contiguous
-/// by construction).
+/// hex-editor lines.
 fn memory_layout_lines(kind_rows: &[(Kind, Vec<(u16, u16)>)]) -> Vec<MemoryLine> {
     let mut out = Vec::new();
-    let mut prev_end: Option<(Kind, u16)> = None;
     for (kind, pairs) in kind_rows {
-        let (unit_per_cell, cells_per_line) = memory_cell_shape(kind.clone());
-        let span = unit_per_cell * cells_per_line;
         for (address, cells) in memory_lines(kind.clone(), pairs) {
-            let contiguous = prev_end
-                .as_ref()
-                .map(|(prev_kind, prev_end_addr)| *prev_kind == *kind && *prev_end_addr == address)
-                .unwrap_or(true);
-            if !out.is_empty() && !contiguous {
-                out.push(MemoryLine::Gap);
-            }
-            prev_end = Some((kind.clone(), address.saturating_add(span)));
-            out.push(MemoryLine::Line {
+            out.push(MemoryLine {
                 kind: kind.clone(),
                 address,
                 cells,
@@ -710,9 +694,9 @@ fn memory_cell_recency_active(
 }
 
 /// Gate3#4 — one row of the Memory-layout table: a rendered line (starting address, its cells'
-/// hex values space-separated, their character representation) or a blank `Gap` separator row
-/// between two non-adjacent lines. Real `Table`/`TableEntry` machinery (`s12`/`s14`'s own
-/// pattern, Shared) replaces the previous hand-painted-into-the-buffer render.
+/// hex values space-separated, their character representation). Real `Table`/`TableEntry`
+/// machinery (`s12`/`s14`'s own pattern, Shared) replaces the previous hand-painted-into-the-
+/// buffer render.
 ///
 /// UI-R-063 requires each individual byte/word to carry its own value-class/recency color; the
 /// Hex/Ascii columns use `TableEntry::cell_spans` (Shared, `ferrowl-ui/src/widgets/table.rs`) to
@@ -723,8 +707,7 @@ fn memory_cell_recency_active(
 #[table_entry(header = MemoryHeader, styles = memory_row_styles, spans = memory_row_spans)]
 struct MemoryRow {
     // UI-R-063 (amended, commit 5574858) — the line's table kind, same `Kind` `Display` naming
-    // the modbus module's own register table uses; empty for a `Gap` row, consistent with its
-    // other blank cells.
+    // the modbus module's own register table uses.
     #[column(name = "Kind", min = 16, max = 16)]
     kind: String,
     #[column(name = "Address", min = 6, max = 10)]
@@ -733,14 +716,11 @@ struct MemoryRow {
     hex: String,
     #[column(name = "Ascii", min = 10, max = 20)]
     ascii: String,
-    /// Not a `#[column]` — carries the row's on-screen style, consumed by `memory_row_styles`.
-    is_gap: bool,
-    style: ratatui::style::Style,
     /// Not a `#[column]` — per-cell `(hex text, style)` spans for the Hex column, consumed by
-    /// `memory_row_spans`; empty for a `Gap` row.
+    /// `memory_row_spans`.
     hex_spans: Vec<(String, ratatui::style::Style)>,
     /// Not a `#[column]` — per-cell `(ascii char, style)` spans for the Ascii column, consumed by
-    /// `memory_row_spans`; empty for a `Gap` row.
+    /// `memory_row_spans`.
     ascii_spans: Vec<(String, ratatui::style::Style)>,
 }
 
@@ -767,37 +747,26 @@ fn new_memory_table() -> MemoryTable {
     }
 }
 
-/// `Gap` rows paint their whole row `gap_bg`-background (`style` already carries that); real
-/// lines color Kind/Address by the same neutral border color the previous render's
-/// `{address:04x} ` prefix used — Hex/Ascii get their color from `memory_row_spans` instead
-/// (per-cell, not per-row), so this returns `None` for those two columns on a real line (the
-/// render loop treats a `Some` `cell_spans` entry as taking over that column's coloring entirely,
-/// Shared).
-fn memory_row_styles(row: &MemoryRow) -> [Option<ratatui::style::Style>; 4] {
-    if row.is_gap {
-        [Some(row.style); 4]
-    } else {
-        use ferrowl_ui::COLOR_SCHEME;
-        let neutral = Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border));
-        [neutral, neutral, None, None]
-    }
+/// Colors Kind/Address by the same neutral border color the previous render's `{address:04x} `
+/// prefix used — Hex/Ascii get their color from `memory_row_spans` instead (per-cell, not
+/// per-row), so this returns `None` for those two columns (the render loop treats a `Some`
+/// `cell_spans` entry as taking over that column's coloring entirely, Shared).
+fn memory_row_styles(_row: &MemoryRow) -> [Option<ratatui::style::Style>; 4] {
+    use ferrowl_ui::COLOR_SCHEME;
+    let neutral = Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border));
+    [neutral, neutral, None, None]
 }
 
-/// UI-R-063 — per-cell spans for the Hex/Ascii columns of a real (non-gap) line: `row.hex_spans`/
-/// `row.ascii_spans` already carry each cell's own `(text, style)` pair (computed in
-/// `memory_table_rows`); `None` for a `Gap` row (styled instead via `memory_row_styles`) and for
-/// the Kind/Address columns (no sub-cell structure to color independently).
+/// UI-R-063 — per-cell spans for the Hex/Ascii columns: `row.hex_spans`/`row.ascii_spans`
+/// already carry each cell's own `(text, style)` pair (computed in `memory_table_rows`); `None`
+/// for the Kind/Address columns (no sub-cell structure to color independently).
 fn memory_row_spans(row: &MemoryRow) -> [Option<Vec<(String, ratatui::style::Style)>>; 4] {
-    if row.is_gap {
-        [None, None, None, None]
-    } else {
-        [
-            None,
-            None,
-            Some(row.hex_spans.clone()),
-            Some(row.ascii_spans.clone()),
-        ]
-    }
+    [
+        None,
+        None,
+        Some(row.hex_spans.clone()),
+        Some(row.ascii_spans.clone()),
+    ]
 }
 
 /// UI-R-063/MB-R-147 — one cell's own color: `hi` while an MB-R-147 recency marker is active for
@@ -818,99 +787,84 @@ fn memory_cell_style(
     }
 }
 
-/// Gate3#4 — build the Memory-layout table's rows from `lines`: real lines get their hex/ascii
+/// Gate3#4 — build the Memory-layout table's rows from `lines`: each line gets its hex/ascii
 /// text plus one `(text, style)` span per cell (UI-R-063/MB-R-147, true per-byte/word
-/// granularity via `TableEntry::cell_spans`, Shared); a `Gap` becomes one blank row styled
-/// `gap_bg`.
+/// granularity via `TableEntry::cell_spans`, Shared).
 fn memory_table_rows(
     lines: &[MemoryLine],
     records: &[MonitorRecord],
     now: std::time::Instant,
 ) -> Vec<MemoryRow> {
-    use ferrowl_ui::COLOR_SCHEME;
     lines
         .iter()
-        .map(|line| match line {
-            MemoryLine::Gap => MemoryRow {
-                kind: String::new(),
-                address: String::new(),
-                hex: String::new(),
-                ascii: String::new(),
-                is_gap: true,
-                style: ratatui::style::Style::default().bg(COLOR_SCHEME.gap_bg),
-                hex_spans: Vec::new(),
-                ascii_spans: Vec::new(),
-            },
-            MemoryLine::Line {
+        .map(|line| {
+            let MemoryLine {
                 kind,
                 address,
                 cells,
-            } => {
-                let unit_per_cell = memory_cell_shape(kind.clone()).0;
-                let hex = cells
-                    .iter()
-                    .map(|cell| {
-                        if unit_per_cell == 8 {
-                            format!("{:02x}", cell.value)
-                        } else {
-                            format!("{:04x}", cell.value)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let ascii: String = cells.iter().map(memory_cell_char).collect();
-                let last = cells.len().saturating_sub(1);
-                let hex_spans = cells
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cell)| {
-                        let cell_address = address.saturating_add((i as u16) * unit_per_cell);
-                        let color = memory_cell_style(
-                            kind.clone(),
-                            cell_address,
-                            unit_per_cell,
-                            cell,
-                            records,
-                            now,
-                        );
-                        let text = if unit_per_cell == 8 {
-                            format!("{:02x}", cell.value)
-                        } else {
-                            format!("{:04x}", cell.value)
-                        };
-                        let text = if i == last { text } else { format!("{text} ") };
-                        (text, ratatui::style::Style::default().fg(color))
-                    })
-                    .collect();
-                let ascii_spans = cells
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cell)| {
-                        let cell_address = address.saturating_add((i as u16) * unit_per_cell);
-                        let color = memory_cell_style(
-                            kind.clone(),
-                            cell_address,
-                            unit_per_cell,
-                            cell,
-                            records,
-                            now,
-                        );
-                        (
-                            memory_cell_char(cell).to_string(),
-                            ratatui::style::Style::default().fg(color),
-                        )
-                    })
-                    .collect();
-                MemoryRow {
-                    kind: kind.to_string(),
-                    address: format!("{address:04x}"),
-                    hex,
-                    ascii,
-                    is_gap: false,
-                    style: ratatui::style::Style::default(),
-                    hex_spans,
-                    ascii_spans,
-                }
+            } = line;
+            let unit_per_cell = memory_cell_shape(kind.clone()).0;
+            let hex = cells
+                .iter()
+                .map(|cell| {
+                    if unit_per_cell == 8 {
+                        format!("{:02x}", cell.value)
+                    } else {
+                        format!("{:04x}", cell.value)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let ascii: String = cells.iter().map(memory_cell_char).collect();
+            let last = cells.len().saturating_sub(1);
+            let hex_spans = cells
+                .iter()
+                .enumerate()
+                .map(|(i, cell)| {
+                    let cell_address = address.saturating_add((i as u16) * unit_per_cell);
+                    let color = memory_cell_style(
+                        kind.clone(),
+                        cell_address,
+                        unit_per_cell,
+                        cell,
+                        records,
+                        now,
+                    );
+                    let text = if unit_per_cell == 8 {
+                        format!("{:02x}", cell.value)
+                    } else {
+                        format!("{:04x}", cell.value)
+                    };
+                    let text = if i == last { text } else { format!("{text} ") };
+                    (text, ratatui::style::Style::default().fg(color))
+                })
+                .collect();
+            let ascii_spans = cells
+                .iter()
+                .enumerate()
+                .map(|(i, cell)| {
+                    let cell_address = address.saturating_add((i as u16) * unit_per_cell);
+                    let color = memory_cell_style(
+                        kind.clone(),
+                        cell_address,
+                        unit_per_cell,
+                        cell,
+                        records,
+                        now,
+                    );
+                    (
+                        memory_cell_char(cell).to_string(),
+                        ratatui::style::Style::default().fg(color),
+                    )
+                })
+                .collect();
+            MemoryRow {
+                kind: kind.to_string(),
+                address: format!("{address:04x}"),
+                hex,
+                ascii,
+                hex_spans,
+                ascii_spans,
             }
         })
         .collect()
@@ -2001,8 +1955,8 @@ mod tests {
         v.unit_ids = vec![UnitId(1)];
         v.selected = 0;
         v.panel_focus = MonitorPanel::Memory;
-        // Two writes far enough apart to span multiple 8-address hex-editor lines (with a `Gap`
-        // row between them, MB-R-144), so the Memory table has more than one row to navigate.
+        // Two writes far enough apart to span multiple 8-address hex-editor lines (MB-R-144), so
+        // the Memory table has more than one row to navigate.
         v.module.table().write().write_words(
             Key::new(SlaveKey {
                 slave_id: UnitId(1),
@@ -3040,16 +2994,18 @@ mod tests {
     }
 
     /// UI-R-063 (amended, commit 5574858) — a real line's Kind cell renders the line's table
-    /// kind with the same `Kind` `Display` naming the modbus module's own register table uses; a
-    /// `Gap` row's Kind cell is empty, consistent with its other blank cells.
+    /// kind with the same `Kind` `Display` naming the modbus module's own register table uses.
     #[test]
-    fn ut_memory_table_kind_column_shows_line_kind_empty_for_gap() {
+    fn ut_memory_table_kind_column_shows_line_kind() {
         let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1), (20, 2)])]);
         let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
-        assert_eq!(rows.len(), 3, "two non-adjacent lines plus one gap");
+        assert_eq!(
+            rows.len(),
+            2,
+            "two non-adjacent lines, no gap row between them"
+        );
         assert_eq!(rows[0].kind, "Holding Register");
-        assert_eq!(rows[1].kind, "", "gap row's Kind cell is empty");
-        assert_eq!(rows[2].kind, "Holding Register");
+        assert_eq!(rows[1].kind, "Holding Register");
     }
 
     /// MB-R-147/UI-R-063 — a line with an active recency marker on any of its cells renders its
@@ -3087,33 +3043,17 @@ mod tests {
         );
     }
 
-    /// UI-R-063 — a blank row separates two non-address-contiguous lines, styled `gap_bg` across
-    /// every column; the surrounding real lines carry their own (non-gap) address/hex/ascii text.
+    /// UI-R-063 — two non-address-contiguous lines render back-to-back, with no separator row
+    /// inserted between them.
     #[test]
-    fn ut_memory_layout_gap_separator_between_non_adjacent_lines_uses_gap_bg() {
-        use ferrowl_ui::COLOR_SCHEME;
-        use ratatui::style::Style;
-
+    fn ut_memory_layout_no_separator_row_between_non_adjacent_lines() {
         let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1), (20, 2)])]);
-        assert_eq!(
-            lines.len(),
-            3,
-            "two non-adjacent lines plus one gap between them"
-        );
-        assert!(matches!(lines[1], MemoryLine::Gap));
+        assert_eq!(lines.len(), 2, "two non-adjacent lines, no gap inserted");
 
         let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
-        assert_eq!(rows.len(), 3);
-        assert!(!rows[0].is_gap);
-        assert!(rows[1].is_gap);
-        assert!(!rows[2].is_gap);
-        assert_eq!(rows[1].kind, "");
-        assert_eq!(rows[1].address, "");
-        assert_eq!(rows[1].hex, "");
-        assert_eq!(rows[1].ascii, "");
-        let gap_style = Some(Style::default().bg(COLOR_SCHEME.gap_bg));
-        assert_eq!(memory_row_styles(&rows[1]), [gap_style; 4]);
-        assert_ne!(memory_row_styles(&rows[0])[1], gap_style);
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0].address, "");
+        assert_ne!(rows[1].address, "");
     }
 
     /// UI-R-063 — true per-cell granularity via `TableEntry::cell_spans`: two adjacent cells on
