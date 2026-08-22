@@ -23,6 +23,7 @@ use ferrowl_ocpp::v2_1::messages::set_charging_profile::SetChargingProfileRespon
 use ferrowl_ocpp::v2_1::messages::set_variables::SetVariablesResponse;
 use ferrowl_ocpp::{Action21, CallError, CallErrorCode, Response21, V2_1, Version};
 
+use crate::module::ocpp::client::backend::OcppSender;
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::handler::Inbound;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
@@ -45,6 +46,7 @@ fn purpose_str(p: &ChargingProfilePurposeEnumType) -> &'static str {
 impl Inbound for V2_1 {
     fn respond(
         state: &Arc<RwLock<CsState>>,
+        sender: &OcppSender<V2_1>,
         action: &Action21,
     ) -> (Result<Response21, CallError>, String) {
         match action {
@@ -284,25 +286,43 @@ impl Inbound for V2_1 {
                     (Ok(resp), context)
                 })
             }
-            Action21::RequestStartTransaction(req) => with_state_mut(state, |s| {
-                // Optional evseId; fall back to the first connector. Mint a transaction and charge.
-                let idx = req
-                    .evse_id
-                    .filter(|&e| e != 0)
-                    .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e as i64))
-                    .or((!s.connectors.is_empty()).then_some(0));
-                let context = match idx {
-                    Some(i) => {
-                        let tx = s.connectors[i].start_tx();
-                        s.connectors[i].status = "Charging".to_string();
-                        format!("started tx {tx} on evse {}", s.connectors[i].evse_id)
-                    }
-                    None => "no connector to start".to_string(),
+            Action21::RequestStartTransaction(req) => {
+                // OC-R-070 — the response is still built synchronously (Accepted, from the
+                // resolved connector), but the actual `TransactionEvent(Started)` + coupled
+                // `StatusNotification` (OC-R-122) are sent asynchronously through the same send
+                // path the RFID/operator flow uses, so the CSMS observes them as real Calls
+                // rather than a local state mutation. This also drops the invalid `"Charging"`
+                // status literal (`ConnectorStatusEnumType` has no such variant) that the removed
+                // inline mutation used to write directly — the real send path's
+                // `V::start_event`/`apply_post_send` already write the valid `"Occupied"`.
+                let has_target = with_state(state, |s| {
+                    req.evse_id
+                        .filter(|&e| e != 0)
+                        .and_then(|e| s.connectors.iter().position(|c| c.evse_id == e as i64))
+                        .or((!s.connectors.is_empty()).then_some(0))
+                        .is_some()
+                });
+                let context = if has_target {
+                    let scope = req
+                        .evse_id
+                        .filter(|&e| e != 0)
+                        .map(|e| crate::module::ocpp::scope::Scope::evse(e as i64, None))
+                        .unwrap_or(crate::module::ocpp::scope::Scope::CS);
+                    drop(
+                        crate::module::ocpp::client::backend::spawn_remote_transaction_start(
+                            sender.clone(),
+                            state.clone(),
+                            scope,
+                        ),
+                    );
+                    "starting tx".to_string()
+                } else {
+                    "no connector to start".to_string()
                 };
                 let resp = V2_1::default_response("RequestStartTransaction")
                     .expect("RequestStartTransaction is a known action");
                 (Ok(resp), context)
-            }),
+            }
             Action21::RequestStopTransaction(req) => {
                 let tx = req.transaction_id.clone();
                 with_state_mut(state, |s| {

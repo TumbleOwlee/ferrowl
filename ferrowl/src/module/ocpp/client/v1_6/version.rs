@@ -13,7 +13,7 @@ use ferrowl_lua::module::ValueType;
 use ferrowl_ocpp::V1_6;
 
 use crate::module::ocpp::action_dialog::ActionSpec;
-use crate::module::ocpp::client::backend::{Messages, boot_interval, rfc3339_now};
+use crate::module::ocpp::client::backend::{Messages, OcppSender, boot_interval, rfc3339_now};
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::v1_6::handler::CsStateHandler;
 use crate::module::ocpp::client::v1_6::state::CsState;
@@ -110,8 +110,9 @@ impl ClientVersion for V1_6 {
         online: Arc<AtomicBool>,
         messages: Messages,
         state: Arc<RwLock<CsState>>,
+        sender: OcppSender<V1_6>,
     ) -> CsStateHandler {
-        CsStateHandler::new(online, messages, state)
+        CsStateHandler::new(online, messages, state, sender)
     }
 
     fn state_driven() -> &'static [&'static str] {

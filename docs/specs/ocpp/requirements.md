@@ -227,9 +227,11 @@ behavior, stated limitations).
 
 **OC-R-069** — A reservation shall be recorded at the level the request targets (charge point or connector) and shall be cleared by a cancellation carrying the same reservation id, at whichever level holds it.
 
-**OC-R-070** — A remotely started transaction shall mint a local transaction id, put the targeted connector into a charging state, and — absent an explicit target — use the first connector. A remote stop shall clear the transaction, clear the transaction-scoped charging limit, and return the connector to available.
+**OC-R-070** — A remotely started transaction shall mint a local transaction id, put the targeted connector into a charging state, and — absent an explicit target — use the first connector, transmitting the transaction-start message (`StartTransaction` for 1.6, `TransactionEvent` with `eventType=Started` for 2.0.1/2.1) through the same send path the RFID/operator-triggered flow uses, so the CSMS learns the transaction id via the normal wire message in every case — matching 1.6's existing pattern of letting the response assign the id where applicable. A remote stop shall clear the transaction, clear the transaction-scoped charging limit, and return the connector to available.
 
 **OC-R-071** — A reset shall return every connector to available, clear its transaction, and zero its session energy.
+
+**OC-R-122** — Whenever a transaction-start message (`StartTransaction` or `TransactionEvent` with `eventType=Started`) is transmitted — whether triggered by RFID/operator action or by an accepted remote-start (OC-R-070) — the same send shall also transmit a `StatusNotification` for that connector carrying its updated status: `ChargePointStatus::Charging` for 1.6, `ConnectorStatusEnumType::Occupied` for 2.0.1/2.1.
 
 **OC-R-072** — Ending a transaction shall clear only the transaction-scoped charging limit; the default and maximum limits shall persist.
 
