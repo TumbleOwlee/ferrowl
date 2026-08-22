@@ -15,6 +15,7 @@ use crate::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyle,
+    traits::IsFocus,
     widgets::Title,
 };
 
@@ -220,7 +221,14 @@ where
         let selected_style = if !self.show_selection_marker || state.focused() {
             &self.style.focused
         } else {
-            &self.style.unfocused_selected
+            if let Some(i) = state.table_state().selected() {
+                self.style
+                    .rows
+                    .get(i % 2)
+                    .expect("rows is [Style; 2]; i % 2 is in bounds")
+            } else {
+                &self.style.unfocused_selected
+            }
         };
         let bar_style = selected_style;
         let mut bar_height = 0;
@@ -369,9 +377,8 @@ where
         } else {
             " "
         };
-        let t = UiTable::new(rows, constraints)
+        let mut t = UiTable::new(rows, constraints)
             .header(header)
-            .row_highlight_style(*selected_style)
             .highlight_symbol({
                 Text::from({
                     let spacing = itertools::repeat_n("".into(), self.row_margin.vertical as usize);
@@ -384,6 +391,9 @@ where
                 .style(*bar_style)
             })
             .column_spacing(1);
+        if state.is_focused() || !self.show_selection_marker {
+            t = t.row_highlight_style(*selected_style);
+        }
 
         state.set_visible_width(area.width);
         if state.total_width() <= area.width {

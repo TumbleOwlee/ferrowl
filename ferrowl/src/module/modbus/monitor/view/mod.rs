@@ -474,7 +474,7 @@ fn new_resolved_table() -> ResolvedTable {
             // Expanded (non-compact) is the default (tui/api-contract.md §2.1): 1 row of
             // vertical padding, same as `TableView::new`'s own default (Shared).
             .row_margin(ratatui::layout::Margin {
-                vertical: 1,
+                vertical: 0,
                 horizontal: 0,
             })
             .build()
@@ -928,7 +928,7 @@ impl ModbusMonitorModuleView {
             overlay: MonitorOverlay::None,
             view_focused: false,
             panel_focus: MonitorPanel::default(),
-            compact: false,
+            compact: true,
             sort: None,
         }
     }
