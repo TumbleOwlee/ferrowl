@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -115,6 +116,31 @@ impl<V: Version> OutboundHandle<V> {
     }
 }
 
+/// Join handles for in-flight inbound-Call handler tasks, shared between the reader task (which
+/// spawns entries) and `Connection::shutdown` (which aborts them). OC-R-121: shutdown aborts
+/// every entry, never awaits one.
+#[derive(Clone, Default)]
+struct HandlerTasks {
+    inner: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+}
+
+impl HandlerTasks {
+    /// Track a newly spawned handler. Opportunistically drops already-finished entries first so
+    /// a long-lived connection processing many Calls doesn't accumulate dead handles forever.
+    fn track(&self, handle: tokio::task::JoinHandle<()>) {
+        let mut guard = self.inner.lock();
+        guard.retain(|h| !h.is_finished());
+        guard.push(handle);
+    }
+
+    /// Abort every tracked handle and forget them. Never awaits completion (OC-R-121).
+    fn abort_all(&self) {
+        for handle in self.inner.lock().drain(..) {
+            handle.abort();
+        }
+    }
+}
+
 /// All the moving parts of a live connection, handed to a role's command loop.
 ///
 /// The `pending` correlation map and the outbound sender live inside [`OutboundHandle`]; the
@@ -124,6 +150,7 @@ pub(crate) struct Connection<V: Version> {
     pub(crate) shutdown: Arc<Notify>,
     writer: tokio::task::JoinHandle<()>,
     reader: tokio::task::JoinHandle<()>,
+    handlers: HandlerTasks,
 }
 
 impl<V: Version> Connection<V> {
@@ -142,6 +169,7 @@ impl<V: Version> Connection<V> {
         let (out_tx, out_rx) = mpsc::channel::<OcppJMessage>(OUTBOUND_CHANNEL_CAP);
         let pending = PendingCalls::new();
         let shutdown = Arc::new(Notify::new());
+        let handlers = HandlerTasks::default();
 
         let writer = tokio::spawn(writer_task(sink, out_rx));
         let reader = tokio::spawn(reader_task::<V, _, D, L>(
@@ -151,6 +179,7 @@ impl<V: Version> Connection<V> {
             dispatch,
             log,
             shutdown.clone(),
+            handlers.clone(),
         ));
 
         // `out_tx`/`pending` move into the handle; the reader keeps its own clones.
@@ -166,18 +195,30 @@ impl<V: Version> Connection<V> {
             shutdown,
             writer,
             reader,
+            handlers,
         }
     }
 
-    /// Tear the connection down: stop the reader, fail every pending call, and drain the writer.
+    /// Tear the connection down: stop the reader, abort every in-flight inbound Call handler,
+    /// fail every pending call, and drain the writer.
     pub(crate) async fn shutdown(self) {
         self.reader.abort();
+        // Awaiting the reader here is bounded: cancellation lands at its next `.await`
+        // (`stream.next().await`), so this returns promptly. It also closes a race — without it,
+        // the reader could still be mid-spawn of a new handler when `handlers.abort_all()` below
+        // runs, leaking that handler's `out_tx` clone and hanging the writer below anyway.
+        let _ = self.reader.await;
+        // OC-R-121: abort every still-running inbound Call handler task rather than await it. A
+        // handler aborted this way never reaches its `out_tx.send(reply)` line, so it never
+        // sends a reply.
+        self.handlers.abort_all();
         self.outbound.pending.fail_all(&CallError::new(
             CallErrorCode::GenericError,
             "connection terminated",
         ));
-        // Dropping the handle drops the last live outbound sender; with the reader aborted, the
-        // writer's channel then closes and the writer task drains and exits.
+        // Dropping the handle drops the last live outbound sender; with the reader aborted and
+        // every handler task aborted, every `out_tx` clone is now gone, so the writer's channel
+        // closes and the writer task drains and exits.
         drop(self.outbound);
         let _ = self.writer.await;
     }
@@ -204,6 +245,7 @@ async fn reader_task<V, St, D, L>(
     dispatch: Arc<D>,
     log: L,
     shutdown: Arc<Notify>,
+    handlers: HandlerTasks,
 ) where
     V: Version,
     St: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -248,10 +290,11 @@ async fn reader_task<V, St, D, L>(
             } => {
                 let dispatch = dispatch.clone();
                 let out_tx = out_tx.clone();
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     let reply = dispatch_call::<V, D>(&dispatch, id, action, payload).await;
                     let _ = out_tx.send(reply).await;
                 });
+                handlers.track(handle);
             }
             OcppJMessage::CallResult { id, payload } => pending.complete(&id, Ok(payload)),
             OcppJMessage::CallError {
@@ -308,5 +351,62 @@ where
             Err(e) => into_error(id, e.into()),
         },
         Err(call_err) => into_error(id, call_err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    /// OC-R-121 — abort_all cancels every tracked task without waiting for it to finish.
+    async fn ut_handler_tasks_abort_all_does_not_await() {
+        let tasks = HandlerTasks::default();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            // Long enough that awaiting it (instead of aborting it) would fail the elapsed-time
+            // assertion below by orders of magnitude.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        tasks.track(handle);
+        started_rx.await.unwrap(); // the task is genuinely in flight, not just queued
+
+        let began = tokio::time::Instant::now();
+        tasks.abort_all();
+        assert!(
+            began.elapsed() < Duration::from_millis(200),
+            "abort_all must not block on the sleeping task"
+        );
+        assert!(
+            tasks.inner.lock().is_empty(),
+            "abort_all must drain the tracked list"
+        );
+    }
+
+    #[tokio::test]
+    /// OC-R-121 — track() prunes already-finished handles so a long-lived connection doesn't
+    /// accumulate one dead JoinHandle per Call forever.
+    async fn ut_handler_tasks_track_prunes_finished_handles() {
+        let tasks = HandlerTasks::default();
+        let finished = tokio::spawn(async {});
+        tasks.track(finished);
+        // Give the trivial task a beat to actually finish before the next track() call.
+        for _ in 0..50 {
+            if tasks.inner.lock()[0].is_finished() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let second = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        tasks.track(second);
+        assert_eq!(
+            tasks.inner.lock().len(),
+            1,
+            "the finished handle should have been pruned"
+        );
     }
 }

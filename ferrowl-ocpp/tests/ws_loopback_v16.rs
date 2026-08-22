@@ -202,6 +202,79 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     server.terminate().await.expect("server terminate failed");
 }
 
+/// CS handler whose `RemoteStartTransaction` handler sleeps far longer than any reasonable
+/// teardown bound, so a terminate that has to wait for it to finish would be trivially
+/// detectable as a test timeout.
+struct SlowCs {
+    started: Arc<tokio::sync::Notify>,
+}
+
+impl CsActionHandler<V1_6> for SlowCs {
+    async fn handle_call(&self, action: Action16) -> Result<Response16, CallError> {
+        match action {
+            Action16::RemoteStartTransaction(_) => {
+                self.started.notify_one();
+                sleep(Duration::from_secs(30)).await;
+                Ok(Response16::RemoteStartTransaction(
+                    serde_json::from_value(json!({ "status": "Accepted" })).unwrap(),
+                ))
+            }
+            _ => Err(CallError::new(CallErrorCode::NotImplemented, "unsupported")),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// OC-R-121 — connection teardown aborts an in-flight inbound Call handler instead of awaiting
+/// it, so terminate() cannot be made to hang by a slow (or stuck) handler.
+async fn terminate_does_not_block_on_in_flight_handler() {
+    let server = start_server().await;
+    let url = format!("ws://{}/ocpp/CS002", bound_addr(&server).await);
+
+    let started = Arc::new(tokio::sync::Notify::new());
+    let client = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: None,
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(
+        SlowCs {
+            started: started.clone(),
+        },
+        sink(),
+        sink(),
+    )
+    .await
+    .expect("client failed to connect");
+
+    let conn = first_connection(&server).await;
+    let remote_start = Action16::RemoteStartTransaction(
+        serde_json::from_value(json!({ "idTag": "TAG1" })).unwrap(),
+    );
+    // Fire-and-forget from the server side, via `Command::SendToConnection` — unlike
+    // `Server::call`, this does not wait for a reply, so it cannot itself hang on the CS handler
+    // that never replies (it gets aborted mid-sleep).
+    server
+        .send(csms::Command::SendToConnection(conn, remote_start))
+        .await
+        .expect("send failed");
+
+    started.notified().await; // the handler is genuinely in flight, not just queued
+
+    tokio::time::timeout(Duration::from_millis(500), client.terminate())
+        .await
+        .expect("terminate() must not block on the in-flight handler")
+        .expect("client terminate failed");
+
+    server.terminate().await.expect("server terminate failed");
+}
+
 /// A malformed Call whose `uniqueId` is still readable must come back as a `CallError` — leaving
 /// it unanswered strands the peer until its own call timeout fires. Driven over a raw websocket,
 /// since the typed client cannot produce a malformed frame.
