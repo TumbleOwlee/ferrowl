@@ -84,6 +84,56 @@ impl std::fmt::Display for Role {
     }
 }
 
+impl Role {
+    /// Narrow to [`ClientOrServer`] at the boundary where a full `Role` first enters
+    /// client/server-only code (instance construction, setup dialogs, host registration). A
+    /// monitor module never reaches any of those paths — it gets its own dialog/instance/view
+    /// construction (MB-R-140 on) — so this only panics if that dispatch invariant is broken.
+    pub fn client_or_server(self) -> ClientOrServer {
+        ClientOrServer::try_from(self).unwrap_or_else(|role| {
+            panic!("client/server-only code reached with role={role}; monitor must dispatch through its own module/view construction")
+        })
+    }
+}
+
+/// [`Role`] narrowed to the two variants every client/server-only code path (setup dialogs,
+/// instance construction, view host registration) actually handles. Converting away from
+/// `Role::Monitor` at the dispatch boundary ([`Role::client_or_server`]) turns what used to be a
+/// call-site convention — matching `Role` exhaustively and asserting `Monitor` unreachable — into
+/// a compile-time guarantee: these paths are no longer typed to accept a monitor role at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientOrServer {
+    Client,
+    Server,
+}
+
+impl From<ClientOrServer> for Role {
+    fn from(role: ClientOrServer) -> Role {
+        match role {
+            ClientOrServer::Client => Role::Client,
+            ClientOrServer::Server => Role::Server,
+        }
+    }
+}
+
+impl TryFrom<Role> for ClientOrServer {
+    type Error = Role;
+
+    fn try_from(role: Role) -> Result<Self, Self::Error> {
+        match role {
+            Role::Client => Ok(ClientOrServer::Client),
+            Role::Server => Ok(ClientOrServer::Server),
+            Role::Monitor => Err(role),
+        }
+    }
+}
+
+impl std::fmt::Display for ClientOrServer {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Role::from(*self).fmt(fmt)
+    }
+}
+
 /// Transport endpoint for a module instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "lowercase")]

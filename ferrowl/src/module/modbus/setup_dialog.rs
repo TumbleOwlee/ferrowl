@@ -28,7 +28,7 @@ use ratatui::{
 };
 
 use crate::config::device::ReadRanges;
-use crate::config::{DeviceConfig, Endpoint, Role};
+use crate::config::{ClientOrServer, DeviceConfig, Endpoint, Role};
 use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
@@ -111,7 +111,7 @@ pub struct SetupDialog {
     #[focus(when = {matches!(self.transport.get_value(), Transport::Tcp | Transport::RtuOverTcp | Transport::AsciiOverTcp)})]
     pub tls_level: Widget<SelectionState<TlsLevel>, Selection<TlsLevel>>,
     #[focus]
-    pub role: Widget<SelectionState<Role>, Selection<Role>>,
+    pub role: Widget<SelectionState<ClientOrServer>, Selection<ClientOrServer>>,
     /// Server: "generate an ephemeral self-signed server certificate" toggle (shown at TLS+).
     /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
     /// (MB-R-139) — the same widget field backs both, since only one role is ever active for a
@@ -218,7 +218,7 @@ impl SetupDialog {
     pub fn edit(
         name: &str,
         config_path: &str,
-        role: Role,
+        role: ClientOrServer,
         endpoint: &Endpoint,
         timing: Timing,
         ranges: &ReadRanges,
@@ -228,7 +228,7 @@ impl SetupDialog {
         dialog
             .role
             .state
-            .set_selection(if role == Role::Client { 1 } else { 0 });
+            .set_selection(if role == ClientOrServer::Client { 1 } else { 0 });
         // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3, Ascii=4, AsciiOverTcp=5
         match endpoint {
             Endpoint::Tcp { ip, port } => {
@@ -297,7 +297,7 @@ impl SetupDialog {
             dialog.original_tls = Some(tls.clone());
 
             match role {
-                Role::Server => {
+                ClientOrServer::Server => {
                     let (server_cert, client_verification) = match &tls.server {
                         ServerTlsPolicy::MutualTls {
                             server_cert,
@@ -336,7 +336,7 @@ impl SetupDialog {
                         .state
                         .set_selection(if skip { 1 } else { 0 });
                 }
-                Role::Client => {
+                ClientOrServer::Client => {
                     let (client_verification, client_identity) = match &tls.client {
                         ClientTlsPolicy::MutualTls {
                             client_verification,
@@ -377,11 +377,6 @@ impl SetupDialog {
                     set_suggest_input(&mut dialog.client_cert_file, ccert);
                     set_suggest_input(&mut dialog.client_key_file, ckey);
                 }
-                Role::Monitor => unreachable!(
-                    "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — \
-                     the dialog/view sites gain real role=monitor handling in s6/s7 of the \
-                     modbus-bus-monitor plan"
-                ),
             }
         }
         dialog
@@ -441,7 +436,7 @@ impl SetupDialog {
             .role(selection(
                 "Role",
                 Some(HorizontalAlignment::Right),
-                vec![Role::Server, Role::Client],
+                vec![ClientOrServer::Server, ClientOrServer::Client],
                 &selection_style,
             ))
             .ip(input("IP", None, "127.0.0.1", &input_style, false))
@@ -662,29 +657,30 @@ impl SetupDialog {
     /// role (see the field's doc comment).
     fn show_self_signed(&self) -> bool {
         self.tls_shown()
-            && ((self.role.get_value() == Role::Server && self.tls_level() >= TlsLevel::Tls)
-                || (self.role.get_value() == Role::Client
+            && ((self.role.get_value() == ClientOrServer::Server
+                && self.tls_level() >= TlsLevel::Tls)
+                || (self.role.get_value() == ClientOrServer::Client
                     && self.tls_level() == TlsLevel::MutualTls))
     }
 
     /// Client-only skip-verify toggle (TCP client at TLS level or above).
     fn show_skip_verify(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Client
+            && self.role.get_value() == ClientOrServer::Client
             && self.tls_level() >= TlsLevel::Tls
     }
 
     /// Server-only, mTLS only: "accept any client certificate" toggle (MB-R-136).
     fn show_client_cert_skip_verify(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Server
+            && self.role.get_value() == ClientOrServer::Server
             && self.tls_level() == TlsLevel::MutualTls
     }
 
     /// Client trust-anchor input (TCP client at TLS level or above).
     fn show_ca_file(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Client
+            && self.role.get_value() == ClientOrServer::Client
             && self.tls_level() >= TlsLevel::Tls
             && self.skip_verify.get_value() == SkipVerifyChoice::Off
     }
@@ -692,7 +688,7 @@ impl SetupDialog {
     /// Server certificate/key inputs (TCP server at TLS level or above).
     fn show_server_cert(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Server
+            && self.role.get_value() == ClientOrServer::Server
             && self.tls_level() >= TlsLevel::Tls
             && self.self_signed.get_value() == SelfSignedChoice::Off
     }
@@ -701,7 +697,7 @@ impl SetupDialog {
     /// toggle is on (MB-R-139), mirroring the server's `show_server_cert`.
     fn show_client_cert(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Client
+            && self.role.get_value() == ClientOrServer::Client
             && self.tls_level() == TlsLevel::MutualTls
             && self.self_signed.get_value() == SelfSignedChoice::Off
     }
@@ -710,7 +706,7 @@ impl SetupDialog {
     /// (MB-R-136), preserving the list's own text so toggling back Off restores it.
     fn show_client_ca(&self) -> bool {
         self.tls_shown()
-            && self.role.get_value() == Role::Server
+            && self.role.get_value() == ClientOrServer::Server
             && self.tls_level() == TlsLevel::MutualTls
             && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
     }
@@ -1032,13 +1028,8 @@ impl SetupDialog {
                 // of resetting them to `ModbusTlsConfig::default()`'s placeholder.
                 if let Some(orig) = &self.original_tls {
                     match role {
-                        Role::Server => cfg.client = orig.client.clone(),
-                        Role::Client => cfg.server = orig.server.clone(),
-                        Role::Monitor => unreachable!(
-                            "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup \
-                             dialog — the dialog/view sites gain real role=monitor handling in \
-                             s6/s7 of the modbus-bus-monitor plan"
-                        ),
+                        ClientOrServer::Server => cfg.client = orig.client.clone(),
+                        ClientOrServer::Client => cfg.server = orig.server.clone(),
                     }
                 }
                 validate_tls(&cfg, role, level, &|p| {
@@ -1053,7 +1044,7 @@ impl SetupDialog {
         Ok(SetupValues {
             name,
             config_path,
-            role,
+            role: role.into(),
             endpoint,
             timeout_ms,
             delay_ms,
@@ -1170,7 +1161,7 @@ impl SetupDialog {
         idx += 1;
 
         if show_tls {
-            let is_server = self.role.state.get_value() == Role::Server;
+            let is_server = self.role.state.get_value() == ClientOrServer::Server;
 
             // Row 1: Self-Signed (both roles).
             if show_self_signed_row {
@@ -1624,7 +1615,7 @@ mod tests {
         let dialog = SetupDialog::edit(
             "dev",
             "",
-            Role::Client,
+            ClientOrServer::Client,
             &endpoint,
             timing,
             &ReadRanges::default(),
@@ -2032,7 +2023,7 @@ mod tests {
         let dialog = SetupDialog::edit(
             "dev",
             "",
-            Role::Client,
+            ClientOrServer::Client,
             &endpoint,
             timing,
             &ReadRanges::default(),
@@ -2057,7 +2048,7 @@ mod tests {
         let dialog = SetupDialog::edit(
             "dev",
             "",
-            Role::Client,
+            ClientOrServer::Client,
             &endpoint,
             timing,
             &ReadRanges::default(),

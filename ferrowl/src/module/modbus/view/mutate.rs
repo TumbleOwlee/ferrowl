@@ -296,14 +296,14 @@ impl ModbusModuleView {
         register_name: &str,
         value: &str,
     ) -> CommandResult {
-        use crate::config::Role;
+        use crate::config::ClientOrServer;
 
         let resolved = self
             .table
             .definitions()
             .iter()
             .find(|d| d.name == register_name)
-            .map(|d| (d.register.clone(), self.spec.role));
+            .map(|d| (d.register.clone(), self.spec.role.client_or_server()));
 
         let Some((register, role)) = resolved else {
             return CommandResult::Handled(Some((
@@ -313,7 +313,7 @@ impl ModbusModuleView {
         };
 
         if let Address::Virtual = register.address() {
-            if role == Role::Server {
+            if role == ClientOrServer::Server {
                 self.module
                     .set_virtual_value(
                         register_name,
@@ -348,7 +348,7 @@ impl ModbusModuleView {
         let slave = *register.slave_id();
 
         match role {
-            Role::Server => {
+            ClientOrServer::Server => {
                 let memory = self.module.memory();
                 let key = Key {
                     id: SlaveKey {
@@ -379,7 +379,7 @@ impl ModbusModuleView {
                     )))
                 }
             }
-            Role::Client => {
+            ClientOrServer::Client => {
                 let key = Key {
                     id: SlaveKey {
                         slave_id: slave,
@@ -413,11 +413,6 @@ impl ModbusModuleView {
                     }
                 }
             }
-            Role::Monitor => unreachable!(
-                "a monitor has no `:set` command (tui/api-contract.md §2.1 omits it entirely for \
-                 this role) — the monitor view's own command dispatch lands in s5/s6/s7 of the \
-                 modbus-bus-monitor plan and never routes through this client/server `:set` path"
-            ),
         }
     }
 }

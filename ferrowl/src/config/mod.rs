@@ -15,7 +15,7 @@ pub mod ocpp {
 
 pub use device::{DeviceConfig, MonitorDeviceConfig};
 pub use ocpp::{OcppDeviceConfig, OcppModuleSpec, OcppSpec};
-pub use session::{Endpoint, ModuleSpec, Role, Session};
+pub use session::{ClientOrServer, Endpoint, ModuleSpec, Role, Session};
 
 use ferrowl_util::convert::{Converter, FileType};
 
