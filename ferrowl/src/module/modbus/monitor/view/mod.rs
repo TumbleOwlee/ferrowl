@@ -31,9 +31,7 @@ use crate::module::view::{
 };
 
 use super::ModbusMonitorModule;
-use super::dialog::{
-    AddInterpretationDialog, EditInterpretationDialog, EditInterpretationSelectionDialog,
-};
+use super::dialog::{EditInterpretationDialog, EditInterpretationSelectionDialog};
 use super::setup_dialog::MonitorSetupDialog;
 
 /// Which of the view's Tab-cyclable panels currently has focus (default `Units`), matching
@@ -75,7 +73,11 @@ impl MonitorPanel {
 enum MonitorOverlay {
     None,
     /// `:add`/`:a` interpretation dialog (UI-R-061), scoped to the currently selected unit id.
-    Add(Box<AddInterpretationDialog>),
+    /// Wraps the same [`EditInterpretationOverlay`] mode-switch shape as `EditInterpretation`
+    /// below — a fresh, non-`deletable` `EditInterpretationDialog` — so the add and edit dialogs
+    /// are identical apart from prefill/deletability, mirroring the modbus module's own
+    /// `EditInputDialog::new()`/`from_register` split (Shared).
+    Add(EditInterpretationOverlay),
     /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device. Renamed from
     /// `Edit` (mechanical rename, `s15`) to make room for `EditInterpretation` below, which
     /// this could otherwise be confused with.
@@ -941,10 +943,10 @@ impl ModbusMonitorModuleView {
     /// "the dialog never asks for it"), and add it to the module's interpretations (MB-R-145).
     /// No-op if the overlay isn't open, the dialog is invalid, or nothing is selected.
     fn confirm_add(&mut self) {
-        let MonitorOverlay::Add(dialog) = &self.overlay else {
+        let MonitorOverlay::Add(overlay) = &self.overlay else {
             return;
         };
-        let Ok((name, def)) = dialog.apply() else {
+        let Ok((name, def)) = overlay.apply() else {
             return;
         };
         let Some(unit) = self.selected_unit() else {
@@ -1295,7 +1297,7 @@ impl ModuleView for ModbusMonitorModuleView {
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
         let full_area = frame.area();
         match &mut self.overlay {
-            MonitorOverlay::Add(dialog) => dialog.render(full_area, frame.buffer_mut()),
+            MonitorOverlay::Add(overlay) => overlay.render(full_area, frame.buffer_mut()),
             MonitorOverlay::EditSetup(dialog) => dialog.render(full_area, frame.buffer_mut()),
             MonitorOverlay::EditInterpretation(overlay, _) => {
                 overlay.render(full_area, frame.buffer_mut())
@@ -1319,58 +1321,86 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             return EventResult::Consumed;
         }
-        if let MonitorOverlay::Add(dialog) = &mut self.overlay {
-            // Manual-exercise fix — while the "Add predefined" named-value sub-popup is open,
-            // *every* key (not just Esc/Enter) must route to it, not the parent dialog's own
-            // fields; mirrors the modbus module's own `RegisterDialog` sub-dialog gate
+        if let MonitorOverlay::Add(overlay) = &mut self.overlay {
+            // The `:add` dialog is never `deletable` (UI-R-061: nothing exists yet to delete),
+            // so `confirm_delete_mut()` never actually opens here — this gate is kept anyway to
+            // mirror `MonitorOverlay::EditInterpretation`'s own shape exactly (Shared), rather
+            // than special-casing Add's routing.
+            use crate::module::modbus::dialog::{DeleteConfirmOutcome, route_delete_confirm};
+            if overlay.confirm_delete_mut().is_some() {
+                match route_delete_confirm(overlay.confirm_delete_mut(), modifiers, code) {
+                    DeleteConfirmOutcome::Confirmed => {
+                        self.delete_interpretation();
+                    }
+                    DeleteConfirmOutcome::Consumed | DeleteConfirmOutcome::NotActive => {}
+                }
+                return EventResult::Consumed;
+            }
+            // While the "Add predefined" named-value sub-popup is open, *every* key (not just
+            // Esc/Enter) must route to it, not the parent dialog's own fields; mirrors the
+            // modbus module's own `RegisterDialog` sub-dialog gate
             // (`ferrowl/src/module/modbus/view/mod.rs`'s `if overlay.has_sub_dialog() { ... }`,
             // which returns early before any parent-dialog routing runs).
-            if dialog.add_dialog.is_some() {
+            if overlay.add_dialog_mut().is_some() {
                 match code {
-                    KeyCode::Esc => dialog.add_dialog = None,
-                    KeyCode::Enter => dialog.confirm_add_dialog(),
+                    KeyCode::Esc => *overlay.add_dialog_mut() = None,
+                    KeyCode::Enter => overlay.confirm_add_dialog(),
                     KeyCode::Tab => {
-                        if let Some(d) = dialog.add_dialog.as_mut() {
+                        if let Some(d) = overlay.add_dialog_mut().as_mut() {
                             d.focus_next();
                         }
                     }
                     KeyCode::BackTab => {
-                        if let Some(d) = dialog.add_dialog.as_mut() {
+                        if let Some(d) = overlay.add_dialog_mut().as_mut() {
                             d.focus_previous();
                         }
                     }
                     _ => {
-                        if let Some(d) = dialog.add_dialog.as_mut() {
+                        if let Some(d) = overlay.add_dialog_mut().as_mut() {
                             let _ =
                                 ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
                         }
                     }
+                }
+                // `KeyCode::Enter` above (`confirm_add_dialog`) may just have pushed the first
+                // alias into an `Input` overlay; check the mode-switch here too, not just after
+                // the outer match below (Shared with `MonitorOverlay::EditInterpretation`).
+                if let MonitorOverlay::Add(overlay) = &self.overlay
+                    && let Some(switched) = overlay.maybe_switch()
+                {
+                    self.overlay = MonitorOverlay::Add(switched);
                 }
                 return EventResult::Consumed;
             }
             match code {
                 KeyCode::Esc => {
                     self.overlay = MonitorOverlay::None;
+                    return EventResult::Consumed;
                 }
-                KeyCode::Enter if dialog.is_confirm_button_focused() => {
+                KeyCode::Enter if overlay.is_confirm_button_focused() => {
                     self.confirm_add();
+                    return EventResult::Consumed;
                 }
                 KeyCode::Char(' ') => {
-                    dialog.handle_space();
+                    overlay.handle_space();
                 }
                 KeyCode::BackTab => {
-                    dialog.focus_previous();
+                    overlay.focus_previous();
                 }
                 KeyCode::Tab => {
-                    dialog.focus_next();
+                    overlay.focus_next();
                 }
                 _ => {
-                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(
-                        dialog.as_mut(),
-                        modifiers,
-                        code,
-                    );
+                    overlay.handle_events(modifiers, code);
                 }
+            }
+            // After every keyevent, swap Input<->Selection mode the moment the alias list
+            // transitions empty<->non-empty — so typing an alias in the Add dialog also
+            // triggers the swap to Selection mode (Shared with `EditInterpretation`).
+            if let MonitorOverlay::Add(overlay) = &self.overlay
+                && let Some(switched) = overlay.maybe_switch()
+            {
+                self.overlay = MonitorOverlay::Add(switched);
             }
             return EventResult::Consumed;
         }
@@ -1625,7 +1655,9 @@ impl ModuleView for ModbusMonitorModuleView {
             }
 
             ModbusMonitorCmd::Add => {
-                self.overlay = MonitorOverlay::Add(Box::new(AddInterpretationDialog::new()));
+                self.overlay = MonitorOverlay::Add(EditInterpretationOverlay::Input(Box::new(
+                    EditInterpretationDialog::new(),
+                )));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -2249,26 +2281,28 @@ mod tests {
         let _log: SharedLog = v.log();
     }
 
-    /// Manual-exercise fix — once "Add predefined" opens the named-value sub-popup, keyboard
-    /// input (typed characters, Tab) reaches the sub-popup's own fields, not the parent
-    /// `AddInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog` sub-dialog
-    /// routing, `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
+    /// Once "Add predefined" opens the named-value sub-popup, keyboard input (typed characters,
+    /// Tab) reaches the sub-popup's own fields, not the parent `EditInterpretationDialog`'s
+    /// (mirrors the modbus module's own `RegisterDialog` sub-dialog routing,
+    /// `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
     #[tokio::test]
     async fn ut_add_predefined_popup_receives_keyboard_focus() {
         let mut v = view();
         v.handle_command("add").await;
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
         };
+        let dialog = overlay.as_input_mut();
         dialog.open_add_dialog();
         assert!(dialog.add_dialog.is_some());
         let parent_label_before = dialog.label.state.input().to_string();
 
         v.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
 
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!("overlay changed unexpectedly");
         };
+        let dialog = overlay.as_input_mut();
         assert_eq!(
             dialog
                 .add_dialog
@@ -2288,7 +2322,9 @@ mod tests {
     }
 
     /// UI-R-061 — `:add` scopes the new interpretation to the currently selected unit id; the
-    /// dialog never asks for one, and other unit ids' interpretation sets are untouched.
+    /// dialog never asks for one, and other unit ids' interpretation sets are untouched. Also
+    /// confirms the dialog opens as a fresh, non-`deletable` `EditInterpretationDialog` —
+    /// the crux of "the add dialog matches the edit dialog except for prefill".
     #[tokio::test]
     async fn ut_add_command_scopes_new_interpretation_to_selected_unit_id() {
         use crate::module::modbus::dialog::set_input;
@@ -2298,9 +2334,14 @@ mod tests {
         v.selected = 1; // unit 3
 
         v.handle_command("add").await;
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
         };
+        let dialog = overlay.as_input_mut();
+        assert!(
+            !dialog.deletable,
+            "the :add dialog must open with deletable == false"
+        );
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.address, "10");
         v.confirm_add();
@@ -2323,9 +2364,10 @@ mod tests {
         v.selected = 0;
 
         v.handle_command("add").await;
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
         };
+        let dialog = overlay.as_input_mut();
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.address, "10");
         v.confirm_add();
@@ -2414,9 +2456,10 @@ mod tests {
         v.selected = 0;
 
         v.handle_command("add").await;
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
         };
+        let dialog = overlay.as_input_mut();
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.address, "10");
         v.confirm_add();
@@ -2445,9 +2488,10 @@ mod tests {
         v.selected = 0;
 
         v.handle_command("add").await;
-        let MonitorOverlay::Add(dialog) = &mut v.overlay else {
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
         };
+        let dialog = overlay.as_input_mut();
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.address, "10");
         v.confirm_add();

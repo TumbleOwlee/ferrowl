@@ -1,6 +1,10 @@
-//! `AddInterpretationDialog` (UI-R-061): a purpose-built `:add`/`:a` dialog for a monitor
-//! module, producing a [`MonitorRegisterDef`] (MB-R-145) scoped to the view's currently
-//! selected unit id (the dialog itself never asks for a slave id).
+//! [`EditInterpretationDialog`] (UI-R-061/UI-R-064): a purpose-built `:add`/`:a`/edit dialog for
+//! a monitor module, producing a [`MonitorRegisterDef`] (MB-R-145) scoped to the view's
+//! currently selected unit id (the dialog itself never asks for a slave id). One struct serves
+//! both `:add` (`deletable == false`, `new()`) and the MB-R-148 edit-on-a-row dialog
+//! (`deletable == true`, `from_interpretation(...)`) — mirroring the modbus module's own
+//! `EditInputDialog`'s `deletable` field/`from_register` split (`dialog/input/mod.rs`), rather
+//! than the two near-duplicate structs this module used to keep.
 //!
 //! Deliberately a new, small struct rather than a "monitor mode" bolted onto
 //! [`crate::module::modbus::dialog::EditInputDialog`]: that struct's `access`/`value`/
@@ -40,551 +44,16 @@ use crate::module::modbus::dialog::{
     widgets, word_order_index,
 };
 
-#[focusable]
-#[derive(Builder, Debug, Focus)]
-pub struct AddInterpretationDialog {
-    #[focus]
-    pub label: Widget<InputFieldState, InputField<NonEmpty>>,
-    #[focus]
-    pub description: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub address: Widget<InputFieldState, InputField<crate::dialog::Address>>,
-    #[focus]
-    pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
-    #[focus(when = { !self.is_boolean_kind() })]
-    pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
-    pub boolean_type: Widget<String, Text>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
-    pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
-    pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0) })]
-    pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number })]
-    pub number_resolution: Widget<InputFieldState, InputField<f64>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0) })]
-    pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
-    pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
-    #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
-    pub text_width: Widget<InputFieldState, InputField<usize>>,
-    /// Item 5 — the named-value list + delete UI, parity with `EditSelectionDialog<NamedValue>`
-    /// (Shared): a single-line selectable list of `pending_named_values`, kept in sync with it
-    /// on every `render()` (the list of `Vec<NamedValue>`, not a `SelectionState<NamedValue>`,
-    /// stays the source of truth `apply()` already reads — this is purely the display/pick/
-    /// delete widget over it).
-    #[focus(when = { !self.pending_named_values.is_empty() })]
-    pub value_list: Widget<SelectionState<NamedValue>, Selection<NamedValue>>,
-    #[focus]
-    pub add_button: Widget<ButtonState, Button>,
-    /// Item 5 — deletes the `value_list`-selected named value from `pending_named_values`
-    /// (`delete_selected_named_value`), immediately (no confirm popup — mirrors
-    /// `EditSelectionDialog::delete_selected`'s own no-confirm shape, Shared; this is distinct
-    /// from `EditInterpretationDialog::delete_button`, which deletes the whole interpretation
-    /// and is confirm-guarded).
-    #[focus(when = { !self.pending_named_values.is_empty() })]
-    pub delete_value_button: Widget<ButtonState, Button>,
-    #[focus]
-    pub confirm_button: Widget<ButtonState, Button>,
-    pub error: Widget<String, Text>,
-    pub keybinds: [Widget<String, Text>; 2],
-    #[builder(default)]
-    pub add_dialog: Option<AddNamedValueDialog>,
-    #[builder(default)]
-    pub pending_named_values: Vec<NamedValue>,
-}
-
-impl AddInterpretationDialog {
-    pub fn new() -> Self {
-        let mut label = widgets::input::<NonEmpty>("Label", "Custom label...");
-        ferrowl_ui::traits::SetFocus::set_focused(&mut label.state, true);
-
-        AddInterpretationDialogBuilder::default()
-            .label(label)
-            .description(widgets::input_multiline::<String>(
-                "Description",
-                "Some description...",
-            ))
-            .address(widgets::input::<crate::dialog::Address>(
-                "Address",
-                "100 or 'virtual'",
-            ))
-            .kind(widgets::selection("Kind", widgets::kind_options(), 0))
-            .value_type(widgets::selection(
-                ("Type", HorizontalAlignment::Right),
-                vec![ValueType::Number, ValueType::Text],
-                0,
-            ))
-            .boolean_type(widgets::text_boxed(
-                ("Type", HorizontalAlignment::Right),
-                "Boolean",
-                Default::default(),
-                false,
-            ))
-            .number_format(widgets::selection(
-                ("Format", HorizontalAlignment::Left),
-                widgets::format_options(),
-                0,
-            ))
-            .number_endian(widgets::selection(
-                ("Endian", HorizontalAlignment::Center),
-                widgets::endian_options(),
-                0,
-            ))
-            .number_word_order(widgets::selection(
-                ("Order", HorizontalAlignment::Center),
-                widgets::word_order_options(),
-                0,
-            ))
-            .number_resolution(widgets::input_filled::<f64>(
-                ("Resolution", HorizontalAlignment::Center),
-                "1.0",
-            ))
-            .number_bitmask(widgets::input::<crate::dialog::Bitmask>(
-                ("Bitmask", HorizontalAlignment::Right),
-                "0xFFFF",
-            ))
-            .text_alignment(widgets::selection(
-                "Alignment",
-                widgets::alignment_options(),
-                0,
-            ))
-            .text_width(widgets::input::<usize>(
-                ("Width", HorizontalAlignment::Right),
-                "1",
-            ))
-            .value_list(widgets::selection("Value", Vec::<NamedValue>::new(), 0))
-            .add_button(widgets::button("ADD ALIAS", 1))
-            .delete_value_button(widgets::button("DEL", 0))
-            .confirm_button(widgets::button("CONFIRM", 1))
-            .error(widgets::error_text())
-            .keybinds([
-                widgets::keybind("<Space>: press button | <C-f>: fill value | <Tab>: next"),
-                widgets::keybind("<Esc>: close | <Enter>: confirm / newline"),
-            ])
-            .focus(AddInterpretationDialogFocus::Label)
-            .build()
-            .expect("all AddInterpretationDialog fields are set")
-    }
-
-    /// Item 5 — remove the `value_list`-selected named value from `pending_named_values`
-    /// immediately (mirrors `EditSelectionDialog::delete_selected`'s no-confirm shape, Shared,
-    /// minus its `default_value` bookkeeping — `AddInterpretationDialog` has no default-value
-    /// field). No-op if the list is already empty.
-    pub fn delete_selected_named_value(&mut self) {
-        if self.pending_named_values.is_empty() {
-            return;
-        }
-        let idx = self
-            .value_list
-            .state
-            .selection()
-            .min(self.pending_named_values.len() - 1);
-        self.pending_named_values.remove(idx);
-        if self.pending_named_values.is_empty() {
-            self.focus_previous();
-        }
-    }
-
-    fn is_boolean_kind(&self) -> bool {
-        matches!(
-            self.kind.state.get_value().0,
-            Kind::Coil | Kind::DiscreteInput
-        )
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
-            return Err(format!("Label: {e}"));
-        } else if let Err(e) = parse_address(self.address.state.input()) {
-            return Err(format!("Address: {e}"));
-        }
-
-        if !self.is_boolean_kind() {
-            match self.value_type.state.values()[self.value_type.state.selection()] {
-                ValueType::Number => {
-                    if let ValidateResult::Error(e) =
-                        f64::validate(self.number_resolution.state.input())
-                    {
-                        return Err(format!("Resolution: {e}"));
-                    }
-                    let format =
-                        &self.number_format.state.values()[self.number_format.state.selection()].0;
-                    if is_integer_format(format)
-                        && let Err(e) = parse_bitmask(self.number_bitmask.state.input())
-                    {
-                        return Err(format!("Bitmask: {e}"));
-                    }
-                }
-                ValueType::Text => {
-                    if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
-                    {
-                        return Err(format!("Width: {e}"));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Validate and produce `(name, MonitorRegisterDef)`. `slave_id` is left at its default
-    /// (`0`) — the caller (the view) sets it to the currently selected unit id (UI-R-061).
-    pub fn apply(&self) -> Result<(String, MonitorRegisterDef), String> {
-        self.validate()?;
-        let name = self.label.state.input().trim().to_string();
-        let description = self.description.state.input().trim().to_string();
-        let address = parse_address(self.address.state.input())?;
-        let address = match address {
-            ferrowl_codec::Address::Fixed(a) => Some(a),
-            ferrowl_codec::Address::Virtual => None,
-        };
-        let is_virtual = address.is_none();
-        let kind = self.kind.state.get_value().0.clone();
-
-        let (value_type, endian, word_order, resolution, bitmask, alignment, length) =
-            if self.is_boolean_kind() {
-                (
-                    crate::config::device::ValueType::U16,
-                    EndianCfg::Big,
-                    WordOrderCfg::Normal,
-                    1.0,
-                    None,
-                    AlignmentCfg::Left,
-                    1usize,
-                )
-            } else {
-                match self.value_type.state.get_value() {
-                    ValueType::Number => {
-                        let selected = self.number_format.state.get_value();
-                        let endian = self.number_endian.state.get_value().0.clone();
-                        let word_order = self.number_word_order.state.get_value().0;
-                        let resolution = self
-                            .number_resolution
-                            .state
-                            .input()
-                            .trim()
-                            .parse::<f64>()
-                            .map_err(|_| "Resolution must be a number.".to_string())?;
-                        let bitfield = if is_integer_format(&selected.0) {
-                            parse_bitmask(self.number_bitmask.state.input())
-                                .map_err(|e| format!("Bitmask {e}."))?
-                        } else {
-                            BitField::default()
-                        };
-                        let bitmask = if bitfield.is_full() {
-                            None
-                        } else {
-                            Some(format!("0x{:X}", bitfield.mask))
-                        };
-                        (
-                            value_type_from_format(&selected.0),
-                            endian_cfg(&endian),
-                            word_order_cfg(word_order),
-                            resolution,
-                            bitmask,
-                            AlignmentCfg::Left,
-                            1,
-                        )
-                    }
-                    ValueType::Text => {
-                        let alignment = self.text_alignment.state.get_value().0;
-                        let width = self
-                            .text_width
-                            .state
-                            .input()
-                            .trim()
-                            .parse::<usize>()
-                            .map_err(|_| "Width must be a number.".to_string())?;
-                        (
-                            crate::config::device::ValueType::Ascii,
-                            EndianCfg::Big,
-                            WordOrderCfg::Normal,
-                            1.0,
-                            None,
-                            alignment_cfg(alignment),
-                            width,
-                        )
-                    }
-                }
-            };
-
-        let def = MonitorRegisterDef {
-            slave_id: 0,
-            kind,
-            address,
-            is_virtual,
-            value_type,
-            endian,
-            word_order,
-            resolution,
-            bitmask,
-            length,
-            alignment,
-            values: self.pending_named_values.clone(),
-            description,
-            default: None,
-        };
-        Ok((name, def))
-    }
-
-    pub fn open_add_dialog(&mut self) {
-        self.add_dialog = Some(AddNamedValueDialog::new());
-    }
-
-    pub fn confirm_add_dialog(&mut self) {
-        let result = self.add_dialog.as_ref().map(|d| d.apply());
-        match result {
-            Some(Ok(nv)) => {
-                self.pending_named_values.push(nv);
-                self.add_dialog = None;
-            }
-            Some(Err(e)) => {
-                if let Some(d) = self.add_dialog.as_mut() {
-                    d.error.state = e;
-                }
-            }
-            None => {}
-        }
-    }
-
-    pub fn handle_space(&mut self) {
-        match self.focus {
-            AddInterpretationDialogFocus::AddButton => self.open_add_dialog(),
-            AddInterpretationDialogFocus::DeleteValueButton => self.delete_selected_named_value(),
-            _ => {
-                let _ = HandleEvents::handle_events(self, KeyModifiers::NONE, KeyCode::Char(' '));
-            }
-        }
-    }
-
-    pub fn is_confirm_button_focused(&self) -> bool {
-        matches!(self.focus, AddInterpretationDialogFocus::ConfirmButton)
-    }
-
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        match self.validate() {
-            Ok(()) => self.error.state.clear(),
-            Err(e) => self.error.state = e,
-        }
-
-        let horizontal_layout: [Rect; 3] =
-            Layout::horizontal([Constraint::Min(1), Constraint::Max(76), Constraint::Min(1)])
-                .areas(area);
-        let vertical_layout: [Rect; 3] = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(30),
-            Constraint::Min(1),
-        ])
-        .areas(horizontal_layout[1]);
-
-        let block = Block::bordered()
-            .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
-            .title_alignment(HorizontalAlignment::Center)
-            .title("Add interpretation");
-        let dialog_box = vertical_layout[1];
-        let block_inner = block.inner(dialog_box);
-        let area = block_inner.inner(Margin::new(2, 1));
-        ratatui::prelude::Widget::render(&ratatui::widgets::Clear, dialog_box, buf);
-        block.render(dialog_box, buf);
-
-        let rows: [Rect; 10] = Layout::vertical([
-            Constraint::Length(3), // 0 label
-            Constraint::Length(3), // 1 description
-            Constraint::Length(3), // 2 address
-            Constraint::Length(3), // 3 kind + type (value_type / boolean_type)
-            Constraint::Length(3), // 4 Number/Text-conditional fields
-            Constraint::Length(3), // 5 add_button
-            Constraint::Length(3), // 6 confirm_button
-            Constraint::Length(3), // 7 error
-            Constraint::Length(1), // 8 keybind0
-            Constraint::Length(1), // 9 keybind1
-        ])
-        .areas(area);
-
-        StatefulWidget::render(&self.label.widget, rows[0], buf, &mut self.label.state);
-        StatefulWidget::render(
-            &self.description.widget,
-            rows[1],
-            buf,
-            &mut self.description.state,
-        );
-        StatefulWidget::render(&self.address.widget, rows[2], buf, &mut self.address.state);
-        // Manual-exercise fix (item 4) — Kind and Type on the same line (a 2-column split, not
-        // the modbus module's 3-column Kind/Access/Type — UI-R-064 drops Access, Shared).
-        let kind_type: [Rect; 2] =
-            Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[3]);
-        StatefulWidget::render(&self.kind.widget, kind_type[0], buf, &mut self.kind.state);
-        if self.is_boolean_kind() {
-            StatefulWidget::render(
-                &self.boolean_type.widget,
-                kind_type[1],
-                buf,
-                &mut self.boolean_type.state,
-            );
-        } else {
-            StatefulWidget::render(
-                &self.value_type.widget,
-                kind_type[1],
-                buf,
-                &mut self.value_type.state,
-            );
-            // Mirrors EditInputDialog's render.rs Number/Text branch — the fields that were
-            // missing entirely here (struct fields existed and `apply()` already read them,
-            // but render() never drew them, so the user had no way to see or edit them).
-            match self.value_type.state.values()[self.value_type.state.selection()] {
-                ValueType::Number => {
-                    let integer = is_integer_format(&self.number_format.get_value().0);
-                    let multi = is_multi_register_format(&self.number_format.get_value().0);
-                    let columns = 3 + multi as usize + integer as usize;
-                    let cells =
-                        Layout::horizontal(vec![Constraint::Min(1); columns]).split(rows[4]);
-
-                    let mut col = 0;
-                    StatefulWidget::render(
-                        &self.number_format.widget,
-                        cells[col],
-                        buf,
-                        &mut self.number_format.state,
-                    );
-                    col += 1;
-
-                    StatefulWidget::render(
-                        &self.number_endian.widget,
-                        cells[col],
-                        buf,
-                        &mut self.number_endian.state,
-                    );
-                    col += 1;
-
-                    if multi {
-                        StatefulWidget::render(
-                            &self.number_word_order.widget,
-                            cells[col],
-                            buf,
-                            &mut self.number_word_order.state,
-                        );
-                        col += 1;
-                    }
-
-                    StatefulWidget::render(
-                        &self.number_resolution.widget,
-                        cells[col],
-                        buf,
-                        &mut self.number_resolution.state,
-                    );
-                    col += 1;
-
-                    if integer {
-                        StatefulWidget::render(
-                            &self.number_bitmask.widget,
-                            cells[col],
-                            buf,
-                            &mut self.number_bitmask.state,
-                        );
-                    }
-                }
-                ValueType::Text => {
-                    let cells: [Rect; 2] =
-                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[4]);
-                    StatefulWidget::render(
-                        &self.text_alignment.widget,
-                        cells[0],
-                        buf,
-                        &mut self.text_alignment.state,
-                    );
-                    StatefulWidget::render(
-                        &self.text_width.widget,
-                        cells[1],
-                        buf,
-                        &mut self.text_width.state,
-                    );
-                }
-            }
-        }
-        // Item 5 — named-value list + delete, parity with `EditSelectionDialog<NamedValue>`'s
-        // own value/add/delete row (Shared). `value_list.state` is kept in sync with
-        // `pending_named_values` on every render, same source-of-truth split as `apply()`
-        // already reads (`pending_named_values`, not `value_list.state`).
-        self.value_list
-            .state
-            .set_values(self.pending_named_values.clone());
-        let value_row: [Rect; 4] = Layout::horizontal([
-            Constraint::Min(1),
-            Constraint::Length(18),
-            Constraint::Length(7),
-            Constraint::Length(1),
-        ])
-        .areas(rows[5]);
-        if self.pending_named_values.is_empty() {
-            let text = ferrowl_ui::widgets::TextBuilder::default()
-                .margin(Margin {
-                    horizontal: 1,
-                    vertical: 0,
-                })
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .style(ferrowl_ui::style::TextStyle {
-                    general: Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg),
-                })
-                .multiline(true)
-                .build()
-                .expect("all required builder fields are set");
-            let mut message: String = "No predefined values — reopen to use free-text input".into();
-            StatefulWidget::render(&text, value_row[0], buf, &mut message);
-        } else {
-            StatefulWidget::render(
-                &self.value_list.widget,
-                value_row[0],
-                buf,
-                &mut self.value_list.state,
-            );
-            StatefulWidget::render(
-                &self.delete_value_button.widget,
-                value_row[2],
-                buf,
-                &mut self.delete_value_button.state,
-            );
-        }
-        StatefulWidget::render(
-            &self.add_button.widget,
-            value_row[1],
-            buf,
-            &mut self.add_button.state,
-        );
-        StatefulWidget::render(
-            &self.confirm_button.widget,
-            rows[6],
-            buf,
-            &mut self.confirm_button.state,
-        );
-        // Item 4 — same class of bug as `setup_dialog::MonitorSetupDialog::render` (Shared): no
-        // error box drawn at all while the dialog validates cleanly.
-        if !self.error.state.is_empty() {
-            StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
-        }
-        StatefulWidget::render(
-            &self.keybinds[0].widget,
-            rows[8],
-            buf,
-            &mut self.keybinds[0].state,
-        );
-        StatefulWidget::render(
-            &self.keybinds[1].widget,
-            rows[9],
-            buf,
-            &mut self.keybinds[1].state,
-        );
-
-        if let Some(dialog) = self.add_dialog.as_mut() {
-            dialog.render(area, buf);
-        }
-    }
-}
-
-/// MB-R-148 — the `:edit`-on-a-Resolved-registers-row dialog: `AddInterpretationDialog`'s field
-/// set plus a Delete button/confirmation flow and prefill-from-existing-row support. A new,
-/// small struct rather than a mode bolted onto `EditInputDialog`, for the same reason
-/// `AddInterpretationDialog`'s own doc comment gives (Shared): no `access`/`value`/
-/// `default_value` fields apply to a monitor interpretation.
+/// UI-R-061 (`:add`, `deletable == false`) / MB-R-148 (edit-on-a-Resolved-registers-row,
+/// `deletable == true`) dialog: the field set plus a Delete button/confirmation flow gated on
+/// `deletable`, and prefill-from-existing-row support (`from_interpretation`). Mirrors the
+/// modbus module's own `EditInputDialog`'s `deletable` field / `new()` vs `from_register` split
+/// (`dialog/input/mod.rs`, Shared) — a single struct rather than the two near-duplicate structs
+/// (`AddInterpretationDialog`/`EditInterpretationDialog`) this module used to keep, which
+/// differed only in that gated Delete button and the mode-switch-to-selection wiring. A new,
+/// small struct rather than a mode bolted onto `EditInputDialog` itself, for the same reason
+/// this module's doc comment gives (Shared): no `access`/`value`/`default_value` fields apply to
+/// a monitor interpretation.
 #[focusable]
 #[derive(Builder, Debug, Focus)]
 pub struct EditInterpretationDialog {
@@ -622,9 +91,9 @@ pub struct EditInterpretationDialog {
     pub add_button: Widget<ButtonState, Button>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
-    /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — mirrors
-    /// `EditInputDialog`'s `delete_register_button` (Shared).
-    #[focus]
+    /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — only
+    /// focusable when `deletable` (mirrors `EditInputDialog`'s `delete_register_button`, Shared).
+    #[focus(when = { self.deletable })]
     pub delete_button: Widget<ButtonState, Button>,
     pub error: Widget<String, Text>,
     pub keybinds: [Widget<String, Text>; 2],
@@ -632,6 +101,11 @@ pub struct EditInterpretationDialog {
     pub add_dialog: Option<AddNamedValueDialog>,
     #[builder(default)]
     pub pending_named_values: Vec<NamedValue>,
+    /// Whether this dialog edits an existing interpretation (enables the delete button) —
+    /// `false` for `:add`/`new()`, `true` for `from_interpretation` (MB-R-148). Mirrors
+    /// `EditInputDialog::deletable` (Shared).
+    #[builder(default)]
+    pub deletable: bool,
     /// Guards `delete_button` (MB-R-148) — reuses `ConfirmDeleteDialog` verbatim, already
     /// generic sub-dialog plumbing (Shared), not `EditInputDialog`-specific.
     #[builder(default)]
@@ -715,6 +189,7 @@ impl EditInterpretationDialog {
     /// gives for starting on Value there.
     pub fn from_interpretation(name: &str, def: &MonitorRegisterDef) -> Self {
         let mut dialog = Self::new();
+        dialog.deletable = true;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, &def.description);
         match def.address() {
@@ -805,8 +280,8 @@ impl EditInterpretationDialog {
     }
 
     /// Validate and produce `(name, MonitorRegisterDef)`. `slave_id` is left at its default
-    /// (`0`) — the caller (the view) scopes it to the unit id being edited, same as
-    /// `AddInterpretationDialog::apply` (Shared).
+    /// (`0`) — the caller (the view) scopes it to the currently selected unit id (UI-R-061 for
+    /// `:add`; UI-R-064's edit dialog scopes to the unit id already being edited).
     pub fn apply(&self) -> Result<(String, MonitorRegisterDef), String> {
         self.validate()?;
         let name = self.label.state.input().trim().to_string();
@@ -938,6 +413,7 @@ impl EditInterpretationDialog {
     /// `EditInputDialog::to_edit_selection_dialog` (Shared).
     pub fn to_selection_dialog(&self) -> EditInterpretationSelectionDialog {
         let mut d = EditInterpretationSelectionDialog::new(self.pending_named_values.clone());
+        d.deletable = self.deletable;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.address.state = self.address.state.clone();
@@ -991,7 +467,11 @@ impl EditInterpretationDialog {
         let block = Block::bordered()
             .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
             .title_alignment(HorizontalAlignment::Center)
-            .title("Edit interpretation");
+            .title(if self.deletable {
+                "Edit interpretation"
+            } else {
+                "Add interpretation"
+            });
         let dialog_box = vertical_layout[1];
         let block_inner = block.inner(dialog_box);
         let area = block_inner.inner(Margin::new(2, 1));
@@ -1005,7 +485,7 @@ impl EditInterpretationDialog {
             Constraint::Length(3), // 3 kind + type (value_type / boolean_type)
             Constraint::Length(3), // 4 Number/Text-conditional fields
             Constraint::Length(3), // 5 add_button
-            Constraint::Length(3), // 6 confirm_button + delete_button
+            Constraint::Length(3), // 6 confirm_button [+ delete_button when deletable]
             Constraint::Length(3), // 7 error
             Constraint::Length(1), // 8 keybind0
             Constraint::Length(1), // 9 keybind1
@@ -1020,8 +500,7 @@ impl EditInterpretationDialog {
             &mut self.description.state,
         );
         StatefulWidget::render(&self.address.widget, rows[2], buf, &mut self.address.state);
-        // Manual-exercise fix (item 4) — Kind and Type on the same line, see
-        // `AddInterpretationDialog::render` (Shared).
+        // Kind and Type on the same line (Shared).
         let kind_type: [Rect; 2] =
             Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[3]);
         StatefulWidget::render(&self.kind.widget, kind_type[0], buf, &mut self.kind.state);
@@ -1109,35 +588,43 @@ impl EditInterpretationDialog {
                 }
             }
         }
-        // Manual-exercise fix (item 3) — a plain, full-width "ADD ALIAS" button; the alias
-        // list/DEL UI now lives entirely in `EditInterpretationSelectionDialog` (Shared).
+        // A plain, full-width "ADD ALIAS" button; the alias list/DEL UI lives entirely in
+        // `EditInterpretationSelectionDialog` (Shared).
         StatefulWidget::render(
             &self.add_button.widget,
             rows[5],
             buf,
             &mut self.add_button.state,
         );
-        // Manual-exercise fix (item 1) — Confirm and Delete on the same line (50/50 split),
-        // matching `EditInputDialog::render`'s own `deletable` branch (Shared);
-        // `EditInterpretationDialog` is always deletable (it only exists for editing an
-        // already-confirmed interpretation), so there is no non-deletable branch to keep.
-        let confirm_delete: [Rect; 2] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(rows[6]);
-        StatefulWidget::render(
-            &self.confirm_button.widget,
-            confirm_delete[0],
-            buf,
-            &mut self.confirm_button.state,
-        );
-        StatefulWidget::render(
-            &self.delete_button.widget,
-            confirm_delete[1],
-            buf,
-            &mut self.delete_button.state,
-        );
-        // Manual-exercise fix (error box) — same class of bug as `AddInterpretationDialog::render`
-        // (Shared): no error box drawn at all while the dialog validates cleanly.
+        // Confirm alone full-width when `:add` (`!deletable`); Confirm+Delete 50/50 split once
+        // editing an existing interpretation (`deletable`) — matches `EditInputDialog::render`'s
+        // own `deletable` branch (Shared).
+        if self.deletable {
+            let confirm_delete: [Rect; 2] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas(rows[6]);
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                confirm_delete[0],
+                buf,
+                &mut self.confirm_button.state,
+            );
+            StatefulWidget::render(
+                &self.delete_button.widget,
+                confirm_delete[1],
+                buf,
+                &mut self.delete_button.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                rows[6],
+                buf,
+                &mut self.confirm_button.state,
+            );
+        }
+        // Same class of bug as `setup_dialog::MonitorSetupDialog::render` (Shared): no error box
+        // drawn at all while the dialog validates cleanly.
         if !self.error.state.is_empty() {
             StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
         }
@@ -1200,7 +687,8 @@ pub struct EditInterpretationSelectionDialog {
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     /// The alias list itself — the source of truth `apply()` reads (unlike
-    /// `AddInterpretationDialog::value_list`, which mirrors a separate `pending_named_values`).
+    /// `EditInterpretationDialog::pending_named_values`, its `Input`-mode counterpart's own
+    /// separate list).
     #[focus(when = { !self.value.state.values().is_empty() })]
     pub value: Widget<SelectionState<NamedValue>, Selection<NamedValue>>,
     #[focus]
@@ -1209,14 +697,19 @@ pub struct EditInterpretationSelectionDialog {
     pub delete_value_button: Widget<ButtonState, Button>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
-    /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — same as
-    /// `EditInterpretationDialog::delete_button` (Shared).
-    #[focus]
+    /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — only
+    /// focusable when `deletable`, same as `EditInterpretationDialog::delete_button` (Shared).
+    #[focus(when = { self.deletable })]
     pub delete_button: Widget<ButtonState, Button>,
     pub error: Widget<String, Text>,
     pub keybinds: [Widget<String, Text>; 2],
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
+    /// Whether this dialog edits an existing interpretation (enables the delete button); carried
+    /// over from `EditInterpretationDialog::deletable` across the mode swap in both directions
+    /// (`to_selection_dialog`/`to_input_dialog`, Shared).
+    #[builder(default)]
+    pub deletable: bool,
     #[builder(default)]
     pub confirm_delete: Option<ConfirmDeleteDialog>,
 }
@@ -1301,6 +794,7 @@ impl EditInterpretationSelectionDialog {
     /// field's state back once the alias list empties out (Shared).
     pub fn to_input_dialog(&self) -> EditInterpretationDialog {
         let mut d = EditInterpretationDialog::new();
+        d.deletable = self.deletable;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.address.state = self.address.state.clone();
@@ -1550,7 +1044,11 @@ impl EditInterpretationSelectionDialog {
         let block = Block::bordered()
             .style(Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.bg))
             .title_alignment(HorizontalAlignment::Center)
-            .title("Edit interpretation");
+            .title(if self.deletable {
+                "Edit interpretation"
+            } else {
+                "Add interpretation"
+            });
         let dialog_box = vertical_layout[1];
         let block_inner = block.inner(dialog_box);
         let area = block_inner.inner(Margin::new(2, 1));
@@ -1564,7 +1062,7 @@ impl EditInterpretationSelectionDialog {
             Constraint::Length(3), // 3 kind + type (value_type / boolean_type)
             Constraint::Length(3), // 4 Number/Text-conditional fields
             Constraint::Length(3), // 5 value + add_button + delete_value_button
-            Constraint::Length(3), // 6 confirm_button + delete_button
+            Constraint::Length(3), // 6 confirm_button [+ delete_button when deletable]
             Constraint::Length(3), // 7 error
             Constraint::Length(1), // 8 keybind0
             Constraint::Length(1), // 9 keybind1
@@ -1688,21 +1186,30 @@ impl EditInterpretationSelectionDialog {
             &mut self.add_button.state,
         );
 
-        let confirm_delete: [Rect; 2] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(rows[6]);
-        StatefulWidget::render(
-            &self.confirm_button.widget,
-            confirm_delete[0],
-            buf,
-            &mut self.confirm_button.state,
-        );
-        StatefulWidget::render(
-            &self.delete_button.widget,
-            confirm_delete[1],
-            buf,
-            &mut self.delete_button.state,
-        );
+        if self.deletable {
+            let confirm_delete: [Rect; 2] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas(rows[6]);
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                confirm_delete[0],
+                buf,
+                &mut self.confirm_button.state,
+            );
+            StatefulWidget::render(
+                &self.delete_button.widget,
+                confirm_delete[1],
+                buf,
+                &mut self.delete_button.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.confirm_button.widget,
+                rows[6],
+                buf,
+                &mut self.confirm_button.state,
+            );
+        }
 
         if !self.error.state.is_empty() {
             StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
@@ -1774,12 +1281,23 @@ mod tests {
     use super::*;
     use crate::module::modbus::dialog::{kind_index, set_input};
 
-    /// UI-R-061 — `apply()` over a filled-in dialog builds a `MonitorRegisterDef` with the
-    /// expected kind/address/value_type, and no access/value/default field exists on the
-    /// struct at all (proven by the struct definition itself compiling without them).
+    /// The crux of the add/edit unification: `EditInterpretationDialog::new()` (used by `:add`,
+    /// UI-R-061) is not deletable, while `from_interpretation` (used by the MB-R-148 edit-on-a-
+    /// row dialog, UI-R-064) is — mirroring `EditInputDialog::new()`/`from_register`'s own
+    /// `deletable` split (Shared).
+    #[test]
+    fn ut_new_is_not_deletable_and_from_interpretation_is() {
+        assert!(!EditInterpretationDialog::new().deletable);
+        assert!(EditInterpretationDialog::from_interpretation("power", &sample_def()).deletable);
+    }
+
+    /// UI-R-061 — `apply()` over a filled-in `:add` dialog (`new()`, not deletable) builds a
+    /// `MonitorRegisterDef` with the expected kind/address/value_type, and no access/value/
+    /// default field exists on the struct at all (proven by the struct definition itself
+    /// compiling without them).
     #[test]
     fn ut_add_interpretation_dialog_apply_builds_monitor_register_def() {
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.description, "Active power");
         set_input(&mut dialog.address, "10");
@@ -1804,12 +1322,12 @@ mod tests {
     /// at all, so the user had no way to see or edit a Number/Text interpretation's format.
     #[test]
     fn ut_render_shows_number_format_fields_when_number_type_selected() {
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         dialog
             .kind
             .state
             .set_selection(kind_index(&Kind::HoldingRegister));
-        // ValueType::Number is index 0 per AddInterpretationDialog::new()'s selection order.
+        // ValueType::Number is index 0 per EditInterpretationDialog::new()'s selection order.
         dialog.value_type.state.set_selection(0);
 
         let area = Rect::new(0, 0, 120, 40);
@@ -1824,12 +1342,12 @@ mod tests {
     /// Same regression, for the Text branch's Alignment/Width fields.
     #[test]
     fn ut_render_shows_text_format_fields_when_text_type_selected() {
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         dialog
             .kind
             .state
             .set_selection(kind_index(&Kind::HoldingRegister));
-        // ValueType::Text is index 1 per AddInterpretationDialog::new()'s selection order.
+        // ValueType::Text is index 1 per EditInterpretationDialog::new()'s selection order.
         dialog.value_type.state.set_selection(1);
 
         let area = Rect::new(0, 0, 120, 40);
@@ -1841,15 +1359,14 @@ mod tests {
         }
     }
 
-    /// Manual-exercise fix (item 4) — same class of bug as
-    /// `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid` (Shared):
-    /// the error box must not draw at all while the dialog validates cleanly, only once it
-    /// doesn't.
+    /// Same class of bug as `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid`
+    /// (Shared): the error box must not draw at all while the dialog validates cleanly, only
+    /// once it doesn't.
     #[test]
     fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 120, 40);
 
-        let mut valid = AddInterpretationDialog::new();
+        let mut valid = EditInterpretationDialog::new();
         set_input(&mut valid.label, "power");
         set_input(&mut valid.description, "Active power");
         set_input(&mut valid.address, "10");
@@ -1865,7 +1382,7 @@ mod tests {
             "no error box should be drawn while the dialog is valid"
         );
 
-        let mut invalid = AddInterpretationDialog::new(); // empty label -> invalid
+        let mut invalid = EditInterpretationDialog::new(); // empty label -> invalid
         let mut buf = Buffer::empty(area);
         invalid.render(area, &mut buf);
         assert!(
@@ -1874,71 +1391,26 @@ mod tests {
         );
     }
 
-    /// Item 5 — the empty-list placeholder shows instead of the value list/delete button while
-    /// `pending_named_values` is empty, and the list itself (with each value's label, e.g. "on")
-    /// renders once values are present, parity with `EditSelectionDialog`'s own value/DEL row.
+    /// UI-R-061 — the `:add` dialog (`new()`, `deletable == false`) shows Confirm alone,
+    /// full-width, and no DELETE button (nothing exists yet to delete), with the "Add
+    /// interpretation" title — mirrors `EditInputDialog::render`'s own `deletable` branch
+    /// (Shared).
     #[test]
-    fn ut_render_shows_named_value_list_and_placeholder_when_empty() {
+    fn ut_add_dialog_render_shows_confirm_alone_and_add_title() {
         let area = Rect::new(0, 0, 120, 40);
-
-        let mut empty = AddInterpretationDialog::new();
-        let mut buf = Buffer::empty(area);
-        empty.render(area, &mut buf);
-        assert!(
-            buffer_text(&buf).contains("No predefined values"),
-            "the empty-list placeholder must show when there are no named values yet"
-        );
-
-        let mut with_values = AddInterpretationDialog::new();
-        with_values.pending_named_values.push(NamedValue {
-            name: "kettle-on".to_string(),
-            value: crate::config::device::Scalar::Int(1),
-        });
-        let mut buf = Buffer::empty(area);
-        with_values.render(area, &mut buf);
-        let text = buffer_text(&buf);
-        assert!(
-            !text.contains("No predefined values"),
-            "the placeholder must not show once a named value exists"
-        );
-        assert!(
-            text.contains("kettle-on"),
-            "the named value's own label must render (value_list.state must be kept in sync \
-             with pending_named_values on render, not left stale/empty):\n{text}"
-        );
-        assert!(
-            text.contains("DEL"),
-            "the delete button must render:\n{text}"
-        );
-    }
-
-    /// Item 5 — `delete_selected_named_value` (routed via `handle_space` on the delete button's
-    /// own focus variant) removes exactly the `value_list`-selected entry from
-    /// `pending_named_values`, parity with `EditSelectionDialog::delete_selected`.
-    #[test]
-    fn ut_delete_value_button_removes_selected_named_value() {
-        let mut dialog = AddInterpretationDialog::new();
-        dialog.pending_named_values.push(NamedValue {
-            name: "on".to_string(),
-            value: crate::config::device::Scalar::Int(1),
-        });
-        dialog.pending_named_values.push(NamedValue {
-            name: "off".to_string(),
-            value: crate::config::device::Scalar::Int(0),
-        });
-        // Render once first so `value_list.state` is synced from `pending_named_values` (render
-        // is what performs that sync — mirrors production: the widget is always rendered at
-        // least once before the user can select/act on it).
-        let area = Rect::new(0, 0, 120, 40);
+        let mut dialog = EditInterpretationDialog::new();
         let mut buf = Buffer::empty(area);
         dialog.render(area, &mut buf);
-        dialog.value_list.state.set_selection(1); // "off"
-
-        dialog.focus = AddInterpretationDialogFocus::DeleteValueButton;
-        dialog.handle_space();
-
-        assert_eq!(dialog.pending_named_values.len(), 1);
-        assert_eq!(dialog.pending_named_values[0].name, "on");
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Add interpretation"),
+            "missing Add title:\n{text}"
+        );
+        assert!(text.contains("CONFIRM"), "missing Confirm button:\n{text}");
+        assert!(
+            !text.contains("DELETE"),
+            "the :add dialog must not show a Delete button:\n{text}"
+        );
     }
 
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
@@ -1952,12 +1424,11 @@ mod tests {
         out
     }
 
-    /// Manual-exercise fix (item 2) — the add-named-value button reads "ADD ALIAS", not
-    /// "ADD PREDEFINED", in `AddInterpretationDialog`.
+    /// The add-named-value button reads "ADD ALIAS", not "ADD PREDEFINED".
     #[test]
     fn ut_add_button_label_is_add_alias() {
         let area = Rect::new(0, 0, 120, 40);
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         let mut buf = Buffer::empty(area);
         dialog.render(area, &mut buf);
         let text = buffer_text(&buf);
@@ -1976,7 +1447,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal
             .draw(|frame| {
@@ -2017,7 +1488,7 @@ mod tests {
     /// tests already prove — nothing about wiring it into this dialog broke it.
     #[test]
     fn ut_add_named_value_flow_reused_unchanged() {
-        let mut dialog = AddInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::new();
         dialog.open_add_dialog();
         assert!(dialog.add_dialog.is_some());
         {
@@ -2029,6 +1500,32 @@ mod tests {
         assert!(dialog.add_dialog.is_none());
         assert_eq!(dialog.pending_named_values.len(), 1);
         assert_eq!(dialog.pending_named_values[0].name, "on");
+    }
+
+    /// Mirrors the `:add` counterpart above (`ut_add_dialog_render_shows_confirm_alone_and_add_title`):
+    /// once `:add` mode-switches into `EditInterpretationSelectionDialog` (via `to_selection_dialog`,
+    /// carrying `deletable == false` across), the Selection-mode dialog must also show Confirm
+    /// alone, no DELETE.
+    #[test]
+    fn ut_selection_dialog_not_deletable_by_default_shows_confirm_alone() {
+        let area = Rect::new(0, 0, 120, 40);
+        let mut dialog = EditInterpretationSelectionDialog::new(vec![NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }]);
+        assert!(!dialog.deletable, "new() must default to not deletable");
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Add interpretation"),
+            "missing Add title:\n{text}"
+        );
+        assert!(text.contains("CONFIRM"), "missing Confirm button:\n{text}");
+        assert!(
+            !text.contains("DELETE"),
+            "a non-deletable Selection-mode dialog must not show a Delete button:\n{text}"
+        );
     }
 
     fn sample_def() -> MonitorRegisterDef {
@@ -2157,6 +1654,10 @@ mod tests {
         assert_eq!(selection.value.state.values().len(), 2);
         assert_eq!(selection.value.state.values()[0].name, "on");
         assert_eq!(selection.value.state.values()[1].name, "off");
+        assert!(
+            selection.deletable,
+            "deletable must carry over from the (deletable, from_interpretation) source dialog"
+        );
     }
 
     /// Manual-exercise fix (item 3) — `EditInterpretationSelectionDialog::delete_selected_named_value`
@@ -2200,6 +1701,10 @@ mod tests {
 
         assert_eq!(back.label.state.input(), "power");
         assert!(back.pending_named_values.is_empty());
+        assert!(
+            !back.deletable,
+            "deletable must carry over from the (not deletable, new()) source dialog"
+        );
     }
 
     /// `from_interpretation` starts focus on Address (`address.state.focused = true`, not
@@ -2298,6 +1803,7 @@ mod tests {
             name: "on".to_string(),
             value: crate::config::device::Scalar::Int(1),
         }]);
+        dialog.deletable = true; // reached via the MB-R-148 edit path, which is deletable
         set_input(&mut dialog.label, "power");
         set_input(&mut dialog.description, "Active power draw");
         set_input(&mut dialog.address, "10");

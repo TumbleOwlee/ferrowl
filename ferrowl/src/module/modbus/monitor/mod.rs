@@ -11,9 +11,6 @@ pub mod setup;
 mod setup_dialog;
 mod view;
 
-#[allow(unused_imports)] // consumed by view/mod.rs's Add command wiring
-pub(crate) use dialog::AddInterpretationDialog;
-
 #[allow(unused_imports)] // consumed by module.rs; not yet by app code outside this submodule
 pub(crate) use build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
 pub use module::ModbusMonitorModule;
