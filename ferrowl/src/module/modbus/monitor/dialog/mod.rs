@@ -34,7 +34,7 @@ use ratatui::{
 use std::fmt::Debug;
 
 use crate::config::device::{
-    AlignmentCfg, EndianCfg, MonitorRegisterDef, NamedValue, WordOrderCfg,
+    AlignmentCfg, EndianCfg, MonitorRegisterDef, NamedValue, Scalar, WordOrderCfg,
 };
 use crate::dialog::NonEmpty;
 use crate::module::modbus::dialog::{
@@ -43,6 +43,28 @@ use crate::module::modbus::dialog::{
     is_multi_register_format, kind_index, numeric_parts, parse_address, parse_bitmask, set_input,
     widgets, word_order_index,
 };
+
+/// Coil/DiscreteInput interpretations have no meaningful "format" — their only two states are
+/// ON/OFF — so the alias UI is hidden entirely and these two aliases are always the effective
+/// `values` (manual-exercise fix, item 6). Exposed at the module level (not just as a method on
+/// each dialog struct) so `view/mod.rs`'s `open_edit_interpretation` can apply the same check to a
+/// raw `Kind` before a dialog even exists.
+pub(super) fn is_boolean_kind(kind: &Kind) -> bool {
+    matches!(kind, Kind::Coil | Kind::DiscreteInput)
+}
+
+fn boolean_kind_values() -> Vec<NamedValue> {
+    vec![
+        NamedValue {
+            name: "ON".to_string(),
+            value: Scalar::Int(1),
+        },
+        NamedValue {
+            name: "OFF".to_string(),
+            value: Scalar::Int(0),
+        },
+    ]
+}
 
 /// UI-R-061 (`:add`, `deletable == false`) / MB-R-148 (edit-on-a-Resolved-registers-row,
 /// `deletable == true`) dialog: the field set plus a Delete button/confirmation flow gated on
@@ -86,8 +108,10 @@ pub struct EditInterpretationDialog {
     /// full-width "ADD ALIAS" button; the moment the first alias is added, the dialog converts
     /// into an [`EditInterpretationSelectionDialog`] (`to_selection_dialog`), which owns the
     /// alias list + DEL UI instead — mirrors the modbus module's own `EditInputDialog`/
-    /// `EditSelectionDialog` mode swap (Shared).
-    #[focus]
+    /// `EditSelectionDialog` mode swap (Shared). Hidden entirely for a boolean-kind interpretation
+    /// (manual-exercise fix, item 6): ON/OFF are the only possible aliases, so there's nothing to
+    /// add.
+    #[focus(when = { !self.is_boolean_kind() })]
     pub add_button: Widget<ButtonState, Button>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
@@ -239,10 +263,7 @@ impl EditInterpretationDialog {
     }
 
     fn is_boolean_kind(&self) -> bool {
-        matches!(
-            self.kind.state.get_value().0,
-            Kind::Coil | Kind::DiscreteInput
-        )
+        is_boolean_kind(&self.kind.state.get_value().0)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -373,7 +394,11 @@ impl EditInterpretationDialog {
             bitmask,
             length,
             alignment,
-            values: self.pending_named_values.clone(),
+            values: if self.is_boolean_kind() {
+                boolean_kind_values()
+            } else {
+                self.pending_named_values.clone()
+            },
             description,
             default: None,
         };
@@ -589,13 +614,16 @@ impl EditInterpretationDialog {
             }
         }
         // A plain, full-width "ADD ALIAS" button; the alias list/DEL UI lives entirely in
-        // `EditInterpretationSelectionDialog` (Shared).
-        StatefulWidget::render(
-            &self.add_button.widget,
-            rows[5],
-            buf,
-            &mut self.add_button.state,
-        );
+        // `EditInterpretationSelectionDialog` (Shared). Hidden for a boolean-kind interpretation
+        // (manual-exercise fix, item 6): ON/OFF are the only possible aliases.
+        if !self.is_boolean_kind() {
+            StatefulWidget::render(
+                &self.add_button.widget,
+                rows[5],
+                buf,
+                &mut self.add_button.state,
+            );
+        }
         // Confirm alone full-width when `:add` (`!deletable`); Confirm+Delete 50/50 split once
         // editing an existing interpretation (`deletable`) — matches `EditInputDialog::render`'s
         // own `deletable` branch (Shared).
@@ -815,10 +843,7 @@ impl EditInterpretationSelectionDialog {
     }
 
     fn is_boolean_kind(&self) -> bool {
-        matches!(
-            self.kind.state.get_value().0,
-            Kind::Coil | Kind::DiscreteInput
-        )
+        is_boolean_kind(&self.kind.state.get_value().0)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -948,7 +973,11 @@ impl EditInterpretationSelectionDialog {
             bitmask,
             length,
             alignment,
-            values: self.value.state.values().clone(),
+            values: if self.is_boolean_kind() {
+                boolean_kind_values()
+            } else {
+                self.value.state.values().clone()
+            },
             description,
             default: None,
         };
@@ -1424,11 +1453,12 @@ mod tests {
         out
     }
 
-    /// The add-named-value button reads "ADD ALIAS", not "ADD PREDEFINED".
+    /// The add-named-value button reads "ADD ALIAS", not "ADD PREDEFINED". Uses a non-boolean
+    /// kind — `new()`'s default `Kind::Coil` now hides the button entirely (item 6).
     #[test]
     fn ut_add_button_label_is_add_alias() {
         let area = Rect::new(0, 0, 120, 40);
-        let mut dialog = EditInterpretationDialog::new();
+        let mut dialog = EditInterpretationDialog::from_interpretation("power", &sample_def());
         let mut buf = Buffer::empty(area);
         dialog.render(area, &mut buf);
         let text = buffer_text(&buf);
@@ -1630,6 +1660,86 @@ mod tests {
             !text.contains("No predefined values"),
             "the old inline-list placeholder must be gone:\n{text}"
         );
+    }
+
+    /// Manual-exercise fix (item 6) — a Coil/DiscreteInput interpretation's alias line is hidden
+    /// entirely: no "ADD ALIAS" button is drawn, and there is nothing to focus in its place.
+    #[test]
+    fn ut_edit_interpretation_render_hides_add_button_for_boolean_kind() {
+        let area = Rect::new(0, 0, 120, 40);
+        let mut def = sample_def();
+        def.kind = Kind::Coil;
+        let mut dialog = EditInterpretationDialog::from_interpretation("motor_on", &def);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(
+            !text.contains("ADD ALIAS"),
+            "a boolean-kind interpretation must not show the alias button:\n{text}"
+        );
+    }
+
+    /// Manual-exercise fix (item 6) — `add_button` is skipped by focus cycling for a boolean-kind
+    /// dialog, same as every other field gated on `is_boolean_kind()`.
+    #[test]
+    fn ut_edit_interpretation_add_button_not_focusable_for_boolean_kind() {
+        let mut def = sample_def();
+        def.kind = Kind::Coil;
+        let mut dialog = EditInterpretationDialog::from_interpretation("motor_on", &def);
+        for _ in 0..20 {
+            assert_ne!(
+                dialog.focus,
+                EditInterpretationDialogFocus::AddButton,
+                "focus cycling must never land on the hidden add_button"
+            );
+            dialog.focus_next();
+        }
+    }
+
+    /// Manual-exercise fix (item 6) — `apply()` always uses the fixed ON=1/OFF=0 aliases for a
+    /// Coil/DiscreteInput interpretation, regardless of `pending_named_values` (which the hidden
+    /// alias UI can never populate through the normal flow, but this must hold at the data-model
+    /// level too, not only because the UI happens to hide the row).
+    #[test]
+    fn ut_edit_interpretation_apply_uses_on_off_defaults_for_boolean_kind() {
+        let mut def = sample_def();
+        def.kind = Kind::DiscreteInput;
+        let mut dialog = EditInterpretationDialog::from_interpretation("door_open", &def);
+        // Even if some stale pending value snuck in (e.g. carried over from a prior Number-kind
+        // edit before the Kind selector was changed), apply() must still override it.
+        dialog.pending_named_values.push(NamedValue {
+            name: "stale".to_string(),
+            value: crate::config::device::Scalar::Int(42),
+        });
+        let (_, applied) = dialog.apply().expect("valid dialog applies");
+        assert_eq!(
+            applied.values,
+            vec![
+                NamedValue {
+                    name: "ON".to_string(),
+                    value: crate::config::device::Scalar::Int(1)
+                },
+                NamedValue {
+                    name: "OFF".to_string(),
+                    value: crate::config::device::Scalar::Int(0)
+                },
+            ]
+        );
+    }
+
+    /// Manual-exercise fix (item 6) — a fresh `:add` dialog defaults to `Kind::Coil`
+    /// (`widgets::kind_options()`'s index-0 default), so it starts with the alias line already
+    /// hidden and ON/OFF already the effective values.
+    #[test]
+    fn ut_new_dialog_defaults_to_boolean_kind_with_on_off_values() {
+        let mut dialog = EditInterpretationDialog::new();
+        assert!(dialog.is_boolean_kind());
+        set_input(&mut dialog.label, "motor_on");
+        set_input(&mut dialog.address, "10");
+        let (_, applied) = dialog.apply().expect("a fresh dialog is valid");
+        assert_eq!(applied.values.len(), 2);
+        assert_eq!(applied.values[0].name, "ON");
+        assert_eq!(applied.values[1].name, "OFF");
     }
 
     /// Manual-exercise fix (item 3) — `to_selection_dialog` carries every shared field's state

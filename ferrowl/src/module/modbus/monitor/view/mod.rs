@@ -14,7 +14,7 @@ use ferrowl_ui::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
-    widgets::{Header, Table, TableBuilder, Widget},
+    widgets::{GetValue, Header, Table, TableBuilder, Widget},
 };
 use ferrowl_ui_derive::TableEntry;
 use ratatui::Frame;
@@ -31,7 +31,7 @@ use crate::module::view::{
 };
 
 use super::ModbusMonitorModule;
-use super::dialog::{EditInterpretationDialog, EditInterpretationSelectionDialog};
+use super::dialog::{EditInterpretationDialog, EditInterpretationSelectionDialog, is_boolean_kind};
 use super::setup_dialog::MonitorSetupDialog;
 
 /// Which of the view's Tab-cyclable panels currently has focus (default `Units`), matching
@@ -207,12 +207,22 @@ impl EditInterpretationOverlay {
     /// own `ModbusOverlay::maybe_switch_to_selection`/`maybe_switch_to_input` (Shared).
     fn maybe_switch(&self) -> Option<EditInterpretationOverlay> {
         match self {
-            EditInterpretationOverlay::Input(d) if !d.pending_named_values.is_empty() => Some(
-                EditInterpretationOverlay::Selection(Box::new(d.to_selection_dialog())),
-            ),
-            EditInterpretationOverlay::Selection(d) if d.value.state.values().is_empty() => Some(
-                EditInterpretationOverlay::Input(Box::new(d.to_input_dialog())),
-            ),
+            EditInterpretationOverlay::Input(d)
+                if !d.pending_named_values.is_empty()
+                    && !is_boolean_kind(&d.kind.state.get_value().0) =>
+            {
+                Some(EditInterpretationOverlay::Selection(Box::new(
+                    d.to_selection_dialog(),
+                )))
+            }
+            EditInterpretationOverlay::Selection(d)
+                if d.value.state.values().is_empty()
+                    || is_boolean_kind(&d.kind.state.get_value().0) =>
+            {
+                Some(EditInterpretationOverlay::Input(Box::new(
+                    d.to_input_dialog(),
+                )))
+            }
             _ => None,
         }
     }
@@ -1023,8 +1033,10 @@ impl ModbusMonitorModuleView {
         let dialog = EditInterpretationDialog::from_interpretation(&name, def);
         // Manual-exercise fix (item 3) — an interpretation with aliases already defined opens
         // straight into `Selection` mode (mirrors the full modbus module's own from-register
-        // open, Shared); `to_selection_dialog` carries the freshly prefilled state over.
-        let overlay = if def.values.is_empty() {
+        // open, Shared); `to_selection_dialog` carries the freshly prefilled state over. A
+        // boolean-kind interpretation (item 6) always opens into `Input` mode regardless of
+        // `def.values` — its alias UI is hidden, so `Selection` mode is never reachable for it.
+        let overlay = if def.values.is_empty() || is_boolean_kind(&def.kind) {
             EditInterpretationOverlay::Input(Box::new(dialog))
         } else {
             EditInterpretationOverlay::Selection(Box::new(dialog.to_selection_dialog()))
