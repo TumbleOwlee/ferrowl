@@ -419,10 +419,6 @@ impl<V: Version> OcppSender<V> {
 /// (`ClientView::send_payload`) and an accepted remote-start (`spawn_remote_transaction_start`, OC-
 /// R-070). Best-effort: `send_scoped` already records a failure into the message log; there is no
 /// separate diagnostic log write here.
-///
-/// `#[allow(dead_code)]`: wired into `ClientView::send_payload` and `spawn_remote_transaction_start`
-/// in later stages of this task; unused for one commit while this stage lands on its own.
-#[allow(dead_code)]
 pub(crate) async fn send_status_notification<V: ClientVersion>(
     sender: OcppSender<V>,
     state: &Arc<parking_lot::RwLock<V::Cs>>,

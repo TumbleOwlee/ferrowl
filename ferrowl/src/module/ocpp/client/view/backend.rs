@@ -184,13 +184,23 @@ impl<V: ClientVersion> ClientView<V> {
                 .map(String::from)
         })
         .flatten();
+        // OC-R-122: a transaction-start message (1.6's `StartTransaction`, or 2.x's
+        // `TransactionEvent(Started)`) is followed by a coupled `StatusNotification` once the
+        // start is acknowledged.
+        let is_tx_start = name == "StartTransaction" || started_tx.is_some();
         tokio::spawn(async move {
             match V::decode_call(&name, payload) {
-                Ok(action) => match sender.send_scoped(action, scope).await {
+                Ok(action) => match sender.clone().send_scoped(action, scope).await {
                     Ok(response) => {
                         with_state_mut(&state, |s| {
                             V::apply_post_send(s, &name, scope, started_tx.as_deref(), &response);
                         });
+                        if is_tx_start {
+                            let _ = crate::module::ocpp::client::backend::send_status_notification(
+                                sender, &state, scope,
+                            )
+                            .await;
+                        }
                     }
                     Err(e) => {
                         with_state_mut(&state, |s| {
@@ -507,5 +517,249 @@ impl<V: ClientVersion> ClientView<V> {
                 )))))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+    use tokio::sync::Notify;
+
+    use super::*;
+    use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
+    use crate::module::view::ModuleView;
+    use ferrowl_ocpp::csms::{self, CsmsActionHandler};
+
+    /// No-op log sink for the CSMS side, mirroring `ferrowl-ocpp/tests/ws_loopback_v16.rs::sink`.
+    fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// Poll until the CSMS listener has bound (`spawn` retries the bind in the background).
+    async fn bound_addr<V: ferrowl_ocpp::Version>(
+        server: &csms::Server<V>,
+    ) -> std::net::SocketAddr {
+        for _ in 0..50 {
+            if let Some(addr) = server.local_addr() {
+                return addr;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("CSMS listener never bound");
+    }
+
+    /// Poll until `flag` is set (e.g. the CS backend reports `is_online()`).
+    async fn wait_for(flag: impl Fn() -> bool) {
+        for _ in 0..100 {
+            if flag() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("condition never became true");
+    }
+
+    fn client_view<V: ClientVersion>(version: OcppVersion, port: u16) -> ClientView<V> {
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
+    }
+
+    /// CSMS handler answering every action used by these tests and recording the ordered list of
+    /// received action names into `calls`, notifying `notify` once `StatusNotification` lands.
+    struct RecordingCsms16 {
+        calls: Arc<Mutex<Vec<String>>>,
+        notify: Arc<Notify>,
+    }
+
+    impl CsmsActionHandler<ferrowl_ocpp::V1_6> for RecordingCsms16 {
+        async fn handle_call(
+            &self,
+            _conn: csms::ConnectionId,
+            action: ferrowl_ocpp::Action16,
+        ) -> Result<ferrowl_ocpp::Response16, ferrowl_ocpp::CallError> {
+            use ferrowl_ocpp::{Action16, Response16};
+            let name = match &action {
+                Action16::StartTransaction(_) => "StartTransaction",
+                Action16::StatusNotification(_) => "StatusNotification",
+                _ => "Other",
+            };
+            self.calls.lock().push(name.to_string());
+            if name == "StatusNotification" {
+                self.notify.notify_one();
+            }
+            match action {
+                Action16::StartTransaction(_) => Ok(Response16::StartTransaction(
+                    serde_json::from_value(serde_json::json!({
+                        "idTagInfo": { "status": "Accepted" },
+                        "transactionId": 42,
+                    }))
+                    .unwrap(),
+                )),
+                Action16::StatusNotification(_) => Ok(Response16::StatusNotification(
+                    serde_json::from_value(serde_json::json!({})).unwrap(),
+                )),
+                _ => Err(ferrowl_ocpp::CallError::new(
+                    ferrowl_ocpp::CallErrorCode::NotImplemented,
+                    "unsupported",
+                )),
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-122 — a RFID/operator-triggered `StartTransaction` (1.6) is followed by a coupled
+    /// `StatusNotification` reflecting the post-start connector status, in that order.
+    async fn ut_rfid_start_couples_status_notification() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let notify = Arc::new(Notify::new());
+        let server = csms::ServerBuilder::<ferrowl_ocpp::V1_6>::new(
+            csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            RecordingCsms16 {
+                calls: calls.clone(),
+                notify: notify.clone(),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let addr = bound_addr(&server).await;
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, addr.port());
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start");
+        wait_for(|| v.backend.is_online()).await;
+
+        let scope = Scope::connector(1);
+        let payload = v.state_payload("StartTransaction", scope);
+        v.deferred.send = Some(("StartTransaction".to_string(), payload, scope));
+        ModuleView::refresh(&mut v).await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        assert_eq!(
+            *calls.lock(),
+            vec![
+                "StartTransaction".to_string(),
+                "StatusNotification".to_string()
+            ],
+        );
+    }
+
+    /// CSMS handler answering every 2.0.1 action used by these tests and recording the ordered
+    /// list of received action names into `calls`, notifying `notify` once `StatusNotification`
+    /// lands.
+    struct RecordingCsms201 {
+        calls: Arc<Mutex<Vec<String>>>,
+        notify: Arc<Notify>,
+    }
+
+    impl CsmsActionHandler<ferrowl_ocpp::V2_0_1> for RecordingCsms201 {
+        async fn handle_call(
+            &self,
+            _conn: csms::ConnectionId,
+            action: ferrowl_ocpp::Action201,
+        ) -> Result<ferrowl_ocpp::Response201, ferrowl_ocpp::CallError> {
+            use ferrowl_ocpp::{Action201, Response201};
+            let name = match &action {
+                Action201::TransactionEvent(_) => "TransactionEvent",
+                Action201::StatusNotification(_) => "StatusNotification",
+                _ => "Other",
+            };
+            self.calls.lock().push(name.to_string());
+            if name == "StatusNotification" {
+                self.notify.notify_one();
+            }
+            match action {
+                Action201::TransactionEvent(_) => Ok(Response201::TransactionEvent(
+                    serde_json::from_value(serde_json::json!({})).unwrap(),
+                )),
+                Action201::StatusNotification(_) => Ok(Response201::StatusNotification(
+                    serde_json::from_value(serde_json::json!({})).unwrap(),
+                )),
+                _ => Err(ferrowl_ocpp::CallError::new(
+                    ferrowl_ocpp::CallErrorCode::NotImplemented,
+                    "unsupported",
+                )),
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-122 — a RFID/operator-triggered `TransactionEvent(Started)` (2.0.1) is followed by a
+    /// coupled `StatusNotification` reflecting the post-start connector status, in that order.
+    async fn ut_transaction_event_started_couples_status_notification() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let notify = Arc::new(Notify::new());
+        let server = csms::ServerBuilder::<ferrowl_ocpp::V2_0_1>::new(
+            csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            RecordingCsms201 {
+                calls: calls.clone(),
+                notify: notify.clone(),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let addr = bound_addr(&server).await;
+
+        let mut v = client_view::<ferrowl_ocpp::V2_0_1>(OcppVersion::V2_0_1, addr.port());
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start");
+        wait_for(|| v.backend.is_online()).await;
+
+        let scope = Scope::evse(1, None);
+        v.dispatch_lua_action(scope, "StartTransaction", serde_json::json!({}));
+        ModuleView::refresh(&mut v).await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        assert_eq!(
+            *calls.lock(),
+            vec![
+                "TransactionEvent".to_string(),
+                "StatusNotification".to_string()
+            ],
+        );
     }
 }
