@@ -944,6 +944,10 @@ pub struct ModbusMonitorModuleView {
     /// added interpretations stay correctly ordered — a deliberate implementation choice, not
     /// spec-mandated (either satisfies UI-R-064/tui/api-contract.md).
     sort: Option<(usize, bool)>,
+    /// MB-R-150 — the session-wide serial-path registry attached via `set_serial_paths`, kept so
+    /// a rebuilt `self.module` (`:reload`, `confirm_edit`) can be reattached to the same registry
+    /// instead of silently falling back to a private default.
+    serial_paths: crate::module::modbus::SerialPathRegistry,
 }
 
 #[allow(dead_code)] // forward-declared; see struct's note
@@ -964,6 +968,7 @@ impl ModbusMonitorModuleView {
             panel_focus: MonitorPanel::default(),
             compact: true,
             sort: None,
+            serial_paths: crate::module::modbus::SerialPathRegistry::default(),
         }
     }
 
@@ -1023,6 +1028,9 @@ impl ModbusMonitorModuleView {
         let placeholder = ModbusMonitorModule::new(&self.spec, &device);
         self.module =
             std::mem::replace(&mut self.module, placeholder).reconfigure(&self.spec, &device);
+        // MB-R-150 — the resulting module is what a later `:start` actually runs (not a
+        // throwaway preview instance), so it must carry the session-wide registry forward too.
+        self.module.set_serial_paths(self.serial_paths.clone());
         // Manual-exercise fix (interpretations-per-unit-id persistence) — resync `definitions`
         // from the reconfigured module's own live map (kept in sync at every `:add`/edit/delete,
         // Shared/confirm_add) rather than trusting whatever `device.definitions` was seeded with
@@ -1676,6 +1684,10 @@ impl ModuleView for ModbusMonitorModuleView {
                 let new_module = ModbusMonitorModule::new(&self.spec, &device);
                 self.module = new_module;
                 self.device = device;
+                // MB-R-150 — the fresh module's `serial_paths` defaults to a private registry
+                // (`ModbusMonitorModule::new`); reattach the session-wide one so an in-progress
+                // conflict survives `:reload` instead of silently clearing.
+                self.module.set_serial_paths(self.serial_paths.clone());
                 if let Err(e) = self
                     .module
                     .start(move |_s: String| async {}, move |_s: String| async {})
@@ -1774,6 +1786,11 @@ impl ModuleView for ModbusMonitorModuleView {
         let mut v = serde_json::to_value(&self.spec).ok()?;
         v.as_object_mut()?.insert("type".into(), "modbus".into());
         Some(v)
+    }
+
+    fn set_serial_paths(&mut self, registry: crate::module::modbus::SerialPathRegistry) {
+        self.module.set_serial_paths(registry.clone());
+        self.serial_paths = registry;
     }
 }
 
@@ -2517,6 +2534,93 @@ mod tests {
             loaded.definitions.iter().any(|d| d.name == "power"),
             "an interpretation added purely at runtime must be persisted by :write"
         );
+    }
+
+    /// MB-R-150 — `:reload` rebuilds `self.module` fresh; the session-wide serial-path registry
+    /// attached via `set_serial_paths` must carry over to that fresh instance, not reset to a
+    /// private default (which would silently drop an in-progress conflict on reload).
+    #[tokio::test]
+    async fn ut_reload_carries_serial_paths_registry_to_new_module() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "ferrowl-monitor-reload-serial-paths-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+
+        // Produce a loadable device config file via the already-tested :write-device path.
+        let mut writer = view();
+        let _ = writer.handle_command(&format!("write-device {p}")).await;
+
+        let serial_path = "/nonexistent/mb-r-150-monitor-reload";
+        let mut s = spec();
+        s.name = "A".into();
+        s.device = p.clone();
+        s.endpoint = Endpoint::Rtu {
+            path: serial_path.into(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        let module = ModbusMonitorModule::new(&s, &device());
+        let mut v = ModbusMonitorModuleView::new(module, s, device());
+
+        // Another instance ("B") already claims the same serial path in a session-wide registry.
+        let registry = SerialPathRegistry::new();
+        registry.claim("B", serial_path);
+        v.set_serial_paths(registry.clone());
+
+        let _ = v.handle_command("reload").await;
+        assert_eq!(
+            registry.conflict("B", serial_path),
+            Some("A".to_string()),
+            "reload's fresh module lost the session-wide registry (claimed on a private default \
+             instead)"
+        );
+
+        let _ = v.handle_command("stop").await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// MB-R-150 — the Edit-confirm reconfigure path (`confirm_edit`) also rebuilds `self.module`
+    /// fresh; it must carry the session-wide registry over too, since the resulting module is
+    /// the one a later `:start` runs (not merely a throwaway preview instance). A claim is only
+    /// recorded on `start()` (mirroring `ModbusMonitorModule`'s own contract), so this test
+    /// confirm-edits and then explicitly starts, same as a real user would.
+    #[tokio::test]
+    async fn ut_confirm_edit_carries_serial_paths_registry_to_new_module() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        // `spec()`'s own Rtu endpoint path doubles as the conflicting serial path; the edit
+        // dialog is confirmed unedited (same name/endpoint), matching a no-op re-confirm.
+        let s = spec();
+        let serial_path = match &s.endpoint {
+            Endpoint::Rtu { path, .. } => path.clone(),
+            other => panic!("fixture spec() must be Rtu, got {other:?}"),
+        };
+        let module = ModbusMonitorModule::new(&s, &device());
+        let mut v = ModbusMonitorModuleView::new(module, s.clone(), device());
+
+        let registry = SerialPathRegistry::new();
+        registry.claim("B", &serial_path);
+        v.set_serial_paths(registry.clone());
+
+        v.overlay =
+            MonitorOverlay::EditSetup(Box::new(MonitorSetupDialog::edit(&s.name, &s, &device())));
+        v.confirm_edit();
+        let _ = v.handle_command("start").await;
+
+        assert_eq!(
+            registry.conflict("B", &serial_path),
+            Some(s.name.clone()),
+            "confirm_edit's fresh module lost the session-wide registry (claimed on a private \
+             default instead)"
+        );
+
+        let _ = v.handle_command("stop").await;
     }
 
     /// MB-R-145 — a newly added interpretation is reflected in the resolved-registers section
