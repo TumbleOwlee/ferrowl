@@ -4,7 +4,7 @@
 
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](#) [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=check)](https://github-ci.code-ape.dev/repos/3) [![status-badge](https://github-ci.code-ape.dev/api/badges/3/status.svg?workflow=nightly)](https://github-ci.code-ape.dev/repos/3)
 
-Ferrowl is a TUI application, written in Rust, to simulate both **Modbus** (Client and Server) and **OCPP** (Charging Station / CSMS) devices. Create configurations on the fly, save and load configurations or sessions to set up multiple Modbus or OCPP instances side by side. The aim is to provide a technical but intuitive interface that can run on any device without an available GUI environment.
+Ferrowl is a TUI application, written in Rust, to simulate both **Modbus** (Client, Server and a passive bus Monitor) and **OCPP** (Charging Station / CSMS) devices. Create configurations on the fly, save and load configurations or sessions to set up multiple Modbus or OCPP instances side by side. The aim is to provide a technical but intuitive interface that can run on any device without an available GUI environment.
 
 If you prefer a GUI application, this tool is not the right choice. For Modbus, refer to a GUI application like [QModbus](https://github.com/ed-chemnitz/qmodbus/).
 
@@ -13,7 +13,7 @@ If you prefer a GUI application, this tool is not the right choice. For Modbus, 
 
 ## Goal
 
-Provide a CLI application to simulate Modbus Servers and Clients as well as OCPP Charging Stations and Central Systems (CSMS, OCPP 1.6, 2.0.1 and 2.1), visualize the states of all registers and charging-station fields, make manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs over Modbus or OCPP.
+Provide a CLI application to simulate Modbus Servers and Clients, passively observe traffic on a Modbus RTU/ASCII bus with a read-only Monitor role, as well as simulate OCPP Charging Stations and Central Systems (CSMS, OCPP 1.6, 2.0.1 and 2.1), visualize the states of all registers and charging-station fields, make manipulation available and provide script based simulation capabilities - e.g. utilize the tool to simulate EVSEs over Modbus or OCPP.
 
 ## Architecture
 
@@ -301,7 +301,7 @@ The session configuration can be saved using `:write` and contains the module co
 [[modules]]
 name = "evse-1"
 device = "configs/evse.toml"
-role = "server"
+role = "server"        # "client", "server" or "monitor" (monitor: read-only bus observer, RTU/ASCII only, see below)
 
 [modules.endpoint]
 transport = "tcp"
@@ -466,6 +466,32 @@ input = "0-10"
 ```
 
 Timing precedence is device → built-in defaults (3000/1000/1000 ms).
+
+#### Monitor device configuration
+
+A `role = "monitor"` module (RTU/ASCII transport only — it never writes to the bus, only decodes
+traffic produced by other devices) uses a reduced device-config shape: no `access`, `update`,
+timing fields, `read_ranges` or Lua `scripts` — a monitor never initiates a transaction, so none
+of those apply. Interpretations use `kind` (`Coil`, `DiscreteInput`, `HoldingRegister` or
+`InputRegister`) instead of `read_code`, otherwise sharing the register fields above.
+
+```toml
+reconnect = true       # retry the serial port with backoff after open/read failure (default true)
+
+[definitions.power]
+slave_id = 1
+kind = "HoldingRegister"
+address = 1
+type = "U16"
+description = "active power (W), as observed on the bus"
+
+[definitions.running]
+slave_id = 1
+kind = "Coil"
+address = 0
+type = "U16"
+description = "run/stop coil, as observed on the bus"
+```
 
 An **OCPP** device file (saved with `:write-device`) describes the charge point: its OCPP version,
 role, reply timeout and the Lua simulation scripts. Endpoint (ip/port/protocol) is per-instance and
