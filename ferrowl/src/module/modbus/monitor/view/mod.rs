@@ -473,8 +473,8 @@ fn new_resolved_table() -> ResolvedTable {
                     .build()
                     .expect("all required builder fields are set"),
             )
-            // Expanded (non-compact) is the default (tui/api-contract.md §2.1): 1 row of
-            // vertical padding, same as `TableView::new`'s own default (Shared).
+            // Compact is the default (tui/api-contract.md §2.1, commit c38dac3) — a deliberate
+            // divergence from `TableView::new`'s own expanded-by-default: no vertical padding.
             .row_margin(ratatui::layout::Margin {
                 vertical: 0,
                 horizontal: 0,
@@ -2629,7 +2629,8 @@ mod tests {
     }
 
     /// tui/api-contract.md §2.1 — `:compact` toggles the resolved-registers section between the
-    /// default (expanded, description shown) layout and the compact (name + value only) layout.
+    /// default (compact, name + value only, commit c38dac3) layout and the expanded (description
+    /// shown) layout.
     #[tokio::test]
     async fn ut_compact_command_toggles_resolved_table_row_margin() {
         let mut v = view();
@@ -2638,16 +2639,16 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
 
-        assert!(!v.compact);
-        assert_eq!(v.resolved_table.widget.row_margin().vertical, 1);
-
-        v.handle_command("compact").await;
         assert!(v.compact);
         assert_eq!(v.resolved_table.widget.row_margin().vertical, 0);
 
         v.handle_command("compact").await;
         assert!(!v.compact);
         assert_eq!(v.resolved_table.widget.row_margin().vertical, 1);
+
+        v.handle_command("compact").await;
+        assert!(v.compact);
+        assert_eq!(v.resolved_table.widget.row_margin().vertical, 0);
     }
 
     /// tui/api-contract.md §2.1/UI-R-064 — `:order <col> [asc|desc]` sorts the
