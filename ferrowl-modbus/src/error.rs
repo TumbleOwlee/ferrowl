@@ -46,6 +46,10 @@ pub enum Error {
     Tcp(#[from] TcpError),
     #[error("Server error: {0}")]
     Server(rust_modbus::Error),
+    /// MB-R-150 — another module instance in the same session already claims this Rtu/Ascii
+    /// serial path; the OS-level open was skipped for this attempt.
+    #[error("Serial path '{path}' is already in use by module '{other}' in this session")]
+    PathConflict { path: String, other: String },
 }
 
 #[cfg(test)]
@@ -83,5 +87,19 @@ mod tests {
         let inner = TcpError::Configuration("no host".to_string());
         let e = Error::from(inner);
         assert!(e.to_string().contains("TCP configuration error: no host"));
+    }
+
+    #[test]
+    /// MB-R-150 — the conflict error names both the path and the other instance, distinguishing
+    /// it from an ordinary open-failure message.
+    fn ut_error_path_conflict_display() {
+        let e = Error::PathConflict {
+            path: "/dev/ttyUSB0".to_string(),
+            other: "PLC Sim".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "Serial path '/dev/ttyUSB0' is already in use by module 'PLC Sim' in this session"
+        );
     }
 }
