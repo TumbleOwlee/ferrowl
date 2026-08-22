@@ -2,8 +2,6 @@
 //! `MonitorDeviceConfig` (a subset of `DeviceConfig`, no timing/read_ranges/scripts) and
 //! `MonitorRegisterDef` (MB-R-145; `RegisterDef` minus `access` and `update`).
 
-use std::collections::BTreeMap;
-
 use ferrowl_codec::{
     Address, Format, Kind,
     format::{Endian, Resolution, Width, WordOrder},
@@ -38,15 +36,21 @@ pub struct MonitorDeviceConfig {
     /// Mirrors `DeviceConfig::log_file`'s own `#[serde(skip)]` field — never written to disk.
     #[serde(skip)]
     pub log_file: Option<String>,
-    pub definitions: BTreeMap<String, MonitorRegisterDef>,
+    /// api-contract.md §6: a list, not a name-keyed map — two interpretations on different
+    /// `slave_id`s may legitimately share a `name` (MB-R-148 scopes edit/remove to one slave
+    /// id's set), and a name-keyed map would silently collapse them on save.
+    #[serde(default)]
+    pub definitions: Vec<MonitorRegisterDef>,
 }
 
 /// MB-R-145 — a display-only register interpretation against a monitor's observed-value table:
 /// every field [`super::RegisterDef`] has, verbatim, except `access` (no access direction — the
-/// table is observed, not owned) and `update` (no store cell to script against).
+/// table is observed, not owned) and `update` (no store cell to script against). Also carries its
+/// own `name`, since `definitions` is a list rather than a name-keyed map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[allow(dead_code)] // forward-declared; real usage lands in s4, see MonitorDeviceConfig's note
 pub struct MonitorRegisterDef {
+    pub name: String,
     #[serde(default)]
     pub slave_id: u8,
     #[serde(default = "default_kind")]
@@ -118,26 +122,23 @@ mod tests {
     use ferrowl_util::convert::{Converter, FileType};
 
     fn sample() -> MonitorDeviceConfig {
-        let mut definitions = BTreeMap::new();
-        definitions.insert(
-            "power".to_string(),
-            MonitorRegisterDef {
-                slave_id: 3,
-                kind: Kind::HoldingRegister,
-                address: Some(10),
-                is_virtual: false,
-                value_type: ValueType::U16,
-                endian: EndianCfg::default(),
-                word_order: WordOrderCfg::default(),
-                resolution: 0.1,
-                bitmask: None,
-                length: 1,
-                alignment: AlignmentCfg::default(),
-                values: vec![],
-                description: "Active power".to_string(),
-                default: None,
-            },
-        );
+        let definitions = vec![MonitorRegisterDef {
+            name: "power".to_string(),
+            slave_id: 3,
+            kind: Kind::HoldingRegister,
+            address: Some(10),
+            is_virtual: false,
+            value_type: ValueType::U16,
+            endian: EndianCfg::default(),
+            word_order: WordOrderCfg::default(),
+            resolution: 0.1,
+            bitmask: None,
+            length: 1,
+            alignment: AlignmentCfg::default(),
+            values: vec![],
+            description: "Active power".to_string(),
+            default: None,
+        }];
         MonitorDeviceConfig {
             version: Some("0.1.0".to_string()),
             reconnect: Some(false),
@@ -186,7 +187,7 @@ scripts = []
 [read_ranges]
 holding = "0-10"
 
-[definitions]
+definitions = []
 "#,
         );
         let cfg: MonitorDeviceConfig =
@@ -204,6 +205,7 @@ holding = "0-10"
         let path = write_toml(
             "ferrowl_monitor_register_def_unknown_fields.toml",
             r#"
+name = "power"
 slave_id = 1
 kind = "HoldingRegister"
 address = 5

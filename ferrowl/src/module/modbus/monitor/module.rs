@@ -64,11 +64,11 @@ impl ModbusMonitorModule {
             UnitId,
             Vec<(String, MonitorRegisterDef)>,
         > = std::collections::BTreeMap::new();
-        for (name, def) in device.definitions.iter() {
+        for def in device.definitions.iter() {
             interpretations
                 .entry(UnitId(def.slave_id))
                 .or_default()
-                .push((name.clone(), def.clone()));
+                .push((def.name.clone(), def.clone()));
         }
 
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
@@ -156,20 +156,24 @@ impl ModbusMonitorModule {
         self.command_tx.is_some()
     }
 
-    /// Manual-exercise fix (interpretations-per-unit-id persistence) — rebuild the flat,
-    /// on-disk `definitions` map (`MonitorDeviceConfig::definitions`) from the live in-memory
-    /// interpretations, keyed by name with each entry's own `slave_id` field already correct
-    /// (kept in sync by `add_interpretation`/`edit_interpretation`). The caller assigns this
-    /// into `self.device.definitions` after any interpretation add/edit/delete so `:write` (and
-    /// any path that reconstructs from `self.device`) never silently drops a runtime change —
-    /// mirroring `ModbusModule`'s own `apply_add`/`delete_register_by_name`
+    /// #219 — rebuild the on-disk `definitions` list (`MonitorDeviceConfig::definitions`) from
+    /// the live in-memory interpretations, each entry carrying its own `name`/`slave_id` (kept in
+    /// sync by `add_interpretation`/`edit_interpretation`). A list, not a name-keyed map: two
+    /// units may legitimately hold a same-named interpretation (MB-R-148 scopes edit/remove to
+    /// one slave id's set), and collapsing them by name here would silently lose one on save. The
+    /// caller assigns this into `self.device.definitions` after any interpretation add/edit/
+    /// delete so `:write` (and any path that reconstructs from `self.device`) never silently
+    /// drops a runtime change — mirroring `ModbusModule`'s own `apply_add`/`delete_register_by_name`
     /// (`module/modbus/view/mutate.rs`), which keep `self.device.definitions` in sync at each
     /// mutation site rather than only at save time.
-    pub fn definitions(&self) -> std::collections::BTreeMap<String, MonitorRegisterDef> {
+    pub fn definitions(&self) -> Vec<MonitorRegisterDef> {
         self.interpretations
             .values()
             .flatten()
-            .map(|(name, def)| (name.clone(), def.clone()))
+            .map(|(name, def)| MonitorRegisterDef {
+                name: name.clone(),
+                ..def.clone()
+            })
             .collect()
     }
 
@@ -335,26 +339,23 @@ mod tests {
     }
 
     fn device_with_defs() -> MonitorDeviceConfig {
-        let mut definitions = std::collections::BTreeMap::new();
-        definitions.insert(
-            "power".to_string(),
-            MonitorRegisterDef {
-                slave_id: 1,
-                kind: ferrowl_codec::Kind::HoldingRegister,
-                address: Some(10),
-                is_virtual: false,
-                value_type: crate::config::device::ValueType::U16,
-                endian: Default::default(),
-                word_order: Default::default(),
-                resolution: 1.0,
-                bitmask: None,
-                length: 1,
-                alignment: Default::default(),
-                values: vec![],
-                description: String::new(),
-                default: None,
-            },
-        );
+        let definitions = vec![MonitorRegisterDef {
+            name: "power".to_string(),
+            slave_id: 1,
+            kind: ferrowl_codec::Kind::HoldingRegister,
+            address: Some(10),
+            is_virtual: false,
+            value_type: crate::config::device::ValueType::U16,
+            endian: Default::default(),
+            word_order: Default::default(),
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: Default::default(),
+            values: vec![],
+            description: String::new(),
+            default: None,
+        }];
         MonitorDeviceConfig {
             version: None,
             reconnect: Some(true),
@@ -380,19 +381,19 @@ mod tests {
         let mut device = device_with_defs();
         let mut current = device
             .definitions
-            .get("power")
+            .iter()
+            .find(|d| d.name == "power")
             .expect("power def present")
             .clone();
         current.slave_id = 3;
-        device.definitions.insert(
-            "voltage".to_string(),
-            MonitorRegisterDef {
-                slave_id: 7,
-                address: Some(20),
-                ..current.clone()
-            },
-        );
-        device.definitions.insert("power".to_string(), current);
+        device.definitions.push(MonitorRegisterDef {
+            name: "voltage".to_string(),
+            slave_id: 7,
+            address: Some(20),
+            ..current.clone()
+        });
+        device.definitions.retain(|d| d.name != "power");
+        device.definitions.push(current);
 
         let module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         let unit3 = module.interpretations_for(ferrowl_modbus::UnitId(3));
@@ -610,7 +611,12 @@ mod tests {
         module.add_interpretation(
             ferrowl_modbus::UnitId(9),
             "extra".to_string(),
-            device_with_defs().definitions.get("power").unwrap().clone(),
+            device_with_defs()
+                .definitions
+                .iter()
+                .find(|d| d.name == "power")
+                .unwrap()
+                .clone(),
         );
         let table_before = module.table();
         let records_before = module.records();
@@ -703,11 +709,79 @@ mod tests {
         module.add_interpretation(ferrowl_modbus::UnitId(9), "extra".to_string(), def);
 
         let defs = module.definitions();
-        assert!(defs.contains_key("power"), "original def must survive");
         assert!(
-            defs.contains_key("extra"),
-            "runtime-added def must be included, not silently dropped"
+            defs.iter().any(|d| d.name == "power"),
+            "original def must survive"
         );
-        assert_eq!(defs["extra"].slave_id, 9);
+        let extra = defs
+            .iter()
+            .find(|d| d.name == "extra")
+            .expect("runtime-added def must be included, not silently dropped");
+        assert_eq!(extra.slave_id, 9);
+    }
+
+    /// #219 — two same-named interpretations on different unit ids must both survive
+    /// `definitions()` (the on-disk-shaped snapshot `:wd` persists), not collapse last-wins.
+    #[test]
+    fn ut_definitions_keeps_same_name_distinct_across_units() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(9), "power".to_string(), def);
+
+        let defs = module.definitions();
+        assert_eq!(
+            defs.len(),
+            2,
+            "both unit 1's and unit 9's \"power\" interpretation must survive distinctly"
+        );
+    }
+
+    /// #219 — the exact reported scenario: two same-named interpretations on different unit ids
+    /// must survive a full `:wd`-equivalent save/reload round trip (`definitions()` -> TOML file
+    /// -> `load_monitor_device` -> a fresh `ModbusMonitorModule::new`), not just an in-process
+    /// snapshot.
+    #[test]
+    fn ut_same_name_across_units_survives_save_reload_round_trip() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let def = module.interpretations_for(ferrowl_modbus::UnitId(1))[0]
+            .1
+            .clone();
+        module.add_interpretation(ferrowl_modbus::UnitId(9), "power".to_string(), def);
+
+        let device = MonitorDeviceConfig {
+            version: None,
+            reconnect: Some(true),
+            log_file: None,
+            definitions: module.definitions(),
+        };
+        let path = std::env::temp_dir()
+            .join("ferrowl_monitor_same_name_roundtrip.toml")
+            .to_string_lossy()
+            .into_owned();
+        ferrowl_util::convert::Converter::save(
+            &device,
+            &path,
+            ferrowl_util::convert::FileType::Toml,
+        )
+        .expect("save");
+        let reloaded = crate::config::load_monitor_device(&path).expect("load");
+
+        let reconstructed = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &reloaded);
+        assert_eq!(
+            reconstructed
+                .interpretations_for(ferrowl_modbus::UnitId(1))
+                .len(),
+            1,
+            "unit 1's \"power\" must survive the round trip"
+        );
+        assert_eq!(
+            reconstructed
+                .interpretations_for(ferrowl_modbus::UnitId(9))
+                .len(),
+            1,
+            "unit 9's \"power\" must survive the round trip, not be collapsed into unit 1's"
+        );
     }
 }

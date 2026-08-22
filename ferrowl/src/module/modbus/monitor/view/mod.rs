@@ -986,7 +986,7 @@ impl ModbusMonitorModuleView {
         };
         self.module.add_interpretation(unit, name, def);
         // Manual-exercise fix (interpretations-per-unit-id persistence) — keep
-        // `self.device.definitions` (the flat, on-disk map `:write` saves verbatim) in sync
+        // `self.device.definitions` (the on-disk list `:write` saves verbatim) in sync
         // with the module's live interpretations, mirroring `ModbusModule::apply_add`'s own
         // `self.device.definitions.insert(...)` (Shared).
         self.device.definitions = self.module.definitions();
@@ -2141,6 +2141,7 @@ mod tests {
             UnitId(3),
             "power".to_string(),
             MonitorRegisterDef {
+                name: "power".to_string(),
                 slave_id: 3,
                 kind: Kind::HoldingRegister,
                 address: Some(0),
@@ -2414,7 +2415,7 @@ mod tests {
         v.confirm_add();
 
         assert!(
-            v.device.definitions.contains_key("power"),
+            v.device.definitions.iter().any(|d| d.name == "power"),
             "device.definitions must be kept in sync so ':write' persists it"
         );
     }
@@ -2431,9 +2432,10 @@ mod tests {
         v.selected = 0;
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
-        v.device
-            .definitions
-            .insert("power".to_string(), def(10, ""));
+        v.device.definitions.push(MonitorRegisterDef {
+            name: "power".to_string(),
+            ..def(10, "")
+        });
         buffer_text(&mut v);
 
         v.open_edit_interpretation();
@@ -2444,11 +2446,11 @@ mod tests {
         v.confirm_edit_interpretation();
 
         assert!(
-            !v.device.definitions.contains_key("power"),
+            !v.device.definitions.iter().any(|d| d.name == "power"),
             "the old name must not linger in device.definitions after a rename"
         );
         assert!(
-            v.device.definitions.contains_key("power2"),
+            v.device.definitions.iter().any(|d| d.name == "power2"),
             "the renamed interpretation must be present in device.definitions"
         );
     }
@@ -2463,16 +2465,17 @@ mod tests {
         v.selected = 0;
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
-        v.device
-            .definitions
-            .insert("power".to_string(), def(10, ""));
+        v.device.definitions.push(MonitorRegisterDef {
+            name: "power".to_string(),
+            ..def(10, "")
+        });
         buffer_text(&mut v);
 
         v.open_edit_interpretation();
         v.delete_interpretation();
 
         assert!(
-            !v.device.definitions.contains_key("power"),
+            !v.device.definitions.iter().any(|d| d.name == "power"),
             "device.definitions must drop the deleted interpretation too"
         );
     }
@@ -2511,7 +2514,7 @@ mod tests {
             Converter::load(&path_str, FileType::Toml).expect("save must succeed");
         let _ = std::fs::remove_file(&path);
         assert!(
-            loaded.definitions.contains_key("power"),
+            loaded.definitions.iter().any(|d| d.name == "power"),
             "an interpretation added purely at runtime must be persisted by :write"
         );
     }
@@ -2664,6 +2667,7 @@ mod tests {
 
     fn def(address: u16, description: &str) -> MonitorRegisterDef {
         MonitorRegisterDef {
+            name: String::new(),
             slave_id: 3,
             kind: Kind::HoldingRegister,
             address: Some(address),

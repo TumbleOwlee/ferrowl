@@ -51,10 +51,10 @@ fn it_fails_hard_on_a_missing_device_config() {
     );
 }
 
-/// MB-R-140/MB-R-145 — a monitor device-type config file's `definitions` map is required
-/// (no `#[serde(default)]`); an empty table is a legitimate "no interpretations yet" file.
+/// MB-R-140/MB-R-145 — a monitor device-type config file's `definitions` list defaults to
+/// empty when omitted; an explicit empty list is a legitimate "no interpretations yet" file.
 fn write_monitor_device(path: &std::path::Path) {
-    std::fs::write(path, "definitions = {}\n").expect("write monitor device config");
+    std::fs::write(path, "definitions = []\n").expect("write monitor device config");
 }
 
 #[test]

@@ -383,6 +383,7 @@ impl EditInterpretationDialog {
             };
 
         let def = MonitorRegisterDef {
+            name: name.clone(),
             slave_id: 0,
             kind,
             address,
@@ -962,6 +963,7 @@ impl EditInterpretationSelectionDialog {
             };
 
         let def = MonitorRegisterDef {
+            name: name.clone(),
             slave_id: 0,
             kind,
             address,
@@ -1560,6 +1562,7 @@ mod tests {
 
     fn sample_def() -> MonitorRegisterDef {
         MonitorRegisterDef {
+            name: "power".to_string(),
             slave_id: 3,
             kind: Kind::HoldingRegister,
             address: Some(10),
