@@ -25,9 +25,10 @@ use crate::lua::{SimHandle, run_script_once, run_sim};
 
 use super::build::{
     Timing, build_instance, build_read_operations, declare_or_reject_msg, default_value,
-    endpoint_to_config, explicit_read_coverage, gap_cell_subject,
+    endpoint_serial_path, endpoint_to_config, explicit_read_coverage, gap_cell_subject,
 };
 use super::log::{FileSink, append, open_sink};
+use super::serial_paths::SerialPathRegistry;
 
 pub type ModuleMemory = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
@@ -92,6 +93,17 @@ pub struct ModbusModule {
     /// edit that keeps the source self-signed reuse cached material, while a genuinely fresh
     /// module instance (new tab, device-type switch) starts with an empty cache.
     self_signed_cache: ferrowl_modbus::tcp::SelfSignedCache,
+    /// MB-R-150 — the session-wide registry this instance's path-conflict check consults.
+    /// Defaults to a private, unshared registry (never conflicts with anything) until
+    /// `set_serial_paths` attaches the real session registry.
+    serial_paths: SerialPathRegistry,
+    /// This instance's own `~`-expanded Rtu/Ascii serial path, or `None` for every other
+    /// transport. Recomputed on every `new()`/`reconfigure()`.
+    own_serial_path: Option<String>,
+    /// The current instance's path-conflict checker cell, or `None` for a non-serial transport.
+    /// Re-fetched (and re-attached to `serial_paths`) on every `new()`/`reconfigure()`, since
+    /// each rebuilds `self.instance` with a fresh, unattached cell.
+    path_conflict_cell: Option<ferrowl_modbus::PathConflictCell>,
 }
 
 impl ModbusModule {
@@ -196,9 +208,40 @@ impl ModbusModule {
             sim: None,
             virtual_values: Arc::new(RwLock::new(virtual_init)),
             self_signed_cache,
+            serial_paths: SerialPathRegistry::default(),
+            own_serial_path: None,
+            path_conflict_cell: None,
         };
+        module.own_serial_path = endpoint_serial_path(&spec.endpoint);
+        module.attach_path_conflict();
         module.ensure_sim();
         module
+    }
+
+    /// MB-R-150 — (re)attach the current `serial_paths` registry to this instance's
+    /// path-conflict cell, if it has one (Rtu/Ascii only). Called at the end of `new()` and
+    /// `reconfigure()` (both of which build a fresh `self.instance`, and so a fresh, unattached
+    /// cell), and from `set_serial_paths()` (when the owning session's registry itself is
+    /// attached or swapped).
+    fn attach_path_conflict(&mut self) {
+        self.path_conflict_cell = self.instance.path_conflict_cell();
+        if let Some(cell) = &self.path_conflict_cell {
+            let registry = self.serial_paths.clone();
+            let name = self.name.clone();
+            cell.set(Arc::new(move |path: &str| registry.conflict(&name, path)));
+        }
+    }
+
+    /// MB-R-150 — attach this session's live Rtu/Ascii path-conflict registry. A module that
+    /// never receives this call keeps the default, unshared registry (never conflicts with
+    /// anything) — the pre-feature behavior, still correct for standalone/test use.
+    // Forward-declared: the real production caller (App, via rebuild_registry) lands in s8 of
+    // the mb-monitor-path-conflict plan. `#[allow(dead_code)]`, not a stub — already fully
+    // implemented and tested above.
+    #[allow(dead_code)]
+    pub fn set_serial_paths(&mut self, registry: SerialPathRegistry) {
+        self.serial_paths = registry;
+        self.attach_path_conflict();
     }
 
     /// Resolve effective timing for an instance from the device config, falling back to the
@@ -295,7 +338,8 @@ impl ModbusModule {
         let log_sink = self.file_sink.clone();
         let status = self.log.clone();
         let status_sink = self.file_sink.clone();
-        self.instance
+        let result = self
+            .instance
             .start(
                 move |s: String| {
                     let log = log.clone();
@@ -315,11 +359,26 @@ impl ModbusModule {
                     }
                 },
             )
-            .await
+            .await;
+        // MB-R-150 — claim this instance's serial path (Rtu/Ascii only; a no-op via
+        // `own_serial_path` being `None` for every other transport) so the registry can report
+        // it as a conflict to any other instance that shares it.
+        if result.is_ok()
+            && let Some(path) = &self.own_serial_path
+        {
+            self.serial_paths.claim(&self.name, path);
+        }
+        result
     }
 
     pub async fn stop(&mut self) -> Result<(), Error> {
-        self.instance.stop().await
+        let result = self.instance.stop().await;
+        // MB-R-150 — release unconditionally, even on an error other than `NotRunning`: `stop()`
+        // still aborts the task via its grace-then-abort fallback, so leaving a stale claim
+        // behind would be the more harmful failure mode ("recovers…once the conflicting
+        // instance stops").
+        self.serial_paths.release(&self.name);
+        result
     }
 
     /// (Re)start the simulation thread from a fresh register snapshot if there is at least one
@@ -434,6 +493,8 @@ impl ModbusModule {
             self.memory.clone(),
             self.self_signed_cache.clone(),
         );
+        self.own_serial_path = endpoint_serial_path(endpoint);
+        self.attach_path_conflict();
         self.ensure_sim();
         Ok(())
     }
@@ -761,6 +822,112 @@ mod tests {
         let module = ModbusModule::new(&spec, &device);
         assert_eq!(module.registers().len(), 2);
         assert!(!module.is_instance_active());
+    }
+
+    fn rtu_spec(name: &str, path: &str) -> crate::config::ModuleSpec {
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        ModuleSpec {
+            name: name.to_string(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Rtu {
+                path: path.to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — starting a module claims its serial path in the attached registry (visible to
+    /// another instance sharing the registry as a conflict); stopping releases it.
+    async fn ut_module_start_claims_serial_path_stop_releases() {
+        use super::ModbusModule;
+        use crate::module::modbus::SerialPathRegistry;
+
+        let device = device_with_defs();
+        let path = "/nonexistent/mb-r-150-a";
+        let mut module_a = ModbusModule::new(&rtu_spec("A", path), &device);
+        let registry = SerialPathRegistry::new();
+        module_a.set_serial_paths(registry.clone());
+
+        let _ = module_a.start().await;
+        assert_eq!(registry.conflict("B", path), Some("A".to_string()));
+
+        module_a.stop().await.expect("stop");
+        assert_eq!(registry.conflict("B", path), None);
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — `reconfigure()` reattaches the (possibly freshly-serial) instance to the
+    /// already-set registry, so a start after reconfiguring still sees a conflict against another
+    /// instance sharing the same path.
+    async fn ut_module_reconfigure_reattaches_path_conflict() {
+        use super::ModbusModule;
+        use crate::config::device::ReadRanges;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        use crate::module::modbus::SerialPathRegistry;
+
+        let device = device_with_defs();
+        let path = "/nonexistent/mb-r-150-b";
+
+        // Module B already claims the path directly in the shared registry.
+        let registry = SerialPathRegistry::new();
+        registry.claim("B", path);
+
+        // Module A starts as a Tcp client (no serial path), then reconfigures onto the same Rtu
+        // path B already claims.
+        let spec = ModuleSpec {
+            name: "A".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        };
+        let mut module_a = ModbusModule::new(&spec, &device);
+        module_a.set_serial_paths(registry.clone());
+
+        let timing = ModbusModule::resolve_timing(&device);
+        module_a
+            .reconfigure(
+                &Endpoint::Rtu {
+                    path: path.to_string(),
+                    baud_rate: 9600,
+                    parity: None,
+                    data_bits: None,
+                    stop_bits: None,
+                },
+                Role::Client,
+                timing,
+                ReadRanges::default(),
+                None,
+            )
+            .await
+            .expect("reconfigure");
+
+        let _ = module_a.start().await;
+        assert_eq!(registry.conflict("A", path), Some("B".to_string()));
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — a module that never receives `set_serial_paths` keeps its own private, default
+    /// registry: its claim never lands in any other (e.g. a session-wide) registry.
+    async fn ut_module_new_without_set_serial_paths_never_conflicts() {
+        use super::ModbusModule;
+        use crate::module::modbus::SerialPathRegistry;
+
+        let device = device_with_defs();
+        let path = "/nonexistent/mb-r-150-c";
+        let mut module_a = ModbusModule::new(&rtu_spec("A", path), &device);
+
+        let _ = module_a.start().await;
+
+        let unrelated_registry = SerialPathRegistry::new();
+        assert_eq!(unrelated_registry.conflict("B", path), None);
     }
 
     // --- Sim lifecycle: decoupled from network start/stop, driven only by enabled scripts. ---

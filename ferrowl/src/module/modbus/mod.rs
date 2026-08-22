@@ -17,9 +17,16 @@ mod build;
 mod log;
 mod module;
 pub mod monitor;
+mod serial_paths;
 
 pub use module::{ModbusModule, ModuleLog, ModuleMemory, VirtualStore};
 pub use monitor::{ModbusMonitorModule, ModbusMonitorModuleView};
 
 pub(crate) use build::{default_value, str_to_value};
 pub(crate) use log::{FileSink, append};
+// Forward-declared: real app-side consumption (App attaching the session-wide registry to
+// each ModbusModule/ModbusMonitorModule via `set_serial_paths`) lands in s8 of the
+// mb-monitor-path-conflict plan. `#[allow(dead_code)]`, not a stub — already fully implemented
+// and tested (module.rs, serial_paths.rs).
+#[allow(unused_imports)]
+pub(crate) use serial_paths::SerialPathRegistry;
