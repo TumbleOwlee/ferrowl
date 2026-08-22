@@ -10,7 +10,7 @@ use super::module::ModbusMonitorModule;
 use super::setup_dialog::MonitorSetupDialog;
 use super::view::ModbusMonitorModuleView;
 
-/// Wraps [`MonitorSetupDialog`] and implements [`SetupView`] for the Modbus Monitor module
+/// Wraps [`MonitorSetupDialog`] and implements [`SetupView`] for the Monitor module
 /// type (UI-R-060/061), same shape as `module::modbus::setup::ModbusSetupView`.
 pub struct MonitorSetupView {
     dialog: MonitorSetupDialog,
@@ -116,7 +116,7 @@ mod tests {
 
     // Regression: the `SetupView::close_requested` default trait method must be overridden here
     // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
-    // silently do nothing for a Modbus Monitor module setup (mirrors `ModbusSetupView`'s own
+    // silently do nothing for a Monitor module setup (mirrors `ModbusSetupView`'s own
     // regression test).
     #[test]
     fn ut_close_requested_delegates_to_dialog_take_close_request() {

@@ -527,8 +527,8 @@ impl MonitorSetupDialog {
             )
             .title_alignment(HorizontalAlignment::Center)
             .title(match self.mode {
-                DialogMode::New => "New Modbus Monitor",
-                DialogMode::Edit => "Edit Modbus Monitor",
+                DialogMode::New => "New Monitor",
+                DialogMode::Edit => "Edit Monitor",
             });
         let inner = block.inner(vcenter).inner(Margin::new(2, 1));
         block.render(vcenter, buf);
@@ -900,7 +900,7 @@ mod tests {
 
         let title_chars: Vec<&str> = (20..80).map(|x| buf[(x, 18)].symbol()).collect();
         let title_row: String = title_chars.concat();
-        assert!(title_row.contains("New Modbus Monitor"));
+        assert!(title_row.contains("New Monitor"));
         // Centered within the 60-wide box: left padding to the title must roughly match right
         // padding (offset measured in cells, not bytes — border glyphs are multi-byte UTF-8).
         let title_start = title_chars
