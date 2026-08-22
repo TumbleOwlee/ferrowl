@@ -365,6 +365,11 @@ where
         // `HighlightSpacing::Never` — no reserved-but-blank whitespace prefix on every line);
         // `row_highlight_style` below still applies the selected row's background/foreground
         // either way, which is what actually conveys the current selection once the bar is gone.
+        let marker = if self.show_selection_marker {
+            " █ "
+        } else {
+            " "
+        };
         let t = UiTable::new(rows, constraints)
             .header(header)
             .row_highlight_style(*selected_style)
@@ -373,18 +378,13 @@ where
                     let spacing = itertools::repeat_n("".into(), self.row_margin.vertical as usize);
                     spacing
                         .clone()
-                        .chain(itertools::repeat_n(" █ ".into(), bar_height as usize))
+                        .chain(itertools::repeat_n(marker.into(), bar_height as usize))
                         .chain(spacing)
                         .collect::<Vec<Line>>()
                 })
                 .style(*bar_style)
             })
-            .column_spacing(1)
-            .highlight_spacing(if self.show_selection_marker {
-                HighlightSpacing::Always
-            } else {
-                HighlightSpacing::Never
-            });
+            .column_spacing(1);
 
         state.set_visible_width(area.width);
         if state.total_width() <= area.width {

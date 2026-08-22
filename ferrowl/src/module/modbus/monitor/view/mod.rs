@@ -254,7 +254,7 @@ const TABLE_KINDS: [Kind; 4] = [
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = UnitHeader)]
 struct UnitRow {
-    #[column(name = "Unit", min = 8, max = 20)]
+    #[column(name = "Unit", min = 4, max = 4)]
     unit: String,
 }
 
@@ -1224,7 +1224,7 @@ impl ModuleView for ModbusMonitorModuleView {
         // && panel_focus == <panel>)` before rendering, no separate `style_for` computation
         // needed here anymore.
         let [left_area, right_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(1)]).areas(content_area);
+            Layout::horizontal([Constraint::Length(10), Constraint::Min(1)]).areas(content_area);
 
         let buf = frame.buffer_mut();
 
