@@ -89,10 +89,11 @@ where
     #[builder(default = "[true; N]")]
     split_by_whitespace: [bool; N],
     /// Whether the selected row's highlight bar (`" █ "`) is drawn (default `true`, every
-    /// existing table unaffected). The selected row's own background/foreground
-    /// (`TableStyle::focused`/`unfocused_selected`, via `row_highlight_style`) is applied either
-    /// way — this only suppresses the extra bar glyph, for a panel (e.g. Units) that already
-    /// conveys focus through that background change alone.
+    /// existing table unaffected). UI-R-066: an unfocused table with the marker shown skips the
+    /// row's own highlight style (`row_highlight_style`) entirely — the marker glyph alone is
+    /// already the selection cue there, and a background highlight too would be redundant. Every
+    /// other case (focused, or the marker hidden) still applies the highlight style, since with
+    /// the marker gone that background is the only remaining selection cue.
     #[getset(get = "pub")]
     #[builder(default = "true")]
     show_selection_marker: bool,
@@ -212,23 +213,40 @@ where
             .collect();
 
         let column_spacings = 2 * (N as u16) + (N as u16 - 1);
-        let table_width = column_widths.iter().fold(column_spacings, |acc, w| acc + w) + 3;
+        // #220 — under ratatui's default `HighlightSpacing::WhenSelected` (no explicit
+        // `.highlight_spacing(...)` call: the gutter reserves zero width whenever nothing is
+        // selected, for every table), the real reserved width is 0 with no selection, else the
+        // highlight symbol's own width (3 for `" █ "` when the marker is shown, 1 for `" "` when
+        // it's not) — never a flat constant.
+        let marker_width: u16 = match state.table_state().selected() {
+            Some(_) if self.show_selection_marker => 3,
+            Some(_) => 1,
+            None => 0,
+        };
+        let table_width =
+            column_widths.iter().fold(column_spacings, |acc, w| acc + w) + marker_width;
 
         // `show_selection_marker == false`: once the bar glyph is gone, the selected row's own
         // background is the *only* remaining selection cue, so it always uses the stronger
-        // `focused` style (never the subtler `unfocused_selected`, which can visually collapse
-        // into the ordinary row background) — even while the table itself isn't panel-focused.
+        // `focused` style — even while the table itself isn't panel-focused. `show_selection_marker
+        // == true` (the default) intentionally skips the row highlight while unfocused: the marker
+        // glyph itself is already the selection cue there, and a highlight too would be redundant.
         let selected_style = if !self.show_selection_marker || state.focused() {
             &self.style.focused
         } else {
-            if let Some(i) = state.table_state().selected() {
-                self.style
-                    .rows
-                    .get(i % 2)
-                    .expect("rows is [Style; 2]; i % 2 is in bounds")
-            } else {
-                &self.style.unfocused_selected
-            }
+            // No row is actually painted with this style when nothing is selected (`Table`'s
+            // `row_highlight_style` only ever applies to the selected row), so the exact value
+            // here is inert in that case.
+            state
+                .table_state()
+                .selected()
+                .map(|i| {
+                    self.style
+                        .rows
+                        .get(i % 2)
+                        .expect("rows is [Style; 2]; i % 2 is in bounds")
+                })
+                .unwrap_or(&self.style.focused)
         };
         let bar_style = selected_style;
         let mut bar_height = 0;
@@ -368,10 +386,9 @@ where
             })
             .collect::<Vec<_>>();
 
-        // `show_selection_marker == false` collapses the marker column entirely (ratatui's
-        // `HighlightSpacing::Never` — no reserved-but-blank whitespace prefix on every line);
-        // `row_highlight_style` below still applies the selected row's background/foreground
-        // either way, which is what actually conveys the current selection once the bar is gone.
+        // UI-R-066 — with no selection, ratatui's default `HighlightSpacing::WhenSelected`
+        // reserves zero gutter width regardless of `show_selection_marker` (see `marker_width`
+        // above); once something is selected, the gutter reserves exactly this glyph's width.
         let marker = if self.show_selection_marker {
             " █ "
         } else {

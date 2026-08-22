@@ -608,7 +608,7 @@ fn table_render_variants() {
 }
 
 #[test]
-/// A `Table` with fewer rows than its area's height fills the whole bordered area with the
+/// UI-R-066 — a `Table` with fewer rows than its area's height fills the whole bordered area with the
 /// table's own background — the row/header area below the last row must not be left at the
 /// buffer's default (uncleared) style, matching every other bordered widget's own filled
 /// background. Narrow enough that `total_width > area.width` (the h-scroll copy path, Shared
@@ -639,9 +639,9 @@ fn table_fills_unused_row_area_with_its_own_background_not_default() {
 }
 
 #[test]
-/// `show_selection_marker(false)` (default `true`, every other table unaffected) suppresses the
-/// selection highlight bar glyph (`█`) entirely, while the selected row's own background still
-/// distinguishes it from unselected rows.
+/// UI-R-066 — `show_selection_marker(false)` (default `true`, every other table unaffected)
+/// suppresses the selection highlight bar glyph (`█`) entirely, while the selected row's own
+/// background still distinguishes it from unselected rows.
 fn table_show_selection_marker_false_suppresses_bar_keeps_row_highlight() {
     let rows = vec![
         Row("alpha".to_string(), "one".to_string()),
@@ -673,10 +673,10 @@ fn table_show_selection_marker_false_suppresses_bar_keeps_row_highlight() {
 }
 
 #[test]
-/// Manual-exercise follow-up to `show_selection_marker(false)` — the marker column must
-/// collapse entirely (no leftover whitespace prefix) rather than stay reserved-but-blank.
-/// Comparing against the marker-`true` render of the identical rows/area: every row's first
-/// non-border, non-header content column starts one cell further left once the marker is gone.
+/// UI-R-066 — `show_selection_marker(false)`'s marker column must collapse entirely (no
+/// leftover whitespace prefix) rather than stay reserved-but-blank. Comparing against the
+/// marker-`true` render of the identical rows/area: every row's first non-border, non-header
+/// content column starts one cell further left once the marker is gone.
 fn table_show_selection_marker_false_collapses_marker_column() {
     let rows = || {
         vec![
@@ -729,10 +729,11 @@ fn table_show_selection_marker_false_collapses_marker_column() {
 }
 
 #[test]
-/// Manual-exercise follow-up — without the bar glyph, the selected row's own background is the
-/// only remaining selection cue, so it must stay clearly visible even while the table itself
-/// isn't the currently focused panel (previously `unfocused_selected` was used in that case,
-/// which visually collapses back into the unselected row background of catppuccin's palette).
+/// UI-R-066 — without the bar glyph, the selected row's own background is the only remaining
+/// selection cue, so it must stay clearly visible even while the table itself isn't the
+/// currently focused panel: `show_selection_marker(false)` always uses the strong `focused`
+/// style, never the subtler alternating-row style a marker-on unfocused table falls back to
+/// (which relies on the marker glyph itself as the selection cue instead).
 fn table_show_selection_marker_false_keeps_selected_row_visibly_highlighted_when_unfocused() {
     let rows = vec![
         Row("alpha".to_string(), "one".to_string()),
@@ -753,13 +754,48 @@ fn table_show_selection_marker_false_keeps_selected_row_visibly_highlighted_when
     StatefulWidget::render(&w, Rect::new(0, 0, 30, 6), &mut b, &mut st);
 
     // Row 2 (the selected first data row) must use the same strong `focused` background as a
-    // focused selection would, not the subtler `unfocused_selected` one.
+    // focused selection would.
     let style = TableStyle::default();
     assert_eq!(
         b[(2, 2)].bg,
         style.focused().bg.expect("focused style always sets a bg"),
         "selected row must stay highlighted with the strong `focused` background even while \
          the table itself is unfocused, once the marker glyph is gone"
+    );
+}
+
+#[test]
+/// UI-R-066 — the marker gutter's reserved width tracks the table's real selection state: zero
+/// with nothing selected (an empty table), the highlight glyph's own width once a row is
+/// selected — not a flat constant that over- or under-reserves relative to what's actually
+/// drawn (#220's phantom-scroll/geometry-jump report).
+fn table_marker_gutter_width_tracks_selection_state_empty_to_non_empty() {
+    let w = TableBuilder::<Row, Cols, 2>::default().build().unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(Vec::new())
+        .build()
+        .unwrap();
+    st.set_values(Vec::new());
+    // Area narrower than the table's own content width, so `total_width` reports the table's
+    // real computed width rather than being clamped up to a wide area's width.
+    let mut b = buffer(5, 8);
+    StatefulWidget::render(&w, Rect::new(0, 0, 5, 8), &mut b, &mut st);
+    let empty_width = st.total_width();
+
+    // Content no wider than the header's own labels ("Name"/"Value"), so the only width change
+    // between the empty and non-empty renders is the marker gutter, not the column widths too.
+    st.set_values(vec![
+        Row("abcd".to_string(), "one".to_string()),
+        Row("wxyz".to_string(), "two".to_string()),
+    ]);
+    StatefulWidget::render(&w, Rect::new(0, 0, 5, 8), &mut b, &mut st);
+    let selected_width = st.total_width();
+
+    assert_eq!(
+        selected_width - empty_width,
+        3,
+        "selecting a row must grow the reserved gutter by exactly the marker glyph's width (3), \
+         not a mismatched fixed constant (empty: {empty_width}, selected: {selected_width})"
     );
 }
 
@@ -791,9 +827,10 @@ impl TableEntry<2> for SpanRow {
 }
 
 #[test]
-/// A `cell_spans`-returning column renders each span with its own color, distinct from its
-/// neighbor's, rather than one flat cell color; a `None` column (col 1) renders exactly as
-/// before this method existed.
+/// UI-R-063 — a `cell_spans`-returning column renders each span with its own color, distinct
+/// from its neighbor's, rather than one flat cell color (the mechanism UI-R-063's Memory-layout
+/// per-byte/word coloring is built on); a `None` column (col 1) renders exactly as before this
+/// method existed.
 fn table_cell_spans_render_distinct_per_span_colors() {
     let w = TableBuilder::<SpanRow, Cols, 2>::default().build().unwrap();
     // Two rows so row index 1 (rendered on buffer row 2) is unselected — the table's default
