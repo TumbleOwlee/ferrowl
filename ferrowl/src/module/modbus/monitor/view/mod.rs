@@ -295,7 +295,7 @@ struct MessageRow {
     // to render on one line, not wrap/truncate.
     #[column(name = "Time", min = 23, max = 23)]
     time: String,
-    #[column(name = "Status", min = 10, max = 16)]
+    #[column(name = "Status", min = 10, max = 25)]
     status: String,
     #[column(name = "Slave", min = 6, max = 6)]
     slave: String,
