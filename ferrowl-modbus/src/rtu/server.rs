@@ -133,6 +133,11 @@ where
             let expanded = ferrowl_util::path::expand(&path);
             let expanded = expanded.to_string_lossy().into_owned();
             if let Some(other) = path_conflict.check(&expanded) {
+                log.invoke(format!(
+                    "Serial path '{expanded}' is already in use by module '{other}' in this \
+                     session; skipping open."
+                ))
+                .await;
                 return AttemptOutcome::Failed {
                     error: Error::PathConflict {
                         path: expanded,
@@ -239,6 +244,46 @@ mod tests {
         assert!(
             matches!(result, Err(Error::PathConflict { .. })),
             "expected Err(Error::PathConflict), got {result:?}"
+        );
+    }
+
+    /// MB-R-150 — "report a distinct path-conflict status/log entry instead — replacing today's
+    /// silent indefinite retry": unlike an ordinary open failure (which the server's own
+    /// `attempt` closure never logs, only client/monitor do via their reconnect loops), a
+    /// conflict must be visible via `log` before the attempt returns, since a `reconnect:true`
+    /// server would otherwise retry it forever with no observable trace at all.
+    #[tokio::test]
+    async fn ut_rtu_server_run_logs_path_conflict_before_returning() {
+        use std::sync::Mutex;
+
+        let cfg = Arc::new(RwLock::new(config(
+            "/nonexistent/mb-r-150-ut-rtu-server-log",
+        )));
+        let memory: Arc<MemLock<Memory<Key<SlaveKey>>>> = Arc::new(MemLock::new(Memory::default()));
+        let (_tx, rx) = mpsc::channel(1);
+        let path_conflict = PathConflictCell::default();
+        path_conflict.set(std::sync::Arc::new(|_: &str| {
+            Some("other-module".to_string())
+        }));
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_sink = {
+            let lines = lines.clone();
+            move |s: String| {
+                let lines = lines.clone();
+                async move {
+                    lines.lock().unwrap().push(s);
+                }
+            }
+        };
+
+        let _ = run::<SlaveKey, _, _>(cfg, memory, rx, log_sink, sink(), path_conflict).await;
+
+        let logged = lines.lock().unwrap();
+        assert!(
+            logged
+                .iter()
+                .any(|l| l.contains("already in use by module 'other-module'")),
+            "expected a path-conflict log line, got: {logged:?}"
         );
     }
 }

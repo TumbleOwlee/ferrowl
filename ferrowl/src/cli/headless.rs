@@ -65,6 +65,11 @@ struct RunModule {
 /// fails to load or `start` reports an error.
 async fn build_modules(args: &RunArgs) -> Result<Vec<RunModule>, String> {
     let mut modules = Vec::new();
+    // MB-R-150 — one session-wide registry for this headless run, attached to every Rtu/Ascii
+    // module immediately after construction and before it starts. No race: modules are built and
+    // started one at a time in this same loop, unlike `App`'s tabs (all pre-started before the
+    // TUI's own first `rebuild_registry`).
+    let serial_paths = crate::module::modbus::SerialPathRegistry::new();
 
     for spec in args.module_specs()? {
         let view: Box<dyn ModuleView> = match spec.role {
@@ -72,14 +77,16 @@ async fn build_modules(args: &RunArgs) -> Result<Vec<RunModule>, String> {
                 let device = config::load_monitor_device(&spec.device).map_err(|e| {
                     format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
                 })?;
-                let module = MonitorModule::new(&spec, &device);
+                let mut module = MonitorModule::new(&spec, &device);
+                module.set_serial_paths(serial_paths.clone());
                 Box::new(ModbusMonitorModuleView::new(module, spec.clone(), device))
             }
             Role::Client | Role::Server => {
                 let device = config::load_device(&spec.device).map_err(|e| {
                     format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
                 })?;
-                let module = Module::new(&spec, &device);
+                let mut module = Module::new(&spec, &device);
+                module.set_serial_paths(serial_paths.clone());
                 Box::new(ModbusModuleView::new(module, spec.clone(), device))
             }
         };
@@ -728,6 +735,43 @@ mod tests {
                 .into(),
         ];
         assert!(build_modules(&args).await.is_err());
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — headless module construction attaches one shared session-wide serial-path
+    /// registry to each Rtu/Ascii module before starting it, so two server instances configured
+    /// on the same nonexistent path see each other as a conflict instead of silently racing the
+    /// OS for it.
+    async fn ut_run_attaches_shared_serial_paths_registry_across_rtu_modules() {
+        let device = write_device("serialpaths");
+        let log_file = std::env::temp_dir()
+            .join("ferrowl_cl_serial_paths.log")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let _ = std::fs::remove_file(&log_file);
+        let args = RunArgs {
+            sessions: vec![],
+            modules: vec![
+                format!(
+                    "name=a,device={device},transport=rtu,path=/nonexistent/mb-r-150-cl,baud=9600,role=server"
+                ),
+                format!(
+                    "name=b,device={device},transport=rtu,path=/nonexistent/mb-r-150-cl,baud=9600,role=server"
+                ),
+            ],
+            ocpp: vec![],
+            duration: Some(1),
+            log_file: Some(log_file.clone()),
+            exit_on_error: false,
+        };
+
+        assert_eq!(run(&args).await, 0);
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.contains("already in use by module"),
+            "expected a path-conflict log line from the shared registry, got:\n{contents}"
+        );
     }
 
     #[tokio::test]

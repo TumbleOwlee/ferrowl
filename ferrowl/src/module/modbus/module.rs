@@ -52,6 +52,7 @@ pub(crate) fn network_log_level(s: &str) -> Level {
         || lower.contains("invalid")
         || lower.contains("dropped")
         || lower.contains("failed")
+        || lower.contains("already in use")
     {
         Level::Warning
     } else {
@@ -556,6 +557,18 @@ mod tests {
 
         let line = "TLS handshake with 127.0.0.1:5502 failed: bad certificate.";
         assert_eq!(network_log_level(line), Level::Error);
+    }
+
+    #[test]
+    /// MB-R-150 — a serial-path-conflict log line classifies as `Level::Warning`, the same
+    /// degraded-but-recovering bucket as "reconnecting"/"disconnected", not the Info default.
+    fn ut_network_log_level_classifies_path_conflict_as_warning() {
+        use super::network_log_level;
+        use crate::app::Level;
+
+        let line = "Serial path '/dev/ttyUSB0' is already in use by module 'PLC Sim' in this \
+                     session; skipping open.";
+        assert_eq!(network_log_level(line), Level::Warning);
     }
 
     fn device_with_defs() -> crate::config::DeviceConfig {
