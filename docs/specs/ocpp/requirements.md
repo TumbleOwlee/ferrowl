@@ -73,6 +73,8 @@ behavior, stated limitations).
 
 **OC-R-024** — A malformed inbound frame shall be logged and shall not tear down the connection. It is otherwise skipped, except where OC-R-098 requires it to be answered with a CallError.
 
+**OC-R-121** — Connection teardown shall not block on an in-flight inbound Call handler task: `shutdown()` shall abort every still-running handler rather than await it. A handler aborted this way never sends its reply.
+
 ---
 
 ## Errors
