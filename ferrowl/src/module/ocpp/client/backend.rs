@@ -438,10 +438,6 @@ pub(crate) async fn send_status_notification<V: ClientVersion>(
 /// post-send/rollback state transition the RFID path uses, then (OC-R-122) send the coupled
 /// `StatusNotification`. Fire-and-forget: the caller does not await this before building
 /// `RemoteStartTransactionResponse`/`RequestStartTransactionResponse`.
-///
-/// `#[allow(dead_code)]`: wired into the `RemoteStartTransaction`/`RequestStartTransaction` match
-/// arms in later stages of this task; unused for one commit while this stage lands on its own.
-#[allow(dead_code)]
 pub(crate) fn spawn_remote_transaction_start<V: ClientVersion>(
     sender: OcppSender<V>,
     state: Arc<parking_lot::RwLock<V::Cs>>,

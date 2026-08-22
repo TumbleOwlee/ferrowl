@@ -70,9 +70,6 @@ pub struct CsStateHandler {
     online: Arc<AtomicBool>,
     messages: Messages,
     state: Arc<RwLock<CsState>>,
-    // Wired into the `RemoteStartTransaction` match arm in a later stage of this task; unused for
-    // one commit while this stage lands on its own.
-    #[allow(dead_code)]
     sender: OcppSender<V1_6>,
 }
 
@@ -301,40 +298,50 @@ impl CsStateHandler {
                     )
                 })
             }
-            Action16::RemoteStartTransaction(req) => self.with_state_mut(|state| {
-                // Optional connectorId; fall back to the first connector. Mint a local transaction
-                // id (one greater than any existing) and put the connector into Charging.
-                let next = state
-                    .connectors
-                    .iter()
-                    .filter_map(|c| c.transaction_id)
-                    .max()
-                    .unwrap_or(0)
-                    + 1;
-                let idx = req
-                    .connector_id
-                    .and_then(|t| {
-                        state
-                            .connectors
-                            .iter()
-                            .position(|c| c.connector_id == t as i64)
-                    })
-                    .or((!state.connectors.is_empty()).then_some(0));
-                let context = match idx {
-                    Some(i) => {
-                        state.connectors[i].transaction_id = Some(next);
-                        state.connectors[i].status = "Charging".to_string();
-                        format!(
-                            "started tx {next} on connector {}",
-                            state.connectors[i].connector_id
-                        )
+            Action16::RemoteStartTransaction(req) => {
+                // OC-R-070 — the response is still built synchronously (Accepted, from the
+                // resolved connector), but the actual `StartTransaction` + coupled
+                // `StatusNotification` (OC-R-122) are sent asynchronously through the same send
+                // path the RFID/operator flow uses, so the CSMS observes them as real Calls
+                // rather than a state mutation invisible to the wire.
+                let (context, has_target) = self.with_state(|state| {
+                    let idx = req
+                        .connector_id
+                        .and_then(|t| {
+                            state
+                                .connectors
+                                .iter()
+                                .position(|c| c.connector_id == t as i64)
+                        })
+                        .or((!state.connectors.is_empty()).then_some(0));
+                    match idx {
+                        Some(i) => (
+                            format!(
+                                "starting tx on connector {}",
+                                state.connectors[i].connector_id
+                            ),
+                            true,
+                        ),
+                        None => ("no connector to start".to_string(), false),
                     }
-                    None => "no connector to start".to_string(),
-                };
+                });
+                if has_target {
+                    let scope = req
+                        .connector_id
+                        .map(|c| Scope::connector(c as i64))
+                        .unwrap_or(Scope::CS);
+                    drop(
+                        crate::module::ocpp::client::backend::spawn_remote_transaction_start(
+                            self.sender.clone(),
+                            self.state.clone(),
+                            scope,
+                        ),
+                    );
+                }
                 let resp = V1_6::default_response("RemoteStartTransaction")
                     .expect("RemoteStartTransaction is a known action");
                 (Ok(resp), context)
-            }),
+            }
             Action16::RemoteStopTransaction(req) => {
                 let tx = req.transaction_id as i64;
                 self.with_state_mut(|state| {
@@ -528,12 +535,18 @@ mod tests {
     }
 
     fn handler_with(state: CsState) -> CsStateHandler {
+        handler_over(Arc::new(RwLock::new(state)))
+    }
+
+    /// A `CsStateHandler` sharing `state` with the caller (a `RemoteStopTransaction` drive doesn't
+    /// need a live sender — it's a synchronous state mutation, unlike `RemoteStartTransaction`).
+    fn handler_over(state: Arc<RwLock<CsState>>) -> CsStateHandler {
         use std::sync::atomic::AtomicBool;
         let messages = Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new()));
         CsStateHandler::new(
             Arc::new(AtomicBool::new(false)),
             messages.clone(),
-            Arc::new(RwLock::new(state)),
+            state,
             OcppSender::<V1_6>::detached(messages),
         )
     }
@@ -624,25 +637,317 @@ mod tests {
         assert!(st.connectors.iter().all(|c| c.status == "Available"));
     }
 
-    #[test]
-    /// OC-R-070 — a remote start mints a transaction id and sets the connector charging; a remote stop clears it and returns to available.
-    fn ut_remote_start_then_stop_transaction() {
-        let h = handler_with(two_connectors());
-        drive(
-            &h,
-            "RemoteStartTransaction",
-            json!({ "connectorId": 1, "idTag": "T" }),
+    // --- OC-R-070 / OC-R-122: remote-start is visible to the CSMS -----------------------------
+    //
+    // A real websocket loopback (mirrors `ferrowl-ocpp/tests/ws_loopback_v16.rs`): the CSMS side
+    // sends the inbound `RemoteStartTransaction` Call and records every Call it receives back
+    // from the CS in order, notifying once it has seen `StatusNotification`.
+
+    /// No-op log sink for the CSMS side.
+    fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// Poll until the CSMS listener has bound (`spawn` retries the bind in the background).
+    async fn bound_addr(server: &ferrowl_ocpp::csms::Server<V1_6>) -> std::net::SocketAddr {
+        for _ in 0..50 {
+            if let Some(addr) = server.local_addr() {
+                return addr;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("CSMS listener never bound");
+    }
+
+    /// Wait until the server registry reports at least one connection, then return its id.
+    async fn first_connection(
+        server: &ferrowl_ocpp::csms::Server<V1_6>,
+    ) -> ferrowl_ocpp::csms::ConnectionId {
+        for _ in 0..50 {
+            if let Some(id) = server.registry().connection_ids().first().copied() {
+                return id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("no CS connected in time");
+    }
+
+    /// CSMS handler answering `StartTransaction`/`StatusNotification`, recording the ordered list
+    /// of Call names it receives into `calls` and notifying `notify` once it sees
+    /// `StatusNotification`. Any other action is left unanswered by `notify`, letting a caller
+    /// that only cares about the send-failure path leave the send hanging (never Ok, never
+    /// recorded) by simply not spawning this handler at all.
+    struct RecordingCsms {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V1_6> for RecordingCsms {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: Action16,
+        ) -> Result<Response16, CallError> {
+            let name = match &action {
+                Action16::StartTransaction(_) => "StartTransaction",
+                Action16::StatusNotification(_) => "StatusNotification",
+                _ => "Other",
+            };
+            self.calls.lock().push(name.to_string());
+            if name == "StatusNotification" {
+                self.notify.notify_one();
+            }
+            match action {
+                Action16::StartTransaction(_) => Ok(Response16::StartTransaction(
+                    serde_json::from_value(json!({
+                        "idTagInfo": { "status": "Accepted" },
+                        "transactionId": 42,
+                    }))
+                    .unwrap(),
+                )),
+                Action16::StatusNotification(_) => Ok(Response16::StatusNotification(
+                    serde_json::from_value(json!({})).unwrap(),
+                )),
+                _ => Err(CallError::new(CallErrorCode::NotImplemented, "unsupported")),
+            }
+        }
+    }
+
+    /// Spawn a CSMS server on an OS-assigned port, recording Calls into `calls`/`notify`.
+    async fn start_server(
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    ) -> ferrowl_ocpp::csms::Server<V1_6> {
+        ferrowl_ocpp::csms::ServerBuilder::<V1_6>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(RecordingCsms { calls, notify }, sink())
+        .await
+        .expect("server failed to bind")
+    }
+
+    /// Connect a real `OcppClient<V1_6>` to `server`, backed by `state`, and return it once the
+    /// live-sender fix makes it usable (the handler's `sender` is captured before `start()`, per
+    /// the Shared plumbing in this task's s1).
+    async fn connected_client(
+        server: &ferrowl_ocpp::csms::Server<V1_6>,
+        state: Arc<RwLock<CsState>>,
+    ) -> crate::module::ocpp::client::backend::OcppClient<V1_6> {
+        use crate::module::ocpp::client::backend::OcppClient;
+        use crate::module::ocpp::config::device::OcppDeviceConfig;
+        use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
+
+        let addr = bound_addr(server).await;
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: addr.port(),
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let device = OcppDeviceConfig::default();
+        let log: crate::module::view::SharedLog =
+            Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()));
+        let mut client = OcppClient::<V1_6>::new();
+        let sender = client.sender();
+        let handler = CsStateHandler::new(
+            client.online_handle(),
+            client.messages_handle(),
+            state,
+            sender,
+        );
+        client
+            .start(&spec, &device, &log, handler)
+            .await
+            .expect("client failed to connect");
+        for _ in 0..100 {
+            if client.is_online() {
+                return client;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("client never came online");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — a remote start mints a transaction id and sets the connector charging, sending a
+    /// real `StartTransaction` to the CSMS (not just a local state mutation).
+    /// OC-R-122 — the `StartTransaction` is followed by a coupled `StatusNotification`.
+    /// A remote stop clears the transaction and returns to available.
+    async fn ut_remote_start_then_stop_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_connectors()));
+        let mut client = connected_client(&server, state.clone()).await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = Action16::RemoteStartTransaction(
+            serde_json::from_value(json!({ "connectorId": 1, "idTag": "T" })).unwrap(),
+        );
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(resp, Response16::RemoteStartTransaction(_)));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        assert_eq!(
+            *calls.lock(),
+            vec![
+                "StartTransaction".to_string(),
+                "StatusNotification".to_string()
+            ],
         );
         let tx = {
-            let st = h.state.read();
+            let st = state.read();
             let c = st.connector(1).unwrap();
             assert_eq!(c.status, "Charging");
             c.transaction_id.expect("transaction assigned")
         };
-        drive(&h, "RemoteStopTransaction", json!({ "transactionId": tx }));
-        let st = h.state.read();
-        assert!(st.connector(1).unwrap().transaction_id.is_none());
-        assert_eq!(st.connector(1).unwrap().status, "Available");
+
+        drive(
+            &handler_over(state.clone()),
+            "RemoteStopTransaction",
+            json!({ "transactionId": tx }),
+        );
+        {
+            let st = state.read();
+            assert!(st.connector(1).unwrap().transaction_id.is_none());
+            assert_eq!(st.connector(1).unwrap().status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — a remote start with no `connectorId` targets the first connector, matching
+    /// `ClientVersion::state_payload`'s existing "no scope → first connector" fallback.
+    async fn ut_remote_start_with_no_target_uses_first_connector() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_connectors()));
+        let mut client = connected_client(&server, state.clone()).await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = Action16::RemoteStartTransaction(
+            serde_json::from_value(json!({ "idTag": "T" })).unwrap(),
+        );
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(resp, Response16::RemoteStartTransaction(_)));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        {
+            let st = state.read();
+            assert_eq!(st.connector(1).unwrap().status, "Charging");
+            assert!(st.connector(1).unwrap().transaction_id.is_some());
+            assert_eq!(st.connector(2).unwrap().status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    /// CSMS handler that rejects `StartTransaction` (simulating a send failure), recording it and
+    /// notifying immediately — there is no coupled `StatusNotification` to wait for, since the
+    /// transaction-start itself failed.
+    struct FailingStartCsms {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V1_6> for FailingStartCsms {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: Action16,
+        ) -> Result<Response16, CallError> {
+            if let Action16::StartTransaction(_) = &action {
+                self.calls.lock().push("StartTransaction".to_string());
+                self.notify.notify_one();
+            }
+            Err(CallError::new(CallErrorCode::InternalError, "refused"))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — when the CSMS rejects the resulting `StartTransaction`, the connector is left
+    /// exactly as it was (1.6 never optimistically mutates state before the response, unlike 2.x's
+    /// `started_tx` fast-path, so there is nothing for `rollback_tx` to undo here — this proves the
+    /// negative: no stale `transaction_id`/`"Charging"` status is left behind).
+    async fn ut_remote_start_send_failure_does_not_leave_stale_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = ferrowl_ocpp::csms::ServerBuilder::<V1_6>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            FailingStartCsms {
+                calls: calls.clone(),
+                notify: notify.clone(),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let state = Arc::new(RwLock::new(two_connectors()));
+        let mut client = connected_client(&server, state.clone()).await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = Action16::RemoteStartTransaction(
+            serde_json::from_value(json!({ "connectorId": 1, "idTag": "T" })).unwrap(),
+        );
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(resp, Response16::RemoteStartTransaction(_)));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StartTransaction attempt never observed");
+        assert_eq!(*calls.lock(), vec!["StartTransaction".to_string()]);
+
+        // Give the failed send's rollback a moment to run before asserting nothing changed.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        {
+            let st = state.read();
+            assert!(st.connector(1).unwrap().transaction_id.is_none());
+            assert_eq!(st.connector(1).unwrap().status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
     }
 
     #[test]
