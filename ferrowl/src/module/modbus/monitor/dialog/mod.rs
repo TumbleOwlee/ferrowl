@@ -950,6 +950,11 @@ impl EditInterpretationDialog {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
+        // Bug fix — cloning each field's `.state` above also clones its own `focused` bool
+        // (e.g. `from_interpretation` starts focus on Address); re-derive widget-level focus
+        // from `d.focus` (Selection mode's own default, `Value`) so exactly one field ends up
+        // focused, not two.
+        SetFocus::set_focused(&mut d, true);
         d
     }
 
@@ -978,7 +983,7 @@ impl EditInterpretationDialog {
                 .areas(area);
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27),
+            Constraint::Length(30),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -1308,6 +1313,10 @@ impl EditInterpretationSelectionDialog {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
+        // Bug fix — same as `to_selection_dialog` (Shared): re-derive widget-level focus from
+        // `d.focus` (Input mode's own default, `Label`) instead of leaving whatever cloned
+        // field happened to be focused in Selection mode.
+        SetFocus::set_focused(&mut d, true);
         d
     }
 
@@ -1533,7 +1542,7 @@ impl EditInterpretationSelectionDialog {
                 .areas(area);
         let vertical_layout: [Rect; 3] = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(27),
+            Constraint::Length(30),
             Constraint::Min(1),
         ])
         .areas(horizontal_layout[1]);
@@ -2191,5 +2200,135 @@ mod tests {
 
         assert_eq!(back.label.state.input(), "power");
         assert!(back.pending_named_values.is_empty());
+    }
+
+    /// Bug fix — `from_interpretation` starts focus on Address (`address.state.focused = true`,
+    /// not Label's own default-`true`), so opening the edit dialog on an interpretation that
+    /// already has aliases (going straight to `to_selection_dialog`, `open_edit_interpretation`)
+    /// carried that stale `focused = true` over into the fresh `EditInterpretationSelectionDialog`
+    /// alongside its own default `value.state.focused = true` — two widgets visibly highlighted
+    /// at once. Exactly one field's widget-level `focused` must be true after the swap, matching
+    /// `d.focus`.
+    #[test]
+    fn ut_edit_interpretation_to_selection_dialog_focuses_exactly_one_field() {
+        let mut def = sample_def();
+        def.values = vec![NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }];
+        let dialog = EditInterpretationDialog::from_interpretation("power", &def);
+        assert!(
+            dialog.address.state.focused(),
+            "sanity: from_interpretation starts focus on Address"
+        );
+
+        let selection = dialog.to_selection_dialog();
+
+        assert!(
+            !selection.address.state.focused(),
+            "the carried-over Address field must not still show focused in Selection mode"
+        );
+        assert!(
+            selection.value.state.focused(),
+            "Selection mode's own default focus (Value) must be the only one focused"
+        );
+        assert_eq!(
+            selection.focus,
+            EditInterpretationSelectionDialogFocus::Value
+        );
+    }
+
+    /// Bug fix — the reverse direction of the above: converting back from `Selection` to
+    /// `Input` mode (`to_input_dialog`, once the last alias is deleted) must leave exactly
+    /// `Label` (its own default focus) focused, not whatever field happened to be focused in
+    /// `Selection` mode.
+    #[test]
+    fn ut_edit_interpretation_selection_to_input_dialog_focuses_exactly_one_field() {
+        let mut selection = EditInterpretationSelectionDialog::new(vec![NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }]);
+        selection.focus_next(); // Value -> AddButton
+        assert!(
+            !selection.label.state.focused(),
+            "sanity: Label is not the Selection dialog's focused field here"
+        );
+
+        let back = selection.to_input_dialog();
+
+        assert!(
+            back.label.state.focused(),
+            "Input mode's own default focus (Label) must be the only one focused"
+        );
+        assert_eq!(back.focus, EditInterpretationDialogFocus::Label);
+    }
+
+    /// Bug fix — `EditInterpretationDialog`'s declared dialog-box height
+    /// (`Length(27)`) was 3 rows short of what its own 10-row `rows` array actually needs
+    /// (`3*8 + 1*2 = 26` interior rows, `+4` border/margin = `30`, not `27`); the ratatui
+    /// layout solver silently shrank 3 of the `Length(3)` rows down to 2 rows each to fit,
+    /// leaving those rows' *content* line entirely unrendered (border-border, no content
+    /// row in between) — not merely "cramped", but the field's value invisible outright.
+    /// `AddInterpretationDialog` was never affected (its own box height, `Length(30)`,
+    /// already matched its identical row sum) — confirmed by rendering both and comparing,
+    /// not by re-deriving the constants.
+    #[test]
+    fn ut_edit_interpretation_render_does_not_shrink_rows_below_declared_height() {
+        let mut dialog = EditInterpretationDialog::from_interpretation("power", &sample_def());
+        set_input(&mut dialog.number_resolution, "2.75");
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+
+        assert!(
+            text.contains("Active power draw"),
+            "the description's own content line must render, not just its border:\n{text}"
+        );
+        assert!(
+            text.contains("2.75"),
+            "the Resolution field's own content line must render, not just its border:\n{text}"
+        );
+        assert!(
+            text.contains("CONFIRM") && text.contains("DELETE"),
+            "the Confirm/Delete buttons' own content line must render, not just their border:\n{text}"
+        );
+    }
+
+    /// Bug fix (post-`f41d946`) — same box-height-vs-row-sum mismatch as
+    /// `EditInterpretationDialog` (`Length(27)` declared, `Length(30)` needed by its own
+    /// identical 10-row array), reached once the mode-switch (item 3) opens this dialog
+    /// instead (Shared).
+    #[test]
+    fn ut_edit_interpretation_selection_render_does_not_shrink_rows_below_declared_height() {
+        let mut dialog = EditInterpretationSelectionDialog::new(vec![NamedValue {
+            name: "on".to_string(),
+            value: crate::config::device::Scalar::Int(1),
+        }]);
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.description, "Active power draw");
+        set_input(&mut dialog.address, "10");
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
+        set_input(&mut dialog.number_resolution, "2.75");
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+
+        assert!(
+            text.contains("Active power draw"),
+            "the description's own content line must render, not just its border:\n{text}"
+        );
+        assert!(
+            text.contains("2.75"),
+            "the Resolution field's own content line must render, not just its border:\n{text}"
+        );
+        assert!(
+            text.contains("CONFIRM") && text.contains("DELETE"),
+            "the Confirm/Delete buttons' own content line must render, not just their border:\n{text}"
+        );
     }
 }
