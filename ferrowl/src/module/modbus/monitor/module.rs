@@ -18,6 +18,7 @@ use ferrowl_modbus::UnitId;
 use ferrowl_modbus::monitor::{RecordLog, SharedObservedTable, SharedRecordLog};
 
 use super::super::log::{FileSink, open_sink};
+use super::super::serial_paths::SerialPathRegistry;
 use super::build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
 
 #[allow(dead_code)] // consumed starting s5 (ModbusMonitorModuleView)
@@ -52,6 +53,10 @@ pub struct ModbusMonitorModule {
     file_sink: FileSink,
     command_tx: Option<Sender<ServerCommand>>,
     task: Option<JoinHandle<Result<(), ferrowl_modbus::Error>>>,
+    /// MB-R-150 — the session-wide registry this instance's path-conflict check consults.
+    /// Defaults to a private, unshared registry until `set_serial_paths` attaches the real
+    /// session registry.
+    serial_paths: SerialPathRegistry,
 }
 
 #[allow(dead_code)] // forward-declared; see ModbusMonitorModule's note
@@ -89,7 +94,15 @@ impl ModbusMonitorModule {
             file_sink,
             command_tx: None,
             task: None,
+            serial_paths: SerialPathRegistry::default(),
         }
+    }
+
+    /// MB-R-150 — attach this session's live Rtu/Ascii path-conflict registry. A monitor that
+    /// never receives this call keeps the default, unshared registry (never conflicts with
+    /// anything) — the pre-feature behavior, still correct for standalone/test use.
+    pub fn set_serial_paths(&mut self, registry: SerialPathRegistry) {
+        self.serial_paths = registry;
     }
 
     /// Manual-exercise fix (items 1/2) — reconfigure an existing monitor instance from a
@@ -112,6 +125,9 @@ impl ModbusMonitorModule {
     /// already had to after a fresh `new()`'d module — this method changes what carries over,
     /// not the start/stop lifecycle itself.
     pub fn reconfigure(self, spec: &ModuleSpec, device: &MonitorDeviceConfig) -> Self {
+        // MB-R-150 — release any claim this instance held before rebuilding: "recovers…once the
+        // conflicting instance stops" applies just as much to a reconfigure as to a stop.
+        self.serial_paths.release(&self.name);
         if let Some(task) = self.task {
             task.abort();
         }
@@ -132,6 +148,7 @@ impl ModbusMonitorModule {
             file_sink,
             command_tx: None,
             task: None,
+            serial_paths: self.serial_paths,
         }
     }
 
@@ -260,22 +277,34 @@ impl ModbusMonitorModule {
             }
         };
 
+        // MB-R-150 — the checker consulted before every connect attempt, via the freshly-built
+        // builder's `PathConflictCell` (attached before `spawn()`, below).
+        let path_conflict_check: ferrowl_modbus::PathConflictCheck = {
+            let registry = self.serial_paths.clone();
+            let name = self.name.clone();
+            Arc::new(move |path: &str| registry.conflict(&name, path))
+        };
+
         let table = self.table.clone();
         let records = self.records.clone();
         let handle = match net_config {
             MonitorNetConfig::Rtu(cfg) => {
-                ferrowl_modbus::rtu::MonitorBuilder::new(Arc::new(RwLock::new(cfg)), table, records)
-                    .spawn(rx, log_cb, status_cb)
-                    .await?
-            }
-            MonitorNetConfig::Ascii(cfg) => {
-                ferrowl_modbus::ascii::MonitorBuilder::new(
+                let builder = ferrowl_modbus::rtu::MonitorBuilder::new(
                     Arc::new(RwLock::new(cfg)),
                     table,
                     records,
-                )
-                .spawn(rx, log_cb, status_cb)
-                .await?
+                );
+                builder.path_conflict().set(path_conflict_check);
+                builder.spawn(rx, log_cb, status_cb).await?
+            }
+            MonitorNetConfig::Ascii(cfg) => {
+                let builder = ferrowl_modbus::ascii::MonitorBuilder::new(
+                    Arc::new(RwLock::new(cfg)),
+                    table,
+                    records,
+                );
+                builder.path_conflict().set(path_conflict_check);
+                builder.spawn(rx, log_cb, status_cb).await?
             }
         };
 
@@ -283,6 +312,11 @@ impl ModbusMonitorModule {
         let _ = status;
         self.command_tx = Some(tx);
         self.task = Some(handle);
+        // MB-R-150 — claim this instance's serial path so the registry can report it as a
+        // conflict to any other instance that shares it.
+        if let Some(path) = crate::module::modbus::build::endpoint_serial_path(&self.endpoint) {
+            self.serial_paths.claim(&self.name, &path);
+        }
         Ok(())
     }
 
@@ -307,6 +341,8 @@ impl ModbusMonitorModule {
                 let _ = handle.await;
             }
         }
+        // MB-R-150 — release unconditionally, mirroring `ModbusModule::stop`.
+        self.serial_paths.release(&self.name);
         Ok(())
     }
 }
@@ -687,6 +723,79 @@ mod tests {
         let reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
         assert!(reconfigured.command_tx.is_none());
         assert!(reconfigured.task.is_none());
+    }
+
+    /// MB-R-150 — starting a monitor claims its serial path in the attached registry (visible to
+    /// another instance sharing the registry as a conflict); stopping releases it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_monitor_start_claims_serial_path_stop_releases() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        let mut device = device_with_defs();
+        device.reconnect = Some(false);
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+        let registry = SerialPathRegistry::new();
+        module.set_serial_paths(registry.clone());
+
+        let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
+            .expect("Rtu endpoint has a serial path");
+        let _ = module
+            .start(|_: String| async {}, |_: String| async {})
+            .await;
+        assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
+
+        module.stop().await.expect("stop");
+        assert_eq!(registry.conflict("B", &path), None);
+    }
+
+    /// MB-R-150 — `reconfigure()` releases the previous claim and carries the same shared
+    /// registry forward, so a subsequent `start()` on the reconfigured instance still
+    /// participates in the same session-wide conflict check.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_monitor_reconfigure_releases_old_claim_and_carries_registry() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        let mut device = device_with_defs();
+        device.reconnect = Some(false);
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+        let registry = SerialPathRegistry::new();
+        module.set_serial_paths(registry.clone());
+
+        let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
+            .expect("Rtu endpoint has a serial path");
+        let _ = module
+            .start(|_: String| async {}, |_: String| async {})
+            .await;
+        assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
+
+        let mut reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
+        // The old claim must be released by reconfigure itself, before any restart.
+        assert_eq!(registry.conflict("B", &path), None);
+
+        let _ = reconfigured
+            .start(|_: String| async {}, |_: String| async {})
+            .await;
+        assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
+    }
+
+    /// MB-R-150 — a monitor that never receives `set_serial_paths` keeps its own private,
+    /// default registry: its claim never lands in any other (e.g. a session-wide) registry.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_monitor_new_without_set_serial_paths_never_conflicts() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        let mut device = device_with_defs();
+        device.reconnect = Some(false);
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
+
+        let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
+            .expect("Rtu endpoint has a serial path");
+        let _ = module
+            .start(|_: String| async {}, |_: String| async {})
+            .await;
+
+        let unrelated_registry = SerialPathRegistry::new();
+        assert_eq!(unrelated_registry.conflict("B", &path), None);
     }
 
     /// network_log_level's monitor-specific Warning branch: a discarded malformed-frame line
