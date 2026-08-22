@@ -65,7 +65,8 @@ mistaken for an oversight and silently "fixed".
 | Transport error on a read or write | disconnect, end the connection run. Subject to reconnect |
 | Modbus exception on a write command | logged, no disconnect, no retry — the write is simply lost |
 | Store write-back of a poll result fails (range not covered) | logged; the read result is discarded. The client stays connected and advances |
-| An operation whose range length exceeds 65535 | answered locally with an `IllegalDataValue` exception (never sent), which then follows the exception-retry path. Unreachable via the config-driven planner, which caps requests at 125 registers / 2000 bits |
+| An operation whose start address exceeds 65535 | answered locally with an `IllegalDataValue` exception (never sent), same local-exception shape as an over-long range (MB-R-149). Unreachable via the config-driven planner (`addr: u16`), reachable only from a hand-edited config |
+| An operation whose range length exceeds 65535 | answered locally with an `IllegalDataValue` exception (never sent), which then follows the exception-retry path (MB-R-149). Unreachable via the config-driven planner, which caps requests at 125 registers / 2000 bits |
 | Empty operation list | the tick fires and does nothing; the client stays connected |
 | Command sent while the client is disconnected and backing off | dropped with a log line — **not** queued for after reconnect |
 | Command channel full (10 pending commands) | the sender waits; commands are never silently dropped at the channel |
