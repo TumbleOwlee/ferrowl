@@ -2,7 +2,7 @@
 use crate::common::serial_config_from;
 use crate::rtu::Config;
 use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
-use crate::{Error, Key, KeyParams, LogFn, SerialError, ServerCommand};
+use crate::{Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand};
 
 // Workspace
 use ferrowl_store::Memory;
@@ -23,11 +23,21 @@ use tokio::task::JoinHandle;
 pub struct ServerBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
+    path_conflict: PathConflictCell,
 }
 
 impl<T: KeyParams> ServerBuilder<T> {
     pub fn new(config: Arc<RwLock<Config>>, memory: Arc<MemLock<Memory<Key<T>>>>) -> Self {
-        Self { config, memory }
+        Self {
+            config,
+            memory,
+            path_conflict: PathConflictCell::default(),
+        }
+    }
+
+    /// MB-R-150 — see `rtu::ClientBuilder::path_conflict` (same late-binding contract).
+    pub fn path_conflict(&self) -> PathConflictCell {
+        self.path_conflict.clone()
     }
 
     /// Spawns the serve loop as a tokio task and always returns `Ok` (MB-R-130): the serial
@@ -48,8 +58,14 @@ impl<T: KeyParams> ServerBuilder<T> {
     {
         let config = self.config.clone();
         let memory = self.memory.clone();
+        let path_conflict = self.path_conflict.clone();
         Ok(tokio::task::spawn(run(
-            config, memory, receiver, log, status,
+            config,
+            memory,
+            receiver,
+            log,
+            status,
+            path_conflict,
         )))
     }
 }
@@ -72,6 +88,7 @@ async fn run<T, L, St>(
     receiver: Receiver<ServerCommand>,
     log: L,
     status: St,
+    path_conflict: PathConflictCell,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -87,6 +104,7 @@ where
         let log = log.clone();
         let activity = activity.clone();
         let receiver = &receiver;
+        let path_conflict = path_conflict.clone();
         async move {
             activity.store(false, Ordering::Relaxed);
             let guard = config.read().await;
@@ -108,6 +126,21 @@ where
             };
             let path = guard.path.clone();
             drop(guard);
+            // MB-R-150 — check the freshly `~`-expanded path for a conflict before the OS-level
+            // open; a conflict is a `Failed` outcome carrying the ordinary reconnect setting, so
+            // it retries on the usual backoff and recovers once the conflict clears.
+            let expanded = ferrowl_util::path::expand(&path);
+            let expanded = expanded.to_string_lossy().into_owned();
+            if let Some(other) = path_conflict.check(&expanded) {
+                return AttemptOutcome::Failed {
+                    error: Error::PathConflict {
+                        path: expanded,
+                        other,
+                    },
+                    reconnect,
+                    reset: false,
+                };
+            }
             match open_serial::<Ascii>(&path, serial) {
                 Err(e) => AttemptOutcome::Failed {
                     error: SerialError::Error(e).into(),
@@ -149,7 +182,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{PHYSICAL_SERIAL, VERBOSE};
+    use super::*;
+    use crate::{Key, PathConflictCell, SlaveKey};
+    use ferrowl_store::Memory;
+    use tokio::sync::mpsc;
 
     /// MB-R-067 — the Ascii server logs per-request outcomes exactly like every
     /// other transport.
@@ -163,5 +199,45 @@ mod tests {
     #[test]
     fn ut_ascii_server_is_physical_serial() {
         assert!(PHYSICAL_SERIAL);
+    }
+
+    fn sink() -> impl crate::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    fn config(path: &str) -> Config {
+        Config {
+            path: path.to_string(),
+            baud_rate: 9600,
+            slave: 0,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+            timeout_ms: 100,
+            delay_ms: 0,
+            interval_ms: 100,
+            reconnect: false,
+        }
+    }
+
+    /// MB-R-150 — a path-conflict checker attached to the builder's cell makes `run()` end the
+    /// (non-reconnecting) attempt with `Error::PathConflict`, without ever calling
+    /// `open_serial`.
+    #[tokio::test]
+    async fn ut_ascii_server_run_reports_path_conflict_and_skips_open() {
+        let cfg = Arc::new(RwLock::new(config("/nonexistent/mb-r-150-ut-ascii-server")));
+        let memory: Arc<MemLock<Memory<Key<SlaveKey>>>> = Arc::new(MemLock::new(Memory::default()));
+        let (_tx, rx) = mpsc::channel(1);
+        let path_conflict = PathConflictCell::default();
+        path_conflict.set(std::sync::Arc::new(|_: &str| {
+            Some("other-module".to_string())
+        }));
+
+        let result = run::<SlaveKey, _, _>(cfg, memory, rx, sink(), sink(), path_conflict).await;
+
+        assert!(
+            matches!(result, Err(Error::PathConflict { .. })),
+            "expected Err(Error::PathConflict), got {result:?}"
+        );
     }
 }
