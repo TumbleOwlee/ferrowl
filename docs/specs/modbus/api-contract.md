@@ -211,7 +211,10 @@ what an application-built module actually uses; they deliberately differ from th
 transport-level defaults of `0`.
 
 For `role = monitor`, the device config carries only `version`, `reconnect` (now also gating
-MB-R-141's serial-open retry), and `definitions` (map of name → `MonitorRegisterDef`, §6.3).
+MB-R-141's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, §6.3 — each
+entry carries its own `name`, since two interpretations on different `slave_id`s may share a
+name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would silently
+collapse same-named entries across slave ids).
 `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, and `script_interval` are
 dropped for this role: a monitor never initiates a transaction, has no poll loop, and (being
 display-only) has no Lua sim surface.
@@ -262,6 +265,7 @@ observed, not owned by the monitor — there is no write/read direction to decla
 
 | Field | Type | Default | Valid values |
 |---|---|---|---|
+| `name` | string | — (required) | the interpretation's display name; unique within its own `slave_id`, not across `slave_id`s (MB-R-148) |
 | `slave_id` | u8 | `0` | 0–255 |
 | `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
 | `address` | optional u16 | unset ⇒ virtual | 0–65535 |
