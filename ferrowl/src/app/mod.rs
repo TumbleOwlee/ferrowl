@@ -965,6 +965,9 @@ mod tests {
             "both instances must be in conflict before the recovery step"
         );
 
+        let log_a = app.tabs[0].view.log();
+        let written_before_stop = log_a.read().await.written();
+
         // Stop "b"; "a" is left alone on the path.
         let _ = app.tabs[1].view.handle_command("stop").await;
 
@@ -977,6 +980,34 @@ mod tests {
             "stopping 'b' must release its claim, clearing the conflict 'a' would see on its \
              next attempt"
         );
+
+        // Observe "a"'s own subsequent behavior, not just the registry precondition: wait past
+        // one full backoff interval (`BackoffPolicy::default().initial` = 1s, see
+        // `ferrowl-util/src/backoff.rs`) so "a" actually re-runs its attempt, then check its log
+        // for a *fresh* conflict line. There is no positive "recovered"/"reconnected" message to
+        // poll for instead — by design (edge-cases.md: "an external holder still surfaces as an
+        // ordinary OS-level open failure/retry, same as before"), an *ordinary* open failure
+        // against this nonexistent path logs nothing at all, both before and after this feature;
+        // only the conflict branch itself ever logs (`rtu::server::run`'s `log.invoke` added for
+        // MB-R-150). So the strongest available end-to-end signal that "a" stopped treating "b"
+        // as a conflict is exactly this: zero *new* conflict lines across an attempt that did
+        // fire — if the stale claim were still consulted, "a" would keep re-logging the same
+        // conflict every attempt, same as it did in the first 200ms above.
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        let after_stop = log_a.read().await;
+        let new_count = after_stop.written().saturating_sub(written_before_stop) as usize;
+        let new_lines: Vec<String> = after_stop
+            .peek_n(new_count)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect();
+        assert!(
+            !new_lines
+                .iter()
+                .any(|l| l.contains("already in use by module")),
+            "'a' must not log a fresh conflict once 'b' has released its claim, got: {new_lines:?}"
+        );
+        drop(after_stop);
 
         let _ = app.tabs[0].view.handle_command("stop").await;
     }
