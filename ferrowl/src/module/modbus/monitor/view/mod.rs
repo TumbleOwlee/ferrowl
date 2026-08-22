@@ -301,7 +301,7 @@ fn new_units_table() -> UnitsTable {
 /// UI-R-062 — one row of the Messages table: a `MonitorRecord`, sourced from `module.records()`,
 /// rendered most-recent-first in this fixed column order.
 #[derive(Clone, Debug, Default, TableEntry)]
-#[table_entry(header = MessageHeader)]
+#[table_entry(header = MessageHeader, styles = message_row_styles)]
 struct MessageRow {
     // Wide enough for `format_timestamp`'s full "YYYY-MM-DD HH:MM:SS.mmm" (23 chars, Gate3#2)
     // to render on one line, not wrap/truncate.
@@ -319,6 +319,10 @@ struct MessageRow {
     quantity: String,
     #[column(name = "Values/Payload", min = 10, max = 800)]
     payload: String,
+    /// Not a `#[column]` — visual improvement: the Status column's own color (`success` for
+    /// `RecordStatus::Ok`, `error` for any exception, `None`/default for `Unmatched`), consumed
+    /// by `message_row_styles`.
+    status_style: Option<ratatui::style::Style>,
 }
 
 type MessageTable = Widget<TableState<MessageRow, 7>, Table<MessageRow, MessageHeader, 7>>;
@@ -353,6 +357,23 @@ fn format_record_status(status: &RecordStatus) -> String {
         RecordStatus::Unmatched => "Unmatched".to_string(),
         RecordStatus::Exception(code) => format!("{code:?}"),
     }
+}
+
+/// Visual improvement — the Status column's own color: green for `Ok`, red for any exception,
+/// `None` (default text color) for `Unmatched`.
+fn record_status_style(status: &RecordStatus) -> Option<ratatui::style::Style> {
+    use ferrowl_ui::COLOR_SCHEME;
+    match status {
+        RecordStatus::Ok => Some(ratatui::style::Style::default().fg(COLOR_SCHEME.success)),
+        RecordStatus::Exception(_) => Some(ratatui::style::Style::default().fg(COLOR_SCHEME.error)),
+        RecordStatus::Unmatched => None,
+    }
+}
+
+/// Visual improvement — per-column styles for a `MessageRow`: only the Status column carries an
+/// override (`row.status_style`), every other column keeps the table's default text color.
+fn message_row_styles(row: &MessageRow) -> [Option<ratatui::style::Style>; 7] {
+    [None, row.status_style, None, None, None, None, None]
 }
 
 /// Shared hex-words formatting (UI-R-062's Messages payload, UI-R-064's resolved-registers raw
@@ -437,6 +458,7 @@ fn message_row(
         address,
         quantity,
         payload: format_record_payload(record),
+        status_style: record_status_style(&record.status),
     }
 }
 
@@ -2832,6 +2854,68 @@ mod tests {
         assert_eq!(rows[0].values()[4], "20");
         assert_eq!(rows[1].values()[3], "ReadHoldingRegisters");
         assert_eq!(rows[1].values()[4], "10");
+    }
+
+    /// Visual improvement — the Status column colors "OK" green and any exception red, so the
+    /// two are distinguishable at a glance, not just by reading the text. `Unmatched` gets no
+    /// override (default text color) — not asked for.
+    #[test]
+    fn ut_message_row_styles_colors_ok_green_and_exception_red() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::style::Style;
+
+        let now = std::time::Instant::now();
+        let wall_now = std::time::SystemTime::now();
+
+        let ok_row = message_row(
+            UnitId(3),
+            &shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                None,
+                std::time::Duration::from_secs(1),
+            ),
+            now,
+            wall_now,
+        );
+        let styles = message_row_styles(&ok_row);
+        assert_eq!(styles[1], Some(Style::default().fg(COLOR_SCHEME.success)));
+        assert!(
+            styles
+                .iter()
+                .enumerate()
+                .all(|(i, s)| i == 1 || s.is_none()),
+            "only the Status column should carry an override style"
+        );
+
+        let exception_row = message_row(
+            UnitId(3),
+            &shaped_record(
+                RecordStatus::Exception(ferrowl_modbus::ExceptionCode::IllegalDataAddress),
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                None,
+                std::time::Duration::from_secs(1),
+            ),
+            now,
+            wall_now,
+        );
+        assert_eq!(
+            message_row_styles(&exception_row)[1],
+            Some(Style::default().fg(COLOR_SCHEME.error))
+        );
+
+        let unmatched_row = message_row(
+            UnitId(3),
+            &shaped_record(
+                RecordStatus::Unmatched,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                None,
+                std::time::Duration::from_secs(1),
+            ),
+            now,
+            wall_now,
+        );
+        assert_eq!(message_row_styles(&unmatched_row)[1], None);
     }
 
     /// UI-R-062 — a register-shaped record's Values/Payload renders 4-digit lowercase hex per
