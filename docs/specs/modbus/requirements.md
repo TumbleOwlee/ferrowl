@@ -123,6 +123,8 @@ behavior, stated limitations).
 
 **MB-R-043** — A read returning a Modbus exception shall not disconnect the client. The client shall retry the same operation on subsequent ticks; after 3 consecutive exceptions for that operation it shall log the operation as invalid, skip it, and advance to the next operation, resetting the retry counter.
 
+**MB-R-149** — Before issuing a read, the client shall validate the operation's range against the wire's `u16` fields: a start address that does not fit in `u16`, or a computed count (`end - start`) that does not fit in `u16`, shall be answered locally with an `IllegalDataValue` exception — never sent to the wire — and shall follow the exception-retry path of MB-R-043.
+
 **MB-R-044** — The retry counter shall reset to zero on any successful read.
 
 **MB-R-045** — A read that times out, or that fails with a transport error, shall disconnect the client and end the current connection run.
