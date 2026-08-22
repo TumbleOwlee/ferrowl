@@ -435,23 +435,23 @@ fn message_row(
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = ResolvedHeader)]
 struct ResolvedRow {
-    #[column(name = "Name", min = 15, max = 30)]
+    #[column(name = "Name", min = 6, max = 30)]
     name: String,
-    #[column(name = "Description", min = 25, max = 40)]
+    #[column(name = "Description", min = 13, max = 40)]
     description: String,
     #[column(name = "Address", min = 10, max = 20)]
     address: String,
-    #[column(name = "Kind", min = 20, max = 30)]
+    #[column(name = "Kind", min = 6, max = 30)]
     kind: String,
     #[column(name = "Format", min = 10, max = 20)]
     format: String,
     #[column(name = "Length", min = 10, max = 20)]
     length: String,
-    #[column(name = "Resolution", min = 10, max = 20)]
+    #[column(name = "Resolution", min = 12, max = 20)]
     resolution: String,
     #[column(name = "Value", min = 5, max = 40)]
     value: String,
-    #[column(name = "Raw Value", min = 0, max = 800)]
+    #[column(name = "Raw Value", min = 11, max = 800)]
     raw_value: String,
 }
 
