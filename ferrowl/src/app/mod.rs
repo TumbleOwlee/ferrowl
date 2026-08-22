@@ -283,6 +283,10 @@ pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     /// Live `C_Module` session registry, rebuilt from `tabs` whenever the tab set or a view
     /// changes (see [`Self::rebuild_registry`]).
     registry: ModuleRegistry,
+    /// MB-R-150 — the single session-wide Rtu/Ascii serial-path registry, attached to every
+    /// tab's view (independent of `module_host()` participation) whenever `rebuild_registry`
+    /// runs.
+    serial_paths: crate::module::modbus::SerialPathRegistry,
     /// The `:session` dialog, if open.
     session_dialog: Option<Box<ScriptDialog>>,
     /// Current session-level Lua scripts and sim-cycle interval, applied to `session_sim` and
@@ -342,6 +346,7 @@ impl<S: DrawSurface> App<S> {
             (None, Focus::Content)
         };
         let registry = ModuleRegistry::new();
+        let serial_paths = crate::module::modbus::SerialPathRegistry::new();
         let session_log: SharedLog = std::sync::Arc::new(tokio::sync::RwLock::new(LogRing::init()));
         let mut session_sim = SessionSim::new(
             std::sync::Arc::new(registry.clone()) as std::sync::Arc<dyn ModuleDirectory>,
@@ -360,6 +365,7 @@ impl<S: DrawSurface> App<S> {
             help_open: false,
             help_scroll: 0,
             registry,
+            serial_paths,
             session_dialog: None,
             session_scripts,
             session_interval,
@@ -373,10 +379,16 @@ impl<S: DrawSurface> App<S> {
     }
 
     /// Snapshot the session-level `C_Module` registry from the current tab set: `Tab::name` ->
-    /// `ModuleView::module_host`, skipping tabs whose view doesn't participate. Call whenever the
-    /// tab set or a view's identity changes (create/close/rename, session load, a `take_replacement`
-    /// swap) so `C_Module` scripts see the current modules.
+    /// `ModuleView::module_host`, skipping tabs whose view doesn't participate. Also attaches the
+    /// single session-wide MB-R-150 serial-path registry to every tab's view (`set_serial_paths`,
+    /// independent of `module_host()` participation). Call whenever the tab set or a view's
+    /// identity changes (create/close/rename, session load, a `take_replacement` swap) so
+    /// `C_Module` scripts see the current modules and every Rtu/Ascii view shares the same
+    /// conflict registry.
     pub(crate) fn rebuild_registry(&mut self) {
+        for tab in &mut self.tabs {
+            tab.view.set_serial_paths(self.serial_paths.clone());
+        }
         let modules = self
             .tabs
             .iter()
@@ -826,6 +838,178 @@ mod tests {
             row(h - 1).contains(":  command"),
             "the command line is the bottom row"
         );
+    }
+
+    #[test]
+    /// MB-R-150 — `rebuild_registry` attaches the app's single session-wide serial-path registry
+    /// to every tab's view (`set_serial_paths`), independent of `module_host()`'s participation.
+    /// The same registry instance goes to every tab: a claim made through one tab's copy is
+    /// visible through another's.
+    fn ut_rebuild_registry_attaches_shared_serial_paths_registry_to_every_tab() {
+        use super::testkit::{MockView, build_app};
+        let (a, ha) = MockView::pair("a");
+        let (b, hb) = MockView::pair("b");
+        let app = build_app(vec![a.boxed(), b.boxed()]);
+        // `with_screen` already calls `rebuild_registry()` once at construction.
+        let _ = &app;
+
+        let reg_a = ha.serial_paths().expect("tab a must receive a registry");
+        let reg_b = hb.serial_paths().expect("tab b must receive a registry");
+        reg_a.claim("A", "/dev/ttyUSB0");
+        assert_eq!(
+            reg_b.conflict("B", "/dev/ttyUSB0"),
+            Some("A".to_string()),
+            "every tab must share the same session-wide registry instance"
+        );
+    }
+
+    /// A Modbus Rtu server `ModuleSpec` on the shared MB-R-150 test path, named `name`.
+    fn mb_r_150_rtu_server_spec(name: &str) -> crate::config::ModuleSpec {
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        ModuleSpec {
+            name: name.to_string(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Rtu {
+                path: "/nonexistent/mb-r-150-app-e2e".into(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        }
+    }
+
+    /// A real (non-mock) `ModbusModuleView` boxed for a tab, built from `mb_r_150_rtu_server_spec`.
+    fn mb_r_150_rtu_server_view(name: &str) -> Box<dyn ModuleView> {
+        use crate::config::DeviceConfig;
+        use crate::module::modbus::ModbusModule;
+        use crate::module::modbus::view::ModbusModuleView;
+        let spec = mb_r_150_rtu_server_spec(name);
+        let device = DeviceConfig::default();
+        let module = ModbusModule::new(&spec, &device);
+        Box::new(ModbusModuleView::new(module, spec, device))
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — end to end through the real `App` wiring (no mocks): two Rtu server tabs
+    /// configured on the same nonexistent path, started after `rebuild_registry()` (which
+    /// attaches the shared session registry to both), both report a symmetric path conflict —
+    /// proving MB-R-150 is not "first one wins" — and neither log shows an OS-level open-failure
+    /// string, proving the OS-level open was actually skipped rather than merely coincidentally
+    /// failing the same way.
+    async fn ut_two_rtu_server_instances_sharing_a_path_both_report_conflict() {
+        let mut app = super::testkit::build_app(vec![
+            mb_r_150_rtu_server_view("a"),
+            mb_r_150_rtu_server_view("b"),
+        ]);
+        // `with_screen` already called `rebuild_registry()` once, attaching the shared registry
+        // to both tabs before either starts.
+        for tab in &mut app.tabs {
+            let _ = tab.view.handle_command("start").await;
+        }
+        // Let the background reconnect loop run its first attempt and log it.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        for tab in &app.tabs {
+            let log = tab.view.log();
+            let lines: Vec<String> = log
+                .read()
+                .await
+                .peek_n(20)
+                .into_iter()
+                .map(|(_, _, l)| l)
+                .collect();
+            assert!(
+                lines.iter().any(|l| l.contains("already in use by module")),
+                "tab '{}' must report the path conflict, got: {lines:?}",
+                tab.name
+            );
+            assert!(
+                !lines
+                    .iter()
+                    .any(|l| l.to_lowercase().contains("device busy")
+                        || l.to_lowercase().contains("os error")),
+                "tab '{}' must never reach the OS-level open, got: {lines:?}",
+                tab.name
+            );
+        }
+
+        for tab in &mut app.tabs {
+            let _ = tab.view.handle_command("stop").await;
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — "recovers automatically once the conflicting instance stops": once one of two
+    /// Rtu server instances sharing a path is stopped, the surviving instance's own next attempt
+    /// no longer reports a conflict.
+    async fn ut_stopping_one_instance_lets_the_other_recover() {
+        let mut app = super::testkit::build_app(vec![
+            mb_r_150_rtu_server_view("a"),
+            mb_r_150_rtu_server_view("b"),
+        ]);
+        for tab in &mut app.tabs {
+            let _ = tab.view.handle_command("start").await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            app.tabs[0]
+                .view
+                .log()
+                .read()
+                .await
+                .peek_n(20)
+                .iter()
+                .any(|(_, _, l)| l.contains("already in use by module")),
+            "both instances must be in conflict before the recovery step"
+        );
+
+        let log_a = app.tabs[0].view.log();
+        let written_before_stop = log_a.read().await.written();
+
+        // Stop "b"; "a" is left alone on the path.
+        let _ = app.tabs[1].view.handle_command("stop").await;
+
+        // MB-R-150's own registry (App::serial_paths) drives this, not each tab's log content —
+        // the shared registry is the single source of truth for "who's still claiming the path".
+        assert_eq!(
+            app.serial_paths
+                .conflict("a", "/nonexistent/mb-r-150-app-e2e"),
+            None,
+            "stopping 'b' must release its claim, clearing the conflict 'a' would see on its \
+             next attempt"
+        );
+
+        // Observe "a"'s own subsequent behavior, not just the registry precondition: wait past
+        // one full backoff interval (`BackoffPolicy::default().initial` = 1s, see
+        // `ferrowl-util/src/backoff.rs`) so "a" actually re-runs its attempt, then check its log
+        // for a *fresh* conflict line. There is no positive "recovered"/"reconnected" message to
+        // poll for instead — by design (edge-cases.md: "an external holder still surfaces as an
+        // ordinary OS-level open failure/retry, same as before"), an *ordinary* open failure
+        // against this nonexistent path logs nothing at all, both before and after this feature;
+        // only the conflict branch itself ever logs (`rtu::server::run`'s `log.invoke` added for
+        // MB-R-150). So the strongest available end-to-end signal that "a" stopped treating "b"
+        // as a conflict is exactly this: zero *new* conflict lines across an attempt that did
+        // fire — if the stale claim were still consulted, "a" would keep re-logging the same
+        // conflict every attempt, same as it did in the first 200ms above.
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        let after_stop = log_a.read().await;
+        let new_count = after_stop.written().saturating_sub(written_before_stop) as usize;
+        let new_lines: Vec<String> = after_stop
+            .peek_n(new_count)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect();
+        assert!(
+            !new_lines
+                .iter()
+                .any(|l| l.contains("already in use by module")),
+            "'a' must not log a fresh conflict once 'b' has released its claim, got: {new_lines:?}"
+        );
+        drop(after_stop);
+
+        let _ = app.tabs[0].view.handle_command("stop").await;
     }
 
     #[tokio::test]

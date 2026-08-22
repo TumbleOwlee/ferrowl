@@ -62,6 +62,10 @@ pub struct ModbusModuleView {
     pending: Option<PendingAction>,
     /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
     view_focused: bool,
+    /// MB-R-150 — the session-wide serial-path registry attached via `set_serial_paths`, kept so
+    /// a `:reload`-rebuilt `self.module` can be reattached to the same registry instead of
+    /// silently falling back to a private default.
+    serial_paths: super::SerialPathRegistry,
 }
 
 impl ModbusModuleView {
@@ -87,6 +91,7 @@ impl ModbusModuleView {
             overlay: ModbusViewOverlay::None,
             pending: None,
             view_focused: false,
+            serial_paths: super::SerialPathRegistry::default(),
         }
     }
 
@@ -620,6 +625,10 @@ impl ModuleView for ModbusModuleView {
                 let new_module = ModbusModule::new(&self.spec, &device);
                 self.module = new_module;
                 self.device = device;
+                // MB-R-150 — the fresh module's `serial_paths` defaults to a private registry
+                // (`ModbusModule::new`); reattach the session-wide one so an in-progress conflict
+                // survives `:reload` instead of silently clearing.
+                self.module.set_serial_paths(self.serial_paths.clone());
                 let defs: Vec<_> = self
                     .module
                     .registers()
@@ -784,6 +793,11 @@ impl ModuleView for ModbusModuleView {
         self.module
             .reload_scripts(super::registers::collect_scripts(&self.device));
         true
+    }
+
+    fn set_serial_paths(&mut self, registry: super::SerialPathRegistry) {
+        self.module.set_serial_paths(registry.clone());
+        self.serial_paths = registry;
     }
 
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
@@ -1678,6 +1692,63 @@ mod tests {
             _ => panic!(":write-device should be handled with a save message"),
         }
         assert!(path.exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    /// MB-R-150 — `:reload` rebuilds `self.module` fresh; the session-wide serial-path registry
+    /// attached via `set_serial_paths` must carry over to that fresh instance, not reset to a
+    /// private default (which would silently drop an in-progress conflict on reload).
+    async fn ut_view_reload_carries_serial_paths_registry_to_new_module() {
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        use crate::module::modbus::SerialPathRegistry;
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "ferrowl-reload-serial-paths-{}.toml",
+            std::process::id()
+        ));
+        let p = path.to_str().expect("temp path is valid UTF-8").to_string();
+
+        // Produce a loadable device config file via the already-tested :write-device path.
+        let mut writer = new_view();
+        let _ = writer.handle_command(&format!("write-device {p}")).await;
+
+        let serial_path = "/nonexistent/mb-r-150-reload";
+        let spec = ModuleSpec {
+            name: "A".into(),
+            device: p.clone(),
+            role: Role::Client,
+            endpoint: Endpoint::Rtu {
+                path: serial_path.into(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        };
+        let device = empty_device();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+
+        // Another instance ("B") already claims the same serial path in a session-wide registry.
+        // `start()` claims optimistically as soon as the background task spawns (MB-R-150's OS-
+        // level conflict check happens inside that task), so the registry itself — not the
+        // reload's returned message — is what proves whether the fresh module used the
+        // session-wide registry or fell back to a private default.
+        let registry = SerialPathRegistry::new();
+        registry.claim("B", serial_path);
+        view.set_serial_paths(registry.clone());
+
+        let _ = view.handle_command("reload").await;
+        assert_eq!(
+            registry.conflict("B", serial_path),
+            Some("A".to_string()),
+            "reload's fresh module lost the session-wide registry (claimed on a private default \
+             instead)"
+        );
+
+        let _ = view.handle_command("stop").await;
         let _ = std::fs::remove_file(&path);
     }
 

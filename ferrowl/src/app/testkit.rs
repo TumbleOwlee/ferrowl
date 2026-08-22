@@ -31,6 +31,7 @@ use ratatui::layout::Rect;
 
 use super::{App, LogRing};
 use crate::config::script::ScriptDef;
+use crate::module::modbus::SerialPathRegistry;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
@@ -111,6 +112,9 @@ const MOCK_CMDS: &[CommandDescriptor] = &[CommandDescriptor {
 pub(super) struct MockHandle {
     refreshes: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
+    /// MB-R-150 — the registry `App::rebuild_registry` most recently attached via
+    /// `set_serial_paths`, if any.
+    serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
 }
 
 impl MockHandle {
@@ -122,6 +126,11 @@ impl MockHandle {
     /// Every command string `App` forwarded to this view, in order.
     pub(super) fn commands(&self) -> Vec<String> {
         self.commands.lock().unwrap().clone()
+    }
+
+    /// MB-R-150 — the registry most recently passed to this view's `set_serial_paths`, if any.
+    pub(super) fn serial_paths(&self) -> Option<SerialPathRegistry> {
+        self.serial_paths.lock().unwrap().clone()
     }
 }
 
@@ -137,6 +146,7 @@ pub(super) struct MockView {
     host_kind: Option<&'static str>,
     refreshes: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
+    serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
 }
 
 impl MockView {
@@ -146,9 +156,11 @@ impl MockView {
     pub(super) fn pair(name: &str) -> (MockView, MockHandle) {
         let refreshes = Arc::new(AtomicUsize::new(0));
         let commands = Arc::new(Mutex::new(Vec::new()));
+        let serial_paths = Arc::new(Mutex::new(None));
         let handle = MockHandle {
             refreshes: refreshes.clone(),
             commands: commands.clone(),
+            serial_paths: serial_paths.clone(),
         };
         let view = MockView {
             name: name.to_string(),
@@ -160,6 +172,7 @@ impl MockView {
             host_kind: None,
             refreshes,
             commands,
+            serial_paths,
         };
         (view, handle)
     }
@@ -256,6 +269,10 @@ impl ModuleView for MockView {
     fn module_host(&self) -> Option<Arc<dyn ModuleHost>> {
         self.host_kind
             .map(|kind| Arc::new(MockHost { kind }) as Arc<dyn ModuleHost>)
+    }
+
+    fn set_serial_paths(&mut self, registry: SerialPathRegistry) {
+        *self.serial_paths.lock().unwrap() = Some(registry);
     }
 }
 

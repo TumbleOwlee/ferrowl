@@ -364,6 +364,19 @@ pub(crate) fn endpoint_to_config(
     }
 }
 
+/// MB-R-150 — this endpoint's own Rtu/Ascii serial path, `~`-expanded, or `None` for every
+/// other transport (which never participates in the path-conflict check).
+pub(crate) fn endpoint_serial_path(endpoint: &Endpoint) -> Option<String> {
+    match endpoint {
+        Endpoint::Rtu { path, .. } | Endpoint::Ascii { path, .. } => Some(
+            ferrowl_util::path::expand(path)
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        _ => None,
+    }
+}
+
 pub(crate) fn build_instance(
     role: ClientOrServer,
     config: NetConfig,
@@ -951,6 +964,65 @@ mod tests {
             }
             _ => panic!("expected an Ascii config"),
         }
+    }
+
+    /// MB-R-150 — `endpoint_serial_path` reports the `~`-expanded path for `Rtu`/`Ascii`
+    /// endpoints (the only two transports that participate in the path-conflict check) and
+    /// `None` for every other transport.
+    #[test]
+    fn ut_endpoint_serial_path_rtu_and_ascii_only() {
+        use super::endpoint_serial_path;
+        use crate::config::Endpoint;
+
+        let rtu = Endpoint::Rtu {
+            path: "/dev/ttyUSB0".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        assert_eq!(endpoint_serial_path(&rtu), Some("/dev/ttyUSB0".to_string()));
+
+        let ascii = Endpoint::Ascii {
+            path: "/dev/ttyUSB1".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+        };
+        assert_eq!(
+            endpoint_serial_path(&ascii),
+            Some("/dev/ttyUSB1".to_string())
+        );
+
+        assert_eq!(
+            endpoint_serial_path(&Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 502,
+            }),
+            None
+        );
+        assert_eq!(
+            endpoint_serial_path(&Endpoint::RtuOverTcp {
+                ip: "127.0.0.1".to_string(),
+                port: 502,
+            }),
+            None
+        );
+        assert_eq!(
+            endpoint_serial_path(&Endpoint::Udp {
+                ip: "127.0.0.1".to_string(),
+                port: 502,
+            }),
+            None
+        );
+        assert_eq!(
+            endpoint_serial_path(&Endpoint::AsciiOverTcp {
+                ip: "127.0.0.1".to_string(),
+                port: 502,
+            }),
+            None
+        );
     }
 
     #[test]

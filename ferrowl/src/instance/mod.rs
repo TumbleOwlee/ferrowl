@@ -31,6 +31,18 @@ impl<T: KeyParams> Instance<T> {
         }
     }
 
+    /// MB-R-150 — the path-conflict checker cell for this instance's underlying builder, or
+    /// `None` for a non-serial transport (which never participates in the check).
+    pub(crate) fn path_conflict_cell(&self) -> Option<ferrowl_modbus::PathConflictCell> {
+        match &self.builder {
+            Builder::RtuClient(b) => Some(b.path_conflict()),
+            Builder::RtuServer(b) => Some(b.path_conflict()),
+            Builder::AsciiClient(b) => Some(b.path_conflict()),
+            Builder::AsciiServer(b) => Some(b.path_conflict()),
+            _ => None,
+        }
+    }
+
     pub fn with_tcp_client(
         config: ClientConfig<T, ferrowl_modbus::tcp::Config>,
         cache: ferrowl_modbus::tcp::SelfSignedCache,
@@ -957,5 +969,23 @@ mod tests {
             .expect("stop() must not hang while the task is backing off");
         assert!(result.is_ok());
         assert!(!instance.active());
+    }
+
+    /// MB-R-150 — `path_conflict_cell()` is `Some` for an Rtu client (the only serial transport
+    /// that participates in the path-conflict check exercised here) and `None` for a Tcp client
+    /// (a non-serial transport, which never participates).
+    #[tokio::test]
+    async fn ut_instance_path_conflict_cell_some_for_rtu_ascii_none_for_others() {
+        let rtu_instance = Instance::with_rtu_client(config::ClientConfig {
+            config: Arc::new(RwLock::new(dead_rtu_config(false))),
+            operations: Arc::new(RwLock::new(vec![])),
+            memory: Arc::new(MemLock::new(
+                ferrowl_store::Memory::<Key<SlaveKey>>::default(),
+            )),
+        });
+        assert!(rtu_instance.path_conflict_cell().is_some());
+
+        let tcp_instance = tcp_client_instance();
+        assert!(tcp_instance.path_conflict_cell().is_none());
     }
 }

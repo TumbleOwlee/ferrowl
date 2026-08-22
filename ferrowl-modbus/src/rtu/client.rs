@@ -1,7 +1,7 @@
 use crate::client_core::{ClientCore, ConnectAttempt};
 use crate::common::serial_config_from;
 use crate::rtu::Config;
-use crate::{Command, Error, Key, KeyParams, LogFn, Operation, SerialError};
+use crate::{Command, Error, Key, KeyParams, LogFn, Operation, PathConflictCell, SerialError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
@@ -19,6 +19,7 @@ pub struct ClientBuilder<T: KeyParams> {
     config: Arc<RwLock<Config>>,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
+    path_conflict: PathConflictCell,
 }
 
 impl<T: KeyParams> ClientBuilder<T> {
@@ -31,7 +32,16 @@ impl<T: KeyParams> ClientBuilder<T> {
             config,
             operations,
             memory,
+            path_conflict: PathConflictCell::default(),
         }
+    }
+
+    /// MB-R-150 — a clone of the checker cell consulted before every connect attempt. The owning
+    /// session (e.g. `ferrowl::module::modbus::ModbusModule`) calls `.set(...)` on this clone
+    /// once it knows the session-wide registry; until then the cell defaults to "never
+    /// conflicts" and this builder behaves exactly as it did before this feature.
+    pub fn path_conflict(&self) -> PathConflictCell {
+        self.path_conflict.clone()
     }
 
     /// Opens the serial port and spawns the client loop as a tokio task. `log` receives log
@@ -56,9 +66,11 @@ impl<T: KeyParams> ClientBuilder<T> {
         let config = self.config.clone();
         let operations = self.operations.clone();
         let memory = self.memory.clone();
+        let path_conflict = self.path_conflict.clone();
         Ok(tokio::task::spawn(async move {
             ClientCore::run_reconnect_loop(receiver, log, status, operations, memory, move || {
                 let config = config.clone();
+                let path_conflict = path_conflict.clone();
                 async move {
                     let guard = config.read().await;
                     let attempt = ConnectAttempt {
@@ -66,7 +78,9 @@ impl<T: KeyParams> ClientBuilder<T> {
                         timeout_ms: guard.timeout_ms,
                         delay_ms: guard.delay_ms,
                         interval_ms: guard.interval_ms,
-                        client: Client::connect(&guard).await.map(|client| client.core),
+                        client: Client::connect(&guard, &path_conflict)
+                            .await
+                            .map(|client| client.core),
                     };
                     drop(guard);
                     attempt
@@ -88,13 +102,25 @@ impl Client {
     ///
     /// The port is not bound to a slave address: each request carries the slave id of the
     /// operation or command that issued it (MB-R-048).
-    pub async fn connect(config: &Config) -> Result<Self, Error> {
+    ///
+    /// MB-R-150 — before the OS-level open, `path_conflict` is checked against the freshly
+    /// `~`-expanded path; a conflict short-circuits with `Error::PathConflict` and skips the
+    /// open attempt entirely.
+    pub async fn connect(config: &Config, path_conflict: &PathConflictCell) -> Result<Self, Error> {
         let serial = serial_config_from(
             config.baud_rate,
             config.data_bits,
             config.stop_bits,
             config.parity.as_deref(),
         )?;
+        let expanded = ferrowl_util::path::expand(&config.path);
+        let expanded = expanded.to_string_lossy();
+        if let Some(other) = path_conflict.check(&expanded) {
+            return Err(Error::PathConflict {
+                path: expanded.into_owned(),
+                other,
+            });
+        }
         match open_serial::<Rtu>(&config.path, serial) {
             Ok(transport) => Ok(Self {
                 core: ClientCore {
@@ -103,5 +129,43 @@ impl Client {
             }),
             Err(e) => Err(SerialError::Error(e).into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PathConflictCell;
+
+    fn config(path: &str) -> Config {
+        Config {
+            path: path.to_string(),
+            baud_rate: 9600,
+            slave: 0,
+            parity: None,
+            data_bits: None,
+            stop_bits: None,
+            timeout_ms: 100,
+            delay_ms: 0,
+            interval_ms: 100,
+            reconnect: false,
+        }
+    }
+
+    /// MB-R-150 — a path-conflict checker attached to the cell short-circuits `Client::connect`
+    /// with `Error::PathConflict` before any OS-level `open_serial` attempt.
+    #[tokio::test]
+    async fn ut_client_connect_reports_path_conflict_before_open_attempt() {
+        let cfg = config("/nonexistent/mb-r-150-ut-rtu-client");
+        let cell = PathConflictCell::default();
+        cell.set(std::sync::Arc::new(|_: &str| {
+            Some("other-module".to_string())
+        }));
+
+        let result = Client::connect(&cfg, &cell).await;
+        assert!(
+            matches!(result, Err(Error::PathConflict { .. })),
+            "expected Err(Error::PathConflict), got an Ok(Client) or a different error variant"
+        );
     }
 }

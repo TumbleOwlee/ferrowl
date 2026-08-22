@@ -139,6 +139,11 @@ pub trait ModuleView: SetFocus + IsFocus {
         false
     }
 
+    /// MB-R-150 — attach this session's live Rtu/Ascii path-conflict registry. Default: no-op —
+    /// only the Modbus client/server/monitor views participate; every other module type (OCPP)
+    /// ignores this.
+    fn set_serial_paths(&mut self, _registry: crate::module::modbus::SerialPathRegistry) {}
+
     /// A snapshot of this module's session-level `C_Module` Lua surface, or `None` when the
     /// module type doesn't participate (none currently opt out, but the default keeps the trait
     /// extensible). Polled by `App::rebuild_registry` whenever the tab set changes.
