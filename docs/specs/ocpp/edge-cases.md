@@ -218,3 +218,10 @@ refresh tick (~100 ms), by sequence number. A message that is both created **and
 evicted between two ticks — i.e. more than 200 messages arrive in one tick — is
 never seen by the tee and does not reach the log file. This is unreachable at any
 realistic OCPP message rate.
+
+### 6.12 A cancelled inbound Call handler's side effects may have partially applied
+
+Teardown (OC-R-121) aborts an in-flight inbound Call handler task rather than
+waiting for it. If the handler had already begun a side effect (e.g. a partial
+state mutation) before cancellation, that partial effect is not rolled back —
+only the reply is guaranteed never to be sent.
