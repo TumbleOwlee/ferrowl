@@ -43,7 +43,7 @@ use crate::config::script::ScriptDef;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{
-    Messages, MsgHeader, MsgRow, OcppClient, OcppMessage, msg_row,
+    Messages, MsgHeader, MsgRow, OcppClient, OcppMessage, OcppSender, msg_row,
 };
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::{ClientFields, OcppSimHandle, ScopedActionQueue};
@@ -112,6 +112,7 @@ pub trait ClientVersion: Version + Sized + 'static {
         online: Arc<std::sync::atomic::AtomicBool>,
         messages: Messages,
         state: Arc<RwLock<Self::Cs>>,
+        sender: OcppSender<Self>,
     ) -> Self::Handler;
 
     /// State-driven actions (their request is fully built from state, no dialog).

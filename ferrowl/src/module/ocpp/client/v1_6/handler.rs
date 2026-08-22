@@ -21,7 +21,7 @@ use ferrowl_ocpp::v1_6::types::{
 };
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6, Version};
 
-use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
+use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, OcppSender, push_capped};
 use crate::module::ocpp::client::v1_6::state::CsState;
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::scope::Scope;
@@ -63,19 +63,31 @@ fn unknown_connector(request: &serde_json::Value, state: &CsState) -> Option<i64
     }
 }
 
-/// Inbound handler for an OCPP 1.6 charging station, backed by shared [`CsState`].
+/// Inbound handler for an OCPP 1.6 charging station, backed by shared [`CsState`]. `sender` lets an
+/// accepted remote-start (OC-R-070) dispatch a `StartTransaction` through the same send path the
+/// RFID/operator flow uses — see `spawn_remote_transaction_start`.
 pub struct CsStateHandler {
     online: Arc<AtomicBool>,
     messages: Messages,
     state: Arc<RwLock<CsState>>,
+    // Wired into the `RemoteStartTransaction` match arm in a later stage of this task; unused for
+    // one commit while this stage lands on its own.
+    #[allow(dead_code)]
+    sender: OcppSender<V1_6>,
 }
 
 impl CsStateHandler {
-    pub fn new(online: Arc<AtomicBool>, messages: Messages, state: Arc<RwLock<CsState>>) -> Self {
+    pub fn new(
+        online: Arc<AtomicBool>,
+        messages: Messages,
+        state: Arc<RwLock<CsState>>,
+        sender: OcppSender<V1_6>,
+    ) -> Self {
         Self {
             online,
             messages,
             state,
+            sender,
         }
     }
 }
@@ -495,10 +507,12 @@ mod tests {
         // Reset hits the `None` (accept) arm and takes a write lock in `respond()`. If the inbound
         // read guard is still held there, the std RwLock self-deadlocks. Run on a thread and bound
         // the wait so a regression fails the test instead of hanging CI.
+        let messages = Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new()));
         let handler = CsStateHandler::new(
             Arc::new(AtomicBool::new(false)),
-            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            messages.clone(),
             Arc::new(RwLock::new(CsState::default())),
+            OcppSender::<V1_6>::detached(messages),
         );
         let action = V1_6::default_action("Reset").expect("Reset is a known action");
         let (tx, rx) = mpsc::channel();
@@ -515,10 +529,12 @@ mod tests {
 
     fn handler_with(state: CsState) -> CsStateHandler {
         use std::sync::atomic::AtomicBool;
+        let messages = Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new()));
         CsStateHandler::new(
             Arc::new(AtomicBool::new(false)),
-            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            messages.clone(),
             Arc::new(RwLock::new(state)),
+            OcppSender::<V1_6>::detached(messages),
         )
     }
 

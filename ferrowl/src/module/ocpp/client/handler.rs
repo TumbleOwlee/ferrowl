@@ -21,41 +21,55 @@ use serde_json::Value;
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::{CallError, CallErrorCode, Version};
 
-use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
+use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, OcppSender, push_capped};
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 use crate::module::ocpp::client::v2_common::{inbound_scope, unknown_evse};
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
-/// Per-version, fully-typed inbound decision logic. Given the shared state and the typed action,
-/// build the typed response (or a [`CallError`]) plus a short human-readable log context. Impl'd in
-/// each version's `inbound.rs`; the generic [`CsStateHandler`] owns everything around it.
+/// Per-version, fully-typed inbound decision logic. Given the shared state, a sender able to
+/// dispatch outbound Calls through the same send path the RFID/operator flow uses (OC-R-070), and
+/// the typed action, build the typed response (or a [`CallError`]) plus a short human-readable log
+/// context. Impl'd in each version's `inbound.rs`; the generic [`CsStateHandler`] owns everything
+/// around it.
 pub trait Inbound: Version {
     fn respond(
         state: &Arc<RwLock<CsState>>,
+        sender: &OcppSender<Self>,
         action: &Self::Action,
-    ) -> (Result<Self::Response, CallError>, String);
+    ) -> (Result<Self::Response, CallError>, String)
+    where
+        Self: Sized;
 }
 
-/// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. One struct
-/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: Inbound`.
-pub struct CsStateHandler {
+/// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. Generic over
+/// `V` (unlike most of this module's plumbing) because it holds a version-specific `OcppSender<V>`
+/// — a 2.0.1 `ClientView` and a 2.1 `ClientView` each build their own instance via
+/// `ClientVersion::handler`, never share one.
+pub struct CsStateHandler<V: Version> {
     online: Arc<AtomicBool>,
     messages: Messages,
     state: Arc<RwLock<CsState>>,
+    sender: OcppSender<V>,
 }
 
-impl CsStateHandler {
-    pub fn new(online: Arc<AtomicBool>, messages: Messages, state: Arc<RwLock<CsState>>) -> Self {
+impl<V: Version> CsStateHandler<V> {
+    pub fn new(
+        online: Arc<AtomicBool>,
+        messages: Messages,
+        state: Arc<RwLock<CsState>>,
+        sender: OcppSender<V>,
+    ) -> Self {
         Self {
             online,
             messages,
             state,
+            sender,
         }
     }
 }
 
-impl HasState for CsStateHandler {
+impl<V: Version> HasState for CsStateHandler<V> {
     type State = CsState;
 
     fn state(&self) -> &Arc<RwLock<CsState>> {
@@ -63,7 +77,7 @@ impl HasState for CsStateHandler {
     }
 }
 
-impl<V: Inbound> CsActionHandler<V> for CsStateHandler {
+impl<V: Inbound> CsActionHandler<V> for CsStateHandler<V> {
     fn handle_call(
         &self,
         action: V::Action,
@@ -81,7 +95,7 @@ impl<V: Inbound> CsActionHandler<V> for CsStateHandler {
                 )),
                 format!("unknown evse {e}"),
             ),
-            None => V::respond(&self.state, &action),
+            None => V::respond(&self.state, &self.sender, &action),
         };
         let reply_payload = match &result {
             Ok(resp) => encode_response_or_log::<V>(resp),
@@ -140,11 +154,13 @@ mod tests {
 
     use parking_lot::RwLock;
 
-    fn handler_with(state: CsState) -> CsStateHandler {
+    fn handler_with<V: Version>(state: CsState) -> CsStateHandler<V> {
+        let messages = Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new()));
         CsStateHandler::new(
             Arc::new(AtomicBool::new(false)),
-            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
+            messages.clone(),
             Arc::new(RwLock::new(state)),
+            OcppSender::<V>::detached(messages),
         )
     }
 
@@ -161,19 +177,22 @@ mod tests {
     }
 
     /// Build an action for version `V`, drive it through `respond`, and assert it was accepted.
-    fn drive<V: Inbound>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+    fn drive<V: Inbound>(h: &CsStateHandler<V>, name: &str, payload: serde_json::Value) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        assert!(V::respond(&h.state, &action).0.is_ok(), "{name} rejected");
+        assert!(
+            V::respond(&h.state, &h.sender, &action).0.is_ok(),
+            "{name} rejected"
+        );
     }
 
     /// Drive an action through `respond` and return its encoded response JSON plus the log context.
     fn responded<V: Inbound>(
-        h: &CsStateHandler,
+        h: &CsStateHandler<V>,
         name: &str,
         payload: serde_json::Value,
     ) -> (serde_json::Value, String) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        let (resp, ctx) = V::respond(&h.state, &action);
+        let (resp, ctx) = V::respond(&h.state, &h.sender, &action);
         (
             V::encode_response(&resp.expect("accepted")).expect("encodes"),
             ctx,
@@ -460,7 +479,7 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = V2_0_1::respond(&h.state, &action);
+        let (resp, ctx) = V2_0_1::respond(&h.state, &h.sender, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }
@@ -578,7 +597,7 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = V2_1::respond(&h.state, &action);
+        let (resp, ctx) = V2_1::respond(&h.state, &h.sender, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }

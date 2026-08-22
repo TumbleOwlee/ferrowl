@@ -23,6 +23,7 @@ use ferrowl_ocpp::v2_1::messages::set_charging_profile::SetChargingProfileRespon
 use ferrowl_ocpp::v2_1::messages::set_variables::SetVariablesResponse;
 use ferrowl_ocpp::{Action21, CallError, CallErrorCode, Response21, V2_1, Version};
 
+use crate::module::ocpp::client::backend::OcppSender;
 use crate::module::ocpp::client::config::ConfigKey;
 use crate::module::ocpp::client::handler::Inbound;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
@@ -45,8 +46,10 @@ fn purpose_str(p: &ChargingProfilePurposeEnumType) -> &'static str {
 impl Inbound for V2_1 {
     fn respond(
         state: &Arc<RwLock<CsState>>,
+        sender: &OcppSender<V2_1>,
         action: &Action21,
     ) -> (Result<Response21, CallError>, String) {
+        let _ = sender; // wired into RequestStartTransaction in a later stage (OC-R-070)
         match action {
             Action21::GetVariables(req) => with_state(state, |s| {
                 let get_variable_result = req

@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use ferrowl_ocpp::cs::{Client, ClientBuilder, Command, Config, CsActionHandler};
 use ferrowl_ocpp::{Error, Version};
 
+use crate::module::ocpp::client::view::ClientVersion;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::scope::Scope;
@@ -227,6 +228,13 @@ pub struct OcppClient<V: Version> {
     /// reused across every `start()` call so repeated `:restart`/reconnects don't regenerate it —
     /// never reinitialized inside `start()`.
     self_signed_cache: ferrowl_ocpp::SelfSignedCache,
+    /// Live mirror of `client`'s command channel, shared with every [`OcppSender`] handed out by
+    /// [`sender`](Self::sender) — including one captured **before** `start()` connects (an inbound
+    /// Call handler built via `ClientVersion::handler(..)` holds exactly such a sender, since it is
+    /// constructed before being passed into `start()`). Populated in `start()`, cleared in `stop()`,
+    /// so a pre-connect sender becomes usable the moment the connection comes up instead of staying
+    /// permanently stuck on the `None` snapshot it was built with.
+    cmd_tx: Arc<parking_lot::RwLock<Option<mpsc::Sender<Command<V>>>>>,
 }
 
 impl<V: Version> OcppClient<V> {
@@ -236,6 +244,7 @@ impl<V: Version> OcppClient<V> {
             online: Arc::new(AtomicBool::new(false)),
             messages: Arc::new(RwLock::new(Vec::new())),
             self_signed_cache: ferrowl_ocpp::new_self_signed_cache(),
+            cmd_tx: Arc::new(parking_lot::RwLock::new(None)),
         }
     }
 
@@ -262,7 +271,7 @@ impl<V: Version> OcppClient<V> {
     /// `tokio::spawn` the round-trip and keep the UI responsive while the peer is slow/silent.
     pub fn sender(&self) -> OcppSender<V> {
         OcppSender {
-            cmd_tx: self.client.as_ref().map(|c| c.sender()),
+            cmd_tx: self.cmd_tx.clone(),
             messages: self.messages.clone(),
         }
     }
@@ -300,6 +309,7 @@ impl<V: Version> OcppClient<V> {
         )
         .spawn(handler, wire_log, status)
         .await?;
+        *self.cmd_tx.write() = Some(client.sender());
         self.client = Some(client);
         // `spawn` no longer dials synchronously (OC-R-048, OC-R-105): the handshake happens
         // inside the retried task, so `online` stays false here and is flipped by the handler's
@@ -310,6 +320,7 @@ impl<V: Version> OcppClient<V> {
     /// Terminate the client task, if running.
     pub async fn stop(&mut self) -> Result<(), Error> {
         self.online.store(false, Ordering::Relaxed);
+        *self.cmd_tx.write() = None;
         match self.client.take() {
             Some(c) => c.terminate().await,
             None => Ok(()),
@@ -319,12 +330,35 @@ impl<V: Version> OcppClient<V> {
 
 /// A self-contained Call sender, decoupled from the [`OcppClient`] borrow so the round-trip can be
 /// `tokio::spawn`ed. Records the request and reply into the same shared message log the view reads.
+/// `cmd_tx` is a live cell shared with the owning [`OcppClient`] (see its doc comment) rather than a
+/// one-shot snapshot, so a sender captured before `start()` connects still works afterward.
 pub struct OcppSender<V: Version> {
-    cmd_tx: Option<mpsc::Sender<Command<V>>>,
+    cmd_tx: Arc<parking_lot::RwLock<Option<mpsc::Sender<Command<V>>>>>,
     messages: Messages,
 }
 
+// Manual impl (not `#[derive(Clone)]`): the derive would add a spurious `V: Clone` bound — neither
+// field actually depends on `V` being `Clone`, only on `V: Version`.
+impl<V: Version> Clone for OcppSender<V> {
+    fn clone(&self) -> Self {
+        Self {
+            cmd_tx: self.cmd_tx.clone(),
+            messages: self.messages.clone(),
+        }
+    }
+}
+
 impl<V: Version> OcppSender<V> {
+    /// A sender with no live connection behind it (`send_scoped` always returns
+    /// `Err(Error::NotRunning)`), sharing `messages` with whatever the caller records into
+    /// elsewhere. For tests that need an `OcppSender` without spinning up an `OcppClient`.
+    pub(crate) fn detached(messages: Messages) -> Self {
+        Self {
+            cmd_tx: Arc::new(parking_lot::RwLock::new(None)),
+            messages,
+        }
+    }
+
     /// Send a typed Call tagging the recorded request/reply with `scope`, so the client view can
     /// filter the message log per connector. Returns the response JSON on success. Awaiting this
     /// never blocks the UI loop because the caller spawns it.
@@ -342,7 +376,8 @@ impl<V: Version> OcppSender<V> {
         )
         .await;
 
-        let result = match &self.cmd_tx {
+        let cmd_tx = self.cmd_tx.read().clone();
+        let result = match &cmd_tx {
             Some(cmd_tx) => Client::<V>::call_via(cmd_tx, action).await,
             None => Err(Error::NotRunning),
         };
@@ -377,6 +412,82 @@ impl<V: Version> OcppSender<V> {
             }
         }
     }
+}
+
+/// OC-R-122 — build and send a `StatusNotification` for `scope`'s current connector state. Called
+/// after a transaction-start message succeeds, from both the RFID/operator path
+/// (`ClientView::send_payload`) and an accepted remote-start (`spawn_remote_transaction_start`, OC-
+/// R-070). Best-effort: `send_scoped` already records a failure into the message log; there is no
+/// separate diagnostic log write here.
+///
+/// `#[allow(dead_code)]`: wired into `ClientView::send_payload` and `spawn_remote_transaction_start`
+/// in later stages of this task; unused for one commit while this stage lands on its own.
+#[allow(dead_code)]
+pub(crate) async fn send_status_notification<V: ClientVersion>(
+    sender: OcppSender<V>,
+    state: &Arc<parking_lot::RwLock<V::Cs>>,
+    scope: Scope,
+) -> Result<Value, Error> {
+    let payload = {
+        let s = state.read();
+        V::state_payload(&s, "StatusNotification", scope)
+    };
+    let action = V::decode_call("StatusNotification", payload).map_err(Error::from)?;
+    sender.send_scoped(action, scope).await
+}
+
+/// OC-R-070 — on an accepted remote-start, build the version's transaction-start message from
+/// state exactly as the RFID/operator path does (`ClientVersion::has_tx_shortcuts()` picks
+/// `StartTransaction` vs `TransactionEvent`), send it through the same `OcppSender`, apply the same
+/// post-send/rollback state transition the RFID path uses, then (OC-R-122) send the coupled
+/// `StatusNotification`. Fire-and-forget: the caller does not await this before building
+/// `RemoteStartTransactionResponse`/`RequestStartTransactionResponse`.
+///
+/// `#[allow(dead_code)]`: wired into the `RemoteStartTransaction`/`RequestStartTransaction` match
+/// arms in later stages of this task; unused for one commit while this stage lands on its own.
+#[allow(dead_code)]
+pub(crate) fn spawn_remote_transaction_start<V: ClientVersion>(
+    sender: OcppSender<V>,
+    state: Arc<parking_lot::RwLock<V::Cs>>,
+    scope: Scope,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let (name, payload) = if V::has_tx_shortcuts() {
+            ("TransactionEvent".to_string(), {
+                let mut s = state.write();
+                V::start_event(&mut s, scope)
+            })
+        } else {
+            ("StartTransaction".to_string(), {
+                let s = state.read();
+                V::state_payload(&s, "StartTransaction", scope)
+            })
+        };
+        let started_tx = (name == "TransactionEvent")
+            .then(|| {
+                payload
+                    .pointer("/transactionInfo/transactionId")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .flatten();
+        let Ok(action) = V::decode_call(&name, payload) else {
+            return;
+        };
+        match sender.clone().send_scoped(action, scope).await {
+            Ok(response) => {
+                {
+                    let mut s = state.write();
+                    V::apply_post_send(&mut s, &name, scope, started_tx.as_deref(), &response);
+                }
+                let _ = send_status_notification(sender, &state, scope).await;
+            }
+            Err(_) => {
+                let mut s = state.write();
+                V::rollback_tx(&mut s, scope, started_tx.as_deref());
+            }
+        }
+    })
 }
 
 /// Push one message into a shared message log (bounded to [`MAX_MESSAGES`]).
@@ -662,6 +773,133 @@ mod tests {
         assert_eq!(boot_interval(&json!({ "interval": 0 })), None);
         // Missing field.
         assert_eq!(boot_interval(&json!({ "status": "Accepted" })), None);
+    }
+
+    /// No-op log sink for the loopback test below (mirrors `ferrowl-ocpp/tests/ws_loopback_v16.rs`).
+    fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// A minimal CSMS test double that default-accepts Heartbeat, for the live-sender test below.
+    struct HeartbeatCsms;
+    impl ferrowl_ocpp::csms::CsmsActionHandler<ferrowl_ocpp::V1_6> for HeartbeatCsms {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: ferrowl_ocpp::Action16,
+        ) -> Result<ferrowl_ocpp::Response16, ferrowl_ocpp::CallError> {
+            match action {
+                ferrowl_ocpp::Action16::Heartbeat(_) => Ok(ferrowl_ocpp::Response16::Heartbeat(
+                    serde_json::from_value(json!({ "currentTime": "2026-01-01T00:00:00Z" }))
+                        .unwrap(),
+                )),
+                _ => Err(ferrowl_ocpp::CallError::new(
+                    ferrowl_ocpp::CallErrorCode::NotImplemented,
+                    "unsupported",
+                )),
+            }
+        }
+    }
+
+    /// A CS-side handler that flips a shared flag once the handshake completes — `NoopCsHandler`'s
+    /// `on_connected` is a no-op, so it never signals a real connect (see
+    /// `it_cs_start_against_unreachable_csms_stays_running`, which only ever asserts `!is_online()`
+    /// against a handler like it).
+    struct ConnectedFlag(Arc<AtomicBool>);
+    impl CsActionHandler<ferrowl_ocpp::V1_6> for ConnectedFlag {
+        async fn handle_call(
+            &self,
+            _action: ferrowl_ocpp::Action16,
+        ) -> Result<ferrowl_ocpp::Response16, ferrowl_ocpp::CallError> {
+            Err(ferrowl_ocpp::CallError::new(
+                ferrowl_ocpp::CallErrorCode::NotImplemented,
+                "unsupported",
+            ))
+        }
+        async fn on_connected(&self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Poll until the CSMS listener has bound (`spawn` no longer binds synchronously).
+    async fn bound_addr(server: &ferrowl_ocpp::csms::Server<ferrowl_ocpp::V1_6>) -> String {
+        for _ in 0..50 {
+            if let Some(addr) = server.local_addr() {
+                return addr.to_string();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("CSMS listener never bound");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// (infra, required for OC-R-070) — a sender captured via `OcppClient::sender()` **before**
+    /// `start()` (exactly how `CsStateHandler` will hold one, since it is built and handed into
+    /// `start()` before the connection exists) must become usable once the client actually
+    /// connects, instead of permanently carrying the `cmd_tx: None` snapshot taken before the
+    /// connection existed.
+    async fn ut_sender_captured_before_start_becomes_live_after_connect() {
+        let server = ferrowl_ocpp::csms::ServerBuilder::<ferrowl_ocpp::V1_6>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(HeartbeatCsms, sink())
+        .await
+        .expect("server failed to bind");
+        let addr = bound_addr(&server).await;
+
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: addr.split(':').next().unwrap().to_owned(),
+            port: addr.rsplit(':').next().unwrap().parse().unwrap(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(2000),
+            reconnect: Some(true),
+            security: OcppSecurityConfig::default(),
+        };
+
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        // Captured before start() — this is the pre-connect snapshot that must stay usable.
+        let sender = backend.sender();
+        let connected = Arc::new(AtomicBool::new(false));
+        backend
+            .start(
+                &spec,
+                &OcppDeviceConfig::default(),
+                &test_log(),
+                ConnectedFlag(connected.clone()),
+            )
+            .await
+            .expect("start must not fail synchronously");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !connected.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            connected.load(Ordering::Relaxed),
+            "client never completed the handshake"
+        );
+
+        let action = ferrowl_ocpp::V1_6::default_action("Heartbeat").expect("Heartbeat is known");
+        let resp = sender.send_scoped(action, Scope::CS).await;
+        assert!(
+            resp.is_ok(),
+            "a sender captured before start() must still work once connected: {resp:?}"
+        );
+
+        let _ = backend.stop().await;
+        let _ = server.terminate().await;
     }
 
     #[test]

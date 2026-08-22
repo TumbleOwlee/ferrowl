@@ -87,6 +87,7 @@ impl<V: ClientVersion> ClientView<V> {
             self.backend.online_handle(),
             self.backend.messages_handle(),
             self.state.clone(),
+            self.backend.sender(),
         )
     }
 
