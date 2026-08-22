@@ -561,6 +561,17 @@ impl MonitorSetupDialog {
         }
         render_field!(self, keybinds, rows[5], buf);
 
+        // Suggestion popups draw last, over everything else in the dialog (and may overflow
+        // the dialog box itself), so both must be rendered after all sibling widgets above —
+        // mirrors `module/modbus/setup_dialog.rs::SetupDialog::render`'s trailing
+        // `render_overlay` calls.
+        self.config_path
+            .widget
+            .render_overlay(area, buf, &mut self.config_path.state);
+        self.path
+            .widget
+            .render_overlay(area, buf, &mut self.path.state);
+
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
         }
@@ -694,6 +705,38 @@ mod tests {
             " ",
             "bottom-right corner must stay blank"
         );
+    }
+
+    /// Manual-exercise fix — the config-path field's filesystem completion popup (already wired
+    /// via `SuggestInput<ConfigPath, FsPathProvider>`, same as the modbus module's own
+    /// `SetupDialog::config_path`) must actually draw: `render` must call `render_overlay` for
+    /// it, same as `module/modbus/setup_dialog.rs`'s trailing `render_overlay` calls.
+    #[test]
+    fn ut_render_config_path_field_shows_suggestion_popup() {
+        let mut dialog = MonitorSetupDialog::create();
+        dialog.config_path.state.set_focused(true);
+        dialog
+            .config_path
+            .state
+            .handle_events(KeyModifiers::NONE, KeyCode::Char('s'));
+        assert!(dialog.config_path.state.suggestions_open());
+
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let text = buffer_text(&buf);
+        assert!(text.contains("src"), "missing suggestion popup:\n{text}");
+    }
+
+    fn buffer_text(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
     }
 
     /// Regression — `render` must populate `error.state` from `resolve()`, same as
