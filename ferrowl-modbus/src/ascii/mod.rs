@@ -3,7 +3,9 @@
 //! serial connect/open behavior as RTU (MB-R-072/073), differing only in on-wire framing.
 
 mod client;
+mod monitor;
 mod server;
 
 pub use client::{Client, ClientBuilder};
+pub use monitor::MonitorBuilder;
 pub use server::ServerBuilder;

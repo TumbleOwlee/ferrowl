@@ -7,8 +7,7 @@ use ratatui::{
     layout::{Constraint as LConstraint, Layout, Margin, Rect},
     text::{Line, Text},
     widgets::{
-        Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, StatefulWidget,
-        Table as UiTable, Widget,
+        Cell, Row, Scrollbar, ScrollbarOrientation, StatefulWidget, Table as UiTable, Widget,
     },
 };
 
@@ -16,6 +15,7 @@ use crate::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyle,
+    traits::IsFocus,
     widgets::Title,
 };
 
@@ -40,6 +40,23 @@ pub trait TableEntry<const N: usize> {
     /// Optional per-cell style overrides (e.g. status coloring). `None` keeps the row style.
     fn cell_styles(&self) -> [Option<ratatui::style::Style>; N] {
         [None; N]
+    }
+    /// Optional true per-character-span styling for a column (UI-R-063: each byte/word of the
+    /// Memory-layout panel's Hex/Ascii cells carries its own value-class/recency color, which a
+    /// single per-cell [`Style`](ratatui::style::Style) from `cell_styles` cannot express).
+    /// `Some(spans)` renders that column from these `(text, style)` pairs as individually colored
+    /// `Span`s instead of `values()`'s plain string under `cell_styles`' one `Style` — that
+    /// column's `cell_styles` entry is then ignored. `None` (the default; every `TableEntry` impl
+    /// predating this method implicitly returns it) renders byte-for-byte as before this method
+    /// existed.
+    ///
+    /// A spans cell is never word-wrapped — Shared with the render loop's own doc comment: only
+    /// content already guaranteed to fit the column's width should use this (the Memory-layout
+    /// table's Hex/Ascii columns are sized for their fixed per-line byte/word count and never
+    /// wrap in practice). Content that doesn't fit simply overflows/truncates per the column's
+    /// width constraint rather than wrapping.
+    fn cell_spans(&self) -> [Option<Vec<(String, ratatui::style::Style)>>; N] {
+        [const { None }; N]
     }
 }
 
@@ -71,6 +88,15 @@ where
     #[getset(get = "pub")]
     #[builder(default = "[true; N]")]
     split_by_whitespace: [bool; N],
+    /// Whether the selected row's highlight bar (`" █ "`) is drawn (default `true`, every
+    /// existing table unaffected). UI-R-066: an unfocused table with the marker shown skips the
+    /// row's own highlight style (`row_highlight_style`) entirely — the marker glyph alone is
+    /// already the selection cue there, and a background highlight too would be redundant. Every
+    /// other case (focused, or the marker hidden) still applies the highlight style, since with
+    /// the marker gone that background is the only remaining selection cue.
+    #[getset(get = "pub")]
+    #[builder(default = "true")]
+    show_selection_marker: bool,
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<V>,
@@ -187,12 +213,40 @@ where
             .collect();
 
         let column_spacings = 2 * (N as u16) + (N as u16 - 1);
-        let table_width = column_widths.iter().fold(column_spacings, |acc, w| acc + w) + 3;
+        // #220 — under ratatui's default `HighlightSpacing::WhenSelected` (no explicit
+        // `.highlight_spacing(...)` call: the gutter reserves zero width whenever nothing is
+        // selected, for every table), the real reserved width is 0 with no selection, else the
+        // highlight symbol's own width (3 for `" █ "` when the marker is shown, 1 for `" "` when
+        // it's not) — never a flat constant.
+        let marker_width: u16 = match state.table_state().selected() {
+            Some(_) if self.show_selection_marker => 3,
+            Some(_) => 1,
+            None => 0,
+        };
+        let table_width =
+            column_widths.iter().fold(column_spacings, |acc, w| acc + w) + marker_width;
 
-        let selected_style = if state.focused() {
+        // `show_selection_marker == false`: once the bar glyph is gone, the selected row's own
+        // background is the *only* remaining selection cue, so it always uses the stronger
+        // `focused` style — even while the table itself isn't panel-focused. `show_selection_marker
+        // == true` (the default) intentionally skips the row highlight while unfocused: the marker
+        // glyph itself is already the selection cue there, and a highlight too would be redundant.
+        let selected_style = if !self.show_selection_marker || state.focused() {
             &self.style.focused
         } else {
-            &self.style.unfocused_selected
+            // No row is actually painted with this style when nothing is selected (`Table`'s
+            // `row_highlight_style` only ever applies to the selected row), so the exact value
+            // here is inert in that case.
+            state
+                .table_state()
+                .selected()
+                .map(|i| {
+                    self.style
+                        .rows
+                        .get(i % 2)
+                        .expect("rows is [Style; 2]; i % 2 is in bounds")
+                })
+                .unwrap_or(&self.style.focused)
         };
         let bar_style = selected_style;
         let mut bar_height = 0;
@@ -208,6 +262,7 @@ where
             let spacing =
                 itertools::repeat_n('\n', self.row_margin.vertical as usize).collect::<String>();
             let cell_styles = item.cell_styles();
+            let cell_spans = item.cell_spans();
             let mut max_line_cnt = 0;
             let row = item
                 .values()
@@ -215,6 +270,30 @@ where
                 .zip(&column_widths)
                 .enumerate()
                 .map(|(col, (content, width))| {
+                    if let Some(spans) = &cell_spans[col] {
+                        // Spans path (see `TableEntry::cell_spans`'s own doc comment): each
+                        // `(text, style)` pair keeps its own color; no word-wrap is attempted
+                        // here, content simply overflows/truncates per the column's width. The
+                        // row's vertical margin is still honored via blank lines above/below,
+                        // matching the plain-text path's `{spacing}{output}{spacing}` framing.
+                        max_line_cnt = std::cmp::max(1, max_line_cnt);
+                        let content_line = Line::from(
+                            spans
+                                .iter()
+                                .map(|(text, style)| {
+                                    ratatui::text::Span::styled(text.clone(), *style)
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                        let blank =
+                            itertools::repeat_n(Line::default(), self.row_margin.vertical as usize);
+                        let lines: Vec<Line> = blank
+                            .clone()
+                            .chain(std::iter::once(content_line))
+                            .chain(blank)
+                            .collect();
+                        return Cell::from(Text::from(lines));
+                    }
                     let mut line_cnt = 0;
                     let mut line = String::with_capacity(*width as usize);
                     let mut output = String::with_capacity(
@@ -307,23 +386,31 @@ where
             })
             .collect::<Vec<_>>();
 
-        let bar = " █ ";
-        let t = UiTable::new(rows, constraints)
+        // UI-R-066 — with no selection, ratatui's default `HighlightSpacing::WhenSelected`
+        // reserves zero gutter width regardless of `show_selection_marker` (see `marker_width`
+        // above); once something is selected, the gutter reserves exactly this glyph's width.
+        let marker = if self.show_selection_marker {
+            " █ "
+        } else {
+            " "
+        };
+        let mut t = UiTable::new(rows, constraints)
             .header(header)
-            .row_highlight_style(*selected_style)
             .highlight_symbol({
                 Text::from({
                     let spacing = itertools::repeat_n("".into(), self.row_margin.vertical as usize);
                     spacing
                         .clone()
-                        .chain(itertools::repeat_n(bar.into(), bar_height as usize))
+                        .chain(itertools::repeat_n(marker.into(), bar_height as usize))
                         .chain(spacing)
                         .collect::<Vec<Line>>()
                 })
                 .style(*bar_style)
             })
-            .column_spacing(1)
-            .highlight_spacing(HighlightSpacing::Always);
+            .column_spacing(1);
+        if state.is_focused() || !self.show_selection_marker {
+            t = t.row_highlight_style(*selected_style);
+        }
 
         state.set_visible_width(area.width);
         if state.total_width() <= area.width {
@@ -337,6 +424,14 @@ where
             };
 
             let mut buffer = Buffer::empty(rect);
+            // The h-scroll path renders into a brand-new, blank `Buffer` (unlike the direct
+            // path, which draws straight onto `buf` and so keeps the border `Block`'s own
+            // already-painted background beneath any row/header area `UiTable` doesn't touch,
+            // e.g. rows past the last data row). Pre-fill it with `border_style` — the same
+            // style the outer border/background already used — so that background carries over
+            // through the copy below instead of every cell not explicitly repainted by a row or
+            // the header reverting to the buffer's untouched (uncleared) default.
+            buffer.set_style(rect, border_style);
             ratatui::widgets::StatefulWidget::render(
                 t,
                 rect,

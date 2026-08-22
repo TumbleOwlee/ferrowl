@@ -16,6 +16,7 @@ mod common;
 mod error;
 mod key;
 mod log;
+pub mod monitor;
 mod operation;
 pub mod rtu;
 pub mod rtu_over_tcp;
@@ -35,4 +36,4 @@ pub use run_config::RunConfig;
 pub use scalar::{Address, Coil, Word};
 pub use transport::Transport;
 
-pub use rust_modbus::{FunctionCode, Quantity, UnitId};
+pub use rust_modbus::{ExceptionCode, FunctionCode, Quantity, UnitId};

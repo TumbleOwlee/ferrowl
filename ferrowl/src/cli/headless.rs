@@ -20,9 +20,10 @@ use crate::app::{Level, LogRing};
 use crate::cli::RunArgs;
 use crate::config::ocpp::OcppRole;
 use crate::config::script::ScriptDef;
-use crate::config::{self, OcppModuleSpec, OcppSpec};
+use crate::config::{self, OcppModuleSpec, OcppSpec, Role};
 use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
+use crate::module::modbus::{ModbusMonitorModule as MonitorModule, ModbusMonitorModuleView};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView, SharedLog};
@@ -66,11 +67,22 @@ async fn build_modules(args: &RunArgs) -> Result<Vec<RunModule>, String> {
     let mut modules = Vec::new();
 
     for spec in args.module_specs()? {
-        let device = config::load_device(&spec.device)
-            .map_err(|e| format!("'{}': failed to load '{}': {e}", spec.name, spec.device))?;
-        let module = Module::new(&spec, &device);
-        let view: Box<dyn ModuleView> =
-            Box::new(ModbusModuleView::new(module, spec.clone(), device));
+        let view: Box<dyn ModuleView> = match spec.role {
+            Role::Monitor => {
+                let device = config::load_monitor_device(&spec.device).map_err(|e| {
+                    format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
+                })?;
+                let module = MonitorModule::new(&spec, &device);
+                Box::new(ModbusMonitorModuleView::new(module, spec.clone(), device))
+            }
+            Role::Client | Role::Server => {
+                let device = config::load_device(&spec.device).map_err(|e| {
+                    format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
+                })?;
+                let module = Module::new(&spec, &device);
+                Box::new(ModbusModuleView::new(module, spec.clone(), device))
+            }
+        };
         modules.push(start_module(spec.name.clone(), view).await?);
     }
 

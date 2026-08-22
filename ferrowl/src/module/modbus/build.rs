@@ -444,6 +444,11 @@ pub(crate) fn build_instance(
             },
             cache,
         ),
+        (Role::Monitor, _) => unreachable!(
+            "a monitor is never built via build_instance/NetConfig — its construction lands in \
+             s4 of the modbus-bus-monitor plan (ModbusMonitorModule lifecycle wrapper), which \
+             uses MonitorNetConfig, not NetConfig, and never calls this function"
+        ),
     }
 }
 

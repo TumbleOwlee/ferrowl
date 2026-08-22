@@ -110,6 +110,11 @@ impl TlsLevel {
                 ServerTlsPolicy::Tls { .. } => TlsLevel::Tls,
                 ServerTlsPolicy::NoTls => TlsLevel::Off,
             },
+            Role::Monitor => unreachable!(
+                "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
+                 dialog/view sites gain real role=monitor handling in s6/s7 of the \
+                 modbus-bus-monitor plan"
+            ),
         }
     }
 
@@ -181,6 +186,11 @@ impl TlsLevel {
                     }
                 };
             }
+            Role::Monitor => unreachable!(
+                "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
+                 dialog/view sites gain real role=monitor handling in s6/s7 of the \
+                 modbus-bus-monitor plan"
+            ),
         }
         Ok(cfg)
     }
@@ -279,6 +289,11 @@ pub(super) fn validate_tls(
                 exists("Client key file", client_key_file)?;
             }
         }
+        Role::Monitor => unreachable!(
+            "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
+             dialog/view sites gain real role=monitor handling in s6/s7 of the \
+             modbus-bus-monitor plan"
+        ),
     }
     Ok(())
 }

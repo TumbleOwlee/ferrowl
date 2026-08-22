@@ -377,6 +377,11 @@ impl SetupDialog {
                     set_suggest_input(&mut dialog.client_cert_file, ccert);
                     set_suggest_input(&mut dialog.client_key_file, ckey);
                 }
+                Role::Monitor => unreachable!(
+                    "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — \
+                     the dialog/view sites gain real role=monitor handling in s6/s7 of the \
+                     modbus-bus-monitor plan"
+                ),
             }
         }
         dialog
@@ -1029,6 +1034,11 @@ impl SetupDialog {
                     match role {
                         Role::Server => cfg.client = orig.client.clone(),
                         Role::Client => cfg.server = orig.server.clone(),
+                        Role::Monitor => unreachable!(
+                            "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup \
+                             dialog — the dialog/view sites gain real role=monitor handling in \
+                             s6/s7 of the modbus-bus-monitor plan"
+                        ),
                     }
                 }
                 validate_tls(&cfg, role, level, &|p| {

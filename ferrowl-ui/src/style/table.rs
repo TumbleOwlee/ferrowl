@@ -3,8 +3,9 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::Style;
 
-/// Styles for [`Table`](crate::widgets::Table): selected row (focused and
-/// unfocused), border, header, and alternating rows.
+/// Styles for [`Table`](crate::widgets::Table): selected row, border, header, and alternating
+/// rows. UI-R-066: an unfocused table with its selection marker shown relies on the marker glyph
+/// alone for its selection cue, not a dedicated unfocused-selected row style.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct TableStyle {
@@ -25,9 +26,6 @@ pub struct TableStyle {
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.hi).bg(COLOR_SCHEME.row[1]).bold()")]
     pub header: Style,
-    #[getset(get = "pub")]
-    #[builder(default = "Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.hi_bg_unfocused)")]
-    pub unfocused_selected: Style,
 }
 
 impl Default for TableStyle {

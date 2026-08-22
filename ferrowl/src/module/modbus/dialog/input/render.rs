@@ -357,6 +357,19 @@ mod render_tests {
         );
     }
 
+    /// Manual-exercise fix (item 2) — the add-named-value button reads "ADD ALIAS", not
+    /// "ADD PREDEFINED".
+    #[test]
+    fn ut_render_add_button_label_is_add_alias() {
+        let mut dialog = EditInputDialog::new();
+        let text = render(&mut dialog);
+        assert!(text.contains("ADD ALIAS"), "missing button label:\n{text}");
+        assert!(
+            !text.contains("PREDEFINED"),
+            "stale label still present:\n{text}"
+        );
+    }
+
     #[test]
     fn ut_render_edit_dialog_shows_edit_title_and_delete_button() {
         let register = RegisterBuilder::default()

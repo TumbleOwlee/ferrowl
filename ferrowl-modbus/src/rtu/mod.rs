@@ -1,12 +1,14 @@
 //! Modbus RTU (serial) client and server.
 
 mod client;
+mod monitor;
 mod server;
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
 pub use client::{Client, ClientBuilder};
+pub use monitor::MonitorBuilder;
 pub use server::ServerBuilder;
 
 /// Modbus RTU serial settings; doubles as the clap argument group for RTU

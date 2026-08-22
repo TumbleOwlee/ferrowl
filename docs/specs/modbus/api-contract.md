@@ -133,8 +133,11 @@ One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
 |---|---|---|---|
 | `name` | string | — (required) | tab / instance name |
 | `device` | string | — (required) | path to the device config file |
-| `role` | `client` \| `server` | `server` | |
+| `role` | `client` \| `server` \| `monitor` | `server` | |
 | `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, or `ascii_over_tcp` |
+
+`role = monitor` is valid only with `transport = rtu` or `transport = ascii` (MB-R-140); resolving
+it against any other transport fails configuration resolution.
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -207,6 +210,15 @@ The device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are
 what an application-built module actually uses; they deliberately differ from the
 transport-level defaults of `0`.
 
+For `role = monitor`, the device config carries only `version`, `reconnect` (now also gating
+MB-R-141's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, §6.3 — each
+entry carries its own `name`, since two interpretations on different `slave_id`s may share a
+name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would silently
+collapse same-named entries across slave ids).
+`timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, and `script_interval` are
+dropped for this role: a monitor never initiates a transaction, has no poll loop, and (being
+display-only) has no Lua sim surface.
+
 ### 6.1 `read_ranges`
 
 | Field | Type | Applies to |
@@ -243,3 +255,32 @@ reversed entries are skipped silently.
 
 `value`/`default` scalars are untagged: `10` is an integer, `1.5` a float, `"idle"`
 text.
+
+### 6.3 `MonitorRegisterDef`
+
+MB-R-145 — a display-only register interpretation against a monitor's observed-value
+table (§6): identical to `RegisterDef` (§6.2) except it drops `access` (the table is
+observed, not owned by the monitor — there is no write/read direction to declare) and
+`update` (no store cell exists to script against).
+
+| Field | Type | Default | Valid values |
+|---|---|---|---|
+| `name` | string | — (required) | the interpretation's display name; unique within its own `slave_id`, not across `slave_id`s (MB-R-148) |
+| `slave_id` | u8 | `0` | 0–255 |
+| `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
+| `address` | optional u16 | unset ⇒ virtual | 0–65535 |
+| `virtual` | bool | `false` | `true` forces virtual even with an `address` set |
+| `type` | enum | — (required) | `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`, `Ascii` |
+| `endian` | enum | `Big` | `Big`, `Little` |
+| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric types only) |
+| `resolution` | f64 | `1.0` | display scale (`displayed = raw × resolution`) |
+| `bitmask` | optional string | unset ⇒ full mask | `0x`-prefixed hex or decimal; integer types only |
+| `length` | usize | `1` | ASCII width in registers (ignored for numeric types) |
+| `alignment` | enum | `Left` | `Left`, `Right` (ASCII only) |
+| `values` | list of `{name, value}` | empty | named/enum-style values for selection registers |
+| `description` | string | empty | |
+| `default` | optional scalar | unset | int, float, or string; a monitor has no memory store to write into, so this field is accepted but has no effect — kept only so a `RegisterDef`-shaped fragment pasted in still deserializes |
+
+A hand-edited or pasted-in fragment carrying `access` and/or `update` deserializes
+cleanly by ignoring both unknown fields (same tolerance §6/§6.1 already document for
+other role-conditional shapes).

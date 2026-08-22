@@ -39,6 +39,7 @@ use crate::config::{
 };
 use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
+use crate::module::modbus::{ModbusMonitorModule as MonitorModule, ModbusMonitorModuleView};
 use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::server::build_server_view;
 use crate::module::view::{CommandResult, ModuleView};
@@ -261,22 +262,40 @@ async fn build_tabs(args: &CliArgs) -> Result<Vec<Tab>, String> {
 
     let mut tabs = Vec::new();
     for (spec, resolved_name) in specs.iter().zip(&resolved) {
-        let device = match config::load_device(&spec.device) {
-            Ok(device) => device,
-            Err(e) => {
-                eprintln!(
-                    "Skipping '{}': failed to load '{}': {e}",
-                    spec.name, spec.device
-                );
-                continue;
-            }
-        };
         let mut spec = spec.clone();
         let renamed = *resolved_name != spec.name;
         spec.name = resolved_name.clone();
-        let module = Module::new(&spec, &device);
-        let view: Box<dyn ModuleView> =
-            Box::new(ModbusModuleView::new(module, spec.clone(), device));
+
+        let view: Box<dyn ModuleView> = match spec.role {
+            Role::Monitor => {
+                let device = match config::load_monitor_device(&spec.device) {
+                    Ok(device) => device,
+                    Err(e) => {
+                        eprintln!(
+                            "Skipping '{}': failed to load '{}': {e}",
+                            spec.name, spec.device
+                        );
+                        continue;
+                    }
+                };
+                let module = MonitorModule::new(&spec, &device);
+                Box::new(ModbusMonitorModuleView::new(module, spec.clone(), device))
+            }
+            Role::Client | Role::Server => {
+                let device = match config::load_device(&spec.device) {
+                    Ok(device) => device,
+                    Err(e) => {
+                        eprintln!(
+                            "Skipping '{}': failed to load '{}': {e}",
+                            spec.name, spec.device
+                        );
+                        continue;
+                    }
+                };
+                let module = Module::new(&spec, &device);
+                Box::new(ModbusModuleView::new(module, spec.clone(), device))
+            }
+        };
         let mut tab = Tab::new_from_view(spec.name.clone(), view);
         if renamed {
             tab.log.write().await.write(
@@ -547,6 +566,103 @@ mod tests {
             tabs.len(),
             1,
             "a blank device path builds on the default config"
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-140/MB-R-141 — a session module with `role = "monitor"` loads and starts a working
+    /// tab: `MonitorBuilder::spawn` always returns `Ok` (the serial open/retry happen inside the
+    /// spawned task), so a monitor module on a non-existent serial path still builds one tab,
+    /// mirroring `it_headless_run_starts_monitor_module` (`tests/headless.rs`) for the TUI's own
+    /// `build_tabs` construction path.
+    async fn ut_session_with_monitor_module_loads_and_starts() {
+        use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig, Role};
+
+        let device_path = std::env::temp_dir().join("ferrowl_main_monitor_device.toml");
+        Converter::save(
+            &MonitorDeviceConfig::default(),
+            device_path.to_str().unwrap(),
+            FileType::Toml,
+        )
+        .unwrap();
+
+        let spec = ModuleSpec {
+            name: "mon".into(),
+            device: device_path.to_str().unwrap().to_string(),
+            role: Role::Monitor,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/ttyNONE-ut-main-monitor".to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+        };
+        let mut module = serde_json::to_value(spec).unwrap();
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        let session = Session {
+            version: None,
+            modules: vec![module],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![save_session("monitor-ok", &session)],
+            devices: vec![],
+            demo: false,
+        };
+        let tabs = build_tabs(&args).await.unwrap();
+        assert_eq!(tabs.len(), 1, "the monitor module builds one working tab");
+    }
+
+    #[tokio::test]
+    /// MB-R-140 — a monitor module referencing a device file that fails `load_monitor_device` is
+    /// skipped (not fatal), same as today's `load_device` failure for Client/Server (see
+    /// `ut_missing_device_is_skipped_not_fatal` above), mirroring
+    /// `it_headless_fails_on_monitor_module_with_bad_device_path` (`tests/headless.rs`) — the TUI
+    /// path skips-with-a-warning rather than hard-failing the whole run.
+    async fn ut_session_skips_monitor_module_with_bad_device_path() {
+        use crate::config::{Endpoint, ModuleSpec, Role};
+
+        let spec = ModuleSpec {
+            name: "mon-bad".into(),
+            device: "/no/such/monitor-device.toml".to_string(),
+            role: Role::Monitor,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/ttyNONE-ut-main-monitor-bad".to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+        };
+        let mut module = serde_json::to_value(spec).unwrap();
+        module
+            .as_object_mut()
+            .unwrap()
+            .insert("type".into(), "modbus".into());
+        let session = Session {
+            version: None,
+            modules: vec![module],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![save_session("monitor-bad-device", &session)],
+            devices: vec![],
+            demo: false,
+        };
+        let tabs = build_tabs(&args).await.unwrap();
+        assert!(
+            tabs.is_empty(),
+            "the monitor instance with a bad device path is skipped"
         );
     }
 }

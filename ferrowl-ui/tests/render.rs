@@ -606,3 +606,252 @@ fn table_render_variants() {
     let mut b = buffer(14, 8);
     StatefulWidget::render(&w, Rect::new(0, 0, 14, 8), &mut b, &mut st);
 }
+
+#[test]
+/// UI-R-066 — a `Table` with fewer rows than its area's height fills the whole bordered area with the
+/// table's own background — the row/header area below the last row must not be left at the
+/// buffer's default (uncleared) style, matching every other bordered widget's own filled
+/// background. Narrow enough that `total_width > area.width` (the h-scroll copy path, Shared
+/// with `table_render_variants`'s own narrow-area case) — that path renders into a fresh, blank
+/// `Buffer` before copying the visible slice back, which previously dropped the border's
+/// already-painted background for any row/header area the table itself didn't touch.
+fn table_fills_unused_row_area_with_its_own_background_not_default() {
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(vec![Row("only".to_string(), "row".to_string())])
+        .build()
+        .unwrap();
+    let mut b = buffer(10, 10);
+    StatefulWidget::render(&w, Rect::new(0, 0, 10, 10), &mut b, &mut st);
+
+    // Row 0 is the border, row 1 the header, row 2 the one data row; row 5 is well past the
+    // single data row but still inside the bordered area — it must carry the table's own
+    // (non-default) background, not `Color::Reset`.
+    let below_last_row = &b[(5, 5)];
+    assert_ne!(
+        below_last_row.bg,
+        ratatui::style::Color::Reset,
+        "area below the last row must be filled with the table's own background"
+    );
+}
+
+#[test]
+/// UI-R-066 — `show_selection_marker(false)` (default `true`, every other table unaffected)
+/// suppresses the selection highlight bar glyph (`█`) entirely, while the selected row's own
+/// background still distinguishes it from unselected rows.
+fn table_show_selection_marker_false_suppresses_bar_keeps_row_highlight() {
+    let rows = vec![
+        Row("alpha".to_string(), "one".to_string()),
+        Row("beta".to_string(), "two".to_string()),
+    ];
+
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default().values(rows).build().unwrap();
+    let mut b = buffer(30, 6);
+    StatefulWidget::render(&w, Rect::new(0, 0, 30, 6), &mut b, &mut st);
+
+    let has_bar = (0..30u16)
+        .flat_map(|x| (0..6u16).map(move |y| (x, y)))
+        .any(|(x, y)| b[(x, y)].symbol() == "█");
+    assert!(!has_bar, "no selection bar glyph anywhere in the buffer");
+
+    // Row 1 (border) is the header, row 2 the first (selected) data row, row 3 the second
+    // (unselected) data row — their backgrounds must still differ, so selection stays visible.
+    let selected_bg = b[(2, 2)].bg;
+    let unselected_bg = b[(2, 3)].bg;
+    assert_ne!(
+        selected_bg, unselected_bg,
+        "selected row's background still distinguishes it without the bar"
+    );
+}
+
+#[test]
+/// UI-R-066 — `show_selection_marker(false)`'s marker column must collapse entirely (no
+/// leftover whitespace prefix) rather than stay reserved-but-blank. Comparing against the
+/// marker-`true` render of the identical rows/area: every row's first non-border, non-header
+/// content column starts one cell further left once the marker is gone.
+fn table_show_selection_marker_false_collapses_marker_column() {
+    let rows = || {
+        vec![
+            Row("alpha".to_string(), "one".to_string()),
+            Row("beta".to_string(), "two".to_string()),
+        ]
+    };
+
+    let with_marker = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .build()
+        .unwrap();
+    let mut st_with = TableStateBuilder::default().values(rows()).build().unwrap();
+    let mut b_with = buffer(30, 6);
+    StatefulWidget::render(
+        &with_marker,
+        Rect::new(0, 0, 30, 6),
+        &mut b_with,
+        &mut st_with,
+    );
+
+    let without_marker = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st_without = TableStateBuilder::default().values(rows()).build().unwrap();
+    let mut b_without = buffer(30, 6);
+    StatefulWidget::render(
+        &without_marker,
+        Rect::new(0, 0, 30, 6),
+        &mut b_without,
+        &mut st_without,
+    );
+
+    // Row 2 is the first data row ("alpha"). With the marker column reserved, its 'a' starts
+    // further right than without it (the marker column no longer eats horizontal space).
+    let first_char_x = |b: &Buffer| {
+        (0..30u16)
+            .find(|&x| b[(x, 2)].symbol() == "a")
+            .expect("row must render its 'alpha' text somewhere on row 2")
+    };
+    let x_with = first_char_x(&b_with);
+    let x_without = first_char_x(&b_without);
+    assert!(
+        x_without < x_with,
+        "collapsing the marker column must shift row content left \
+         (with marker: x={x_with}, without marker: x={x_without})"
+    );
+}
+
+#[test]
+/// UI-R-066 — without the bar glyph, the selected row's own background is the only remaining
+/// selection cue, so it must stay clearly visible even while the table itself isn't the
+/// currently focused panel: `show_selection_marker(false)` always uses the strong `focused`
+/// style, never the subtler alternating-row style a marker-on unfocused table falls back to
+/// (which relies on the marker glyph itself as the selection cue instead).
+fn table_show_selection_marker_false_keeps_selected_row_visibly_highlighted_when_unfocused() {
+    let rows = vec![
+        Row("alpha".to_string(), "one".to_string()),
+        Row("beta".to_string(), "two".to_string()),
+    ];
+
+    let w = TableBuilder::<Row, Cols, 2>::default()
+        .border(full_border())
+        .show_selection_marker(false)
+        .build()
+        .unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(rows)
+        .focused(false)
+        .build()
+        .unwrap();
+    let mut b = buffer(30, 6);
+    StatefulWidget::render(&w, Rect::new(0, 0, 30, 6), &mut b, &mut st);
+
+    // Row 2 (the selected first data row) must use the same strong `focused` background as a
+    // focused selection would.
+    let style = TableStyle::default();
+    assert_eq!(
+        b[(2, 2)].bg,
+        style.focused().bg.expect("focused style always sets a bg"),
+        "selected row must stay highlighted with the strong `focused` background even while \
+         the table itself is unfocused, once the marker glyph is gone"
+    );
+}
+
+#[test]
+/// UI-R-066 — the marker gutter's reserved width tracks the table's real selection state: zero
+/// with nothing selected (an empty table), the highlight glyph's own width once a row is
+/// selected — not a flat constant that over- or under-reserves relative to what's actually
+/// drawn (#220's phantom-scroll/geometry-jump report).
+fn table_marker_gutter_width_tracks_selection_state_empty_to_non_empty() {
+    let w = TableBuilder::<Row, Cols, 2>::default().build().unwrap();
+    let mut st = TableStateBuilder::default()
+        .values(Vec::new())
+        .build()
+        .unwrap();
+    st.set_values(Vec::new());
+    // Area narrower than the table's own content width, so `total_width` reports the table's
+    // real computed width rather than being clamped up to a wide area's width.
+    let mut b = buffer(5, 8);
+    StatefulWidget::render(&w, Rect::new(0, 0, 5, 8), &mut b, &mut st);
+    let empty_width = st.total_width();
+
+    // Content no wider than the header's own labels ("Name"/"Value"), so the only width change
+    // between the empty and non-empty renders is the marker gutter, not the column widths too.
+    st.set_values(vec![
+        Row("abcd".to_string(), "one".to_string()),
+        Row("wxyz".to_string(), "two".to_string()),
+    ]);
+    StatefulWidget::render(&w, Rect::new(0, 0, 5, 8), &mut b, &mut st);
+    let selected_width = st.total_width();
+
+    assert_eq!(
+        selected_width - empty_width,
+        3,
+        "selecting a row must grow the reserved gutter by exactly the marker glyph's width (3), \
+         not a mismatched fixed constant (empty: {empty_width}, selected: {selected_width})"
+    );
+}
+
+#[derive(Clone, Default)]
+struct SpanRow;
+
+impl TableEntry<2> for SpanRow {
+    fn values(&self) -> [String; 2] {
+        ["ab".to_string(), "plain".to_string()]
+    }
+    fn height(&self) -> u16 {
+        1
+    }
+    fn cell_spans(&self) -> [Option<Vec<(String, ratatui::style::Style)>>; 2] {
+        [
+            Some(vec![
+                (
+                    "a".to_string(),
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Red),
+                ),
+                (
+                    "b".to_string(),
+                    ratatui::style::Style::default().fg(ratatui::style::Color::Blue),
+                ),
+            ]),
+            None,
+        ]
+    }
+}
+
+#[test]
+/// UI-R-063 — a `cell_spans`-returning column renders each span with its own color, distinct
+/// from its neighbor's, rather than one flat cell color (the mechanism UI-R-063's Memory-layout
+/// per-byte/word coloring is built on); a `None` column (col 1) renders exactly as before this
+/// method existed.
+fn table_cell_spans_render_distinct_per_span_colors() {
+    let w = TableBuilder::<SpanRow, Cols, 2>::default().build().unwrap();
+    // Two rows so row index 1 (rendered on buffer row 2) is unselected — the table's default
+    // first-row selection patches `focused`'s own fg over cell content, which would otherwise
+    // mask the spans' colors this test asserts on.
+    let mut st = TableStateBuilder::default()
+        .values(vec![SpanRow, SpanRow])
+        .build()
+        .unwrap();
+    let mut b = buffer(40, 8);
+    StatefulWidget::render(&w, Rect::new(0, 0, 40, 8), &mut b, &mut st);
+
+    // Buffer row 2 = data row 1 (row 0 is the header, buffer row 1 = data row 0, selected); x=0
+    // padding, x=1 padding, x=2 padding, then the first data column's spans: 'a' at x=3, 'b' at
+    // x=4, rendered adjacently (same column layout as the selected row's own highlight-bar
+    // column, which is blank — not `█` — on an unselected row).
+    let a_cell = &b[(3, 2)];
+    let b_cell = &b[(4, 2)];
+    assert_eq!(a_cell.symbol(), "a");
+    assert_eq!(b_cell.symbol(), "b");
+    assert_eq!(a_cell.fg, ratatui::style::Color::Red);
+    assert_eq!(b_cell.fg, ratatui::style::Color::Blue);
+    assert_ne!(a_cell.fg, b_cell.fg);
+}

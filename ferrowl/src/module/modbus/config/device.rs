@@ -14,7 +14,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::script::ScriptDef;
 
+mod monitor;
 mod value_types;
+// `MonitorRegisterDef` itself is reached only through `MonitorDeviceConfig::definitions`
+// (`BTreeMap<String, MonitorRegisterDef>`) until app code names it directly in s4 — re-exported
+// now for callers who will, per the modbus-bus-monitor plan.
+#[allow(unused_imports)]
+pub use monitor::{MonitorDeviceConfig, MonitorRegisterDef};
 pub use value_types::{
     AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, WordOrderCfg, parse_bitmask,
 };

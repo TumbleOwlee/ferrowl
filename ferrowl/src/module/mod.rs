@@ -22,4 +22,24 @@ pub static MODULE_TYPES: &[ModuleTypeDescriptor] = &[
         label: "OCPP",
         new_setup_view: || Box::new(ocpp::setup::OcppSetupView::new()),
     },
+    ModuleTypeDescriptor {
+        label: "Monitor",
+        new_setup_view: || Box::new(modbus::monitor::setup::MonitorSetupView::new_create()),
+    },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UI-R-060 — `:new`/`:n` offers a "Monitor" module type, and its setup view
+    /// constructs without panicking.
+    #[test]
+    fn ut_module_types_includes_modbus_monitor() {
+        let descriptor = MODULE_TYPES
+            .iter()
+            .find(|d| d.label == "Monitor")
+            .expect("Monitor must be registered in MODULE_TYPES");
+        let _setup_view = (descriptor.new_setup_view)();
+    }
+}

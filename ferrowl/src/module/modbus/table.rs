@@ -27,10 +27,12 @@ pub const COLUMN_COUNT: usize = 11;
 /// How long a row stays highlighted after a register change.
 pub const CHANGE_HIGHLIGHT: Duration = Duration::from_secs(2);
 
-/// Resolve a user-supplied column name to its index in [`TableHeader::header`].
-/// Matching is case-insensitive and ignores spaces, so `slaveid`, `slave id`, and
-/// `Slave ID` all resolve to the same column. Returns `None` if nothing matches.
-pub fn column_index(name: &str) -> Option<usize> {
+/// Resolve a user-supplied column name to its index in `H::header()`. Matching is
+/// case-insensitive and ignores spaces, so `slaveid`, `slave id`, and `Slave ID` all resolve to
+/// the same column. Returns `None` if nothing matches. Generic over any [`Header`] so other
+/// tables (e.g. the monitor module's resolved-registers table) can resolve `:order`'s column
+/// argument the same way, without duplicating the normalize-and-match body.
+pub fn column_index_for<H: Header<N>, const N: usize>(name: &str) -> Option<usize> {
     let normalize = |s: &str| {
         s.chars()
             .filter(|c| !c.is_whitespace())
@@ -38,17 +40,22 @@ pub fn column_index(name: &str) -> Option<usize> {
             .collect::<String>()
     };
     let target = normalize(name);
-    TableHeader::header()
-        .iter()
-        .position(|h| normalize(h) == target)
+    H::header().iter().position(|h| normalize(h) == target)
 }
 
-/// Compare two register rows by the given column for `:order`. Both sides are taken from
-/// [`TableEntry::values`] (the displayed strings); numeric when both parse as `f64`,
-/// otherwise case-insensitive lexicographic. `descending` reverses the result.
-pub fn cmp_definitions(
-    a: &Definition,
-    b: &Definition,
+/// Resolve a user-supplied column name to its index in [`TableHeader::header`]. See
+/// [`column_index_for`] for the matching rule.
+pub fn column_index(name: &str) -> Option<usize> {
+    column_index_for::<TableHeader, COLUMN_COUNT>(name)
+}
+
+/// Compare two [`TableEntry`] rows by the given column for `:order`. Both sides are taken from
+/// [`TableEntry::values`] (the displayed strings); numeric when both parse as `f64`, otherwise
+/// case-insensitive lexicographic. `descending` reverses the result. Generic over any
+/// `TableEntry<N>` so other tables can reuse the same sort rule.
+pub fn cmp_table_entry<V: TableEntry<N>, const N: usize>(
+    a: &V,
+    b: &V,
     column: usize,
     descending: bool,
 ) -> std::cmp::Ordering {
@@ -61,6 +68,16 @@ pub fn cmp_definitions(
         _ => sa.to_lowercase().cmp(&sb.to_lowercase()),
     };
     if descending { ord.reverse() } else { ord }
+}
+
+/// Compare two register rows by the given column for `:order`. See [`cmp_table_entry`].
+pub fn cmp_definitions(
+    a: &Definition,
+    b: &Definition,
+    column: usize,
+    descending: bool,
+) -> std::cmp::Ordering {
+    cmp_table_entry(a, b, column, descending)
 }
 
 #[derive(Clone, Debug)]
