@@ -118,7 +118,16 @@ where
                 Err(ModbusError::Exception(ExceptionCode::IllegalDataAddress)),
             );
         }
-        let (address, quantity) = (Address(start as u16), Quantity(count));
+        // MB-R-149: a start address that doesn't fit in the wire's u16 field is refused
+        // locally, in the same shape as the count guard above, so it follows the same
+        // exception-retry path as MB-R-043 instead of silently truncating.
+        let Ok(start_addr) = u16::try_from(start) else {
+            return (
+                "Unknown",
+                Err(ModbusError::Exception(ExceptionCode::IllegalDataValue)),
+            );
+        };
+        let (address, quantity) = (Address(start_addr), Quantity(count));
         match op.fn_code {
             FunctionCode::ReadCoils => {
                 log_read_intent(log, "ReadCoils", op.slave_id, start, end).await;
@@ -663,6 +672,59 @@ mod tests {
         assert!(
             drain_peer(&mut peer).await.is_empty(),
             "a broadcast read must not reach the wire"
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-149 — a read whose start address does not fit in `u16` (reachable only from a
+    /// hand-edited config; the planner's `addr: u16` cannot produce one) is refused locally as
+    /// `IllegalDataValue`, never reaching the wire, following the same exception-retry path as
+    /// MB-R-043.
+    async fn ut_rtu_start_address_overflow_is_refused_locally() {
+        let (mut core, mut peer) = rtu_client_over_duplex();
+        let (log, _lines) = recording_log();
+        let op = Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(70_000, 1),
+        };
+
+        let (label, result) = core.read(&op, 200, &log).await;
+
+        assert_eq!(label, "Unknown");
+        assert!(matches!(
+            result,
+            Err(ModbusError::Exception(ExceptionCode::IllegalDataValue))
+        ));
+        assert!(
+            drain_peer(&mut peer).await.is_empty(),
+            "an out-of-range start address must not reach the wire"
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-149 — a read whose computed count (`end - start`) does not fit in `u16` is refused
+    /// locally as `IllegalDataValue`, never reaching the wire, following the same exception-retry
+    /// path as MB-R-043. (Pre-existing guard, now covered under MB-R-149.)
+    async fn ut_rtu_range_count_overflow_is_refused_locally() {
+        let (mut core, mut peer) = rtu_client_over_duplex();
+        let (log, _lines) = recording_log();
+        let op = Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 70_000),
+        };
+
+        let (label, result) = core.read(&op, 200, &log).await;
+
+        assert_eq!(label, "Unknown");
+        assert!(matches!(
+            result,
+            Err(ModbusError::Exception(ExceptionCode::IllegalDataValue))
+        ));
+        assert!(
+            drain_peer(&mut peer).await.is_empty(),
+            "an over-long range must not reach the wire"
         );
     }
 
