@@ -1325,7 +1325,14 @@ impl ModuleView for ModbusMonitorModuleView {
                     self.overlay = MonitorOverlay::None;
                 }
                 KeyCode::Enter => {
-                    self.confirm_edit();
+                    // Manual-exercise fix — offer Enter to the dialog first, so a focused
+                    // completion popup (config-path/serial-path) gets to accept its highlighted
+                    // suggestion (UI-R-026) instead of Enter unconditionally confirming the whole
+                    // dialog; only treat it as confirm once the dialog itself leaves it unhandled
+                    // (mirrors the full modbus module's own `ModbusModuleView::handle_events`).
+                    if let EventResult::Unhandled(..) = dialog.handle_events(modifiers, code) {
+                        self.confirm_edit();
+                    }
                 }
                 _ => {
                     let _ = dialog.handle_events(modifiers, code);
@@ -2565,6 +2572,39 @@ mod tests {
         v.confirm_edit();
 
         assert_eq!(v.spec.device, "new-device.toml");
+    }
+
+    /// Manual-exercise fix — `Enter` while the config-path field's completion popup is open must
+    /// accept the highlighted suggestion (UI-R-026), not unconditionally confirm the whole setup
+    /// dialog; mirrors the modbus module's own `ModbusModuleView::handle_events`, which offers
+    /// `Enter` to `setup.handle_events` before falling back to its own confirm handling.
+    #[tokio::test]
+    async fn ut_edit_setup_enter_accepts_suggestion_instead_of_confirming_when_popup_open() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        dialog.focus_next(); // Name -> ConfigPath
+        dialog
+            .config_path
+            .state
+            .handle_events(KeyModifiers::NONE, KeyCode::Char('s'));
+        assert!(dialog.config_path.state.suggestions_open());
+
+        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+
+        let MonitorOverlay::EditSetup(dialog) = &v.overlay else {
+            panic!("dialog must stay open, unconfirmed, while the popup handles Enter");
+        };
+        // The `ferrowl` crate root (test cwd) has an `src/` dir, a partial match for "s" that
+        // re-queries and stays open (UI-R-026) — if `Enter` had instead been routed straight to
+        // `confirm_edit` (the bug), the field would never see it and stay at "s".
+        assert_eq!(
+            dialog.config_path.state.input(),
+            "src/",
+            "Enter must be offered to the dialog first so it can accept the suggestion"
+        );
     }
 
     /// Manual-exercise fix (item 1) — editing setup must not reset the running monitor's
