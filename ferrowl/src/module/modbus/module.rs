@@ -174,7 +174,7 @@ impl ModbusModule {
         let self_signed_cache = ferrowl_modbus::tcp::new_self_signed_cache();
         let net_config = endpoint_to_config(&spec.endpoint, &timing, device.tls.clone());
         let instance = build_instance(
-            spec.role,
+            spec.role.client_or_server(),
             net_config,
             operations.clone(),
             memory.clone(),
@@ -428,7 +428,7 @@ impl ModbusModule {
         self.rebuild_operations().await;
         let net_config = endpoint_to_config(endpoint, &timing, tls);
         self.instance = build_instance(
-            role,
+            role.client_or_server(),
             net_config,
             self.operations.clone(),
             self.memory.clone(),

@@ -653,7 +653,7 @@ impl ModuleView for ModbusModuleView {
                 let dialog = SetupDialog::edit(
                     &self.spec.name,
                     &self.spec.device,
-                    self.spec.role,
+                    self.spec.role.client_or_server(),
                     &self.spec.endpoint,
                     timing,
                     &self.device.read_ranges,
@@ -793,15 +793,9 @@ impl ModuleView for ModbusModuleView {
             .iter()
             .map(|(name, _, register, _)| (name.clone(), register.clone()))
             .collect();
-        let role = match self.spec.role {
-            crate::config::Role::Client => "client",
-            crate::config::Role::Server => "server",
-            crate::config::Role::Monitor => unreachable!(
-                "a monitor has no Lua sim surface (api-contract.md §6's role-conditional device \
-                 config drops `scripts`) and never registers a `C_Module` host — the monitor \
-                 module view lands in s5 of the modbus-bus-monitor plan and never reaches this \
-                 client/server host-registration path"
-            ),
+        let role = match self.spec.role.client_or_server() {
+            crate::config::ClientOrServer::Client => "client",
+            crate::config::ClientOrServer::Server => "server",
         };
         Some(std::sync::Arc::new(crate::registry::ModbusHost {
             memory: self.module.memory(),

@@ -6,7 +6,7 @@
 
 use ferrowl_ui::traits::ToLabel;
 
-use crate::config::Role;
+use crate::config::ClientOrServer;
 use ferrowl_modbus::tcp::ModbusTlsConfig;
 use ferrowl_util::tls::{
     ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
@@ -98,23 +98,18 @@ impl TlsLevel {
     /// Infer the level an existing [`ModbusTlsConfig`] represents, by role, from that role's own
     /// nested policy (`cfg.server`/`cfg.client` — the other role's half is always present on the
     /// wire too, per `device.rs`'s doc comment, but never consulted here).
-    pub fn from_config(cfg: &ModbusTlsConfig, role: Role) -> TlsLevel {
+    pub fn from_config(cfg: &ModbusTlsConfig, role: ClientOrServer) -> TlsLevel {
         match role {
-            Role::Client => match &cfg.client {
+            ClientOrServer::Client => match &cfg.client {
                 ClientTlsPolicy::MutualTls { .. } => TlsLevel::MutualTls,
                 ClientTlsPolicy::Tls { .. } => TlsLevel::Tls,
                 ClientTlsPolicy::NoTls => TlsLevel::Off,
             },
-            Role::Server => match &cfg.server {
+            ClientOrServer::Server => match &cfg.server {
                 ServerTlsPolicy::MutualTls { .. } => TlsLevel::MutualTls,
                 ServerTlsPolicy::Tls { .. } => TlsLevel::Tls,
                 ServerTlsPolicy::NoTls => TlsLevel::Off,
             },
-            Role::Monitor => unreachable!(
-                "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
-                 dialog/view sites gain real role=monitor handling in s6/s7 of the \
-                 modbus-bus-monitor plan"
-            ),
         }
     }
 
@@ -125,7 +120,7 @@ impl TlsLevel {
     /// other role's previously-saved settings.
     pub fn build_config(
         self,
-        role: Role,
+        role: ClientOrServer,
         inputs: TlsInputs<'_>,
     ) -> Result<ModbusTlsConfig, String> {
         let TlsInputs {
@@ -147,7 +142,7 @@ impl TlsLevel {
 
         let mut cfg = ModbusTlsConfig::default();
         match role {
-            Role::Server => {
+            ClientOrServer::Server => {
                 let server_cert =
                     ServerCertSource::resolve(self_signed, opt(cert_file), opt(key_file))?;
                 cfg.server = if mtls {
@@ -168,7 +163,7 @@ impl TlsLevel {
                     ServerTlsPolicy::Tls { server_cert }
                 };
             }
-            Role::Client => {
+            ClientOrServer::Client => {
                 let client_verification = ClientVerification::resolve(skip_verify, opt(ca_file));
                 cfg.client = if mtls {
                     let client_identity = ClientCertSource::resolve(
@@ -186,11 +181,6 @@ impl TlsLevel {
                     }
                 };
             }
-            Role::Monitor => unreachable!(
-                "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
-                 dialog/view sites gain real role=monitor handling in s6/s7 of the \
-                 modbus-bus-monitor plan"
-            ),
         }
         Ok(cfg)
     }
@@ -212,7 +202,7 @@ impl TlsLevel {
 /// them helpfully) — this only adds the file-existence check on top.
 pub(super) fn validate_tls(
     cfg: &ModbusTlsConfig,
-    role: Role,
+    role: ClientOrServer,
     level: TlsLevel,
     file_exists: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
@@ -224,7 +214,7 @@ pub(super) fn validate_tls(
     };
 
     match role {
-        Role::Server => {
+        ClientOrServer::Server => {
             let server_cert = match &cfg.server {
                 ServerTlsPolicy::Tls { server_cert }
                 | ServerTlsPolicy::MutualTls { server_cert, .. } => server_cert,
@@ -260,7 +250,7 @@ pub(super) fn validate_tls(
                 }
             }
         }
-        Role::Client => {
+        ClientOrServer::Client => {
             let client_verification = match &cfg.client {
                 ClientTlsPolicy::Tls {
                     client_verification,
@@ -289,11 +279,6 @@ pub(super) fn validate_tls(
                 exists("Client key file", client_key_file)?;
             }
         }
-        Role::Monitor => unreachable!(
-            "a monitor is RTU/Ascii-only (MB-R-140) and never has a TLS setup dialog — the \
-             dialog/view sites gain real role=monitor handling in s6/s7 of the \
-             modbus-bus-monitor plan"
-        ),
     }
     Ok(())
 }
@@ -331,8 +316,14 @@ mod tests {
     /// present `ModbusTlsConfig` (only the wrapping `Option<ModbusTlsConfig>` represents "off").
     fn ut_from_config_default_both_roles_is_tls() {
         let cfg = ModbusTlsConfig::default();
-        assert_eq!(TlsLevel::from_config(&cfg, Role::Client), TlsLevel::Tls);
-        assert_eq!(TlsLevel::from_config(&cfg, Role::Server), TlsLevel::Tls);
+        assert_eq!(
+            TlsLevel::from_config(&cfg, ClientOrServer::Client),
+            TlsLevel::Tls
+        );
+        assert_eq!(
+            TlsLevel::from_config(&cfg, ClientOrServer::Server),
+            TlsLevel::Tls
+        );
     }
 
     #[test]
@@ -346,7 +337,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            TlsLevel::from_config(&cfg, Role::Client),
+            TlsLevel::from_config(&cfg, ClientOrServer::Client),
             TlsLevel::MutualTls
         );
     }
@@ -364,7 +355,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            TlsLevel::from_config(&cfg, Role::Server),
+            TlsLevel::from_config(&cfg, ClientOrServer::Server),
             TlsLevel::MutualTls
         );
     }
@@ -375,7 +366,10 @@ mod tests {
     /// UI-R-024 — a server TLS build resolves cert/key from raw text when self-signed is off.
     fn ut_build_config_tls_server_resolves_cert_key() {
         let cfg = TlsLevel::Tls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
+            .build_config(
+                ClientOrServer::Server,
+                inputs("", "cert", "key", "", "", &[]),
+            )
             .unwrap();
         assert_eq!(
             cfg.server,
@@ -394,7 +388,7 @@ mod tests {
     fn ut_build_config_mutual_tls_server_parses_ca_list() {
         let cfg = TlsLevel::MutualTls
             .build_config(
-                Role::Server,
+                ClientOrServer::Server,
                 inputs(
                     "",
                     "cert",
@@ -420,7 +414,10 @@ mod tests {
     /// `ClientCertVerification::Verify { ca_files: vec![] }`).
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
         let err = TlsLevel::MutualTls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
+            .build_config(
+                ClientOrServer::Server,
+                inputs("", "cert", "key", "", "", &[]),
+            )
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
     }
@@ -430,7 +427,9 @@ mod tests {
     fn ut_build_config_mutual_tls_server_skip_verify_needs_no_ca_list() {
         let mut i = inputs("", "cert", "key", "", "", &[]);
         i.client_cert_skip_verify = true;
-        let cfg = TlsLevel::MutualTls.build_config(Role::Server, i).unwrap();
+        let cfg = TlsLevel::MutualTls
+            .build_config(ClientOrServer::Server, i)
+            .unwrap();
         assert_eq!(
             cfg.server,
             ServerTlsPolicy::MutualTls {
@@ -449,7 +448,9 @@ mod tests {
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
         let mut i = inputs("", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
-        let cfg = TlsLevel::MutualTls.build_config(Role::Client, i).unwrap();
+        let cfg = TlsLevel::MutualTls
+            .build_config(ClientOrServer::Client, i)
+            .unwrap();
         assert_eq!(
             cfg.client,
             ClientTlsPolicy::MutualTls {
@@ -464,7 +465,10 @@ mod tests {
     /// default placeholder (the caller stitches in the real inactive-role config, if any).
     fn ut_build_config_leaves_inactive_role_at_default() {
         let cfg = TlsLevel::Tls
-            .build_config(Role::Server, inputs("", "cert", "key", "", "", &[]))
+            .build_config(
+                ClientOrServer::Server,
+                inputs("", "cert", "key", "", "", &[]),
+            )
             .unwrap();
         assert_eq!(cfg.client, ModbusTlsConfig::default().client);
     }
@@ -480,14 +484,14 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::Tls, &|_| false).is_ok());
+        assert!(validate_tls(&cfg, ClientOrServer::Server, TlsLevel::Tls, &|_| false).is_ok());
     }
 
     #[test]
     /// UI-R-024 — a server at TLS without self_signed requires an existing cert and key file.
     fn ut_validate_tls_server_requires_cert_and_key_files() {
         let missing = ModbusTlsConfig::default();
-        assert!(validate_tls(&missing, Role::Server, TlsLevel::Tls, &|_| false).is_err());
+        assert!(validate_tls(&missing, ClientOrServer::Server, TlsLevel::Tls, &|_| false).is_err());
 
         let cfg = ModbusTlsConfig {
             server: ServerTlsPolicy::Tls {
@@ -498,8 +502,8 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::Tls, &|_| true).is_ok());
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::Tls, &|_| false).is_err());
+        assert!(validate_tls(&cfg, ClientOrServer::Server, TlsLevel::Tls, &|_| true).is_ok());
+        assert!(validate_tls(&cfg, ClientOrServer::Server, TlsLevel::Tls, &|_| false).is_err());
     }
 
     #[test]
@@ -514,8 +518,13 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::MutualTls, &|_| true).is_ok());
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::MutualTls, &|_| false).is_err());
+        assert!(validate_tls(&cfg, ClientOrServer::Server, TlsLevel::MutualTls, &|_| true).is_ok());
+        assert!(
+            validate_tls(&cfg, ClientOrServer::Server, TlsLevel::MutualTls, &|_| {
+                false
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -528,7 +537,12 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Server, TlsLevel::MutualTls, &|_| false).is_ok());
+        assert!(
+            validate_tls(&cfg, ClientOrServer::Server, TlsLevel::MutualTls, &|_| {
+                false
+            })
+            .is_ok()
+        );
     }
 
     #[test]
@@ -542,8 +556,8 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Client, TlsLevel::Tls, &|_| true).is_ok());
-        assert!(validate_tls(&cfg, Role::Client, TlsLevel::Tls, &|_| false).is_err());
+        assert!(validate_tls(&cfg, ClientOrServer::Client, TlsLevel::Tls, &|_| true).is_ok());
+        assert!(validate_tls(&cfg, ClientOrServer::Client, TlsLevel::Tls, &|_| false).is_err());
 
         let skip_verify_only = ModbusTlsConfig {
             client: ClientTlsPolicy::Tls {
@@ -551,7 +565,15 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&skip_verify_only, Role::Client, TlsLevel::Tls, &|_| false).is_ok());
+        assert!(
+            validate_tls(
+                &skip_verify_only,
+                ClientOrServer::Client,
+                TlsLevel::Tls,
+                &|_| false
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -567,8 +589,13 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Client, TlsLevel::MutualTls, &|_| true).is_ok());
-        assert!(validate_tls(&cfg, Role::Client, TlsLevel::MutualTls, &|_| false).is_err());
+        assert!(validate_tls(&cfg, ClientOrServer::Client, TlsLevel::MutualTls, &|_| true).is_ok());
+        assert!(
+            validate_tls(&cfg, ClientOrServer::Client, TlsLevel::MutualTls, &|_| {
+                false
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -581,6 +608,11 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_tls(&cfg, Role::Client, TlsLevel::MutualTls, &|_| false).is_ok());
+        assert!(
+            validate_tls(&cfg, ClientOrServer::Client, TlsLevel::MutualTls, &|_| {
+                false
+            })
+            .is_ok()
+        );
     }
 }

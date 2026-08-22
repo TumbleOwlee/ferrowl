@@ -8,7 +8,7 @@ use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetCon
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 use tokio::sync::RwLock;
 
-use crate::config::{Endpoint, Role, device::NamedValue, device::ReadRanges};
+use crate::config::{ClientOrServer, Endpoint, device::NamedValue, device::ReadRanges};
 use crate::instance::Instance;
 use crate::instance::config::{ClientConfig, ServerConfig};
 
@@ -365,14 +365,14 @@ pub(crate) fn endpoint_to_config(
 }
 
 pub(crate) fn build_instance(
-    role: Role,
+    role: ClientOrServer,
     config: NetConfig,
     operations: Arc<RwLock<Vec<Operation>>>,
     memory: ModuleMemory,
     cache: ferrowl_modbus::tcp::SelfSignedCache,
 ) -> Instance<SlaveKey> {
     match (role, config) {
-        (Role::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(
+        (ClientOrServer::Client, NetConfig::Tcp(cfg)) => Instance::with_tcp_client(
             ClientConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 operations,
@@ -380,23 +380,23 @@ pub(crate) fn build_instance(
             },
             cache,
         ),
-        (Role::Server, NetConfig::Tcp(cfg)) => Instance::with_tcp_server(
+        (ClientOrServer::Server, NetConfig::Tcp(cfg)) => Instance::with_tcp_server(
             ServerConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 memory,
             },
             cache,
         ),
-        (Role::Client, NetConfig::Rtu(cfg)) => Instance::with_rtu_client(ClientConfig {
+        (ClientOrServer::Client, NetConfig::Rtu(cfg)) => Instance::with_rtu_client(ClientConfig {
             config: Arc::new(RwLock::new(cfg)),
             operations,
             memory,
         }),
-        (Role::Server, NetConfig::Rtu(cfg)) => Instance::with_rtu_server(ServerConfig {
+        (ClientOrServer::Server, NetConfig::Rtu(cfg)) => Instance::with_rtu_server(ServerConfig {
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
-        (Role::Client, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_client(
+        (ClientOrServer::Client, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_client(
             ClientConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 operations,
@@ -404,51 +404,54 @@ pub(crate) fn build_instance(
             },
             cache,
         ),
-        (Role::Server, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_server(
+        (ClientOrServer::Server, NetConfig::RtuOverTcp(cfg)) => Instance::with_rtu_over_tcp_server(
             ServerConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 memory,
             },
             cache,
         ),
-        (Role::Client, NetConfig::Udp(cfg)) => Instance::with_udp_client(ClientConfig {
+        (ClientOrServer::Client, NetConfig::Udp(cfg)) => Instance::with_udp_client(ClientConfig {
             config: Arc::new(RwLock::new(cfg)),
             operations,
             memory,
         }),
-        (Role::Server, NetConfig::Udp(cfg)) => Instance::with_udp_server(ServerConfig {
+        (ClientOrServer::Server, NetConfig::Udp(cfg)) => Instance::with_udp_server(ServerConfig {
             config: Arc::new(RwLock::new(cfg)),
             memory,
         }),
-        (Role::Client, NetConfig::Ascii(cfg)) => Instance::with_ascii_client(ClientConfig {
-            config: Arc::new(RwLock::new(cfg)),
-            operations,
-            memory,
-        }),
-        (Role::Server, NetConfig::Ascii(cfg)) => Instance::with_ascii_server(ServerConfig {
-            config: Arc::new(RwLock::new(cfg)),
-            memory,
-        }),
-        (Role::Client, NetConfig::AsciiOverTcp(cfg)) => Instance::with_ascii_over_tcp_client(
-            ClientConfig {
+        (ClientOrServer::Client, NetConfig::Ascii(cfg)) => {
+            Instance::with_ascii_client(ClientConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 operations,
                 memory,
-            },
-            cache,
-        ),
-        (Role::Server, NetConfig::AsciiOverTcp(cfg)) => Instance::with_ascii_over_tcp_server(
-            ServerConfig {
+            })
+        }
+        (ClientOrServer::Server, NetConfig::Ascii(cfg)) => {
+            Instance::with_ascii_server(ServerConfig {
                 config: Arc::new(RwLock::new(cfg)),
                 memory,
-            },
-            cache,
-        ),
-        (Role::Monitor, _) => unreachable!(
-            "a monitor is never built via build_instance/NetConfig — its construction lands in \
-             s4 of the modbus-bus-monitor plan (ModbusMonitorModule lifecycle wrapper), which \
-             uses MonitorNetConfig, not NetConfig, and never calls this function"
-        ),
+            })
+        }
+        (ClientOrServer::Client, NetConfig::AsciiOverTcp(cfg)) => {
+            Instance::with_ascii_over_tcp_client(
+                ClientConfig {
+                    config: Arc::new(RwLock::new(cfg)),
+                    operations,
+                    memory,
+                },
+                cache,
+            )
+        }
+        (ClientOrServer::Server, NetConfig::AsciiOverTcp(cfg)) => {
+            Instance::with_ascii_over_tcp_server(
+                ServerConfig {
+                    config: Arc::new(RwLock::new(cfg)),
+                    memory,
+                },
+                cache,
+            )
+        }
     }
 }
 

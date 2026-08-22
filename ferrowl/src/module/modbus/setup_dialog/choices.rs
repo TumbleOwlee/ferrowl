@@ -4,7 +4,7 @@
 
 use ferrowl_ui::traits::ToLabel;
 
-use crate::config::Role;
+use crate::config::ClientOrServer;
 
 /// Edit an existing instance, or create a new module (with an optional config path).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl ToLabel for Transport {
     }
 }
 
-impl ToLabel for Role {
+impl ToLabel for ClientOrServer {
     fn to_label(&self) -> String {
         format!("{self}")
     }
@@ -141,7 +141,10 @@ mod tests {
         assert_eq!(Parity::Even.to_label(), "Even");
         assert_eq!(ReconnectChoice::On.to_label(), "On");
         assert_eq!(U8Choice(8).to_label(), "8");
-        assert_eq!(Role::Server.to_label(), format!("{}", Role::Server));
+        assert_eq!(
+            ClientOrServer::Server.to_label(),
+            format!("{}", ClientOrServer::Server)
+        );
     }
 
     #[test]
