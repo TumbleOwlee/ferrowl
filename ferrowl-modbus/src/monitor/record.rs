@@ -85,7 +85,9 @@ pub fn recency_active_at(
 ) -> bool {
     records.iter().rev().any(|r| {
         r.shape.as_ref().is_some_and(|s| {
-            s.kind == kind && address >= s.address && address < s.address.saturating_add(s.quantity)
+            s.kind == kind
+                && (address as u32) >= s.address as u32
+                && (address as u32) < s.address as u32 + s.quantity as u32
         }) && now.duration_since(r.timestamp) < Duration::from_secs(2)
     })
 }
@@ -190,5 +192,27 @@ mod tests {
         let now = Instant::now();
         let r = record(None);
         assert!(!recency_active_at(&[r], Kind::HoldingRegister, 0, now));
+    }
+
+    /// MB-R-147 — a range ending exactly at 0xFFFF is fully covered, including its last address;
+    /// `address.saturating_add(quantity)` must not silently clamp the exclusive upper bound below
+    /// the true last touched address.
+    #[test]
+    fn ut_recency_covers_last_address_at_0xffff_boundary() {
+        let now = Instant::now();
+        let r = record(Some(shape(Kind::HoldingRegister, 0xFFFE, 2))); // covers 0xFFFE..=0xFFFF
+        let records = [r];
+        assert!(recency_active_at(
+            &records,
+            Kind::HoldingRegister,
+            0xFFFE,
+            now
+        ));
+        assert!(recency_active_at(
+            &records,
+            Kind::HoldingRegister,
+            0xFFFF,
+            now
+        ));
     }
 }
