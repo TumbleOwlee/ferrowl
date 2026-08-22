@@ -160,15 +160,7 @@ A CSMS accepts and serves any number of concurrent connections, with no cap and 
 idle timeout. A charging station that connects and goes silent holds its
 connection and its registry entry indefinitely.
 
-### 6.4 A remotely started transaction is invisible to the CSMS
-
-When the CS simulator accepts a remote-start, it mints a **local** transaction id
-(one greater than any it already holds) and puts the connector into a charging
-state. It does not then send a transaction-start message, so the CSMS never learns
-that id and the two sides disagree about the transaction. This is a simulator
-simplification, not a protocol behavior.
-
-### 6.5 No version-neutral semantic layer
+### 6.4 No version-neutral semantic layer
 
 There is deliberately no neutral abstraction over the three versions. The surface
 is the per-version action set, so that every action can be listed and every raw
@@ -179,39 +171,39 @@ functions, not an abstraction.
 Consequence: adding a version means adding its action table, its inbound handlers,
 and its action-spec module. There is no single seam that makes it free.
 
-### 6.6 `NotifyPeriodicEventStream` is not an action
+### 6.5 `NotifyPeriodicEventStream` is not an action
 
 OCPP 2.1's `NotifyPeriodicEventStream` is a one-way streaming datagram with no
 request/response pair, so it cannot be an entry in an action table. It is
 intentionally absent from the 90-action 2.1 set, and can be neither sent nor
 received.
 
-### 6.7 The RFID accept-list is the only CSMS authorization model
+### 6.6 The RFID accept-list is the only CSMS authorization model
 
 The simulated CSMS accepts or rejects an id tag purely by list membership. There is
 no local auth list, no auth cache, no expiry, no parent id tag, and no group-id
 handling — those actions exist on the wire and are default-accepted, but they
 change no CSMS state.
 
-### 6.8 Server-side configuration is transient
+### 6.7 Server-side configuration is transient
 
 A CSMS's observed state — station entries, connectors, per-station configuration —
 is discarded on `:stop` and `:restart` and is never written to the device config.
 Only the RFID accept-lists persist. The client role, by contrast, persists its
 connector table and its configuration-key store.
 
-### 6.9 Connector count is unbounded
+### 6.8 Connector count is unbounded
 
 Nothing caps the number of connectors a client-role device config may declare, or
 that may be added at runtime.
 
-### 6.10 A stale reply is silently dropped
+### 6.9 A stale reply is silently dropped
 
 A reply that arrives after its Call timed out finds no correlation entry and is
 discarded with no log line. From the caller's side the Call simply failed; from the
 wire's side the peer did answer. The two views are not reconciled.
 
-### 6.11 A message burst larger than the buffer can lose log lines
+### 6.10 A message burst larger than the buffer can lose log lines
 
 Messages are teed from the in-memory buffer into the persistent log file once per
 refresh tick (~100 ms), by sequence number. A message that is both created **and**
@@ -219,7 +211,7 @@ evicted between two ticks — i.e. more than 200 messages arrive in one tick —
 never seen by the tee and does not reach the log file. This is unreachable at any
 realistic OCPP message rate.
 
-### 6.12 A cancelled inbound Call handler's side effects may have partially applied
+### 6.11 A cancelled inbound Call handler's side effects may have partially applied
 
 Teardown (OC-R-121) aborts an in-flight inbound Call handler task rather than
 waiting for it. If the handler had already begun a side effect (e.g. a partial

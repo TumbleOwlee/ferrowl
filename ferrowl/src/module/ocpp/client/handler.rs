@@ -21,41 +21,55 @@ use serde_json::Value;
 use ferrowl_ocpp::cs::CsActionHandler;
 use ferrowl_ocpp::{CallError, CallErrorCode, Version};
 
-use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, push_capped};
+use crate::module::ocpp::client::backend::{Dir, Messages, OcppMessage, OcppSender, push_capped};
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 use crate::module::ocpp::client::v2_common::{inbound_scope, unknown_evse};
 use crate::module::ocpp::lock::HasState;
 use crate::module::ocpp::wire_log::{encode_action_or_log, encode_response_or_log};
 
-/// Per-version, fully-typed inbound decision logic. Given the shared state and the typed action,
-/// build the typed response (or a [`CallError`]) plus a short human-readable log context. Impl'd in
-/// each version's `inbound.rs`; the generic [`CsStateHandler`] owns everything around it.
+/// Per-version, fully-typed inbound decision logic. Given the shared state, a sender able to
+/// dispatch outbound Calls through the same send path the RFID/operator flow uses (OC-R-070), and
+/// the typed action, build the typed response (or a [`CallError`]) plus a short human-readable log
+/// context. Impl'd in each version's `inbound.rs`; the generic [`CsStateHandler`] owns everything
+/// around it.
 pub trait Inbound: Version {
     fn respond(
         state: &Arc<RwLock<CsState>>,
+        sender: &OcppSender<Self>,
         action: &Self::Action,
-    ) -> (Result<Self::Response, CallError>, String);
+    ) -> (Result<Self::Response, CallError>, String)
+    where
+        Self: Sized;
 }
 
-/// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. One struct
-/// serves both 2.0.1 and 2.1: the [`CsActionHandler`] impl is blanket over `V: Inbound`.
-pub struct CsStateHandler {
+/// Inbound handler for an OCPP 2.x charging station, backed by the shared [`CsState`]. Generic over
+/// `V` (unlike most of this module's plumbing) because it holds a version-specific `OcppSender<V>`
+/// — a 2.0.1 `ClientView` and a 2.1 `ClientView` each build their own instance via
+/// `ClientVersion::handler`, never share one.
+pub struct CsStateHandler<V: Version> {
     online: Arc<AtomicBool>,
     messages: Messages,
     state: Arc<RwLock<CsState>>,
+    sender: OcppSender<V>,
 }
 
-impl CsStateHandler {
-    pub fn new(online: Arc<AtomicBool>, messages: Messages, state: Arc<RwLock<CsState>>) -> Self {
+impl<V: Version> CsStateHandler<V> {
+    pub fn new(
+        online: Arc<AtomicBool>,
+        messages: Messages,
+        state: Arc<RwLock<CsState>>,
+        sender: OcppSender<V>,
+    ) -> Self {
         Self {
             online,
             messages,
             state,
+            sender,
         }
     }
 }
 
-impl HasState for CsStateHandler {
+impl<V: Version> HasState for CsStateHandler<V> {
     type State = CsState;
 
     fn state(&self) -> &Arc<RwLock<CsState>> {
@@ -63,7 +77,7 @@ impl HasState for CsStateHandler {
     }
 }
 
-impl<V: Inbound> CsActionHandler<V> for CsStateHandler {
+impl<V: Inbound> CsActionHandler<V> for CsStateHandler<V> {
     fn handle_call(
         &self,
         action: V::Action,
@@ -81,7 +95,7 @@ impl<V: Inbound> CsActionHandler<V> for CsStateHandler {
                 )),
                 format!("unknown evse {e}"),
             ),
-            None => V::respond(&self.state, &action),
+            None => V::respond(&self.state, &self.sender, &action),
         };
         let reply_payload = match &result {
             Ok(resp) => encode_response_or_log::<V>(resp),
@@ -140,11 +154,100 @@ mod tests {
 
     use parking_lot::RwLock;
 
-    fn handler_with(state: CsState) -> CsStateHandler {
+    /// No-op log sink for the CSMS side of a real loopback test.
+    fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    /// Poll until the CSMS listener has bound (`spawn` retries the bind in the background).
+    async fn bound_addr<V: Version>(
+        server: &ferrowl_ocpp::csms::Server<V>,
+    ) -> std::net::SocketAddr {
+        for _ in 0..50 {
+            if let Some(addr) = server.local_addr() {
+                return addr;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("CSMS listener never bound");
+    }
+
+    /// Wait until the server registry reports at least one connection, then return its id.
+    async fn first_connection<V: Version>(
+        server: &ferrowl_ocpp::csms::Server<V>,
+    ) -> ferrowl_ocpp::csms::ConnectionId {
+        for _ in 0..50 {
+            if let Some(id) = server.registry().connection_ids().first().copied() {
+                return id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("no CS connected in time");
+    }
+
+    /// Connect a real `OcppClient<V>` to the CSMS bound at `server`, backed by `state`, waiting for
+    /// it to come online (the live-sender fix from this task's s1: the handler's `sender` is
+    /// captured before `start()`).
+    async fn connected_client<V: Inbound>(
+        server: &ferrowl_ocpp::csms::Server<V>,
+        version: crate::module::ocpp::config::session::OcppVersion,
+        state: Arc<RwLock<CsState>>,
+    ) -> crate::module::ocpp::client::backend::OcppClient<V> {
+        use crate::module::ocpp::client::backend::OcppClient;
+        use crate::module::ocpp::config::device::OcppDeviceConfig;
+        use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec};
+
+        let addr = bound_addr(server).await;
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: addr.port(),
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let device = OcppDeviceConfig::default();
+        let log: crate::module::view::SharedLog =
+            Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()));
+        let mut client = OcppClient::<V>::new();
+        let sender = client.sender();
+        let handler = CsStateHandler::new(
+            client.online_handle(),
+            client.messages_handle(),
+            state,
+            sender,
+        );
+        client
+            .start(&spec, &device, &log, handler)
+            .await
+            .expect("client failed to connect");
+        for _ in 0..100 {
+            if client.is_online() {
+                return client;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("client never came online");
+    }
+
+    fn handler_with<V: Version>(state: CsState) -> CsStateHandler<V> {
+        handler_with_state(Arc::new(RwLock::new(state)))
+    }
+
+    /// A `CsStateHandler` sharing `state` with the caller (a `RequestStopTransaction` drive
+    /// doesn't need a live sender — it's a synchronous state mutation, unlike
+    /// `RequestStartTransaction`).
+    fn handler_with_state<V: Version>(state: Arc<RwLock<CsState>>) -> CsStateHandler<V> {
+        let messages = Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new()));
         CsStateHandler::new(
             Arc::new(AtomicBool::new(false)),
-            Arc::new(tokio::sync::RwLock::new(Vec::<OcppMessage>::new())),
-            Arc::new(RwLock::new(state)),
+            messages.clone(),
+            state,
+            OcppSender::<V>::detached(messages),
         )
     }
 
@@ -161,19 +264,22 @@ mod tests {
     }
 
     /// Build an action for version `V`, drive it through `respond`, and assert it was accepted.
-    fn drive<V: Inbound>(h: &CsStateHandler, name: &str, payload: serde_json::Value) {
+    fn drive<V: Inbound>(h: &CsStateHandler<V>, name: &str, payload: serde_json::Value) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        assert!(V::respond(&h.state, &action).0.is_ok(), "{name} rejected");
+        assert!(
+            V::respond(&h.state, &h.sender, &action).0.is_ok(),
+            "{name} rejected"
+        );
     }
 
     /// Drive an action through `respond` and return its encoded response JSON plus the log context.
     fn responded<V: Inbound>(
-        h: &CsStateHandler,
+        h: &CsStateHandler<V>,
         name: &str,
         payload: serde_json::Value,
     ) -> (serde_json::Value, String) {
         let action = V::decode_call(name, payload).expect("action decodes");
-        let (resp, ctx) = V::respond(&h.state, &action);
+        let (resp, ctx) = V::respond(&h.state, &h.sender, &action);
         (
             V::encode_response(&resp.expect("accepted")).expect("encodes"),
             ctx,
@@ -302,26 +408,269 @@ mod tests {
         assert!(st.connectors.iter().all(|c| c.status == "Available"));
     }
 
-    #[test]
-    /// OC-R-070 — a remote start mints a transaction id and sets the EVSE charging; a remote stop clears it and returns to available.
-    fn ut_request_start_then_stop_transaction() {
-        let h = handler_with(two_evses());
-        drive::<V2_0_1>(
-            &h,
-            "RequestStartTransaction",
-            json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+    // --- OC-R-070 / OC-R-122: 2.0.1 remote-start is visible to the CSMS -----------------------
+    //
+    // A real websocket loopback, mirroring s3's 1.6 tests: the CSMS side sends the inbound
+    // `RequestStartTransaction` Call and records every Call it receives back from the CS in
+    // order, notifying once it has seen `StatusNotification`.
+
+    /// CSMS handler answering `TransactionEvent`/`StatusNotification` (2.0.1), recording the
+    /// ordered list of Call names it receives into `calls` and notifying `notify` once it sees
+    /// `StatusNotification`.
+    struct RecordingCsms201 {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V2_0_1> for RecordingCsms201 {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: ferrowl_ocpp::Action201,
+        ) -> Result<ferrowl_ocpp::Response201, CallError> {
+            use ferrowl_ocpp::{Action201, Response201};
+            let name = match &action {
+                Action201::TransactionEvent(_) => "TransactionEvent",
+                Action201::StatusNotification(_) => "StatusNotification",
+                _ => "Other",
+            };
+            self.calls.lock().push(name.to_string());
+            if name == "StatusNotification" {
+                self.notify.notify_one();
+            }
+            match action {
+                Action201::TransactionEvent(_) => Ok(Response201::TransactionEvent(
+                    serde_json::from_value(json!({})).unwrap(),
+                )),
+                Action201::StatusNotification(_) => Ok(Response201::StatusNotification(
+                    serde_json::from_value(json!({})).unwrap(),
+                )),
+                _ => Err(CallError::new(CallErrorCode::NotImplemented, "unsupported")),
+            }
+        }
+    }
+
+    /// Spawn a 2.0.1 CSMS server on an OS-assigned port, recording Calls into `calls`/`notify`.
+    async fn start_server_201(
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    ) -> ferrowl_ocpp::csms::Server<V2_0_1> {
+        ferrowl_ocpp::csms::ServerBuilder::<V2_0_1>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(RecordingCsms201 { calls, notify }, sink())
+        .await
+        .expect("server failed to bind")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — a remote start mints a transaction id and sends a real `TransactionEvent(Started)`
+    /// to the CSMS (not just a local state mutation).
+    /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
+    /// Bugfix — the connector status is the valid `"Occupied"`, not the invalid `"Charging"`
+    /// literal the removed inline mutation used to write.
+    /// A remote stop clears the transaction and returns to available.
+    async fn ut_request_start_then_stop_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server_201(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_0_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action201::RequestStartTransaction(Box::new(
+            serde_json::from_value(
+                json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+            )
+            .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response201::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        assert_eq!(
+            *calls.lock(),
+            vec![
+                "TransactionEvent".to_string(),
+                "StatusNotification".to_string()
+            ],
         );
         let tx = {
-            let st = h.state.read();
+            let st = state.read();
             let c = st.connector_by_evse(1).unwrap();
-            assert_eq!(c.status, "Charging");
+            assert_eq!(c.status, "Occupied");
             c.transaction_id.clone().expect("transaction assigned")
         };
-        drive::<V2_0_1>(&h, "RequestStopTransaction", json!({ "transactionId": tx }));
-        let st = h.state.read();
-        let c = st.connector_by_evse(1).unwrap();
-        assert!(c.transaction_id.is_none());
-        assert_eq!(c.status, "Available");
+
+        drive(
+            &handler_with_state::<V2_0_1>(state.clone()),
+            "RequestStopTransaction",
+            json!({ "transactionId": tx }),
+        );
+        {
+            let st = state.read();
+            let c = st.connector_by_evse(1).unwrap();
+            assert!(c.transaction_id.is_none());
+            assert_eq!(c.status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — a remote start with no `evseId` targets the first connector.
+    async fn ut_request_start_with_no_target_uses_first_connector() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server_201(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_0_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action201::RequestStartTransaction(Box::new(
+            serde_json::from_value(json!({ "remoteStartId": 5, "idToken": id_token("T") }))
+                .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response201::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        {
+            let st = state.read();
+            assert_eq!(st.connector_by_evse(1).unwrap().status, "Occupied");
+            assert!(st.connector_by_evse(1).unwrap().transaction_id.is_some());
+            assert_eq!(st.connector_by_evse(2).unwrap().status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    /// CSMS handler that rejects `TransactionEvent` (simulating a send failure), recording it and
+    /// notifying immediately.
+    struct FailingStartCsms201 {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V2_0_1> for FailingStartCsms201 {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: ferrowl_ocpp::Action201,
+        ) -> Result<ferrowl_ocpp::Response201, CallError> {
+            if let ferrowl_ocpp::Action201::TransactionEvent(_) = &action {
+                self.calls.lock().push("TransactionEvent".to_string());
+                self.notify.notify_one();
+            }
+            Err(CallError::new(CallErrorCode::InternalError, "refused"))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — when the CSMS rejects the resulting `TransactionEvent`, the optimistic
+    /// `started_tx` state is rolled back (2.0.1 sets `status`/`transaction_id` eagerly in
+    /// `start_event`, unlike 1.6 — this is the version where `rollback_tx` actually has work to
+    /// undo).
+    async fn ut_request_start_send_failure_does_not_leave_stale_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = ferrowl_ocpp::csms::ServerBuilder::<V2_0_1>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            FailingStartCsms201 {
+                calls: calls.clone(),
+                notify: notify.clone(),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_0_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action201::RequestStartTransaction(Box::new(
+            serde_json::from_value(
+                json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+            )
+            .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response201::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("TransactionEvent attempt never observed");
+        assert_eq!(*calls.lock(), vec!["TransactionEvent".to_string()]);
+
+        // Give the failed send's rollback a moment to run before asserting it undid the
+        // optimistic state.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        {
+            let st = state.read();
+            let c = st.connector_by_evse(1).unwrap();
+            assert!(c.transaction_id.is_none());
+            assert_eq!(c.status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
     }
 
     #[test]
@@ -460,7 +809,7 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = V2_0_1::respond(&h.state, &action);
+        let (resp, ctx) = V2_0_1::respond(&h.state, &h.sender, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }
@@ -549,24 +898,257 @@ mod tests {
         assert!(ctx.contains("stackLevel"));
     }
 
-    #[test]
-    /// OC-R-070 — the 2.1 binding mints and clears a transaction.
-    fn ut_v21_request_start_then_stop_transaction() {
-        let h = handler_with(two_evses());
-        drive::<V2_1>(
-            &h,
-            "RequestStartTransaction",
-            json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+    // --- OC-R-070 / OC-R-122: 2.1 remote-start is visible to the CSMS -------------------------
+
+    /// CSMS handler answering `TransactionEvent`/`StatusNotification` (2.1), recording the ordered
+    /// list of Call names it receives into `calls` and notifying `notify` once it sees
+    /// `StatusNotification`.
+    struct RecordingCsms21 {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V2_1> for RecordingCsms21 {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: ferrowl_ocpp::Action21,
+        ) -> Result<ferrowl_ocpp::Response21, CallError> {
+            use ferrowl_ocpp::{Action21, Response21};
+            let name = match &action {
+                Action21::TransactionEvent(_) => "TransactionEvent",
+                Action21::StatusNotification(_) => "StatusNotification",
+                _ => "Other",
+            };
+            self.calls.lock().push(name.to_string());
+            if name == "StatusNotification" {
+                self.notify.notify_one();
+            }
+            match action {
+                Action21::TransactionEvent(_) => Ok(Response21::TransactionEvent(
+                    serde_json::from_value(json!({})).unwrap(),
+                )),
+                Action21::StatusNotification(_) => Ok(Response21::StatusNotification(
+                    serde_json::from_value(json!({})).unwrap(),
+                )),
+                _ => Err(CallError::new(CallErrorCode::NotImplemented, "unsupported")),
+            }
+        }
+    }
+
+    /// Spawn a 2.1 CSMS server on an OS-assigned port, recording Calls into `calls`/`notify`.
+    async fn start_server_21(
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    ) -> ferrowl_ocpp::csms::Server<V2_1> {
+        ferrowl_ocpp::csms::ServerBuilder::<V2_1>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(RecordingCsms21 { calls, notify }, sink())
+        .await
+        .expect("server failed to bind")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — the 2.1 binding sends a real `TransactionEvent(Started)` to the CSMS and mints a
+    /// transaction; a remote stop clears it.
+    /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
+    /// Bugfix — the connector status is the valid `"Occupied"`, not `"Charging"`.
+    async fn ut_v21_request_start_then_stop_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server_21(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action21::RequestStartTransaction(Box::new(
+            serde_json::from_value(
+                json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+            )
+            .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response21::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        assert_eq!(
+            *calls.lock(),
+            vec![
+                "TransactionEvent".to_string(),
+                "StatusNotification".to_string()
+            ],
         );
         let tx = {
-            let st = h.state.read();
+            let st = state.read();
             let c = st.connector_by_evse(1).unwrap();
-            assert_eq!(c.status, "Charging");
+            assert_eq!(c.status, "Occupied");
             c.transaction_id.clone().expect("transaction assigned")
         };
-        drive::<V2_1>(&h, "RequestStopTransaction", json!({ "transactionId": tx }));
-        let st = h.state.read();
-        assert!(st.connector_by_evse(1).unwrap().transaction_id.is_none());
+
+        drive(
+            &handler_with_state::<V2_1>(state.clone()),
+            "RequestStopTransaction",
+            json!({ "transactionId": tx }),
+        );
+        {
+            let st = state.read();
+            assert!(st.connector_by_evse(1).unwrap().transaction_id.is_none());
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — a remote start with no `evseId` targets the first connector (2.1).
+    async fn ut_v21_request_start_with_no_target_uses_first_connector() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = start_server_21(calls.clone(), notify.clone()).await;
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action21::RequestStartTransaction(Box::new(
+            serde_json::from_value(json!({ "remoteStartId": 5, "idToken": id_token("T") }))
+                .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response21::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("StatusNotification never sent");
+        {
+            let st = state.read();
+            assert_eq!(st.connector_by_evse(1).unwrap().status, "Occupied");
+            assert!(st.connector_by_evse(1).unwrap().transaction_id.is_some());
+            assert_eq!(st.connector_by_evse(2).unwrap().status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
+    }
+
+    /// CSMS handler that rejects `TransactionEvent` (simulating a send failure), recording it and
+    /// notifying immediately.
+    struct FailingStartCsms21 {
+        calls: Arc<parking_lot::Mutex<Vec<String>>>,
+        notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl ferrowl_ocpp::csms::CsmsActionHandler<V2_1> for FailingStartCsms21 {
+        async fn handle_call(
+            &self,
+            _conn: ferrowl_ocpp::csms::ConnectionId,
+            action: ferrowl_ocpp::Action21,
+        ) -> Result<ferrowl_ocpp::Response21, CallError> {
+            if let ferrowl_ocpp::Action21::TransactionEvent(_) = &action {
+                self.calls.lock().push("TransactionEvent".to_string());
+                self.notify.notify_one();
+            }
+            Err(CallError::new(CallErrorCode::InternalError, "refused"))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// OC-R-070 — when the CSMS rejects the resulting `TransactionEvent` (2.1), the optimistic
+    /// `started_tx` state is rolled back.
+    async fn ut_v21_request_start_send_failure_does_not_leave_stale_transaction() {
+        let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let server = ferrowl_ocpp::csms::ServerBuilder::<V2_1>::new(
+            ferrowl_ocpp::csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: None,
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            FailingStartCsms21 {
+                calls: calls.clone(),
+                notify: notify.clone(),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let state = Arc::new(RwLock::new(two_evses()));
+        let mut client = connected_client(
+            &server,
+            crate::module::ocpp::config::session::OcppVersion::V2_1,
+            state.clone(),
+        )
+        .await;
+
+        let conn = first_connection(&server).await;
+        let remote_start = ferrowl_ocpp::Action21::RequestStartTransaction(Box::new(
+            serde_json::from_value(
+                json!({ "remoteStartId": 5, "idToken": id_token("T"), "evseId": 1 }),
+            )
+            .unwrap(),
+        ));
+        let resp = server
+            .call(conn, remote_start)
+            .await
+            .expect("remote start call failed");
+        assert!(matches!(
+            resp,
+            ferrowl_ocpp::Response21::RequestStartTransaction(_)
+        ));
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .expect("TransactionEvent attempt never observed");
+        assert_eq!(*calls.lock(), vec!["TransactionEvent".to_string()]);
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        {
+            let st = state.read();
+            let c = st.connector_by_evse(1).unwrap();
+            assert!(c.transaction_id.is_none());
+            assert_eq!(c.status, "Available");
+        }
+
+        client.stop().await.expect("client stop");
+        server.terminate().await.expect("server terminate");
     }
 
     #[test]
@@ -578,7 +1160,7 @@ mod tests {
             json!({ "requestId": 1, "reportBase": "FullInventory" }),
         )
         .expect("action decodes");
-        let (resp, ctx) = V2_1::respond(&h.state, &action);
+        let (resp, ctx) = V2_1::respond(&h.state, &h.sender, &action);
         assert!(resp.is_ok());
         assert_eq!(ctx, "default-accepted");
     }

@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use parking_lot::RwLock;
 
 use crate::module::ocpp::action_dialog::ActionSpec;
-use crate::module::ocpp::client::backend::Messages;
+use crate::module::ocpp::client::backend::{Messages, OcppSender};
 use crate::module::ocpp::client::handler::CsStateHandler;
 use crate::module::ocpp::client::v2_0_1::state::CsState;
 use crate::module::ocpp::client::v2_common as common;
@@ -22,14 +22,15 @@ use ferrowl_ocpp::V2_0_1;
 
 impl ClientVersion for V2_0_1 {
     type Cs = CsState;
-    type Handler = CsStateHandler;
+    type Handler = CsStateHandler<V2_0_1>;
 
     fn handler(
         online: Arc<AtomicBool>,
         messages: Messages,
         state: Arc<RwLock<CsState>>,
-    ) -> CsStateHandler {
-        CsStateHandler::new(online, messages, state)
+        sender: OcppSender<V2_0_1>,
+    ) -> CsStateHandler<V2_0_1> {
+        CsStateHandler::new(online, messages, state, sender)
     }
 
     fn state_driven() -> &'static [&'static str] {
