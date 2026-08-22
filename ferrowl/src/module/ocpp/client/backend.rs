@@ -352,6 +352,7 @@ impl<V: Version> OcppSender<V> {
     /// A sender with no live connection behind it (`send_scoped` always returns
     /// `Err(Error::NotRunning)`), sharing `messages` with whatever the caller records into
     /// elsewhere. For tests that need an `OcppSender` without spinning up an `OcppClient`.
+    #[cfg(test)]
     pub(crate) fn detached(messages: Messages) -> Self {
         Self {
             cmd_tx: Arc::new(parking_lot::RwLock::new(None)),
