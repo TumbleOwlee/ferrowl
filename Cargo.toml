@@ -78,6 +78,10 @@ rustls-pki-types = { version = "1.15", default-features = false, features = ["al
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 syn = "3.0.3"
+# Already pulled in transitively by rustls's "ring" feature above; named directly so
+# ferrowl-ocpp can do a constant-time Basic Auth credential comparison (NF-R-032) without
+# pinning its own, possibly-divergent, copy.
+subtle = "2.6.1"
 thiserror = "2.0"
 tokio = "1.53.1"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

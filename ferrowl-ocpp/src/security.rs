@@ -57,10 +57,17 @@ impl BasicAuth {
     }
 
     /// Whether `header` (the raw `Authorization` header value received on a handshake request)
-    /// matches these credentials. Missing header never matches.
+    /// matches these credentials. Missing header never matches. NF-R-032: the comparison is
+    /// constant-time, so a wrong credential leaks no timing signal about where it first diverges.
     pub(crate) fn matches(&self, header: Option<&HeaderValue>) -> bool {
+        use subtle::ConstantTimeEq;
+
         header
-            .map(|h| h.as_bytes() == self.header_value().as_bytes())
+            .map(|h| {
+                let expected = self.header_value();
+                let (got, expected) = (h.as_bytes(), expected.as_bytes());
+                got.len() == expected.len() && got.ct_eq(expected).into()
+            })
             .unwrap_or(false)
     }
 }
@@ -628,6 +635,18 @@ mod tests {
         assert!(a.matches(Some(&good)));
         assert!(!a.matches(Some(&HeaderValue::from_static("Basic d3Jvbmc="))));
         assert!(!a.matches(None));
+    }
+
+    #[test]
+    /// NF-R-032 — a same-length wrong header is rejected exactly like a different-length one; the
+    /// constant-time comparison must not special-case the equal-length case as a match.
+    fn ut_basic_auth_matches_rejects_same_length_wrong_header() {
+        let a = auth();
+        let good = a.header_value();
+        let mut same_length_wrong = good.to_str().unwrap().as_bytes().to_vec();
+        *same_length_wrong.last_mut().unwrap() ^= 1;
+        let same_length_wrong = HeaderValue::from_bytes(&same_length_wrong).unwrap();
+        assert!(!a.matches(Some(&same_length_wrong)));
     }
 
     #[test]
