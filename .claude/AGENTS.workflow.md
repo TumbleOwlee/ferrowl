@@ -291,9 +291,9 @@ write the code (a reviewer sharing the implementer's context reproduces its
 blind spots). Give it the diff, approved spec text, the artifact dir, the
 worktree path, and the stage ids in scope (all of them, at gate 3) — never the
 issue number, same as every agent in this workflow. It reads its own rules
-(`.claude/AGENTS.core.md`) itself. Reports on three axes — spec fidelity,
-standards, TDD honesty; full criteria: `spec-reviewer.md`'s `## Three axes,
-reported separately`.
+(`.claude/AGENTS.core.md`) itself. Reports on four axes — spec fidelity,
+standards, TDD honesty, docs currency; full criteria: `spec-reviewer.md`'s
+`## Four axes, reported separately`.
 
 Re-run the verification yourself, report findings + fixes. User-decision
 findings are raised, not silently fixed.
