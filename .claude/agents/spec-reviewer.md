@@ -17,7 +17,7 @@ Scope = the base ref given: a wave (stages merged so far — cross-stage bugs li
 
 **`spec-diff.md`:** headed `## <ID>` per requirement (see `.claude/AGENTS.workflow.md`'s gate 1 `Board:` bullet). Wave review → the in-scope stage sections' ID→test tables name exactly which IDs to pull: one batched call, every ID at once — `sh .claude/scripts/extract-section.sh '## <ID>' ['## <ID>' ...] artifacts/<slug>/spec-diff.md`. An ID cited by the diff that isn't in any in-scope stage's table is itself a finding (scope creep or a stage-table gap) — catch it from the plan section already in hand, no full read needed to notice it's missing. Full branch at gate 3 → every ID is in scope, read the whole file directly, same reasoning as `plan.md` above.
 
-## Three axes, reported separately
+## Four axes, reported separately
 
 **Spec fidelity** — every approved requirement implemented as written (quote
 requirement + satisfying code path); nothing implemented beyond approval
@@ -34,6 +34,13 @@ and ID citation placement; unflagged semver-relevant public surface changes.
 derived from the implementation's own output instead of the authoritative
 source; coverage padded by non-asserting tests; tests same-commit as their
 code in an order suggesting after-the-fact authorship.
+
+**Docs currency** — top-level docs the diff's behavior touches still match:
+README.md (flags, config keys, supported protocols/modes, setup steps),
+ARCHITECTURE.md (crate graph, data flow, concurrency model), PRD.md (product
+scope), CONTRIBUTING.md (contribution workflow). Scoped to what this change
+actually affects, not a full audit of each doc. A stale doc is a finding,
+same as a spec-fidelity gap.
 
 ## Output
 
