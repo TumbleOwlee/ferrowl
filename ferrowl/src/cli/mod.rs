@@ -68,8 +68,9 @@ pub struct BridgeArgs {
     /// Required. The interface bridge mode connects to and forwards every upstream request to,
     /// e.g. --downstream transport=tcp,ip=10.0.0.5,port=502
     /// or --downstream transport=rtu,path=/dev/ttyUSB1,baud=19200
-    /// Both descriptors accept `transport` (`tcp` default, or `rtu`), `timeout_ms`, `reconnect`
-    /// (true/false); `tcp` also takes `ip`, `port`, and TLS keys; `rtu` also takes `path`, `baud`,
+    /// Both descriptors accept `transport` (`tcp` default, `rtu`, `rtu_over_tcp`, or
+    /// `ascii_over_tcp`), `timeout_ms`, `reconnect` (true/false); `tcp`/`rtu_over_tcp`/
+    /// `ascii_over_tcp` also take `ip`, `port`, and TLS keys; `rtu` also takes `path`, `baud`,
     /// `parity`, `data_bits`, `stop_bits`. `--upstream` additionally accepts `unit_ids` (e.g.
     /// `unit_ids=1,3,5-8`) to restrict which slave ids the bridge answers for.
     #[arg(long, value_name = "KEY=VAL,...")]
@@ -439,6 +440,36 @@ pub fn parse_bridge_descriptor(
                 tls,
             })
         }
+        "rtu_over_tcp" => {
+            let tls = build_descriptor_tls(&get)?;
+            ferrowl_modbus::bridge::BridgeEndpointKind::RtuOverTcp(ferrowl_modbus::tcp::Config {
+                ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+                port: get("port")
+                    .ok_or("rtu_over_tcp descriptor requires 'port'")?
+                    .parse()
+                    .map_err(|_| "invalid 'port'")?,
+                timeout_ms,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect,
+                tls,
+            })
+        }
+        "ascii_over_tcp" => {
+            let tls = build_descriptor_tls(&get)?;
+            ferrowl_modbus::bridge::BridgeEndpointKind::AsciiOverTcp(ferrowl_modbus::tcp::Config {
+                ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
+                port: get("port")
+                    .ok_or("ascii_over_tcp descriptor requires 'port'")?
+                    .parse()
+                    .map_err(|_| "invalid 'port'")?,
+                timeout_ms,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect,
+                tls,
+            })
+        }
         "rtu" => ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(ferrowl_modbus::rtu::Config {
             path: get("path").ok_or("rtu descriptor requires 'path'")?,
             baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
@@ -452,7 +483,11 @@ pub fn parse_bridge_descriptor(
             interval_ms: 0,
             reconnect,
         }),
-        other => return Err(format!("invalid transport '{other}' (expected tcp|rtu)")),
+        other => {
+            return Err(format!(
+                "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp|ascii_over_tcp)"
+            ));
+        }
     };
     Ok(ferrowl_modbus::bridge::BridgeEndpointSpec { kind, unit_ids })
 }
@@ -1132,7 +1167,75 @@ mod tests {
                 assert!(cfg.reconnect);
                 assert!(cfg.tls.is_none());
             }
-            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => panic!("expected Tcp"),
+            _ => panic!("expected Tcp"),
+        }
+    }
+
+    #[test]
+    /// BR-R-004 — every rtu_over_tcp descriptor key round-trips, reusing the same field set
+    /// (and defaults) as plain tcp.
+    fn ut_parse_bridge_descriptor_rtu_over_tcp_full() {
+        let spec = parse_bridge_descriptor(
+            "transport=rtu_over_tcp,ip=10.0.0.9,port=1502,timeout_ms=500,reconnect=false",
+        )
+        .unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::RtuOverTcp(cfg) => {
+                assert_eq!(cfg.ip, "10.0.0.9");
+                assert_eq!(cfg.port, 1502);
+                assert_eq!(cfg.timeout_ms, 500);
+                assert!(!cfg.reconnect);
+            }
+            _ => panic!("expected RtuOverTcp"),
+        }
+    }
+
+    #[test]
+    /// BR-R-004 — a rtu_over_tcp descriptor missing `port` errors, same as plain tcp.
+    fn ut_parse_bridge_descriptor_rtu_over_tcp_requires_port() {
+        assert!(parse_bridge_descriptor("transport=rtu_over_tcp").is_err());
+    }
+
+    #[test]
+    /// BR-R-004 — every ascii_over_tcp descriptor key round-trips, reusing the same field set
+    /// (and defaults) as plain tcp.
+    fn ut_parse_bridge_descriptor_ascii_over_tcp_full() {
+        let spec = parse_bridge_descriptor(
+            "transport=ascii_over_tcp,ip=10.0.0.10,port=1503,timeout_ms=500,reconnect=false",
+        )
+        .unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::AsciiOverTcp(cfg) => {
+                assert_eq!(cfg.ip, "10.0.0.10");
+                assert_eq!(cfg.port, 1503);
+                assert_eq!(cfg.timeout_ms, 500);
+                assert!(!cfg.reconnect);
+            }
+            _ => panic!("expected AsciiOverTcp"),
+        }
+    }
+
+    #[test]
+    /// BR-R-004 — an ascii_over_tcp descriptor missing `port` errors, same as plain tcp.
+    fn ut_parse_bridge_descriptor_ascii_over_tcp_requires_port() {
+        assert!(parse_bridge_descriptor("transport=ascii_over_tcp").is_err());
+    }
+
+    #[test]
+    /// BR-R-011 — rtu_over_tcp/ascii_over_tcp descriptors accept the same opt-in `tls` field
+    /// set as plain tcp (BR-R-004's shared tcp::Config field set).
+    fn ut_parse_bridge_descriptor_over_tcp_variants_accept_tls() {
+        for transport in ["rtu_over_tcp", "ascii_over_tcp"] {
+            let spec = parse_bridge_descriptor(&format!(
+                "transport={transport},port=502,self_signed=true"
+            ))
+            .unwrap();
+            let tls = match spec.kind {
+                ferrowl_modbus::bridge::BridgeEndpointKind::RtuOverTcp(cfg) => cfg.tls,
+                ferrowl_modbus::bridge::BridgeEndpointKind::AsciiOverTcp(cfg) => cfg.tls,
+                _ => panic!("expected an over-tcp variant"),
+            };
+            assert!(tls.is_some(), "{transport} must accept tls fields");
         }
     }
 
@@ -1158,7 +1261,7 @@ mod tests {
                 assert_eq!(cfg.timeout_ms, 500);
                 assert!(!cfg.reconnect);
             }
-            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(_) => panic!("expected Rtu"),
+            _ => panic!("expected Rtu"),
         }
     }
 
@@ -1168,7 +1271,7 @@ mod tests {
         let no_tls = parse_bridge_descriptor("port=502").unwrap();
         match no_tls.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => assert!(cfg.tls.is_none()),
-            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+            _ => unreachable!(),
         }
 
         let with_tls = parse_bridge_descriptor("port=502,self_signed=true").unwrap();
@@ -1182,7 +1285,7 @@ mod tests {
                     }
                 );
             }
-            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+            _ => unreachable!(),
         }
     }
 
@@ -1203,7 +1306,7 @@ mod tests {
                     }
                 );
             }
-            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(_) => unreachable!(),
+            _ => unreachable!(),
         }
     }
 

@@ -1,14 +1,20 @@
 //! Modbus relay ("bridge") mode: BR-R-001..BR-R-015.
 mod config;
 mod downstream;
+mod downstream_ascii_over_tcp;
 mod downstream_rtu;
+mod downstream_rtu_over_tcp;
 mod downstream_tcp;
 mod service;
 mod upstream_rtu;
 mod upstream_tcp;
 pub use config::{BridgeEndpointKind, BridgeEndpointSpec, UnitIdFilter};
 pub use downstream::{DownstreamHandle, ERROR_PREFIX};
+pub use downstream_ascii_over_tcp::{
+    AsciiOverTcpDownstream, spawn as spawn_ascii_over_tcp_downstream,
+};
 pub use downstream_rtu::{RtuDownstream, spawn as spawn_rtu_downstream};
+pub use downstream_rtu_over_tcp::{RtuOverTcpDownstream, spawn as spawn_rtu_over_tcp_downstream};
 pub use downstream_tcp::{TcpDownstream, spawn as spawn_tcp_downstream};
 
 use crate::{Error, LogFn};
@@ -23,13 +29,14 @@ pub struct BridgeConfig {
 
 /// BR-R-002 — the whole of bridge mode: no TUI, no session file, no Lua/`C_*`/sim
 /// framework, no register store of its own. Spawns the downstream link (BR-R-006), builds
-/// the relay `Service`, and spawns the upstream link (BR-R-005) over whichever of the 4
-/// transport combinations `config` selects.
+/// the relay `Service`, and spawns the upstream link (BR-R-005) over whichever of the 16
+/// transport combinations `config` selects (`Tcp`/`Rtu`/`RtuOverTcp`/`AsciiOverTcp` on each
+/// side, BR-R-004).
 pub async fn run<L>(config: BridgeConfig, log: L) -> Result<JoinHandle<Result<(), Error>>, Error>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
-    use crate::bridge::config::BridgeEndpointKind::{Rtu, Tcp};
+    use crate::bridge::config::BridgeEndpointKind::{AsciiOverTcp, Rtu, RtuOverTcp, Tcp};
     // BR-R-015, design decision 4: downstream.unit_ids is never read.
     let unit_filter = config.upstream.unit_ids.clone();
     match (config.upstream.kind, config.downstream.kind) {
@@ -44,6 +51,18 @@ where
             let service = service::BridgeService::new(downstream, unit_filter, log.clone());
             upstream_tcp::run(&up, service, log).await
         }
+        (Tcp(up), RtuOverTcp(down)) => {
+            let downstream = downstream_rtu_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run(&up, service, log).await
+        }
+        (Tcp(up), AsciiOverTcp(down)) => {
+            let downstream = downstream_ascii_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run(&up, service, log).await
+        }
         (Rtu(up), Tcp(down)) => {
             let downstream = downstream_tcp::spawn(down, log.clone());
             let service =
@@ -54,6 +73,64 @@ where
             let downstream = downstream_rtu::spawn(down, log.clone());
             let service = service::BridgeService::new(downstream, unit_filter, log.clone());
             upstream_rtu::run(&up, service).await
+        }
+        (Rtu(up), RtuOverTcp(down)) => {
+            let downstream = downstream_rtu_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_rtu::run(&up, service).await
+        }
+        (Rtu(up), AsciiOverTcp(down)) => {
+            let downstream = downstream_ascii_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_rtu::run(&up, service).await
+        }
+        (RtuOverTcp(up), Tcp(down)) => {
+            let downstream = downstream_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::RtuOverTcp, _, _, _>(&up, service, log).await
+        }
+        (RtuOverTcp(up), Rtu(down)) => {
+            let downstream = downstream_rtu::spawn(down, log.clone());
+            let service = service::BridgeService::new(downstream, unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::RtuOverTcp, _, _, _>(&up, service, log).await
+        }
+        (RtuOverTcp(up), RtuOverTcp(down)) => {
+            let downstream = downstream_rtu_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::RtuOverTcp, _, _, _>(&up, service, log).await
+        }
+        (RtuOverTcp(up), AsciiOverTcp(down)) => {
+            let downstream = downstream_ascii_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::RtuOverTcp, _, _, _>(&up, service, log).await
+        }
+        (AsciiOverTcp(up), Tcp(down)) => {
+            let downstream = downstream_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::Ascii, _, _, _>(&up, service, log).await
+        }
+        (AsciiOverTcp(up), Rtu(down)) => {
+            let downstream = downstream_rtu::spawn(down, log.clone());
+            let service = service::BridgeService::new(downstream, unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::Ascii, _, _, _>(&up, service, log).await
+        }
+        (AsciiOverTcp(up), RtuOverTcp(down)) => {
+            let downstream = downstream_rtu_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::Ascii, _, _, _>(&up, service, log).await
+        }
+        (AsciiOverTcp(up), AsciiOverTcp(down)) => {
+            let downstream = downstream_ascii_over_tcp::spawn(down, log.clone());
+            let service =
+                service::BridgeService::new(downstream.into_handle(), unit_filter, log.clone());
+            upstream_tcp::run_framed::<rust_modbus::Ascii, _, _, _>(&up, service, log).await
         }
     }
 }

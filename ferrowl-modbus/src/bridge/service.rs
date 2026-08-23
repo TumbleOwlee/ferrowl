@@ -2,8 +2,8 @@ use crate::LogFn;
 use crate::bridge::{UnitIdFilter, downstream::DownstreamHandle};
 use crate::tcp::tls::ClientStream;
 use rust_modbus::{
-    ClientFraming, ClientTransport, Connection, ExceptionCode, FrameTransport, RequestPdu,
-    ResponsePdu, Rtu, SerialStream, Service, Tcp, UnitId,
+    Ascii, ClientFraming, ClientTransport, Connection, ExceptionCode, FrameTransport, RequestPdu,
+    ResponsePdu, Rtu, RtuOverTcp, SerialStream, Service, Tcp, UnitId,
 };
 
 /// The upstream-facing `Service`: applies BR-R-015's filter, then forwards to the
@@ -70,6 +70,48 @@ where
 }
 
 impl<L> Service for BridgeService<FrameTransport<ClientStream, Tcp>, Tcp, L>
+where
+    L: LogFn + Clone + Send + Sync + 'static,
+{
+    async fn on_request(
+        &self,
+        _conn: &Connection,
+        unit: UnitId,
+        request: RequestPdu,
+    ) -> Result<Option<ResponsePdu>, ExceptionCode> {
+        forward_and_relay(
+            &self.downstream,
+            &self.unit_filter,
+            &self.log,
+            unit,
+            request,
+        )
+        .await
+    }
+}
+
+impl<L> Service for BridgeService<FrameTransport<ClientStream, RtuOverTcp>, RtuOverTcp, L>
+where
+    L: LogFn + Clone + Send + Sync + 'static,
+{
+    async fn on_request(
+        &self,
+        _conn: &Connection,
+        unit: UnitId,
+        request: RequestPdu,
+    ) -> Result<Option<ResponsePdu>, ExceptionCode> {
+        forward_and_relay(
+            &self.downstream,
+            &self.unit_filter,
+            &self.log,
+            unit,
+            request,
+        )
+        .await
+    }
+}
+
+impl<L> Service for BridgeService<FrameTransport<ClientStream, Ascii>, Ascii, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
