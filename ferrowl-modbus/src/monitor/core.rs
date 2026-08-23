@@ -29,7 +29,9 @@ pub(crate) enum MonitorEnd {
 /// MB-R-142 — decode one raw ADU per the transport's framing `F` and advance `state`
 /// accordingly, logging a completed pairing (MB-R-143), an unmatched request (MB-R-143), or a
 /// discarded malformed frame (MB-R-142's CRC/LRC/malformed carve-out) as it goes, and applying
-/// a matched non-exception transaction to `table` (MB-R-144).
+/// each MB-R-143-logged slave id's traffic to `table` (MB-R-144): a matched non-exception
+/// transaction writes words, while a matched exception, an unmatched request, or a broadcast
+/// with nothing to write still marks that slave id as seen.
 pub(crate) async fn process_frame<F, L>(
     bytes: Vec<u8>,
     state: MatchState,
@@ -85,6 +87,8 @@ where
 /// MB-R-142 — begin awaiting a response to `request`, unless `slave` is the broadcast address
 /// (MB-R-101/103), in which case it is logged complete on its own (MB-R-143) and, if
 /// write-shaped, applied to `table` immediately (MB-R-144) — a broadcast never gets a response.
+/// Every request reaching here marks `slave` seen in `table` (MB-R-144), regardless of how it
+/// is eventually resolved — matched success, matched exception, unmatched, or broadcast.
 async fn handle_new_request<L: LogFn>(
     slave: UnitId,
     request: RequestPdu,
@@ -92,6 +96,7 @@ async fn handle_new_request<L: LogFn>(
     table: &SharedObservedTable,
     records: &SharedRecordLog,
 ) -> MatchState {
+    table.write().mark_seen(slave);
     if slave == UnitId(0) {
         log_complete(slave, &request, None, log).await;
         push_broadcast_record(slave, &request, records);
@@ -442,9 +447,11 @@ fn shape_address_only(request: &RequestPdu) -> Option<TableShape> {
     }
 }
 
-/// MB-R-144 — a matched, non-exception transaction updates `table`: a read-shaped request
-/// writes the response's returned words; a write-shaped request writes its own carried
-/// value(s). `ReadWriteMultipleRegisters` is both at once (FR-R-037's read-then-write).
+/// MB-R-144 — a matched transaction updates `table`: a read-shaped request writes the
+/// response's returned words; a write-shaped request writes its own carried value(s).
+/// `ReadWriteMultipleRegisters` is both at once (FR-R-037's read-then-write). A response
+/// carrying an exception code writes no words (there are none to write); `slave` was already
+/// marked seen (MB-R-144) when the request was first decoded, in `handle_new_request`.
 fn apply_matched(
     slave: UnitId,
     request: &RequestPdu,
@@ -832,6 +839,29 @@ mod tests {
         assert!(!log.lines()[0].contains("unmatched"));
     }
 
+    /// MB-R-144 — a non-write-shaped broadcast writes no words (nothing to write) but still
+    /// marks slave id 0 as seen, since it still reaches an MB-R-143 log entry.
+    #[tokio::test]
+    async fn ut_read_shaped_broadcast_writes_no_words_but_marks_slave_seen() {
+        let log = RecordingLog::default();
+        let table = table();
+        let records = records();
+        let request = RequestPdu::ReadHoldingRegisters {
+            address: rust_modbus::Address(0),
+            quantity: rust_modbus::Quantity(1),
+        };
+        process_frame::<Rtu, _>(
+            request_bytes(UnitId(0), &request),
+            MatchState::ExpectRequest,
+            &log,
+            &table,
+            &records,
+        )
+        .await;
+
+        assert_eq!(table.read().unit_ids(), vec![UnitId(0)]);
+    }
+
     /// MB-R-144 — a matched read transaction writes the response's returned words into the
     /// table at the request's address range.
     #[tokio::test]
@@ -909,9 +939,9 @@ mod tests {
         assert_eq!(table.read().read_words(&key, 3, 1), Some(vec![99]));
     }
 
-    /// MB-R-144 — an unmatched write request never modifies the table.
+    /// MB-R-144 — an unmatched write request writes no words, but marks the slave id as seen.
     #[tokio::test]
-    async fn ut_unmatched_write_does_not_modify_table() {
+    async fn ut_unmatched_write_writes_no_words_but_marks_slave_seen() {
         let log = RecordingLog::default();
         let table = table();
         let records = records();
@@ -950,12 +980,13 @@ mod tests {
             kind: Kind::HoldingRegister,
         });
         assert_eq!(table.read().read_words(&key, 3, 1), None);
+        assert_eq!(table.read().unit_ids(), vec![UnitId(1)]);
     }
 
-    /// MB-R-144 — a response carrying an exception code never modifies the table, matched or
-    /// not.
+    /// MB-R-144 — a response carrying an exception code writes no words, but marks the slave
+    /// id as seen (`unit_ids()` includes it).
     #[tokio::test]
-    async fn ut_exception_response_does_not_modify_table() {
+    async fn ut_exception_response_writes_no_words_but_marks_slave_seen() {
         let log = RecordingLog::default();
         let table = table();
         let records = records();
@@ -990,6 +1021,7 @@ mod tests {
             kind: Kind::HoldingRegister,
         });
         assert_eq!(table.read().read_words(&key, 0, 1), None);
+        assert_eq!(table.read().unit_ids(), vec![UnitId(1)]);
     }
 
     /// MB-R-146 — a matched, non-exception pair captures an `Ok` record with the response's own
