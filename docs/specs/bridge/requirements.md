@@ -27,13 +27,13 @@ Per the ownership rules in [`../README.md`](../README.md), this area does
 
 **BR-R-003** — The `bridge` subcommand shall accept exactly one `--upstream <descriptor>` and exactly one `--downstream <descriptor>` flag, both required. Missing either is a setup failure (exit 1, `BR-R-013`).
 
-**BR-R-004** — Each descriptor uses the existing `key=val[,key=val...]` mini-language (same grammar as `--module`'s endpoint keys): `transport` in {`tcp`, `rtu`} (default `tcp`) selects the interface's transport; remaining keys match that transport's existing connection fields (`ip`,`port` for tcp; `path`,`baud`,`parity`,`data_bits`,`stop_bits` for rtu), plus optional `timeout_ms`, `reconnect`, an optional `unit_ids` key (`BR-R-015`), and — tcp only — the `tls` key set (`BR-R-011`).
+**BR-R-004** — Each descriptor uses the existing `key=val[,key=val...]` mini-language (same grammar as `--module`'s endpoint keys): `transport` in {`tcp`, `rtu`, `rtu_over_tcp`, `ascii_over_tcp`} (default `tcp`) selects the interface's transport; remaining keys match that transport's existing connection fields (`ip`,`port` for tcp/rtu_over_tcp/ascii_over_tcp; `path`,`baud`,`parity`,`data_bits`,`stop_bits` for rtu), plus optional `timeout_ms`, `reconnect`, an optional `unit_ids` key (`BR-R-015`), and — tcp/rtu_over_tcp/ascii_over_tcp only — the `tls` key set (`BR-R-011`). `rtu_over_tcp`/`ascii_over_tcp` carry the same `tcp::Config` field set as `tcp` (`MB-R-113`/`MB-R-125`), differing only in on-wire framing (RTU/ASCII instead of MBAP); either may be used as upstream or downstream independently of the other side's transport.
 
 ## Roles and relay behavior
 
-**BR-R-005** — The upstream interface always acts in the server role: bridge mode listens for/accepts connections (tcp) or serves the opened link (rtu) on upstream, reusing the existing server accept-loop / single-serial-link behavior unchanged.
+**BR-R-005** — The upstream interface always acts in the server role: bridge mode listens for/accepts connections (tcp, rtu_over_tcp, ascii_over_tcp) or serves the opened link (rtu) on upstream, reusing the existing server accept-loop / single-serial-link behavior unchanged.
 
-**BR-R-006** — The downstream interface always acts in the client role: bridge mode connects (tcp) or opens the serial port (rtu) on downstream as an ordinary client, including existing reconnect/backoff (`MB-R-050–056`) when enabled.
+**BR-R-006** — The downstream interface always acts in the client role: bridge mode connects (tcp, rtu_over_tcp, ascii_over_tcp) or opens the serial port (rtu) on downstream as an ordinary client, including existing reconnect/backoff (`MB-R-050–056`) when enabled.
 
 **BR-R-007** — Each decoded request received upstream is forwarded downstream unmodified (same unit id, function code, address, count) and awaited; the downstream response or exception is relayed back upstream unmodified. Bridge mode imposes no register/bit-count limit beyond each transport's own wire format — pure pass-through, no bridge-side cap.
 
@@ -43,7 +43,7 @@ Per the ownership rules in [`../README.md`](../README.md), this area does
 
 **BR-R-010** — When the downstream interface fails to connect while a forwarded request is outstanding (no established connection/serial link), bridge mode answers the upstream requester with exception `GatewayPathUnavailable` (0x0A). When downstream is connected but the forwarded request itself times out or the connection drops before a response arrives, bridge mode answers with exception `GatewayTargetDeviceFailedToRespond` (0x0B). Both codes are already present in the vendored `rust_modbus::ExceptionCode` enum (values 10/11); existing ferrowl servers never emit them today (`api-contract.md`'s exhaustive list is 0x01–0x04), since only bridge — not an ordinary client/server module — has a second link whose failure must be reported back to a first.
 
-**BR-R-011** — TCP interfaces (upstream and/or downstream) may enable TLS via the same opt-in `tls` config fields as existing TCP client/server modules (`MB-R-104–111` field set: `ca_file`, `cert_file`, `key_file`, `client_cert_file`, `client_key_file`, `client_ca_file`, `require_client_cert`, `self_signed`, `insecure_skip_verify`).
+**BR-R-011** — TCP-socket interfaces (`tcp`, `rtu_over_tcp`, `ascii_over_tcp`; upstream and/or downstream) may enable TLS via the same opt-in `tls` config fields as existing TCP client/server modules (`MB-R-104–111` field set: `ca_file`, `cert_file`, `key_file`, `client_cert_file`, `client_key_file`, `client_ca_file`, `require_client_cert`, `self_signed`, `insecure_skip_verify`).
 
 ## Logging and process contract
 

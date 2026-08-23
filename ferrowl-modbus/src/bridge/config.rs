@@ -11,6 +11,12 @@ pub struct BridgeEndpointSpec {
 pub enum BridgeEndpointKind {
     Tcp(tcp::Config),
     Rtu(rtu::Config),
+    /// RTU framing carried over a TCP socket (MB-R-113); same `tcp::Config` field set as
+    /// `Tcp` (BR-R-004).
+    RtuOverTcp(tcp::Config),
+    /// ASCII framing carried over a TCP socket (MB-R-125); same `tcp::Config` field set as
+    /// `Tcp`/`RtuOverTcp` (BR-R-004).
+    AsciiOverTcp(tcp::Config),
 }
 
 /// BR-R-015 — an allow-list of unit ids parsed from `unit_ids=1,3,5-8`. `None` (the

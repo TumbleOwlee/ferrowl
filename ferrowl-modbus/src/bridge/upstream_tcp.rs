@@ -3,22 +3,45 @@ use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
 use crate::{Error, LogFn, TcpError};
 use rust_modbus::{
-    ClientFraming, ClientTransport, Server as ModbusServer, Service, TcpListener, TlsListener,
+    ClientFraming, ClientTransport, Server as ModbusServer, ServerFraming, Service, TcpListener,
+    TlsListener,
 };
 use std::net::SocketAddr;
 use tokio::task::JoinHandle;
 
 /// Bind the configured upstream TCP address (BR-R-005 — upstream acts as an ordinary server)
-/// and spawn the accept loop, answering every connection via `service`. Plain TCP unless
-/// `config.tls` is set (BR-R-011), mirroring `tcp/server.rs::run`'s bind/TLS shape exactly
-/// (duplicated rather than shared: the store-based server and the bridge server share no
-/// state type to factor a common helper around).
+/// and spawn the accept loop, answering every connection via `service`, framed as Modbus TCP.
+/// `run_framed` is the general form (BR-R-004's `RtuOverTcp`/`AsciiOverTcp` upstream kinds go
+/// through that instead); this is `run_framed::<rust_modbus::Tcp, _, _, _>` under its existing
+/// name so every pre-existing plain-TCP call site needs no change.
 pub(crate) async fn run<S, F, L>(
     config: &Config,
     service: BridgeService<S, F, L>,
     log: L,
 ) -> Result<JoinHandle<Result<(), Error>>, Error>
 where
+    S: ClientTransport<F> + Send + Sync + 'static,
+    F: ClientFraming + Send + Sync + 'static,
+    L: LogFn + Clone + Send + Sync + 'static,
+    BridgeService<S, F, L>: Service,
+{
+    run_framed::<rust_modbus::Tcp, S, F, L>(config, service, log).await
+}
+
+/// Bind the configured upstream TCP address (BR-R-005 — upstream acts as an ordinary server)
+/// and spawn the accept loop, answering every connection via `service`, framed as `UF`
+/// (Modbus TCP, RTU-over-TCP, or ASCII-over-TCP, per BR-R-004's `transport` key). Plain TCP
+/// unless `config.tls` is set (BR-R-011), mirroring `tcp/server.rs::run`'s bind/TLS shape
+/// exactly (duplicated rather than shared: the store-based server and the bridge server share
+/// no state type to factor a common helper around).
+pub(crate) async fn run_framed<UF, S, F, L>(
+    config: &Config,
+    service: BridgeService<S, F, L>,
+    log: L,
+) -> Result<JoinHandle<Result<(), Error>>, Error>
+where
+    UF: ServerFraming + Send + Sync + 'static,
+    UF::Header: Send + Sync,
     S: ClientTransport<F> + Send + Sync + 'static,
     F: ClientFraming + Send + Sync + 'static,
     L: LogFn + Clone + Send + Sync + 'static,
@@ -37,7 +60,10 @@ where
     {
         None => match TcpListener::bind(addr).await {
             Ok(listener) => Ok(tokio::task::spawn(async move {
-                server.serve(listener).await.map_err(Error::Server)
+                server
+                    .serve_framed::<UF>(listener)
+                    .await
+                    .map_err(Error::Server)
             })),
             Err(e) => Err(Error::Server(e)),
         },
@@ -53,7 +79,7 @@ where
             match TlsListener::bind(addr, tls_config).await {
                 Ok(listener) => Ok(tokio::task::spawn(async move {
                     server
-                        .serve_tls::<rust_modbus::Tcp>(listener)
+                        .serve_tls::<UF>(listener)
                         .await
                         .map_err(Error::Server)
                 })),
