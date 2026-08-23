@@ -49,7 +49,7 @@ Per the ownership rules in [`../README.md`](../README.md), this area does
 
 **BR-R-012** — Bridge mode drains relayed-request and lifecycle log lines to stdout using the existing `[<timestamp>] <source> | <message>` format (`CL-R-040`), optionally appends to `--log-file` (`CL-R-041` semantics: create-and-append), and keeps setup/fatal diagnostics on stderr (`CL-R-042`).
 
-**BR-R-013** — Exit codes mirror `run`'s scheme (`CL-R-030–032`): exit 1 for setup failure (missing/invalid `--upstream`/`--downstream`, upstream bind/listen/serial-open failure); exit 0 on `--duration` deadline or Ctrl-C; with `--exit-on-error` set, exit 2 on a drained `[bridge]`-sourced error line.
+**BR-R-013** — Exit codes mirror `run`'s scheme (`CL-R-030–032`): exit 1 for setup failure (missing/invalid `--upstream`/`--downstream`, upstream bind/listen/serial-open failure); exit 0 on `--duration` deadline or Ctrl-C; with `--exit-on-error` set, exit 3 on a drained `[bridge]`-sourced error line.
 
 **BR-R-014** — `bridge` accepts an optional `--duration <secs>` flag, identical semantics to `run`'s (`CL-R-013` family).
 

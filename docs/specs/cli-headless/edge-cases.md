@@ -13,11 +13,9 @@ Lua/assertion semantics live in [`../scripting/`](../scripting/).
   run or migration, prints a usage diagnostic to stderr, and exits with its standard
   usage exit code (**2**). No modules are started.
 - **`--help` / `--version`** — printed to stdout, process exits **0**, no run occurs.
-- **Exit-code-2 ambiguity for CI** — a parser usage error and an
-  `--exit-on-error` assertion trip both exit with the integer **2**, from different
-  stages (parse-time vs run-time). A CI script that distinguishes "the test failed"
-  from "I mistyped a flag" cannot do so on the exit code alone; it must also inspect
-  stderr (usage text vs a `[sim]` line on stdout). Stated limitation, not a bug.
+- A parser usage error (exit **2**) and an `--exit-on-error` assertion trip (exit
+  **3**) use distinct codes, so a CI script can tell "I mistyped a flag" apart from
+  "the run detected an error" on the exit code alone.
 
 ## 2. Malformed `--module` / `--ocpp` descriptors
 
@@ -67,20 +65,17 @@ Lua/assertion semantics live in [`../scripting/`](../scripting/).
 - **A blank `device` path** — for OCPP this is a legitimate quick-start on the default
   device config (not a failure); the envelope rule (CS-R-053) governs it.
 
-## 6. `--exit-on-error` detection is prefix-based, not level-based
+## 6. `--exit-on-error` detection is level-based
 
-- Detection keys off the literal line prefix `[sim]`, matched on the drained
-  message string, **regardless of the line's log level**. It is plain log-string
-  detection, not a structured error channel: it catches only errors that are actually
-  *logged* under that prefix, and it would also trip on any non-error line that
-  happens to start with `[sim]`. A Lua error that never reaches the log (or is logged
-  without the prefix) will not trip it. Stated limitation — the contract is exactly
-  "a drained line starts with `[sim]`", nothing more semantic.
+- Detection keys off the drained line's log level (`Level::Error`), not any
+  particular message text. It catches only errors that are actually *logged* at
+  Error level; a Lua error that never reaches the log, or is logged at a lower
+  level, will not trip it.
 - Consequence for assertions: `C_Test:Assert` failures surface through the sim's
-  `[sim] <error>` log line. Without `--exit-on-error`, an assertion failure does
-  **not** change the exit code — the run still exits 0. CI that must fail on assertion
-  failure must pass `--exit-on-error`. (Assertion semantics: see
-  [`../scripting/`](../scripting/).)
+  `[sim] <error>` log line, logged at Error level. Without `--exit-on-error`, an
+  assertion failure does **not** change the exit code — the run still exits 0. CI
+  that must fail on assertion failure must pass `--exit-on-error`. (Assertion
+  semantics: see [`../scripting/`](../scripting/).)
 
 ## 7. `--log-file`
 
@@ -133,13 +128,9 @@ Lua/assertion semantics live in [`../scripting/`](../scripting/).
   short form for the module/session/device flags (which sidesteps any short-flag
   collision of the kind above).
 
-- **Exit code 2 is overloaded.** As noted in §1, the parser's usage-error code and the
-  `--exit-on-error` assertion-failure code are both 2. There is no distinct code for
-  "bad invocation" vs "test assertion tripped".
-
-- **`--exit-on-error` only catches logged, prefixed errors.** Per §6, it is a string
-  match on `[sim]`, not a structured result channel. Errors outside the sim log, or
-  logged without the prefix, are invisible to it.
+- **`--exit-on-error` only catches logged Error-level lines.** Per §6, it is a
+  level match, not a structured result channel. Errors that never reach the log, or
+  are logged below Error level, are invisible to it.
 
 - **Headless has no per-module error isolation.** Any one module's startup failure
   fails the whole `run` with exit 1 (§5); there is no "start the good ones, report the
