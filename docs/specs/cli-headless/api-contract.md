@@ -77,7 +77,7 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 | `--ocpp` | `KEY=VAL,...` | — | yes | Ad-hoc OCPP module (see §4). |
 | `--duration` | `SECS` (integer) | none | no | Run this many seconds then exit 0. Omit → run until Ctrl-C. |
 | `--log-file` | `FILE` | none | no | Append every drained log line to this file (create-and-append) in addition to stdout. |
-| `--exit-on-error` | (flag) | off | no | Exit 2 (after stopping all modules) when a drained log line begins with `[sim]`. |
+| `--exit-on-error` | (flag) | off | no | Exit 3 (after stopping all modules) when a drained log line has log level Error. |
 
 Notes:
 
@@ -157,8 +157,8 @@ Example:
 |---|---|
 | `0` | Ran to completion: `--duration` deadline reached, or Ctrl-C (SIGINT) received. No error condition fired. |
 | `1` | Setup failure: a module's device config failed to load, a module's `start` reported an error, a `--session` file failed to load/parse, or `--log-file` could not be opened. Diagnostic (`Error: …`) on stderr; started modules are stopped first. |
-| `2` | `--exit-on-error` was set **and** a drained log line began with `[sim]` (the Lua sim-error marker). All modules are stopped, then exit 2. |
-| `2` | (Argument-parser usage error, e.g. unknown flag — emitted by the parser before the run starts; same integer, different origin. See edge-cases.) |
+| `2` | Argument-parser usage error, e.g. unknown flag — emitted by the parser before the run starts. |
+| `3` | `--exit-on-error` was set **and** a drained log line had log level Error. All modules are stopped, then exit 3. |
 
 ### `ferrowl migrate`
 

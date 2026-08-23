@@ -6,8 +6,8 @@
 //! happened instead of leaving the operator to read a screen.
 //!
 //! Exit codes: `0` ran to completion (duration elapsed or Ctrl-C), `1` a module's device config
-//! failed to load or `start` reported an error, `2` `--exit-on-error` was set and a drained log
-//! line looked like a Lua script error.
+//! failed to load or `start` reported an error, `3` `--exit-on-error` was set and a drained log
+//! line had log level Error.
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -41,10 +41,6 @@ const TICK: Duration = Duration::from_millis(100);
 /// Ring depth to peek per tick. Matches `crate::app::LOG_SIZE`; kept local so this module has no
 /// dependency on the TUI's `App` beyond the shared log type and [`LogRing`] itself.
 const LOG_PEEK: usize = 80;
-
-/// Prefix Lua sim script errors are logged under (see `ferrowl/src/lua.rs`). `--exit-on-error`
-/// keys off this exact string, so detection is only as good as what actually gets logged.
-const SIM_ERROR_PREFIX: &str = "[sim]";
 
 /// One running module: its view (owns start/stop/refresh), display name, log channel, and how
 /// many lines of the log have already been drained.
@@ -164,16 +160,21 @@ async fn drain_log(
     if new_count > window.len() as u64 {
         let dropped = new_count - window.len() as u64;
         lines.push(format!(
-            "[{}] {name} | ({dropped} lines dropped: ring overflowed between ticks)",
-            format_timestamp(now_ms())
+            "[{}] [{}] {name} | ({dropped} lines dropped: ring overflowed between ticks)",
+            format_timestamp(now_ms()),
+            Level::Error
         ));
     }
 
     let take = (new_count as usize).min(window.len());
     let start = window.len() - take;
-    for (ts, _level, msg) in &window[start..] {
-        lines.push(format!("[{}] {name} | {msg}", format_timestamp(*ts)));
-        if exit_on_error && msg.starts_with(SIM_ERROR_PREFIX) {
+    for (ts, level, msg) in &window[start..] {
+        lines.push(format!(
+            "[{}] [{}] {name} | {msg}",
+            format_timestamp(*ts),
+            level
+        ));
+        if exit_on_error && *level == Level::Error {
             hit_error = true;
         }
     }
@@ -320,7 +321,7 @@ pub async fn run(args: &RunArgs) -> i32 {
                 }
             }
             if hit_error {
-                exit_code = 2;
+                exit_code = 3;
                 should_stop = true;
             }
         }
@@ -335,7 +336,7 @@ pub async fn run(args: &RunArgs) -> i32 {
                 }
             }
             if hit_error {
-                exit_code = 2;
+                exit_code = 3;
                 should_stop = true;
             }
         }
@@ -423,7 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-031 — a `[sim]` line flags exit-code 2 only when --exit-on-error is set.
+    /// CL-R-031 — a log error line flags exit-code 3 only when --exit-on-error is set.
     /// CL-R-034 — a Lua sim error (a `[sim]` line) does not by itself fail a headless run: with
     /// --exit-on-error off it surfaces without flagging the exit code.
     async fn ut_drain_log_flags_sim_error_prefix_only_when_requested() {
@@ -455,7 +456,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-031 — a `[sim]` session-sim line flags exit-code 2 under --exit-on-error.
+    /// CL-R-031 — an error session-sim line flags exit-code 3 under --exit-on-error.
     async fn ut_drain_log_session_sim_error_flags_exit_on_error() {
         let log = new_log();
         log.write().await.write(Level::Error, "[sim] boom");
@@ -827,8 +828,8 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-031 — with --exit-on-error set, a `[sim]`-prefixed error line makes the run exit 2.
-    async fn ut_run_exit_on_error_returns_two() {
+    /// CL-R-031 — with --exit-on-error set, an error line makes the run exit 3.
+    async fn ut_run_exit_on_error_returns_three() {
         use ferrowl_util::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
@@ -850,7 +851,7 @@ mod tests {
             log_file: None,
             exit_on_error: true,
         };
-        assert_eq!(run(&args).await, 2);
+        assert_eq!(run(&args).await, 3);
     }
 
     #[tokio::test]

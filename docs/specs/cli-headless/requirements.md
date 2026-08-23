@@ -80,13 +80,13 @@ own:
 
 **CL-R-030** — `ferrowl run` shall return exit code **1** for any setup failure: a module's device config failed to load, a module's `start` reported an error, a `--session` file failed to load or parse, or the `--log-file` could not be opened. A diagnostic beginning `Error:` shall be written to standard error, and any modules already started shall be stopped before returning.
 
-**CL-R-031** — `ferrowl run` shall return exit code **2** if and only if `--exit-on-error` is set **and** a drained log line begins with the sim-error prefix `[sim]`. On detecting such a line the runner shall stop every module and then exit with code 2. When `--exit-on-error` is not set, a `[sim]` line shall never change the exit code.
+**CL-R-031** — `ferrowl run` shall return exit code **3** if and only if `--exit-on-error` is set **and** a drained log line has log level Error. On detecting such a log line the runner shall stop every module and then exit with code 3. When `--exit-on-error` is not set, an error log line shall never change the exit code.
 
 **CL-R-032** — `ferrowl run` shall return exit code **0** for a run that reaches its `--duration` deadline or is interrupted by Ctrl-C without any exit-code-2 condition having fired.
 
-**CL-R-033** — The `migrate` subcommand shall exit **0** on a successful conversion and **1** on failure (unrecognized input/output file extension, input parse failure, or output write failure), writing a diagnostic beginning `error:` to standard error. `migrate` shall never use exit code 2.
+**CL-R-033** — The `migrate` subcommand shall exit **0** on a successful conversion and **1** on failure (unrecognized input/output file extension, input parse failure, or output write failure), writing a diagnostic beginning `error:` to standard error. `migrate` shall never use exit code 2 or 3.
 
-**CL-R-034** — A `C_Test:Assert` failure (or any other Lua sim error) shall **not** by itself fail a headless run: it surfaces only as a `[sim]`-prefixed log line, so it influences the exit code only when `--exit-on-error` is set (yielding code 2 per CL-R-031). A CI job that must fail on assertion failure shall pass `--exit-on-error`.
+**CL-R-034** — A `C_Test:Assert` failure (or any other Lua sim error) shall **not** by itself fail a headless run: it surfaces only as an error-level log line (conventionally `[sim]`-prefixed), so it influences the exit code only when `--exit-on-error` is set (yielding code 3 per CL-R-031). A CI job that must fail on assertion failure shall pass `--exit-on-error`.
 
 **CL-R-035** — An argument-parsing error (unknown flag, missing required subcommand option, malformed option value handled by the parser) shall abort before any run, printing a usage diagnostic to standard error and exiting with the argument parser's standard usage exit code (2). Requesting `--help`/`--version` shall exit 0.
 

@@ -2,7 +2,7 @@
 //!
 //! Exit codes: `0` ran to completion (`--duration` elapsed or Ctrl-C), `1` `--upstream`/
 //! `--downstream` missing or malformed, or the bridge failed to start (upstream bind/listen/
-//! serial-open failure, BR-R-013), `2` `--exit-on-error` was set and a drained log line was
+//! serial-open failure, BR-R-013), `3` `--exit-on-error` was set and a drained log line was
 //! `[bridge]`-prefixed (a genuine relay failure, Shared design decision 3).
 
 use std::io::Write as _;
@@ -12,7 +12,8 @@ use crate::cli::{BridgeArgs, parse_bridge_descriptor};
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
-/// BR-R-013 / Shared design decision 3 — mirrors headless `run`'s `SIM_ERROR_PREFIX`.
+/// BR-R-013 / Shared design decision 3 — the bridge's own error-line prefix, unlike headless
+/// `run`'s `--exit-on-error` (CL-R-031), which keys off log level rather than a prefix.
 const ERROR_PREFIX: &str = ferrowl_modbus::bridge::ERROR_PREFIX;
 
 /// Run the bridge described by `args`. Returns the process exit code; never panics on the
@@ -92,7 +93,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
                     let _ = writeln!(f, "{line}");
                 }
                 if args.exit_on_error && msg.starts_with(ERROR_PREFIX) {
-                    exit_code = 2;
+                    exit_code = 3;
                     break;
                 }
             }
@@ -333,7 +334,7 @@ mod tests {
 
     /// BR-R-013 — with `--exit-on-error` set and no downstream listening, a forwarded request
     /// answers `GatewayPathUnavailable` and logs a `[bridge]`-prefixed line, making the run
-    /// exit 2.
+    /// exit 3.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_bridge_exit_on_error_flags_bridge_prefixed_line() {
         // Nothing listens on this downstream port.
@@ -355,7 +356,7 @@ mod tests {
             },
             run(&args)
         );
-        assert_eq!(exit_code, 2);
+        assert_eq!(exit_code, 3);
     }
 
     /// BR-R-012, CL-R-041 — `--log-file` is opened create-and-append: pre-existing content

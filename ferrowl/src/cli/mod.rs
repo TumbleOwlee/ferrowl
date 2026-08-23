@@ -125,9 +125,7 @@ pub struct RunArgs {
     #[arg(long = "log-file", value_name = "FILE")]
     pub log_file: Option<String>,
 
-    /// Exit with code 2 (after stopping every module) if a drained log line starts with the
-    /// `[sim]` prefix Lua script errors are logged under. This is plain log-string detection, not
-    /// a structured error channel, so it only catches errors that are actually logged.
+    /// Exit with code 3 (after stopping every module) if a drained log line has log level error.
     #[arg(long = "exit-on-error")]
     pub exit_on_error: bool,
 }

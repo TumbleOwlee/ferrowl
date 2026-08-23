@@ -35,6 +35,5 @@ point-to-point upstream link.
 
 ## 4. Exit codes
 
-Exit code 2 remains overloaded with the clap usage-error code, the same known
-limitation `run` already has (see `cli-headless/edge-cases.md`) — not solved
-for bridge, just inherited.
+`--exit-on-error` uses exit code 3, distinct from the clap usage-error code
+(2), mirroring `run`'s scheme (see `cli-headless/edge-cases.md`).
