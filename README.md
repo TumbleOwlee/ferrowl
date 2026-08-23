@@ -113,6 +113,40 @@ Exit codes:
 
 On any exit, every module that started is stopped first (best-effort).
 
+## Bridge mode
+
+`ferrowl bridge` relays Modbus requests between two independently-configured interfaces without
+the TUI, session file, or Lua/sim framework — an upstream interface bridge mode serves (answering
+requests, like a real device) and a downstream interface it connects to as a client, forwarding
+every request it receives on the upstream side and relaying the answer back unmodified. Useful
+for placing a TCP-only master in front of a serial-only device, or vice versa.
+
+```bash
+# Place a TCP master in front of a serial-only device
+ferrowl bridge --upstream transport=tcp,ip=0.0.0.0,port=502 \
+               --downstream transport=rtu,path=/dev/ttyUSB0,baud=19200
+
+# Bridge two TCP-only sides, restricting which slave ids are answered
+ferrowl bridge --upstream transport=tcp,ip=0.0.0.0,port=502,unit_ids=1,3,5-8 \
+               --downstream transport=tcp,ip=10.0.0.5,port=502
+
+# RTU or ASCII framing carried over TCP, on either side, mixed freely with tcp/rtu
+ferrowl bridge --upstream transport=rtu_over_tcp,ip=0.0.0.0,port=1502 \
+               --downstream transport=ascii_over_tcp,ip=10.0.0.5,port=1503
+```
+
+Both `--upstream` and `--downstream` are required and use the same `key=val,...` mini-language as
+`--module`. `transport` selects the interface's transport — `tcp` (default), `rtu`,
+`rtu_over_tcp`, or `ascii_over_tcp`; `tcp`/`rtu_over_tcp`/`ascii_over_tcp` take `ip`, `port`, and
+the same opt-in TLS keys as an ordinary TCP module (`self_signed`, `cert_file`/`key_file`, etc.);
+`rtu` takes `path`, `baud`, `parity`, `data_bits`, `stop_bits`. Every transport also accepts
+`timeout_ms` and `reconnect`. `--upstream` additionally accepts `unit_ids` (e.g. `unit_ids=1,3,5-8`)
+to restrict which slave ids the bridge answers for — a request for any other unit id is ignored
+entirely, letting another device share the same upstream link.
+
+`--duration`, `--log-file`, and `--exit-on-error` behave the same as in `run` mode; a drained log
+line reporting a genuine relay failure is prefixed `[bridge]`.
+
 ## Commands
 
 | Command | Description |
