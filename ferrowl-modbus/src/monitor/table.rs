@@ -14,6 +14,10 @@ use std::sync::Arc;
 #[derive(Default)]
 pub struct ObservedTable {
     values: HashMap<Key<SlaveKey>, BTreeMap<u16, u16>>,
+    /// Slave ids seen in a matched request/response pair that carried no words to write (an
+    /// exception response, MB-R-144) — tracked separately from `values` so `unit_ids()` counts
+    /// them without inventing a placeholder value at any address.
+    seen: BTreeSet<rust_modbus::UnitId>,
 }
 
 /// Shared handle to an [`ObservedTable`], read by the view and written by the monitor's
@@ -55,12 +59,20 @@ impl ObservedTable {
             .unwrap_or_default()
     }
 
-    /// Distinct slave ids observed so far, across every table kind, in sorted order (UI-R-060
-    /// sorts for display regardless, so any deterministic order is fine here).
+    /// Mark `slave` as seen without writing any address's value (MB-R-144's exception-response
+    /// case: a matched pair with no words to record still means the slave id was on the bus).
+    pub fn mark_seen(&mut self, slave: rust_modbus::UnitId) {
+        self.seen.insert(slave);
+    }
+
+    /// Distinct slave ids observed so far, across every table kind plus every `mark_seen` call,
+    /// in sorted order (UI-R-060 sorts for display regardless, so any deterministic order is
+    /// fine here).
     pub fn unit_ids(&self) -> Vec<rust_modbus::UnitId> {
         self.values
             .keys()
             .map(|key| key.id.slave_id)
+            .chain(self.seen.iter().copied())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
