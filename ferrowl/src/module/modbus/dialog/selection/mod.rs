@@ -131,7 +131,7 @@ where
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub delete_button: Widget<ButtonState, Button>,
     // Default value selection (same options as value, plus a leading "no default" sentinel)
-    #[focus(when = {!self.value.state.values().is_empty()})]
+    #[focus(when = {!self.value.state.values().is_empty() && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server) })]
     pub default_value: Widget<SelectionState<V>, Selection<V>>,
     // Confirm button
     #[focus]
@@ -148,6 +148,9 @@ where
     // Optional add-value sub-dialog
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
+    // Whether this dialog edits an existing register of server (enables the value input).
+    #[builder(default)]
+    pub is_server: bool,
     // Whether this dialog edits an existing register (enables the delete button).
     #[builder(default)]
     pub deletable: bool,
@@ -210,9 +213,11 @@ impl EditSelectionDialog<NamedValue> {
         current_value: &str,
         raw_value: &str,
         default: Option<&Scalar>,
+        is_server: bool,
     ) -> Self {
         let mut dialog = Self::new(named_values.clone());
         dialog.deletable = true;
+        dialog.is_server = is_server;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         // Populate default selection: sentinel at index 0, then all named values.
@@ -403,6 +408,7 @@ impl EditSelectionDialog<NamedValue> {
     pub fn to_edit_input_dialog(&self) -> super::input::EditInputDialog {
         let mut d = super::input::EditInputDialog::new();
         d.deletable = self.deletable;
+        d.is_server = self.is_server;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();
@@ -561,6 +567,7 @@ mod apply_tests {
             "1",
             "[0001]",
             None,
+            true,
         )
         .apply()
         .expect("valid dialog should apply");
@@ -591,6 +598,7 @@ mod apply_tests {
             "0",
             "[0000]",
             None,
+            true,
         );
         assert_eq!(dialog.value.state.selection(), 1); // "off" (value 0)
     }
@@ -615,6 +623,7 @@ mod apply_tests {
             "1",
             "[0001]",
             None,
+            true,
         );
         assert_eq!(dialog.value.state.values().len(), 2);
         dialog.value.state.set_selection(0);
@@ -663,7 +672,7 @@ mod focus_tests {
             name: "on".into(),
             value: Scalar::Int(1),
         }];
-        EditSelectionDialog::from_register("s", "", &original, values, "1", "[0001]", None)
+        EditSelectionDialog::from_register("s", "", &original, values, "1", "[0001]", None, true)
     }
 
     #[test]
@@ -743,6 +752,7 @@ mod default_and_conversion_tests {
             "1",
             "[0001]",
             Some(&Scalar::Int(1)),
+            true,
         )
     }
 

@@ -214,20 +214,24 @@ impl EditInputDialog {
         }
         vertical_index += 1;
 
-        StatefulWidget::render(
-            &self.value.widget,
-            vertical_layout[vertical_index],
-            buf,
-            &mut self.value.state,
-        );
+        if self.is_server || self.access.get_value().0 != ferrowl_codec::Access::ReadOnly {
+            StatefulWidget::render(
+                &self.value.widget,
+                vertical_layout[vertical_index],
+                buf,
+                &mut self.value.state,
+            );
+        }
         vertical_index += 1;
 
-        StatefulWidget::render(
-            &self.default_value.widget,
-            vertical_layout[vertical_index],
-            buf,
-            &mut self.default_value.state,
-        );
+        if self.is_server || self.access.get_value().0 != ferrowl_codec::Access::ReadOnly {
+            StatefulWidget::render(
+                &self.default_value.widget,
+                vertical_layout[vertical_index],
+                buf,
+                &mut self.default_value.state,
+            );
+        }
         vertical_index += 1;
 
         StatefulWidget::render(
@@ -385,7 +389,7 @@ mod render_tests {
             )))
             .build()
             .unwrap();
-        let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None);
+        let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None, true);
         let text = render(&mut dialog);
         assert!(text.contains("Edit"), "missing box title:\n{text}");
         assert!(text.contains("DELETE"), "missing delete button:\n{text}");

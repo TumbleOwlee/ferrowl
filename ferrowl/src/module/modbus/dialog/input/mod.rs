@@ -73,10 +73,10 @@ pub struct EditInputDialog {
     #[focus(when = { !self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text })]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     // Value input
-    #[focus]
+    #[focus(when = {self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server })]
     pub value: Widget<InputFieldState, InputField<String>>,
     // Default value stored in the device config and applied on startup
-    #[focus]
+    #[focus(when = {self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server })]
     pub default_value: Widget<InputFieldState, InputField<String>>,
     // Button to add a predefined named value
     #[focus]
@@ -99,6 +99,9 @@ pub struct EditInputDialog {
     // Named values accumulated via the ADD button in this session.
     #[builder(default)]
     pub pending_named_values: Vec<NamedValue>,
+    // Whether this dialog edits an existing register of server (enables the value input).
+    #[builder(default)]
+    pub is_server: bool,
     // Whether this dialog edits an existing register (enables the delete button).
     #[builder(default)]
     pub deletable: bool,
@@ -191,9 +194,11 @@ impl EditInputDialog {
         register: &Register,
         value: &str,
         default: Option<&Scalar>,
+        is_server: bool,
     ) -> Self {
         let mut dialog = Self::new();
         dialog.deletable = true;
+        dialog.is_server = is_server;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
         if let Some(def) = default {
@@ -402,6 +407,7 @@ impl EditInputDialog {
         let values = self.pending_named_values.clone();
         let mut d = super::selection::EditSelectionDialog::new(values.clone());
         d.deletable = self.deletable;
+        d.is_server = self.is_server;
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();
@@ -564,9 +570,10 @@ mod apply_tests {
                 BitField::default(),
             )),
         );
-        let edited = EditInputDialog::from_register("temp", "a sensor", &original, "42", None)
-            .apply()
-            .expect("valid register should apply");
+        let edited =
+            EditInputDialog::from_register("temp", "a sensor", &original, "42", None, true)
+                .apply()
+                .expect("valid register should apply");
 
         assert_eq!(edited.name, "temp");
         assert_eq!(edited.description, "a sensor");
@@ -593,7 +600,7 @@ mod apply_tests {
                 BitField::default(),
             )),
         );
-        let edited = EditInputDialog::from_register("w", "", &original, "1", None)
+        let edited = EditInputDialog::from_register("w", "", &original, "1", None, true)
             .apply()
             .expect("valid register should apply");
         assert_eq!(edited.register.format(), original.format());
@@ -613,7 +620,7 @@ mod apply_tests {
                 BitField::default(),
             )),
         );
-        let edited = EditInputDialog::from_register("v", "", &original, "3", None)
+        let edited = EditInputDialog::from_register("v", "", &original, "3", None, true)
             .apply()
             .expect("valid register should apply");
 
@@ -636,7 +643,7 @@ mod apply_tests {
                 BitField { mask: 0xFF00 },
             )),
         );
-        let edited = EditInputDialog::from_register("masked", "", &original, "0", None)
+        let edited = EditInputDialog::from_register("masked", "", &original, "0", None, true)
             .apply()
             .expect("valid register should apply");
         assert_eq!(edited.register.format(), original.format());
@@ -651,7 +658,7 @@ mod apply_tests {
             1,
             RegisterFormat::Ascii((TextAlignment::Left, Width(4))),
         );
-        let edited = EditInputDialog::from_register("label", "", &original, "AB", None)
+        let edited = EditInputDialog::from_register("label", "", &original, "AB", None, true)
             .apply()
             .expect("valid register should apply");
         assert_eq!(edited.register.format(), original.format());
@@ -671,7 +678,7 @@ mod apply_tests {
                 BitField::default(),
             )),
         );
-        let edited = EditInputDialog::from_register("c", "", &original, "1", None)
+        let edited = EditInputDialog::from_register("c", "", &original, "1", None, true)
             .apply()
             .expect("valid register should apply");
         assert_eq!(*edited.register.kind(), Kind::Coil);
@@ -725,7 +732,7 @@ mod focus_tests {
             .build()
             .unwrap();
         // `from_register` focuses the value field and sets the cursor at the end of "4".
-        EditInputDialog::from_register("name", "", &register, "4", None)
+        EditInputDialog::from_register("name", "", &register, "4", None, true)
     }
 
     fn coil_dialog() -> EditInputDialog {
@@ -742,7 +749,7 @@ mod focus_tests {
             )))
             .build()
             .unwrap();
-        EditInputDialog::from_register("c", "", &register, "1", None)
+        EditInputDialog::from_register("c", "", &register, "1", None, true)
     }
 
     /// Walk a full forward focus cycle, returning every focus state visited (starting state first).
@@ -826,7 +833,7 @@ mod focus_tests {
             )))
             .build()
             .unwrap();
-        let mut single = EditInputDialog::from_register("name", "", &single, "4", None);
+        let mut single = EditInputDialog::from_register("name", "", &single, "4", None, true);
         assert!(
             !forward_cycle(&mut single).contains(&EditInputDialogFocus::NumberWordOrder),
             "single-register cycle should skip NumberWordOrder"

@@ -224,9 +224,14 @@ mirrored into the store locally because it is not otherwise observable.
 A register's `access` (`ReadOnly` / `WriteOnly` / `ReadWrite`) does **not**
 determine the direction of its backing memory cells; the register's *kind* does
 (coils and holding registers get read/write cells, discrete inputs and input
-registers get read-only cells). `access` only governs whether the register is
-polled (write-only registers are excluded from read operations) and whether a
-client-side write is mirrored into the store.
+registers get read-only cells). `access` governs whether the register is
+polled (write-only registers are excluded from read operations), whether a
+client-side write is mirrored into the store, and — as of MB-R-091/MB-R-151 —
+whether the client will attempt a write at all: a `ReadOnly` register on a
+**client** rejects the UI's `:set`/dialog write locally (no command sent, no
+store touch), while on a **server** MB-R-090 bypasses cell access checks
+entirely.
 
 A `ReadOnly` holding register is therefore still writable by a remote master
-against a server module.
+against a server module, even though the local UI can no longer be used to
+write it from a client module.

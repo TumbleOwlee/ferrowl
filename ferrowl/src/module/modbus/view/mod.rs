@@ -113,6 +113,7 @@ impl ModbusModuleView {
                     &def.register,
                     &unscaled,
                     current_default,
+                    self.spec.role.client_or_server() == crate::config::ClientOrServer::Server,
                 ),
             )));
         } else {
@@ -125,6 +126,7 @@ impl ModbusModuleView {
                     &unscaled,
                     &def.raw_value,
                     current_default,
+                    self.spec.role.client_or_server() == crate::config::ClientOrServer::Server,
                 ),
             )));
         }

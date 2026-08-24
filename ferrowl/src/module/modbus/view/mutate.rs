@@ -395,22 +395,27 @@ impl ModbusModuleView {
                         .unwrap_or_default();
                     register.merge_write(&old, &raw)
                 };
-                let command = write_command(&register, slave, WireAddress(addr), &merged);
-                let result = self.module.send_command(command).await;
-                match result {
-                    Ok(()) => {
-                        if *register.access() == Access::WriteOnly {
-                            let memory = self.module.memory();
-                            memory.write().write_unchecked(key, &range, &merged);
+                if *register.access() != Access::ReadOnly {
+                    let command = write_command(&register, slave, WireAddress(addr), &merged);
+                    let result = self.module.send_command(command).await;
+                    match result {
+                        Ok(()) => {
+                            if *register.access() == Access::WriteOnly {
+                                let memory = self.module.memory();
+                                memory.write().write_unchecked(key, &range, &merged);
+                            }
+                            CommandResult::Handled(Some((
+                                Level::Info,
+                                format!("set {register_name} = {value} (sent)"),
+                            )))
                         }
-                        CommandResult::Handled(Some((
-                            Level::Info,
-                            format!("set {register_name} = {value} (sent)"),
-                        )))
+                        Err(e) => CommandResult::Handled(Some((
+                            Level::Error,
+                            format!(":set failed: {e}"),
+                        ))),
                     }
-                    Err(e) => {
-                        CommandResult::Handled(Some((Level::Error, format!(":set failed: {e}"))))
-                    }
+                } else {
+                    CommandResult::Handled(None)
                 }
             }
         }
