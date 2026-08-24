@@ -35,7 +35,7 @@ impl Validate for Address {
     fn validate(input: &str) -> ValidateResult {
         if input == "virtual" {
             ValidateResult::Success
-        } else if let ValidateResult::Error(e) = i16::validate(input) {
+        } else if let ValidateResult::Error(e) = u16::validate(input) {
             ValidateResult::Error(e.to_string())
         } else {
             ValidateResult::None
@@ -112,25 +112,22 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-048 — the address field validator accepts an in-range value.
-    fn address_valid_i16() {
+    /// MB-R-003 — the address field validator accepts an in-range value.
+    fn address_valid_u16() {
         assert!(matches!(Address::validate("0"), ValidateResult::None));
-        assert!(matches!(Address::validate("32767"), ValidateResult::None));
-        assert!(matches!(Address::validate("-32768"), ValidateResult::None));
+        assert!(matches!(Address::validate("65535"), ValidateResult::None));
+        assert!(matches!(Address::validate("32768"), ValidateResult::None));
         assert!(matches!(Address::validate("100"), ValidateResult::None));
     }
 
     #[test]
-    /// UI-R-048 — the address field validator rejects an out-of-range value.
-    fn address_overflow_i16() {
+    /// MB-R-003 — the address field validator rejects an out-of-range value.
+    fn address_overflow_u16() {
         assert!(matches!(
-            Address::validate("32768"),
+            Address::validate("65536"),
             ValidateResult::Error(_)
         ));
-        assert!(matches!(
-            Address::validate("-32769"),
-            ValidateResult::Error(_)
-        ));
+        assert!(matches!(Address::validate("-1"), ValidateResult::Error(_)));
         assert!(matches!(
             Address::validate("99999"),
             ValidateResult::Error(_)
