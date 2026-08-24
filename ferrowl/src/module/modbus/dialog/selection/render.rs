@@ -252,7 +252,9 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 
         vertical_index += 1;
 
-        if !self.default_value.state.values().is_empty() {
+        if !self.value.state.values().is_empty()
+            && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server)
+        {
             StatefulWidget::render(
                 &self.default_value.widget,
                 vertical_layout[vertical_index],
@@ -409,6 +411,7 @@ mod render_tests {
             "1",
             "[0001]",
             None,
+            true,
         );
         let text = render(&mut dialog);
         assert!(text.contains("Edit"), "missing box title:\n{text}");
