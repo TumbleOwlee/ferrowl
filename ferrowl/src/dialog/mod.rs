@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-048 — the address field validator accepts an in-range value.
+    /// MB-R-003 — the address field validator accepts an in-range value.
     fn address_valid_u16() {
         assert!(matches!(Address::validate("0"), ValidateResult::None));
         assert!(matches!(Address::validate("65535"), ValidateResult::None));
@@ -121,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-048 — the address field validator rejects an out-of-range value.
+    /// MB-R-003 — the address field validator rejects an out-of-range value.
     fn address_overflow_u16() {
         assert!(matches!(
             Address::validate("65536"),
