@@ -707,8 +707,12 @@ mod tests {
         assert_eq!(v.spec, edited);
         assert!(v.spec.csms_self_signed_fallback());
         // The same tick stops the old listener and rebinds from the edited spec (want_running
-        // is on by default), so the backend ends the tick online with the new settings.
-        assert!(v.backend.is_online(), "edit must rebind the listener");
+        // is on by default); OC-R-083's bind is async, so poll rather than asserting `is_online()`
+        // synchronously.
+        assert!(
+            poll_bound_addr(&v.backend).await.is_some(),
+            "edit must rebind the listener"
+        );
     }
 
     #[tokio::test]
@@ -1030,7 +1034,6 @@ mod tests {
             !msg.contains("self-signed"),
             "a plain listener must not report a self-signed certificate, got: {msg}"
         );
-        assert!(v.backend.is_online());
         // OC-R-083: the listener no longer binds synchronously inside `start()` — poll for it.
         assert!(
             poll_bound_addr(&v.backend).await.is_some(),
@@ -1065,6 +1068,67 @@ mod tests {
             v.entries.is_empty(),
             "restart must discard every observed charging-station entry"
         );
-        assert!(v.backend.is_online(), "restart must start a new instance");
+        // OC-R-083: the listener no longer binds synchronously — poll for it.
+        assert!(
+            poll_bound_addr(&v.backend).await.is_some(),
+            "restart must start a new instance"
+        );
+    }
+
+    #[tokio::test]
+    /// OC-R-124 — a CSMS view whose bind target is already occupied shows RECONNECTING (not
+    /// DISCONNECTED) while its task keeps retrying the bind, per the occupier idiom established
+    /// in `instance/mod.rs`'s `it_server_stop_on_backing_off_task_ends_promptly`.
+    async fn it_csms_view_shows_reconnecting_while_bind_backs_off() {
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let occupier = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = occupier.local_addr().unwrap().port();
+
+        let mut v = server_view();
+        v.spec.port = port;
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        v.refresh_impl().await;
+
+        for _ in 0..100 {
+            if v.backend.connection_status() == ConnStatus::Reconnecting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            v.backend.connection_status(),
+            ConnStatus::Reconnecting,
+            "task must be backing off, never Connected, against an occupied port"
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| v.render(frame, frame.area()))
+            .unwrap();
+        let last_row = terminal.backend().buffer().area.height - 1;
+        let contents: String = (0..120)
+            .map(|x| {
+                terminal.backend().buffer()[(x, last_row)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            contents.contains("RECONNECTING"),
+            "backing-off server must show RECONNECTING: {contents:?}"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(0, last_row)].bg,
+            COLOR_SCHEME.warning,
+            "RECONNECTING row must use the warning background"
+        );
+
+        drop(occupier);
+        v.backend.stop().await.expect("cleanup stop");
     }
 }

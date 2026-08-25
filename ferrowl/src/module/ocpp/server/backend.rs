@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -169,8 +168,6 @@ pub enum TlsBinding {
 /// never drift from what the listener actually binds with.
 pub struct OcppServer<V: Version> {
     server: Option<Server<V>>,
-    /// Server bound state (drives the ONLINE/OFFLINE status line).
-    online: Arc<AtomicBool>,
     /// Cached self-signed server certificate (OC-R-037), created once per backend instance and
     /// reused across every `start()` call so repeated `:restart`/rebind attempts don't
     /// regenerate it — never reinitialized inside `start()`.
@@ -184,13 +181,35 @@ where
     pub fn new() -> Self {
         Self {
             server: None,
-            online: Arc::new(AtomicBool::new(false)),
             self_signed_cache: ferrowl_ocpp::new_self_signed_cache(),
         }
     }
 
+    /// OC-R-124 — the tri-state connection status: not running → `Disconnected`; running and
+    /// actually bound → `Connected`; running but backing off from a failed bind → `Reconnecting`.
+    /// Supersedes the old `online` flag, which was set once `true` in `start()` and never
+    /// updated again, so it went stale the moment a live listener's bind later dropped and began
+    /// backing off.
+    pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
+        use crate::view::status_bar::ConnStatus;
+        match &self.server {
+            None => ConnStatus::Disconnected,
+            Some(s) if !s.is_running() => ConnStatus::Disconnected,
+            Some(_) => {
+                if self.bound_addr().is_some() {
+                    ConnStatus::Connected
+                } else {
+                    ConnStatus::Reconnecting
+                }
+            }
+        }
+    }
+
+    /// Thin wrapper over `connection_status()`, kept for `view/backend.rs`'s auto-bind guard
+    /// (`want_running && !is_online()`) — harmless to call `start()` again while reconnecting,
+    /// since `start()` itself no-ops once `self.server` is already `Some`.
     pub fn is_online(&self) -> bool {
-        self.online.load(Ordering::Relaxed)
+        self.connection_status() == crate::view::status_bar::ConnStatus::Connected
     }
 
     /// Bind the listening socket and spawn the accept loop with the caller-supplied inbound handler.
@@ -236,13 +255,11 @@ where
             .spawn(handler, |_s: String| async {})
             .await?;
         self.server = Some(server);
-        self.online.store(true, Ordering::Relaxed);
         Ok(binding)
     }
 
     /// Terminate the server task and every connection, if running.
     pub async fn stop(&mut self) -> Result<(), Error> {
-        self.online.store(false, Ordering::Relaxed);
         match self.server.take() {
             Some(s) => s.terminate().await,
             None => Ok(()),

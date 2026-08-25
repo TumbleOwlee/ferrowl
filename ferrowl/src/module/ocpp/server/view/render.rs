@@ -9,12 +9,10 @@ use ferrowl_ui::{
         ButtonState, ButtonStateBuilder, CodeInputFieldState, CodeInputFieldStateBuilder,
         SelectionState, SelectionStateBuilder, TableState, TableStateBuilder,
     },
-    style::{
-        ButtonStyle, InputFieldStyleBuilder, SelectionStyleBuilder, TableStyleBuilder, TextStyle,
-    },
+    style::{ButtonStyle, InputFieldStyleBuilder, SelectionStyleBuilder, TableStyleBuilder},
     widgets::{
         Button, ButtonBuilder, CodeInputField, CodeInputFieldBuilder, Selection, SelectionBuilder,
-        TableBuilder, TableEntry, TextBuilder, Widget,
+        TableBuilder, TableEntry, Widget,
     },
 };
 use ratatui::style::Style;
@@ -122,28 +120,10 @@ where
         );
         StatefulWidget::render(&self.code.widget, right_bottom, buf, &mut self.code.state);
 
-        // ONLINE/OFFLINE status line (with the bound address when running).
-        let online = self.backend.is_online();
-        let status_widget = TextBuilder::default()
-            .horizontal_alignment(HorizontalAlignment::Center)
-            .style(TextStyle {
-                general: Style::default()
-                    .bg(if online {
-                        COLOR_SCHEME.success
-                    } else {
-                        COLOR_SCHEME.error
-                    })
-                    .fg(COLOR_SCHEME.text_status)
-                    .bold(),
-            })
-            .build()
-            .expect("all required builder fields are set");
-        let mut status = if online {
-            format!("ONLINE  {}", self.backend.bound_addr().unwrap_or_default())
-        } else {
-            "OFFLINE".to_string()
-        };
-        StatefulWidget::render(&status_widget, status_area, buf, &mut status);
+        // OC-R-124 — tri-state CONNECTED/RECONNECTING/DISCONNECTED status line.
+        let status = self.backend.connection_status();
+        let addr = self.backend.bound_addr();
+        crate::view::status_bar::render_status_bar(status, addr.as_deref(), status_area, buf);
     }
 
     pub(super) fn render_overlay_impl(&mut self, frame: &mut Frame, area: Rect) {
