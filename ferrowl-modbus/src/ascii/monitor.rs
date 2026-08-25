@@ -3,7 +3,7 @@ use crate::common::serial_config_from;
 use crate::monitor::{MonitorEnd, SharedObservedTable, SharedRecordLog, drive_monitor};
 use crate::rtu::Config;
 use crate::server_core::wait_reconnect_backoff;
-use crate::{Error, LogFn, PathConflictCell, SerialError, ServerCommand};
+use crate::{ConnectedCell, Error, LogFn, PathConflictCell, SerialError, ServerCommand};
 
 // Workspace
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
@@ -51,7 +51,7 @@ impl MonitorBuilder {
         receiver: Receiver<ServerCommand>,
         log: L,
         status: St,
-    ) -> Result<JoinHandle<Result<(), Error>>, Error>
+    ) -> Result<(JoinHandle<Result<(), Error>>, ConnectedCell), Error>
     where
         L: LogFn + Clone,
         St: LogFn + Clone,
@@ -60,7 +60,8 @@ impl MonitorBuilder {
         let table = self.table.clone();
         let records = self.records.clone();
         let path_conflict = self.path_conflict.clone();
-        Ok(tokio::task::spawn(run(
+        let open = ConnectedCell::default();
+        let handle = tokio::task::spawn(run(
             config,
             table,
             records,
@@ -68,12 +69,15 @@ impl MonitorBuilder {
             log,
             status,
             path_conflict,
-        )))
+            open.clone(),
+        ));
+        Ok((handle, open))
     }
 }
 
 /// MB-R-141 — open the configured serial port receive-only and drive the monitor's decode/
 /// match loop, retrying the open with the shared backoff policy on failure (MB-R-130–134).
+#[allow(clippy::too_many_arguments)] // config/table/records/receiver/log/status/path_conflict/open
 async fn run<L, St>(
     config: Arc<RwLock<Config>>,
     table: SharedObservedTable,
@@ -82,6 +86,7 @@ async fn run<L, St>(
     log: L,
     status: St,
     path_conflict: PathConflictCell,
+    open: ConnectedCell,
 ) -> Result<(), Error>
 where
     L: LogFn + Clone,
@@ -98,6 +103,7 @@ where
         let activity = activity.clone();
         let receiver = &receiver;
         let path_conflict = path_conflict.clone();
+        let open = open.clone();
         async move {
             activity.store(false, Ordering::Relaxed);
             let guard = config.read().await;
@@ -155,6 +161,7 @@ where
                     reset: false,
                 },
                 Ok(transport) => {
+                    open.set(true);
                     let stream = transport.into_inner();
                     let reader = AduReader::<_, Ascii>::with_config(
                         stream,
@@ -162,7 +169,7 @@ where
                         transport_config,
                     );
                     let mut receiver = receiver.lock().await;
-                    match drive_monitor::<_, Ascii, _>(
+                    let end = drive_monitor::<_, Ascii, _>(
                         reader,
                         log.clone(),
                         table.clone(),
@@ -170,8 +177,9 @@ where
                         &activity,
                         &mut receiver,
                     )
-                    .await
-                    {
+                    .await;
+                    open.set(false);
+                    match end {
                         MonitorEnd::Terminated => AttemptOutcome::Done,
                         MonitorEnd::Failed(e) => AttemptOutcome::Failed {
                             error: Error::Server(e),
@@ -240,7 +248,17 @@ mod tests {
             Some("other-module".to_string())
         }));
 
-        let result = run(cfg, table, records, rx, sink(), sink(), path_conflict).await;
+        let result = run(
+            cfg,
+            table,
+            records,
+            rx,
+            sink(),
+            sink(),
+            path_conflict,
+            ConnectedCell::default(),
+        )
+        .await;
 
         assert!(
             matches!(result, Err(Error::PathConflict { .. })),
@@ -276,7 +294,17 @@ mod tests {
             }
         };
 
-        let _ = run(cfg, table, records, rx, log_sink, sink(), path_conflict).await;
+        let _ = run(
+            cfg,
+            table,
+            records,
+            rx,
+            log_sink,
+            sink(),
+            path_conflict,
+            ConnectedCell::default(),
+        )
+        .await;
 
         let logged = lines.lock().unwrap();
         assert!(
@@ -284,6 +312,43 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("already in use by module 'other-module'")),
             "expected a path-conflict log line, got: {logged:?}"
+        );
+    }
+
+    /// MB-R-152 — a serial-open attempt that never succeeds (a bad path, `reconnect: false` so
+    /// the task ends after one attempt) never flips the open cell true. See
+    /// `rtu::server::tests::ut_rtu_server_open_cell_stays_false_through_failed_attempt` for why
+    /// the "flips true while serving" half needs real serial hardware unavailable in CI.
+    #[tokio::test]
+    async fn ut_ascii_monitor_open_cell_stays_false_through_failed_attempt() {
+        let cfg = Arc::new(RwLock::new(config(
+            "/nonexistent/mb-r-152-ut-ascii-monitor-open-cell",
+        )));
+        let table: SharedObservedTable =
+            Arc::new(parking_lot::RwLock::new(ObservedTable::default()));
+        let records: SharedRecordLog = Arc::new(parking_lot::RwLock::new(RecordLog::default()));
+        let (_tx, rx) = mpsc::channel(1);
+        let open = ConnectedCell::default();
+
+        let result = run(
+            cfg,
+            table,
+            records,
+            rx,
+            sink(),
+            sink(),
+            PathConflictCell::default(),
+            open.clone(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a bad path with reconnect: false ends the task with an error"
+        );
+        assert!(
+            !open.get(),
+            "the open cell must never observe true when the port was never opened"
         );
     }
 }
