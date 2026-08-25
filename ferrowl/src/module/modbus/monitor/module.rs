@@ -53,6 +53,10 @@ pub struct ModbusMonitorModule {
     file_sink: FileSink,
     command_tx: Option<Sender<ServerCommand>>,
     task: Option<JoinHandle<Result<(), ferrowl_modbus::Error>>>,
+    /// MB-R-152 — the "serial port open" signal, mirroring `ServerHandle::open`
+    /// (`instance/handle.rs`, Shared) but read directly off the builder's returned
+    /// `ConnectedCell` rather than routed through an `Instance`.
+    open: ferrowl_modbus::ConnectedCell,
     /// MB-R-150 — the session-wide registry this instance's path-conflict check consults.
     /// Defaults to a private, unshared registry until `set_serial_paths` attaches the real
     /// session registry.
@@ -94,6 +98,7 @@ impl ModbusMonitorModule {
             file_sink,
             command_tx: None,
             task: None,
+            open: ferrowl_modbus::ConnectedCell::default(),
             serial_paths: SerialPathRegistry::default(),
         }
     }
@@ -148,6 +153,7 @@ impl ModbusMonitorModule {
             file_sink,
             command_tx: None,
             task: None,
+            open: ferrowl_modbus::ConnectedCell::default(),
             serial_paths: self.serial_paths,
         }
     }
@@ -170,7 +176,21 @@ impl ModbusMonitorModule {
     /// client/server module (a monitor is RTU/ASCII-only, so there is no bound TCP address to
     /// report instead).
     pub fn is_running(&self) -> bool {
-        self.command_tx.is_some()
+        self.task.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// MB-R-152 — see `Instance::connection_status` (`instance/mod.rs`, Shared) for the shared
+    /// derivation this mirrors.
+    pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
+        use crate::view::status_bar::ConnStatus;
+        if !self.is_running() {
+            return ConnStatus::Disconnected;
+        }
+        if self.open.get() {
+            ConnStatus::Connected
+        } else {
+            ConnStatus::Reconnecting
+        }
     }
 
     /// #219 — rebuild the on-disk `definitions` list (`MonitorDeviceConfig::definitions`) from
@@ -287,7 +307,7 @@ impl ModbusMonitorModule {
 
         let table = self.table.clone();
         let records = self.records.clone();
-        let handle = match net_config {
+        let (handle, open) = match net_config {
             MonitorNetConfig::Rtu(cfg) => {
                 let builder = ferrowl_modbus::rtu::MonitorBuilder::new(
                     Arc::new(RwLock::new(cfg)),
@@ -312,6 +332,7 @@ impl ModbusMonitorModule {
         let _ = status;
         self.command_tx = Some(tx);
         self.task = Some(handle);
+        self.open = open;
         // MB-R-150 — claim this instance's serial path so the registry can report it as a
         // conflict to any other instance that shares it.
         if let Some(path) = crate::module::modbus::build::endpoint_serial_path(&self.endpoint) {
@@ -343,6 +364,8 @@ impl ModbusMonitorModule {
         }
         // MB-R-150 — release unconditionally, mirroring `ModbusModule::stop`.
         self.serial_paths.release(&self.name);
+        // MB-R-152 — a stopped monitor must never read back a stale `true`.
+        self.open = ferrowl_modbus::ConnectedCell::default();
         Ok(())
     }
 }
@@ -572,6 +595,25 @@ mod tests {
 
     /// Manual-exercise addition (item 3) — `is_running` tracks the receive task's own
     /// started/stopped state, the ONLINE/OFFLINE signal for the status line.
+    /// MB-R-152 — the direct regression test for the truthfulness bug: `is_running()` must not
+    /// trust a stale `command_tx` alone once the task backing it has already finished, mirroring
+    /// `instance/mod.rs`'s own `send_command_on_server_is_invalid_operation` fixture (a hand-built
+    /// handle wrapping an already-finished `tokio::spawn`).
+    #[tokio::test]
+    async fn ut_monitor_is_running_false_after_task_ends_even_if_command_tx_set() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        let task = tokio::spawn(async { Ok(()) });
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        // Give the freshly spawned task a moment to actually finish before asserting.
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        module.command_tx = Some(sender);
+        module.task = Some(task);
+        assert!(
+            !module.is_running(),
+            "a finished task must not report running just because command_tx is still Some"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_is_running_tracks_start_stop() {
         let mut device = device_with_defs();
