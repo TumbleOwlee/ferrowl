@@ -137,6 +137,11 @@ pub struct Server<V: Version> {
 }
 
 impl<V: Version> Server<V> {
+    /// OC-R-124's task-alive signal, mirrors `cs::Client::is_running`.
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
     /// The bound local address (useful when the configured port was `0`) — `None` while the
     /// listener has never bound yet, or is currently backing off from a failed bind attempt
     /// (OC-R-083).
@@ -554,6 +559,63 @@ mod tests {
         assert!(
             activity.load(Ordering::Relaxed),
             "accept_loop must mark activity once it accepts a connection"
+        );
+    }
+
+    #[cfg(feature = "v1_6")]
+    #[tokio::test]
+    /// OC-R-124 — `is_running()` reports `true` while the server task is alive, and `false` once
+    /// it has ended (here, via an explicit `Command::Terminate` sent without consuming `self`, so
+    /// the handle stays available to poll afterward).
+    async fn ut_server_is_running_false_before_spawn_true_after_until_terminate() {
+        use crate::action::v1_6::V1_6;
+        use crate::security::new_self_signed_cache;
+
+        struct NoopHandler;
+        impl super::CsmsActionHandler<V1_6> for NoopHandler {
+            async fn handle_call(
+                &self,
+                _conn: super::ConnectionId,
+                _action: crate::action::v1_6::Action,
+            ) -> Result<crate::action::v1_6::Response, crate::CallError> {
+                Err(crate::CallError::new(
+                    crate::CallErrorCode::NotImplemented,
+                    "unsupported",
+                ))
+            }
+        }
+
+        let config = super::Config {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+            timeout_ms: 1_000,
+            reconnect: false,
+            basic_auth: None,
+            tls: None,
+        };
+        let server = super::ServerBuilder::<V1_6>::new(config, new_self_signed_cache())
+            .spawn(NoopHandler, |_s: String| async move {})
+            .await
+            .unwrap();
+
+        assert!(
+            server.is_running(),
+            "a freshly spawned server task must be running"
+        );
+
+        server.send(super::Command::Terminate).await.unwrap();
+
+        let mut running = true;
+        for _ in 0..50 {
+            running = server.is_running();
+            if !running {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            !running,
+            "the server task must stop running after Terminate"
         );
     }
 }
