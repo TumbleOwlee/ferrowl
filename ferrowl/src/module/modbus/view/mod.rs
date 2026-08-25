@@ -372,11 +372,7 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
-        use ratatui::{
-            layout::{Constraint, HorizontalAlignment, Layout},
-            widgets::StatefulWidget,
-        };
+        use ratatui::layout::{Constraint, Layout};
 
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
@@ -387,33 +383,15 @@ impl ModuleView for ModbusModuleView {
             .set_focused(self.view_focused && !self.overlay.is_active());
         self.table.render(content_area, frame.buffer_mut());
 
-        let online = self.module.is_instance_active();
-        {
-            let buf = frame.buffer_mut();
-            let status_widget = TextBuilder::default()
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .style(TextStyle {
-                    general: ratatui::prelude::Style::default()
-                        .bg(if online {
-                            COLOR_SCHEME.success
-                        } else {
-                            COLOR_SCHEME.error
-                        })
-                        .fg(COLOR_SCHEME.text_status)
-                        .bold(),
-                })
-                .build()
-                .expect("all required builder fields are set");
-            let mut label = if online {
-                match self.module.bound_addr() {
-                    Some(addr) => format!("ONLINE  {addr}"),
-                    None => "ONLINE".to_string(),
-                }
-            } else {
-                "OFFLINE".to_string()
-            };
-            StatefulWidget::render(&status_widget, status_area, buf, &mut label);
-        }
+        // MB-R-137/153 — tri-state CONNECTED/RECONNECTING/DISCONNECTED status line.
+        let status = self.module.connection_status();
+        let addr = self.module.bound_addr().map(|a| a.to_string());
+        crate::view::status_bar::render_status_bar(
+            status,
+            addr.as_deref(),
+            status_area,
+            frame.buffer_mut(),
+        );
     }
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
@@ -1565,7 +1543,108 @@ mod tests {
         // Table title, a register row, and the not-started status line are all drawn.
         assert!(text.contains("Register"), "missing table title:\n{text}");
         assert!(text.contains("hold"), "missing register row:\n{text}");
-        assert!(text.contains("OFFLINE"), "missing status line:\n{text}");
+        assert!(
+            text.contains("DISCONNECTED"),
+            "missing status line:\n{text}"
+        );
+    }
+
+    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — mirrors
+    /// `instance/mod.rs`'s own `free_port()` fixture.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    #[tokio::test]
+    /// MB-R-137 — a client view against an unreachable TCP peer shows RECONNECTING (not
+    /// DISCONNECTED) once its task starts backing off, distinguishing "task is running but not
+    /// currently connected" from "not started/stopped".
+    async fn it_modbus_client_view_shows_reconnecting_while_backing_off() {
+        let mut device = empty_device();
+        device.timeout_ms = Some(200);
+        device.reconnect = Some(true);
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: free_port(),
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        let area = Rect::new(0, 0, 120, 24);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        let mut text = String::new();
+        for _ in 0..100 {
+            term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+            text = buffer_text(term.backend().buffer());
+            if text.contains("RECONNECTING") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            text.contains("RECONNECTING"),
+            "missing status line:\n{text}"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test]
+    /// MB-R-153 — a server view whose bind target is already occupied shows RECONNECTING (not
+    /// DISCONNECTED) while its task backs off retrying the bind, per the occupier idiom
+    /// established in `instance/mod.rs`'s `it_server_stop_on_backing_off_task_ends_promptly`.
+    async fn it_modbus_server_view_shows_reconnecting_while_bind_backs_off() {
+        let port = free_port();
+        let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+
+        let mut device = empty_device();
+        device.timeout_ms = Some(200);
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        let area = Rect::new(0, 0, 120, 24);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        let mut text = String::new();
+        for _ in 0..100 {
+            term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+            text = buffer_text(term.backend().buffer());
+            if text.contains("RECONNECTING") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            text.contains("RECONNECTING"),
+            "missing status line:\n{text}"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
     }
 
     #[test]

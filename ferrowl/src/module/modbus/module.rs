@@ -500,6 +500,10 @@ impl ModbusModule {
         Ok(())
     }
 
+    /// MB-R-137/153 — superseded as the view-facing signal by `connection_status()` (which
+    /// distinguishes running-but-not-connected from not-running), but kept as the plain
+    /// task-alive check its own existing tests still assert on directly.
+    #[allow(dead_code)]
     pub fn is_instance_active(&self) -> bool {
         self.instance.active()
     }
@@ -510,6 +514,11 @@ impl ModbusModule {
     /// port when the configured port was `0` (mirrors OCPP's own CSMS status line, OC-R-083).
     pub fn bound_addr(&self) -> Option<std::net::SocketAddr> {
         self.instance.bound_addr()
+    }
+
+    /// MB-R-137/153 — the tri-state connection status shown by this module's status bar.
+    pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
+        self.instance.connection_status()
     }
 }
 

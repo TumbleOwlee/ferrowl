@@ -264,7 +264,7 @@ mod tests {
             range: Range::new(0, 1),
         }]));
         let (tx, rx) = tokio::sync::mpsc::channel::<Command>(4);
-        let handle = tcp::ClientBuilder::new(
+        let (handle, _connected) = tcp::ClientBuilder::new(
             std::sync::Arc::new(tokio::sync::RwLock::new(config)),
             operations,
             mem,
