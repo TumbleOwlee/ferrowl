@@ -121,7 +121,7 @@ async fn ascii_over_tcp_client_server_tls_roundtrip() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ascii_over_tcp::ClientBuilder::new(
+    let (client, _connected) = ascii_over_tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port, client_tls))),
         operations,
         cli_mem.clone(),

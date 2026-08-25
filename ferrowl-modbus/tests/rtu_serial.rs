@@ -110,7 +110,7 @@ async fn rtu_client_open_failure_reconnect_false_dies() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = rtu::ClientBuilder::new(
+    let (client, _connected) = rtu::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(false))),
         operations,
         empty_mem(),
@@ -132,7 +132,7 @@ async fn rtu_client_open_failure_reconnect_false_dies() {
 async fn rtu_client_open_failure_reconnect_true_retries() {
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = rtu::ClientBuilder::new(
+    let (client, _connected) = rtu::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(true))),
         operations,
         empty_mem(),

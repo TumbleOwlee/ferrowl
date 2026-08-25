@@ -13,6 +13,7 @@ pub mod bridge;
 mod client_core;
 mod command;
 mod common;
+mod conn_state;
 mod error;
 mod key;
 mod log;
@@ -29,6 +30,7 @@ mod transport;
 pub mod udp;
 
 pub use command::{Command, ServerCommand};
+pub use conn_state::ConnectedCell;
 pub use error::{Error, ModbusError, SerialError, TcpError};
 pub use key::{Key, KeyParams, SlaveKey};
 pub use log::LogFn;

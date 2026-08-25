@@ -113,7 +113,7 @@ async fn ascii_client_open_failure_reconnect_false_dies() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = ascii::ClientBuilder::new(
+    let (client, _connected) = ascii::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(false))),
         operations,
         empty_mem(),
@@ -136,7 +136,7 @@ async fn ascii_client_open_failure_reconnect_false_dies() {
 async fn ascii_client_open_failure_reconnect_true_retries() {
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ascii::ClientBuilder::new(
+    let (client, _connected) = ascii::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(true))),
         operations,
         empty_mem(),
