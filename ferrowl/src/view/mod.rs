@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod log;
+pub mod status_bar;
 pub mod tabs;
 pub mod text;
 
