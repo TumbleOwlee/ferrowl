@@ -577,6 +577,68 @@ mod tests {
         ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-123 — a client view against an unreachable CSMS with reconnect enabled shows
+    /// RECONNECTING (not DISCONNECTED) once its task starts backing off, via
+    /// `render_status_bar`'s `COLOR_SCHEME.warning` background.
+    async fn it_cs_view_shows_reconnecting_while_backing_off() {
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        // A bound-then-dropped ephemeral port: nothing answers on it afterward.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously against an unreachable CSMS");
+
+        for _ in 0..100 {
+            if v.backend.connection_status() == ConnStatus::Reconnecting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            v.backend.connection_status(),
+            ConnStatus::Reconnecting,
+            "task must be backing off, never Connected, against an unreachable CSMS"
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| v.render(frame, frame.area()))
+            .unwrap();
+        let last_row = terminal.backend().buffer().area.height - 1;
+        let contents: String = (0..120)
+            .map(|x| {
+                terminal.backend().buffer()[(x, last_row)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            contents.contains("RECONNECTING"),
+            "backing-off client must show RECONNECTING: {contents:?}"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(0, last_row)].bg,
+            COLOR_SCHEME.warning,
+            "RECONNECTING row must use the warning background"
+        );
+
+        v.backend.stop().await.expect("cleanup stop");
+    }
+
     /// CSMS handler answering every action used by these tests and recording the ordered list of
     /// received action names into `calls`, notifying `notify` once `StatusNotification` lands.
     struct RecordingCsms16 {
