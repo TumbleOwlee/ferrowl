@@ -1244,6 +1244,7 @@ mod tests {
             set_input(&mut sub.value, "1");
         }
         dialog.confirm_add_dialog();
+        dialog.open_add_dialog();
         {
             let sub = dialog.add_dialog.as_mut().unwrap();
             set_input(&mut sub.label, "off");
