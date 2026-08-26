@@ -32,7 +32,7 @@ IDs are stable and append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-030** — OCPP shall support TLS (including mutual TLS) and HTTP Basic Auth. Modbus/TCP shall optionally support TLS, including mutual TLS, via an opt-in `tls` config field (MB-R-104–MB-R-111). Modbus RTU has no transport security, matching the protocol's own lack of one.
 
-**NF-R-031** — Lua sim scripts shall run in a restricted sandbox with no access to the host filesystem, shell, environment, or dynamic code loading. (Specified in [`scripting/`](./scripting/), SC-R-006.) There is no CPU-time or memory ceiling — a separate, known limitation.
+**NF-R-031** — Lua sim scripts shall run in a restricted sandbox with no access to the host filesystem, shell, environment, or dynamic code loading. (Specified in [`scripting/`](./scripting/), SC-R-006.) A script's wall-clock execution time is capped (SC-R-034); there is no memory ceiling — a separate, known limitation.
 
 **NF-R-032** — A credential comparison performed as part of authenticating a peer (e.g. OCPP CSMS Basic Auth) shall run in constant time with respect to the secret value, so a wrong guess leaks no timing signal about where it first diverges from the expected value.
 
