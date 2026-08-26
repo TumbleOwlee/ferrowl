@@ -6,7 +6,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_codec::Kind;
-use ferrowl_modbus::monitor::{MonitorRecord, RecordStatus};
+use ferrowl_modbus::monitor::{MonitorRecord, RECORD_RING_CAPACITY, RecordStatus};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::{HandleEvents, SetFocus};
@@ -851,7 +851,11 @@ fn memory_table_rows(
                 .join(" ");
             let ascii: String = cells.iter().map(memory_cell_char).collect();
             let last = cells.len().saturating_sub(1);
-            let hex_spans = cells
+            // Gate3#4 perf: compute each cell's recency/value-class color once and reuse it for
+            // both the Hex and Ascii spans, instead of two independent `memory_cell_style` calls
+            // per cell (it's a pure function of its arguments, so both calls always agreed on the
+            // color — computing it twice was wasted work, not divergent behavior).
+            let (hex_spans, ascii_spans): (Vec<_>, Vec<_>) = cells
                 .iter()
                 .enumerate()
                 .map(|(i, cell)| {
@@ -864,34 +868,23 @@ fn memory_table_rows(
                         records,
                         now,
                     );
-                    let text = if unit_per_cell == 8 {
+                    let style = ratatui::style::Style::default().fg(color);
+                    let hex_text = if unit_per_cell == 8 {
                         format!("{:02x}", cell.value)
                     } else {
                         format!("{:04x}", cell.value)
                     };
-                    let text = if i == last { text } else { format!("{text} ") };
-                    (text, ratatui::style::Style::default().fg(color))
-                })
-                .collect();
-            let ascii_spans = cells
-                .iter()
-                .enumerate()
-                .map(|(i, cell)| {
-                    let cell_address = address.saturating_add((i as u16) * unit_per_cell);
-                    let color = memory_cell_style(
-                        kind.clone(),
-                        cell_address,
-                        unit_per_cell,
-                        cell,
-                        records,
-                        now,
-                    );
+                    let hex_text = if i == last {
+                        hex_text
+                    } else {
+                        format!("{hex_text} ")
+                    };
                     (
-                        memory_cell_char(cell).to_string(),
-                        ratatui::style::Style::default().fg(color),
+                        (hex_text, style),
+                        (memory_cell_char(cell).to_string(), style),
                     )
                 })
-                .collect();
+                .unzip();
             MemoryRow {
                 kind: kind.to_string(),
                 address: format!("{address:04x}"),
@@ -948,6 +941,17 @@ pub struct ModbusMonitorModuleView {
     /// a rebuilt `self.module` (`:reload`, `confirm_edit`) can be reattached to the same registry
     /// instead of silently falling back to a private default.
     serial_paths: crate::module::modbus::SerialPathRegistry,
+    /// UI-R-062 perf: which unit id `messages_table`'s rows were last built for, which
+    /// `SharedRecordLog` instance they came from (Arc identity — `self.module.records()` returns
+    /// a fresh clone of a *different* underlying log after `:reload`/`confirm_edit` rebuild
+    /// `self.module`, even if the new log's generation coincidentally matches or exceeds the old
+    /// one; comparing generations alone can't tell those two cases apart), and the generation
+    /// observed at that time. `refresh()` skips rebuilding entirely when all three are unchanged,
+    /// and formats only the newly-arrived tail when just the generation moved on the same log.
+    /// `None`/`0` before the first refresh.
+    cached_messages_unit: Option<UnitId>,
+    cached_messages_log: Option<ferrowl_modbus::monitor::SharedRecordLog>,
+    cached_messages_generation: u64,
 }
 
 #[allow(dead_code)] // forward-declared; see struct's note
@@ -969,6 +973,9 @@ impl ModbusMonitorModuleView {
             compact: true,
             sort: None,
             serial_paths: crate::module::modbus::SerialPathRegistry::default(),
+            cached_messages_unit: None,
+            cached_messages_log: None,
+            cached_messages_generation: 0,
         }
     }
 
@@ -1577,20 +1584,81 @@ impl ModuleView for ModbusMonitorModuleView {
                 self.selected = self.unit_ids.len().saturating_sub(1);
             }
 
-            let rows = match self.selected_unit() {
-                Some(unit) => {
-                    let now = std::time::Instant::now();
-                    let wall_now = std::time::SystemTime::now();
-                    let mut records = self.module.records().read().records_for(unit);
-                    records.reverse(); // most-recent-first (UI-R-062)
-                    records
-                        .iter()
-                        .map(|record| message_row(unit, record, now, wall_now))
-                        .collect()
+            match self.selected_unit() {
+                None => {
+                    if self.cached_messages_unit.is_some() {
+                        self.messages_table.state.set_values(Vec::new());
+                        self.cached_messages_unit = None;
+                        self.cached_messages_log = None;
+                        self.cached_messages_generation = 0;
+                    }
                 }
-                None => Vec::new(),
-            };
-            self.messages_table.state.set_values(rows);
+                Some(unit) => {
+                    let records_log = self.module.records();
+                    let generation = records_log.read().generation_for(unit);
+                    // The cache is only valid for the exact same (unit, underlying RecordLog
+                    // instance) it was last built from. A `:reload`/`confirm_edit` rebuilds
+                    // `self.module`, so `self.module.records()` returns a clone of a *different*
+                    // Arc afterward — its generation can coincidentally land at or above the old
+                    // cached value even though every record it holds is new, so identity (`Arc::
+                    // ptr_eq`), not just the generation number, is what must gate the cache.
+                    let same_source = self.cached_messages_unit == Some(unit)
+                        && self
+                            .cached_messages_log
+                            .as_ref()
+                            .is_some_and(|prev| std::sync::Arc::ptr_eq(prev, &records_log));
+                    let full_rebuild = !same_source || generation < self.cached_messages_generation;
+                    if full_rebuild {
+                        let now = std::time::Instant::now();
+                        let wall_now = std::time::SystemTime::now();
+                        let mut records = records_log.read().records_for(unit);
+                        records.reverse(); // most-recent-first (UI-R-062)
+                        let rows: Vec<MessageRow> = records
+                            .iter()
+                            .map(|record| message_row(unit, record, now, wall_now))
+                            .collect();
+                        self.messages_table.state.set_values(rows);
+                    } else {
+                        let delta = generation - self.cached_messages_generation;
+                        if delta > 0 {
+                            if delta as usize >= RECORD_RING_CAPACITY {
+                                // Bigger than the whole ring since last tick — equivalent to a
+                                // full rebuild (every currently-cached row would be stale/evicted
+                                // anyway).
+                                let now = std::time::Instant::now();
+                                let wall_now = std::time::SystemTime::now();
+                                let mut records = records_log.read().records_for(unit);
+                                records.reverse();
+                                let rows: Vec<MessageRow> = records
+                                    .iter()
+                                    .map(|record| message_row(unit, record, now, wall_now))
+                                    .collect();
+                                self.messages_table.state.set_values(rows);
+                            } else {
+                                let now = std::time::Instant::now();
+                                let wall_now = std::time::SystemTime::now();
+                                let mut new_records =
+                                    records_log.read().recent_for(unit, delta as usize);
+                                // most-recent-first, matching the cached rows' own order.
+                                new_records.reverse();
+                                let mut rows: Vec<MessageRow> = new_records
+                                    .iter()
+                                    .map(|record| message_row(unit, record, now, wall_now))
+                                    .collect();
+                                rows.extend(self.messages_table.state.values().iter().cloned());
+                                rows.truncate(RECORD_RING_CAPACITY);
+                                self.messages_table.state.set_values(rows);
+                            }
+                        }
+                        // delta == 0: nothing changed since the last tick — skip entirely, zero
+                        // `message_row`/`format!` calls. This is the fix's whole point for an
+                        // idle tab.
+                    }
+                    self.cached_messages_unit = Some(unit);
+                    self.cached_messages_log = Some(records_log);
+                    self.cached_messages_generation = generation;
+                }
+            }
         })
     }
 
@@ -3108,6 +3176,236 @@ mod tests {
         assert_eq!(rows[0].values()[6], "[1 0 1]");
     }
 
+    /// (perf, no spec ID) — a second `refresh()` tick with no new records pushed since the first
+    /// leaves the Messages table's rows unchanged (the generation-gated skip must not corrupt or
+    /// duplicate rows).
+    #[tokio::test]
+    async fn ut_refresh_skips_rebuild_when_generation_unchanged() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(Kind::HoldingRegister, 10, 1, None, None, vec![7])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+
+        v.refresh().await;
+        let first: Vec<[String; 7]> = v
+            .messages_table
+            .state
+            .values()
+            .iter()
+            .map(|r| r.values())
+            .collect();
+        v.refresh().await;
+        let second: Vec<[String; 7]> = v
+            .messages_table
+            .state
+            .values()
+            .iter()
+            .map(|r| r.values())
+            .collect();
+        assert_eq!(first, second);
+    }
+
+    /// (perf, no spec ID) — a `refresh()` tick after new records were pushed appends only the new
+    /// rows (most-recent-first), leaving the previously-rendered rows' content untouched.
+    #[tokio::test]
+    async fn ut_refresh_incremental_appends_only_new_records_most_recent_first() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(Kind::HoldingRegister, 10, 1, None, None, vec![7])),
+                std::time::Duration::from_secs(5),
+            ),
+        );
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::WriteSingleRegister,
+                Some(shape(Kind::HoldingRegister, 20, 1, None, None, vec![9])),
+                std::time::Duration::from_secs(1),
+            ),
+        );
+        v.refresh().await;
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].values()[3], "WriteSingleRegister");
+        assert_eq!(rows[1].values()[3], "ReadHoldingRegisters");
+        let previous_rows: Vec<[String; 7]> = rows.iter().map(|r| r.values()).collect();
+
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadCoils,
+                Some(shape(Kind::Coil, 0, 1, None, None, vec![1])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+        v.refresh().await;
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].values()[3], "ReadCoils", "newest record first");
+        let trailing: Vec<[String; 7]> = rows[1..].iter().map(|r| r.values()).collect();
+        assert_eq!(
+            trailing, previous_rows,
+            "previously-rendered rows must stay byte-identical, not reformatted"
+        );
+    }
+
+    /// (perf, no spec ID) — switching the selected unit id forces a full rebuild (the cache is
+    /// scoped to a single unit id at a time), rather than showing the previously selected unit's
+    /// leftover cached rows.
+    #[tokio::test]
+    async fn ut_refresh_full_rebuild_when_selected_unit_changes() {
+        let mut v = view();
+        seed_unit(&v, UnitId(3));
+        seed_unit(&v, UnitId(5));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(Kind::HoldingRegister, 1, 1, None, None, vec![1])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+        v.module.records().write().push(
+            UnitId(5),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadInputRegisters,
+                Some(shape(Kind::InputRegister, 2, 1, None, None, vec![2])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+        v.selected = 0;
+        v.refresh().await;
+        assert_eq!(v.selected_unit(), Some(UnitId(3)));
+        assert_eq!(
+            v.messages_table.state.values()[0].values()[3],
+            "ReadHoldingRegisters"
+        );
+
+        v.selected = 1;
+        v.refresh().await;
+        assert_eq!(v.selected_unit(), Some(UnitId(5)));
+        let rows = v.messages_table.state.values();
+        assert_eq!(
+            rows.len(),
+            1,
+            "unit 5's own single record, not unit 3's leftover cache"
+        );
+        assert_eq!(rows[0].values()[3], "ReadInputRegisters");
+    }
+
+    /// (perf, no spec ID) — pushing more records than the ring's own capacity between two
+    /// `refresh()` ticks forces a full rebuild (the incremental delta path is unsafe once the
+    /// delta meets/exceeds `RECORD_RING_CAPACITY` — every cached row would be stale/evicted
+    /// anyway); the ring's own 200-cap (MB-R-146) is still respected.
+    #[tokio::test]
+    async fn ut_refresh_full_rebuild_when_ring_exceeds_capacity_since_last_tick() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(Kind::HoldingRegister, 0, 1, None, None, vec![0])),
+                std::time::Duration::from_secs(10),
+            ),
+        );
+        v.refresh().await;
+        assert_eq!(v.messages_table.state.values().len(), 1);
+
+        for i in 0..RECORD_RING_CAPACITY {
+            v.module.records().write().push(
+                UnitId(3),
+                shaped_record(
+                    RecordStatus::Ok,
+                    ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                    Some(shape(
+                        Kind::HoldingRegister,
+                        i as u16,
+                        1,
+                        None,
+                        None,
+                        vec![i as u16],
+                    )),
+                    std::time::Duration::from_millis(1),
+                ),
+            );
+        }
+        v.refresh().await;
+        let rows = v.messages_table.state.values();
+        assert_eq!(rows.len(), RECORD_RING_CAPACITY, "ring cap respected");
+        assert_eq!(
+            rows[0].values()[4],
+            (RECORD_RING_CAPACITY - 1).to_string(),
+            "newest pushed record renders first"
+        );
+    }
+
+    /// (perf, no spec ID) — a module replacement (mirrors what `:reload`/`confirm_edit` do: a
+    /// fresh `ModbusMonitorModule`, hence a fresh, empty `RecordLog` whose generation drops back
+    /// to 0) must not panic (no `u64` underflow computing the generation delta) and must show
+    /// only the fresh module's own records, not a stale mix with the old cache.
+    #[tokio::test]
+    async fn ut_refresh_handles_generation_drop_after_module_replacement_without_panicking() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                Some(shape(Kind::HoldingRegister, 0, 1, None, None, vec![0])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+        v.refresh().await;
+        assert_eq!(v.messages_table.state.values().len(), 1);
+
+        v.module = ModbusMonitorModule::new(&spec(), &device());
+        seed_unit(&v, UnitId(3));
+        v.module.records().write().push(
+            UnitId(3),
+            shaped_record(
+                RecordStatus::Ok,
+                ferrowl_modbus::FunctionCode::ReadCoils,
+                Some(shape(Kind::Coil, 0, 1, None, None, vec![1])),
+                std::time::Duration::from_millis(100),
+            ),
+        );
+        v.refresh().await;
+        let rows = v.messages_table.state.values();
+        assert_eq!(
+            rows.len(),
+            1,
+            "fresh module's own single record, not a stale mix"
+        );
+        assert_eq!(rows[0].values()[3], "ReadCoils");
+    }
+
     /// Gate3#2 — the Time column renders the full wall-clock timestamp (same
     /// `crate::view::log::format_timestamp` format the log pane already uses), not a relative
     /// "Xs ago" string.
@@ -3358,6 +3656,27 @@ mod tests {
             rows[0].hex_spans[0].1,
             Style::default().fg(COLOR_SCHEME.warning)
         );
+    }
+
+    /// (perf, no spec ID) — `memory_table_rows` computes each cell's recency/value-class color
+    /// once and reuses it for both the Hex and Ascii spans (was computed twice, independently,
+    /// per cell); a mix of unobserved, observed-zero, observed-printable, and observed
+    /// -non-printable cells all still agree between the two columns.
+    #[test]
+    fn ut_memory_table_rows_hex_and_ascii_spans_share_the_same_color_per_cell() {
+        // Register kind: 8 cells/line. Addresses 0,1,2 observed (zero, printable 'A', non
+        // -printable), addresses 3..8 left unobserved.
+        let lines =
+            memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 0), (1, 65), (2, 300)])]);
+        let rows = memory_table_rows(&lines, &[], std::time::Instant::now());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].hex_spans.len(), 8);
+        for i in 0..8 {
+            assert_eq!(
+                rows[0].hex_spans[i].1, rows[0].ascii_spans[i].1,
+                "cell {i}'s hex and ascii spans must share the same computed color"
+            );
+        }
     }
 
     /// UI-R-063 — two non-address-contiguous lines render back-to-back, with no separator row
