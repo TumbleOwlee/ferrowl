@@ -508,6 +508,33 @@ mod tests {
         assert_eq!(cfg.reconnect, None);
     }
 
+    #[test]
+    /// CS-R-022 — a device-config file's `version` field is informational only: an
+    /// arbitrary/stale version string and a missing `version` field both load to the same
+    /// non-version fields — the field is never consulted by the load path (same semantics
+    /// as CS-R-018's session-level `version`).
+    fn ut_device_config_version_field_not_consulted_on_load() {
+        let with_path = std::env::temp_dir().join("ferrowl_device_stale_version.toml");
+        let with_path = with_path.to_str().unwrap();
+        std::fs::write(
+            with_path,
+            "version = \"0.0.1-does-not-exist\"\ntimeout_ms = 2000\ndefinitions = {}\n",
+        )
+        .unwrap();
+        let without_path = std::env::temp_dir().join("ferrowl_device_no_version.toml");
+        let without_path = without_path.to_str().unwrap();
+        std::fs::write(without_path, "timeout_ms = 2000\ndefinitions = {}\n").unwrap();
+
+        let with: DeviceConfig = Converter::load(with_path, FileType::Toml).unwrap();
+        let without: DeviceConfig = Converter::load(without_path, FileType::Toml).unwrap();
+        assert_eq!(with.version.as_deref(), Some("0.0.1-does-not-exist"));
+        assert_eq!(without.version, None);
+        assert_eq!(with.timeout_ms, without.timeout_ms);
+        assert_eq!(with.definitions, without.definitions);
+        assert_eq!(with.scripts, without.scripts);
+        assert_eq!(with.script_interval, without.script_interval);
+    }
+
     // An old-format device config file (predating `script_interval`) must still load, with
     // `script_interval` defaulting to 1.0.
     #[test]
