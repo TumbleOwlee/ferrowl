@@ -58,6 +58,8 @@ what those surfaces read and write.
 
 **CS-R-021** — The split between the two files shall be: per-instance wire addressing (name, role, endpoint) lives in the session entry; everything that describes the device type — register/variable model, timing, scripts, security — lives in the device-config file. The device-config field sets are specified in the Modbus and OCPP areas, not here.
 
+*Coverage note: CS-R-020 and CS-R-021 are structural/definitional — the split is a Rust-type-level fact (`Session` vs. `DeviceConfig` are distinct structs with disjoint field sets) rather than an independently testable runtime behavior. Their content is exercised by CS-R-004's cross-encoding device round-trip, CS-R-033's session round-trip, and CS-R-015's instance-vs-device field-split assertions; no dedicated test is added for the umbrella statement itself.*
+
 **CS-R-022** — A device-config file shall also carry an optional, informational `version` string with the same semantics as CS-R-018: stamped on save, never branched on.
 
 **CS-R-023** — A device-config file shall load even when it predates fields added in later releases: every field the loader recognizes shall have a default so that an older file's missing fields take their defaults rather than failing the load.
