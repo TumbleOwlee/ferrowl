@@ -6,7 +6,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_codec::Kind;
-use ferrowl_modbus::monitor::{MonitorRecord, RECORD_RING_CAPACITY, RecordStatus};
+use ferrowl_modbus::monitor::{MonitorRecord, RECORD_RING_CAPACITY, RecordStatus, SharedRecordLog};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::{HandleEvents, SetFocus};
@@ -950,7 +950,7 @@ pub struct ModbusMonitorModuleView {
     /// and formats only the newly-arrived tail when just the generation moved on the same log.
     /// `None`/`0` before the first refresh.
     cached_messages_unit: Option<UnitId>,
-    cached_messages_log: Option<ferrowl_modbus::monitor::SharedRecordLog>,
+    cached_messages_log: Option<SharedRecordLog>,
     cached_messages_generation: u64,
 }
 
@@ -1595,7 +1595,6 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
                 Some(unit) => {
                     let records_log = self.module.records();
-                    let generation = records_log.read().generation_for(unit);
                     // The cache is only valid for the exact same (unit, underlying RecordLog
                     // instance) it was last built from. A `:reload`/`confirm_edit` rebuilds
                     // `self.module`, so `self.module.records()` returns a clone of a *different*
@@ -1607,11 +1606,23 @@ impl ModuleView for ModbusMonitorModuleView {
                             .cached_messages_log
                             .as_ref()
                             .is_some_and(|prev| std::sync::Arc::ptr_eq(prev, &records_log));
+
+                    // A single read guard spans both the generation read and the records read
+                    // below (whichever branch runs) — the modbus receive-loop task pushes to this
+                    // same `RecordLog` concurrently (it's on the app's multi-threaded runtime), so
+                    // two separate `.read()` acquisitions would leave a window for a push to land
+                    // between them: the generation observed would then be stale-low relative to
+                    // the rows already fetched (which already include that push), producing a
+                    // duplicate row once the next tick's delta re-fetches it. One guard held
+                    // across both reads makes them see the same snapshot, atomically.
+                    let guard = records_log.read();
+                    let generation = guard.generation_for(unit);
                     let full_rebuild = !same_source || generation < self.cached_messages_generation;
                     if full_rebuild {
                         let now = std::time::Instant::now();
                         let wall_now = std::time::SystemTime::now();
-                        let mut records = records_log.read().records_for(unit);
+                        let mut records = guard.records_for(unit);
+                        drop(guard);
                         records.reverse(); // most-recent-first (UI-R-062)
                         let rows: Vec<MessageRow> = records
                             .iter()
@@ -1627,7 +1638,8 @@ impl ModuleView for ModbusMonitorModuleView {
                                 // anyway).
                                 let now = std::time::Instant::now();
                                 let wall_now = std::time::SystemTime::now();
-                                let mut records = records_log.read().records_for(unit);
+                                let mut records = guard.records_for(unit);
+                                drop(guard);
                                 records.reverse();
                                 let rows: Vec<MessageRow> = records
                                     .iter()
@@ -1637,8 +1649,8 @@ impl ModuleView for ModbusMonitorModuleView {
                             } else {
                                 let now = std::time::Instant::now();
                                 let wall_now = std::time::SystemTime::now();
-                                let mut new_records =
-                                    records_log.read().recent_for(unit, delta as usize);
+                                let mut new_records = guard.recent_for(unit, delta as usize);
+                                drop(guard);
                                 // most-recent-first, matching the cached rows' own order.
                                 new_records.reverse();
                                 let mut rows: Vec<MessageRow> = new_records
@@ -1649,6 +1661,8 @@ impl ModuleView for ModbusMonitorModuleView {
                                 rows.truncate(RECORD_RING_CAPACITY);
                                 self.messages_table.state.set_values(rows);
                             }
+                        } else {
+                            drop(guard);
                         }
                         // delta == 0: nothing changed since the last tick — skip entirely, zero
                         // `message_row`/`format!` calls. This is the fix's whole point for an
@@ -3404,6 +3418,57 @@ mod tests {
             "fresh module's own single record, not a stale mix"
         );
         assert_eq!(rows[0].values()[3], "ReadCoils");
+    }
+
+    /// (perf, no spec ID) — regression: `refresh()` must read a unit's generation and its
+    /// records/recent-tail off exactly *one* `RecordLog` read guard, not two separate
+    /// acquisitions. Two separate acquisitions leave a window where a concurrent push (the
+    /// modbus receive-loop task runs on the same multi-threaded runtime and pushes independently
+    /// of the view's tick) can land between them: the cached generation observed would then be
+    /// stale-low relative to the rows already fetched (which already include that push), so the
+    /// next tick's delta computation re-fetches and prepends a record that's already present —
+    /// a duplicate row lingering until ring-cap eviction. Drives real concurrent pushes from a
+    /// spawned OS thread (not a cooperative async task — the actual race is at the
+    /// `parking_lot::RwLock` level, independent of the tokio scheduler) while repeatedly calling
+    /// `refresh()`, and asserts no duplicate address ever appears in the final Messages table.
+    #[tokio::test]
+    async fn ut_refresh_never_duplicates_rows_under_concurrent_pushes() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        seed_unit(&v, UnitId(3));
+
+        const PUSHES: u16 = 2000;
+        let records_log = v.module.records();
+        let pusher = std::thread::spawn(move || {
+            for i in 0..PUSHES {
+                records_log.write().push(
+                    UnitId(3),
+                    shaped_record(
+                        RecordStatus::Ok,
+                        ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+                        Some(shape(Kind::HoldingRegister, i, 1, None, None, vec![i])),
+                        std::time::Duration::from_millis(0),
+                    ),
+                );
+            }
+        });
+
+        for _ in 0..PUSHES {
+            v.refresh().await;
+        }
+        pusher.join().unwrap();
+        v.refresh().await;
+
+        let rows = v.messages_table.state.values();
+        let addresses: Vec<String> = rows.iter().map(|r| r.values()[4].clone()).collect();
+        let unique: std::collections::HashSet<&String> = addresses.iter().collect();
+        assert_eq!(
+            addresses.len(),
+            unique.len(),
+            "no duplicate address should ever appear in the Messages table despite concurrent \
+             pushes racing refresh()'s reads: {addresses:?}"
+        );
     }
 
     /// Gate3#2 — the Time column renders the full wall-clock timestamp (same
