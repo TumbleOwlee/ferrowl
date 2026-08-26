@@ -331,6 +331,10 @@ mod tests {
 
     #[test]
     /// CS-R-033 — a session file round-trips its module instances, scripts, and interval.
+    /// CS-R-010 — the round-tripped `Session` exercises all four envelope fields (`version`,
+    /// `modules`, `scripts`, `interval`) via `sample()`.
+    /// CS-R-015 — each round-tripped `ModuleSpec` carries only `name`/`device`/`role`/`endpoint`
+    /// (no register table, timing, TLS, or OCPP version/role field exists on the type to lose).
     fn ut_session_roundtrip() {
         let original = sample();
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -346,11 +350,70 @@ mod tests {
     // `scripts` defaulting to empty and `interval` to 1.0.
     #[test]
     /// CS-R-012 — a module entry with no `type` tag loads as modbus.
+    /// CS-R-016 — a session file lacking a `scripts` field loads with an empty list.
     fn ut_session_old_format_compat() {
         let json = r#"{"modules":[]}"#;
         let session: Session = serde_json::from_str(json).unwrap();
         assert!(session.scripts.is_empty());
         assert_eq!(session.interval, 1.0);
+    }
+
+    #[test]
+    /// CS-R-018 — the session `version` field is informational only: an arbitrary/stale
+    /// version string and a missing `version` field both load with identical `modules`,
+    /// `scripts`, and `interval` — the field is never consulted by the load path.
+    fn ut_session_version_field_not_consulted_on_load() {
+        let with_stale_version =
+            r#"{"version":"0.0.1-does-not-exist","modules":[],"interval":3.0}"#;
+        let without_version = r#"{"modules":[],"interval":3.0}"#;
+        let with: Session = serde_json::from_str(with_stale_version).unwrap();
+        let without: Session = serde_json::from_str(without_version).unwrap();
+        assert_eq!(with.version.as_deref(), Some("0.0.1-does-not-exist"));
+        assert_eq!(without.version, None);
+        assert_eq!(with.modules, without.modules);
+        assert_eq!(with.scripts, without.scripts);
+        assert_eq!(with.interval, without.interval);
+    }
+
+    #[test]
+    /// CS-R-034 — a session written with every omittable field at its default/empty value
+    /// (`version: None`, empty `scripts`) reloads to an equal value through both TOML and
+    /// JSON, and a `ModuleSpec` whose `Endpoint::Rtu` leaves `parity`/`data_bits`/`stop_bits`
+    /// unset does the same.
+    fn ut_session_omit_defaults_roundtrip() {
+        let session = Session {
+            version: None,
+            modules: vec![],
+            scripts: vec![],
+            interval: default_interval(),
+        };
+        let spec = ModuleSpec {
+            name: "dev".into(),
+            device: "configs/dev.toml".into(),
+            role: Role::Client,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/ttyUSB0".into(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        };
+        for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
+            let session_path =
+                std::env::temp_dir().join(format!("ferrowl_session_omit_defaults.{ext}"));
+            let session_path = session_path.to_str().unwrap();
+            Converter::save(&session, session_path, ty).expect("save session");
+            let session_back: Session = Converter::load(session_path, ty).expect("load session");
+            assert_eq!(session, session_back);
+
+            let spec_path =
+                std::env::temp_dir().join(format!("ferrowl_modulespec_omit_defaults.{ext}"));
+            let spec_path = spec_path.to_str().unwrap();
+            Converter::save(&spec, spec_path, ty).expect("save spec");
+            let spec_back: ModuleSpec = Converter::load(spec_path, ty).expect("load spec");
+            assert_eq!(spec, spec_back);
+        }
     }
 
     // A hand-edited `interval` that is NaN, negative, or zero must fall back to the 1.0s

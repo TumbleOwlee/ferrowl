@@ -99,6 +99,8 @@ behavior, stated limitations).
 
 **OC-R-029** — Three OCPP security profiles shall be supported: Profile 1 (HTTP Basic Auth over plain `ws://`), Profile 2 (TLS with a server certificate only), and Profile 3 (mutual TLS).
 
+*Coverage note: OC-R-029 is an umbrella statement over the three security profiles; its substance is independently covered by the per-profile requirements and their tests — OC-R-030/OC-R-031 (Profile 1, Basic Auth, `ferrowl-ocpp/tests/ws_loopback_security.rs`), OC-R-096 (Profile 2, TLS with only a server certificate, `ferrowl/src/module/ocpp/config/{session,device}.rs`), and OC-R-039/OC-R-040 (Profile 3, mutual TLS, `ws_loopback_security.rs` and `ferrowl-ocpp/src/security.rs`). No separate test cites OC-R-029 itself.*
+
 **OC-R-030** — A CS with Basic Auth configured shall send an `Authorization: Basic <base64(user:pass)>` header on the WebSocket upgrade request.
 
 **OC-R-031** — A CSMS with Basic Auth configured shall reject any upgrade request whose `Authorization` header is absent or does not match the configured credentials, answering HTTP 401 and never disclosing the expected credential.
