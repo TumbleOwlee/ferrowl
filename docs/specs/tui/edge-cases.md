@@ -138,3 +138,20 @@ A forwarded module command is recognized by its exact first whitespace-delimited
 token: `:setfoo` is an unknown command, not a malformed `:set`. Argument
 validation applies only after the token matches (`:set` alone still reports the
 usage warning).
+
+### 6.9 Terminal-restore paths are not unit-tested
+
+UI-R-001 requires the terminal be restored (leave the alternate screen,
+disable raw mode) on normal exit, on the error-exit path, and from a panic
+hook. None of the three paths — `AlternateScreen`'s `Drop` impl
+(`ferrowl-ui/src/screen.rs`), `AlternateScreen::release()` called from the
+error-exit branch (`ferrowl/src/main.rs`, after `app.run()` returns an
+`Err`), or the same `release()` call installed in the panic hook
+(`main.rs`, before `runtime.block_on`) — is exercised by an automated
+test. All three require mutating the real terminal's raw-mode/alternate-
+screen state; doing so from within the test harness's own process would
+corrupt the harness's terminal (and, for the panic-hook path, requires
+actually panicking the process), so this is deliberately left to manual
+verification (`cargo run -- --demo`, then exit normally, force an error
+exit, and trigger a panic, checking the shell prompt is intact each time)
+rather than an automated unit or integration test.
