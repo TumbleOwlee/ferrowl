@@ -451,6 +451,7 @@ where
         operations: Arc<RwLock<Vec<Operation>>>,
         memory: Arc<MemLock<Memory<Key<T>>>>,
         connect: C,
+        connected: crate::ConnectedCell,
     ) -> Result<(), Error>
     where
         T: KeyParams,
@@ -479,6 +480,7 @@ where
             let memory = memory.clone();
             let receiver = &receiver;
             let connect = &connect;
+            let connected = connected.clone();
             async move {
                 let conn_attempt = {
                     let mut guard = connect.lock().await;
@@ -495,7 +497,12 @@ where
                 };
 
                 let core = match conn_attempt.client {
-                    Ok(core) => core,
+                    Ok(core) => {
+                        // MB-R-137 — the transport is now actually connected, not merely "a
+                        // dial attempt was scheduled": flips the tri-state status to Connected.
+                        connected.set(true);
+                        core
+                    }
                     Err(e) => {
                         if !reconnect {
                             log.invoke(format!("{e} Reconnect disabled; client stopping."))
@@ -517,6 +524,10 @@ where
                     .run::<T, _, _>(operations, memory, &mut guard, run_config)
                     .await;
                 drop(guard);
+                // MB-R-137 — the run() loop has ended (gracefully or not): no longer connected,
+                // whether the next step is a retry (Reconnecting) or the task itself ending
+                // (Disconnected, which the caller derives separately from task-alive).
+                connected.set(false);
                 match result {
                     Ok(()) => ferrowl_util::backoff::AttemptOutcome::Done,
                     Err(e) => {
@@ -600,7 +611,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SlaveKey;
+    use crate::{ConnectedCell, SlaveKey};
     use ferrowl_store::Range;
     use rust_modbus::{FrameTransport, Rtu};
     use tokio::io::{AsyncReadExt, DuplexStream};
@@ -873,6 +884,66 @@ mod tests {
         let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Command>(4);
         drop(tx2);
         assert!(wait_reconnect_backoff(&mut rx2, Duration::from_secs(30), &sink).await);
+    }
+
+    #[tokio::test]
+    /// MB-R-137 — the `ConnectedCell` threaded through `run_reconnect_loop` is `false` until a
+    /// connect attempt succeeds, `true` while the resulting `run()` loop is active, and `false`
+    /// again once that loop ends (here: a graceful `Terminate`).
+    async fn ut_run_reconnect_loop_connected_cell_reflects_connect_run_disconnect_lifecycle() {
+        let (client_end, _peer) = tokio::io::duplex(256);
+        let core = ClientCore {
+            client: Client::new(FrameTransport::<_, Rtu>::new(client_end)),
+        };
+        let (log, _log_lines) = recording_log();
+        let (status, _status_lines) = recording_log();
+        let (tx, rx) = tokio::sync::mpsc::channel::<Command>(4);
+        let connected = ConnectedCell::default();
+
+        let mut once = Some(core);
+        let connect = move || {
+            let core = once
+                .take()
+                .expect("connect is called exactly once in this test");
+            async move {
+                ConnectAttempt {
+                    reconnect: true,
+                    timeout_ms: 200,
+                    delay_ms: 0,
+                    interval_ms: 60_000,
+                    client: Ok(core),
+                }
+            }
+        };
+
+        assert!(!connected.get(), "not connected before the loop starts");
+
+        let connected_for_task = connected.clone();
+        let handle = tokio::spawn(async move {
+            ClientCore::run_reconnect_loop::<SlaveKey, _, _, _, _>(
+                rx,
+                log,
+                status,
+                Arc::new(RwLock::new(Vec::new())),
+                Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default())),
+                connect,
+                connected_for_task,
+            )
+            .await
+        });
+
+        let mut waited = 0;
+        while !connected.get() && waited < 100 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            waited += 1;
+        }
+        assert!(connected.get(), "connected once the run() loop is active");
+
+        tx.send(Command::Terminate).await.unwrap();
+        let result = handle.await.unwrap();
+
+        assert!(result.is_ok(), "graceful terminate ends the loop cleanly");
+        assert!(!connected.get(), "not connected once the loop has ended");
     }
 
     #[test]

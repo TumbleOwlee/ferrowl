@@ -51,7 +51,7 @@ fn bad_config(reconnect: bool) -> ferrowl_modbus::rtu::Config {
 /// on the shared backoff policy instead of ending.
 async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::MonitorBuilder::new(
+    let (handle, _open) = ascii::MonitorBuilder::new(
         Arc::new(RwLock::new(bad_config(true))),
         empty_table(),
         empty_records(),
@@ -72,7 +72,7 @@ async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
 /// still returns `Ok(handle)`, but the joined task carries the serial error.
 async fn ut_monitor_open_failure_reconnect_false_ends_task() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::MonitorBuilder::new(
+    let (handle, _open) = ascii::MonitorBuilder::new(
         Arc::new(RwLock::new(bad_config(false))),
         empty_table(),
         empty_records(),

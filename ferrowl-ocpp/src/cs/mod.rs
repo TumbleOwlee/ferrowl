@@ -172,7 +172,10 @@ where
             let timeout = guard.timeout();
             drop(guard);
             match dial_result {
-                Err(e) => classify_attempt(AttemptResult::DialFailed(e), reconnect),
+                Err(e) => {
+                    log.invoke(format!("{e}")).await;
+                    classify_attempt(AttemptResult::DialFailed(e), reconnect)
+                }
                 Ok(ws) => {
                     let mut receiver = receiver.lock().await;
                     let run_end = core::run::<V, H, _, _>(
@@ -185,7 +188,16 @@ where
                     .await;
                     let attempt_result = match run_end {
                         core::RunEnd::Terminated => AttemptResult::Terminated,
-                        core::RunEnd::Disconnected => AttemptResult::Disconnected,
+                        core::RunEnd::Disconnected => {
+                            // `core::RunEnd::Disconnected` carries no underlying error — the
+                            // reader task already logs the specific reason ("websocket error:
+                            // {e}", "OCPP-J framing error: {e}") for most drops, but a clean
+                            // peer-initiated close carries none, so OC-R-114's "log the failure
+                            // reason" is satisfied here with a fixed reason string covering every
+                            // path uniformly.
+                            log.invoke("Connection dropped.".to_string()).await;
+                            AttemptResult::Disconnected
+                        }
                     };
                     classify_attempt(attempt_result, reconnect)
                 }
@@ -197,6 +209,8 @@ where
         let receiver = &receiver;
         let log = log.clone();
         async move {
+            log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
+                .await;
             let mut receiver = receiver.lock().await;
             wait_reconnect_backoff(&mut receiver, backoff, &log).await
         }
@@ -271,6 +285,11 @@ pub struct Client<V: Version> {
 }
 
 impl<V: Version> Client<V> {
+    /// OC-R-123's task-alive signal, mirrors `ferrowl_modbus::instance::Handle::is_finished`.
+    pub fn is_running(&self) -> bool {
+        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
     /// Clone of the command sender, for drivers that want to hold their own.
     pub fn sender(&self) -> mpsc::Sender<Command<V>> {
         self.cmd_tx.clone()
@@ -337,8 +356,15 @@ impl<V: Version> Client<V> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttemptOutcome, AttemptResult, classify_attempt};
-    use crate::error::Error;
+    use super::CsActionHandler;
+    use super::{AttemptOutcome, AttemptResult, ClientBuilder, Config, classify_attempt};
+    use crate::error::{CallError, Error};
+    use crate::log::LogFn;
+    use crate::security::new_self_signed_cache;
+    use crate::{Action16, CallErrorCode, Response16, V1_6};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::RwLock;
 
     /// OC-R-105 — a failed dial never resets the backoff (no handshake ever completed), but the
     /// caller's freshly-read `reconnect` flag still passes through unchanged.
@@ -393,5 +419,98 @@ mod tests {
             AttemptOutcome::Failed { reconnect, .. } => assert!(!reconnect),
             AttemptOutcome::Done => panic!("expected Failed"),
         }
+    }
+
+    /// A `LogFn` that records every line into a shared buffer for assertions. Mirrors
+    /// `ferrowl_modbus::client_core`'s own `recording_log()` fixture.
+    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = lines.clone();
+        let log = move |s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push(s);
+            }
+        };
+        (log, lines)
+    }
+
+    /// CS handler; these tests never receive a server-initiated Call.
+    struct TestCs;
+
+    impl CsActionHandler<V1_6> for TestCs {
+        async fn handle_call(&self, _action: Action16) -> Result<Response16, CallError> {
+            Err(CallError::new(CallErrorCode::NotImplemented, "unsupported"))
+        }
+    }
+
+    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — nothing
+    /// answers on it afterward, standing in for a refused dial.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn config(reconnect: bool) -> Arc<RwLock<Config>> {
+        Arc::new(RwLock::new(Config {
+            url: format!("ws://127.0.0.1:{}/CS001", free_port()),
+            timeout_ms: 1_000,
+            basic_auth: None,
+            tls: None,
+            extra_headers: Vec::new(),
+            reconnect,
+        }))
+    }
+
+    /// OC-R-114 — a failed dial (`reconnect: false`, so the task ends after the single attempt)
+    /// logs the dial error's `Display` text before the task returns.
+    #[tokio::test]
+    async fn ut_dial_failure_logs_reason() {
+        let (log, lines) = recording_log();
+        let (status, _status_lines) = recording_log();
+        let mut client = ClientBuilder::<V1_6>::new(config(false), new_self_signed_cache())
+            .spawn(TestCs, log, status)
+            .await
+            .unwrap();
+
+        let result = client.join().await;
+
+        let err =
+            result.expect_err("a refused dial with reconnect: false ends the task with an error");
+        let err_text = err.to_string();
+        assert!(
+            lines.lock().iter().any(|l| l.contains(&err_text)),
+            "expected the dial failure reason ({err_text:?}) to be logged, got: {:?}",
+            lines.lock()
+        );
+    }
+
+    /// OC-R-114 — with `reconnect: true` against a dead port, the first backoff wait (MB-R-051's
+    /// shared 1s-start policy, OC-R-106) is logged before the task waits it out.
+    #[tokio::test]
+    async fn ut_backoff_wait_logs_duration() {
+        let (log, lines) = recording_log();
+        let (status, _status_lines) = recording_log();
+        let client = ClientBuilder::<V1_6>::new(config(true), new_self_signed_cache())
+            .spawn(TestCs, log, status)
+            .await
+            .unwrap();
+
+        // Give the reconnect loop time to fail its first dial and log the backoff wait, then
+        // terminate before it retries.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        client.terminate().await.unwrap();
+
+        assert!(
+            lines
+                .lock()
+                .iter()
+                .any(|l| l.contains("Reconnecting in 1s.")),
+            "expected a logged backoff-wait duration line, got: {:?}",
+            lines.lock()
+        );
     }
 }

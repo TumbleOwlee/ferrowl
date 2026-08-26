@@ -1208,7 +1208,7 @@ impl ModuleView for ModbusMonitorModuleView {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        use ratatui::layout::{Constraint, HorizontalAlignment, Layout};
+        use ratatui::layout::{Constraint, Layout};
 
         // Item 3 — an ONLINE/OFFLINE status bar, same shape/position as `ModbusModuleView`'s own
         // (Shared): one line tall, below the module's own panels (`content_area`), which the
@@ -1314,26 +1314,10 @@ impl ModuleView for ModbusMonitorModuleView {
             );
         }
 
-        // Item 3 — `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP
-        // server), so the label is always the bare "ONLINE"/"OFFLINE" (no address to append),
-        // driven by `is_running()` instead of a bound-address `Option`.
-        let online = self.module.is_running();
-        let status_widget = ferrowl_ui::widgets::TextBuilder::default()
-            .horizontal_alignment(HorizontalAlignment::Center)
-            .style(ferrowl_ui::style::TextStyle {
-                general: ratatui::style::Style::default()
-                    .bg(if online {
-                        ferrowl_ui::COLOR_SCHEME.success
-                    } else {
-                        ferrowl_ui::COLOR_SCHEME.error
-                    })
-                    .fg(ferrowl_ui::COLOR_SCHEME.text_status)
-                    .bold(),
-            })
-            .build()
-            .expect("all required builder fields are set");
-        let mut label = if online { "ONLINE" } else { "OFFLINE" }.to_string();
-        StatefulWidget::render(&status_widget, status_area, buf, &mut label);
+        // MB-R-152 — `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP
+        // server), so `render_status_bar` is passed `None` unconditionally.
+        let status = self.module.connection_status();
+        crate::view::status_bar::render_status_bar(status, None, status_area, buf);
     }
 
     fn render_overlay(&mut self, frame: &mut Frame, _area: Rect) {
@@ -2085,16 +2069,16 @@ mod tests {
         );
     }
 
-    /// Manual-exercise addition (item 3) — an ONLINE/OFFLINE status bar, same shape as
-    /// `ModbusModuleView`'s own (`module/modbus/view/mod.rs`, Shared): centered, one line tall,
-    /// `COLOR_SCHEME.success`/`error` background, positioned below the module's own panels
-    /// (which the outer app-level compositor then draws the shared log pane below in turn,
-    /// `app/render.rs`'s `[view_area, log_area]` split — no extra coordination needed here).
-    /// `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP server), so this
-    /// drives off `is_running()` instead and always shows the bare "ONLINE"/"OFFLINE" label (no
-    /// address to append).
+    /// Manual-exercise addition (item 3) — a CONNECTED/RECONNECTING/DISCONNECTED status bar,
+    /// same shape as `ModbusModuleView`'s own (`module/modbus/view/mod.rs`, Shared): centered,
+    /// one line tall, `COLOR_SCHEME.success`/`warning`/`error` background, positioned below the
+    /// module's own panels (which the outer app-level compositor then draws the shared log pane
+    /// below in turn, `app/render.rs`'s `[view_area, log_area]` split — no extra coordination
+    /// needed here). `ModbusMonitorModule` has no `bound_addr` (RTU/ASCII monitor, not a TCP
+    /// server), so this drives off `connection_status()` instead and always shows the bare
+    /// label (no address to append).
     #[test]
-    fn ut_render_shows_online_offline_status_bar() {
+    fn ut_render_shows_disconnected_status_bar() {
         use ferrowl_ui::COLOR_SCHEME;
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -2113,14 +2097,58 @@ mod tests {
             })
             .collect();
         assert!(
-            contents.contains("OFFLINE"),
-            "not-yet-started monitor must show OFFLINE: {contents:?}"
+            contents.contains("DISCONNECTED"),
+            "not-yet-started monitor must show DISCONNECTED: {contents:?}"
         );
         assert_eq!(
             terminal.backend().buffer()[(0, last_row)].bg,
             COLOR_SCHEME.error,
-            "OFFLINE row must use the error background"
+            "DISCONNECTED row must use the error background"
         );
+    }
+
+    /// MB-R-152 — a monitor whose serial port never opens (bad path, `reconnect: true`) shows
+    /// RECONNECTING (not DISCONNECTED) while its task keeps retrying, mirroring `module.rs`'s
+    /// own `ut_monitor_module_start_stop_lifecycle` fixture.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_monitor_view_shows_reconnecting_while_port_open_fails() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| v.render(frame, frame.area()))
+            .unwrap();
+        let last_row = terminal.backend().buffer().area.height - 1;
+        let contents: String = (0..120)
+            .map(|x| {
+                terminal.backend().buffer()[(x, last_row)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(
+            contents.contains("RECONNECTING"),
+            "backing-off monitor must show RECONNECTING: {contents:?}"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(0, last_row)].bg,
+            COLOR_SCHEME.warning,
+            "RECONNECTING row must use the warning background"
+        );
+
+        v.module.stop().await.expect("cleanup stop");
     }
 
     /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer

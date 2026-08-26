@@ -1,6 +1,6 @@
 use crate::client_core::{ClientCore, ConnectAttempt};
 use crate::udp::Config;
-use crate::{Command, Error, Key, KeyParams, LogFn, Operation, TcpError};
+use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
@@ -47,7 +47,7 @@ impl<T: KeyParams> ClientBuilder<T> {
         receiver: Receiver<Command>,
         log: L,
         status: S,
-    ) -> Result<JoinHandle<Result<(), Error>>, Error>
+    ) -> Result<(JoinHandle<Result<(), Error>>, ConnectedCell), Error>
     where
         L: LogFn + Clone,
         S: LogFn + Clone,
@@ -55,24 +55,35 @@ impl<T: KeyParams> ClientBuilder<T> {
         let config = self.config.clone();
         let operations = self.operations.clone();
         let memory = self.memory.clone();
-        Ok(tokio::task::spawn(async move {
-            ClientCore::run_reconnect_loop(receiver, log, status, operations, memory, move || {
-                let config = config.clone();
-                async move {
-                    let guard = config.read().await;
-                    let attempt = ConnectAttempt {
-                        reconnect: guard.reconnect,
-                        timeout_ms: guard.timeout_ms,
-                        delay_ms: guard.delay_ms,
-                        interval_ms: guard.interval_ms,
-                        client: Client::connect(&guard).await.map(|client| client.core),
-                    };
-                    drop(guard);
-                    attempt
-                }
-            })
+        let connected = ConnectedCell::default();
+        let connected_for_task = connected.clone();
+        let handle = tokio::task::spawn(async move {
+            ClientCore::run_reconnect_loop(
+                receiver,
+                log,
+                status,
+                operations,
+                memory,
+                move || {
+                    let config = config.clone();
+                    async move {
+                        let guard = config.read().await;
+                        let attempt = ConnectAttempt {
+                            reconnect: guard.reconnect,
+                            timeout_ms: guard.timeout_ms,
+                            delay_ms: guard.delay_ms,
+                            interval_ms: guard.interval_ms,
+                            client: Client::connect(&guard).await.map(|client| client.core),
+                        };
+                        drop(guard);
+                        attempt
+                    }
+                },
+                connected_for_task,
+            )
             .await
-        }))
+        });
+        Ok((handle, connected))
     }
 }
 

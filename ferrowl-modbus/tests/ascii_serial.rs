@@ -53,10 +53,11 @@ fn bad_config(reconnect: bool) -> rtu::Config {
 /// for RTU.
 async fn ascii_server_open_failure_retries_while_reconnect_enabled() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _open) =
+        ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok now");
     sleep(Duration::from_millis(200)).await;
     assert!(
         !handle.is_finished(),
@@ -74,10 +75,11 @@ async fn ascii_server_open_failure_retries_while_reconnect_enabled() {
 /// relocated.
 async fn ascii_server_open_failure_reconnect_false_ends_task() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _open) =
+        ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok now");
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")
@@ -90,10 +92,11 @@ async fn ascii_server_open_failure_reconnect_false_ends_task() {
 /// serial-open failure ends the task gracefully (`Ok(())`), not with the open error.
 async fn ascii_server_terminate_while_backing_off_ends_task_ok() {
     let (tx, rx) = mpsc::channel::<ServerCommand>(1);
-    let handle = ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
-        .spawn(rx, sink(), sink())
-        .await
-        .expect("spawn always returns Ok now");
+    let (handle, _open) =
+        ascii::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok now");
     sleep(Duration::from_millis(100)).await;
     tx.send(ServerCommand::Terminate).await.unwrap();
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
@@ -113,7 +116,7 @@ async fn ascii_client_open_failure_reconnect_false_dies() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = ascii::ClientBuilder::new(
+    let (client, _connected) = ascii::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(false))),
         operations,
         empty_mem(),
@@ -136,7 +139,7 @@ async fn ascii_client_open_failure_reconnect_false_dies() {
 async fn ascii_client_open_failure_reconnect_true_retries() {
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ascii::ClientBuilder::new(
+    let (client, _connected) = ascii::ClientBuilder::new(
         Arc::new(RwLock::new(bad_config(true))),
         operations,
         empty_mem(),

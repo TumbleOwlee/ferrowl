@@ -2,7 +2,9 @@
 use crate::common::serial_config_from;
 use crate::rtu::Config;
 use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
-use crate::{Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand};
+use crate::{
+    ConnectedCell, Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand,
+};
 
 // Workspace
 use ferrowl_store::Memory;
@@ -51,7 +53,7 @@ impl<T: KeyParams> ServerBuilder<T> {
         receiver: Receiver<ServerCommand>,
         log: L,
         status: St,
-    ) -> Result<JoinHandle<Result<(), Error>>, Error>
+    ) -> Result<(JoinHandle<Result<(), Error>>, ConnectedCell), Error>
     where
         L: LogFn + Clone,
         St: LogFn + Clone,
@@ -59,14 +61,17 @@ impl<T: KeyParams> ServerBuilder<T> {
         let config = self.config.clone();
         let memory = self.memory.clone();
         let path_conflict = self.path_conflict.clone();
-        Ok(tokio::task::spawn(run(
+        let open = ConnectedCell::default();
+        let handle = tokio::task::spawn(run(
             config,
             memory,
             receiver,
             log,
             status,
             path_conflict,
-        )))
+            open.clone(),
+        ));
+        Ok((handle, open))
     }
 }
 
@@ -90,6 +95,7 @@ async fn run<T, L, St>(
     log: L,
     status: St,
     path_conflict: PathConflictCell,
+    open: ConnectedCell,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -106,6 +112,7 @@ where
         let activity = activity.clone();
         let receiver = &receiver;
         let path_conflict = path_conflict.clone();
+        let open = open.clone();
         async move {
             activity.store(false, Ordering::Relaxed);
             let guard = config.read().await;
@@ -154,13 +161,17 @@ where
                     reset: false,
                 },
                 Ok(transport) => {
+                    open.set(true);
                     let server = ModbusServer::new(
                         Server::new(memory.clone(), log.clone(), VERBOSE, PHYSICAL_SERIAL)
                             .with_reset_on(activity.clone(), ResetOn::Request),
                     );
                     let handle = server.handle();
                     let mut receiver = receiver.lock().await;
-                    match drive_serve(server.serve_link(transport), handle, &mut receiver).await {
+                    let end =
+                        drive_serve(server.serve_link(transport), handle, &mut receiver).await;
+                    open.set(false);
+                    match end {
                         ServeEnd::Terminated => AttemptOutcome::Done,
                         ServeEnd::Failed(e) => AttemptOutcome::Failed {
                             error: Error::Server(e),
@@ -239,7 +250,16 @@ mod tests {
             Some("other-module".to_string())
         }));
 
-        let result = run::<SlaveKey, _, _>(cfg, memory, rx, sink(), sink(), path_conflict).await;
+        let result = run::<SlaveKey, _, _>(
+            cfg,
+            memory,
+            rx,
+            sink(),
+            sink(),
+            path_conflict,
+            ConnectedCell::default(),
+        )
+        .await;
 
         assert!(
             matches!(result, Err(Error::PathConflict { .. })),
@@ -276,7 +296,16 @@ mod tests {
             }
         };
 
-        let _ = run::<SlaveKey, _, _>(cfg, memory, rx, log_sink, sink(), path_conflict).await;
+        let _ = run::<SlaveKey, _, _>(
+            cfg,
+            memory,
+            rx,
+            log_sink,
+            sink(),
+            path_conflict,
+            ConnectedCell::default(),
+        )
+        .await;
 
         let logged = lines.lock().unwrap();
         assert!(
@@ -284,6 +313,41 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("already in use by module 'other-module'")),
             "expected a path-conflict log line, got: {logged:?}"
+        );
+    }
+
+    /// MB-R-153 — a serial-open attempt that never succeeds (a bad path, `reconnect: false` so
+    /// the task ends after one attempt) never flips the open cell true. A real "flips true while
+    /// serving" assertion needs an actual openable serial device, which this crate's own
+    /// `tests/rtu_serial.rs` documents as unavailable in CI (no portable named-PTY loopback); this
+    /// is the CI-portable half of MB-R-153's contract.
+    #[tokio::test]
+    async fn ut_rtu_server_open_cell_stays_false_through_failed_attempt() {
+        let cfg = Arc::new(RwLock::new(config(
+            "/nonexistent/mb-r-153-ut-rtu-server-open-cell",
+        )));
+        let memory: Arc<MemLock<Memory<Key<SlaveKey>>>> = Arc::new(MemLock::new(Memory::default()));
+        let (_tx, rx) = mpsc::channel(1);
+        let open = ConnectedCell::default();
+
+        let result = run::<SlaveKey, _, _>(
+            cfg,
+            memory,
+            rx,
+            sink(),
+            sink(),
+            PathConflictCell::default(),
+            open.clone(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a bad path with reconnect: false ends the task with an error"
+        );
+        assert!(
+            !open.get(),
+            "the open cell must never observe true when the port was never opened"
         );
     }
 }

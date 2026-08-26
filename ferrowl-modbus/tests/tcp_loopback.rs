@@ -216,7 +216,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
     ]));
 
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
@@ -345,7 +345,7 @@ async fn tcp_client_handles_server_rejections() {
         range: Range::new(0, 2),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
@@ -456,7 +456,7 @@ async fn tcp_server_serves_concurrent_clients() {
     let mem_b = client_mem();
     let (tx_a, rx_a) = mpsc::channel::<Command>(16);
     let (tx_b, rx_b) = mpsc::channel::<Command>(16);
-    let client_a = tcp::ClientBuilder::new(
+    let (client_a, _connected_a) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         ops(),
         mem_a.clone(),
@@ -465,7 +465,7 @@ async fn tcp_server_serves_concurrent_clients() {
     .spawn(rx_a, sink(), sink())
     .await
     .expect("client A failed to connect");
-    let client_b = tcp::ClientBuilder::new(
+    let (client_b, _connected_b) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         ops(),
         mem_b.clone(),
@@ -521,7 +521,7 @@ async fn tcp_client_reconnect_false_dies_on_refused_connect() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config_no_reconnect(port))),
         operations,
         client_mem(),
@@ -554,7 +554,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
@@ -611,7 +611,7 @@ async fn tcp_client_terminate_during_backoff_exits_promptly() {
     let port = free_port();
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
@@ -660,7 +660,7 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations.clone(),
         cli_mem.clone(),
@@ -737,7 +737,7 @@ async fn tcp_client_rereads_config_on_reconnect() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         shared_cfg.clone(),
         operations,
         cli_mem.clone(),
@@ -786,7 +786,7 @@ async fn tcp_client_backoff_resets_after_successful_run() {
     let (tx, rx) = mpsc::channel::<Command>(16);
     let (log, lines) = capturing();
     // No server yet: the first connect fails and the backoff grows to 2 s.
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
@@ -902,7 +902,7 @@ async fn tcp_client_addresses_operation_slave_id() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
@@ -956,7 +956,7 @@ async fn tcp_client_delays_before_first_poll() {
         range: Range::new(0, 4),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(cfg)),
         operations,
         cli_mem.clone(),
@@ -1025,7 +1025,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
         range: Range::new(0, 2),
     }]));
     let (_tx, rx) = mpsc::channel::<Command>(16);
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(cfg)),
         operations,
         client_mem(),
@@ -1070,7 +1070,7 @@ async fn tcp_client_success_resets_retry_counter() {
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
     let (log, lines) = capturing();
-    let client = tcp::ClientBuilder::new(
+    let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),

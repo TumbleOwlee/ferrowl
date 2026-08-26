@@ -173,6 +173,10 @@ behavior, stated limitations).
 
 **OC-R-107** — The `reconnect` field, the endpoint, and the security (TLS/auth) configuration shall be re-read from the shared device config on every dial attempt, so an edit to them takes effect on the next reconnect without a restart (mirrors MB-R-056).
 
+**OC-R-114** — With `reconnect` enabled, a CS shall log the failure reason for each failed dial or dropped connection, and shall log a line stating the wait duration before each backoff wait, mirroring the Modbus client's reconnect logging (MB-R-051).
+
+**OC-R-123** — A CS module's displayed connection status shall follow the same three-state rule as a Modbus client module's (MB-R-137): `CONNECTED` while the WebSocket connection is currently open; `RECONNECTING` while the CS task is running but not currently connected (a dial attempt in progress or a reconnect backoff wait, OC-R-048); `DISCONNECTED` while the CS task is not running.
+
 ---
 
 ## Role — CSMS (server)
@@ -268,6 +272,8 @@ behavior, stated limitations).
 **OC-R-082** — The connection or listener configuration shall be rebuilt from the current module spec on every start, so an edited endpoint or security section always takes effect on the next start without a stale copy.
 
 **OC-R-083** — A client module shall **not** connect automatically; it shall connect only on an explicit start. A server module shall bind its listener automatically on creation. With `reconnect` enabled (the default), a failed bind shall not end the module task; it shall retry using the same backoff policy as the Modbus client (MB-R-051). With `reconnect` disabled, a failed bind shall end the module task with that error, surfaced to the caller.
+
+**OC-R-124** — A CSMS server module's displayed connection status shall follow the same three-state rule as a Modbus server module's (MB-R-153): `CONNECTED` while the listener is currently bound; `RECONNECTING` while the server task is running but not currently bound (a bind attempt in progress or a reconnect backoff wait, OC-R-083); `DISCONNECTED` while the server task is not running.
 
 **OC-R-084** — Restarting a module shall stop the current instance and start a new one from the current spec. Restarting a server shall additionally discard every observed charging-station entry.
 

@@ -262,6 +262,24 @@ impl<V: Version> OcppClient<V> {
         self.online.load(Ordering::Relaxed)
     }
 
+    /// OC-R-123 — the tri-state connection status, same derivation as `Instance::connection_
+    /// status` (`ferrowl_modbus`'s equivalent — see plan Shared): not running → `Disconnected`;
+    /// running and currently connected → `Connected`; running and not → `Reconnecting`.
+    pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
+        use crate::view::status_bar::ConnStatus;
+        match &self.client {
+            None => ConnStatus::Disconnected,
+            Some(c) if !c.is_running() => ConnStatus::Disconnected,
+            Some(_) => {
+                if self.is_online() {
+                    ConnStatus::Connected
+                } else {
+                    ConnStatus::Reconnecting
+                }
+            }
+        }
+    }
+
     pub async fn messages_snapshot(&self) -> Vec<OcppMessage> {
         self.messages.read().await.clone()
     }
@@ -694,6 +712,70 @@ mod tests {
             .await
             .expect("stop() must not hang while the client task is backing off")
             .expect("stop() must succeed");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-123 — before `start()`, the tri-state status is `Disconnected` (no client task at
+    /// all); against an unreachable CSMS with `reconnect` enabled (the default), it becomes
+    /// `Reconnecting` once the task is running but never gets past the dial (never `Connected`,
+    /// since no real handshake ever completes).
+    async fn it_connection_status_disconnected_then_reconnecting_against_unreachable_csms() {
+        use crate::view::status_bar::ConnStatus;
+
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: free_port(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect: None, // defaults to true (OC-R-048)
+            security: OcppSecurityConfig::default(),
+        };
+
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        assert_eq!(
+            backend.connection_status(),
+            ConnStatus::Disconnected,
+            "no client task yet"
+        );
+
+        backend
+            .start(
+                &spec,
+                &OcppDeviceConfig::default(),
+                &test_log(),
+                NoopCsHandler,
+            )
+            .await
+            .expect("start must not fail synchronously against an unreachable CSMS");
+
+        // The task is running but never completes a handshake against a closed port: it must
+        // settle on Reconnecting, never Connected, and never fall back to Disconnected while the
+        // task itself stays alive.
+        for _ in 0..100 {
+            if backend.connection_status() == ConnStatus::Reconnecting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            backend.connection_status(),
+            ConnStatus::Reconnecting,
+            "a running task that never completes a handshake must report Reconnecting"
+        );
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), backend.stop())
+            .await
+            .expect("stop() must not hang while the client task is backing off")
+            .expect("stop() must succeed");
+        assert_eq!(
+            backend.connection_status(),
+            ConnStatus::Disconnected,
+            "after stop() the task is gone"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

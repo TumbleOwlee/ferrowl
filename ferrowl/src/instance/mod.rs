@@ -23,6 +23,10 @@ pub struct Instance<T: KeyParams> {
 }
 
 impl<T: KeyParams> Instance<T> {
+    /// MB-R-137/153 — superseded as the view-facing signal by `connection_status()` (which
+    /// distinguishes running-but-not-connected from not-running), but kept as the plain
+    /// task-alive check its own extensive test suite below still exercises directly.
+    #[allow(dead_code)]
     pub fn active(&self) -> bool {
         if let Some(h) = &self.handle {
             !h.is_finished()
@@ -218,8 +222,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -235,6 +243,7 @@ impl<T: KeyParams> Instance<T> {
                             handle,
                             sender,
                             bound_addr,
+                            open: ferrowl_modbus::ConnectedCell::default(),
                         }));
                     }
                 }
@@ -246,8 +255,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -258,14 +271,16 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
+                    Ok((handle, open)) => {
                         // Pure serial: no socket, so no bind to report — an `Arc` nobody ever
                         // writes to reads back `None` from `Instance::bound_addr()`, correctly
-                        // indistinguishable from "never bound."
+                        // indistinguishable from "never bound." `open` (MB-R-153) is the real
+                        // "port currently open" signal `connection_status()` reads instead.
                         self.handle = Some(Handle::Server(handle::ServerHandle {
                             handle,
                             sender,
                             bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                            open,
                         }));
                     }
                 }
@@ -277,8 +292,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -294,6 +313,7 @@ impl<T: KeyParams> Instance<T> {
                             handle,
                             sender,
                             bound_addr,
+                            open: ferrowl_modbus::ConnectedCell::default(),
                         }));
                     }
                 }
@@ -305,8 +325,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -322,6 +346,7 @@ impl<T: KeyParams> Instance<T> {
                             handle,
                             sender,
                             bound_addr,
+                            open: ferrowl_modbus::ConnectedCell::default(),
                         }));
                     }
                 }
@@ -333,8 +358,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -345,12 +374,13 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
+                    Ok((handle, open)) => {
                         // Pure serial — see the identical `RtuServer` arm above.
                         self.handle = Some(Handle::Server(handle::ServerHandle {
                             handle,
                             sender,
                             bound_addr: std::sync::Arc::new(parking_lot::Mutex::new(None)),
+                            open,
                         }));
                     }
                 }
@@ -362,8 +392,12 @@ impl<T: KeyParams> Instance<T> {
                     Err(e) => {
                         return Err(e.into());
                     }
-                    Ok(handle) => {
-                        self.handle = Some(Handle::Client(handle::ClientHandle { handle, sender }));
+                    Ok((handle, connected)) => {
+                        self.handle = Some(Handle::Client(handle::ClientHandle {
+                            handle,
+                            sender,
+                            connected,
+                        }));
                     }
                 }
             }
@@ -379,6 +413,7 @@ impl<T: KeyParams> Instance<T> {
                             handle,
                             sender,
                             bound_addr,
+                            open: ferrowl_modbus::ConnectedCell::default(),
                         }));
                     }
                 }
@@ -397,6 +432,31 @@ impl<T: KeyParams> Instance<T> {
         match &self.handle {
             Some(Handle::Server(h)) => *h.bound_addr.lock(),
             _ => None,
+        }
+    }
+
+    /// MB-R-137/153 — the tri-state connection status, uniformly derived: not running →
+    /// `Disconnected`; running and currently connected/bound/open → `Connected`; running and not
+    /// → `Reconnecting`.
+    pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
+        use crate::view::status_bar::ConnStatus;
+        match &self.handle {
+            None => ConnStatus::Disconnected,
+            Some(h) if h.is_finished() => ConnStatus::Disconnected,
+            Some(Handle::Client(c)) => {
+                if c.connected.get() {
+                    ConnStatus::Connected
+                } else {
+                    ConnStatus::Reconnecting
+                }
+            }
+            Some(Handle::Server(s)) => {
+                if s.bound_addr.lock().is_some() || s.open.get() {
+                    ConnStatus::Connected
+                } else {
+                    ConnStatus::Reconnecting
+                }
+            }
         }
     }
 
@@ -578,6 +638,7 @@ mod tests {
             handle: task,
             sender,
             bound_addr: Arc::new(parking_lot::Mutex::new(None)),
+            open: ferrowl_modbus::ConnectedCell::default(),
         }));
 
         let err = instance.send_command(Command::Terminate).await.unwrap_err();

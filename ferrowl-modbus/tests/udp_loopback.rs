@@ -205,7 +205,7 @@ async fn it_udp_client_polls_server_and_executes_commands() {
     ]));
 
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = udp::ClientBuilder::<SlaveKey>::new(
+    let (client, _connected) = udp::ClientBuilder::<SlaveKey>::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),

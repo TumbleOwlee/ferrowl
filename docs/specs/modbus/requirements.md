@@ -159,6 +159,8 @@ behavior, stated limitations).
 
 **MB-R-056** — The connection settings (`reconnect`, `timeout_ms`, `delay_ms`, `interval_ms`, and the transport endpoint) shall be re-read from the shared configuration on every connection attempt, so an edit to them takes effect on the next reconnect.
 
+**MB-R-137** — A Modbus client module's displayed connection status shall be one of three states, driven by whether the transport is currently connected and whether the client task is running, not merely by task lifetime: `CONNECTED` while the transport is currently connected; `RECONNECTING` while the client task is running but the transport is not currently connected (a dial attempt in progress or a reconnect backoff wait, MB-R-050–MB-R-056); `DISCONNECTED` while the client task is not running (never started, stopped, or ended after a non-reconnecting failure, MB-R-055). The status bar shall render `CONNECTED` in the success color, `RECONNECTING` in the warning color, and `DISCONNECTED` in the error color.
+
 **MB-R-130** — With `reconnect` enabled (the default), a Modbus server's listener bind failure (TCP, `RtuOverTcp`, `Udp`, `AsciiOverTcp`) or serial-port open failure (RTU, `Ascii`) shall not end the server task; the server shall wait a backoff and retry, using the same backoff policy as the client (MB-R-051).
 
 **MB-R-131** — With `reconnect` enabled, a mid-serve failure — the listener or serial port failing after having already opened successfully — shall retry the same way, once the current serve loop ends.
@@ -168,6 +170,8 @@ behavior, stated limitations).
 **MB-R-133** — The terminate command, or the command channel closing, shall abort a backoff wait immediately and end the server task with success.
 
 **MB-R-134** — With `reconnect` disabled, a listener bind failure, a serial-port open failure, or a mid-serve failure shall end the server task with that error, after emitting a server-stopped status.
+
+**MB-R-153** — A Modbus server module's displayed connection status shall follow the same three-state rule as a client module's (MB-R-137), substituting "listener bound" (TCP-family) or "serial port open" (RTU/Ascii) for "transport connected": `CONNECTED` while bound/open; `RECONNECTING` while the server task is running but not currently bound/open (a bind/open attempt in progress or a reconnect backoff wait, MB-R-071, MB-R-075, MB-R-120, MB-R-130–MB-R-134); `DISCONNECTED` while the server task is not running.
 
 ---
 
@@ -364,3 +368,5 @@ behavior, stated limitations).
 **MB-R-150** — Before opening its RTU or Ascii serial port, whether on initial start or a reconnect attempt (MB-R-050–MB-R-055 client, MB-R-130–MB-R-134 server, MB-R-141 monitor), a module instance shall check every other configured module instance in the same session for an Rtu/Ascii endpoint on the same path (after `~` expansion). On a match, it shall skip the OS-level port open for that attempt and report a distinct path-conflict status/log entry instead — replacing today's silent indefinite retry against "Device busy" — then retry on the same backoff cadence as an ordinary open failure, so it recovers automatically once the conflicting instance stops or is reconfigured off that path. With `reconnect` disabled, the single attempt reports the same distinct conflict status before the instance stops, in place of today's generic open-failure message.
 
 **MB-R-151** — The add/edit register dialog's Value and Default Value inputs shall be hidden and unfocusable for a `ReadOnly` register on a **client** module, since MB-R-091 excludes such a register from client-side writes and any value the user could type would go nowhere. On a **server** module, where MB-R-090 bypasses cell access checks, the inputs shall remain shown and editable regardless of the register's declared access.
+
+**MB-R-152** — A monitor module's displayed connection status shall follow the same three-state rule as a client module's (MB-R-137), substituting "serial port open" for "transport connected": `CONNECTED` while the port is open and being read; `RECONNECTING` while the monitor task is running but the port is not currently open (an open attempt in progress or a reconnect backoff wait, MB-R-130–MB-R-134, MB-R-141); `DISCONNECTED` while the monitor task is not running.

@@ -193,7 +193,7 @@ async fn ascii_over_tcp_client_polls_server_and_executes_commands() {
     ]));
 
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
+    let (client, _connected) = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         cli_mem.clone(),
@@ -361,7 +361,7 @@ async fn ascii_over_tcp_client_skips_broadcast_poll_without_disconnect() {
         range: Range::new(0, 2),
     }]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
+    let (client, _connected) = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
@@ -416,7 +416,7 @@ async fn ascii_over_tcp_client_fire_and_forget_broadcast_write() {
 
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
-    let client = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
+    let (client, _connected) = ferrowl_modbus::ascii_over_tcp::ClientBuilder::new(
         Arc::new(RwLock::new(config(port))),
         operations,
         client_mem(),
