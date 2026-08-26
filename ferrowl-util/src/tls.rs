@@ -151,19 +151,24 @@ struct RawClientCertVerification {
     client_cert_skip_verify: bool,
 }
 
+/// The `(ca_files, skip_verify)` wire pair for a [`ClientCertVerification`], shared by its own
+/// `Serialize` impl and by [`ServerTlsPolicy`]'s `MutualTls` arm (issue #207 item 2).
+fn client_cert_verification_fields(v: &ClientCertVerification) -> (Vec<String>, bool) {
+    match v {
+        ClientCertVerification::SkipVerify => (Vec::new(), true),
+        ClientCertVerification::Verify { ca_files } => (ca_files.clone(), false),
+    }
+}
+
 impl Serialize for ClientCertVerification {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let raw = match self {
-            ClientCertVerification::SkipVerify => RawClientCertVerification {
-                client_cert_skip_verify: true,
-                ..Default::default()
-            },
-            ClientCertVerification::Verify { ca_files } => RawClientCertVerification {
-                client_ca_files: ca_files.clone(),
-                ..Default::default()
-            },
-        };
-        raw.serialize(serializer)
+        let (client_ca_files, client_cert_skip_verify) = client_cert_verification_fields(self);
+        RawClientCertVerification {
+            client_ca_files,
+            client_cert_skip_verify,
+            ..Default::default()
+        }
+        .serialize(serializer)
     }
 }
 
@@ -192,23 +197,32 @@ struct RawClientCertSource {
     client_self_signed: bool,
 }
 
+/// The `(self_signed, cert_file, key_file)` wire triple for a [`ClientCertSource`], shared by
+/// its own `Serialize` impl and by [`ClientTlsPolicy`]'s `MutualTls` arm (issue #207 item 2).
+fn client_cert_source_fields(source: &ClientCertSource) -> (bool, Option<String>, Option<String>) {
+    match source {
+        ClientCertSource::SelfSigned => (true, None, None),
+        ClientCertSource::Explicit {
+            client_cert_file,
+            client_key_file,
+        } => (
+            false,
+            Some(client_cert_file.clone()),
+            Some(client_key_file.clone()),
+        ),
+    }
+}
+
 impl Serialize for ClientCertSource {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let raw = match self {
-            ClientCertSource::SelfSigned => RawClientCertSource {
-                client_self_signed: true,
-                ..Default::default()
-            },
-            ClientCertSource::Explicit {
-                client_cert_file,
-                client_key_file,
-            } => RawClientCertSource {
-                client_cert_file: Some(client_cert_file.clone()),
-                client_key_file: Some(client_key_file.clone()),
-                client_self_signed: false,
-            },
-        };
-        raw.serialize(serializer)
+        let (client_self_signed, client_cert_file, client_key_file) =
+            client_cert_source_fields(self);
+        RawClientCertSource {
+            client_cert_file,
+            client_key_file,
+            client_self_signed,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -281,43 +295,40 @@ struct RawServerTlsPolicy {
 impl Serialize for ServerTlsPolicy {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let raw = match self {
+            // issue #207 item 1: this arm serializes to the same all-defaults wire form as
+            // `Tls { server_cert: Unset }` below, and deserializes back as `Tls`, never `NoTls`
+            // — see `ut_server_tls_policy_notls_serializes_as_tls_unset_asymmetry`. Harmless
+            // today: `NoTls` is only ever produced by the containing wire config's
+            // `Option`-shaped accessor, never nested inside a present `tls` block, so this arm
+            // is unreachable in practice — but a future caller that round-trips through it
+            // directly would silently get `Tls` back.
             ServerTlsPolicy::NoTls => RawServerTlsPolicy::default(),
-            ServerTlsPolicy::Tls { server_cert } => RawServerTlsPolicy {
-                self_signed: matches!(server_cert, ServerCertSource::SelfSigned),
-                cert_file: match server_cert {
-                    ServerCertSource::Explicit { cert_file, .. } => Some(cert_file.clone()),
-                    _ => None,
-                },
-                key_file: match server_cert {
-                    ServerCertSource::Explicit { key_file, .. } => Some(key_file.clone()),
-                    _ => None,
-                },
-                ..Default::default()
-            },
+            ServerTlsPolicy::Tls { server_cert } => {
+                let (self_signed, cert_file, key_file) = server_cert_fields(server_cert);
+                RawServerTlsPolicy {
+                    self_signed,
+                    cert_file,
+                    key_file,
+                    ..Default::default()
+                }
+            }
             ServerTlsPolicy::MutualTls {
                 server_cert,
                 client_verification,
-            } => RawServerTlsPolicy {
-                self_signed: matches!(server_cert, ServerCertSource::SelfSigned),
-                cert_file: match server_cert {
-                    ServerCertSource::Explicit { cert_file, .. } => Some(cert_file.clone()),
-                    _ => None,
-                },
-                key_file: match server_cert {
-                    ServerCertSource::Explicit { key_file, .. } => Some(key_file.clone()),
-                    _ => None,
-                },
-                require_client_cert: true,
-                client_ca_files: match client_verification {
-                    ClientCertVerification::Verify { ca_files } => ca_files.clone(),
-                    ClientCertVerification::SkipVerify => Vec::new(),
-                },
-                client_ca_file: None,
-                client_cert_skip_verify: matches!(
-                    client_verification,
-                    ClientCertVerification::SkipVerify
-                ),
-            },
+            } => {
+                let (self_signed, cert_file, key_file) = server_cert_fields(server_cert);
+                let (client_ca_files, client_cert_skip_verify) =
+                    client_cert_verification_fields(client_verification);
+                RawServerTlsPolicy {
+                    self_signed,
+                    cert_file,
+                    key_file,
+                    require_client_cert: true,
+                    client_ca_files,
+                    client_ca_file: None,
+                    client_cert_skip_verify,
+                }
+            }
         };
         raw.serialize(serializer)
     }
@@ -369,40 +380,36 @@ struct RawClientTlsPolicy {
 impl Serialize for ClientTlsPolicy {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let raw = match self {
+            // issue #207 item 1: same asymmetry as `ServerTlsPolicy::NoTls` — see
+            // `ut_client_tls_policy_notls_serializes_as_tls_default_asymmetry`.
             ClientTlsPolicy::NoTls => RawClientTlsPolicy::default(),
             ClientTlsPolicy::Tls {
                 client_verification,
-            } => RawClientTlsPolicy {
-                ca_file: match client_verification {
-                    ClientVerification::Verify { ca_file } => ca_file.clone(),
-                    ClientVerification::SkipVerify => None,
-                },
-                insecure_skip_verify: matches!(client_verification, ClientVerification::SkipVerify),
-                ..Default::default()
-            },
+            } => {
+                let (ca_file, insecure_skip_verify) =
+                    client_verification_fields(client_verification);
+                RawClientTlsPolicy {
+                    ca_file,
+                    insecure_skip_verify,
+                    ..Default::default()
+                }
+            }
             ClientTlsPolicy::MutualTls {
                 client_verification,
                 client_identity,
-            } => RawClientTlsPolicy {
-                ca_file: match client_verification {
-                    ClientVerification::Verify { ca_file } => ca_file.clone(),
-                    ClientVerification::SkipVerify => None,
-                },
-                insecure_skip_verify: matches!(client_verification, ClientVerification::SkipVerify),
-                client_self_signed: matches!(client_identity, ClientCertSource::SelfSigned),
-                client_cert_file: match client_identity {
-                    ClientCertSource::Explicit {
-                        client_cert_file, ..
-                    } => Some(client_cert_file.clone()),
-                    ClientCertSource::SelfSigned => None,
-                },
-                client_key_file: match client_identity {
-                    ClientCertSource::Explicit {
-                        client_key_file, ..
-                    } => Some(client_key_file.clone()),
-                    ClientCertSource::SelfSigned => None,
-                },
-            },
+            } => {
+                let (ca_file, insecure_skip_verify) =
+                    client_verification_fields(client_verification);
+                let (client_self_signed, client_cert_file, client_key_file) =
+                    client_cert_source_fields(client_identity);
+                RawClientTlsPolicy {
+                    ca_file,
+                    insecure_skip_verify,
+                    client_self_signed,
+                    client_cert_file,
+                    client_key_file,
+                }
+            }
         };
         raw.serialize(serializer)
     }
@@ -447,24 +454,28 @@ struct RawServerCert {
     self_signed: bool,
 }
 
+/// The `(self_signed, cert_file, key_file)` wire triple for a [`ServerCertSource`], shared by
+/// its own `Serialize` impl and by [`ServerTlsPolicy`]'s (issue #207 item 2).
+fn server_cert_fields(source: &ServerCertSource) -> (bool, Option<String>, Option<String>) {
+    match source {
+        ServerCertSource::SelfSigned => (true, None, None),
+        ServerCertSource::Explicit {
+            cert_file,
+            key_file,
+        } => (false, Some(cert_file.clone()), Some(key_file.clone())),
+        ServerCertSource::Unset => (false, None, None),
+    }
+}
+
 impl Serialize for ServerCertSource {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let raw = match self {
-            ServerCertSource::SelfSigned => RawServerCert {
-                self_signed: true,
-                ..Default::default()
-            },
-            ServerCertSource::Explicit {
-                cert_file,
-                key_file,
-            } => RawServerCert {
-                cert_file: Some(cert_file.clone()),
-                key_file: Some(key_file.clone()),
-                self_signed: false,
-            },
-            ServerCertSource::Unset => RawServerCert::default(),
-        };
-        raw.serialize(serializer)
+        let (self_signed, cert_file, key_file) = server_cert_fields(self);
+        RawServerCert {
+            cert_file,
+            key_file,
+            self_signed,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -487,19 +498,23 @@ struct RawClientVerification {
     insecure_skip_verify: bool,
 }
 
+/// The `(ca_file, insecure_skip_verify)` wire pair for a [`ClientVerification`], shared by its
+/// own `Serialize` impl and by [`ClientTlsPolicy`]'s `Tls`/`MutualTls` arms (issue #207 item 2).
+fn client_verification_fields(v: &ClientVerification) -> (Option<String>, bool) {
+    match v {
+        ClientVerification::SkipVerify => (None, true),
+        ClientVerification::Verify { ca_file } => (ca_file.clone(), false),
+    }
+}
+
 impl Serialize for ClientVerification {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let raw = match self {
-            ClientVerification::SkipVerify => RawClientVerification {
-                insecure_skip_verify: true,
-                ..Default::default()
-            },
-            ClientVerification::Verify { ca_file } => RawClientVerification {
-                ca_file: ca_file.clone(),
-                insecure_skip_verify: false,
-            },
-        };
-        raw.serialize(serializer)
+        let (ca_file, insecure_skip_verify) = client_verification_fields(self);
+        RawClientVerification {
+            ca_file,
+            insecure_skip_verify,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -665,6 +680,27 @@ mod tests {
         assert_eq!(back.server, mtls.server);
     }
 
+    /// issue #207 item 1 — `NoTls` serializes to the same all-defaults wire form as
+    /// `Tls { server_cert: Unset }`, and round-trips back as `Tls`, never `NoTls`. Pinned so a
+    /// future change to this asymmetry is deliberate, not accidental.
+    #[test]
+    fn ut_server_tls_policy_notls_serializes_as_tls_unset_asymmetry() {
+        let no_tls = ServerTlsPolicyWrapper {
+            server: ServerTlsPolicy::NoTls,
+        };
+        let tls_unset = ServerTlsPolicyWrapper {
+            server: ServerTlsPolicy::Tls {
+                server_cert: ServerCertSource::Unset,
+            },
+        };
+        let no_tls_value = serde_json::to_value(&no_tls).unwrap();
+        let tls_unset_value = serde_json::to_value(&tls_unset).unwrap();
+        assert_eq!(no_tls_value, tls_unset_value);
+
+        let back: ServerTlsPolicyWrapper = serde_json::from_value(no_tls_value).unwrap();
+        assert_eq!(back.server, tls_unset.server);
+    }
+
     // --- ClientTlsPolicy serde --------------------------------------------------------------
 
     /// MB-R-105 — a bare `{}` deserializes `Tls { client_verification: Verify { ca_file: None } }`
@@ -739,6 +775,27 @@ mod tests {
         assert_eq!(value, serde_json::json!({"client_self_signed": true}));
         let back: ClientTlsPolicyWrapper = serde_json::from_value(value).unwrap();
         assert_eq!(back.client, mtls.client);
+    }
+
+    /// issue #207 item 1 — same asymmetry as `ServerTlsPolicy::NoTls`: `NoTls` serializes to
+    /// the same all-defaults wire form as `Tls { client_verification: Verify { ca_file: None } }`
+    /// and round-trips back as `Tls`, never `NoTls`.
+    #[test]
+    fn ut_client_tls_policy_notls_serializes_as_tls_default_asymmetry() {
+        let no_tls = ClientTlsPolicyWrapper {
+            client: ClientTlsPolicy::NoTls,
+        };
+        let tls_default = ClientTlsPolicyWrapper {
+            client: ClientTlsPolicy::Tls {
+                client_verification: ClientVerification::Verify { ca_file: None },
+            },
+        };
+        let no_tls_value = serde_json::to_value(&no_tls).unwrap();
+        let tls_default_value = serde_json::to_value(&tls_default).unwrap();
+        assert_eq!(no_tls_value, tls_default_value);
+
+        let back: ClientTlsPolicyWrapper = serde_json::from_value(no_tls_value).unwrap();
+        assert_eq!(back.client, tls_default.client);
     }
 
     #[derive(Serialize, Deserialize)]
