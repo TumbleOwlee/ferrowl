@@ -676,7 +676,12 @@ impl EditInterpretationDialog {
                     Constraint::Length(1),
                 ])
                 .areas(rows[5]);
-                StatefulWidget::render(&self.value.widget, value_row[0], buf, &mut self.value.state);
+                StatefulWidget::render(
+                    &self.value.widget,
+                    value_row[0],
+                    buf,
+                    &mut self.value.state,
+                );
                 StatefulWidget::render(
                     &self.delete_value_button.widget,
                     value_row[2],
@@ -1021,7 +1026,10 @@ mod tests {
     fn ut_dialog_with_alias_not_deletable_by_default_shows_confirm_alone() {
         let area = Rect::new(0, 0, 120, 40);
         let mut dialog = EditInterpretationDialog::new();
-        dialog.kind.state.set_selection(kind_index(&Kind::HoldingRegister));
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
         dialog.value.state.values_mut().push(NamedValue {
             name: "on".to_string(),
             value: crate::config::device::Scalar::Int(1),
@@ -1256,7 +1264,10 @@ mod tests {
         assert_eq!(dialog.value.state.values().len(), 2);
         assert_eq!(dialog.value.state.values()[0].name, "on");
         assert_eq!(dialog.value.state.values()[1].name, "off");
-        assert!(dialog.deletable, "deletable must be unaffected by adding aliases");
+        assert!(
+            dialog.deletable,
+            "deletable must be unaffected by adding aliases"
+        );
     }
 
     /// Manual-exercise fix (item 3) — `EditInterpretationDialog::delete_selected_named_value`
@@ -1265,7 +1276,10 @@ mod tests {
     #[test]
     fn ut_edit_interpretation_delete_removes_selected_named_value() {
         let mut dialog = EditInterpretationDialog::new();
-        dialog.kind.state.set_selection(kind_index(&Kind::HoldingRegister));
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
         *dialog.value.state.values_mut() = vec![
             NamedValue {
                 name: "on".to_string(),
@@ -1293,7 +1307,10 @@ mod tests {
     #[test]
     fn ut_delete_last_alias_carries_state_and_focuses_label() {
         let mut dialog = EditInterpretationDialog::new();
-        dialog.kind.state.set_selection(kind_index(&Kind::HoldingRegister));
+        dialog
+            .kind
+            .state
+            .set_selection(kind_index(&Kind::HoldingRegister));
         set_input(&mut dialog.label, "power");
         dialog.value.state.values_mut().push(NamedValue {
             name: "on".to_string(),
