@@ -17,6 +17,10 @@
           {
             "type": "command",
             "command": "sh .claude/scripts/hook-guard-cat.sh"
+          },
+          {
+            "type": "command",
+            "command": "sh .claude/scripts/hook-guard-attribution.sh"
           }
         ]
       }

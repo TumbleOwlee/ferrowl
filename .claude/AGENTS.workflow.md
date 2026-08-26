@@ -161,7 +161,7 @@ existing spec + current goal.
 ### Gate 1b — tracking issue. Orchestrator runs this itself. Stop for approval.
 
 Search existing issues (`gh issue list`, open and closed) for the same goal;
-read any candidate with `sh .claude/scripts/issue-view.sh <number>`, never raw
+read any candidate with `bash .claude/scripts/issue-view.sh <number>`, never raw
 `gh issue view`. Reuse, never duplicate.
 
 Draft, on GitHub via `gh issue create`, self-contained: a reader with only
@@ -307,11 +307,17 @@ when review starts.
 - Verification run + reported, then **ask whether to open a PR** — user may
   want a manual run first; don't pre-empt it.
 - Draft title + body, get approval of that text, push, open.
-- CI fails on the pushed branch → `sh .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`, to see the failure.
-- Title plain language, issue's style. Body = the implementation: why,
-  requirement IDs, how the issue was resolved (approach/structure the issue
-  omitted), verification actually performed, the coverage number, and
+- CI fails on the pushed branch → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`, to see the failure.
+- Title plain language, issue's style. Body has four sections, in order —
+  Why, What changed, Approach, Verification — dropping one only when
+  genuinely inapplicable: why (requirement IDs, motivation), what changed,
+  approach (how the issue was resolved, structure it omitted), verification
+  (what was actually run, ending with the current coverage percentage), and
   `Closes #<issue>`.
+- Never add `Co-Authored-By`, "Generated with," or any tool attribution
+  trailer to the commit or the PR body — same rule as everywhere else in
+  this workflow, restated here because this is the step it's most often
+  missed at.
 
 ### Merge
 
