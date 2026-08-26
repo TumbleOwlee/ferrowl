@@ -478,16 +478,12 @@ mod tests {
 
         let result = client.join().await;
 
+        let err =
+            result.expect_err("a refused dial with reconnect: false ends the task with an error");
+        let err_text = err.to_string();
         assert!(
-            result.is_err(),
-            "a refused dial with reconnect: false ends the task with an error"
-        );
-        assert!(
-            lines
-                .lock()
-                .iter()
-                .any(|l| !l.is_empty() && *l != "Client disconnected"),
-            "expected the dial failure reason to be logged, got: {:?}",
+            lines.lock().iter().any(|l| l.contains(&err_text)),
+            "expected the dial failure reason ({err_text:?}) to be logged, got: {:?}",
             lines.lock()
         );
     }
