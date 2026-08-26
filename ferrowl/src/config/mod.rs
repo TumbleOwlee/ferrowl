@@ -20,7 +20,8 @@ pub use session::{ClientOrServer, Endpoint, ModuleSpec, Role, Session};
 use ferrowl_util::convert::{Converter, FileType};
 
 /// Ferrowl version stamped into device/session files on save (see `DeviceConfig::version`,
-/// `Session::version`), so older configs can be detected for compatibility shims.
+/// `Session::version`) — informational only, never consulted by any load-time or migration
+/// branch (CS-R-018, CS-R-022; migration keys off the legacy file shape per CS-R-040).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Sanitize a hand-edited (or dialog-typed) sim-cycle interval in seconds into a `Duration`: a
