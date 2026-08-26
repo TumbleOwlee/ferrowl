@@ -595,6 +595,7 @@ mod tests {
     }
 
     #[test]
+    /// CS-R-001 — every configuration file shall be TOML or JSON; there is no YAML support.
     fn ut_save_device_to_rejects_unknown_extension() {
         let v = view(Role::Server);
         assert!(msg(&v.save_device_to("/tmp/x.yaml")).contains("unknown format"));
