@@ -99,7 +99,7 @@ for seg in $segments; do
   case "$seg" in
     *gh\ issue\ view*)
       offender="$seg"
-      reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.workflow.md gate 1b: read any issue with 'sh .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: sh .claude/scripts/issue-view.sh <number>"
+      reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.workflow.md gate 1b: read any issue with 'bash .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: bash .claude/scripts/issue-view.sh <number>"
       ;;
   esac
   [ -z "$offender" ] || break
