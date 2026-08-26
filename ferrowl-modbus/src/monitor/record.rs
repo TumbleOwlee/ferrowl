@@ -46,10 +46,20 @@ pub struct MonitorRecord {
 /// evicted first.
 pub const RECORD_RING_CAPACITY: usize = 200;
 
+/// One slave id's bounded ring plus a monotonic "how many pushes ever" counter — lets a caller
+/// (the monitor view's incremental refresh) detect "nothing changed since I last looked" without
+/// cloning/diffing records. Never reset except by constructing a fresh `RecordLog` (a
+/// `:reload`/edit-confirm rebuild).
+#[derive(Default)]
+struct SlaveRing {
+    ring: VecDeque<MonitorRecord>,
+    generation: u64,
+}
+
 /// MB-R-146's per-slave-id record store, independent of every other slave id's ring.
 #[derive(Default)]
 pub struct RecordLog {
-    records: HashMap<UnitId, VecDeque<MonitorRecord>>,
+    records: HashMap<UnitId, SlaveRing>,
 }
 
 /// Shared handle to a [`RecordLog`], written by the monitor's receive-loop driver and read by
@@ -57,26 +67,50 @@ pub struct RecordLog {
 pub type SharedRecordLog = Arc<RwLock<RecordLog>>;
 
 impl RecordLog {
-    /// Push `record` onto `slave`'s ring, evicting the oldest entry once at capacity.
+    /// Push `record` onto `slave`'s ring, evicting the oldest entry once at capacity, and bump
+    /// its generation counter (regardless of whether this push caused an eviction).
     pub fn push(&mut self, slave: UnitId, record: MonitorRecord) {
-        let ring = self.records.entry(slave).or_default();
-        if ring.len() == RECORD_RING_CAPACITY {
-            ring.pop_front();
+        let entry = self.records.entry(slave).or_default();
+        if entry.ring.len() == RECORD_RING_CAPACITY {
+            entry.ring.pop_front();
         }
-        ring.push_back(record);
+        entry.ring.push_back(record);
+        entry.generation += 1;
     }
 
     /// Records for `slave`, oldest first. Empty (not absent) for a slave id never pushed to.
     pub fn records_for(&self, slave: UnitId) -> Vec<MonitorRecord> {
         self.records
             .get(&slave)
-            .map(|r| r.iter().cloned().collect())
+            .map(|e| e.ring.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Current generation for `slave` (total pushes ever applied to its ring) — `0` for a slave
+    /// id never pushed to. The monitor view uses this to skip a refresh entirely when unchanged
+    /// since the last tick.
+    pub fn generation_for(&self, slave: UnitId) -> u64 {
+        self.records.get(&slave).map(|e| e.generation).unwrap_or(0)
+    }
+
+    /// The most recently pushed `n` records for `slave`, oldest-of-the-batch first — clones only
+    /// those `n` entries, not the whole ring (the monitor view's incremental refresh: format only
+    /// the rows that are actually new). `n` is clamped to the ring's current length.
+    pub fn recent_for(&self, slave: UnitId, n: usize) -> Vec<MonitorRecord> {
+        match self.records.get(&slave) {
+            Some(e) => {
+                let skip = e.ring.len().saturating_sub(n);
+                e.ring.iter().skip(skip).cloned().collect()
+            }
+            None => Vec::new(),
+        }
     }
 }
 
 /// MB-R-147 — active for 2 seconds after the most recent record (any status) whose `shape`
-/// covers `(kind, address)`.
+/// covers `(kind, address)`. Checks the cheap timestamp condition before the costlier
+/// (kind, address)-range check — `&&` short-circuits left-to-right, so this is purely an
+/// evaluation-order change, output identical.
 pub fn recency_active_at(
     records: &[MonitorRecord],
     kind: Kind,
@@ -84,11 +118,12 @@ pub fn recency_active_at(
     now: Instant,
 ) -> bool {
     records.iter().rev().any(|r| {
-        r.shape.as_ref().is_some_and(|s| {
-            s.kind == kind
-                && (address as u32) >= s.address as u32
-                && (address as u32) < s.address as u32 + s.quantity as u32
-        }) && now.duration_since(r.timestamp) < Duration::from_secs(2)
+        now.duration_since(r.timestamp) < Duration::from_secs(2)
+            && r.shape.as_ref().is_some_and(|s| {
+                s.kind == kind
+                    && (address as u32) >= s.address as u32
+                    && (address as u32) < s.address as u32 + s.quantity as u32
+            })
     })
 }
 
@@ -214,5 +249,75 @@ mod tests {
             0xFFFF,
             now
         ));
+    }
+
+    /// (perf, no spec ID) — `generation_for` counts every push, is independent of ring
+    /// eviction, and is `0` for a slave id never pushed to.
+    #[test]
+    fn ut_generation_for_increments_on_every_push_and_is_zero_for_unpushed_slave() {
+        let mut log = RecordLog::default();
+        log.push(UnitId(1), record(None));
+        log.push(UnitId(1), record(None));
+        log.push(UnitId(1), record(None));
+        assert_eq!(log.generation_for(UnitId(1)), 3);
+        assert_eq!(log.generation_for(UnitId(9)), 0);
+    }
+
+    /// (perf, no spec ID) — each slave id's generation counter is independent of every other's.
+    #[test]
+    fn ut_generation_for_is_independent_per_slave() {
+        let mut log = RecordLog::default();
+        log.push(UnitId(1), record(None));
+        log.push(UnitId(1), record(None));
+        log.push(UnitId(2), record(None));
+        assert_eq!(log.generation_for(UnitId(1)), 2);
+        assert_eq!(log.generation_for(UnitId(2)), 1);
+    }
+
+    /// (perf, no spec ID) — generation counts pushes, not ring occupancy: it keeps incrementing
+    /// past the 200-entry eviction cap.
+    #[test]
+    fn ut_generation_keeps_incrementing_past_ring_eviction() {
+        let mut log = RecordLog::default();
+        for _ in 0..205u16 {
+            log.push(UnitId(1), record(None));
+        }
+        assert_eq!(log.generation_for(UnitId(1)), 205);
+    }
+
+    /// (perf, no spec ID) — `recent_for` clones only the last `n` pushed records, oldest-of-the
+    /// -batch first, matching `records_for`'s own tail order.
+    #[test]
+    fn ut_recent_for_returns_only_the_last_n_oldest_of_batch_first() {
+        let mut log = RecordLog::default();
+        for i in 0..10u16 {
+            log.push(UnitId(1), record(Some(shape(Kind::HoldingRegister, i, 1))));
+        }
+        let recent = log.recent_for(UnitId(1), 3);
+        let addrs: Vec<u16> = recent
+            .iter()
+            .map(|r| r.shape.as_ref().unwrap().address)
+            .collect();
+        assert_eq!(addrs, vec![7, 8, 9]);
+    }
+
+    /// (perf, no spec ID) — `recent_for` clamps `n` to the ring's current length rather than
+    /// panicking or padding.
+    #[test]
+    fn ut_recent_for_clamps_n_to_ring_length() {
+        let mut log = RecordLog::default();
+        log.push(UnitId(1), record(None));
+        log.push(UnitId(1), record(None));
+        assert_eq!(log.recent_for(UnitId(1), 10).len(), 2);
+    }
+
+    /// (perf, no spec ID) — `recent_for` is empty (not absent/panicking) for a slave never
+    /// pushed to, and empty for `n == 0` on a slave with records.
+    #[test]
+    fn ut_recent_for_empty_for_unpushed_slave_or_zero_n() {
+        let mut log = RecordLog::default();
+        log.push(UnitId(1), record(None));
+        assert_eq!(log.recent_for(UnitId(9), 5), Vec::new());
+        assert_eq!(log.recent_for(UnitId(1), 0), Vec::new());
     }
 }
