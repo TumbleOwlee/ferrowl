@@ -1605,10 +1605,15 @@ impl ModuleView for ModbusMonitorModuleView {
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
-            ModbusMonitorCmd::Add => {
+            ModbusMonitorCmd::Add => Box::pin(std::future::ready(if self.unit_ids.is_empty() {
+                CommandResult::Handled(Some((
+                    Level::Warning,
+                    "Unable to add interpretations to unknown unit id.".into(),
+                )))
+            } else {
                 self.overlay = MonitorOverlay::Add(Box::new(EditInterpretationDialog::new()));
-                Box::pin(std::future::ready(CommandResult::Handled(None)))
-            }
+                CommandResult::Handled(None)
+            })),
 
             ModbusMonitorCmd::Compact => {
                 self.compact = !self.compact;
@@ -2287,6 +2292,7 @@ mod tests {
     #[tokio::test]
     async fn ut_add_predefined_popup_receives_keyboard_focus() {
         let mut v = view();
+        v.unit_ids.push(UnitId(1));
         v.handle_command("add").await;
         let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!(":add did not open the interpretation dialog");
