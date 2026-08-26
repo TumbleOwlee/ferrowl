@@ -26,13 +26,13 @@ IDs are stable and append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-021** — An OCPP connection (CS or CSMS) shall auto-reconnect using the same bounded exponential-backoff policy as Modbus's client (MB-R-051), gated by the CS's `reconnect` config field (default enabled) and, for a CSMS, applied unconditionally to a failed listener bind. (Specified in [`ocpp/`](./ocpp/), OC-R-048, OC-R-083.)
 
-**NF-R-022** — A Lua script error shall never crash its host module: the error is logged and the script loop continues.
+**NF-R-022** — A Lua script error shall never crash its host module. (Specified in [`scripting/`](./scripting/), SC-R-032.)
 
 ## Security posture
 
 **NF-R-030** — OCPP shall support TLS (including mutual TLS) and HTTP Basic Auth. Modbus/TCP shall optionally support TLS, including mutual TLS, via an opt-in `tls` config field (MB-R-104–MB-R-111). Modbus RTU has no transport security, matching the protocol's own lack of one.
 
-**NF-R-031** — Lua sim scripts shall run in a restricted sandbox: only the pure-computation standard libraries (`string`, `table`, `math`, `utf8`, `coroutine`) are reachable; `io`, `os`, `package`, `debug`, FFI, and the base dynamic-code loaders (`load`, `loadfile`, `dofile`, `require`) are not. A script therefore has no access to the host filesystem, shell, environment, or dynamic code loading. (Specified in [`scripting/`](./scripting/).) There is no CPU-time or memory ceiling — a separate, known limitation.
+**NF-R-031** — Lua sim scripts shall run in a restricted sandbox with no access to the host filesystem, shell, environment, or dynamic code loading. (Specified in [`scripting/`](./scripting/), SC-R-006.) There is no CPU-time or memory ceiling — a separate, known limitation.
 
 **NF-R-032** — A credential comparison performed as part of authenticating a peer (e.g. OCPP CSMS Basic Auth) shall run in constant time with respect to the secret value, so a wrong guess leaks no timing signal about where it first diverges from the expected value.
 
@@ -42,6 +42,6 @@ IDs are stable and append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 ## Versioning & testing
 
-**NF-R-040** — All twelve workspace crates shall be versioned in lockstep; no crate is published independently.
+**NF-R-040** — All workspace crates shall be versioned in lockstep; no crate is published independently.
 
 **NF-R-041** — Unit tests shall be colocated with the code under test (`#[cfg(test)] mod tests`, `ut_*` naming where practical); integration tests live in each crate's `tests/`. CI shall run `cargo check` + `cargo test` on every push; a tag-triggered nightly workflow additionally builds and publishes release binaries. `lefthook` shall enforce `cargo fmt --check` and `cargo clippy -D warnings` pre-commit.
