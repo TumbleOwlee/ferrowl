@@ -53,7 +53,7 @@ impl Default for Session {
 
 /// One module instance: which device type, named, with a role and an endpoint. Timing
 /// (timeout/delay/interval ms) is not per-instance — it lives in the device config.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleSpec {
     pub name: String,
     /// Path to the device-type config file.
@@ -135,7 +135,7 @@ impl std::fmt::Display for ClientOrServer {
 }
 
 /// Transport endpoint for a module instance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "lowercase")]
 pub enum Endpoint {
     Tcp {
@@ -194,16 +194,16 @@ impl std::fmt::Display for Endpoint {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Endpoint::Tcp { ip, port } => {
-                write!(fmt, "{}:{}", ip, port)
+                write!(fmt, "{ip}:{port}")
             }
             Endpoint::RtuOverTcp { ip, port } => {
-                write!(fmt, "{}:{} (rtu/tcp)", ip, port)
+                write!(fmt, "{ip}:{port} (rtu/tcp)")
             }
             Endpoint::Udp { ip, port } => {
-                write!(fmt, "{}:{} (udp)", ip, port)
+                write!(fmt, "{ip}:{port} (udp)")
             }
             Endpoint::AsciiOverTcp { ip, port } => {
-                write!(fmt, "{}:{} (ascii/tcp)", ip, port)
+                write!(fmt, "{ip}:{port} (ascii/tcp)")
             }
             Endpoint::Rtu {
                 path,
@@ -213,12 +213,12 @@ impl std::fmt::Display for Endpoint {
                 stop_bits,
             } => {
                 let data_bits = if let Some(d) = data_bits {
-                    format!("{}", d)
+                    format!("{d}")
                 } else {
                     "-".to_string()
                 };
                 let stop_bits = if let Some(s) = stop_bits {
-                    format!("{}", s)
+                    format!("{s}")
                 } else {
                     "-".to_string()
                 };
@@ -240,12 +240,12 @@ impl std::fmt::Display for Endpoint {
                 stop_bits,
             } => {
                 let data_bits = if let Some(d) = data_bits {
-                    format!("{}", d)
+                    format!("{d}")
                 } else {
                     "-".to_string()
                 };
                 let stop_bits = if let Some(s) = stop_bits {
-                    format!("{}", s)
+                    format!("{s}")
                 } else {
                     "-".to_string()
                 };

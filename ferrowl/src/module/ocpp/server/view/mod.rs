@@ -70,7 +70,7 @@ fn rfid_store_from_device(device: &OcppDeviceConfig) -> RfidStore {
 /// Write the runtime RFID store back into a device config for persistence, dropping empty
 /// per-connector lists.
 pub(super) fn fill_device_rfids(device: &mut OcppDeviceConfig, store: &RfidStore) {
-    device.rfids = store.cs.clone();
+    device.rfids.clone_from(&store.cs);
     let mut conns: Vec<ConnectorRfids> = store
         .by_scope
         .iter()

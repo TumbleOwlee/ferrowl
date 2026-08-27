@@ -92,7 +92,10 @@ impl CodeInputFieldState {
     /// Replaces the full text, resetting scroll and placing the cursor at
     /// the end of the last line.
     pub fn set_content(&mut self, s: &str) {
-        self.lines = s.split('\n').map(|l| l.to_string()).collect();
+        self.lines = s
+            .split('\n')
+            .map(std::string::ToString::to_string)
+            .collect();
         if self.lines.is_empty() {
             self.lines.push(String::new());
         }
@@ -181,8 +184,7 @@ impl CodeInputFieldState {
         let byte_idx = target
             .char_indices()
             .nth(idx)
-            .map(|(b, _)| b)
-            .unwrap_or(target.len());
+            .map_or(target.len(), |(b, _)| b);
         self.lines[line].insert_str(byte_idx, text);
     }
 
@@ -198,13 +200,11 @@ impl CodeInputFieldState {
         let start_b = target
             .char_indices()
             .nth(start)
-            .map(|(b, _)| b)
-            .unwrap_or(target.len());
+            .map_or(target.len(), |(b, _)| b);
         let end_b = target
             .char_indices()
             .nth(end)
-            .map(|(b, _)| b)
-            .unwrap_or(target.len());
+            .map_or(target.len(), |(b, _)| b);
         let removed = target[start_b..end_b].to_string();
         self.lines[line].replace_range(start_b..end_b, "");
         removed
@@ -339,7 +339,10 @@ impl CodeInputFieldState {
         };
         self.snapshot_undo();
         if linewise {
-            let new_lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+            let new_lines: Vec<String> = text
+                .split('\n')
+                .map(std::string::ToString::to_string)
+                .collect();
             let insert_at = if after {
                 self.active_line + 1
             } else {
@@ -370,7 +373,11 @@ impl CodeInputFieldState {
                 let first_line = format!("{before}{}", parts[0]);
                 let last_line = format!("{}{tail}", parts[parts.len() - 1]);
                 let mut new_lines = vec![first_line];
-                new_lines.extend(parts[1..parts.len() - 1].iter().map(|s| s.to_string()));
+                new_lines.extend(
+                    parts[1..parts.len() - 1]
+                        .iter()
+                        .map(std::string::ToString::to_string),
+                );
                 new_lines.push(last_line);
                 let last_idx = self.active_line + new_lines.len() - 1;
                 let last_col = parts[parts.len() - 1].chars().count().saturating_sub(1);
@@ -688,7 +695,7 @@ impl CodeInputFieldState {
                 self.enter_normal_at_selection_start();
                 return EventResult::Consumed;
             }
-            (KeyModifiers::NONE, KeyCode::Char('d') | KeyCode::Char('x')) => {
+            (KeyModifiers::NONE, KeyCode::Char('d' | 'x')) => {
                 self.delete_selection();
                 return EventResult::Consumed;
             }

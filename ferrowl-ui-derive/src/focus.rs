@@ -300,7 +300,7 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     // Generate Enum for focus states.
     let enum_fields = definitions.iter().map(|i| &i.enum_field);
     let enum_def = quote! {
-        #[derive(Debug, Clone, Copy, PartialEq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum #enum_name {
             #(#enum_fields),*
         }
@@ -491,8 +491,7 @@ pub fn expand_focusable(
         attr.path().is_ident("derive")
             && attr
                 .parse_args_with(Punctuated::<syn::Path, Token![,]>::parse_terminated)
-                .map(|paths| paths.iter().any(|p| p.is_ident("Builder")))
-                .unwrap_or(false)
+                .is_ok_and(|paths| paths.iter().any(|p| p.is_ident("Builder")))
     });
 
     let s = match &mut input.data {

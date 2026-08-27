@@ -102,7 +102,7 @@ impl<V: ClientVersion> ClientView<V> {
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
-        device.log_file = self.device.log_file.clone();
+        device.log_file.clone_from(&self.device.log_file);
         device.connectors = self.with_state(|s| {
             (0..s.connector_count())
                 .map(|i| V::connector_ref(s, i))
@@ -318,7 +318,7 @@ impl<V: ClientVersion> ClientView<V> {
             // Auto-Heartbeat (CS-level) at the BootNotification-supplied cadence while connected.
             if online {
                 let interval_secs = self
-                    .with_state(|s| s.heartbeat_interval_secs())
+                    .with_state(super::ClientState::heartbeat_interval_secs)
                     .unwrap_or(DEFAULT_HEARTBEAT_SECS)
                     .max(1);
                 self.runtime.heartbeat_tick = self.runtime.heartbeat_tick.wrapping_add(1);
@@ -353,7 +353,9 @@ impl<V: ClientVersion> ClientView<V> {
                     .write()
                     .await
                     .set_log_file(self.device.log_file.as_deref(), &name);
-                self.runtime.applied_log_file = self.device.log_file.clone();
+                self.runtime
+                    .applied_log_file
+                    .clone_from(&self.device.log_file);
             }
 
             // Refresh tables. Messages are teed to the persistent log (all scopes) then filtered to

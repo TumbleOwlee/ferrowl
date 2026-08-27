@@ -32,7 +32,7 @@ impl FileType {
         match std::path::Path::new(path)
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
+            .map(str::to_ascii_lowercase)
             .as_deref()
         {
             Some("toml") => Some(FileType::Toml),
@@ -51,12 +51,12 @@ impl Converter {
     pub fn load<T: DeserializeOwned>(path: &str, ty: FileType) -> Result<T, Error> {
         let resolved = crate::path::expand(path);
         let content = std::fs::read_to_string(&resolved)
-            .map_err(|e| Error::Deserialize(format!("Failed to read {} [{}].", path, e)))?;
+            .map_err(|e| Error::Deserialize(format!("Failed to read {path} [{e}].")))?;
         match ty {
             FileType::Toml => toml::from_str::<T>(&content)
-                .map_err(|e| Error::Deserialize(format!("Failed to deserialize TOML [{}].", e))),
+                .map_err(|e| Error::Deserialize(format!("Failed to deserialize TOML [{e}]."))),
             FileType::Json => serde_json::from_str::<T>(&content)
-                .map_err(|e| Error::Deserialize(format!("Failed to deserialize JSON [{}].", e))),
+                .map_err(|e| Error::Deserialize(format!("Failed to deserialize JSON [{e}]."))),
         }
     }
 
@@ -71,18 +71,18 @@ impl Converter {
                 // `{"$serde_json::private::Number": "…"}` wrapper struct, which TOML would otherwise
                 // emit as a bogus sub-table. Normalizing turns those back into plain integers/floats.
                 let json = serde_json::to_value(value)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?;
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))?;
                 toml::to_string_pretty(&json_to_toml(&json)?)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))?
             }
             FileType::Json => serde_json::to_string_pretty(value)
-                .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))?,
+                .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))?,
         };
         let resolved = crate::path::expand(path);
         let mut file = File::create(&resolved)
-            .map_err(|e| Error::Serialize(format!("Failed to create {} [{}].", path, e)))?;
-        write!(file, "{}", content)
-            .map_err(|e| Error::Serialize(format!("Failed to write {} [{}].", path, e)))
+            .map_err(|e| Error::Serialize(format!("Failed to create {path} [{e}].")))?;
+        write!(file, "{content}")
+            .map_err(|e| Error::Serialize(format!("Failed to write {path} [{e}].")))
     }
     /// Re-serialize a file from `src_type` to `dest_type` by round-tripping
     /// it through `T`.
@@ -96,16 +96,16 @@ impl Converter {
         let data: T = match src_type {
             FileType::Toml => {
                 let content = std::fs::read_to_string(&resolved_src)
-                    .map_err(|e| Error::Serialize(format!("Failed to read TOML file [{}].", e)))?;
+                    .map_err(|e| Error::Serialize(format!("Failed to read TOML file [{e}].")))?;
                 toml::from_str::<T>(&content)
-                    .map_err(|e| Error::Serialize(format!("Failed to deserialize TOML [{}].", e)))?
+                    .map_err(|e| Error::Serialize(format!("Failed to deserialize TOML [{e}].")))?
             }
             FileType::Json => {
                 let file = File::open(&resolved_src)
-                    .map_err(|e| Error::Serialize(format!("Failed to open JSON file [{}].", e)))?;
+                    .map_err(|e| Error::Serialize(format!("Failed to open JSON file [{e}].")))?;
                 let reader = BufReader::new(file);
                 serde_json::from_reader(reader)
-                    .map_err(|e| Error::Serialize(format!("Failed to deserialize JSON [{}].", e)))?
+                    .map_err(|e| Error::Serialize(format!("Failed to deserialize JSON [{e}].")))?
             }
         };
 
@@ -113,21 +113,19 @@ impl Converter {
         match dest_type {
             FileType::Toml => {
                 let content = toml::to_string::<T>(&data)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))?;
-                let mut file = File::create(&resolved_dest).map_err(|e| {
-                    Error::Serialize(format!("Failed to create TOML file [{}].", e))
-                })?;
-                write!(file, "{}", content)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{}].", e)))
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))?;
+                let mut file = File::create(&resolved_dest)
+                    .map_err(|e| Error::Serialize(format!("Failed to create TOML file [{e}].")))?;
+                write!(file, "{content}")
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))
             }
             FileType::Json => {
                 let content = serde_json::to_string_pretty::<T>(&data)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))?;
-                let mut file = File::create(&resolved_dest).map_err(|e| {
-                    Error::Serialize(format!("Failed to create JSON file [{}].", e))
-                })?;
-                write!(file, "{}", content)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{}].", e)))
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))?;
+                let mut file = File::create(&resolved_dest)
+                    .map_err(|e| Error::Serialize(format!("Failed to create JSON file [{e}].")))?;
+                write!(file, "{content}")
+                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))
             }
         }
     }

@@ -175,11 +175,11 @@ impl ModbusModuleView {
 
             if let Some(def) = self.device.definitions.get_mut(&original_name) {
                 sync_register_def(def, &edited.register);
-                def.description = edited.description.clone();
+                def.description.clone_from(&edited.description);
                 if let Some(nv) = &edited.named_values {
-                    def.values = nv.clone();
+                    def.values.clone_from(nv);
                 }
-                def.default = edited.default.clone();
+                def.default.clone_from(&edited.default);
             }
             if edited.name != original_name
                 && let Some(def) = self.device.definitions.remove(&original_name)
@@ -236,8 +236,8 @@ impl ModbusModuleView {
     }
 
     pub(super) async fn apply_setup(&mut self, values: SetupValues) {
-        self.spec.device = values.config_path.clone();
-        self.spec.name = values.name.clone();
+        self.spec.device.clone_from(&values.config_path);
+        self.spec.name.clone_from(&values.name);
         self.spec.role = values.role;
         self.spec.endpoint = values.endpoint.clone();
         self.device.timeout_ms = values.timeout_ms;

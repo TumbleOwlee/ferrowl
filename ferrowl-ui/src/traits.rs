@@ -78,7 +78,7 @@ pub trait Margins {
 
 /// A single entry offered by a [`SuggestionProvider`] for a
 /// [`SuggestInput`](crate::widgets::SuggestInput)'s popup.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
     /// Full text the input is replaced with when this suggestion is accepted.
     pub value: String,

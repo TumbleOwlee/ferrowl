@@ -85,7 +85,7 @@ impl ToLabel for OcppProtocol {
 }
 
 /// One OCPP module instance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcppSpec {
     pub name: String,
     #[serde(default)]
@@ -168,7 +168,7 @@ impl OcppSpec {
 /// Session-level OCPP module entry: the tab name, the device-config file path, and the
 /// per-instance websocket endpoint. Mirrors the Modbus `ModuleSpec` split — version/role/timeout
 /// and the Lua scripts live in the referenced device file, not here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcppModuleSpec {
     pub name: String,
     /// Path to the OCPP device-config file.

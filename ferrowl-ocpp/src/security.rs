@@ -62,13 +62,11 @@ impl BasicAuth {
     pub(crate) fn matches(&self, header: Option<&HeaderValue>) -> bool {
         use subtle::ConstantTimeEq;
 
-        header
-            .map(|h| {
-                let expected = self.header_value();
-                let (got, expected) = (h.as_bytes(), expected.as_bytes());
-                got.len() == expected.len() && got.ct_eq(expected).into()
-            })
-            .unwrap_or(false)
+        header.is_some_and(|h| {
+            let expected = self.header_value();
+            let (got, expected) = (h.as_bytes(), expected.as_bytes());
+            got.len() == expected.len() && got.ct_eq(expected).into()
+        })
     }
 }
 

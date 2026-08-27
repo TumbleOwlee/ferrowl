@@ -94,11 +94,9 @@ where
             self.table_state.select(None);
             self.vertical_scroll = self.vertical_scroll.position(0);
         } else {
-            let i = self
-                .table_state
-                .selected()
-                .map(|i| std::cmp::min(i + 1, std::cmp::max(self.values.len(), 1) - 1))
-                .unwrap_or(0);
+            let i = self.table_state.selected().map_or(0, |i| {
+                std::cmp::min(i + 1, std::cmp::max(self.values.len(), 1) - 1)
+            });
             self.table_state.select(Some(i));
             self.vertical_scroll = self.vertical_scroll.position(i);
         }
@@ -112,8 +110,7 @@ where
             let i = self
                 .table_state
                 .selected()
-                .map(|i| std::cmp::max(i, 1) - 1)
-                .unwrap_or(0);
+                .map_or(0, |i| std::cmp::max(i, 1) - 1);
             self.table_state.select(Some(i));
             self.vertical_scroll = self.vertical_scroll.position(i);
         }
@@ -202,19 +199,19 @@ where
 {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+            (KeyModifiers::NONE, KeyCode::Char('j') | KeyCode::Down) => {
                 self.move_down();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+            (KeyModifiers::NONE, KeyCode::Char('k') | KeyCode::Up) => {
                 self.move_up();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('h')) | (KeyModifiers::NONE, KeyCode::Left) => {
+            (KeyModifiers::NONE, KeyCode::Char('h') | KeyCode::Left) => {
                 self.move_left();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('l')) | (KeyModifiers::NONE, KeyCode::Right) => {
+            (KeyModifiers::NONE, KeyCode::Char('l') | KeyCode::Right) => {
                 self.move_right();
                 EventResult::Consumed
             }

@@ -240,13 +240,12 @@ where
             state
                 .table_state()
                 .selected()
-                .map(|i| {
+                .map_or(&self.style.focused, |i| {
                     self.style
                         .rows
                         .get(i % 2)
                         .expect("rows is [Style; 2]; i % 2 is in bounds")
                 })
-                .unwrap_or(&self.style.focused)
         };
         let bar_style = selected_style;
         let mut bar_height = 0;

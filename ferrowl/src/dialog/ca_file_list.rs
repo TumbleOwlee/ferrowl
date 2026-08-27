@@ -119,12 +119,11 @@ impl AddCaFileDialog {
         let has_valid_extension = resolved
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| {
+            .is_some_and(|e| {
                 CA_EXTENSIONS
                     .iter()
                     .any(|allowed| allowed.eq_ignore_ascii_case(e))
-            })
-            .unwrap_or(false);
+            });
         if !has_valid_extension {
             return Err(format!(
                 "Path: unsupported extension (expected one of {}): {path}",

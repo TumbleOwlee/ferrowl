@@ -233,35 +233,27 @@ pub(crate) fn edit_kind(s: &CsState, scope: Scope, cs: bool, field: EditField) -
     Some(match field {
         EditField::Phases => EditKind::Choice(choice(
             &PHASE_CHOICES,
-            conn.map(|c| c.phases.as_str()).unwrap_or(""),
+            conn.map_or("", |c| c.phases.as_str()),
         )),
         EditField::Status => EditKind::Choice(choice(
             &STATUS_CHOICES,
-            conn.map(|c| c.status.as_str()).unwrap_or(""),
+            conn.map_or("", |c| c.status.as_str()),
         )),
-        EditField::EvseId => {
-            EditKind::Number(number(conn.map(|c| c.evse_id as f64).unwrap_or(1.0)))
-        }
+        EditField::EvseId => EditKind::Number(number(conn.map_or(1.0, |c| c.evse_id as f64))),
         EditField::ConnectorId => {
-            EditKind::Number(number(conn.map(|c| c.connector_id as f64).unwrap_or(0.0)))
+            EditKind::Number(number(conn.map_or(0.0, |c| c.connector_id as f64)))
         }
-        EditField::Voltage => EditKind::Number(number(conn.map(|c| c.voltage).unwrap_or(0.0))),
-        EditField::Current(i) => {
-            EditKind::Number(number(conn.map(|c| c.current[i]).unwrap_or(0.0)))
-        }
-        EditField::Power => EditKind::Number(number(conn.map(|c| c.power).unwrap_or(0.0))),
-        EditField::Frequency => EditKind::Number(number(conn.map(|c| c.frequency).unwrap_or(0.0))),
-        EditField::TotalEnergy => {
-            EditKind::Number(number(conn.map(|c| c.total_energy).unwrap_or(0.0)))
-        }
+        EditField::Voltage => EditKind::Number(number(conn.map_or(0.0, |c| c.voltage))),
+        EditField::Current(i) => EditKind::Number(number(conn.map_or(0.0, |c| c.current[i]))),
+        EditField::Power => EditKind::Number(number(conn.map_or(0.0, |c| c.power))),
+        EditField::Frequency => EditKind::Number(number(conn.map_or(0.0, |c| c.frequency))),
+        EditField::TotalEnergy => EditKind::Number(number(conn.map_or(0.0, |c| c.total_energy))),
         EditField::SessionEnergy => {
-            EditKind::Number(number(conn.map(|c| c.session_energy).unwrap_or(0.0)))
+            EditKind::Number(number(conn.map_or(0.0, |c| c.session_energy)))
         }
-        EditField::Soc => EditKind::Number(number(conn.map(|c| c.soc).unwrap_or(0.0))),
-        EditField::Temperature => {
-            EditKind::Number(number(conn.map(|c| c.temperature).unwrap_or(0.0)))
-        }
-        EditField::Rfid => EditKind::Text(text_input(conn.map(|c| c.rfid.as_str()).unwrap_or(""))),
+        EditField::Soc => EditKind::Number(number(conn.map_or(0.0, |c| c.soc))),
+        EditField::Temperature => EditKind::Number(number(conn.map_or(0.0, |c| c.temperature))),
+        EditField::Rfid => EditKind::Text(text_input(conn.map_or("", |c| c.rfid.as_str()))),
         EditField::Model => EditKind::Text(text_input(&s.model)),
         EditField::Vendor => EditKind::Text(text_input(&s.vendor)),
         EditField::FirmwareVersion => EditKind::Text(text_input(&s.firmware_version)),
@@ -333,8 +325,8 @@ pub(crate) fn state_payload(s: &CsState, name: &str, scope: Scope) -> serde_json
         .evse
         .and_then(|e| s.connector_by_evse(e))
         .or_else(|| s.connectors.first());
-    let evse = conn.map(|c| c.evse_id).unwrap_or(1);
-    let cid = conn.map(|c| c.connector_id).unwrap_or(1);
+    let evse = conn.map_or(1, |c| c.evse_id);
+    let cid = conn.map_or(1, |c| c.connector_id);
     let rfid = conn.map(|c| c.rfid.clone()).unwrap_or_default();
     match name {
         "Authorize" => serde_json::json!({
@@ -352,7 +344,7 @@ pub(crate) fn state_payload(s: &CsState, name: &str, scope: Scope) -> serde_json
         "Heartbeat" => serde_json::json!({}),
         "MeterValues" => serde_json::json!({
             "evseId": evse,
-            "meterValue": conn.map(|c| c.meter_value_json()).unwrap_or(serde_json::json!([])),
+            "meterValue": conn.map(super::v2_0_1::state::ConnectorState::meter_value_json).unwrap_or(serde_json::json!([])),
         }),
         "StatusNotification" => serde_json::json!({
             "timestamp": rfc3339_now(),

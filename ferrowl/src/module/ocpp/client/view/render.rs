@@ -207,12 +207,7 @@ pub(super) fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(
     state: &TableState<E, N>,
 ) -> bool {
     let len = state.values().len();
-    len == 0
-        || state
-            .table_state()
-            .selected()
-            .map(|s| s + 1 >= len)
-            .unwrap_or(true)
+    len == 0 || state.table_state().selected().is_none_or(|s| s + 1 >= len)
 }
 
 fn boxed(title: &str) -> Block<'_> {
@@ -383,7 +378,10 @@ pub fn choice(
     options: &[&str],
     current: &str,
 ) -> Widget<SelectionState<String>, Selection<String>> {
-    let values: Vec<String> = options.iter().map(|s| s.to_string()).collect();
+    let values: Vec<String> = options
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     let mut state = SelectionStateBuilder::default()
         .focused(true)
         .values(values)

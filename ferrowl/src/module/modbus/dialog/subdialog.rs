@@ -37,7 +37,7 @@ pub trait SubDialogs {
     }
 
     fn confirm_add_dialog(&mut self) {
-        let result = self.add_dialog_opt().map(|d| d.apply());
+        let result = self.add_dialog_opt().map(AddNamedValueDialog::apply);
         match result {
             Some(Ok(nv)) => {
                 self.accept_named_value(nv);
@@ -97,8 +97,7 @@ pub trait SubDialogs {
 
     fn confirm_delete_is_confirmed(&self) -> bool {
         self.confirm_delete_opt()
-            .map(|d| d.is_confirm_focused())
-            .unwrap_or(false)
+            .is_some_and(ConfirmDeleteDialog::is_confirm_focused)
     }
 
     fn set_name_error(&mut self, msg: String) {

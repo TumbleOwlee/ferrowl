@@ -137,7 +137,7 @@ where
             .create_function(move |_, args: mlua::Variadic<mlua::Value>| {
                 let line = args
                     .iter()
-                    .map(|v| v.to_string()) // tostring semantics, honors __tostring
+                    .map(mlua::Value::to_string) // tostring semantics, honors __tostring
                     .collect::<std::result::Result<Vec<_>, _>>()?
                     .join("\t");
                 sink.log(LogLevel::Info, &line);
@@ -181,7 +181,7 @@ where
         let errors: Vec<_> = self
             .iter_mut()
             .map(|(_, v)| v.exec())
-            .filter(|r| r.is_err())
+            .filter(std::result::Result::is_err)
             .map(|e| e.expect_err("filter kept only Err results"))
             .collect();
 
@@ -203,7 +203,7 @@ where
             .iter_mut()
             .filter(|(_, v)| v.since_last_execution() >= since)
             .map(|(_, v)| v.exec())
-            .filter(|r| r.is_err())
+            .filter(std::result::Result::is_err)
             .map(|e| e.expect_err("filter kept only Err results"))
             .collect();
 

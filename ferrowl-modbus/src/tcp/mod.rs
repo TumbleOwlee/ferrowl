@@ -59,8 +59,9 @@ impl Config {
     pub(crate) fn server_tls_policy(&self) -> ferrowl_util::tls::ServerTlsPolicy {
         self.tls
             .as_ref()
-            .map(|t| t.server.clone())
-            .unwrap_or(ferrowl_util::tls::ServerTlsPolicy::NoTls)
+            .map_or(ferrowl_util::tls::ServerTlsPolicy::NoTls, |t| {
+                t.server.clone()
+            })
     }
 
     /// This endpoint's client-role TLS policy (MB-R-105): `NoTls` when `tls` is unset at all,
@@ -69,8 +70,9 @@ impl Config {
     pub(crate) fn client_tls_policy(&self) -> ferrowl_util::tls::ClientTlsPolicy {
         self.tls
             .as_ref()
-            .map(|t| t.client.clone())
-            .unwrap_or(ferrowl_util::tls::ClientTlsPolicy::NoTls)
+            .map_or(ferrowl_util::tls::ClientTlsPolicy::NoTls, |t| {
+                t.client.clone()
+            })
     }
 }
 

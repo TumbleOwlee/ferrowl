@@ -93,7 +93,7 @@ pub(crate) fn inject_scope(payload: &mut serde_json::Value, scope: Scope) {
     if let (Some(e), Some(obj)) = (scope.evse, payload.as_object_mut()) {
         // Set the EVSE id when absent or still the `0` default the encoded request struct
         // carries; a genuine non-zero value (and later user overrides) win.
-        let cur = obj.get("evseId").and_then(|v| v.as_i64());
+        let cur = obj.get("evseId").and_then(serde_json::Value::as_i64);
         if cur.is_none() || cur == Some(0) {
             obj.insert("evseId".into(), serde_json::json!(e));
         }

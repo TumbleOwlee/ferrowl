@@ -180,8 +180,7 @@ pub fn parse_bitmask(s: Option<&str>) -> BitField {
         Some(s) => s
             .strip_prefix("0x")
             .or_else(|| s.strip_prefix("0X"))
-            .map(|hex| u128::from_str_radix(hex, 16))
-            .unwrap_or_else(|| s.parse::<u128>())
+            .map_or_else(|| s.parse::<u128>(), |hex| u128::from_str_radix(hex, 16))
             .unwrap_or(u128::MAX),
     };
     BitField { mask }

@@ -451,8 +451,7 @@ fn subprotocol_matches(req: &Request, expected: &str) -> bool {
         .any(|value| {
             value
                 .to_str()
-                .map(|s| s.split(',').any(|t| t.trim() == expected))
-                .unwrap_or(false)
+                .is_ok_and(|s| s.split(',').any(|t| t.trim() == expected))
         })
 }
 

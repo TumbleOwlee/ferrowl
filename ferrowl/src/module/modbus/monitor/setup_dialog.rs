@@ -105,7 +105,7 @@ impl Parity {
     }
 
     fn from_config(value: Option<&str>) -> Parity {
-        match value.map(|s| s.to_ascii_lowercase()).as_deref() {
+        match value.map(str::to_ascii_lowercase).as_deref() {
             Some("odd") => Parity::Odd,
             Some("even") => Parity::Even,
             _ => Parity::None,

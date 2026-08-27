@@ -87,7 +87,7 @@ impl Inbound for V2_1 {
                             match s.config.iter_mut().find(|c| c.key == d.variable.name) {
                                 Some(c) if c.readonly => SetVariableStatusEnumType::Rejected,
                                 Some(c) => {
-                                    c.value = d.attribute_value.clone();
+                                    c.value.clone_from(&d.attribute_value);
                                     SetVariableStatusEnumType::Accepted
                                 }
                                 None => {
@@ -185,19 +185,19 @@ impl Inbound for V2_1 {
                                 match purpose {
                                     ChargingProfilePurposeEnumType::TxDefaultProfile => {
                                         c.default_limit = Some(limit);
-                                        c.default_limit_unit = unit.clone();
+                                        c.default_limit_unit.clone_from(&unit);
                                     }
                                     ChargingProfilePurposeEnumType::ChargingStationMaxProfile => {
                                         c.max_limit = Some(limit);
-                                        c.max_limit_unit = unit.clone();
+                                        c.max_limit_unit.clone_from(&unit);
                                     }
                                     ChargingProfilePurposeEnumType::ChargingStationExternalConstraints => {
                                         c.external_limit = Some(limit);
-                                        c.external_limit_unit = unit.clone();
+                                        c.external_limit_unit.clone_from(&unit);
                                     }
                                     _ => {
                                         c.limit = Some(limit);
-                                        c.limit_unit = unit.clone();
+                                        c.limit_unit.clone_from(&unit);
                                     }
                                 }
                             }
@@ -306,8 +306,9 @@ impl Inbound for V2_1 {
                     let scope = req
                         .evse_id
                         .filter(|&e| e != 0)
-                        .map(|e| crate::module::ocpp::scope::Scope::evse(e as i64, None))
-                        .unwrap_or(crate::module::ocpp::scope::Scope::CS);
+                        .map_or(crate::module::ocpp::scope::Scope::CS, |e| {
+                            crate::module::ocpp::scope::Scope::evse(e as i64, None)
+                        });
                     drop(
                         crate::module::ocpp::client::backend::spawn_remote_transaction_start(
                             sender.clone(),

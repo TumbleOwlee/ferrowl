@@ -81,9 +81,9 @@ impl Parser {
                 self.pos += 1;
             }
         }
-        if matches!(self.peek(), Some('e') | Some('E')) {
+        if matches!(self.peek(), Some('e' | 'E')) {
             self.pos += 1;
-            if matches!(self.peek(), Some('+') | Some('-')) {
+            if matches!(self.peek(), Some('+' | '-')) {
                 self.pos += 1;
             }
             if !matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
@@ -120,7 +120,7 @@ impl Parser {
                             if hex_end > self.chars.len()
                                 || !self.chars[hex_start..hex_end]
                                     .iter()
-                                    .all(|c| c.is_ascii_hexdigit())
+                                    .all(char::is_ascii_hexdigit)
                             {
                                 return None;
                             }

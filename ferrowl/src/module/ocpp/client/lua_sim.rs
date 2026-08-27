@@ -113,7 +113,7 @@ impl<S: ClientFields + 'static> OcppClientHost for ClientCsHandle<S> {
         }
     }
     fn connectors(&self) -> Vec<i64> {
-        let mut ids: Vec<i64> = with_state(&self.state, |s| s.conns());
+        let mut ids: Vec<i64> = with_state(&self.state, ClientFields::conns);
         ids.sort();
         ids
     }
@@ -204,8 +204,7 @@ impl ClientFields for crate::module::ocpp::client::v1_6::state::CsState {
     }
     fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool {
         self.connector_mut(id)
-            .map(|c| c.set_field(name, value))
-            .unwrap_or(false)
+            .is_some_and(|c| c.set_field(name, value))
     }
     fn conn_scope(&self, id: i64) -> Scope {
         Scope::connector(id)
@@ -344,8 +343,7 @@ impl ClientFields for crate::module::ocpp::client::v2_0_1::state::CsState {
     }
     fn conn_set(&mut self, id: i64, name: &str, value: ValueType) -> bool {
         self.connector_mut(id)
-            .map(|c| c.set_field(name, value))
-            .unwrap_or(false)
+            .is_some_and(|c| c.set_field(name, value))
     }
     fn conn_scope(&self, id: i64) -> Scope {
         match self.connector(id) {

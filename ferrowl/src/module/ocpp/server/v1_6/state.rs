@@ -239,8 +239,8 @@ impl OcppFields for ConnectorState {
                 Some(n) => self.temperature = n,
                 None => return false,
             },
-            ("Status", ValueType::String(s)) => self.status = s.clone(),
-            ("Rfid", ValueType::String(s)) => self.rfid = s.clone(),
+            ("Status", ValueType::String(s)) => self.status.clone_from(s),
+            ("Rfid", ValueType::String(s)) => self.rfid.clone_from(s),
             _ => return false,
         }
         true
@@ -421,9 +421,7 @@ fn limit_field(name: &str, limit: Option<f64>, unit: &str) -> (String, String, S
     (
         name.into(),
         unit.into(),
-        limit
-            .map(|l| format!("{l:.1}"))
-            .unwrap_or_else(|| "—".to_string()),
+        limit.map_or_else(|| "—".to_string(), |l| format!("{l:.1}")),
     )
 }
 

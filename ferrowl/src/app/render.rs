@@ -77,7 +77,8 @@ pub(super) fn render(
     {
         let buf = frame.buffer_mut();
         if focus == Focus::Command {
-            let module_cmds = tabs.get(active).map(|t| t.view.commands()).unwrap_or(&[]);
+            let module_cmds: &[CommandDescriptor] =
+                tabs.get(active).map_or(&[], |t| t.view.commands());
             render_command_help(cmd_area, buf, module_cmds);
         }
         if let Some(dialog) = overlay {

@@ -322,7 +322,7 @@ impl ActionDialog {
         let rows = self.table.state.values();
         let mut pairs: Vec<(&'static str, Value)> = Vec::new();
         for (i, (name, kind, optional)) in self.props.iter().enumerate() {
-            let s = rows.get(i).map(|r| r.value.as_str()).unwrap_or("");
+            let s = rows.get(i).map_or("", |r| r.value.as_str());
             match Self::coerce(*kind, s) {
                 Some(v) => pairs.push((*name, v)),
                 None if *optional => {}

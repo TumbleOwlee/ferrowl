@@ -518,7 +518,7 @@ where
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
-        device.log_file = self.device.log_file.clone();
+        device.log_file.clone_from(&self.device.log_file);
         with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
@@ -609,7 +609,9 @@ where
                     .write()
                     .await
                     .set_log_file(self.device.log_file.as_deref(), &name);
-                self.runtime.applied_log_file = self.device.log_file.clone();
+                self.runtime
+                    .applied_log_file
+                    .clone_from(&self.device.log_file);
             }
 
             // Tee new protocol messages (across all entries) into the persistent log. Each entry's

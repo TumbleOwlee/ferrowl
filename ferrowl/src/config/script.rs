@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One named Lua simulation script attached to a device type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptDef {
     pub name: String,
     #[serde(default)]

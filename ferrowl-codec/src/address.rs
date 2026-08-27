@@ -16,7 +16,7 @@ pub enum Address {
 impl Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Address::Fixed(v) => write!(f, "{}", v),
+            Address::Fixed(v) => write!(f, "{v}"),
             Address::Virtual => write!(f, "virtual"),
         }
     }

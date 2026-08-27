@@ -218,8 +218,7 @@ impl CsState {
             nv(
                 "Reservation ID",
                 self.reservation_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "—".to_string()),
+                    .map_or_else(|| "—".to_string(), |id| id.to_string()),
             ),
             nv("ICCID", self.iccid.clone()),
             nv("IMSI", self.imsi.clone()),
@@ -298,22 +297,19 @@ impl ConnectorState {
                 "Charge Limit",
                 &self.limit_unit,
                 self.limit
-                    .map(|l| format!("{l:.1}"))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .map_or_else(|| "—".to_string(), |l| format!("{l:.1}")),
             ),
             nv(
                 "Default Charge Limit",
                 &self.default_limit_unit,
                 self.default_limit
-                    .map(|l| format!("{l:.1}"))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .map_or_else(|| "—".to_string(), |l| format!("{l:.1}")),
             ),
             nv(
                 "Max Charge Limit",
                 &self.max_limit_unit,
                 self.max_limit
-                    .map(|l| format!("{l:.1}"))
-                    .unwrap_or_else(|| "—".to_string()),
+                    .map_or_else(|| "—".to_string(), |l| format!("{l:.1}")),
             ),
             nv(
                 "Reserved RFID",
@@ -326,8 +322,7 @@ impl ConnectorState {
                 "Reservation ID",
                 "",
                 self.reservation_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "—".to_string()),
+                    .map_or_else(|| "—".to_string(), |id| id.to_string()),
             ),
         ]
     }
@@ -425,9 +420,9 @@ impl ConnectorState {
                 Some(n) => self.session_energy = n,
                 None => return false,
             },
-            ("Phases", Vt::String(s)) => self.phases = s.clone(),
-            ("Status", Vt::String(s)) => self.status = s.clone(),
-            ("Rfid", Vt::String(s)) => self.rfid = s.clone(),
+            ("Phases", Vt::String(s)) => self.phases.clone_from(s),
+            ("Status", Vt::String(s)) => self.status.clone_from(s),
+            ("Rfid", Vt::String(s)) => self.rfid.clone_from(s),
             ("ChargeLimit", _) => match num(&value) {
                 Some(n) => self.limit = Some(n),
                 None => return false,

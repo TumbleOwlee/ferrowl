@@ -67,7 +67,7 @@ impl<S: DrawSurface> App<S> {
         // The help dialog is modal: it eats every key so nothing leaks to the view beneath it.
         if self.help_open {
             match code {
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                KeyCode::Esc | KeyCode::Char('q' | '?') => {
                     self.help_open = false;
                     self.help_scroll = 0;
                 }
@@ -89,10 +89,7 @@ impl<S: DrawSurface> App<S> {
             (None, KeyModifiers::CONTROL, KeyCode::Char('w')) => {
                 self.keymode = Some(KeyMode::CtrlWin)
             }
-            (Some(KeyMode::CtrlWin), _, KeyCode::Char('j'))
-            | (Some(KeyMode::CtrlWin), _, KeyCode::Down)
-            | (Some(KeyMode::CtrlWin), _, KeyCode::Char('k'))
-            | (Some(KeyMode::CtrlWin), _, KeyCode::Up) => {
+            (Some(KeyMode::CtrlWin), _, KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up) => {
                 self.keymode = None;
                 self.toggle_pane();
             }
@@ -146,8 +143,7 @@ impl<S: DrawSurface> App<S> {
                 if !self
                     .tabs
                     .get_mut(self.active)
-                    .map(|t| t.view.is_overlay_active())
-                    .unwrap_or(false) =>
+                    .is_some_and(|t| t.view.is_overlay_active()) =>
             {
                 self.enter_command()
             }
@@ -156,8 +152,7 @@ impl<S: DrawSurface> App<S> {
                 if !self
                     .tabs
                     .get_mut(self.active)
-                    .map(|t| t.view.is_overlay_active())
-                    .unwrap_or(false) =>
+                    .is_some_and(|t| t.view.is_overlay_active()) =>
             {
                 self.help_open = true
             }

@@ -1,14 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    cmp::Ordering,
-    fmt::{Debug, Display},
-};
+use std::fmt::{Debug, Display};
 
 /// A half-open address range `[start, end)`.
 ///
 /// Ordering compares `start` first, then `end`, so ranges sort by position
 /// in the address space (used as `BTreeMap` keys in [`Memory`](crate::Memory)).
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
     /// First address contained in the range.
     pub(crate) start: usize,
@@ -80,28 +77,6 @@ impl Range {
         } else {
             Some(Range::new(start, end - start))
         }
-    }
-}
-
-impl Ord for Range {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self.start < other.start {
-            Ordering::Less
-        } else if other.start < self.start {
-            Ordering::Greater
-        } else if self.end < other.end {
-            Ordering::Less
-        } else if self.end > other.end {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        }
-    }
-}
-
-impl PartialOrd for Range {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
 

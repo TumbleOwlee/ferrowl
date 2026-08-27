@@ -93,7 +93,7 @@ impl std::fmt::Display for Value {
                 Self::Ascii(v) => v.chars().collect(),
             }
         };
-        write!(fmt, "{}", val)
+        write!(fmt, "{val}")
     }
 }
 

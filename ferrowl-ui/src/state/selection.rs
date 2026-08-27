@@ -118,19 +118,19 @@ where
 {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+            (KeyModifiers::NONE, KeyCode::Char('j') | KeyCode::Down) => {
                 self.move_down();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+            (KeyModifiers::NONE, KeyCode::Char('k') | KeyCode::Up) => {
                 self.move_up();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('h')) | (KeyModifiers::NONE, KeyCode::Left) => {
+            (KeyModifiers::NONE, KeyCode::Char('h') | KeyCode::Left) => {
                 self.move_left();
                 EventResult::Consumed
             }
-            (KeyModifiers::NONE, KeyCode::Char('l')) | (KeyModifiers::NONE, KeyCode::Right) => {
+            (KeyModifiers::NONE, KeyCode::Char('l') | KeyCode::Right) => {
                 self.move_right();
                 EventResult::Consumed
             }

@@ -13,7 +13,7 @@ pub use server::ServerBuilder;
 
 /// Modbus RTU serial settings; doubles as the clap argument group for RTU
 /// mode.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Args)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq, Args)]
 pub struct Config {
     /// The device path to use for communication.
     pub path: String,
