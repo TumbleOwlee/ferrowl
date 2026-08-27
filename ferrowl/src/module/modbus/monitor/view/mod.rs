@@ -1605,6 +1605,8 @@ impl ModuleView for ModbusMonitorModuleView {
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
+            // UI-R-061 — no unit id discovered yet means there's nothing to scope a new
+            // interpretation to; reject with a warning instead of opening the dialog.
             ModbusMonitorCmd::Add => Box::pin(std::future::ready(if self.unit_ids.is_empty() {
                 CommandResult::Handled(Some((
                     Level::Warning,
@@ -2323,6 +2325,25 @@ mod tests {
             dialog.label.state.input(),
             &parent_label_before,
             "the parent dialog's own label field is untouched while the sub-popup is open"
+        );
+    }
+
+    /// UI-R-061 — with no unit id discovered yet, `:add` is rejected (Warning) instead of
+    /// opening the dialog: there is no unit id to scope a new interpretation to.
+    #[tokio::test]
+    async fn ut_add_command_rejects_when_no_unit_id_discovered() {
+        let mut v = view();
+        assert!(v.unit_ids.is_empty());
+
+        let result = v.handle_command("add").await;
+
+        assert!(matches!(
+            result,
+            CommandResult::Handled(Some((Level::Warning, _)))
+        ));
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            ":add must not open the dialog with no unit id to scope it to"
         );
     }
 
