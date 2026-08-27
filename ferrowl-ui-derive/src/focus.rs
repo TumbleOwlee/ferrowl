@@ -5,6 +5,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     Expr, Field, Fields, Ident, Meta, MetaNameValue, Token, Type, Visibility,
+    parse::Parser,
     punctuated::Punctuated,
 };
 
@@ -302,8 +303,35 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// Appends the `focus`/`view_focused` fields the `Focus` derive needs.
-pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream> {
+/// Appends the `focus`/`view_focused` fields the `Focus` derive needs. `attr` is the raw
+/// `#[focusable(...)]` argument list, e.g. `nestable` for `#[focusable(nestable)]` (empty for a
+/// bare `#[focusable]`).
+pub fn expand_focusable(attr: TokenStream, mut input: syn::DeriveInput) -> syn::Result<TokenStream> {
+    let mut nestable = false;
+    if !attr.is_empty() {
+        let args = Punctuated::<Meta, Token![,]>::parse_terminated
+            .parse2(attr)
+            .map_err(|_| {
+                syn::Error::new(
+                    Span::call_site(),
+                    "Invalid syntax for #[focusable] attribute, expected #[focusable(nestable)]",
+                )
+            })?;
+        for arg in args {
+            match arg {
+                Meta::Path(p) if p.is_ident("nestable") => {
+                    nestable = true;
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        &other,
+                        "Invalid argument for #[focusable] attribute, expected #[focusable(nestable)]",
+                    ));
+                }
+            }
+        }
+    }
+
     // Structs that also `#[derive(Builder)]` get `#[builder(default)]` on the injected
     // `view_focused` flag so callers needn't set it (it defaults to `false`); the `focus` field is
     // still set explicitly by those builders (its enum has no `Default`).
@@ -363,12 +391,20 @@ pub fn expand_focusable(mut input: syn::DeriveInput) -> syn::Result<TokenStream>
     named.named.push(focus_field);
     named.named.push(view_focused_field);
 
+    if nestable {
+        // Marker read by `expand_focus` (via `derive_focus`'s `attributes(focus,
+        // focus_nestable)` registration) to gate generation of the `NestedFocus` impl and its
+        // supporting methods onto only a struct that opted in.
+        input.attrs.push(syn::parse_quote!(#[focus_nestable]));
+    }
+
     Ok(quote! { #input })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{expand_focus, expand_focusable};
+    use proc_macro2::TokenStream;
 
     #[test]
     fn rejects_struct_with_no_focus_fields() {
@@ -511,7 +547,8 @@ mod tests {
             }
         };
 
-        let err = expand_focusable(input).expect_err("expected focusable on enum to be rejected");
+        let err = expand_focusable(TokenStream::new(), input)
+            .expect_err("expected focusable on enum to be rejected");
         assert!(
             err.to_string()
                 .contains("#[focusable] can only be applied to structs")
@@ -524,11 +561,41 @@ mod tests {
             struct TestView(Widget, Widget);
         };
 
-        let err =
-            expand_focusable(input).expect_err("expected focusable on tuple struct to be rejected");
+        let err = expand_focusable(TokenStream::new(), input)
+            .expect_err("expected focusable on tuple struct to be rejected");
         assert!(
             err.to_string()
                 .contains("#[focusable] only works on structs with named fields")
+        );
+    }
+
+    #[test]
+    /// UI-R-049 — `#[focusable]` (bare) and `#[focusable(nestable)]` are both accepted.
+    fn focusable_accepts_bare_and_nestable_attr() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                field: Widget,
+            }
+        };
+        expand_focusable(TokenStream::new(), input.clone())
+            .expect("expected bare #[focusable] to be accepted");
+        expand_focusable(quote::quote! { nestable }, input)
+            .expect("expected #[focusable(nestable)] to be accepted");
+    }
+
+    #[test]
+    /// UI-R-049 — an unknown `#[focusable(...)]` argument is rejected.
+    fn focusable_rejects_unknown_attr_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                field: Widget,
+            }
+        };
+        let err = expand_focusable(quote::quote! { bogus }, input)
+            .expect_err("expected unknown #[focusable] argument to be rejected");
+        assert!(
+            err.to_string()
+                .contains("Invalid argument for #[focusable] attribute")
         );
     }
 }
