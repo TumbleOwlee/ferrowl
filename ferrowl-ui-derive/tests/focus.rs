@@ -252,7 +252,7 @@ fn ut_set_focused_keeps_remembered_eligible_gated_pane() {
 // --- NestedFocus: #[focusable(nestable)] + #[focus(nested)] ---------------
 
 #[focusable(nestable)]
-#[derive(Builder, Debug, Focus)]
+#[derive(Builder, Clone, Debug, Focus)]
 struct Section {
     #[focus]
     pub a: Widget,
@@ -320,4 +320,93 @@ fn ut_single_field_section_try_focus_next_false_immediately() {
     let mut section = make_single_section();
     assert!(!section.try_focus_next());
     assert!(!section.try_focus_previous());
+}
+
+// --- NestedFocus: embedding a nestable struct via #[focus(nested)] --------
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct NestingApp {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested)]
+    pub section: Section,
+    #[focus]
+    pub after: Widget,
+}
+
+fn make_nesting_app(start: NestingAppFocus, section_start: SectionFocus) -> NestingApp {
+    NestingAppBuilder::default()
+        .before(Widget::default())
+        .section(make_section(section_start))
+        .after(Widget::default())
+        .focus(start)
+        .view_focused(false)
+        .build()
+        .expect("NestingApp builder failed")
+}
+
+/// Simulates the verified production call-site pattern (e.g.
+/// `ferrowl/src/module/modbus/view/mod.rs:407-437`): try the view's own `handle_events` first;
+/// only an `Unhandled` Tab/BackTab falls back to the outer `focus_next()`/`focus_previous()`.
+fn send_key_with_fallback(
+    app: &mut NestingApp,
+    modifiers: crossterm::event::KeyModifiers,
+    code: crossterm::event::KeyCode,
+) {
+    use crossterm::event::KeyCode;
+    use ferrowl_ui::traits::HandleEvents;
+    if let ferrowl_ui::EventResult::Unhandled(_, code) = app.handle_events(modifiers, code) {
+        match code {
+            KeyCode::Tab => app.focus_next(),
+            KeyCode::BackTab => app.focus_previous(),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+/// UI-R-049 — forward Tab into a `#[focus(nested)]` field enters at its first eligible pane,
+/// regardless of which pane it last remembered.
+fn ut_nested_forward_tab_enters_section_at_first_pane() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    // Remembers B, so a pre-fix (remembered-or-first) entry would land on B, not A.
+    let mut app = make_nesting_app(NestingAppFocus::Before, SectionFocus::B);
+    app.before.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.a.is_focused());
+    assert!(!app.section.b.is_focused());
+}
+
+#[test]
+/// UI-R-049 — Tab at the nested field's last pane advances the outer cycle, not back to its own
+/// first pane.
+fn ut_nested_forward_tab_at_last_pane_advances_to_after() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = make_nesting_app(NestingAppFocus::Section, SectionFocus::B);
+    app.section.b.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+    assert_eq!(app.focus, NestingAppFocus::After);
+    assert!(app.after.is_focused());
+    assert!(!app.section.b.is_focused());
+}
+
+#[test]
+/// UI-R-049 — the load-bearing regression case: BackTab from the field after a `#[focus(nested)]`
+/// field lands on its *last* pane, not its first (the case a direction-blind, remembered-or-first
+/// entry would get wrong).
+fn ut_nested_backtab_from_after_lands_on_last_pane() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    // section remembers A (its default from make_section), proving entry ignores the remembered
+    // pane entirely on a backward step.
+    let mut app = make_nesting_app(NestingAppFocus::After, SectionFocus::A);
+    app.after.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::SHIFT, KeyCode::BackTab);
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.b.is_focused(), "must land on the last pane, not the remembered/first one");
+    assert!(!app.section.a.is_focused());
 }

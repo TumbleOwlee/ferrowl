@@ -143,50 +143,75 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
-    // Generate code for enabling new focus.
-    let mut impl_enable = quote! {};
-    for def in definitions.iter() {
-        let name = &def.widget_name;
-        let enum_field = &def.enum_field;
-        let when = if let Some(when) = &def.when {
-            quote! {
-                && #when
-            }
-        } else {
-            quote! {}
-        };
+    // Generate code for enabling new focus. Built once per direction: for a plain field the two
+    // are byte-for-byte identical (the `else` branch below, unchanged from before this field ever
+    // existed); for a `#[focus(nested)]` field, forward entry calls the direction-aware
+    // "enter at first eligible" helper and backward entry calls "enter at last eligible" instead
+    // of the direction-blind `SetFocus::set_focused(true)` — and, since finding no eligible inner
+    // pane is possible (a nested field can be structurally `when`-eligible yet have zero eligible
+    // panes of its own), a failed entry does not `break`, letting the surrounding scan continue to
+    // the next candidate exactly as it already does for an ordinary ineligible field.
+    let impl_enable_dir = |forward: bool| {
+        let mut arms = quote! {};
+        for def in definitions.iter() {
+            let name = &def.widget_name;
+            let enum_field = &def.enum_field;
+            let when = if let Some(when) = &def.when {
+                quote! {
+                    && #when
+                }
+            } else {
+                quote! {}
+            };
 
-        impl_enable.extend(quote! {
-            if current_focus == #enum_name::#enum_field #when {
-                ferrowl_ui::traits::SetFocus::set_focused(&mut self.#name, true);
-                self.focus = #enum_name::#enum_field;
-                break;
-            }
-        });
-    }
+            let enter = if def.nested {
+                let entry_call = if forward {
+                    quote! { self.#name.__focus_enter_first_eligible() }
+                } else {
+                    quote! { self.#name.__focus_enter_last_eligible() }
+                };
+                quote! {
+                    if #entry_call {
+                        self.focus = #enum_name::#enum_field;
+                        break;
+                    }
+                }
+            } else {
+                quote! {
+                    ferrowl_ui::traits::SetFocus::set_focused(&mut self.#name, true);
+                    self.focus = #enum_name::#enum_field;
+                    break;
+                }
+            };
 
-    // Common code for both previous and next focus switching.
-    let impl_general = quote! {
-        #impl_array
-
-        #impl_disable
-
-        // Get index of current focus
-        let index = focuses.iter().position(|f| *f == self.focus).unwrap();
+            arms.extend(quote! {
+                if current_focus == #enum_name::#enum_field #when {
+                    #enter
+                }
+            });
+        }
+        arms
     };
+    let impl_enable_forward = impl_enable_dir(true);
+    let impl_enable_backward = impl_enable_dir(false);
 
-    // Forward and reverse traversal differ only by the per-step `delta` (forward = +1,
-    // reverse = +(len-1), i.e. -1 mod len).
-    let focus_loop = |delta: TokenStream| {
+    // Forward and reverse traversal differ by the per-step `delta` (forward = +1, reverse =
+    // +(len-1), i.e. -1 mod len) and by which direction's `impl_enable_*` is spliced in.
+    let focus_loop = |delta: TokenStream, enable: &TokenStream| {
         quote! {
-            #impl_general
+            #impl_array
+
+            #impl_disable
+
+            // Get index of current focus
+            let index = focuses.iter().position(|f| *f == self.focus).unwrap();
 
             let mut current_index = (index + #delta) % #def_len;
 
             loop {
                 let current_focus = focuses[current_index];
 
-                #impl_enable
+                #enable
 
                 if current_index == index {
                     break;
@@ -197,8 +222,8 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
             }
         }
     };
-    let impl_previous = focus_loop(quote! { (#def_len - 1) });
-    let impl_next = focus_loop(quote! { 1 });
+    let impl_previous = focus_loop(quote! { (#def_len - 1) }, &impl_enable_backward);
+    let impl_next = focus_loop(quote! { 1 }, &impl_enable_forward);
 
     // Generate implementation for focus switching methods.
     let focus_def = quote! {
