@@ -2,7 +2,7 @@
 name: spec-reviewer
 description: Independent gate 3 review of a branch against the approved spec and the repo's standards, including TDD honesty. Use before proposing a PR; must be a different agent than the one that wrote the code.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 ---
 
 **Concise, compact, facts only.**
