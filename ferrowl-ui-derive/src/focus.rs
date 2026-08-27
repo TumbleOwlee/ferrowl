@@ -99,6 +99,14 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
     let definitions = collect_definitions(&s.fields)?;
 
+    // Set by `expand_focusable` (via the `#[focus_nestable]` marker attribute) when the struct
+    // opted in with `#[focusable(nestable)]`. Gates generation of `NestedFocus` and its
+    // supporting methods so every other `#[derive(Focus)]` struct's generated code is unaffected.
+    let is_nestable = input
+        .attrs
+        .iter()
+        .any(|a| a.path().is_ident("focus_nestable"));
+
     if definitions.is_empty() {
         return Err(syn::Error::new_spanned(
             identifier,
@@ -295,11 +303,101 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
+    // `NestedFocus` support: a genuinely new, bounded (non-wrapping) scan, generated only for a
+    // struct that opted in via `#[focusable(nestable)]`. Every other struct gets none of this.
+    //
+    // One shared per-field arm, parameterized by `extra` (the token stream run just before
+    // committing to a candidate): the two scanning methods (`try_focus_next`/`_previous`) pass
+    // `impl_disable` so the currently-focused field is disabled only once a next eligible target
+    // is actually found (never eagerly); the two entry methods
+    // (`__focus_enter_first_eligible`/`_last_eligible`) pass `self.view_focused = true;` instead,
+    // since nothing is enabled yet on first entry (the struct was left fully disabled by its own
+    // `SetFocus::set_focused(false)` — see `impl_clear_all` above — when it was last exited).
+    let step_arm = |extra: &TokenStream| {
+        let mut arms = quote! {};
+        for def in definitions.iter() {
+            let name = &def.widget_name;
+            let enum_field = &def.enum_field;
+            let when = if let Some(when) = &def.when {
+                quote! { && #when }
+            } else {
+                quote! {}
+            };
+            arms.extend(quote! {
+                if candidate == #enum_name::#enum_field #when {
+                    #extra
+                    self.focus = #enum_name::#enum_field;
+                    ferrowl_ui::traits::SetFocus::set_focused(&mut self.#name, true);
+                    return true;
+                }
+            });
+        }
+        arms
+    };
+    let step_arm_scan = step_arm(&impl_disable);
+    let step_arm_enter = step_arm(&quote! { self.view_focused = true; });
+
+    let nested_methods = if is_nestable {
+        quote! {
+            impl #impl_generic #identifier #ty_generic #where_clause {
+                #[doc(hidden)]
+                pub fn try_focus_next(&mut self) -> bool {
+                    #impl_array
+                    let index = focuses.iter().position(|f| *f == self.focus).unwrap();
+                    for i in (index + 1)..#def_len {
+                        let candidate = focuses[i];
+                        #step_arm_scan
+                    }
+                    false
+                }
+                #[doc(hidden)]
+                pub fn try_focus_previous(&mut self) -> bool {
+                    #impl_array
+                    let index = focuses.iter().position(|f| *f == self.focus).unwrap();
+                    for i in (0..index).rev() {
+                        let candidate = focuses[i];
+                        #step_arm_scan
+                    }
+                    false
+                }
+                #[doc(hidden)]
+                pub fn __focus_enter_first_eligible(&mut self) -> bool {
+                    #impl_array
+                    for i in 0..#def_len {
+                        let candidate = focuses[i];
+                        #step_arm_enter
+                    }
+                    false
+                }
+                #[doc(hidden)]
+                pub fn __focus_enter_last_eligible(&mut self) -> bool {
+                    #impl_array
+                    for i in (0..#def_len).rev() {
+                        let candidate = focuses[i];
+                        #step_arm_enter
+                    }
+                    false
+                }
+            }
+            impl #impl_generic ferrowl_ui::traits::NestedFocus for #identifier #ty_generic #where_clause {
+                fn try_focus_next(&mut self) -> bool {
+                    self.try_focus_next()
+                }
+                fn try_focus_previous(&mut self) -> bool {
+                    self.try_focus_previous()
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     Ok(quote! {
         #enum_def
         #focus_def
         #set_focus_def
         #handle_def
+        #nested_methods
     })
 }
 

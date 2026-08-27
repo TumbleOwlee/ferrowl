@@ -24,9 +24,16 @@ impl ferrowl_ui::traits::IsFocus for Widget {
 impl ferrowl_ui::traits::HandleEvents for Widget {
     fn handle_events(
         &mut self,
-        _modifiers: crossterm::event::KeyModifiers,
-        _code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+        code: crossterm::event::KeyCode,
     ) -> ferrowl_ui::EventResult {
+        use crossterm::event::KeyCode;
+        // Mirrors real leaf widgets (Button/InputField/Table/Selection): Tab/BackTab are never
+        // consumed, falling through to `Unhandled` so an outer container's focus cycling (or,
+        // for a `#[focus(nested)]` field, `NestedFocus` stepping) can act on them.
+        if matches!(code, KeyCode::Tab | KeyCode::BackTab) {
+            return ferrowl_ui::EventResult::Unhandled(modifiers, code);
+        }
         self.events += 1;
         ferrowl_ui::EventResult::Consumed
     }
@@ -240,4 +247,77 @@ fn ut_set_focused_keeps_remembered_eligible_gated_pane() {
     app.set_focused(true);
     assert!(app.second.is_focused());
     assert!(!app.first.is_focused());
+}
+
+// --- NestedFocus: #[focusable(nestable)] + #[focus(nested)] ---------------
+
+#[focusable(nestable)]
+#[derive(Builder, Debug, Focus)]
+struct Section {
+    #[focus]
+    pub a: Widget,
+    #[focus]
+    pub b: Widget,
+}
+
+fn make_section(start: SectionFocus) -> Section {
+    SectionBuilder::default()
+        .a(Widget::default())
+        .b(Widget::default())
+        .focus(start)
+        .view_focused(false)
+        .build()
+        .expect("Section builder failed")
+}
+
+#[focusable(nestable)]
+#[derive(Builder, Debug, Focus)]
+struct SingleSection {
+    #[focus]
+    pub a: Widget,
+}
+
+fn make_single_section() -> SingleSection {
+    SingleSectionBuilder::default()
+        .a(Widget::default())
+        .focus(SingleSectionFocus::A)
+        .view_focused(false)
+        .build()
+        .expect("SingleSection builder failed")
+}
+
+#[test]
+/// UI-R-049 — `try_focus_next` on a `#[focusable(nestable)]` struct steps to the next pane.
+fn ut_try_focus_next_steps_within_section() {
+    let mut section = make_section(SectionFocus::A);
+    assert!(section.try_focus_next());
+    assert!(section.b.is_focused());
+    assert!(!section.a.is_focused());
+}
+
+#[test]
+/// UI-R-049 — `try_focus_next` at the last pane reports `false` and leaves position unchanged.
+fn ut_try_focus_next_false_at_last_pane() {
+    let mut section = make_section(SectionFocus::B);
+    section.b.set_focused(true);
+    assert!(!section.try_focus_next());
+    assert!(section.b.is_focused(), "must not disable the current pane on a failed scan");
+}
+
+#[test]
+/// UI-R-049 — `try_focus_previous` at the first pane reports `false` and leaves position unchanged.
+fn ut_try_focus_previous_false_at_first_pane() {
+    let mut section = make_section(SectionFocus::A);
+    section.a.set_focused(true);
+    assert!(!section.try_focus_previous());
+    assert!(section.a.is_focused());
+}
+
+#[test]
+/// UI-R-049 — a single-field `#[focusable(nestable)]` struct reports `false` immediately from
+/// `try_focus_next`/`try_focus_previous`, without panicking or looping.
+fn ut_single_field_section_try_focus_next_false_immediately() {
+    let mut section = make_single_section();
+    assert!(!section.try_focus_next());
+    assert!(!section.try_focus_previous());
 }
