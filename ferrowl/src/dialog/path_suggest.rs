@@ -162,12 +162,12 @@ mod tests {
     fn ut_prefix_filtering() {
         let root = setup("ferrowl_pathsuggest_prefix");
         let dir_prefix = format!("{}/", root.to_string_lossy());
-        let input = format!("{}conf", dir_prefix);
+        let input = format!("{dir_prefix}conf");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
-        assert!(names.contains(&format!("{}configs/", dir_prefix).as_str()));
-        assert!(names.contains(&format!("{}config.toml", dir_prefix).as_str()));
-        assert!(names.contains(&format!("{}config.json", dir_prefix).as_str()));
+        assert!(names.contains(&format!("{dir_prefix}configs/").as_str()));
+        assert!(names.contains(&format!("{dir_prefix}config.toml").as_str()));
+        assert!(names.contains(&format!("{dir_prefix}config.json").as_str()));
         assert!(!names.iter().any(|n| n.ends_with("notes.txt")));
         cleanup(&root);
     }
@@ -177,10 +177,10 @@ mod tests {
     fn ut_trailing_slash_on_dirs() {
         let root = setup("ferrowl_pathsuggest_slash");
         let dir_prefix = format!("{}/", root.to_string_lossy());
-        let input = format!("{}configs", dir_prefix);
+        let input = format!("{dir_prefix}configs");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, format!("{}configs/", dir_prefix));
+        assert_eq!(results[0].0, format!("{dir_prefix}configs/"));
         assert!(results[0].1);
         cleanup(&root);
     }
@@ -202,11 +202,11 @@ mod tests {
     fn ut_hidden_included_when_typed() {
         let root = setup("ferrowl_pathsuggest_hidden_incl");
         let dir_prefix = format!("{}/", root.to_string_lossy());
-        let input = format!("{}.", dir_prefix);
+        let input = format!("{dir_prefix}.");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
-        assert!(names.contains(&format!("{}.hiddendir/", dir_prefix).as_str()));
-        assert!(names.contains(&format!("{}.hidden.toml", dir_prefix).as_str()));
+        assert!(names.contains(&format!("{dir_prefix}.hiddendir/").as_str()));
+        assert!(names.contains(&format!("{dir_prefix}.hidden.toml").as_str()));
         cleanup(&root);
     }
 
@@ -219,10 +219,10 @@ mod tests {
         let results = complete_path(&input, Some(&["toml"]), MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
         // dirs always pass the filter
-        assert!(names.contains(&format!("{}configs/", dir_prefix).as_str()));
-        assert!(names.contains(&format!("{}sub/", dir_prefix).as_str()));
+        assert!(names.contains(&format!("{dir_prefix}configs/").as_str()));
+        assert!(names.contains(&format!("{dir_prefix}sub/").as_str()));
         // files: only .toml
-        assert!(names.contains(&format!("{}config.toml", dir_prefix).as_str()));
+        assert!(names.contains(&format!("{dir_prefix}config.toml").as_str()));
         assert!(!names.iter().any(|n| n.ends_with("config.json")));
         assert!(!names.iter().any(|n| n.ends_with("notes.txt")));
         cleanup(&root);
@@ -264,7 +264,7 @@ mod tests {
         cleanup(&root);
         fs::create_dir_all(&root).unwrap();
         for i in 0..20 {
-            fs::write(root.join(format!("file{:02}.txt", i)), "").unwrap();
+            fs::write(root.join(format!("file{i:02}.txt")), "").unwrap();
         }
         let input = format!("{}/", root.to_string_lossy());
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
@@ -306,11 +306,11 @@ mod tests {
         let root = setup("ferrowl_pathsuggest_provider_dir");
         let dir_prefix = format!("{}/", root.to_string_lossy());
         let provider = FsPathProvider::default();
-        let input = format!("{}sub/conf", dir_prefix);
+        let input = format!("{dir_prefix}sub/conf");
         let results = provider.suggest(&input);
         let hit = results
             .iter()
-            .find(|s| s.value == format!("{}sub/configs/", dir_prefix))
+            .find(|s| s.value == format!("{dir_prefix}sub/configs/"))
             .expect("expected sub/configs/ suggestion");
         assert_eq!(hit.label, "configs/");
         assert!(hit.partial);
@@ -323,11 +323,11 @@ mod tests {
         let root = setup("ferrowl_pathsuggest_provider_file");
         let dir_prefix = format!("{}/", root.to_string_lossy());
         let provider = FsPathProvider::default();
-        let input = format!("{}config.toml", dir_prefix);
+        let input = format!("{dir_prefix}config.toml");
         let results = provider.suggest(&input);
         let hit = results
             .iter()
-            .find(|s| s.value == format!("{}config.toml", dir_prefix))
+            .find(|s| s.value == format!("{dir_prefix}config.toml"))
             .expect("expected config.toml suggestion");
         assert_eq!(hit.label, "config.toml");
         assert!(!hit.partial);
@@ -342,7 +342,7 @@ mod tests {
         let provider = FsPathProvider::with_extensions(&["toml"]);
         let results = provider.suggest(&dir_prefix);
         let values: Vec<&str> = results.iter().map(|s| s.value.as_str()).collect();
-        assert!(values.contains(&format!("{}config.toml", dir_prefix).as_str()));
+        assert!(values.contains(&format!("{dir_prefix}config.toml").as_str()));
         assert!(!values.iter().any(|v| v.ends_with("config.json")));
         assert!(!values.iter().any(|v| v.ends_with("notes.txt")));
         cleanup(&root);

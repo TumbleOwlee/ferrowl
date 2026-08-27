@@ -212,7 +212,7 @@ mod tests {
     /// against a real serial port.
     fn duplex_downstream(
         expected: RegisterValue,
-        log: impl LogFn + Clone + Send + 'static,
+        log: impl LogFn + Clone + 'static,
     ) -> DownstreamHandle<FrameTransport<DuplexStream, RtuFraming>, RtuFraming> {
         let (client_end, mut peer) = tokio::io::duplex(256);
         let mut client_end = Some(client_end);

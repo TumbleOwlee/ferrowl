@@ -5,6 +5,9 @@
 //! prefixed tests inside `ferrowl/src/cli/bridge.rs` itself (same split `headless.rs` already
 //! uses between its own in-crate tests and this crate's `tests/headless.rs`).
 
+// Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
+#![allow(clippy::unwrap_used)]
+
 use std::process::Command;
 
 fn bin() -> Command {

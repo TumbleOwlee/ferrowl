@@ -2440,7 +2440,10 @@ mod tests {
         );
         confirm_ca_add(&mut dialog);
         assert!(dialog.client_ca_add_dialog.is_none());
-        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // ADD a second entry.
         dialog.focus = SetupDialogFocus::ClientCaAddButton;
@@ -2498,7 +2501,10 @@ mod tests {
         assert_eq!(dialog.client_ca_files.state.selection(), 1);
         dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // MB-R-136 — the ADD sub-dialog's path field offers filesystem completions, and
         // accepting one (Enter with the popup open) fills the field without submitting the

@@ -1695,7 +1695,7 @@ mod tests {
         );
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(d.client_ca_add_dialog.is_none());
-        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
 
         // ADD a second entry.
         d.focus = OcppSetupDialogFocus::ClientCaAddButton;
@@ -1748,7 +1748,7 @@ mod tests {
         assert_eq!(d.client_ca_files.state.selection(), 1);
         d.focus = OcppSetupDialogFocus::ClientCaDeleteButton;
         d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
 
         let spec = d.resolve().expect("one CA resolves");
         match spec.security.server {

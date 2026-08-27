@@ -129,14 +129,14 @@ mod tests {
     /// MB-R-067 — the TCP server logs per-request outcomes exactly like every other transport.
     #[test]
     fn ut_tcp_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — Tcp is never physical-serial: an unmapped slave id keeps the ordinary
     /// exception.
     #[test]
     fn ut_tcp_server_is_not_physical_serial() {
-        assert!(!PHYSICAL_SERIAL);
+        const { assert!(!PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

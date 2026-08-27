@@ -204,14 +204,14 @@ mod tests {
     /// other transport now; there is no more quiet-RTU special case.
     #[test]
     fn ut_rtu_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — the Rtu server is wired as physical-serial: an unmapped slave id is answered
     /// with silence.
     #[test]
     fn ut_rtu_server_is_physical_serial() {
-        assert!(PHYSICAL_SERIAL);
+        const { assert!(PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

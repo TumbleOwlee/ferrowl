@@ -306,8 +306,7 @@ fn it_ocpp_server_enumeration() {
             reg.stations
                 .get("CP1")
                 .and_then(|st| st.cs.clone())
-                .map(|cs| matches!(cs.read().get_field("Model"), Some(ValueType::String(ref s)) if s == "X"))
-                .unwrap_or(false)
+                .is_some_and(|cs| matches!(cs.read().get_field("Model"), Some(ValueType::String(ref s)) if s == "X"))
         })
     }));
 }

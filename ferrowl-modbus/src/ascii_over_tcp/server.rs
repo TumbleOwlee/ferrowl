@@ -131,14 +131,14 @@ mod tests {
     /// transport (RTU, RTU-over-TCP, TCP, Ascii alike now).
     #[test]
     fn ut_ascii_over_tcp_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — AsciiOverTcp is never physical-serial: an unmapped slave id keeps the ordinary
     /// exception.
     #[test]
     fn ut_ascii_over_tcp_server_is_not_physical_serial() {
-        assert!(!PHYSICAL_SERIAL);
+        const { assert!(!PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

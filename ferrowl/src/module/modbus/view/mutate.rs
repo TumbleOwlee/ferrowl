@@ -642,13 +642,14 @@ mod tests {
                 default: None,
             },
         );
-        let mut device = DeviceConfig::default();
-        device.definitions = definitions;
-        device.read_ranges = ReadRanges {
-            holding: Some("0-10".into()),
+        DeviceConfig {
+            definitions,
+            read_ranges: ReadRanges {
+                holding: Some("0-10".into()),
+                ..Default::default()
+            },
             ..Default::default()
-        };
-        device
+        }
     }
 
     #[tokio::test]

@@ -202,7 +202,7 @@ mod tests {
     /// link with a fixed responder driving the other end.
     fn downstream_with_fixed_responder(
         expected: ResponsePdu,
-        log: impl LogFn + Clone + Send + 'static,
+        log: impl LogFn + Clone + 'static,
     ) -> DownstreamHandle<FrameTransport<DuplexStream, Rtu>, Rtu> {
         let (client_end, mut peer) = tokio::io::duplex(256);
         let mut client_end = Some(client_end);

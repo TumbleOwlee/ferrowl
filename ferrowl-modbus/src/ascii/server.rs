@@ -203,14 +203,14 @@ mod tests {
     /// other transport.
     #[test]
     fn ut_ascii_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — the Ascii server is wired as physical-serial: an unmapped slave id is answered
     /// with silence.
     #[test]
     fn ut_ascii_server_is_physical_serial() {
-        assert!(PHYSICAL_SERIAL);
+        const { assert!(PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

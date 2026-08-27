@@ -433,7 +433,7 @@ fn main() -> ExitCode {
                 app.error.state.set_input("".into());
             }
             Err(e) => {
-                app.error.state.set_input(format!("ERROR: {}", e));
+                app.error.state.set_input(format!("ERROR: {e}"));
             }
         }
 
@@ -465,11 +465,11 @@ fn main() -> ExitCode {
 
     match app.result() {
         Ok(v) => {
-            println!("{:?}", v);
+            println!("{v:?}");
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("ERROR: {}", e);
+            eprintln!("ERROR: {e}");
             ExitCode::FAILURE
         }
     }
