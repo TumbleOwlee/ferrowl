@@ -410,3 +410,41 @@ fn ut_nested_backtab_from_after_lands_on_last_pane() {
     assert!(app.section.b.is_focused(), "must land on the last pane, not the remembered/first one");
     assert!(!app.section.a.is_focused());
 }
+
+#[test]
+/// UI-R-049 — repeated forward Tab visits every pane inside a `#[focus(nested)]` field, purely
+/// via `handle_events`, before leaving it (no outer `focus_next()` fallback needed for the
+/// interior step).
+fn ut_nested_repeated_tab_steps_within_section_before_leaving() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = make_nesting_app(NestingAppFocus::Before, SectionFocus::A);
+    app.before.set_focused(true);
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // Before -> Section (a)
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.a.is_focused());
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // a -> b, still inside Section
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.b.is_focused());
+    assert!(!app.section.a.is_focused());
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // b -> After, leaving Section
+    assert_eq!(app.focus, NestingAppFocus::After);
+    assert!(app.after.is_focused());
+}
+
+#[test]
+/// UI-R-049 — the `HandleEvents` arm for a `#[focus(nested)]` field converts a successful
+/// `NestedFocus` step to `Consumed`, isolated from the higher-level "did focus end up in the
+/// right place" assertions above.
+fn ut_nested_handle_events_arm_converts_unhandled_tab_to_consumed() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = make_nesting_app(NestingAppFocus::Section, SectionFocus::A);
+    app.section.a.set_focused(true);
+    let result = app.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+    assert!(matches!(result, ferrowl_ui::EventResult::Consumed));
+}

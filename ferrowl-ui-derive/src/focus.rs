@@ -307,13 +307,40 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
-    // Implementation of HandleEvents.
+    // Implementation of HandleEvents. A `#[focus(nested)]` field's arm additionally tries
+    // `NestedFocus` stepping on an `Unhandled` Tab/BackTab from that field's own `handle_events`,
+    // converting to `Consumed` on success or re-emitting the original `Unhandled` on failure (so
+    // it bubbles to whichever outer call site owns this struct's own `focus_next`/`focus_previous`
+    // fallback). Every non-nested field's arm is emitted identically to before.
     let mut impl_handle_events = quote! {};
     for def in definitions.iter() {
         let from = &def.widget_name;
         let from_enum = &def.enum_field;
+        let arm = if def.nested {
+            quote! {
+                match ferrowl_ui::traits::HandleEvents::handle_events(&mut self.#from, modifiers, code) {
+                    ferrowl_ui::EventResult::Unhandled(m, crossterm::event::KeyCode::Tab) => {
+                        if ferrowl_ui::traits::NestedFocus::try_focus_next(&mut self.#from) {
+                            ferrowl_ui::EventResult::Consumed
+                        } else {
+                            ferrowl_ui::EventResult::Unhandled(m, crossterm::event::KeyCode::Tab)
+                        }
+                    }
+                    ferrowl_ui::EventResult::Unhandled(m, crossterm::event::KeyCode::BackTab) => {
+                        if ferrowl_ui::traits::NestedFocus::try_focus_previous(&mut self.#from) {
+                            ferrowl_ui::EventResult::Consumed
+                        } else {
+                            ferrowl_ui::EventResult::Unhandled(m, crossterm::event::KeyCode::BackTab)
+                        }
+                    }
+                    other => other,
+                }
+            }
+        } else {
+            quote! { ferrowl_ui::traits::HandleEvents::handle_events(&mut self.#from, modifiers, code) }
+        };
         impl_handle_events.extend(quote! {
-            #enum_name::#from_enum => ferrowl_ui::traits::HandleEvents::handle_events(&mut self.#from, modifiers, code),
+            #enum_name::#from_enum => #arm,
         });
     }
 
