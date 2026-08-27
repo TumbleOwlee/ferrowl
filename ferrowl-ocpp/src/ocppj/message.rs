@@ -45,7 +45,7 @@ impl From<String> for UniqueId {
 /// version-agnostic; turning them into typed actions/responses is the [`Version`] trait's job.
 ///
 /// [`Version`]: crate::action::Version
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OcppJMessage {
     /// `[2, id, action, payload]`
     Call {

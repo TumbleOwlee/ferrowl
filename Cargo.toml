@@ -34,6 +34,10 @@ all = { level = "deny", priority = -1 }
 # via `expect("...")`. `expect_used` stays off — `expect` is the sanctioned, documented form. Test
 # code is exempt (see clippy.toml).
 unwrap_used = "deny"
+derive_partial_eq_without_eq = "warn"
+uninlined_format_args = "warn"
+map_unwrap_or = "warn"
+assigning_clones = "warn"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

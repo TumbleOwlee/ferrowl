@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// Why a [`Memory`] read or write operation failed.
-#[derive(Debug, PartialEq, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum MemoryError {
     /// The device key has no registered memory regions.
     #[error("key not registered")]

@@ -47,7 +47,7 @@ impl std::fmt::Display for Format {
         }
         match self {
             Format::Ascii((alignment, _)) => {
-                write!(fmt, "ASCII ({})", alignment)
+                write!(fmt, "ASCII ({alignment})")
             }
             Format::U8((e, _, _, _)) => fmt_variant!(U8, e),
             Format::U16((e, _, _, _)) => fmt_variant!(U16, e),

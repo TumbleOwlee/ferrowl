@@ -369,8 +369,7 @@ where
             let (read_addr, cnt, write_addr) = (read_address.0, read_quantity.0, write_address.0);
             let values: Vec<u16> = registers.iter().map(|v| v.0).collect();
             log.invoke(format!(
-                "ReadWriteMultipleRegisrters request received for slave ID {}, read address {}, count {}, write address {}, and values {:?}.",
-                slave, read_addr, cnt, write_addr, values
+                "ReadWriteMultipleRegisrters request received for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?}."
             ))
             .await;
             let key = Key {
@@ -420,8 +419,7 @@ where
                 Outcome::NotAddressable(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
-                            slave, read_addr, cnt, write_addr, values
+                            "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
                     }
@@ -430,8 +428,7 @@ where
                 Outcome::Rejected(e) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} failed: {e}.",
-                            slave, read_addr, cnt, write_addr, values
+                            "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
                     }
@@ -440,8 +437,7 @@ where
                 Outcome::Ok(v) => {
                     if verbose {
                         log.invoke(format!(
-                            "ReadWriteMultipleRegisrters request for slave ID {}, read address {}, count {}, write address {}, and values {:?} successful.",
-                            slave, read_addr, cnt, write_addr, values
+                            "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} successful."
                         ))
                         .await;
                     }

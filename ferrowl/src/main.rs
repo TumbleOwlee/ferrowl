@@ -372,7 +372,7 @@ fn main() {
     }
 
     // Multi-threaded runtime: background modbus/OCPP tasks run concurrently with the UI loop.
-    let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{}]", e));
+    let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{e}]"));
 
     if let Some(SubCommand::Run(ref run_args)) = args.command {
         let code = runtime.block_on(cli::headless::run(run_args));
@@ -418,7 +418,7 @@ fn main() {
         };
         if let Err(e) = app.run().await {
             AlternateScreen::<Stdout>::release();
-            eprintln!("UI error: {}", e);
+            eprintln!("UI error: {e}");
         }
     });
 }

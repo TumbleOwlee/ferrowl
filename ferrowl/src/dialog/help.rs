@@ -93,7 +93,7 @@ impl HelpOverlay {
     pub fn handle_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let _ = modifiers;
         match code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => true,
+            KeyCode::Esc | KeyCode::Char('q' | '?') => true,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.scroll = self.scroll.saturating_add(1).min(self.max_scroll);
                 false

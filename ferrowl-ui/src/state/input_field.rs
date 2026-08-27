@@ -117,8 +117,7 @@ impl HandleEvents for InputFieldState {
                                 .input
                                 .char_indices()
                                 .nth(self.cursor)
-                                .map(|(idx, _)| idx)
-                                .unwrap_or(self.input.len());
+                                .map_or(self.input.len(), |(idx, _)| idx);
                             self.input.insert(byte_idx, c);
                         }
                         self.cursor += 1;

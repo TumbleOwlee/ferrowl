@@ -128,8 +128,7 @@ impl ModbusModule {
                 let init = def
                     .default
                     .as_ref()
-                    .map(|s| s.to_value(def.resolution))
-                    .unwrap_or_else(|| default_value(&register));
+                    .map_or_else(|| default_value(&register), |s| s.to_value(def.resolution));
                 virtual_init.insert(name.clone(), init);
             }
             if let Some(range) = def.mem_range() {

@@ -26,7 +26,7 @@ pub(crate) fn default_value(register: &Register) -> ferrowl_codec::Value {
 /// Parse user input (`:set`, Lua `write`) into a typed [`Value`](ferrowl_codec::Value),
 /// attaching the register's display resolution (1.0 when the format has none).
 pub(crate) fn str_to_value(s: &str, register: &Register) -> ferrowl_codec::Value {
-    let res = register.format().resolution().map(|r| r.0).unwrap_or(1.0);
+    let res = register.format().resolution().map_or(1.0, |r| r.0);
     crate::config::device::Scalar::from_input(s).to_value(res)
 }
 

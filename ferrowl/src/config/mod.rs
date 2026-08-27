@@ -59,7 +59,7 @@ fn file_type(path: &str) -> Result<FileType, ConfigError> {
 
 fn load<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ConfigError> {
     let ty = file_type(path)?;
-    Converter::load(path, ty).map_err(|e| ConfigError::Io(format!("{:?}", e)))
+    Converter::load(path, ty).map_err(|e| ConfigError::Io(format!("{e:?}")))
 }
 
 /// Load a device-type config file, migrating legacy per-register `update` scripts

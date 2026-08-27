@@ -26,7 +26,7 @@ use crate::TcpError;
 /// only when this endpoint runs as a server) and a role-pure `client` policy (consulted only
 /// when this endpoint runs as a client) — both fields are always present on the wire (flattened
 /// siblings), even though only one is read at any given call site.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ModbusTlsConfig {
     #[serde(flatten)]
     pub server: ServerTlsPolicy,

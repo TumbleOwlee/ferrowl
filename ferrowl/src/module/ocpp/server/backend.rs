@@ -69,7 +69,7 @@ pub struct RfidStore {
 impl RfidStore {
     /// The connector list for `scope` (empty if none recorded).
     pub fn scope_list(&self, scope: Scope) -> &[String] {
-        self.by_scope.get(&scope).map(Vec::as_slice).unwrap_or(&[])
+        self.by_scope.get(&scope).map_or(&[], Vec::as_slice)
     }
 
     /// Add `tag` to a level (deduplicated); returns whether it was newly inserted. `scope`
@@ -271,7 +271,7 @@ where
     pub fn bound_addr(&self) -> Option<String> {
         self.server
             .as_ref()
-            .and_then(|s| s.local_addr())
+            .and_then(ferrowl_ocpp::csms::Server::local_addr)
             .map(|a| a.to_string())
     }
 

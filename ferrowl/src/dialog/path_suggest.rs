@@ -60,19 +60,18 @@ pub fn complete_path(input: &str, extensions: Option<&[&str]>, max: usize) -> Ve
         };
 
         if file_type.is_dir() {
-            dirs.push(format!("{}{}/", dir_part, name));
+            dirs.push(format!("{dir_part}{name}/"));
         } else if file_type.is_file() {
             if let Some(exts) = extensions {
                 let matches_ext = Path::new(name)
                     .extension()
                     .and_then(|e| e.to_str())
-                    .map(|e| exts.iter().any(|allowed| allowed.eq_ignore_ascii_case(e)))
-                    .unwrap_or(false);
+                    .is_some_and(|e| exts.iter().any(|allowed| allowed.eq_ignore_ascii_case(e)));
                 if !matches_ext {
                     continue;
                 }
             }
-            files.push(format!("{}{}", dir_part, name));
+            files.push(format!("{dir_part}{name}"));
         }
     }
 
@@ -110,7 +109,7 @@ impl SuggestionProvider for FsPathProvider {
                 let trimmed = value.strip_suffix('/').unwrap_or(&value);
                 let last = trimmed.rsplit('/').next().unwrap_or(trimmed);
                 let label = if is_dir {
-                    format!("{}/", last)
+                    format!("{last}/")
                 } else {
                     last.to_string()
                 };

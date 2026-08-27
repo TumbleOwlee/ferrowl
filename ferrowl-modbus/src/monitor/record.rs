@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// MB-R-146's per-record outcome.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordStatus {
     Ok,
     Unmatched,
@@ -18,7 +18,7 @@ pub enum RecordStatus {
 
 /// MB-R-146's address/quantity/value(s) for the 9 table-shaping operations (the 8 MB-R-144 ops
 /// plus `ReadWriteMultipleRegisters`); a record with no `TableShape` is any other operation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableShape {
     pub kind: Kind,
     pub address: u16,
@@ -34,7 +34,7 @@ pub struct TableShape {
 }
 
 /// MB-R-146 — one captured message record.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MonitorRecord {
     pub timestamp: Instant,
     pub status: RecordStatus,
@@ -90,7 +90,7 @@ impl RecordLog {
     /// id never pushed to. The monitor view uses this to skip a refresh entirely when unchanged
     /// since the last tick.
     pub fn generation_for(&self, slave: UnitId) -> u64 {
-        self.records.get(&slave).map(|e| e.generation).unwrap_or(0)
+        self.records.get(&slave).map_or(0, |e| e.generation)
     }
 
     /// The most recently pushed `n` records for `slave`, oldest-of-the-batch first — clones only

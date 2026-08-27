@@ -25,7 +25,7 @@ pub fn parse(input: &str) -> Cmd {
     let Some(name) = parts.next() else {
         return Cmd::Empty;
     };
-    let mut first = || parts.next().map(|s| s.to_string());
+    let mut first = || parts.next().map(std::string::ToString::to_string);
 
     match name {
         "q" | "q!" | "quit" => Cmd::Quit,
@@ -35,11 +35,11 @@ pub fn parse(input: &str) -> Cmd {
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "log" => Cmd::Log(first()),
         "swap" => {
-            let from = match parts.next().map(|v| v.parse()) {
+            let from = match parts.next().map(str::parse) {
                 Some(Ok(v)) => v,
                 _ => return Cmd::Unknown("swap".to_string()),
             };
-            let to = match parts.next().map(|v| v.parse()) {
+            let to = match parts.next().map(str::parse) {
                 Some(Ok(v)) => v,
                 _ => return Cmd::Unknown("swap".to_string()),
             };

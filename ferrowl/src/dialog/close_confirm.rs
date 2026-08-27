@@ -120,9 +120,7 @@ impl CloseConfirmDialog {
     /// Feed one key while the confirm is open.
     pub fn handle_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> CloseConfirmEvent {
         match (modifiers, code) {
-            (KeyModifiers::NONE, KeyCode::Enter) | (KeyModifiers::NONE, KeyCode::Char(' ')) => {
-                CloseConfirmEvent::Close
-            }
+            (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) => CloseConfirmEvent::Close,
             (KeyModifiers::NONE, KeyCode::Esc) => CloseConfirmEvent::Dismiss,
             _ => CloseConfirmEvent::Consumed,
         }

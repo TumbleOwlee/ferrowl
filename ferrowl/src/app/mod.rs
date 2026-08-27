@@ -588,7 +588,7 @@ impl<S: DrawSurface> App<S> {
         if done {
             let dialog = self.session_dialog.take().expect("checked above");
             let (scripts, interval) = dialog.resolve();
-            self.session_scripts = scripts.clone();
+            self.session_scripts.clone_from(&scripts);
             self.session_interval = interval;
             // Interval first, then scripts — same order as construction, so the restart
             // triggered by `set_scripts` already runs on the new interval.

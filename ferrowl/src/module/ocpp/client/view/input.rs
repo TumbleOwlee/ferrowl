@@ -274,7 +274,10 @@ impl<V: ClientVersion> ClientView<V> {
         } else {
             <V::Cs as ClientFields>::cs_actions()
         };
-        let values: Vec<String> = names.into_iter().map(|s| s.to_string()).collect();
+        let values: Vec<String> = names
+            .into_iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         self.actions.state.set_values(values);
         self.actions_for_connector = Some(want);
     }
@@ -289,7 +292,7 @@ impl<V: ClientVersion> ClientView<V> {
             // Rebuild the (now-sorted) table and select the new connector's row (CS row = 0).
             let cp = self.spec.name.clone();
             let (rows, row) = self.with_state(|s| {
-                let row = s.connector_position(id).map(|p| p + 1).unwrap_or(0);
+                let row = s.connector_position(id).map_or(0, |p| p + 1);
                 (conn_rows::<V>(&cp, s), row)
             });
             self.conn_table.state.set_values(rows);
@@ -365,8 +368,10 @@ impl<V: ClientVersion> ClientView<V> {
                             .or_else(|| {
                                 V::default_action(&name).and_then(|a| V::encode_action(&a).ok())
                             })
-                            .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                            .unwrap_or_else(|| "{}".to_string());
+                            .map_or_else(
+                                || "{}".to_string(),
+                                |v| serde_json::to_string_pretty(&v).unwrap_or_default(),
+                            );
                         Box::new(ActionDialog::json_only(name, &template))
                     }
                 });

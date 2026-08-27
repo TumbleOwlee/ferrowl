@@ -22,7 +22,10 @@ impl ServerVersion for V1_6 {
     }
 
     fn inbound_connector(_name: &str, request: &serde_json::Value) -> Scope {
-        match request.get("connectorId").and_then(|v| v.as_i64()) {
+        match request
+            .get("connectorId")
+            .and_then(serde_json::Value::as_i64)
+        {
             Some(c) if c >= 1 => Scope::connector(c),
             _ => Scope::CS,
         }
@@ -39,7 +42,7 @@ impl ServerVersion for V1_6 {
         if let (Some(c), Some(obj)) = (scope.connector, payload.as_object_mut()) {
             // Set the connector id when absent or still the `0` default the encoded request struct
             // carries; a genuine non-zero value (and later user overrides) win.
-            let cur = obj.get("connectorId").and_then(|v| v.as_i64());
+            let cur = obj.get("connectorId").and_then(serde_json::Value::as_i64);
             if cur.is_none() || cur == Some(0) {
                 obj.insert("connectorId".into(), serde_json::json!(c));
             }

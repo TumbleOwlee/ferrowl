@@ -204,11 +204,10 @@ where
             }
         } else if matches!(
             (modifiers, code),
-            (KeyModifiers::NONE, KeyCode::Up)
-                | (KeyModifiers::NONE, KeyCode::Down)
-                | (KeyModifiers::NONE, KeyCode::Enter)
-                | (KeyModifiers::NONE, KeyCode::Tab)
-                | (KeyModifiers::NONE, KeyCode::Esc)
+            (
+                KeyModifiers::NONE,
+                KeyCode::Up | KeyCode::Down | KeyCode::Enter | KeyCode::Tab | KeyCode::Esc
+            )
         ) {
             return EventResult::Unhandled(modifiers, code);
         }

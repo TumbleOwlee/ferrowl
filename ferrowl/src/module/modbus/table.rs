@@ -160,7 +160,7 @@ impl Definition {
 impl TableEntry<COLUMN_COUNT> for Definition {
     fn values(&self) -> [String; COLUMN_COUNT] {
         let resolution = match self.register.format().resolution() {
-            Some(v) => format!("{}", v),
+            Some(v) => format!("{v}"),
             None => "None".into(),
         };
 

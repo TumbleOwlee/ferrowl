@@ -4,7 +4,7 @@
 use std::io::Write;
 
 /// Editing mode for a vim-enabled [`super::CodeInputFieldState`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VimMode {
     Normal,
     Insert,

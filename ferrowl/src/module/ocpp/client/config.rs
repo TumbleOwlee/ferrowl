@@ -193,7 +193,10 @@ fn input(title: &str, current: &str) -> Widget<InputFieldState, InputField<Strin
 }
 
 fn readonly_select(current: bool) -> Widget<SelectionState<String>, Selection<String>> {
-    let values: Vec<String> = READONLY_CHOICES.iter().map(|s| s.to_string()).collect();
+    let values: Vec<String> = READONLY_CHOICES
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     let mut state = SelectionStateBuilder::default()
         .focused(false)
         .values(values)

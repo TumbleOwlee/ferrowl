@@ -216,10 +216,7 @@ impl ModbusMonitorModule {
 
     /// Interpretations for one unit id, empty (not absent/panicking) for a unit id with none.
     pub fn interpretations_for(&self, unit: UnitId) -> &[(String, MonitorRegisterDef)] {
-        self.interpretations
-            .get(&unit)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.interpretations.get(&unit).map_or(&[], Vec::as_slice)
     }
 
     /// Append a brand-new interpretation to `unit`'s cached list, forcing `def.slave_id` to

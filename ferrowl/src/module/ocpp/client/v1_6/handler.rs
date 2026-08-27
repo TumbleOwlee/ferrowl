@@ -129,7 +129,7 @@ impl CsStateHandler {
                 let status = match state.config.iter_mut().find(|c| c.key == req.key) {
                     Some(c) if c.readonly => ConfigurationStatus::Rejected,
                     Some(c) => {
-                        c.value = req.value.clone();
+                        c.value.clone_from(&req.value);
                         ConfigurationStatus::Accepted
                     }
                     None => {
@@ -209,15 +209,15 @@ impl CsStateHandler {
                                 match purpose.as_str() {
                                     "TxDefaultProfile" => {
                                         c.default_limit = Some(limit);
-                                        c.default_limit_unit = unit.clone();
+                                        c.default_limit_unit.clone_from(&unit);
                                     }
                                     "ChargePointMaxProfile" => {
                                         c.max_limit = Some(limit);
-                                        c.max_limit_unit = unit.clone();
+                                        c.max_limit_unit.clone_from(&unit);
                                     }
                                     _ => {
                                         c.limit = Some(limit);
-                                        c.limit_unit = unit.clone();
+                                        c.limit_unit.clone_from(&unit);
                                     }
                                 }
                             }
@@ -328,8 +328,7 @@ impl CsStateHandler {
                 if has_target {
                     let scope = req
                         .connector_id
-                        .map(|c| Scope::connector(c as i64))
-                        .unwrap_or(Scope::CS);
+                        .map_or(Scope::CS, |c| Scope::connector(c as i64));
                     drop(
                         crate::module::ocpp::client::backend::spawn_remote_transaction_start(
                             self.sender.clone(),

@@ -146,12 +146,7 @@ where
 /// An empty table or no selection counts as tailing.
 fn msg_log_at_bottom<E: TableEntry<N>, const N: usize>(state: &TableState<E, N>) -> bool {
     let len = state.values().len();
-    len == 0
-        || state
-            .table_state()
-            .selected()
-            .map(|s| s + 1 >= len)
-            .unwrap_or(true)
+    len == 0 || state.table_state().selected().is_none_or(|s| s + 1 >= len)
 }
 
 pub(super) fn cs_table() -> CsTable {

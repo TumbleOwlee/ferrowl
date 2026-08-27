@@ -887,8 +887,7 @@ impl ModbusMonitorModuleView {
         self.spec.device = outcome.values.config_path.clone();
         let mut device = outcome
             .device
-            .map(|(_, d)| d)
-            .unwrap_or_else(|| self.device.clone());
+            .map_or_else(|| self.device.clone(), |(_, d)| d);
         self.spec.name = outcome.values.name;
         self.spec.endpoint = outcome.values.endpoint;
         device.reconnect = Some(outcome.values.reconnect);

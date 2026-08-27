@@ -281,7 +281,7 @@ impl EditInterpretationDialog {
                 }
             }
         }
-        *dialog.value.state.values_mut() = def.values.clone();
+        dialog.value.state.values_mut().clone_from(&def.values);
         if !dialog.value.state.values().is_empty() && !dialog.is_boolean_kind() {
             dialog.focus = EditInterpretationDialogFocus::Value;
         } else {
@@ -447,7 +447,7 @@ impl EditInterpretationDialog {
     /// `to_selection_dialog`'s forced focus onto its own default (`Value`,
     /// `EditInterpretationSelectionDialog::new`) once the swap happened.
     pub fn confirm_add_dialog(&mut self) {
-        let result = self.add_dialog.as_ref().map(|d| d.apply());
+        let result = self.add_dialog.as_ref().map(AddNamedValueDialog::apply);
         match result {
             Some(Ok(nv)) => {
                 self.value.state.values_mut().push(nv);

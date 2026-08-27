@@ -305,8 +305,10 @@ where
                             .or_else(|| {
                                 V::default_action(&name).and_then(|a| V::encode_action(&a).ok())
                             })
-                            .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
-                            .unwrap_or_else(|| "{}".to_string());
+                            .map_or_else(
+                                || "{}".to_string(),
+                                |v| serde_json::to_string_pretty(&v).unwrap_or_default(),
+                            );
                         ActionDialog::json_only(name.clone(), &template)
                     }
                 };
