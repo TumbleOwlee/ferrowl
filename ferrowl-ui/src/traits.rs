@@ -56,6 +56,21 @@ pub trait IsFocus {
     fn is_focused(&self) -> bool;
 }
 
+/// Boundary-aware focus stepping for a `#[focusable(nestable)]` struct embedded as a
+/// `#[focus(nested)]` field of another. Unlike `focus_next`/`focus_previous` (which always
+/// wrap), these stop and report `false` — leaving position unchanged — once already at the
+/// struct's own last/first eligible pane, so the embedding parent knows to advance its own
+/// cycle instead of wrapping back into this one.
+///
+/// Known limitation: if the currently-focused inner pane's own `handle_events` consumes
+/// Tab/BackTab itself (e.g. `CodeInputFieldState` in Insert mode) rather than returning
+/// `Unhandled`, that keystroke never reaches this trait's methods and no stepping occurs —
+/// same as how Tab is already swallowed at any level today when a widget wants it.
+pub trait NestedFocus {
+    fn try_focus_next(&mut self) -> bool;
+    fn try_focus_previous(&mut self) -> bool;
+}
+
 /// The margin a widget reserves around its content (e.g. for borders).
 pub trait Margins {
     fn margins(&self) -> Margin;

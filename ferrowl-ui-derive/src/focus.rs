@@ -8,11 +8,13 @@ use syn::{
     punctuated::Punctuated,
 };
 
-/// One focusable field, as gathered from a `#[focus]`/`#[focus(when = …)]` attribute.
+/// One focusable field, as gathered from a `#[focus]`/`#[focus(when = …)]`/`#[focus(nested)]`
+/// attribute.
 struct Definition {
     widget_name: Ident,
     enum_field: Ident,
     when: Option<Expr>,
+    nested: bool,
 }
 
 /// Collect the `#[focus]`-tagged fields of a struct in declaration order.
@@ -22,6 +24,7 @@ fn collect_definitions(fields: &Fields) -> syn::Result<Vec<Definition>> {
     for field in fields.iter() {
         let mut found = false;
         let mut when: Option<Expr> = None;
+        let mut nested = false;
 
         for attr in field.attrs.iter() {
             if !attr.path().is_ident("focus") {
@@ -48,6 +51,9 @@ fn collect_definitions(fields: &Fields) -> syn::Result<Vec<Definition>> {
                     Meta::NameValue(MetaNameValue { path, value, .. }) if path.is_ident("when") => {
                         when = Some(value);
                     }
+                    Meta::Path(p) if p.is_ident("nested") => {
+                        nested = true;
+                    }
                     other => {
                         return Err(syn::Error::new_spanned(
                             &other,
@@ -67,6 +73,7 @@ fn collect_definitions(fields: &Fields) -> syn::Result<Vec<Definition>> {
                 widget_name: ident.clone(),
                 enum_field: Ident::new(&enum_field, Span::call_site()),
                 when,
+                nested,
             });
         }
     }
@@ -406,6 +413,58 @@ mod tests {
         };
 
         let err = expand_focus(input).expect_err("expected unknown focus key to be rejected");
+        assert!(
+            err.to_string()
+                .contains("Invalid argument for #[focus] attribute")
+        );
+    }
+
+    #[test]
+    /// UI-R-049 — `#[focus(nested)]` (bare, no `when`) is accepted.
+    fn accepts_bare_nested_focus_attribute() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(nested)]
+                field: Widget,
+            }
+        };
+
+        expand_focus(input).expect("expected #[focus(nested)] to be accepted");
+    }
+
+    #[test]
+    /// UI-R-049 — `#[focus(nested, when = …)]` and `#[focus(when = …, nested)]` are both accepted.
+    fn accepts_nested_with_when_either_argument_order() {
+        let nested_then_when: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(nested, when = self.flag)]
+                field: Widget,
+            }
+        };
+        expand_focus(nested_then_when)
+            .expect("expected #[focus(nested, when = …)] to be accepted");
+
+        let when_then_nested: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(when = self.flag, nested)]
+                field: Widget,
+            }
+        };
+        expand_focus(when_then_nested)
+            .expect("expected #[focus(when = …, nested)] to be accepted");
+    }
+
+    #[test]
+    /// UI-R-049 — an unknown key alongside `nested` is still rejected like any other unknown key.
+    fn rejects_nested_with_unknown_key() {
+        let input: syn::DeriveInput = syn::parse_quote! {
+            struct TestView {
+                #[focus(nested, bogus = 1)]
+                field: Widget,
+            }
+        };
+
+        let err = expand_focus(input).expect_err("expected unknown key alongside nested to fail");
         assert!(
             err.to_string()
                 .contains("Invalid argument for #[focus] attribute")
