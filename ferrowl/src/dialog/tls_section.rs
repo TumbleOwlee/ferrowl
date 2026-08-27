@@ -7,13 +7,9 @@
 //! `role`/`level` are set once per relevant call via [`TlsSection::sync`] rather than passed as
 //! explicit parameters to every predicate: `#[focus(when = ...)]` expressions are spliced
 //! verbatim with only `self` in scope (no mechanism to receive caller-supplied arguments), so the
-//! 7 internal visibility gates read `self.role`/`self.level` directly. Each outer dialog's own
-//! `render`/`handle_events`/`resolve`-equivalent funnel methods call `self.tls.sync(role, level)`
-//! as their first statement (see the embedding stages, B2/B3) — not this stage's concern, but the
-//! reason these two fields exist as private state here rather than function parameters.
-//!
-//! No production caller constructs a `TlsSection` yet — the Modbus/OCPP setup dialogs still own
-//! their TLS fields directly — so `dead_code` is allowed module-wide until they're wired in.
+//! 7 internal visibility gates read `self.role`/`self.level` directly. An embedding dialog calls
+//! `self.tls.sync(role, level)` as the first statement of any method that touches these gates,
+//! since nothing else keeps `role`/`level` current.
 #![allow(dead_code)]
 
 use derive_builder::Builder;
@@ -125,9 +121,9 @@ pub struct TlsSectionInputs {
 
 /// Shared TLS/mTLS cluster: self-signed toggle, own-identity cert/key pair, skip-verify toggle,
 /// peer-verification input, client-CA add/remove list. Embedded by the Modbus and OCPP setup
-/// dialogs via `#[focus(nested, when = ...)]` (see the B2/B3 migration stages, not this one).
+/// dialogs via `#[focus(nested, when = ...)]`.
 #[focusable(nestable)]
-#[derive(Builder, Focus)]
+#[derive(Builder, Clone, Focus)]
 pub struct TlsSection {
     /// Server: "generate an ephemeral self-signed server certificate" toggle (shown at TLS+).
     /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
@@ -270,12 +266,28 @@ impl TlsSection {
         self.level = level;
     }
 
+    /// Which of this section's own panes currently holds focus — `#[focusable]`'s generated
+    /// `focus` field is private to this module (and its descendants) by construction, so an
+    /// embedding outer dialog needs this accessor to route its own Enter/Space handling for the
+    /// client-CA ADD/DEL buttons and to guard against leaving focus on a hidden DEL button.
+    pub fn focus(&self) -> TlsSectionFocus {
+        self.focus
+    }
+
     /// Server: self-signed server-certificate toggle (TLS level or above). Client, at mTLS
     /// only: self-signed client-identity toggle (MB-R-139) — same widget, different meaning per
     /// role (see the field's doc comment).
     fn show_self_signed(&self) -> bool {
         (self.role == ClientOrServer::Server && self.level >= EffectiveTlsLevel::Tls)
             || (self.role == ClientOrServer::Client && self.level == EffectiveTlsLevel::MutualTls)
+    }
+
+    /// Row (self-signed toggle): a dialog that paints this as its own standalone row (rather
+    /// than folding it into the identity row alongside cert/key, as a combined-row layout would)
+    /// reads this directly for its own row-height budgeting, mirroring the other 3 `pub` row
+    /// helpers below.
+    pub fn show_self_signed_row(&self) -> bool {
+        self.show_self_signed()
     }
 
     /// Client-only skip-verify toggle (client at TLS level or above).
@@ -466,10 +478,8 @@ impl TlsSection {
     }
 
     /// Route a key for this section's own client-CA add-dialog and ADD/DEL buttons (Enter/
-    /// Space); everything else falls through to the derived per-field routing. Standalone
-    /// routing so `TlsSection` is independently testable — an embedding outer dialog (B2/B3) may
-    /// route these same paths itself against `self.tls.*` fields instead of delegating here; both
-    /// shapes are equivalent, this exists so B1's own tests can drive a bare `TlsSection`.
+    /// Space); everything else falls through to the derived per-field routing. Self-contained so
+    /// `TlsSection` can be driven and tested without an embedding dialog.
     pub fn handle_events(
         &mut self,
         modifiers: crossterm::event::KeyModifiers,
@@ -644,9 +654,7 @@ mod tests {
     }
 
     fn render_bare(section: &mut TlsSection, is_server: bool, area: Rect, buf: &mut Buffer) {
-        // Mirrors the row-composition Modbus/OCPP's own `render()` performs today (see Shared's
-        // "Render composition" note) — a local rebinding so `render_field!`/`render_row!` see a
-        // bare ident, exactly as B2/B3's production code will.
+        // `render_field!`/`render_row!` take a bare `$self:ident`, not `self`, hence the rebind.
         let rows: [Rect; 4] =
             ratatui::layout::Layout::vertical([Constraint::Length(3); 4]).areas(area);
         let mut idx = 0;
@@ -928,7 +936,10 @@ mod tests {
         );
         confirm_ca_add(&mut section);
         assert!(section.client_ca_add_dialog.is_none());
-        assert_eq!(section.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            section.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // ADD a second entry.
         section.focus = TlsSectionFocus::ClientCaAddButton;
@@ -986,7 +997,10 @@ mod tests {
         assert_eq!(section.client_ca_files.state.selection(), 1);
         section.focus = TlsSectionFocus::ClientCaDeleteButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(section.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            section.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // Removing the last entry leaves the list empty and the DEL button no longer eligible.
         section.focus = TlsSectionFocus::ClientCaDeleteButton;
