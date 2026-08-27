@@ -263,7 +263,7 @@ impl<V: Version> OcppClient<V> {
     }
 
     /// OC-R-123 — the tri-state connection status, same derivation as `Instance::connection_
-    /// status` (`ferrowl_modbus`'s equivalent — see plan Shared): not running → `Disconnected`;
+    /// status` (`ferrowl_modbus`'s equivalent): not running → `Disconnected`;
     /// running and currently connected → `Connected`; running and not → `Reconnecting`.
     pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
         use crate::view::status_bar::ConnStatus;

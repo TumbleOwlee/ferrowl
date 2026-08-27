@@ -42,5 +42,5 @@ fn main() {
         .build()
         .expect("App builder failed.");
     app.focus_previous();
-    println!("{:?}", app);
+    println!("{app:?}");
 }

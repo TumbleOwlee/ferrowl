@@ -138,7 +138,6 @@ mod tests {
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
         let result = open_sink(&sink, Some("/nonexistent/dir/base.log"), "test");
         assert!(result.is_err());
-        // Verify sink was cleared on error.
         let guard = sink.lock().unwrap();
         assert!(guard.is_none());
     }
@@ -156,11 +155,9 @@ mod tests {
             .into_owned();
         let result = open_sink(&sink, Some(&base), "test");
         assert!(result.is_ok());
-        // Verify sink has a writer.
         let guard = sink.lock().unwrap();
         assert!(guard.is_some());
         drop(guard);
-        // Cleanup.
         let _ = std::fs::remove_file(temp_dir.join("ferrowl_test.test.log"));
     }
 
@@ -172,7 +169,6 @@ mod tests {
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
         let result = open_sink(&sink, None, "test");
         assert!(result.is_ok());
-        // Verify sink remains None.
         let guard = sink.lock().unwrap();
         assert!(guard.is_none());
     }

@@ -62,7 +62,7 @@ impl<S: DrawSurface> App<S> {
         false
     }
 
-    // Returns true if has to quit
+    /// Returns `true` when the app must quit.
     pub(super) fn handle_nav_key(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         // The help dialog is modal: it eats every key so nothing leaks to the view beneath it.
         if self.help_open {

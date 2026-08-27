@@ -92,8 +92,7 @@ impl TryFrom<HeaderDefWire> for HeaderDef {
     }
 }
 
-/// Header names the client itself sets — OC-R-117's exact collision list (see the plan's
-/// `## Shared` section for the source list).
+/// Header names the client itself sets — OC-R-117's exact collision list.
 const RESERVED_HEADER_NAMES: [&str; 8] = [
     "authorization",
     "host",

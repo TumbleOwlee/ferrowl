@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn ut_expect_ok_returns_value() {
         let result: Result<i32, &str> = Ok(42);
-        let val = result.panic(|e| format!("error: {}", e));
+        let val = result.panic(|e| format!("error: {e}"));
         assert_eq!(val, 42);
     }
 
@@ -105,6 +105,6 @@ mod tests {
     #[should_panic(expected = "something went wrong: oops")]
     fn ut_expect_err_panics_with_message() {
         let result: Result<i32, &str> = Err("oops");
-        result.panic(|e| format!("something went wrong: {}", e));
+        result.panic(|e| format!("something went wrong: {e}"));
     }
 }

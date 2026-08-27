@@ -484,7 +484,7 @@ mod tests {
     #[test]
     /// CL-R-023 — no session files means no session sim is created.
     fn ut_load_session_scripts_none_without_session_files() {
-        // Mirrors the single-module `--module key=val` headless path (point 5 of the task):
+        // Mirrors the single-module `--module key=val` headless path:
         // no `--session` file means no `Session`, so no session sim is even considered.
         let args = empty_run_args(vec![]);
         assert!(load_session_scripts(&args).unwrap().is_none());

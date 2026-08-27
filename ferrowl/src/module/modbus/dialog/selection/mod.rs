@@ -69,83 +69,56 @@ mod parse_raw_value_tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// EditSelectionDialog
-// ---------------------------------------------------------------------------
-
 #[focusable]
 #[derive(Builder, Debug, Focus)]
 pub struct EditSelectionDialog<V>
 where
     V: ToLabel + Clone,
 {
-    // Label for the register
     #[focus]
     pub label: Widget<InputFieldState, InputField<crate::dialog::NonEmpty>>,
-    // Description for the register
     #[focus]
     pub description: Widget<InputFieldState, InputField<String>>,
-    // Slave ID for this register
     #[focus]
     pub slave_id: Widget<InputFieldState, InputField<u8>>,
-    // Address of the start register
     #[focus]
     pub address: Widget<InputFieldState, InputField<crate::dialog::Address>>,
-    // Register kind selection (HoldingRegister, Coil, etc.)
     #[focus]
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
-    // Access selection (ReadOnly / WriteOnly / ReadWrite)
     #[focus]
     pub access: Widget<SelectionState<AccessOption>, Selection<AccessOption>>,
-    // Type selection
     #[focus]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
-    // Number format selection
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
-    // Number endianess selection
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
-    // Register (word) order selection (only for multi-register numeric formats)
     #[focus(when = {self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0)})]
     pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
-    // Number resolution input
     #[focus(when = {self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
-    // Bit-field mask input (integer formats only)
     #[focus(when = {self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
     pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
-    // Text alignment selection
     #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
-    // Text length input
     #[focus(when = {self.value_type.get_value() == ValueType::Text})]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
-    // Value selection
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub value: Widget<SelectionState<V>, Selection<V>>,
-    // Add button
     #[focus]
     pub add_button: Widget<ButtonState, Button>,
-    // Delete button
     #[focus(when = {!self.value.state.values().is_empty()})]
     pub delete_button: Widget<ButtonState, Button>,
     // Default value selection (same options as value, plus a leading "no default" sentinel)
     #[focus(when = {!self.value.state.values().is_empty() && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server) })]
     pub default_value: Widget<SelectionState<V>, Selection<V>>,
-    // Confirm button
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
-    // Delete-register button (only focusable when editing an existing register)
     #[focus(when = { self.deletable })]
     pub delete_register_button: Widget<ButtonState, Button>,
-    // Error display field
     pub error: Widget<String, Text>,
-    // Success display field
     pub success: Widget<String, Text>,
-    // Keybinds display field
     pub keybinds: [Widget<String, Text>; 2],
-    // Optional add-value sub-dialog
     #[builder(default)]
     pub add_dialog: Option<AddNamedValueDialog>,
     // Whether this dialog edits an existing register of server (enables the value input).
@@ -154,7 +127,6 @@ where
     // Whether this dialog edits an existing register (enables the delete button).
     #[builder(default)]
     pub deletable: bool,
-    // Optional confirmation box guarding register deletion.
     #[builder(default)]
     pub confirm_delete: Option<ConfirmDeleteDialog>,
     // Name-conflict error set by the app at confirm time. Survives the per-frame `validate()`

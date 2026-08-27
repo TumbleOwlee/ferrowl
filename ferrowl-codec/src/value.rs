@@ -235,7 +235,7 @@ mod tests {
     /// MB-R-025 — a float renders as its IEEE 754 bit pattern in zero-padded hex.
     fn ut_value_as_hex_str_f32() {
         let bits = 1.5f32.to_bits();
-        let expected = format!("0x{:08X}", bits);
+        let expected = format!("0x{bits:08X}");
         assert_eq!(Value::F32((1.5f32, res())).as_hex_str(), expected);
     }
 
@@ -243,7 +243,7 @@ mod tests {
     /// MB-R-025 — an f64 renders as its IEEE 754 bit pattern in zero-padded hex.
     fn ut_value_as_hex_str_f64() {
         let bits = 1.5f64.to_bits();
-        let expected = format!("0x{:016X}", bits);
+        let expected = format!("0x{bits:016X}");
         assert_eq!(Value::F64((1.5f64, res())).as_hex_str(), expected);
     }
 

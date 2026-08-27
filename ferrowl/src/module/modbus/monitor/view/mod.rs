@@ -75,15 +75,15 @@ enum MonitorOverlay {
     /// `:add`/`:a` interpretation dialog (UI-R-061) — a fresh, non-`deletable`
     /// `EditInterpretationDialog`, scoped to the currently selected unit id, identical to
     /// `EditInterpretation` below apart from prefill/deletability (mirrors the modbus module's
-    /// own `EditInputDialog::new()`/`from_register` split, Shared). The struct's own
+    /// own `EditInputDialog::new()`/`from_register` split). The struct's own
     /// `#[focus(when = ...)]` gates handle the alias-list-shown-vs-hidden presentation
-    /// internally — no mode-switch wrapper needed here (Shared).
+    /// internally — no mode-switch wrapper needed here.
     Add(Box<EditInterpretationDialog>),
     /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device. Renamed from
-    /// `Edit` (mechanical rename, `s15`) to make room for `EditInterpretation` below, which
+    /// `Edit` to make room for `EditInterpretation` below, which
     /// this could otherwise be confused with.
     EditSetup(Box<MonitorSetupDialog>),
-    /// MB-R-148 — `Enter` on a Resolved-registers row (`s14`) opens this, prefilled from the
+    /// MB-R-148 — `Enter` on a Resolved-registers row opens this, prefilled from the
     /// selected row. The `String` is the interpretation's original name, needed for the
     /// edit-in-place lookup (`module.edit_interpretation`'s `old_name` — a confirmed rename
     /// changes the map key, so the dialog's own current label input isn't enough once the user
@@ -93,7 +93,7 @@ enum MonitorOverlay {
 
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
 /// current `VERSION`, format from the path's extension).
-#[allow(dead_code)] // consumed starting s8
+#[allow(dead_code)] // consumed once the app-side call sites are wired up
 fn save_device_to(device: &MonitorDeviceConfig, path: &str) -> CommandResult {
     use ferrowl_util::convert::{Converter, FileType};
     let Some(ty) = FileType::from_path(path) else {
@@ -115,7 +115,7 @@ fn save_device_to(device: &MonitorDeviceConfig, path: &str) -> CommandResult {
 
 /// The 4 register-table kinds a monitor's observed-value table groups its memory layout by
 /// (MB-R-144), in display order.
-#[allow(dead_code)] // consumed starting s8
+#[allow(dead_code)] // consumed once the app-side call sites are wired up
 const TABLE_KINDS: [Kind; 4] = [
     Kind::Coil,
     Kind::DiscreteInput,
@@ -123,8 +123,8 @@ const TABLE_KINDS: [Kind; 4] = [
     Kind::InputRegister,
 ];
 
-/// Gate3#6 — one row of the Units panel: one observed unit id. A real `Table`/`TableEntry` row
-/// (`s12`/`s14`'s own pattern, Shared), replacing the previous hand-built `List`/`ListItem`, for
+/// One row of the Units panel: one observed unit id. A real `Table`/`TableEntry` row
+/// like the other panels, replacing the previous hand-built `List`/`ListItem`, for
 /// rendering consistency with the other 3 panels.
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = UnitHeader)]
@@ -135,8 +135,8 @@ struct UnitRow {
 
 type UnitsTable = Widget<TableState<UnitRow, 1>, Table<UnitRow, UnitHeader, 1>>;
 
-/// Gate3#6 — build a fresh, empty `UnitsTable` widget/state pair, same builder shape as
-/// `new_message_table`/`new_resolved_table` (Shared).
+/// Build a fresh, empty `UnitsTable` widget/state pair, same builder shape as
+/// `new_message_table`/`new_resolved_table`.
 fn new_units_table() -> UnitsTable {
     Widget {
         state: TableStateBuilder::default()
@@ -151,9 +151,9 @@ fn new_units_table() -> UnitsTable {
                     .build()
                     .expect("all required builder fields are set"),
             )
-            // Manual-exercise fix: the Units panel is a single narrow column (unit ids only) —
+            // The Units panel is a single narrow column (unit ids only) —
             // the selected row's own background/foreground change (still applied via
-            // `row_highlight_style`, Shared) already conveys focus without the extra `█` bar,
+            // `row_highlight_style`) already conveys focus without the extra `█` bar,
             // which crowded the one data column.
             .show_selection_marker(false)
             .build()
@@ -166,7 +166,7 @@ fn new_units_table() -> UnitsTable {
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = MessageHeader, styles = message_row_styles)]
 struct MessageRow {
-    // Wide enough for `format_timestamp`'s full "YYYY-MM-DD HH:MM:SS.mmm" (23 chars, Gate3#2)
+    // Wide enough for `format_timestamp`'s full "YYYY-MM-DD HH:MM:SS.mmm" (23 chars)
     // to render on one line, not wrap/truncate.
     #[column(name = "Time", min = 23, max = 23)]
     time: String,
@@ -211,7 +211,7 @@ fn new_message_table() -> MessageTable {
     }
 }
 
-/// UI-R-062's `Status` column text. Gate3#3 — the exception case renders the bare
+/// UI-R-062's `Status` column text. The exception case renders the bare
 /// `ExceptionCode` variant name (e.g. `IllegalDataAddress`), not the Debug-derived
 /// `Exception(...)` wrapper around it.
 fn format_record_status(status: &RecordStatus) -> String {
@@ -253,7 +253,7 @@ fn hex_words(words: &[u16]) -> String {
 }
 
 /// UI-R-062's `Values/Payload` column text — empty for no shape or no values (MB-R-146's
-/// record-status-to-value gating, Shared); one digit per bit for coil-family kinds, 4-digit
+/// record-status-to-value gating); one digit per bit for coil-family kinds, 4-digit
 /// lowercase hex per word for register-family kinds.
 fn format_record_payload(record: &MonitorRecord) -> String {
     let Some(shape) = &record.shape else {
@@ -293,7 +293,7 @@ fn format_record_address_quantity(record: &MonitorRecord) -> (String, String) {
 }
 
 /// UI-R-062 — build one `MessageRow` for `unit`'s Messages table from a captured record.
-/// Gate3#2 — `MonitorRecord.timestamp` is a monotonic `Instant` with no wall-clock reference of
+/// `MonitorRecord.timestamp` is a monotonic `Instant` with no wall-clock reference of
 /// its own, so `time` is derived by projecting the record's age (relative to `now`, an
 /// `Instant` captured at the same moment as `wall_now`) back from `wall_now`, then formatted
 /// with the same full-timestamp format the log pane uses
@@ -326,7 +326,7 @@ fn message_row(
 }
 
 /// UI-R-064 — one row of the Resolved-registers table: the same column set as
-/// `ferrowl::module::modbus::table::TableHeader` minus Slave ID/Access (Shared).
+/// `ferrowl::module::modbus::table::TableHeader` minus Slave ID/Access.
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = ResolvedHeader)]
 struct ResolvedRow {
@@ -353,7 +353,7 @@ struct ResolvedRow {
 type ResolvedTable = Widget<TableState<ResolvedRow, 9>, Table<ResolvedRow, ResolvedHeader, 9>>;
 
 /// UI-R-064 — build a fresh, empty `ResolvedTable` widget/state pair, same builder shape as
-/// `new_message_table` (Shared).
+/// `new_message_table`.
 fn new_resolved_table() -> ResolvedTable {
     Widget {
         state: TableStateBuilder::default()
@@ -398,10 +398,10 @@ fn resolved_row(
     };
     let width = def.format().width();
     let (value, raw_value) = match table.read_words(&key, address, width) {
-        // Gate3#1 — decode via the same path the modbus module's own `Definition::values`
+        // Decode via the same path the modbus module's own `Definition::values`
         // (`ferrowl/src/module/modbus/table.rs`) uses for its Value column
         // (`self.register.decode(&raw)`, itself `ferrowl_codec::decode(&format, &raw)`), not a
-        // raw `{words:?}` debug dump. Gate3#5 — no `[...]` wrapping on Value (Raw Value keeps
+        // raw `{words:?}` debug dump, and no `[...]` wrapping on Value (Raw Value keeps
         // its own bracketed hex format via `hex_words`).
         Some(words) => {
             let mut value = match ferrowl_codec::decode(&def.format(), &words) {
@@ -409,7 +409,7 @@ fn resolved_row(
                 Err(_) => "Error".to_string(),
             };
             let raw_value = hex_words(&words);
-            // Item 6 — when the decoded value exactly matches one of the interpretation's
+            // When the decoded value exactly matches one of the interpretation's
             // named values, show the label alone (not "label (value)", unlike the full modbus
             // module's own `Definition::values` — Shared/api-contract), using the same
             // `Scalar::Int`-vs-raw-int-or-string matching logic (`table.rs`'s own `values()`).
@@ -577,7 +577,7 @@ fn memory_layout_lines(kind_rows: &[(Kind, Vec<(u16, u16)>)]) -> Vec<MemoryLine>
 }
 
 /// Whether any of `cell_address`'s `unit_per_cell` constituent raw addresses is MB-R-147
-/// recency-active (Shared) as of `now`.
+/// recency-active as of `now`.
 fn memory_cell_recency_active(
     kind: Kind,
     cell_address: u16,
@@ -590,9 +590,9 @@ fn memory_cell_recency_active(
     })
 }
 
-/// Gate3#4 — one row of the Memory-layout table: a rendered line (starting address, its cells'
+/// One row of the Memory-layout table: a rendered line (starting address, its cells'
 /// hex values space-separated, their character representation). Real `Table`/`TableEntry`
-/// machinery (`s12`/`s14`'s own pattern, Shared) replaces the previous hand-painted-into-the-
+/// machinery, like the other panels, replaces the previous hand-painted-into-the-
 /// buffer render.
 ///
 /// UI-R-063 requires each individual byte/word to carry its own value-class/recency color; the
@@ -623,8 +623,8 @@ struct MemoryRow {
 
 type MemoryTable = Widget<TableState<MemoryRow, 4>, Table<MemoryRow, MemoryHeader, 4>>;
 
-/// Gate3#4 — build a fresh, empty `MemoryTable` widget/state pair, same builder shape as
-/// `new_message_table`/`new_resolved_table` (Shared).
+/// Build a fresh, empty `MemoryTable` widget/state pair, same builder shape as
+/// `new_message_table`/`new_resolved_table`.
 fn new_memory_table() -> MemoryTable {
     Widget {
         state: TableStateBuilder::default()
@@ -647,7 +647,7 @@ fn new_memory_table() -> MemoryTable {
 /// Colors Kind/Address by the same neutral border color the previous render's `{address:04x} `
 /// prefix used — Hex/Ascii get their color from `memory_row_spans` instead (per-cell, not
 /// per-row), so this returns `None` for those two columns (the render loop treats a `Some`
-/// `cell_spans` entry as taking over that column's coloring entirely, Shared).
+/// `cell_spans` entry as taking over that column's coloring entirely).
 fn memory_row_styles(_row: &MemoryRow) -> [Option<ratatui::style::Style>; 4] {
     use ferrowl_ui::COLOR_SCHEME;
     let neutral = Some(ratatui::style::Style::default().fg(COLOR_SCHEME.border));
@@ -684,9 +684,9 @@ fn memory_cell_style(
     }
 }
 
-/// Gate3#4 — build the Memory-layout table's rows from `lines`: each line gets its hex/ascii
+/// Build the Memory-layout table's rows from `lines`: each line gets its hex/ascii
 /// text plus one `(text, style)` span per cell (UI-R-063/MB-R-147, true per-byte/word
-/// granularity via `TableEntry::cell_spans`, Shared).
+/// granularity via `TableEntry::cell_spans`).
 fn memory_table_rows(
     lines: &[MemoryLine],
     records: &[MonitorRecord],
@@ -714,7 +714,7 @@ fn memory_table_rows(
                 .join(" ");
             let ascii: String = cells.iter().map(memory_cell_char).collect();
             let last = cells.len().saturating_sub(1);
-            // Gate3#4 perf: compute each cell's recency/value-class color once and reuse it for
+            // Compute each cell's recency/value-class color once and reuse it for
             // both the Hex and Ascii spans, instead of two independent `memory_cell_style` calls
             // per cell (it's a pure function of its arguments, so both calls always agreed on the
             // color — computing it twice was wasted work, not divergent behavior).
@@ -760,7 +760,8 @@ fn memory_table_rows(
         .collect()
 }
 
-// Forward-declared: real app-side construction lands in s8 of the modbus-bus-monitor plan (wiring the 3 construction call sites); already fully implemented and tested here.
+// `#[allow(dead_code)]`: implemented and tested here; the app-side construction call sites are
+// not wired up yet.
 #[allow(dead_code)]
 pub struct ModbusMonitorModuleView {
     module: ModbusMonitorModule,
@@ -770,14 +771,14 @@ pub struct ModbusMonitorModuleView {
     unit_ids: Vec<UnitId>,
     /// Index into `unit_ids` of the left panel's current selection.
     selected: usize,
-    /// Gate3#6 — Units panel table, rebuilt live in `render()` from `unit_ids`; `selected`
+    /// Units panel table, rebuilt live in `render()` from `unit_ids`; `selected`
     /// remains the single source of truth for which row is selected (unchanged, everything else
     /// already keys off it) — this only drives which row the table highlights.
     units_table: UnitsTable,
     /// UI-R-062 Messages table for the selected unit id, re-derived each tick from
     /// `module.records()`.
     messages_table: MessageTable,
-    /// Gate3#4 — Memory-layout table (MB-R-144/UI-R-063) for the selected unit id, rebuilt live
+    /// Memory-layout table (MB-R-144/UI-R-063) for the selected unit id, rebuilt live
     /// in `render()` (Shared with the Resolved-registers table's own live-rebuild pattern — it
     /// also depends on `module.records()`'s recency markers, which change independent of any
     /// `refresh()` tick).
@@ -791,7 +792,7 @@ pub struct ModbusMonitorModuleView {
     /// border highlight); only meaningful while `view_focused` is `true`.
     panel_focus: MonitorPanel,
     /// `:compact` toggle (tui/api-contract.md §2.1) — a real row-margin toggle on
-    /// `resolved_table.widget` (mirrors `TableView::set_compact`, Shared), not string formatting.
+    /// `resolved_table.widget` (mirrors `TableView::set_compact`), not string formatting.
     compact: bool,
     /// `:order [col] [asc|desc]` (tui/api-contract.md §2.1) — sorts the resolved-registers
     /// table by column *index* (resolved from the name once, at `:order` parse time, via
@@ -860,10 +861,10 @@ impl ModbusMonitorModuleView {
             return;
         };
         self.module.add_interpretation(unit, name, def);
-        // Manual-exercise fix (interpretations-per-unit-id persistence) — keep
+        // Keep
         // `self.device.definitions` (the on-disk list `:write` saves verbatim) in sync
         // with the module's live interpretations, mirroring `ModbusModule::apply_add`'s own
-        // `self.device.definitions.insert(...)` (Shared).
+        // `self.device.definitions.insert(...)`.
         self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
@@ -879,9 +880,9 @@ impl ModbusMonitorModuleView {
         let Ok(outcome) = dialog.resolve() else {
             return;
         };
-        // Item 2 — `outcome.device` is only ever `Some` in New mode (`resolve()` never re-loads
+        // `outcome.device` is only ever `Some` in New mode (`resolve()` never re-loads
         // the device config file from a possibly-edited path in Edit mode, matching the full
-        // client/server module's own edit-confirm, Shared); the device-path *field* itself must
+        // client/server module's own edit-confirm); the device-path *field* itself must
         // still apply on every edit-confirm regardless, so it comes from `values.config_path`
         // unconditionally rather than being silently dropped whenever `outcome.device` is `None`.
         self.spec.device = outcome.values.config_path.clone();
@@ -891,7 +892,7 @@ impl ModbusMonitorModuleView {
         self.spec.name = outcome.values.name;
         self.spec.endpoint = outcome.values.endpoint;
         device.reconnect = Some(outcome.values.reconnect);
-        // Item 1 — `reconfigure` (Shared) carries the running module's accumulated `table`/
+        // `reconfigure` carries the running module's accumulated `table`/
         // `records`/`log`/`interpretations` over instead of `ModbusMonitorModule::new()`'s
         // always-fresh-and-empty construction.
         let placeholder = ModbusMonitorModule::new(&self.spec, &device);
@@ -900,16 +901,16 @@ impl ModbusMonitorModuleView {
         // MB-R-150 — the resulting module is what a later `:start` actually runs (not a
         // throwaway preview instance), so it must carry the session-wide registry forward too.
         self.module.set_serial_paths(self.serial_paths.clone());
-        // Manual-exercise fix (interpretations-per-unit-id persistence) — resync `definitions`
+        // Resync `definitions`
         // from the reconfigured module's own live map (kept in sync at every `:add`/edit/delete,
-        // Shared/confirm_add) rather than trusting whatever `device.definitions` was seeded with
+        // `confirm_add`) rather than trusting whatever `device.definitions` was seeded with
         // above, so a runtime-added interpretation never regresses to a stale on-disk snapshot.
         device.definitions = self.module.definitions();
         self.device = device;
         self.overlay = MonitorOverlay::None;
     }
 
-    /// MB-R-148 — `Enter` on a Resolved-registers row (with the panel focused, `s14`) opens the
+    /// MB-R-148 — `Enter` on a Resolved-registers row (with the panel focused) opens the
     /// edit/delete dialog prefilled from that row. No-op if nothing is selected in either table.
     fn open_edit_interpretation(&mut self) {
         let Some(unit) = self.selected_unit() else {
@@ -931,7 +932,7 @@ impl ModbusMonitorModuleView {
         };
         let dialog = EditInterpretationDialog::from_interpretation(&name, def);
         // `from_interpretation` itself already opens focused on the alias list when `def.values`
-        // is non-empty and the kind isn't boolean (Shared) — no separate mode-switch needed here.
+        // is non-empty and the kind isn't boolean — no separate mode-switch needed here.
         self.overlay = MonitorOverlay::EditInterpretation(Box::new(dialog), name);
     }
 
@@ -952,7 +953,7 @@ impl ModbusMonitorModuleView {
         };
         self.module
             .edit_interpretation(unit, &original_name, new_name, def);
-        // Manual-exercise fix (interpretations-per-unit-id persistence) — see Shared/confirm_add.
+        // See `confirm_add`.
         self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
@@ -968,7 +969,7 @@ impl ModbusMonitorModuleView {
             return;
         };
         self.module.remove_interpretation(unit, original_name);
-        // Manual-exercise fix (interpretations-per-unit-id persistence) — see Shared/confirm_add.
+        // See `confirm_add`.
         self.device.definitions = self.module.definitions();
         self.overlay = MonitorOverlay::None;
     }
@@ -992,7 +993,7 @@ impl ModbusMonitorModuleView {
     }
 
     /// The selected unit id's `ResolvedRow`s (UI-R-064), definition order unless `self.sort` is
-    /// set, in which case sorted by that column index via `cmp_table_entry` (Shared).
+    /// set, in which case sorted by that column index via `cmp_table_entry`.
     fn resolved_rows(&self, unit: UnitId) -> Vec<ResolvedRow> {
         let table = self.module.table();
         let table = table.read();
@@ -1071,15 +1072,15 @@ impl ModuleView for ModbusMonitorModuleView {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         use ratatui::layout::{Constraint, Layout};
 
-        // Item 3 — an ONLINE/OFFLINE status bar, same shape/position as `ModbusModuleView`'s own
-        // (Shared): one line tall, below the module's own panels (`content_area`), which the
+        // An ONLINE/OFFLINE status bar, same shape/position as `ModbusModuleView`'s own
+        //: one line tall, below the module's own panels (`content_area`), which the
         // outer app-level compositor then draws the shared log pane below in turn.
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        // Every Tab-cyclable panel is now a real `Table` widget (Gate3#4/#6) whose own border
+        // Every Tab-cyclable panel is now a real `Table` widget whose own border
         // color already tracks `state.focused()` (`ferrowl_ui::style::TableStyle`'s
-        // `border`/`general`, Shared) — each panel below just calls `.set_focused(view_focused
+        // `border`/`general`) — each panel below just calls `.set_focused(view_focused
         // && panel_focus == <panel>)` before rendering, no separate `style_for` computation
         // needed here anymore.
         let [left_area, right_area] =
@@ -1087,7 +1088,7 @@ impl ModuleView for ModbusMonitorModuleView {
 
         let buf = frame.buffer_mut();
 
-        // Units panel (Gate3#6, a real Table/TableEntry — was a hand-built List/ListItem).
+        // Units panel (a real Table/TableEntry — was a hand-built List/ListItem).
         self.units_table.state.set_values(
             self.unit_ids
                 .iter()
@@ -1132,7 +1133,7 @@ impl ModuleView for ModbusMonitorModuleView {
             &mut self.messages_table.state,
         );
 
-        // Memory layout, grouped by table kind (MB-R-144, Gate3#4: a real Table widget).
+        // Memory layout, grouped by table kind (MB-R-144; a real Table widget).
         self.memory_table
             .state
             .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Memory);
@@ -1200,7 +1201,7 @@ impl ModuleView for ModbusMonitorModuleView {
                     self.overlay = MonitorOverlay::None;
                 }
                 KeyCode::Enter => {
-                    // Manual-exercise fix — offer Enter to the dialog first, so a focused
+                    // Offer Enter to the dialog first, so a focused
                     // completion popup (config-path/serial-path) gets to accept its highlighted
                     // suggestion (UI-R-026) instead of Enter unconditionally confirming the whole
                     // dialog; only treat it as confirm once the dialog itself leaves it unhandled
@@ -1218,7 +1219,7 @@ impl ModuleView for ModbusMonitorModuleView {
         if let MonitorOverlay::Add(overlay) = &mut self.overlay {
             // The `:add` dialog is never `deletable` (UI-R-061: nothing exists yet to delete),
             // so `confirm_delete` never actually opens here — this gate is kept anyway to
-            // mirror `MonitorOverlay::EditInterpretation`'s own shape exactly (Shared), rather
+            // mirror `MonitorOverlay::EditInterpretation`'s own shape exactly, rather
             // than special-casing Add's routing.
             use crate::module::modbus::dialog::{DeleteConfirmOutcome, route_delete_confirm};
             if overlay.confirm_delete.is_some() {
@@ -1297,8 +1298,8 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
                 return EventResult::Consumed;
             }
-            // Manual-exercise fix — same "Add predefined" sub-popup gate as `MonitorOverlay::Add`
-            // above (Shared): every key routes to the open sub-popup, not the parent dialog.
+            // Same "Add predefined" sub-popup gate as `MonitorOverlay::Add`
+            // above: every key routes to the open sub-popup, not the parent dialog.
             if overlay.add_dialog.is_some() {
                 match code {
                     KeyCode::Esc => overlay.add_dialog = None,
@@ -1619,7 +1620,7 @@ impl ModuleView for ModbusMonitorModuleView {
             ModbusMonitorCmd::Compact => {
                 self.compact = !self.compact;
                 // Real row-padding toggle (UI-R-064), mirroring `TableView::set_compact`
-                // (Shared): 1 row of vertical margin expanded, 0 compact.
+                //: 1 row of vertical margin expanded, 0 compact.
                 let vertical = if self.compact { 0 } else { 1 };
                 self.resolved_table
                     .widget
@@ -1700,7 +1701,7 @@ impl ModuleView for ModbusMonitorModuleView {
 /// [`MONITOR_COMMAND_SPECS`]. `:set`/`:script` are simply absent from the table — `parse_command`
 /// already falls through to `CommandResult::Unhandled` for anything not listed, which is exactly
 /// tui/api-contract.md's "both are unrecognized on this role rather than erroring".
-#[allow(dead_code)] // consumed starting s8
+#[allow(dead_code)] // consumed once the app-side call sites are wired up
 enum ModbusMonitorCmd {
     Start,
     Stop,
@@ -1715,7 +1716,7 @@ enum ModbusMonitorCmd {
 }
 
 /// Single source for this view's commands: aliases, help row, and parse target per entry.
-#[allow(dead_code)] // consumed starting s8
+#[allow(dead_code)] // consumed once the app-side call sites are wired up
 static MONITOR_COMMAND_SPECS: [CommandSpec<ModbusMonitorCmd>; 10] = [
     CommandSpec {
         aliases: &["e", "edit"],
@@ -1850,7 +1851,7 @@ mod tests {
         assert_eq!(v.unit_ids, vec![UnitId(3)]);
     }
 
-    /// Gate3#6 — the Units panel is a real Table/TableEntry: exactly 1 column ("Unit"), rows
+    /// The Units panel is a real Table/TableEntry: exactly 1 column ("Unit"), rows
     /// track `unit_ids`, and the highlighted row tracks `selected` (`selected` itself remains
     /// the single source of truth — the table only mirrors it for rendering).
     #[test]
@@ -1879,7 +1880,7 @@ mod tests {
         assert_eq!(v.units_table.state.table_state().selected(), Some(1));
     }
 
-    /// Manual-exercise fix — the Units panel disables the shared `Table` widget's selection bar
+    /// The Units panel disables the shared `Table` widget's selection bar
     /// (its one narrow "Unit" column already conveys focus via the selected row's own
     /// background/foreground change).
     #[test]
@@ -1987,8 +1988,8 @@ mod tests {
         );
     }
 
-    /// Manual-exercise addition (item 3) — a CONNECTED/RECONNECTING/DISCONNECTED status bar,
-    /// same shape as `ModbusModuleView`'s own (`module/modbus/view/mod.rs`, Shared): centered,
+    /// A CONNECTED/RECONNECTING/DISCONNECTED status bar,
+    /// same shape as `ModbusModuleView`'s own (`module/modbus/view/mod.rs`): centered,
     /// one line tall, `COLOR_SCHEME.success`/`warning`/`error` background, positioned below the
     /// module's own panels (which the outer app-level compositor then draws the shared log pane
     /// below in turn, `app/render.rs`'s `[view_area, log_area]` split — no extra coordination
@@ -2377,7 +2378,7 @@ mod tests {
         assert!(matches!(v.overlay, MonitorOverlay::None));
     }
 
-    /// Manual-exercise fix (interpretations-per-unit-id persistence) — `:add` must sync the
+    /// `:add` must sync the
     /// new interpretation into `self.device.definitions` too, not just `self.module`'s live
     /// map, or `:write` silently drops it (it saves `self.device` verbatim).
     #[tokio::test]
@@ -2403,7 +2404,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (interpretations-per-unit-id persistence) — MB-R-148's edit/delete
+    /// MB-R-148's edit/delete
     /// must also keep `self.device.definitions` in sync (rename moves the key, delete removes
     /// it), same parity requirement as `:add`.
     #[tokio::test]
@@ -2438,7 +2439,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (interpretations-per-unit-id persistence) — deleting an
+    /// Deleting an
     /// interpretation must remove it from `self.device.definitions`, not just the module's
     /// in-memory map, or a stale copy resurfaces on the next `:write`.
     #[tokio::test]
@@ -2463,7 +2464,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (interpretations-per-unit-id persistence) — end to end: an
+    /// End to end: an
     /// interpretation added purely at runtime (never in the file `:o`/`:oc` originally loaded)
     /// must actually appear in the file after `:write`, not be silently dropped.
     #[tokio::test]
@@ -2652,7 +2653,7 @@ mod tests {
         assert!(matches!(v.overlay, MonitorOverlay::None));
     }
 
-    /// Manual-exercise fix (item 2) — the device-config-path field must actually apply on
+    /// The device-config-path field must actually apply on
     /// edit-confirm; previously `MonitorSetupOutcome::device` was always `None` in Edit mode, so
     /// `confirm_edit` silently discarded whatever the user typed there and reset `spec.device`
     /// to `""` on every single edit.
@@ -2669,7 +2670,7 @@ mod tests {
         assert_eq!(v.spec.device, "new-device.toml");
     }
 
-    /// Manual-exercise fix — `Enter` while the config-path field's completion popup is open must
+    /// `Enter` while the config-path field's completion popup is open must
     /// accept the highlighted suggestion (UI-R-026), not unconditionally confirm the whole setup
     /// dialog; mirrors the modbus module's own `ModbusModuleView::handle_events`, which offers
     /// `Enter` to `setup.handle_events` before falling back to its own confirm handling.
@@ -2702,7 +2703,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 1) — editing setup must not reset the running monitor's
+    /// Editing setup must not reset the running monitor's
     /// accumulated state: known unit ids' observed table, message records, and interpretations
     /// added at runtime (MB-R-148's `:add`/`:edit`) all survive an edit-confirm.
     #[tokio::test]
@@ -3327,7 +3328,7 @@ mod tests {
         );
     }
 
-    /// Gate3#2 — the Time column renders the full wall-clock timestamp (same
+    /// The Time column renders the full wall-clock timestamp (same
     /// `crate::view::log::format_timestamp` format the log pane already uses), not a relative
     /// "Xs ago" string.
     #[test]
@@ -3356,7 +3357,7 @@ mod tests {
         assert!(!row.values()[0].contains("ago"));
     }
 
-    /// Manual-exercise fix — the Time column's `#[column(min, max)]` bounds are wide enough for
+    /// The Time column's `#[column(min, max)]` bounds are wide enough for
     /// `format_timestamp`'s full `"YYYY-MM-DD HH:MM:SS.mmm"` output (23 chars) to render on one
     /// line, not wrap/truncate.
     #[test]
@@ -3372,7 +3373,7 @@ mod tests {
         );
     }
 
-    /// Gate3#3 — the Status column's exception case renders just the bare `ExceptionCode`
+    /// The Status column's exception case renders just the bare `ExceptionCode`
     /// variant name (`IllegalDataAddress`), not the Debug-derived `Exception(...)` wrapper.
     #[test]
     fn ut_message_row_exception_status_renders_bare_variant_name() {
@@ -3648,7 +3649,7 @@ mod tests {
         );
     }
 
-    /// UI-R-063 (regression on `memory_rows`'s existing filter, Shared) — a table kind with no
+    /// UI-R-063 (regression on `memory_rows`'s existing filter) — a table kind with no
     /// observed traffic for the selected unit is omitted entirely, not rendered as an empty
     /// section.
     #[tokio::test]
@@ -3737,9 +3738,9 @@ mod tests {
         assert_eq!(rows[0].values()[8], "[0005]");
     }
 
-    /// UI-R-064/Gate3#1 — the Value column renders the *decoded* reading (same decode path
+    /// UI-R-064 — the Value column renders the *decoded* reading (same decode path
     /// `ferrowl::module::modbus::table::Definition`'s own Value column uses), not a raw
-    /// `{words:?}` debug dump, and (Gate3#5) with no surrounding `[...]` brackets (Raw Value
+    /// `{words:?}` debug dump, and with no surrounding `[...]` brackets (Raw Value
     /// keeps those). A resolution of `0.5` on a raw word of `100` proves the scaling actually
     /// ran, not just a hex reformat.
     #[tokio::test]
@@ -3767,7 +3768,7 @@ mod tests {
         assert_eq!(rows[0].values()[8], "[0064]");
     }
 
-    /// Manual-exercise fix (item 6) — when the decoded value exactly matches one of the
+    /// When the decoded value exactly matches one of the
     /// interpretation's named values, the Value column shows the label alone (not
     /// "label (value)", unlike the full modbus module's own `Definition::values` — Shared),
     /// using the same `Scalar::Int`-vs-raw-int-or-string matching logic.
@@ -3802,7 +3803,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 6) — no match means the decoded value renders as-is, unchanged.
+    /// No match means the decoded value renders as-is, unchanged.
     #[tokio::test]
     async fn ut_resolved_registers_table_value_renders_decoded_when_no_named_value_matches() {
         let mut v = view();
@@ -3931,7 +3932,7 @@ mod tests {
         assert_eq!(dialog.address.state.input(), "10");
     }
 
-    /// Manual-exercise fix — same "Add predefined" sub-popup routing fix as
+    /// Same "Add predefined" sub-popup routing fix as
     /// `ut_add_predefined_popup_receives_keyboard_focus`, but from `EditInterpretationDialog`'s
     /// own "Add predefined" flow (`:edit`/Enter-on-Resolved-row), not `:add`'s.
     #[tokio::test]
@@ -3978,7 +3979,7 @@ mod tests {
     }
 
     /// MB-R-148 — confirming the edit dialog replaces the interpretation in place, under a
-    /// (possibly new) name, mirroring `s11`'s module-level `edit_interpretation` test one layer
+    /// (possibly new) name, mirroring the module-level `edit_interpretation` test one layer
     /// up, through the dialog/view.
     #[tokio::test]
     async fn ut_confirm_edit_interpretation_replaces_in_place_under_new_name() {
@@ -4092,7 +4093,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 3) — an interpretation that already has aliases defined opens
+    /// An interpretation that already has aliases defined opens
     /// focused directly on the alias list (`value`), not `Address` (Shared:
     /// `EditInterpretationDialog::from_interpretation`).
     #[tokio::test]
@@ -4125,7 +4126,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 3) — adding the first alias through the dialog's own
+    /// Adding the first alias through the dialog's own
     /// "ADD ALIAS" sub-popup re-homes focus onto the alias list (`value`), mirroring the full
     /// modbus module's own mode-switch-on-first-alias behavior (Shared:
     /// `EditInterpretationDialog::confirm_add_dialog`).
@@ -4171,7 +4172,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 3) — deleting the last remaining alias re-homes focus onto
+    /// Deleting the last remaining alias re-homes focus onto
     /// `Label`, mirroring the full modbus module's own mode-switch-back-on-last-delete behavior
     /// (Shared: `EditInterpretationDialog::delete_selected_named_value`).
     #[tokio::test]

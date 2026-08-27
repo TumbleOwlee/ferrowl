@@ -16,9 +16,8 @@ pub struct SerialPathRegistry {
 }
 
 impl SerialPathRegistry {
-    // Forward-declared: the real production caller (App, constructing the session-wide
-    // registry) lands in s8 of the mb-monitor-path-conflict plan. `#[allow(dead_code)]`, not a
-    // stub — already fully implemented and tested below.
+    // `#[allow(dead_code)]`: implemented and tested below; App does not construct the
+    // session-wide registry yet.
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()

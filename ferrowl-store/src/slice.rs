@@ -44,7 +44,6 @@ impl Slice {
     /// values of `kind`. `range` must be directly adjacent to the slice
     /// (ending at its start or starting at its end); returns `false` otherwise.
     pub fn extend(&mut self, kind: &CellKind, range: &Range) -> bool {
-        // Extend slice while maintaining data consistency
         if range.end == self.range.start {
             let mut buffer: Vec<Cell> = vec![];
             std::mem::swap(&mut buffer, &mut self.buffer);

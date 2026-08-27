@@ -1744,7 +1744,7 @@ mod tests {
 
     #[test]
     /// UI-R-024 — mTLS row order, server role: Self-Signed first, then the server's own
-    /// cert/key pair, then Skip Verify, then the client-CA list (post-gate3 layout refinement).
+    /// cert/key pair, then Skip Verify, then the client-CA list (layout refinement).
     fn ut_mtls_row_order_server() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.role.state.set_selection(0); // Server
@@ -1775,7 +1775,7 @@ mod tests {
 
     #[test]
     /// UI-R-024 — mTLS row order, client role: Self-Signed first, then the client's own
-    /// cert/key pair, then Skip Verify, then the CA-file input (post-gate3 layout refinement).
+    /// cert/key pair, then Skip Verify, then the CA-file input (layout refinement).
     fn ut_mtls_row_order_client() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.role.state.set_selection(1); // Client
@@ -2297,9 +2297,9 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136 — the mTLS server-role Tab order matches the dialog's visual row order (post-
-    /// s9 layout): Role, Self-Signed, own cert/key, Skip Verify, then the client-CA list and its
-    /// ADD/DEL buttons, then IP.
+    /// MB-R-136 — the mTLS server-role Tab order matches the dialog's visual row order: Role,
+    /// Self-Signed, own cert/key, Skip Verify, then the client-CA list and its ADD/DEL buttons,
+    /// then IP.
     fn ut_tab_order_server_mtls() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.role.state.set_selection(0); // Server
@@ -2440,7 +2440,10 @@ mod tests {
         );
         confirm_ca_add(&mut dialog);
         assert!(dialog.client_ca_add_dialog.is_none());
-        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // ADD a second entry.
         dialog.focus = SetupDialogFocus::ClientCaAddButton;
@@ -2498,7 +2501,10 @@ mod tests {
         assert_eq!(dialog.client_ca_files.state.selection(), 1);
         dialog.focus = SetupDialogFocus::ClientCaDeleteButton;
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(dialog.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(
+            dialog.client_ca_files.state.values(),
+            std::slice::from_ref(&ca1)
+        );
 
         // MB-R-136 — the ADD sub-dialog's path field offers filesystem completions, and
         // accepting one (Enter with the popup open) fills the field without submitting the

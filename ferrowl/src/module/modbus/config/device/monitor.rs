@@ -18,10 +18,8 @@ use super::{
 /// `definitions` — no timing (`timeout_ms`/`delay_ms`/`interval_ms`), no `read_ranges`, no Lua
 /// sim surface (`scripts`/`script_interval`): a monitor never initiates a transaction, has no
 /// poll loop, and is display-only.
-// Forward-declared: real app-side construction/consumption lands in s4 (ModbusMonitorModule
-// lifecycle wrapper) of the modbus-bus-monitor plan. `#[allow(dead_code)]` on the not-yet-used
-// members only, not a stub — the schema and its `.format()`/`.address()` methods are already
-// fully implemented and tested here.
+// `#[allow(dead_code)]` covers the not-yet-constructed members only; the schema and its
+// `.format()`/`.address()` methods are implemented and tested here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[allow(dead_code)]
 pub struct MonitorDeviceConfig {
@@ -48,7 +46,7 @@ pub struct MonitorDeviceConfig {
 /// table is observed, not owned) and `update` (no store cell to script against). Also carries its
 /// own `name`, since `definitions` is a list rather than a name-keyed map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[allow(dead_code)] // forward-declared; real usage lands in s4, see MonitorDeviceConfig's note
+#[allow(dead_code)] // not constructed yet, see `MonitorDeviceConfig`'s note
 pub struct MonitorRegisterDef {
     pub name: String,
     #[serde(default)]
@@ -81,7 +79,7 @@ pub struct MonitorRegisterDef {
     pub default: Option<Scalar>,
 }
 
-#[allow(dead_code)] // forward-declared; real usage lands in s4, see MonitorDeviceConfig's note
+#[allow(dead_code)] // not constructed yet, see `MonitorDeviceConfig`'s note
 impl MonitorRegisterDef {
     /// Identical body to [`super::RegisterDef::format`] — same format machinery, MB-R-145.
     pub fn format(&self) -> Format {

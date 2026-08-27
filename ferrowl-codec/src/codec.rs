@@ -713,7 +713,7 @@ mod tests {
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
             let words = r.encode(&val.to_string()).unwrap();
             let decoded = r.decode(&words).unwrap();
-            assert_eq!(decoded.to_string(), val.to_string(), "val={}", val);
+            assert_eq!(decoded.to_string(), val.to_string(), "val={val}");
         }
     }
 
@@ -724,7 +724,7 @@ mod tests {
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
             let words = r.encode(&val.to_string()).unwrap();
             let decoded = r.decode(&words).unwrap();
-            assert_eq!(decoded.to_string(), val.to_string(), "val={}", val);
+            assert_eq!(decoded.to_string(), val.to_string(), "val={val}");
         }
     }
 
@@ -788,7 +788,7 @@ mod tests {
     /// MB-R-022 — a `0x` literal on a float format is taken as its IEEE 754 bit pattern.
     fn ut_encode_f32_hex() {
         let bits = 1.5f32.to_bits();
-        let hex_str = format!("0x{:08X}", bits);
+        let hex_str = format!("0x{bits:08X}");
         let expected = vec![((bits >> 16) & 0xFFFF) as u16, (bits & 0xFFFF) as u16];
         assert_eq!(reg(f32_be()).encode(&hex_str).unwrap(), expected);
     }
@@ -1105,7 +1105,7 @@ mod tests {
     /// MB-R-022 — a `0x` literal on an F64 format is taken as its IEEE 754 bit pattern.
     fn ut_encode_f64_hex() {
         let bits = 2.5f64.to_bits();
-        let hex_str = format!("0x{:016X}", bits);
+        let hex_str = format!("0x{bits:016X}");
         let r = reg(f64_be());
         let words = r.encode(&hex_str).unwrap();
         match r.decode(&words).unwrap() {
@@ -1253,7 +1253,7 @@ mod tests {
             for (format, value, s) in cases {
                 let via_string = encode(&format, s).unwrap();
                 let via_typed = encode_value(&format, &value).unwrap();
-                assert_eq!(via_string, via_typed, "format={:?}", format);
+                assert_eq!(via_string, via_typed, "format={format:?}");
             }
         }
         // ASCII

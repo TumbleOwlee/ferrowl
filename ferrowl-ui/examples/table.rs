@@ -48,7 +48,6 @@ impl TableEntry<2> for Item {
     }
 }
 
-// Simple app consisting of single input field
 #[derive(Builder, Debug)]
 struct App {
     pub state: TableState<Item, 2>,
@@ -81,7 +80,6 @@ fn main() -> ExitCode {
     let mut screen: AlternateScreen<Stdout> =
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
-    // Create app state
     let mut app = AppBuilder::default()
         .state(
             TableStateBuilder::default()
@@ -101,10 +99,8 @@ fn main() -> ExitCode {
         .unwrap();
 
     loop {
-        // Draw app
         screen.draw(|f| app.render(f)).unwrap();
 
-        // Check for events
         if event::poll(Duration::from_millis(50)).unwrap()
             && let Event::Key(key) = event::read().unwrap()
             && key.kind == KeyEventKind::Press

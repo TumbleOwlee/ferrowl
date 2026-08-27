@@ -76,7 +76,6 @@ impl StatefulWidget for &Text {
         ])
         .split(area)[1];
 
-        // Create block if border is required
         if let Border::Full(margin) = &self.border {
             let style = self.style.general;
             let mut block = Block::bordered().style(style);

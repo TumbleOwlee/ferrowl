@@ -997,7 +997,7 @@ mod tests {
     /// MB-R-133 — stopping a TCP server whose task is actively backing off from a bind failure
     /// (an occupied port, per MB-R-071/MB-R-130) still ends it gracefully and promptly via
     /// `ServerCommand::Terminate`, exercised through the full `Instance` stack (not just
-    /// `ferrowl-modbus` in isolation, which s4 already covers).
+    /// `ferrowl-modbus` in isolation, already covered there).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_server_stop_on_backing_off_task_ends_promptly() {
         let port = free_port();

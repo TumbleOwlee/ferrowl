@@ -1,14 +1,11 @@
-// Crate
 use crate::common::serial_config_from;
 use crate::monitor::{MonitorEnd, SharedObservedTable, SharedRecordLog, drive_monitor};
 use crate::rtu::Config;
 use crate::server_core::wait_reconnect_backoff;
 use crate::{ConnectedCell, Error, LogFn, PathConflictCell, SerialError, ServerCommand};
 
-// Workspace
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
-// External
 use rust_modbus::{AduReader, Ascii, Direction, TransportConfig, open_serial};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

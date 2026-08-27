@@ -40,9 +40,9 @@ pub struct MonitorSetupValues {
     pub reconnect: bool,
     /// The device-config-path field's current value, always populated regardless of
     /// `New`/`Edit` mode (unlike `MonitorSetupOutcome::device`, which only re-loads the device
-    /// config file in `New` mode) — items 1/2's fix: an edit-confirm must apply this field even
+    /// config file in `New` mode): an edit-confirm must apply this field even
     /// though it never re-loads a device config from it, mirroring `SetupValues::config_path`'s
-    /// own always-populated shape in the full client/server module's setup dialog (Shared).
+    /// own always-populated shape in the full client/server module's setup dialog.
     pub config_path: String,
 }
 
@@ -707,7 +707,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix — the config-path field's filesystem completion popup (already wired
+    /// The config-path field's filesystem completion popup (already wired
     /// via `SuggestInput<ConfigPath, FsPathProvider>`, same as the modbus module's own
     /// `SetupDialog::config_path`) must actually draw: `render` must call `render_overlay` for
     /// it, same as `module/modbus/setup_dialog.rs`'s trailing `render_overlay` calls.

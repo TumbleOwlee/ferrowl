@@ -1,13 +1,10 @@
-// Crate
 use crate::server_core::{BoundAddr, run_tcp_family};
 use crate::tcp::Config;
 use crate::tcp::tls::SelfSignedCache;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand};
 
-// Workspace
 use ferrowl_store::Memory;
 
-// External
 use parking_lot::RwLock as MemLock;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -134,14 +131,14 @@ mod tests {
     /// transport (RTU, RTU-over-TCP, TCP, Ascii alike now).
     #[test]
     fn ut_ascii_over_tcp_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — AsciiOverTcp is never physical-serial: an unmapped slave id keeps the ordinary
     /// exception.
     #[test]
     fn ut_ascii_over_tcp_server_is_not_physical_serial() {
-        assert!(!PHYSICAL_SERIAL);
+        const { assert!(!PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

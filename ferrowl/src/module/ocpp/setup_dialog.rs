@@ -1695,7 +1695,7 @@ mod tests {
         );
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(d.client_ca_add_dialog.is_none());
-        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
 
         // ADD a second entry.
         d.focus = OcppSetupDialogFocus::ClientCaAddButton;
@@ -1748,7 +1748,7 @@ mod tests {
         assert_eq!(d.client_ca_files.state.selection(), 1);
         d.focus = OcppSetupDialogFocus::ClientCaDeleteButton;
         d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(d.client_ca_files.state.values(), &[ca1.clone()]);
+        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
 
         let spec = d.resolve().expect("one CA resolves");
         match spec.security.server {
@@ -2071,7 +2071,7 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        // `client_ca_files` is focus-eligible only when non-empty (post-s11: an empty list hides
+        // `client_ca_files` is focus-eligible only when non-empty (an empty list hides
         // the field, matching its no-longer-rendered DEL button) — populate it so this cycle
         // actually reaches it.
         d.client_ca_files
@@ -2144,7 +2144,7 @@ mod tests {
         assert!(dialog.close_confirm.is_none());
     }
 
-    // --- post-gate3 row-layout refinement ---------------------------------------------------
+    // --- row-layout refinement ---------------------------------------------------
 
     fn row_of(buf: &Buffer, needle: &str) -> u16 {
         let text = buffer_text(buf);

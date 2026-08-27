@@ -176,8 +176,7 @@ mod tests {
             expand_table_entry(input).expect_err("expected unknown table_entry key to be rejected");
         assert!(
             err.to_string().contains("unknown `table_entry` key"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -194,8 +193,7 @@ mod tests {
         let err = expand_table_entry(input).expect_err("expected unknown row key to be rejected");
         assert!(
             err.to_string().contains("unknown `row` key"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -209,8 +207,7 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("TableEntry requires a struct with named fields"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -226,8 +223,7 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("TableEntry can only be derived for structs"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -244,8 +240,7 @@ mod tests {
             expand_table_entry(input).expect_err("expected unknown column key to be rejected");
         assert!(
             err.to_string().contains("unknown `column` key"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -261,8 +256,7 @@ mod tests {
         let err = expand_table_entry(input).expect_err("expected missing name to be rejected");
         assert!(
             err.to_string().contains("`column` requires `name`"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -278,8 +272,7 @@ mod tests {
         let err = expand_table_entry(input).expect_err("expected missing min to be rejected");
         assert!(
             err.to_string().contains("`column` requires `min`"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -295,8 +288,7 @@ mod tests {
         let err = expand_table_entry(input).expect_err("expected missing max to be rejected");
         assert!(
             err.to_string().contains("`column` requires `max`"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 
@@ -312,8 +304,7 @@ mod tests {
             expand_table_entry(input).expect_err("expected zero-column struct to be rejected");
         assert!(
             err.to_string().contains("TableEntry needs at least one"),
-            "error message: {}",
-            err
+            "error message: {err}"
         );
     }
 }

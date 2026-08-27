@@ -8,9 +8,8 @@ use crate::config::Endpoint;
 /// `ferrowl_modbus::rtu::Config` shape (the two endpoint kinds share identical fields —
 /// path/baud_rate/parity/data_bits/stop_bits — differing only in on-wire framing, exactly as
 /// `ferrowl_modbus::ascii` reuses `rtu::Config` verbatim for the client/server case).
-// Forward-declared: real app-side consumption (constructing a `ModbusMonitorModule`) lands in
-// s4 of the modbus-bus-monitor plan. `#[allow(dead_code)]`, not a stub — already fully
-// implemented and tested here.
+// `#[allow(dead_code)]`: implemented and tested here; nothing constructs a
+// `ModbusMonitorModule` from it yet.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum MonitorNetConfig {
@@ -27,9 +26,9 @@ pub(crate) struct MonitorTransportError(pub &'static str);
 /// MB-R-140 — the role/transport compatibility check, same failure class as MB-R-107's
 /// resolve-time TLS check (a typed error returned from a resolution step, not a panic or a
 /// silent fallback). `ferrowl_modbus::rtu::Config`'s `timeout_ms`/`delay_ms`/`interval_ms`
-/// fields are structurally present but unused by the monitor engine (`s2`'s `MonitorBuilder`
-/// never reads them) — left at `0`.
-#[allow(dead_code)] // forward-declared; see MonitorNetConfig's note
+/// fields are structurally present but unused by the monitor engine (`MonitorBuilder` never
+/// reads them) — left at `0`.
+#[allow(dead_code)] // see `MonitorNetConfig`'s note
 pub(crate) fn endpoint_to_monitor_config(
     endpoint: &Endpoint,
     reconnect: bool,

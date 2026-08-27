@@ -193,8 +193,7 @@ mod tests {
         let err = expand_overlay(input).expect_err("expected unknown attribute to be rejected");
         assert!(
             err.to_string().contains("unknown `overlay` key"),
-            "Error message should mention unknown key, got: {}",
-            err
+            "Error message should mention unknown key, got: {err}"
         );
     }
 

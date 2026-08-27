@@ -78,9 +78,7 @@ pub fn load_ocpp_device(path: &str) -> Result<OcppDeviceConfig, ConfigError> {
 /// Load a monitor device-type config file. No `migrate_update_scripts`-equivalent needed —
 /// `MonitorRegisterDef` has no `update` field to migrate (MB-R-145).
 ///
-/// Forward-declared: real app-side call sites land in s4 of the modbus-bus-monitor plan
-/// (`ModbusMonitorModule` lifecycle wrapper) — `#[allow(dead_code)]`, not a stub, the function
-/// itself is already implemented and tested here.
+/// `#[allow(dead_code)]`: implemented and tested here, with no app-side call site yet.
 #[allow(dead_code)]
 pub fn load_monitor_device(path: &str) -> Result<MonitorDeviceConfig, ConfigError> {
     load(path)

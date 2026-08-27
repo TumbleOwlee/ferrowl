@@ -1,4 +1,3 @@
-// Crate
 use crate::common::serial_config_from;
 use crate::rtu::Config;
 use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
@@ -6,11 +5,9 @@ use crate::{
     ConnectedCell, Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand,
 };
 
-// Workspace
 use ferrowl_store::Memory;
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
-// External
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Ascii, Server as ModbusServer, open_serial};
 use std::sync::Arc;
@@ -85,8 +82,7 @@ const PHYSICAL_SERIAL: bool = true;
 /// Open the configured serial port and serve it, retrying the open with the shared backoff
 /// policy on failure (MB-R-124 revised, MB-R-130–134). `ResetOn::Request` (not `Connect`): the
 /// Ascii link's own `on_connect` fires once immediately, before any request is read, so it
-/// cannot be the "did something useful" signal — only reading a request/datagram counts (see
-/// Shared note in plan.md).
+/// cannot be the "did something useful" signal — only reading a request/datagram counts.
 async fn run<T, L, St>(
     config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
@@ -207,14 +203,14 @@ mod tests {
     /// other transport.
     #[test]
     fn ut_ascii_server_is_verbose() {
-        assert!(VERBOSE);
+        const { assert!(VERBOSE) };
     }
 
     /// MB-R-128 — the Ascii server is wired as physical-serial: an unmapped slave id is answered
     /// with silence.
     #[test]
     fn ut_ascii_server_is_physical_serial() {
-        assert!(PHYSICAL_SERIAL);
+        const { assert!(PHYSICAL_SERIAL) };
     }
 
     fn sink() -> impl crate::LogFn + Clone {

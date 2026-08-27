@@ -143,7 +143,7 @@ where
 // drive `downstream_rtu::spawn`/`upstream_rtu::run` for a real exchange, so those three
 // combinations' service/type wiring is proven here instead, one layer below `bridge::run`'s
 // own dispatch, over an in-memory duplex link standing in for the serial link (same approach
-// s6/s7 already use for `upstream_tcp`/`upstream_rtu`'s own tests). `service::BridgeService`
+// `upstream_tcp`/`upstream_rtu`'s own tests already use). `service::BridgeService`
 // and `upstream_tcp::run`/`upstream_rtu::run` are `pub(crate)`, unreachable from an external
 // `tests/` crate, so these live as crate-internal unit tests.
 #[cfg(test)]
@@ -212,7 +212,7 @@ mod tests {
     /// against a real serial port.
     fn duplex_downstream(
         expected: RegisterValue,
-        log: impl LogFn + Clone + Send + 'static,
+        log: impl LogFn + Clone + 'static,
     ) -> DownstreamHandle<FrameTransport<DuplexStream, RtuFraming>, RtuFraming> {
         let (client_end, mut peer) = tokio::io::duplex(256);
         let mut client_end = Some(client_end);

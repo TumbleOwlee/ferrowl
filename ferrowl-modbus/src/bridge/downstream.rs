@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
 /// Log-line prefix for a genuine bridge failure (BR-R-013's "`[bridge]`-sourced error
-/// line", mirroring headless run's `[sim]` — see Shared design decision 3).
+/// line", mirroring headless run's `[sim]`).
 pub const ERROR_PREFIX: &str = "[bridge]";
 
 /// Owns one downstream connection (BR-R-006) and answers forwarded requests (BR-R-007)
