@@ -448,3 +448,101 @@ fn ut_nested_handle_events_arm_converts_unhandled_tab_to_consumed() {
     let result = app.handle_events(KeyModifiers::NONE, KeyCode::Tab);
     assert!(matches!(result, ferrowl_ui::EventResult::Consumed));
 }
+
+// --- NestedFocus: when-gated nested field, and entry into an ineligible inner pane -----------
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct GatedNestingApp {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested, when = self.section_enabled)]
+    pub section: Section,
+    #[focus]
+    pub after: Widget,
+    pub section_enabled: bool,
+}
+
+#[test]
+/// UI-R-049 — a `when`-gated `#[focus(nested)]` field that's currently ineligible is skipped by
+/// the outer walk exactly as any other gated field is today.
+fn ut_nested_when_gated_section_skipped_when_ineligible() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = GatedNestingAppBuilder::default()
+        .before(Widget::default())
+        .section(make_section(SectionFocus::A))
+        .after(Widget::default())
+        .section_enabled(false)
+        .focus(GatedNestingAppFocus::Before)
+        .view_focused(false)
+        .build()
+        .expect("GatedNestingApp builder failed");
+    app.before.set_focused(true);
+
+    if let ferrowl_ui::EventResult::Unhandled(_, KeyCode::Tab) =
+        app.handle_events(KeyModifiers::NONE, KeyCode::Tab)
+    {
+        app.focus_next();
+    }
+    assert_eq!(app.focus, GatedNestingAppFocus::After);
+    assert!(app.after.is_focused());
+}
+
+#[focusable(nestable)]
+#[derive(Builder, Clone, Debug, Focus)]
+struct GatedSingleSection {
+    #[focus(when = self.a_enabled)]
+    pub a: Widget,
+    pub a_enabled: bool,
+}
+
+fn make_gated_single_section(a_enabled: bool) -> GatedSingleSection {
+    GatedSingleSectionBuilder::default()
+        .a(Widget::default())
+        .a_enabled(a_enabled)
+        .focus(GatedSingleSectionFocus::A)
+        .view_focused(false)
+        .build()
+        .expect("GatedSingleSection builder failed")
+}
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct NestingAppGatedInner {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested)]
+    pub section: GatedSingleSection,
+    #[focus]
+    pub after: Widget,
+}
+
+#[test]
+/// UI-R-049 — a `#[focusable(nestable)]` struct whose only field is currently `when`-ineligible
+/// makes entry into it a no-op the parent's own walk skips past (the private
+/// `__focus_enter_first_eligible` helper's failure path, observable one level up).
+fn ut_nested_entry_into_ineligible_single_pane_section_is_noop() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = NestingAppGatedInnerBuilder::default()
+        .before(Widget::default())
+        .section(make_gated_single_section(false))
+        .after(Widget::default())
+        .focus(NestingAppGatedInnerFocus::Before)
+        .view_focused(false)
+        .build()
+        .expect("NestingAppGatedInner builder failed");
+    app.before.set_focused(true);
+
+    if let ferrowl_ui::EventResult::Unhandled(_, KeyCode::Tab) =
+        app.handle_events(KeyModifiers::NONE, KeyCode::Tab)
+    {
+        app.focus_next();
+    }
+    assert_eq!(app.focus, NestingAppGatedInnerFocus::After);
+    assert!(app.after.is_focused());
+    assert!(!app.section.a.is_focused());
+}
