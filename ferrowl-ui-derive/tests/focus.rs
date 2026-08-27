@@ -301,7 +301,10 @@ fn ut_try_focus_next_false_at_last_pane() {
     let mut section = make_section(SectionFocus::B);
     section.b.set_focused(true);
     assert!(!section.try_focus_next());
-    assert!(section.b.is_focused(), "must not disable the current pane on a failed scan");
+    assert!(
+        section.b.is_focused(),
+        "must not disable the current pane on a failed scan"
+    );
 }
 
 #[test]
@@ -407,7 +410,10 @@ fn ut_nested_backtab_from_after_lands_on_last_pane() {
     app.after.set_focused(true);
     send_key_with_fallback(&mut app, KeyModifiers::SHIFT, KeyCode::BackTab);
     assert_eq!(app.focus, NestingAppFocus::Section);
-    assert!(app.section.b.is_focused(), "must land on the last pane, not the remembered/first one");
+    assert!(
+        app.section.b.is_focused(),
+        "must land on the last pane, not the remembered/first one"
+    );
     assert!(!app.section.a.is_focused());
 }
 

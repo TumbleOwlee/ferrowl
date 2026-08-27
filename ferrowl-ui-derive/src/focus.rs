@@ -4,8 +4,7 @@ use convert_case::{Case, Casing};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
-    Expr, Field, Fields, Ident, Meta, MetaNameValue, Token, Type, Visibility,
-    parse::Parser,
+    Expr, Field, Fields, Ident, Meta, MetaNameValue, Token, Type, Visibility, parse::Parser,
     punctuated::Punctuated,
 };
 
@@ -456,7 +455,10 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 /// Appends the `focus`/`view_focused` fields the `Focus` derive needs. `attr` is the raw
 /// `#[focusable(...)]` argument list, e.g. `nestable` for `#[focusable(nestable)]` (empty for a
 /// bare `#[focusable]`).
-pub fn expand_focusable(attr: TokenStream, mut input: syn::DeriveInput) -> syn::Result<TokenStream> {
+pub fn expand_focusable(
+    attr: TokenStream,
+    mut input: syn::DeriveInput,
+) -> syn::Result<TokenStream> {
     let mut nestable = false;
     if !attr.is_empty() {
         let args = Punctuated::<Meta, Token![,]>::parse_terminated
@@ -627,8 +629,7 @@ mod tests {
                 field: Widget,
             }
         };
-        expand_focus(nested_then_when)
-            .expect("expected #[focus(nested, when = …)] to be accepted");
+        expand_focus(nested_then_when).expect("expected #[focus(nested, when = …)] to be accepted");
 
         let when_then_nested: syn::DeriveInput = syn::parse_quote! {
             struct TestView {
@@ -636,8 +637,7 @@ mod tests {
                 field: Widget,
             }
         };
-        expand_focus(when_then_nested)
-            .expect("expected #[focus(when = …, nested)] to be accepted");
+        expand_focus(when_then_nested).expect("expected #[focus(when = …, nested)] to be accepted");
     }
 
     #[test]
