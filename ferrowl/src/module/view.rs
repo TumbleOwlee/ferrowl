@@ -74,7 +74,6 @@ pub type RefreshFuture<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = 
 /// whole-view focus, and the view reads [`IsFocus::is_focused`] for focus-dependent rendering (e.g.
 /// message-log autoscroll). Concrete views get these from `#[derive(Focus)]`.
 pub trait ModuleView: SetFocus + IsFocus {
-    // Name of the module instance
     fn name(&self) -> String;
 
     /// Render the module content area (everything except the log pane and tab bar).

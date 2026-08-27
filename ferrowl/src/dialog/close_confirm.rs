@@ -65,15 +65,11 @@ pub fn route_close_confirm(
     }
 }
 
-// ---------------------------------------------------------------------------
-// CloseConfirmDialog — small popup guarding accidental dialog close
-// ---------------------------------------------------------------------------
-
+/// Small popup guarding accidental dialog close.
 #[derive(Builder, Clone, Debug)]
 pub struct CloseConfirmDialog {
     // Single CLOSE button, always focused.
     close_button: Widget<ButtonState, Button>,
-    // Keybind hint.
     keybinds: Widget<String, Text>,
 }
 

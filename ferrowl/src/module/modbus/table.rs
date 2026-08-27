@@ -164,7 +164,6 @@ impl TableEntry<COLUMN_COUNT> for Definition {
             None => "None".into(),
         };
 
-        // Show value and it's name if available
         let raw_value = &self.raw_value;
         let raw_int = parse_raw_value(raw_value);
         let mut value = self.value.to_string();

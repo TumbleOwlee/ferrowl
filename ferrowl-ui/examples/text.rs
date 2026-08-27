@@ -10,13 +10,11 @@ use ratatui::{
 };
 use std::{io::Stdout, time::Duration};
 
-// Simple app consisting of single input field
 #[derive(Default)]
 struct App {
     texts: Vec<String>,
 }
 
-// Render simple input field
 fn ui(f: &mut Frame, app: &mut App) {
     let text = TextBuilder::default()
         .title(Some("Text".into()))
@@ -63,7 +61,6 @@ fn main() {
     let mut screen: AlternateScreen<Stdout> =
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
-    // Create app state
     let mut app = App {
         texts: vec![
             "Some special text".to_string(),
@@ -72,10 +69,8 @@ fn main() {
     };
 
     loop {
-        // Draw app
         screen.draw(|f| ui(f, &mut app)).unwrap();
 
-        // Check for events
         if event::poll(Duration::from_millis(50)).unwrap()
             && let Event::Key(key) = event::read().unwrap()
             && key.kind == KeyEventKind::Press

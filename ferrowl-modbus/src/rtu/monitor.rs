@@ -1,14 +1,11 @@
-// Crate
 use crate::common::serial_config_from;
 use crate::monitor::{MonitorEnd, SharedObservedTable, SharedRecordLog, drive_monitor};
 use crate::rtu::Config;
 use crate::server_core::wait_reconnect_backoff;
 use crate::{ConnectedCell, Error, LogFn, PathConflictCell, SerialError, ServerCommand};
 
-// Workspace
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
-// External
 use rust_modbus::{AduReader, Direction, Rtu, TransportConfig, open_serial};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -270,7 +267,7 @@ mod tests {
 
     /// MB-R-150 — "report a distinct path-conflict status/log entry instead — replacing today's
     /// silent indefinite retry": a conflict must be visible via `log` before the attempt
-    /// returns, matching the server's own requirement (Shared).
+    /// returns, matching the server's own requirement.
     #[tokio::test]
     async fn ut_rtu_monitor_run_logs_path_conflict_before_returning() {
         use std::sync::Mutex;

@@ -361,7 +361,7 @@ mod render_tests {
         );
     }
 
-    /// Manual-exercise fix (item 2) — the add-named-value button reads "ADD ALIAS", not
+    /// The add-named-value button reads "ADD ALIAS", not
     /// "ADD PREDEFINED".
     #[test]
     fn ut_render_add_button_label_is_add_alias() {

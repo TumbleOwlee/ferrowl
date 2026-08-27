@@ -77,11 +77,11 @@ fn boolean_kind_values() -> Vec<NamedValue> {
 /// `deletable == true`) dialog: the field set plus a Delete button/confirmation flow gated on
 /// `deletable`, and prefill-from-existing-row support (`from_interpretation`). Mirrors the
 /// modbus module's own `EditInputDialog`'s `deletable` field / `new()` vs `from_register` split
-/// (`dialog/input/mod.rs`, Shared) — a single struct rather than the two near-duplicate structs
+/// (`dialog/input/mod.rs`) — a single struct rather than the two near-duplicate structs
 /// (`AddInterpretationDialog`/`EditInterpretationDialog`) this module used to keep, which
 /// differed only in that gated Delete button and the mode-switch-to-selection wiring. A new,
 /// small struct rather than a mode bolted onto `EditInputDialog` itself, for the same reason
-/// this module's doc comment gives (Shared): no `access`/`value`/`default_value` fields apply to
+/// this module's doc comment gives: no `access`/`value`/`default_value` fields apply to
 /// a monitor interpretation.
 ///
 /// The alias list (`value`/`add_button`/`delete_value_button`) used to live on a separate
@@ -137,7 +137,7 @@ pub struct EditInterpretationDialog {
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
     /// Deletes the interpretation outright (MB-R-148), guarded by `confirm_delete` — only
-    /// focusable when `deletable` (mirrors `EditInputDialog`'s `delete_register_button`, Shared).
+    /// focusable when `deletable` (mirrors `EditInputDialog`'s `delete_register_button`).
     #[focus(when = { self.deletable })]
     pub delete_button: Widget<ButtonState, Button>,
     pub error: Widget<String, Text>,
@@ -146,11 +146,11 @@ pub struct EditInterpretationDialog {
     pub add_dialog: Option<AddNamedValueDialog>,
     /// Whether this dialog edits an existing interpretation (enables the delete button) —
     /// `false` for `:add`/`new()`, `true` for `from_interpretation` (MB-R-148). Mirrors
-    /// `EditInputDialog::deletable` (Shared).
+    /// `EditInputDialog::deletable`.
     #[builder(default)]
     pub deletable: bool,
     /// Guards `delete_button` (MB-R-148) — reuses `ConfirmDeleteDialog` verbatim, already
-    /// generic sub-dialog plumbing (Shared), not `EditInputDialog`-specific.
+    /// generic sub-dialog plumbing, not `EditInputDialog`-specific.
     #[builder(default)]
     pub confirm_delete: Option<ConfirmDeleteDialog>,
 }
@@ -467,7 +467,7 @@ impl EditInterpretationDialog {
     }
 
     /// Open the delete-confirmation popup (MB-R-148), named after the dialog's current label
-    /// input (mirrors `SubDialogs::open_confirm_delete`'s `register_label`, Shared).
+    /// input (mirrors `SubDialogs::open_confirm_delete`'s `register_label`).
     pub fn open_confirm_delete(&mut self) {
         let name = self.label.state.input().to_string();
         self.confirm_delete = Some(ConfirmDeleteDialog::new(&name));
@@ -475,7 +475,7 @@ impl EditInterpretationDialog {
 
     /// Delete the `value`-selected alias immediately (no confirm popup — this deletes one alias,
     /// not the interpretation), mirroring `EditSelectionDialog::delete_selected` minus its
-    /// `default_value` bookkeeping (this dialog has no default-value field, Shared). Once this
+    /// `default_value` bookkeeping (this dialog has no default-value field). Once this
     /// empties the list, re-home focus onto `Label` — mirroring the old `to_input_dialog`'s
     /// forced focus onto its own default (`Label`, `EditInterpretationDialog::new`) once the swap
     /// happened.
@@ -567,7 +567,7 @@ impl EditInterpretationDialog {
             &mut self.description.state,
         );
         StatefulWidget::render(&self.address.widget, rows[2], buf, &mut self.address.state);
-        // Kind and Type on the same line (Shared).
+        // Kind and Type on the same line.
         let kind_type: [Rect; 2] =
             Layout::horizontal([Constraint::Min(1), Constraint::Min(1)]).areas(rows[3]);
         StatefulWidget::render(&self.kind.widget, kind_type[0], buf, &mut self.kind.state);
@@ -659,7 +659,7 @@ impl EditInterpretationDialog {
         // are the only possible aliases. Otherwise, a plain full-width "ADD ALIAS" button while
         // the alias list is empty, or the list itself plus a narrower add/delete button pair once
         // it isn't — folds what used to be `EditInterpretationDialog::render`'s and
-        // `EditInterpretationSelectionDialog::render`'s own rows[5] bodies into one (Shared).
+        // `EditInterpretationSelectionDialog::render`'s own rows[5] bodies into one.
         if !self.is_boolean_kind() {
             if self.value.state.values().is_empty() {
                 StatefulWidget::render(
@@ -698,7 +698,7 @@ impl EditInterpretationDialog {
         }
         // Confirm alone full-width when `:add` (`!deletable`); Confirm+Delete 50/50 split once
         // editing an existing interpretation (`deletable`) — matches `EditInputDialog::render`'s
-        // own `deletable` branch (Shared).
+        // own `deletable` branch.
         if self.deletable {
             let confirm_delete: [Rect; 2] =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -723,7 +723,7 @@ impl EditInterpretationDialog {
                 &mut self.confirm_button.state,
             );
         }
-        // Same class of bug as `setup_dialog::MonitorSetupDialog::render` (Shared): no error box
+        // Same class of bug as `setup_dialog::MonitorSetupDialog::render`: no error box
         // drawn at all while the dialog validates cleanly.
         if !self.error.state.is_empty() {
             StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
@@ -798,7 +798,7 @@ mod tests {
     /// The crux of the add/edit unification: `EditInterpretationDialog::new()` (used by `:add`,
     /// UI-R-061) is not deletable, while `from_interpretation` (used by the MB-R-148 edit-on-a-
     /// row dialog, UI-R-064) is — mirroring `EditInputDialog::new()`/`from_register`'s own
-    /// `deletable` split (Shared).
+    /// `deletable` split.
     #[test]
     fn ut_new_is_not_deletable_and_from_interpretation_is() {
         assert!(!EditInterpretationDialog::new().deletable);
@@ -873,9 +873,9 @@ mod tests {
         }
     }
 
-    /// Same class of bug as `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid`
-    /// (Shared): the error box must not draw at all while the dialog validates cleanly, only
-    /// once it doesn't.
+    /// Same class of bug as
+    /// `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid`: the error
+    /// box must not draw at all while the dialog validates cleanly, only once it doesn't.
     #[test]
     fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 120, 40);
@@ -907,8 +907,7 @@ mod tests {
 
     /// UI-R-061 — the `:add` dialog (`new()`, `deletable == false`) shows Confirm alone,
     /// full-width, and no DELETE button (nothing exists yet to delete), with the "Add
-    /// interpretation" title — mirrors `EditInputDialog::render`'s own `deletable` branch
-    /// (Shared).
+    /// interpretation" title — mirrors `EditInputDialog::render`'s own `deletable` branch.
     #[test]
     fn ut_add_dialog_render_shows_confirm_alone_and_add_title() {
         let area = Rect::new(0, 0, 120, 40);
@@ -1113,8 +1112,8 @@ mod tests {
         assert!(dialog.confirm_delete.is_some());
     }
 
-    /// Manual-exercise fix (item 4), applied here too for parity — `EditInterpretationDialog`
-    /// has the identical error-box-always-drawn bug as `AddInterpretationDialog` (Shared).
+    /// `EditInterpretationDialog` has the identical error-box-always-drawn bug as
+    /// `AddInterpretationDialog`.
     #[test]
     fn ut_edit_interpretation_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 120, 40);
@@ -1137,9 +1136,9 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 3) — while the alias list is empty,
+    /// While the alias list is empty,
     /// `EditInterpretationDialog` shows a single full-width "ADD ALIAS" button, not an inline
-    /// list (mirrors `EditInputDialog`, Shared).
+    /// list (mirrors `EditInputDialog`).
     #[test]
     fn ut_edit_interpretation_render_shows_add_button_when_empty() {
         let area = Rect::new(0, 0, 120, 40);
@@ -1154,7 +1153,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 6) — a Coil/DiscreteInput interpretation's alias line is hidden
+    /// A Coil/DiscreteInput interpretation's alias line is hidden
     /// entirely: no "ADD ALIAS" button is drawn, and there is nothing to focus in its place.
     #[test]
     fn ut_edit_interpretation_render_hides_add_button_for_boolean_kind() {
@@ -1171,7 +1170,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 6) — `add_button` is skipped by focus cycling for a boolean-kind
+    /// `add_button` is skipped by focus cycling for a boolean-kind
     /// dialog, same as every other field gated on `is_boolean_kind()`.
     #[test]
     fn ut_edit_interpretation_add_button_not_focusable_for_boolean_kind() {
@@ -1188,7 +1187,7 @@ mod tests {
         }
     }
 
-    /// Manual-exercise fix (item 6) — `apply()` always uses the fixed ON=1/OFF=0 aliases for a
+    /// `apply()` always uses the fixed ON=1/OFF=0 aliases for a
     /// Coil/DiscreteInput interpretation, regardless of any alias list contents (which the hidden
     /// alias UI can never populate through the normal flow, but this must hold at the data-model
     /// level too, not only because the UI happens to hide the row).
@@ -1219,7 +1218,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 6) — a fresh `:add` dialog defaults to `Kind::Coil`
+    /// A fresh `:add` dialog defaults to `Kind::Coil`
     /// (`widgets::kind_options()`'s index-0 default), so it starts with the alias line already
     /// hidden and ON/OFF already the effective values.
     #[test]
@@ -1234,7 +1233,7 @@ mod tests {
         assert_eq!(applied.values[1].name, "OFF");
     }
 
-    /// Manual-exercise fix (item 3) — `confirm_add_dialog` carries every shared field's state
+    /// `confirm_add_dialog` carries every shared field's state
     /// forward unchanged (here: the label) while adding the first alias, and re-homes focus onto
     /// `value` the moment the list transitions from empty to non-empty — replaces the old
     /// `to_selection_dialog`-based test of the same underlying fact
@@ -1270,9 +1269,9 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix (item 3) — `EditInterpretationDialog::delete_selected_named_value`
+    /// `EditInterpretationDialog::delete_selected_named_value`
     /// removes exactly the `value`-selected entry, same shape as
-    /// `EditSelectionDialog::delete_selected` minus its `default_value` bookkeeping (Shared).
+    /// `EditSelectionDialog::delete_selected` minus its `default_value` bookkeeping.
     #[test]
     fn ut_edit_interpretation_delete_removes_selected_named_value() {
         let mut dialog = EditInterpretationDialog::new();
@@ -1299,7 +1298,7 @@ mod tests {
         assert_eq!(dialog.value.state.values()[0].name, "on");
     }
 
-    /// Manual-exercise fix (item 3) — once the alias list empties out (deleting the last one),
+    /// Once the alias list empties out (deleting the last one),
     /// `delete_selected_named_value` re-homes focus onto `Label` — replaces the old
     /// `to_input_dialog`-based test of the same underlying fact
     /// (`ut_edit_interpretation_selection_dialog_to_input_dialog_carries_state`), now provable
@@ -1392,7 +1391,7 @@ mod tests {
 
     /// Same box-height-vs-row-sum requirement as above (`Length(30)` needed by its own identical
     /// 10-row array), reached once the alias list is non-empty and rows[5] renders the
-    /// list+add+delete layout instead of the single "ADD ALIAS" button (Shared).
+    /// list+add+delete layout instead of the single "ADD ALIAS" button.
     #[test]
     fn ut_edit_interpretation_with_alias_render_does_not_shrink_rows_below_declared_height() {
         let mut dialog = EditInterpretationDialog::new();

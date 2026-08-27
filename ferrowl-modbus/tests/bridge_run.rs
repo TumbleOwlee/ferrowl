@@ -1,4 +1,4 @@
-//! bridge::run wiring tests (stage s9). Only the tcp-upstream/tcp-downstream combination
+//! bridge::run wiring tests. Only the tcp-upstream/tcp-downstream combination
 //! runs a real end-to-end path through `bridge::run` itself here: both transports work
 //! without hardware in a test environment. The other three combinations involve RTU, whose
 //! downstream/upstream types are hard-pinned to a real `SerialStream` (no hardware available

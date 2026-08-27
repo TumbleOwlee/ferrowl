@@ -73,10 +73,7 @@ pub fn route_delete_confirm(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ConfirmDeleteDialog — small inline yes/no box guarding register deletion
-// ---------------------------------------------------------------------------
-
+/// Small inline yes/no box guarding register deletion.
 #[focusable]
 #[derive(Builder, Clone, Debug, Focus)]
 pub struct ConfirmDeleteDialog {
@@ -85,10 +82,8 @@ pub struct ConfirmDeleteDialog {
     // Cancel button (focused by default — the safe choice).
     #[focus]
     pub cancel_button: Widget<ButtonState, Button>,
-    // Confirm-deletion button.
     #[focus]
     pub delete_button: Widget<ButtonState, Button>,
-    // Keybind hint.
     pub keybinds: Widget<String, Text>,
 }
 

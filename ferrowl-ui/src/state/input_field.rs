@@ -96,7 +96,6 @@ impl HandleEvents for InputFieldState {
                 }
                 EventResult::Consumed
             }
-            // Clear the input line
             (KeyModifiers::CONTROL, KeyCode::Char('d')) if !self.disabled => {
                 self.input.clear();
                 self.cursor = 0;

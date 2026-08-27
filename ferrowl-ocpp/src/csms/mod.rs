@@ -257,7 +257,7 @@ where
 {
     // Shared between `attempt` and `wait_abortable`, called strictly sequentially by
     // `run_with_backoff` and never concurrently — same technique as `ferrowl_ocpp::cs` and
-    // `ferrowl_modbus::server_core` (see Shared).
+    // `ferrowl_modbus::server_core`.
     let receiver = AsyncMutex::new(receiver);
 
     let attempt = || {

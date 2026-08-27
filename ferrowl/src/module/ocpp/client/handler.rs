@@ -186,8 +186,7 @@ mod tests {
     }
 
     /// Connect a real `OcppClient<V>` to the CSMS bound at `server`, backed by `state`, waiting for
-    /// it to come online (the live-sender fix from this task's s1: the handler's `sender` is
-    /// captured before `start()`).
+    /// it to come online. The handler's `sender` is captured before `start()`.
     async fn connected_client<V: Inbound>(
         server: &ferrowl_ocpp::csms::Server<V>,
         version: crate::module::ocpp::config::session::OcppVersion,
@@ -410,7 +409,7 @@ mod tests {
 
     // --- OC-R-070 / OC-R-122: 2.0.1 remote-start is visible to the CSMS -----------------------
     //
-    // A real websocket loopback, mirroring s3's 1.6 tests: the CSMS side sends the inbound
+    // A real websocket loopback, mirroring the 1.6 tests: the CSMS side sends the inbound
     // `RequestStartTransaction` Call and records every Call it receives back from the CS in
     // order, notifying once it has seen `StatusNotification`.
 

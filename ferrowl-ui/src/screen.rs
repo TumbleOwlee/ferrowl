@@ -57,7 +57,6 @@ where
     /// Restores the terminal (leave alternate screen, disable raw mode)
     /// without a value to drop — for use from panic/exit handlers.
     pub fn release() {
-        // restore terminal
         disable_raw_mode().expect("Disable raw mode failed.");
         execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture)
             .expect("Failed to leave alternate screen.");
@@ -89,7 +88,6 @@ where
     W: Write + Init,
 {
     fn drop(&mut self) {
-        // restore terminal
         let _ = disable_raw_mode();
         let _ = execute!(
             self.terminal.backend_mut(),

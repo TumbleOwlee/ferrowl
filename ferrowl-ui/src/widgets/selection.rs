@@ -135,7 +135,6 @@ impl<ValueType: ToLabel + Clone> StatefulWidget for &Selection<ValueType> {
         ])
         .split(area)[1];
 
-        // Create block if border is required
         let border_style = if state.focused() {
             self.style.border
         } else {

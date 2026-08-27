@@ -1,13 +1,10 @@
-// Crate
 use crate::server_core::{BoundAddr, run_tcp_family};
 use crate::tcp::Config;
 use crate::tcp::tls::SelfSignedCache;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand};
 
-// Workspace
 use ferrowl_store::Memory;
 
-// External
 use parking_lot::RwLock as MemLock;
 use std::sync::Arc;
 use tokio::sync::RwLock;

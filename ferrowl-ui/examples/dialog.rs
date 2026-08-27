@@ -242,7 +242,6 @@ fn main() -> ExitCode {
         general: ratatui::prelude::Style::default().fg(tailwind::RED.c500),
         ..InputFieldStyle::default()
     };
-    // Create app state
     let mut app = AppBuilder::default()
         .name(Widget {
             state: InputFieldStateBuilder::default()
@@ -427,10 +426,8 @@ fn main() -> ExitCode {
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
     loop {
-        // Draw app
         screen.draw(|f| app.render(f, f.area())).unwrap();
 
-        // Show error
         match app.result() {
             Ok(_) => {
                 app.error.state.set_input("".into());
@@ -440,7 +437,6 @@ fn main() -> ExitCode {
             }
         }
 
-        // Check for events
         if event::poll(Duration::from_millis(50)).unwrap()
             && let Event::Key(key) = event::read().unwrap()
             && key.kind == KeyEventKind::Press

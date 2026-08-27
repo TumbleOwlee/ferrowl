@@ -1,8 +1,7 @@
 //! Client-side Modbus/TCP TLS tests (MB-R-109, MB-R-110, MB-R-111 client half).
 //!
 //! Drives `ferrowl_modbus::tcp::Client::connect` against a bare `rust_modbus`
-//! TLS/TCP listener (not `ferrowl_modbus`'s own server — that's s3's job), so
-//! this stage needs no coordination with s3.
+//! TLS/TCP listener, never `ferrowl_modbus`'s own server (covered by tcp_tls_server.rs).
 
 // Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
 #![allow(clippy::unwrap_used)]

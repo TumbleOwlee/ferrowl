@@ -18,7 +18,6 @@ use std::{io::Stdout, time::Duration};
 
 const INPUT_FIELDS: usize = 2;
 
-// Simple app consisting of single input field
 struct App {
     index: usize,
     states: Vec<InputFieldState>,
@@ -38,7 +37,6 @@ impl Default for App {
     }
 }
 
-// Render simple input field
 fn ui(f: &mut Frame, app: &mut App) {
     let input: InputField<String> = InputFieldBuilder::default()
         .title(Some("Input".into()))
@@ -92,14 +90,11 @@ fn main() {
     let mut screen: AlternateScreen<Stdout> =
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
-    // Create app state
     let mut app = App::default();
 
     loop {
-        // Draw app
         screen.draw(|f| ui(f, &mut app)).unwrap();
 
-        // Check for events
         if event::poll(Duration::from_millis(50)).unwrap()
             && let Event::Key(key) = event::read().unwrap()
             && key.kind == KeyEventKind::Press

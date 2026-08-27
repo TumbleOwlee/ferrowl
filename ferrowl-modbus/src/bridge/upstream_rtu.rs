@@ -42,8 +42,8 @@ where
     }
 }
 
-// This stage's own tests live as crate-internal unit tests (see s6's upstream_tcp.rs for the
-// same reasoning): `run` and `BridgeService` are both `pub(crate)`, unreachable from an
+// These tests live as crate-internal unit tests (see upstream_tcp.rs for the same reasoning):
+// `run` and `BridgeService` are both `pub(crate)`, unreachable from an
 // external `tests/` crate. That includes the open-failure test below — it needs `run` and
 // `BridgeService` directly, so it cannot live in `tests/rtu_serial.rs` either.
 #[cfg(test)]

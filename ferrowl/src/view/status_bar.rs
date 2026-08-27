@@ -1,8 +1,7 @@
 //! MB-R-137/152/153, OC-R-123/124 — the tri-state connection status bar shared by every
 //! client/server/monitor module view.
-// Forward-declared: consumed by later stages of the reconnect-status-truthfulness plan (s5, s6,
-// s9, s10), each wiring one module's view to `render_status_bar`. `#[allow(dead_code)]`, not a
-// stub — already fully implemented and tested here.
+// `#[allow(dead_code)]`: fully implemented and tested here, but not every module view has been
+// wired to `render_status_bar` yet.
 #![allow(dead_code)]
 
 use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};

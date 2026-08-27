@@ -395,8 +395,8 @@ impl ActionDialog {
         // Freshly assembled/left content is either valid JSON or irrelevant; a stale parse
         // error from a previous JSON-mode attempt must not linger across the mode switch.
         self.json_error = None;
-        // Sanctioned deviation from the old hand-rolled Focus: focus stays on the toggle
-        // button after switching modes (previously it jumped back to the fields).
+        // Focus deliberately stays on the toggle button after switching modes rather than
+        // jumping back to the fields.
     }
 
     /// Handle a key. Returns an [`ActionResult`] when the host view must act.
@@ -777,8 +777,8 @@ mod tests {
         assert!(!d.compact);
         d.input(KeyModifiers::NONE, KeyCode::Char('c'));
         assert!(d.compact, "c toggles compact while the table is focused");
-        // In JSON mode `c` is text input, not a compact toggle. `toggle_mode` no longer moves
-        // focus itself (sanctioned change), so point focus at the JSON editor directly.
+        // In JSON mode `c` is text input, not a compact toggle. `toggle_mode` does not move
+        // focus itself, so point focus at the JSON editor directly.
         d.toggle_mode();
         d.focus = ActionDialogFocus::Json;
         let before = d.compact;
@@ -1044,7 +1044,7 @@ mod tests {
     fn json_insert_colon_inserts() {
         let mut d = dialog();
         d.toggle_mode();
-        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // `toggle_mode` does not move focus itself; point focus at the
         // JSON editor directly so the input below reaches it.
         d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
@@ -1063,7 +1063,7 @@ mod tests {
     fn json_insert_esc_goes_normal_no_confirm() {
         let mut d = dialog();
         d.toggle_mode();
-        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // `toggle_mode` does not move focus itself; point focus at the
         // JSON editor directly so the input below reaches it.
         d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
@@ -1085,7 +1085,7 @@ mod tests {
     fn json_normal_colon_consumed_by_editor() {
         let mut d = dialog();
         d.toggle_mode();
-        // `toggle_mode` no longer moves focus itself (sanctioned change); point focus at the
+        // `toggle_mode` does not move focus itself; point focus at the
         // JSON editor directly so the input below reaches it.
         d.focus = ActionDialogFocus::Json;
         assert!(d.json_mode);
@@ -1134,8 +1134,8 @@ mod tests {
         }
     }
 
-    // Sanctioned behavior change: pressing Toggle no longer jumps focus back to the fields;
-    // it stays on the Toggle button, and the next Tab now routes through Json instead of Table.
+    // Pressing Toggle does not jump focus back to the fields; it stays on the Toggle button,
+    // and the next Tab routes through Json instead of Table.
     #[test]
     /// UI-R-022 — toggling keeps focus, then Tab routes through the JSON editor.
     fn toggle_keeps_focus_then_tab_routes_through_json() {

@@ -202,7 +202,6 @@ where
 
         let valid = ValueType::validate(state.input());
 
-        // Create block if border is required
         let border_style = if state.focused() && !state.disabled() {
             match valid {
                 ValidateResult::Success | ValidateResult::None => self.style.focused,

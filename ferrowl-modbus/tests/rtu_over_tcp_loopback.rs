@@ -155,7 +155,6 @@ async fn rtu_over_tcp_client_polls_server_and_executes_commands() {
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
-    // Start the server.
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let (server, bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
         Arc::new(RwLock::new(config(port))),
@@ -314,7 +313,6 @@ async fn rtu_over_tcp_unparseable_address_is_error() {
         Err(Error::Tcp(TcpError::Address(_)))
     ));
 
-    // Server side.
     let mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(

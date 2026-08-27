@@ -1,15 +1,12 @@
-// Crate
 use crate::server_core::{
     BoundAddr, ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff,
 };
 use crate::udp::Config;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand, TcpError};
 
-// Workspace
 use ferrowl_store::Memory;
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
-// External
 use parking_lot::RwLock as MemLock;
 use rust_modbus::Server as ModbusServer;
 use std::net::SocketAddr;
@@ -82,8 +79,7 @@ const PHYSICAL_SERIAL: bool = false;
 /// `memory` via a [`Server`] (verbose logging on, MB-R-067, mirroring the TCP server). No
 /// accept loop, no TLS branch (MB-R-116 — `udp::Config` carries no `tls` field at all).
 /// `ResetOn::Request`: `serve_udp` never calls `on_connect` at all (no connection concept for
-/// UDP), so reading a datagram is the only "did something useful" signal (see Shared note in
-/// plan.md).
+/// UDP), so reading a datagram is the only "did something useful" signal.
 async fn run<T, L, St>(
     config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,

@@ -2,8 +2,8 @@
 //! connection-scoping half).
 //!
 //! Drives `ferrowl_modbus::tcp::ServerBuilder` (the real server) with `rust_modbus`'s
-//! own TLS client primitives directly (never `ferrowl_modbus::tcp::Client` — that's
-//! s2's own surface), so this stage needs nothing s2 produces.
+//! own TLS client primitives directly, never `ferrowl_modbus::tcp::Client` (covered by
+//! tcp_tls_client.rs).
 
 // Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
 #![allow(clippy::unwrap_used)]
@@ -363,7 +363,7 @@ async fn require_client_cert_enforced() {
     .expect("a client signed by the trusted CA should connect");
 
     // No client certificate presented at all: the handshake either fails outright,
-    // or (TLS 1.3 client-side completion quirk — see s2's client tests) appears to
+    // or (TLS 1.3 client-side completion quirk — see `tcp_tls_client.rs`) appears to
     // succeed to the client while the server has already rejected it; either way the
     // connection carries no usable session. Survival of the accept loop past this
     // rejection is asserted separately, in

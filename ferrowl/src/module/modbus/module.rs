@@ -235,9 +235,8 @@ impl ModbusModule {
     /// MB-R-150 — attach this session's live Rtu/Ascii path-conflict registry. A module that
     /// never receives this call keeps the default, unshared registry (never conflicts with
     /// anything) — the pre-feature behavior, still correct for standalone/test use.
-    // Forward-declared: the real production caller (App, via rebuild_registry) lands in s8 of
-    // the mb-monitor-path-conflict plan. `#[allow(dead_code)]`, not a stub — already fully
-    // implemented and tested above.
+    // `#[allow(dead_code)]`: implemented and tested above; App does not call this via
+    // `rebuild_registry` yet.
     #[allow(dead_code)]
     pub fn set_serial_paths(&mut self, registry: SerialPathRegistry) {
         self.serial_paths = registry;
@@ -1157,7 +1156,7 @@ mod tests {
         assert!(module.lua_running());
     }
 
-    // Confirms the log-ring split (stage 5): Lua `print()`/`C_Log` output lands only in
+    // Confirms the log-ring split: Lua `print()`/`C_Log` output lands only in
     // `script_log`, never in the module's general `log` (connection/status/traffic lines).
     #[test]
     /// SC-R-031 — Modbus sim print/C_Log output goes to the module's script log, not its connection log.

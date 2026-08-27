@@ -33,13 +33,11 @@ impl ToLabel for Item {
     }
 }
 
-// Simple app consisting of single input field
 #[derive(Builder, Debug)]
 struct App {
     pub state: SelectionState<Item>,
 }
 
-// Render simple input field
 fn ui(f: &mut Frame, app: &mut App) {
     let layout = Layout::vertical([Constraint::Length(5)]);
     let rects = f.area().layout_vec(&layout);
@@ -66,7 +64,6 @@ fn ui(f: &mut Frame, app: &mut App) {
 }
 
 fn main() {
-    // Create app state
     let mut app = AppBuilder::default()
         .state(
             SelectionStateBuilder::default()
@@ -89,10 +86,8 @@ fn main() {
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
     loop {
-        // Draw app
         screen.draw(|f| ui(f, &mut app)).unwrap();
 
-        // Check for events
         if event::poll(Duration::from_millis(50)).unwrap()
             && let Event::Key(key) = event::read().unwrap()
             && key.kind == KeyEventKind::Press

@@ -16,10 +16,7 @@ use ratatui::{
 };
 use std::fmt::Debug;
 
-// ---------------------------------------------------------------------------
-// AddNamedValueDialog — small inline sub-dialog for creating a new NamedValue
-// ---------------------------------------------------------------------------
-
+/// Small inline sub-dialog for creating a new `NamedValue`.
 #[focusable]
 #[derive(Builder, Clone, Debug, Focus)]
 pub struct AddNamedValueDialog {
@@ -27,7 +24,6 @@ pub struct AddNamedValueDialog {
     pub label: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub value: Widget<InputFieldState, InputField<String>>,
-    // Error display field
     pub error: Widget<String, Text>,
     pub keybinds: [Widget<String, Text>; 2],
 }

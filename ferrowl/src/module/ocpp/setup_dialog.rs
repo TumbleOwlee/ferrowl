@@ -2071,7 +2071,7 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        // `client_ca_files` is focus-eligible only when non-empty (post-s11: an empty list hides
+        // `client_ca_files` is focus-eligible only when non-empty (an empty list hides
         // the field, matching its no-longer-rendered DEL button) — populate it so this cycle
         // actually reaches it.
         d.client_ca_files
@@ -2144,7 +2144,7 @@ mod tests {
         assert!(dialog.close_confirm.is_none());
     }
 
-    // --- post-gate3 row-layout refinement ---------------------------------------------------
+    // --- row-layout refinement ---------------------------------------------------
 
     fn row_of(buf: &Buffer, needle: &str) -> u16 {
         let text = buffer_text(buf);

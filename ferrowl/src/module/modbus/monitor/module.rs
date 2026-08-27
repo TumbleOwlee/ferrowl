@@ -21,13 +21,13 @@ use super::super::log::{FileSink, open_sink};
 use super::super::serial_paths::SerialPathRegistry;
 use super::build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
 
-#[allow(dead_code)] // consumed starting s5 (ModbusMonitorModuleView)
+#[allow(dead_code)] // consumed once ModbusMonitorModuleView is wired up
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 
 /// Errors from a monitor's own lifecycle: either the role/transport compatibility check
 /// (MB-R-140) or a network error surfaced from the running receive task.
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)] // forward-declared; real construction/consumption lands in s5/s8
+#[allow(dead_code)] // constructed only once the view and app-side call sites are wired up
 pub enum Error {
     #[error("Network error: {0}")]
     Net(#[from] ferrowl_modbus::Error),
@@ -38,9 +38,8 @@ pub enum Error {
 /// One monitor instance: a receive-only observer of an `Rtu`/`Ascii` bus, its register
 /// interpretations, observed-value table, and log — no operations list, no memory store, no
 /// Lua sim (MB-R-076).
-// Forward-declared: real app-side construction (the 3 call sites, session role dispatch) lands
-// in s8 of the modbus-bus-monitor plan; the view lands in s5. `#[allow(dead_code)]`, not a
-// stub — already fully implemented and tested here.
+// `#[allow(dead_code)]`: implemented and tested here; the app-side construction call sites and
+// session role dispatch are not wired up yet.
 #[allow(dead_code)]
 pub struct ModbusMonitorModule {
     name: String,
@@ -54,7 +53,7 @@ pub struct ModbusMonitorModule {
     command_tx: Option<Sender<ServerCommand>>,
     task: Option<JoinHandle<Result<(), ferrowl_modbus::Error>>>,
     /// MB-R-152 — the "serial port open" signal, mirroring `ServerHandle::open`
-    /// (`instance/handle.rs`, Shared) but read directly off the builder's returned
+    /// (`instance/handle.rs`) but read directly off the builder's returned
     /// `ConnectedCell` rather than routed through an `Instance`.
     open: ferrowl_modbus::ConnectedCell,
     /// MB-R-150 — the session-wide registry this instance's path-conflict check consults.
@@ -110,7 +109,7 @@ impl ModbusMonitorModule {
         self.serial_paths = registry;
     }
 
-    /// Manual-exercise fix (items 1/2) — reconfigure an existing monitor instance from a
+    /// Reconfigure an existing monitor instance from a
     /// (possibly edited) spec/device without resetting its accumulated observed state: the
     /// counterpart to `ModbusModule::reconfigure` (`module/modbus/module.rs`), but consuming
     /// `self` and returning a new `Self` rather than mutating in place, since (unlike the full
@@ -170,16 +169,16 @@ impl ModbusMonitorModule {
         self.log.clone()
     }
 
-    /// Manual-exercise addition — whether the monitor's receive task is currently running
-    /// (started and not yet stopped), the connection-state signal the view's ONLINE/OFFLINE
-    /// status line (item 3) drives off of, mirroring `ModbusModule::bound_addr` for the full
+    /// Whether the monitor's receive task is currently running (started and not yet stopped),
+    /// the connection-state signal the view's ONLINE/OFFLINE status line drives off of,
+    /// mirroring `ModbusModule::bound_addr` for the full
     /// client/server module (a monitor is RTU/ASCII-only, so there is no bound TCP address to
     /// report instead).
     pub fn is_running(&self) -> bool {
         self.task.as_ref().is_some_and(|h| !h.is_finished())
     }
 
-    /// MB-R-152 — see `Instance::connection_status` (`instance/mod.rs`, Shared) for the shared
+    /// MB-R-152 — see `Instance::connection_status` (`instance/mod.rs`) for the shared
     /// derivation this mirrors.
     pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
         use crate::view::status_bar::ConnStatus;
@@ -369,9 +368,9 @@ impl ModbusMonitorModule {
 
 /// Classifies a monitor's network/status line for the log ring: reuses
 /// [`super::super::module::network_log_level`]'s classification plus a monitor-specific Warning
-/// branch for a discarded, malformed frame (MB-R-142) — `s2`'s decode/match state machine
-/// phrases its discarded-frame log line to contain this exact substring.
-#[allow(dead_code)] // consumed starting s5 (ModbusMonitorModuleView routes lines through it)
+/// branch for a discarded, malformed frame (MB-R-142) — the decode/match state machine phrases
+/// its discarded-frame log line to contain this exact substring.
+#[allow(dead_code)] // consumed once ModbusMonitorModuleView routes lines through it
 pub(crate) fn network_log_level(s: &str) -> crate::app::Level {
     if s.to_lowercase().contains("malformed frame") {
         crate::app::Level::Warning
@@ -590,7 +589,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise addition (item 3) — `is_running` tracks the receive task's own
+    /// `is_running` tracks the receive task's own
     /// started/stopped state, the ONLINE/OFFLINE signal for the status line.
     /// MB-R-152 — the direct regression test for the truthfulness bug: `is_running()` must not
     /// trust a stale `command_tx` alone once the task backing it has already finished, mirroring
@@ -677,7 +676,7 @@ mod tests {
         .expect("task should end promptly, not retry, with reconnect disabled");
     }
 
-    /// Manual-exercise fix — editing a running monitor's setup must not reset its accumulated
+    /// Editing a running monitor's setup must not reset its accumulated
     /// `table`/`records`/`log`/`interpretations`: `reconfigure` carries the same `Arc`-shared
     /// instances over (`Arc::ptr_eq`, not just equal-by-value) rather than building fresh ones.
     #[test]
@@ -721,7 +720,7 @@ mod tests {
         );
     }
 
-    /// Manual-exercise fix — `reconfigure` rebuilds identity/connection fields (name, endpoint,
+    /// `reconfigure` rebuilds identity/connection fields (name, endpoint,
     /// reconnect) from the new spec/device, same as a fresh `new()`.
     #[test]
     fn ut_reconfigure_rebuilds_identity_fields_from_new_spec_and_device() {
@@ -745,7 +744,7 @@ mod tests {
         assert!(!reconfigured.reconnect);
     }
 
-    /// Manual-exercise fix — `reconfigure` never leaves a previously running task's `command_tx`/
+    /// `reconfigure` never leaves a previously running task's `command_tx`/
     /// `task` handle behind (would leak a detached background task); the reconfigured instance
     /// always starts in the same not-yet-started state a fresh `new()` would.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -838,14 +837,14 @@ mod tests {
     }
 
     /// network_log_level's monitor-specific Warning branch: a discarded malformed-frame line
-    /// classifies as Warning, matching `s2`'s decode/match state machine's log wording.
+    /// classifies as Warning, matching the decode/match state machine's log wording.
     #[test]
     fn ut_network_log_level_classifies_malformed_frame_as_warning() {
         let line = "Discarding malformed frame (checksum mismatch): 01 02 03";
         assert_eq!(network_log_level(line), crate::app::Level::Warning);
     }
 
-    /// Manual-exercise fix — `definitions()` rebuilds the flat on-disk map from whatever is
+    /// `definitions()` rebuilds the flat on-disk map from whatever is
     /// currently in the in-memory interpretations map, including entries added purely at
     /// runtime (never present in the `MonitorDeviceConfig` the module was constructed from).
     #[test]

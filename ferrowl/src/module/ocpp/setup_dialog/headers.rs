@@ -234,8 +234,7 @@ pub(crate) enum HeaderEditOutcome {
 }
 
 /// The header-edit popup: two pre-filled input fields (name, value) plus a keybind hint. No
-/// existing shared two-field prompt fits (`RenamePrompt` is single-field) — see the plan's
-/// rationale in the module doc comment; this is new code owned by this stage, not a spec gap.
+/// existing shared two-field prompt fits (`RenamePrompt` is single-field).
 #[derive(Clone, Debug)]
 pub(crate) struct HeaderEditPrompt {
     name_input: Widget<InputFieldState, InputField<String>>,

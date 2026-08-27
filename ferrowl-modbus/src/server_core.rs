@@ -769,7 +769,7 @@ where
 {
     // Shared between `attempt` and `wait_abortable`, called strictly sequentially by
     // `run_with_backoff` and never concurrently — same technique as
-    // `client_core::run_reconnect_loop` (see Shared).
+    // `client_core::run_reconnect_loop`.
     let receiver = AsyncMutex::new(receiver);
     let activity = Arc::new(AtomicBool::new(false));
 
@@ -2457,7 +2457,7 @@ mod tests {
     /// `Result` exists only so a *future* serving failure needs no API change); `drive_serve` is
     /// generic over any `Future<Output = rust_modbus::Result<()>>`, so this exercises its actual
     /// dispatch logic exactly as a real `serve`/`serve_framed`/`serve_tls` failure would (the
-    /// code path s4/s5/s6 wire a real listener-bind/accept failure onto).
+    /// code path a real listener-bind/accept failure is wired onto).
     async fn ut_drive_serve_transport_failure_surfaces_as_failed() {
         let (_modbus, handle) = minimal_modbus_server();
         let serve_fut = async { Err(rust_modbus::Error::TrailingBytes { extra: 1 }) };
