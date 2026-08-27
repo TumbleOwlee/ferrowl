@@ -122,14 +122,14 @@ normative text — issue holds the goal, `artifacts/` holds the spec.
 
 | Card | `open` | `inprogress` | `inreview` | `done` |
 |---|---|---|---|---|
-| stage | created from plan | agent took it | agent claims green | merged + orchestrator-verified |
+| stage | created from plan | agent took it | green; under review | reviewed + merged + orchestrator-verified |
 | wave gate | not started | stages running | all done; reviewing wave diff | clean — next wave unblocks |
 | parent | gate 1 pending | implementing | gate 3/4 | PR squash-merged |
 
 Rules:
 - **No agent writes its own `done`.** Implementer stops at `inreview`.
-  Orchestrator merges, re-runs gauntlet, only then moves to `done` — same
-  self-report rule as everywhere else.
+  Orchestrator reviews the stage, merges, re-runs gauntlet, only then moves to
+  `done` — same self-report rule as everywhere else.
 - **Runnable** = every `blocked-by` id in `done/`. Stage `done` = merged into
   the feature branch ("the code I depend on is on the branch I branch from").
 - No `blocked/` directory — blocking derives from `blocked-by`, stated once.
@@ -231,11 +231,27 @@ Default sequential on no preference. Never infer concurrency from plan shape
 Sequential: same planning agent, resumed with worktree path + stage cards —
 no re-reading `AGENTS.md`, no re-exploring. It reads the implementer rules
 itself, follows them per stage in plan order. Moves stage card
-`open`→`inprogress` on start. On green, stage card → `inreview`, stop and
-wait for approval before touching git — only after approval does it commit
-the stage. Push is never the implementer's — orchestrator pushes the
-updated worktree to remote once committed. Orchestrator verifies, moves to
-`done` — nothing to merge, so `done` = approved+committed+pushed+verified.
+`open`→`inprogress` on start. On green, stage card → `inreview` and the
+orchestrator runs the per-stage review below. Only once that review is clean
+does it stop and wait for approval; only after approval does it commit the
+stage. Push is never the implementer's — orchestrator pushes the updated
+worktree to remote once committed. Orchestrator verifies, moves to `done` —
+nothing to merge, so `done` = approved+reviewed+committed+pushed+verified.
+
+**Per-stage review** (sequential; parallel's equivalent is the wave gate in
+step 5 below). Every green stage gets a **fresh `spec-reviewer`** before its
+approval stop — never the implementer, never a resumed reviewer carrying the
+previous stage's context. Base ref = the previous stage's commit, or the
+branch point for the first stage; scope = that one stage id. Same four axes as
+gate 3, on one stage's diff. Clean → report it alongside the green result at
+the approval stop. Finding → card back to `inprogress/`, fix, re-run the
+gauntlet, re-review; the approval stop only happens on a clean review, so an
+unreviewed stage is never committed.
+
+This does not replace gate 3. Per-stage review catches a stage's own defects
+while the stage is cheap to change; gate 3 reads the whole branch at once and
+is the only pass that can see cross-stage bugs, spec drift across stages, and
+scope creep that no single stage's diff reveals.
 
 Parallel: one worktree+branch per agent, branched off the feature branch at
 wave start —
@@ -268,8 +284,8 @@ Gates unchanged under parallelism — verification, review, spec reconcile all
 happen once, on the merged feature branch, never per agent.
 
 - TDD order above. Stage = green checkpoint: builds, tests pass, lint clean,
-  coverage ≥ 80%. Green stage pauses for approval; only after approval does
-  the implementer commit the stage. Push is never the implementer's — only
+  coverage ≥ 80%. A green stage is independently reviewed, then pauses for
+  approval; only after approval does the implementer commit the stage. Push is never the implementer's — only
   the orchestrator pushes the updated worktree to remote, after that same
   approval — makes the plan resumable.
 - Stage messages cheap, squashed later. Squash message carries requirement
@@ -299,7 +315,9 @@ report the final spec diff.
 
 Before proposing a PR: independent review in a **separate agent** that didn't
 write the code (a reviewer sharing the implementer's context reproduces its
-blind spots). Give it the diff, approved spec text, the artifact dir, the
+blind spots). Stages were already reviewed one at a time; this is the
+whole-branch pass, the only one that can catch cross-stage bugs, spec drift
+across stages, and scope creep no single stage's diff shows. Give it the diff, approved spec text, the artifact dir, the
 worktree path, and the stage ids in scope (all of them, at gate 3) — never the
 issue number, same as every agent in this workflow. It reads its own rules
 (`.claude/AGENTS.core.md`) itself. Reports on four axes — spec fidelity,

@@ -28,7 +28,21 @@ reopens gate 1).
 
 **Standards** — `AGENTS.md` conventions (typed errors, typed domain values, no
 panics on external input, file-splitting rule, dependency policy); test naming
-and ID citation placement; unflagged semver-relevant public surface changes.
+and ID citation placement; unflagged semver-relevant public surface changes;
+comment hygiene.
+
+**Comment hygiene** (part of Standards, `//` and `///` alike) — a comment must
+say something the code does not. Each of these is a finding, severity minor:
+restating the adjacent statement, field, or function name; narrating steps
+(`// Create app state`); decorative banners and import-group headers; a
+paragraph where a sentence does. And severity major, because it rots on
+contact: citing this workflow rather than the code — a plan, a stage id
+(`s7`), a gate (`Gate3#2`), a task item, `(Shared)`, "sanctioned change",
+"manual-exercise fix". These mean nothing to a reader six months out and
+nothing at all once the plan is deleted; keep the technical content, drop the
+citation. Requirement IDs are the only sanctioned cross-reference. An
+`#[allow(...)]` justification states the condition that lifts it, never the
+stage that will.
 
 **TDD honesty** — tests passing against empty/stub implementation; assertions
 derived from the implementation's own output instead of the authoritative

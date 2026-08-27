@@ -160,6 +160,16 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   a line count as a prompt to *review* the file, not a mandate to divide it;
   an arbitrary boundary drawn to hit a number makes the code harder to
   follow, not easier.
+- **A comment says what the code cannot.** No restating the adjacent
+  statement, field, or function name; no step narration (`// Create app
+  state`); no decorative banners or import-group headers; no paragraph where a
+  sentence does. **Never cite this workflow** — a plan, a stage id (`s7`), a
+  gate (`Gate3#2`), a task item, `(Shared)`, "sanctioned change": those rot
+  the moment the plan is deleted and mean nothing to a later reader. Keep the
+  technical content, drop the citation. Requirement IDs are the only
+  sanctioned cross-reference. An `#[allow(...)]` justification names the
+  condition that lifts it, never the stage that will. Applies to `//` and
+  `///` alike.
 - **Prefer typed handling over generic JSON.** Read request fields and build
   responses from the strongly-typed `rust_ocpp` structs and enums
   (`req.evse_id`, `Response201::Reset(...)`), never by indexing or
