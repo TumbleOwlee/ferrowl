@@ -24,9 +24,16 @@ impl ferrowl_ui::traits::IsFocus for Widget {
 impl ferrowl_ui::traits::HandleEvents for Widget {
     fn handle_events(
         &mut self,
-        _modifiers: crossterm::event::KeyModifiers,
-        _code: crossterm::event::KeyCode,
+        modifiers: crossterm::event::KeyModifiers,
+        code: crossterm::event::KeyCode,
     ) -> ferrowl_ui::EventResult {
+        use crossterm::event::KeyCode;
+        // Mirrors real leaf widgets (Button/InputField/Table/Selection): Tab/BackTab are never
+        // consumed, falling through to `Unhandled` so an outer container's focus cycling (or,
+        // for a `#[focus(nested)]` field, `NestedFocus` stepping) can act on them.
+        if matches!(code, KeyCode::Tab | KeyCode::BackTab) {
+            return ferrowl_ui::EventResult::Unhandled(modifiers, code);
+        }
         self.events += 1;
         ferrowl_ui::EventResult::Consumed
     }
@@ -240,4 +247,308 @@ fn ut_set_focused_keeps_remembered_eligible_gated_pane() {
     app.set_focused(true);
     assert!(app.second.is_focused());
     assert!(!app.first.is_focused());
+}
+
+// --- NestedFocus: #[focusable(nestable)] + #[focus(nested)] ---------------
+
+#[focusable(nestable)]
+#[derive(Builder, Clone, Debug, Focus)]
+struct Section {
+    #[focus]
+    pub a: Widget,
+    #[focus]
+    pub b: Widget,
+}
+
+fn make_section(start: SectionFocus) -> Section {
+    SectionBuilder::default()
+        .a(Widget::default())
+        .b(Widget::default())
+        .focus(start)
+        .view_focused(false)
+        .build()
+        .expect("Section builder failed")
+}
+
+#[focusable(nestable)]
+#[derive(Builder, Debug, Focus)]
+struct SingleSection {
+    #[focus]
+    pub a: Widget,
+}
+
+fn make_single_section() -> SingleSection {
+    SingleSectionBuilder::default()
+        .a(Widget::default())
+        .focus(SingleSectionFocus::A)
+        .view_focused(false)
+        .build()
+        .expect("SingleSection builder failed")
+}
+
+#[test]
+/// UI-R-049 — `try_focus_next` on a `#[focusable(nestable)]` struct steps to the next pane.
+fn ut_try_focus_next_steps_within_section() {
+    let mut section = make_section(SectionFocus::A);
+    assert!(section.try_focus_next());
+    assert!(section.b.is_focused());
+    assert!(!section.a.is_focused());
+}
+
+#[test]
+/// UI-R-049 — `try_focus_next` at the last pane reports `false` and leaves position unchanged.
+fn ut_try_focus_next_false_at_last_pane() {
+    let mut section = make_section(SectionFocus::B);
+    section.b.set_focused(true);
+    assert!(!section.try_focus_next());
+    assert!(
+        section.b.is_focused(),
+        "must not disable the current pane on a failed scan"
+    );
+}
+
+#[test]
+/// UI-R-049 — `try_focus_previous` at the first pane reports `false` and leaves position unchanged.
+fn ut_try_focus_previous_false_at_first_pane() {
+    let mut section = make_section(SectionFocus::A);
+    section.a.set_focused(true);
+    assert!(!section.try_focus_previous());
+    assert!(section.a.is_focused());
+}
+
+#[test]
+/// UI-R-049 — a single-field `#[focusable(nestable)]` struct reports `false` immediately from
+/// `try_focus_next`/`try_focus_previous`, without panicking or looping.
+fn ut_single_field_section_try_focus_next_false_immediately() {
+    let mut section = make_single_section();
+    assert!(!section.try_focus_next());
+    assert!(!section.try_focus_previous());
+}
+
+// --- NestedFocus: embedding a nestable struct via #[focus(nested)] --------
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct NestingApp {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested)]
+    pub section: Section,
+    #[focus]
+    pub after: Widget,
+}
+
+fn make_nesting_app(start: NestingAppFocus, section_start: SectionFocus) -> NestingApp {
+    NestingAppBuilder::default()
+        .before(Widget::default())
+        .section(make_section(section_start))
+        .after(Widget::default())
+        .focus(start)
+        .view_focused(false)
+        .build()
+        .expect("NestingApp builder failed")
+}
+
+/// Simulates the verified production call-site pattern (e.g.
+/// `ferrowl/src/module/modbus/view/mod.rs:407-437`): try the view's own `handle_events` first;
+/// only an `Unhandled` Tab/BackTab falls back to the outer `focus_next()`/`focus_previous()`.
+fn send_key_with_fallback(
+    app: &mut NestingApp,
+    modifiers: crossterm::event::KeyModifiers,
+    code: crossterm::event::KeyCode,
+) {
+    use crossterm::event::KeyCode;
+    use ferrowl_ui::traits::HandleEvents;
+    if let ferrowl_ui::EventResult::Unhandled(_, code) = app.handle_events(modifiers, code) {
+        match code {
+            KeyCode::Tab => app.focus_next(),
+            KeyCode::BackTab => app.focus_previous(),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+/// UI-R-049 — forward Tab into a `#[focus(nested)]` field enters at its first eligible pane,
+/// regardless of which pane it last remembered.
+fn ut_nested_forward_tab_enters_section_at_first_pane() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    // Remembers B, so a pre-fix (remembered-or-first) entry would land on B, not A.
+    let mut app = make_nesting_app(NestingAppFocus::Before, SectionFocus::B);
+    app.before.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.a.is_focused());
+    assert!(!app.section.b.is_focused());
+}
+
+#[test]
+/// UI-R-049 — Tab at the nested field's last pane advances the outer cycle, not back to its own
+/// first pane.
+fn ut_nested_forward_tab_at_last_pane_advances_to_after() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = make_nesting_app(NestingAppFocus::Section, SectionFocus::B);
+    app.section.b.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab);
+    assert_eq!(app.focus, NestingAppFocus::After);
+    assert!(app.after.is_focused());
+    assert!(!app.section.b.is_focused());
+}
+
+#[test]
+/// UI-R-049 — the load-bearing regression case: BackTab from the field after a `#[focus(nested)]`
+/// field lands on its *last* pane, not its first (the case a direction-blind, remembered-or-first
+/// entry would get wrong).
+fn ut_nested_backtab_from_after_lands_on_last_pane() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    // section remembers A (its default from make_section), proving entry ignores the remembered
+    // pane entirely on a backward step.
+    let mut app = make_nesting_app(NestingAppFocus::After, SectionFocus::A);
+    app.after.set_focused(true);
+    send_key_with_fallback(&mut app, KeyModifiers::SHIFT, KeyCode::BackTab);
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(
+        app.section.b.is_focused(),
+        "must land on the last pane, not the remembered/first one"
+    );
+    assert!(!app.section.a.is_focused());
+}
+
+#[test]
+/// UI-R-049 — repeated forward Tab visits every pane inside a `#[focus(nested)]` field, purely
+/// via `handle_events`, before leaving it (no outer `focus_next()` fallback needed for the
+/// interior step).
+fn ut_nested_repeated_tab_steps_within_section_before_leaving() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut app = make_nesting_app(NestingAppFocus::Before, SectionFocus::A);
+    app.before.set_focused(true);
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // Before -> Section (a)
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.a.is_focused());
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // a -> b, still inside Section
+    assert_eq!(app.focus, NestingAppFocus::Section);
+    assert!(app.section.b.is_focused());
+    assert!(!app.section.a.is_focused());
+
+    send_key_with_fallback(&mut app, KeyModifiers::NONE, KeyCode::Tab); // b -> After, leaving Section
+    assert_eq!(app.focus, NestingAppFocus::After);
+    assert!(app.after.is_focused());
+}
+
+#[test]
+/// UI-R-049 — the `HandleEvents` arm for a `#[focus(nested)]` field converts a successful
+/// `NestedFocus` step to `Consumed`, isolated from the higher-level "did focus end up in the
+/// right place" assertions above.
+fn ut_nested_handle_events_arm_converts_unhandled_tab_to_consumed() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = make_nesting_app(NestingAppFocus::Section, SectionFocus::A);
+    app.section.a.set_focused(true);
+    let result = app.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+    assert!(matches!(result, ferrowl_ui::EventResult::Consumed));
+}
+
+// --- NestedFocus: when-gated nested field, and entry into an ineligible inner pane -----------
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct GatedNestingApp {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested, when = self.section_enabled)]
+    pub section: Section,
+    #[focus]
+    pub after: Widget,
+    pub section_enabled: bool,
+}
+
+#[test]
+/// UI-R-049 — a `when`-gated `#[focus(nested)]` field that's currently ineligible is skipped by
+/// the outer walk exactly as any other gated field is today.
+fn ut_nested_when_gated_section_skipped_when_ineligible() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = GatedNestingAppBuilder::default()
+        .before(Widget::default())
+        .section(make_section(SectionFocus::A))
+        .after(Widget::default())
+        .section_enabled(false)
+        .focus(GatedNestingAppFocus::Before)
+        .view_focused(false)
+        .build()
+        .expect("GatedNestingApp builder failed");
+    app.before.set_focused(true);
+
+    if let ferrowl_ui::EventResult::Unhandled(_, KeyCode::Tab) =
+        app.handle_events(KeyModifiers::NONE, KeyCode::Tab)
+    {
+        app.focus_next();
+    }
+    assert_eq!(app.focus, GatedNestingAppFocus::After);
+    assert!(app.after.is_focused());
+}
+
+#[focusable(nestable)]
+#[derive(Builder, Clone, Debug, Focus)]
+struct GatedSingleSection {
+    #[focus(when = self.a_enabled)]
+    pub a: Widget,
+    pub a_enabled: bool,
+}
+
+fn make_gated_single_section(a_enabled: bool) -> GatedSingleSection {
+    GatedSingleSectionBuilder::default()
+        .a(Widget::default())
+        .a_enabled(a_enabled)
+        .focus(GatedSingleSectionFocus::A)
+        .view_focused(false)
+        .build()
+        .expect("GatedSingleSection builder failed")
+}
+
+#[focusable]
+#[derive(Builder, Debug, Focus)]
+struct NestingAppGatedInner {
+    #[focus]
+    pub before: Widget,
+    #[focus(nested)]
+    pub section: GatedSingleSection,
+    #[focus]
+    pub after: Widget,
+}
+
+#[test]
+/// UI-R-049 — a `#[focusable(nestable)]` struct whose only field is currently `when`-ineligible
+/// makes entry into it a no-op the parent's own walk skips past (the private
+/// `__focus_enter_first_eligible` helper's failure path, observable one level up).
+fn ut_nested_entry_into_ineligible_single_pane_section_is_noop() {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_ui::traits::HandleEvents;
+
+    let mut app = NestingAppGatedInnerBuilder::default()
+        .before(Widget::default())
+        .section(make_gated_single_section(false))
+        .after(Widget::default())
+        .focus(NestingAppGatedInnerFocus::Before)
+        .view_focused(false)
+        .build()
+        .expect("NestingAppGatedInner builder failed");
+    app.before.set_focused(true);
+
+    if let ferrowl_ui::EventResult::Unhandled(_, KeyCode::Tab) =
+        app.handle_events(KeyModifiers::NONE, KeyCode::Tab)
+    {
+        app.focus_next();
+    }
+    assert_eq!(app.focus, NestingAppGatedInnerFocus::After);
+    assert!(app.after.is_focused());
+    assert!(!app.section.a.is_focused());
 }

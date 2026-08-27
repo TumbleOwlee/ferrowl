@@ -29,7 +29,7 @@ use proc_macro::TokenStream;
 ///
 /// The struct must have a `focus: <StructName>Focus` field — usually
 /// injected with [`macro@focusable`].
-#[proc_macro_derive(Focus, attributes(focus))]
+#[proc_macro_derive(Focus, attributes(focus, focus_nestable))]
 pub fn derive_focus(item: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(item as syn::DeriveInput);
     focus::expand_focus(input)
@@ -42,9 +42,9 @@ pub fn derive_focus(item: TokenStream) -> TokenStream {
 /// `view_focused: bool` field (whether the whole view is focused). Must appear
 /// *above* the derive so the fields exist when the derive runs.
 #[proc_macro_attribute]
-pub fn focusable(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn focusable(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(item as syn::DeriveInput);
-    focus::expand_focusable(input)
+    focus::expand_focusable(attr.into(), input)
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
