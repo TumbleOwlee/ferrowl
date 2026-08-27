@@ -37,8 +37,9 @@ no prose:
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-Move card `open`→`inprogress/` on start, →`inreview/` on green+committed. No
-further.
+Move card `open`→`inprogress/` on start. On green, move card →`inreview/`,
+stop and wait for orchestrator approval — commit only after approval; never
+push. No further.
 
 May be given the whole plan or only some stages (others run in parallel).
 Implement assigned stages only, in plan order, touching only their listed
@@ -56,8 +57,9 @@ Fixed 4-step order: `.claude/AGENTS.core.md`'s `## TDD` section, followed verbat
 
 Done = builds, tests pass, lint clean, coverage floor holds. Run full gauntlet
 from `AGENTS.md`, quote the relevant excerpt (failure text, summary/pass
-line — never a full verbose log), commit. Commit every green stage — makes
-the plan resumable. Stage messages cheap (squashed later).
+line — never a full verbose log). Stop and wait for approval; only after
+approval commit. Push is the orchestrator's call, never yours — same as
+opening a PR or merging. Stage messages cheap (squashed later).
 
 ## Stop and report — never improvise
 

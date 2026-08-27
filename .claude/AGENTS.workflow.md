@@ -23,6 +23,11 @@ do it. Size sets stage count, never gate existence.
 - **Gate 1 = orchestrator's own conversation with the user, not an agent's.**
   Abstract: existing spec + current goal, nothing about current code. No
   worktree/branch until gate 2 approved.
+- **No spec effect (docs-only, other non-functional change with no
+  observable-behavior change) → skip gate 1 entirely**, proceed straight to
+  gate 2. No `spec-diff.md`, no `gate1` on the parent card. If gate 2
+  planning turns up an actual spec gap, stop and run gate 1 before
+  continuing — same as any other spec-gap pause.
 - Gate 2 onward delegates to agents. **All agents Sonnet or better** —
   weaker models stop mid-plan, commit stubs as "green," report hanging tests
   as verified.
@@ -226,8 +231,11 @@ Default sequential on no preference. Never infer concurrency from plan shape
 Sequential: same planning agent, resumed with worktree path + stage cards —
 no re-reading `AGENTS.md`, no re-exploring. It reads the implementer rules
 itself, follows them per stage in plan order. Moves stage card
-`open`→`inprogress` on start, →`inreview` on green+committed. Orchestrator
-verifies, moves to `done` — nothing to merge, so `done` = committed+verified.
+`open`→`inprogress` on start. On green, stage card → `inreview`, stop and
+wait for approval before touching git — only after approval does it commit
+the stage. Push is never the implementer's — orchestrator pushes the
+updated worktree to remote once committed. Orchestrator verifies, moves to
+`done` — nothing to merge, so `done` = approved+committed+pushed+verified.
 
 Parallel: one worktree+branch per agent, branched off the feature branch at
 wave start —
@@ -260,7 +268,10 @@ Gates unchanged under parallelism — verification, review, spec reconcile all
 happen once, on the merged feature branch, never per agent.
 
 - TDD order above. Stage = green checkpoint: builds, tests pass, lint clean,
-  coverage ≥ 80%. Commit every green stage — makes the plan resumable.
+  coverage ≥ 80%. Green stage pauses for approval; only after approval does
+  the implementer commit the stage. Push is never the implementer's — only
+  the orchestrator pushes the updated worktree to remote, after that same
+  approval — makes the plan resumable.
 - Stage messages cheap, squashed later. Squash message carries requirement
   IDs + why. Spec = first stage, first commit.
 - **Never add `Co-Authored-By`, "Generated with," or any tool attribution
@@ -308,6 +319,7 @@ when review starts.
   want a manual run first; don't pre-empt it.
 - Draft title + body, get approval of that text, push, open.
 - CI fails on the pushed branch → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`, to see the failure.
+- Reading an existing PR's title/body/comments (e.g. gate 3 review context, or checking for feedback after pushing) → `bash .claude/scripts/pr-view.sh <number>`, never raw `gh pr view`.
 - Title plain language, issue's style. Body has four sections, in order —
   Why, What changed, Approach, Verification — dropping one only when
   genuinely inapplicable: why (requirement IDs, motivation), what changed,

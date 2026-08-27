@@ -7,7 +7,7 @@ description: Drive one behavior change through the repo's gated spec-driven TDD 
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md` is authority for every gate, the task board, and the subagents — read its `## Workflow` section and follow it exactly (`AGENTS.md`'s own `## Workflow` heading is now a short pointer to that file). This skill is only the invocation entrypoint; it does not restate that procedure. Conflict between this file and `.claude/AGENTS.workflow.md` → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md` is authority for every gate, the task board, and the subagents — follow it exactly, pulled one heading at a time per the table below (`AGENTS.md`'s own `## Workflow` heading is now a short pointer to that file). This skill is only the invocation entrypoint; it does not restate that procedure. Conflict between this file and `.claude/AGENTS.workflow.md` → `.claude/AGENTS.workflow.md` wins.
 
 ## Before anything else
 
