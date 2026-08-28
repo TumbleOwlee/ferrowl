@@ -1,15 +1,19 @@
 //! Transport-agnostic Modbus server request handler shared by the TCP and RTU servers.
 
+use crate::common::serial_config_from;
 use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
-use crate::{Error, Key, KeyParams, LogFn, ServerCommand, TcpError};
+use crate::{
+    ConnectedCell, Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand,
+    TcpError,
+};
 
 use ferrowl_store::{CellType, Memory, Range};
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 use parking_lot::RwLock;
 use rust_modbus::{
     Connection, ExceptionCode, FunctionCode, Quantity, RegisterValue, RequestPdu, ResponsePdu,
-    Server as ModbusServer, ServerFraming, Service, TcpListener, TlsListener, UnitId,
+    Server as ModbusServer, ServerFraming, Service, TcpListener, TlsListener, UnitId, open_serial,
 };
 use std::fmt::Display;
 use std::net::SocketAddr;
@@ -907,6 +911,128 @@ where
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    };
+
+    let wait_abortable = |backoff: std::time::Duration| {
+        let receiver = &receiver;
+        async move {
+            let mut receiver = receiver.lock().await;
+            wait_reconnect_backoff(&mut receiver, backoff).await
+        }
+    };
+
+    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    status.invoke("Server stopped".to_string()).await;
+    result
+}
+
+/// Drive the open/serve retry loop shared by every serial-family server transport (Rtu, Ascii —
+/// both ride an OS serial port opened via `open_serial::<F>` and share `crate::rtu::Config`;
+/// only the framing `F` they hand to `serve_link` differs). Retries an open or mid-serve failure
+/// per [`BackoffPolicy`] when `config.reconnect` is set (MB-R-071/MB-R-075/MB-R-124 revised,
+/// MB-R-130–134). Uses `ResetOn::Request`, not `Connect`: a serial link's own `on_connect` fires
+/// once immediately, before any request is read, so it cannot be the "did something useful"
+/// signal — only reading a request/datagram counts. Before every OS-level open, `path_conflict`
+/// is checked against the freshly `~`-expanded path (MB-R-150); a conflict is a `Failed` outcome
+/// carrying the ordinary reconnect setting (so it retries on the usual backoff and recovers once
+/// the conflict clears) and is logged before returning, since a `reconnect: true` server would
+/// otherwise retry it forever with no observable trace at all.
+#[allow(clippy::too_many_arguments)] // config/memory/receiver/log/status/path_conflict/open + verbose/physical_serial flags
+pub(crate) async fn run_serial_family<T, F, L, St>(
+    config: Arc<tokio::sync::RwLock<crate::rtu::Config>>,
+    memory: Arc<RwLock<Memory<Key<T>>>>,
+    receiver: tokio::sync::mpsc::Receiver<ServerCommand>,
+    log: L,
+    status: St,
+    path_conflict: PathConflictCell,
+    open: ConnectedCell,
+    verbose: bool,
+    physical_serial: bool,
+) -> Result<(), Error>
+where
+    T: KeyParams,
+    F: ServerFraming + Send + 'static,
+    F::Header: Send + Sync,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+{
+    let receiver = AsyncMutex::new(receiver);
+    let activity = Arc::new(AtomicBool::new(false));
+
+    let attempt = || {
+        let config = config.clone();
+        let memory = memory.clone();
+        let log = log.clone();
+        let activity = activity.clone();
+        let receiver = &receiver;
+        let path_conflict = path_conflict.clone();
+        let open = open.clone();
+        async move {
+            activity.store(false, Ordering::Relaxed);
+            let guard = config.read().await;
+            let reconnect = guard.reconnect;
+            let serial = match serial_config_from(
+                guard.baud_rate,
+                guard.data_bits,
+                guard.stop_bits,
+                guard.parity.as_deref(),
+            ) {
+                Ok(serial) => serial,
+                Err(e) => {
+                    return AttemptOutcome::Failed {
+                        error: e.into(),
+                        reconnect: false, // a bad serial-config value never fixes itself
+                        reset: false,
+                    };
+                }
+            };
+            let path = guard.path.clone();
+            drop(guard);
+            let expanded = ferrowl_util::path::expand(&path);
+            let expanded = expanded.to_string_lossy().into_owned();
+            if let Some(other) = path_conflict.check(&expanded) {
+                log.invoke(format!(
+                    "Serial path '{expanded}' is already in use by module '{other}' in this \
+                     session; skipping open."
+                ))
+                .await;
+                return AttemptOutcome::Failed {
+                    error: Error::PathConflict {
+                        path: expanded,
+                        other,
+                    },
+                    reconnect,
+                    reset: false,
+                };
+            }
+            match open_serial::<F>(&path, serial) {
+                Err(e) => AttemptOutcome::Failed {
+                    error: SerialError::Error(e).into(),
+                    reconnect,
+                    reset: false,
+                },
+                Ok(transport) => {
+                    open.set(true);
+                    let server = ModbusServer::new(
+                        Server::new(memory.clone(), log.clone(), verbose, physical_serial)
+                            .with_reset_on(activity.clone(), ResetOn::Request),
+                    );
+                    let handle = server.handle();
+                    let mut receiver = receiver.lock().await;
+                    let end =
+                        drive_serve(server.serve_link(transport), handle, &mut receiver).await;
+                    open.set(false);
+                    match end {
+                        ServeEnd::Terminated => AttemptOutcome::Done,
+                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
+                            error: Error::Server(e),
+                            reconnect,
+                            reset: activity.load(Ordering::Relaxed),
+                        },
                     }
                 }
             }

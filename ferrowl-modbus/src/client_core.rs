@@ -5,13 +5,17 @@
 //! Everything after that — the read/run loop and command execution — is identical and lives
 //! here, generic over both.
 
-use crate::{Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, RunConfig};
+use crate::common::serial_config_from;
+use crate::{
+    Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, PathConflictCell, RunConfig,
+    SerialError,
+};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
-    Address, Client, ClientFraming, ClientTransport, ExceptionCode, FunctionCode, Quantity,
-    RegisterValue, UnitId,
+    Address, Client, ClientFraming, ClientTransport, ExceptionCode, FrameTransport, Framing,
+    FunctionCode, Quantity, RegisterValue, SerialStream, UnitId, open_serial,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -79,6 +83,43 @@ pub(crate) fn classify<V>(
 /// and RTU `Client` types each establish the connection, then hand the client here.
 pub(crate) struct ClientCore<S, F> {
     pub(crate) client: Client<S, F>,
+}
+
+/// Opens the configured serial port under framing `F`, shared by the ASCII and RTU clients.
+///
+/// The port is not bound to a slave address: each request carries the slave id of the
+/// operation or command that issued it (MB-R-048).
+///
+/// MB-R-150 — before the OS-level open, `path_conflict` is checked against the freshly
+/// `~`-expanded path; a conflict short-circuits with `Error::PathConflict` and skips the open
+/// attempt entirely.
+pub(crate) fn connect_serial<F>(
+    config: &crate::rtu::Config,
+    path_conflict: &PathConflictCell,
+) -> Result<ClientCore<FrameTransport<SerialStream, F>, F>, Error>
+where
+    F: Framing + ClientFraming,
+{
+    let serial = serial_config_from(
+        config.baud_rate,
+        config.data_bits,
+        config.stop_bits,
+        config.parity.as_deref(),
+    )?;
+    let expanded = ferrowl_util::path::expand(&config.path);
+    let expanded = expanded.to_string_lossy();
+    if let Some(other) = path_conflict.check(&expanded) {
+        return Err(Error::PathConflict {
+            path: expanded.into_owned(),
+            other,
+        });
+    }
+    match open_serial::<F>(&config.path, serial) {
+        Ok(transport) => Ok(ClientCore {
+            client: Client::new(transport),
+        }),
+        Err(e) => Err(SerialError::Error(e).into()),
+    }
 }
 
 impl<S, F> ClientCore<S, F>

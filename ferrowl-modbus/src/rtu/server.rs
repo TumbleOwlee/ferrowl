@@ -1,18 +1,11 @@
-use crate::common::serial_config_from;
 use crate::rtu::Config;
-use crate::server_core::{ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff};
-use crate::{
-    ConnectedCell, Error, Key, KeyParams, LogFn, PathConflictCell, SerialError, ServerCommand,
-};
+use crate::server_core::run_serial_family;
+use crate::{ConnectedCell, Error, Key, KeyParams, LogFn, PathConflictCell, ServerCommand};
 
 use ferrowl_store::Memory;
-use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 
 use parking_lot::RwLock as MemLock;
-use rust_modbus::{Rtu, Server as ModbusServer, open_serial};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
@@ -34,7 +27,7 @@ impl<T: KeyParams> ServerBuilder<T> {
         }
     }
 
-    /// MB-R-150 — see `rtu::ClientBuilder::path_conflict` (same late-binding contract).
+    /// MB-R-150 — see [`PathConflictCell`] for the late-binding contract.
     pub fn path_conflict(&self) -> PathConflictCell {
         self.path_conflict.clone()
     }
@@ -80,10 +73,9 @@ const VERBOSE: bool = true;
 /// silence, not an exception.
 const PHYSICAL_SERIAL: bool = true;
 
-/// Open the configured serial port and serve it, retrying the open with the shared backoff
-/// policy on failure (MB-R-075 revised, MB-R-130–134). `ResetOn::Request` (not `Connect`): the
-/// RTU link's own `on_connect` fires once immediately, before any request is read, so it cannot
-/// be the "did something useful" signal — only reading a request/datagram counts.
+/// Open the configured serial port and serve it under RTU framing (MB-R-075 revised). Thin
+/// wrapper over [`run_serial_family`](crate::server_core::run_serial_family), shared with
+/// `ascii::server` — the two transports differ only in which framing they pass.
 async fn run<T, L, St>(
     config: Arc<RwLock<Config>>,
     memory: Arc<MemLock<Memory<Key<T>>>>,
@@ -98,99 +90,18 @@ where
     L: LogFn + Clone,
     St: LogFn + Clone,
 {
-    let receiver = AsyncMutex::new(receiver);
-    let activity = Arc::new(AtomicBool::new(false));
-
-    let attempt = || {
-        let config = config.clone();
-        let memory = memory.clone();
-        let log = log.clone();
-        let activity = activity.clone();
-        let receiver = &receiver;
-        let path_conflict = path_conflict.clone();
-        let open = open.clone();
-        async move {
-            activity.store(false, Ordering::Relaxed);
-            let guard = config.read().await;
-            let reconnect = guard.reconnect;
-            let serial = match serial_config_from(
-                guard.baud_rate,
-                guard.data_bits,
-                guard.stop_bits,
-                guard.parity.as_deref(),
-            ) {
-                Ok(serial) => serial,
-                Err(e) => {
-                    return AttemptOutcome::Failed {
-                        error: e.into(),
-                        reconnect: false, // a bad serial-config value never fixes itself
-                        reset: false,
-                    };
-                }
-            };
-            let path = guard.path.clone();
-            drop(guard);
-            // MB-R-150 — check the freshly `~`-expanded path for a conflict before the OS-level
-            // open; a conflict is a `Failed` outcome carrying the ordinary reconnect setting, so
-            // it retries on the usual backoff and recovers once the conflict clears.
-            let expanded = ferrowl_util::path::expand(&path);
-            let expanded = expanded.to_string_lossy().into_owned();
-            if let Some(other) = path_conflict.check(&expanded) {
-                log.invoke(format!(
-                    "Serial path '{expanded}' is already in use by module '{other}' in this \
-                     session; skipping open."
-                ))
-                .await;
-                return AttemptOutcome::Failed {
-                    error: Error::PathConflict {
-                        path: expanded,
-                        other,
-                    },
-                    reconnect,
-                    reset: false,
-                };
-            }
-            match open_serial::<Rtu>(&path, serial) {
-                Err(e) => AttemptOutcome::Failed {
-                    error: SerialError::Error(e).into(),
-                    reconnect,
-                    reset: false,
-                },
-                Ok(transport) => {
-                    open.set(true);
-                    let server = ModbusServer::new(
-                        Server::new(memory.clone(), log.clone(), VERBOSE, PHYSICAL_SERIAL)
-                            .with_reset_on(activity.clone(), ResetOn::Request),
-                    );
-                    let handle = server.handle();
-                    let mut receiver = receiver.lock().await;
-                    let end =
-                        drive_serve(server.serve_link(transport), handle, &mut receiver).await;
-                    open.set(false);
-                    match end {
-                        ServeEnd::Terminated => AttemptOutcome::Done,
-                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: activity.load(Ordering::Relaxed),
-                        },
-                    }
-                }
-            }
-        }
-    };
-
-    let wait_abortable = |backoff: std::time::Duration| {
-        let receiver = &receiver;
-        async move {
-            let mut receiver = receiver.lock().await;
-            wait_reconnect_backoff(&mut receiver, backoff).await
-        }
-    };
-
-    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
-    result
+    run_serial_family::<T, rust_modbus::Rtu, L, St>(
+        config,
+        memory,
+        receiver,
+        log,
+        status,
+        path_conflict,
+        open,
+        VERBOSE,
+        PHYSICAL_SERIAL,
+    )
+    .await
 }
 
 #[cfg(test)]
