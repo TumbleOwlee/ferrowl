@@ -1814,13 +1814,11 @@ mod tests {
     }
 
     /// One step of the flattened forward Tab walk used by the tab-order tests below: while
-    /// `self.focus` sits on the nested `Tls` field, a Tab keystroke steps *within* `TlsSection`'s
-    /// own panes (dispatched to its `HandleEvents` impl, which tries `NestedFocus::try_focus_next`
-    /// on an `Unhandled` Tab/BackTab from its own current pane — see `ferrowl-ui-derive`'s
-    /// `focus.rs`); once that inner scan is exhausted (`Unhandled` bubbles back out), the outer
-    /// struct's own `focus_next()` advances `self.focus` to the next *top-level* field — the two
-    /// mechanisms combined are what actually walk a full nested Tab sequence, since the outer
-    /// struct's own wrap-around walk only ever treats `tls` as a single field, one step.
+    /// `self.focus` sits on the nested `Tls` field, Tab steps *within* `TlsSection`'s own panes
+    /// (dispatched to its `HandleEvents`, which tries `NestedFocus::try_focus_next` on an
+    /// `Unhandled` Tab/BackTab); once that inner scan is exhausted, the outer struct's own
+    /// `focus_next()` advances to the next top-level field. The outer wrap-around walk alone only
+    /// ever treats `tls` as a single field — both mechanisms together walk the full sequence.
     #[derive(Debug, Clone, PartialEq)]
     enum Stop {
         Outer(SetupDialogFocus),
@@ -1838,15 +1836,11 @@ mod tests {
     /// Drive a flattened forward Tab walk from `SetupDialogFocus::Role` up to and including
     /// `SetupDialogFocus::Ip`, recording every stop (outer field, or a pane inside `tls`).
     fn tab_sequence_from_role(dialog: &mut SetupDialog) -> Vec<Stop> {
-        // In production, `handle_events()` (which calls `sync_tls()` as its own first statement)
-        // always runs before any Tab/BackTab reaches the outer struct's generated `focus_next()`/
-        // `focus_previous()` (see `ferrowl/src/module/modbus/view/mod.rs`'s call chain) — so
-        // `self.tls`'s role/level are always fresh by the time entry into it is attempted. A test
-        // driving `focus_next()` directly, without going through `handle_events()` first, must
-        // reproduce that same precondition explicitly: entering `tls` finds its first *eligible*
-        // pane by consulting `self.tls`'s own `role`/`level`, which default to
-        // `Server`/`Off` until synced — at `Off` every pane is ineligible, so an unsynced `tls`
-        // looks entirely empty and `focus_next()` skips over it as if it didn't exist.
+        // Production always runs `handle_events()` (which calls `sync_tls()` first) before any
+        // Tab/BackTab reaches `focus_next()`/`focus_previous()`, so `self.tls`'s role/level are
+        // always fresh. A test driving `focus_next()` directly must reproduce that precondition:
+        // unsynced, `self.tls`'s role/level default to `Server`/`Off`, making every pane
+        // ineligible, so `focus_next()` would skip straight past `tls` as if it weren't there.
         dialog.sync_tls();
         dialog.focus = SetupDialogFocus::Role;
         let mut seq = vec![current_stop(dialog)];
@@ -1972,63 +1966,6 @@ mod tests {
                 Stop::Tls(TlsSectionFocus::CaFile),
                 Stop::Outer(SetupDialogFocus::Ip),
             ]
-        );
-    }
-
-    #[test]
-    /// UI-R-049 — the migration to a single `#[focus(nested)] tls: TlsSection` field reproduces
-    /// exactly the per-role Tab sequence Modbus's own 11 separately-declared fields produced
-    /// before the migration (pinned here as literal expected lists, hand-derived from the
-    /// pre-migration declaration order: `self_signed, cert_file, key_file, client_cert_file,
-    /// client_key_file, client_cert_skip_verify, skip_verify, ca_file, client_ca_files,
-    /// client_ca_add_button, client_ca_delete_button`) — this is the direct regression check that
-    /// collapsing 11 flat fields into 1 nested field didn't silently reorder anything observable.
-    fn ut_declaration_order_equivalence_per_role() {
-        let mut server = SetupDialog::create(default_timing());
-        server.role.state.set_selection(0); // Server
-        server
-            .tls_level
-            .state
-            .set_selection(TlsLevel::MutualTls.index());
-        server
-            .tls
-            .client_ca_files
-            .state
-            .set_values(vec!["ca1.pem".to_string()]);
-        assert_eq!(
-            tab_sequence_from_role(&mut server),
-            vec![
-                Stop::Outer(SetupDialogFocus::Role),
-                Stop::Tls(TlsSectionFocus::SelfSigned),
-                Stop::Tls(TlsSectionFocus::CertFile),
-                Stop::Tls(TlsSectionFocus::KeyFile),
-                Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
-                Stop::Tls(TlsSectionFocus::ClientCaFiles),
-                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
-                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
-                Stop::Outer(SetupDialogFocus::Ip),
-            ],
-            "server-role sequence diverged from Modbus's pre-migration declaration order"
-        );
-
-        let mut client = SetupDialog::create(default_timing());
-        client.role.state.set_selection(1); // Client
-        client
-            .tls_level
-            .state
-            .set_selection(TlsLevel::MutualTls.index());
-        assert_eq!(
-            tab_sequence_from_role(&mut client),
-            vec![
-                Stop::Outer(SetupDialogFocus::Role),
-                Stop::Tls(TlsSectionFocus::SelfSigned),
-                Stop::Tls(TlsSectionFocus::ClientCertFile),
-                Stop::Tls(TlsSectionFocus::ClientKeyFile),
-                Stop::Tls(TlsSectionFocus::SkipVerify),
-                Stop::Tls(TlsSectionFocus::CaFile),
-                Stop::Outer(SetupDialogFocus::Ip),
-            ],
-            "client-role sequence diverged from Modbus's pre-migration declaration order"
         );
     }
 

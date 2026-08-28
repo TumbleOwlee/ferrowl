@@ -182,10 +182,8 @@ pub struct TlsSection {
 }
 
 impl TlsSection {
-    /// Fully-baked constructor: every shared field's title/placeholder/provider, identical
-    /// between Modbus's and OCPP's own construction blocks today (verified: "Cert File"/
-    /// "server.crt", "Client Cert"/"client.crt", etc. match exactly), so no per-caller
-    /// parameterization is needed.
+    /// Fully-baked constructor: every shared field's title/placeholder/provider is identical
+    /// between Modbus's and OCPP's dialogs, so no per-caller parameterization is needed.
     pub fn new() -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
@@ -348,8 +346,7 @@ impl TlsSection {
         self.show_client_ca() || self.show_ca_file()
     }
 
-    /// Prefill every field from an existing policy (Edit mode), by role — today's inline
-    /// `edit()`/OCPP-`edit()` match-on-role destructuring, moved verbatim.
+    /// Prefill every field from an existing policy (Edit mode), by role.
     pub fn prefill(
         &mut self,
         role: ClientOrServer,
@@ -713,8 +710,6 @@ mod tests {
             .unwrap_or_else(|| panic!("{needle:?} not found in:\n{text}")) as u16
     }
 
-    // --- sync ------------------------------------------------------------------------------
-
     #[test]
     /// UI-R-049 — `sync` updates the fresh role/level `TlsSection`'s own gates read, rather than
     /// caching a stale copy from construction time.
@@ -725,8 +720,6 @@ mod tests {
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         assert!(section.show_server_cert());
     }
-
-    // --- extract / prefill ------------------------------------------------------------------
 
     #[test]
     /// MB-R-104..112 — a server TLS section at `Tls` with self-signed on extracts and resolves
@@ -876,8 +869,6 @@ mod tests {
         assert_eq!(extracted.client_key_file, "");
     }
 
-    // --- row order / render ------------------------------------------------------------------
-
     #[test]
     /// UI-R-024 — mTLS row order, server role: Self-Signed first, then the server's own
     /// cert/key pair, then Skip Verify, then the client-CA list.
@@ -913,8 +904,6 @@ mod tests {
         assert!(cert_row < skip_row);
         assert!(skip_row < ca_row);
     }
-
-    // --- client-CA list lifecycle (moved verbatim from Modbus's setup_dialog.rs) -------------
 
     /// MB-R-136 — the client-CA row is a genuine add/remove list: the ADD button opens a
     /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes

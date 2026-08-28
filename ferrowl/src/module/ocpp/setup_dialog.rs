@@ -1825,12 +1825,11 @@ mod tests {
     }
 
     /// One stop of the flattened Tab walk used by the tab-order tests below: while `self.focus`
-    /// sits on the nested `Tls` field, a Tab keystroke steps *within* `TlsSection`'s own panes
-    /// (dispatched to its `HandleEvents` impl, which tries `NestedFocus::try_focus_next` on an
-    /// `Unhandled` Tab/BackTab from its own current pane); once that inner scan is exhausted, the
-    /// outer struct's own `focus_next()` advances `self.focus` to the next top-level field — the
-    /// two mechanisms combined are what actually walk a full nested Tab sequence, since the outer
-    /// struct's own wrap-around walk only ever treats `tls` as a single field, one step.
+    /// sits on the nested `Tls` field, Tab steps *within* `TlsSection`'s own panes (dispatched to
+    /// its `HandleEvents`, which tries `NestedFocus::try_focus_next` on an `Unhandled` Tab/
+    /// BackTab); once that inner scan is exhausted, the outer struct's own `focus_next()`
+    /// advances to the next top-level field. The outer wrap-around walk alone only ever treats
+    /// `tls` as a single field — both mechanisms together walk the full sequence.
     #[derive(Debug, Clone, PartialEq)]
     enum Stop {
         Outer(OcppSetupDialogFocus),
@@ -1849,12 +1848,11 @@ mod tests {
     /// `OcppSetupDialogFocus::Name` (`tls` is the last declared focusable field, so the outer
     /// wrap-around walk returns to `Name` once past it), recording every stop.
     fn tab_sequence_from_security(d: &mut OcppSetupDialog) -> Vec<Stop> {
-        // Mirrors production: `handle_events()` (which calls `sync_tls()` first) always runs
-        // before Tab/BackTab reaches the outer struct's generated `focus_next()`/
-        // `focus_previous()`, so `self.tls`'s role/level are fresh by the time entry into it is
-        // attempted. A test driving `focus_next()` directly must reproduce that precondition
-        // explicitly — at the builder-default `Off` level every pane is ineligible, so an
-        // unsynced `tls` looks entirely empty and `focus_next()` skips over it.
+        // Production always runs `handle_events()` (which calls `sync_tls()` first) before any
+        // Tab/BackTab reaches `focus_next()`/`focus_previous()`, so `self.tls`'s role/level are
+        // always fresh. A test driving `focus_next()` directly must reproduce that precondition:
+        // unsynced, `self.tls`'s role/level default to `Off`, making every pane ineligible, so
+        // `focus_next()` would skip straight past `tls` as if it weren't there.
         d.sync_tls();
         d.focus = OcppSetupDialogFocus::Security;
         let mut seq = vec![current_stop(d)];
@@ -1907,8 +1905,7 @@ mod tests {
     /// OC-R-113, UI-R-049 — the mTLS server-role Tab order: own cert/key, then Skip Verify,
     /// then the client-CA list and its ADD/DEL buttons — reached by bubbling into/out of the
     /// nested `tls` field. Also proves entering `tls` backward lands on its last pane (DEL), not
-    /// its first (Self-Signed). This is also the effective per-role sequence pre-migration's
-    /// interleaved 11-field declaration produced, now collapsed onto `TlsSection`'s single order.
+    /// its first (Self-Signed).
     fn ut_tab_order_server_mtls() {
         let mut d = wss_dialog(1); // Server
         d.security
@@ -1958,8 +1955,7 @@ mod tests {
     #[test]
     /// OC-R-111, OC-R-116, UI-R-049 — the mTLS client-role Tab order: own cert/key, then Skip
     /// Verify, then the CA-file trust-anchor input (no ADD/DEL — client role never shows the
-    /// client-CA list). Also the effective per-role sequence pre-migration's interleaved 11-field
-    /// declaration produced, now collapsed onto `TlsSection`'s single order.
+    /// client-CA list).
     fn ut_tab_order_client_mtls() {
         let mut d = wss_dialog(0); // Client
         d.security
