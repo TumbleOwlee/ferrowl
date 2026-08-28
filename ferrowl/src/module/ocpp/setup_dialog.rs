@@ -453,25 +453,8 @@ impl OcppSetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
-        if let Some(dialog) = self.tls.client_ca_add_dialog.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => {
-                    self.tls.client_ca_add_dialog = None;
-                }
-                (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
-                    Ok(path) => {
-                        self.tls.client_ca_files.state.values_mut().push(path);
-                        let idx = self.tls.client_ca_files.state.values().len() - 1;
-                        self.tls.client_ca_files.state.set_selection(idx);
-                        self.tls.client_ca_add_dialog = None;
-                    }
-                    Err(e) => dialog.error.state = e,
-                },
-                _ => {
-                    let _ = dialog.path.state.handle_events(modifiers, code);
-                }
-            }
-            return EventResult::Consumed;
+        if self.tls.client_ca_add_dialog.is_some() {
+            return self.tls.handle_events(modifiers, code);
         }
 
         match route_header_edit(&mut self.header_edit_prompt, modifiers, code) {
@@ -544,19 +527,12 @@ impl OcppSetupDialog {
         if modifiers == KeyModifiers::NONE
             && matches!(code, KeyCode::Enter | KeyCode::Char(' '))
             && self.focus == OcppSetupDialogFocus::Tls
+            && matches!(
+                self.tls.focus(),
+                TlsSectionFocus::ClientCaAddButton | TlsSectionFocus::ClientCaDeleteButton
+            )
         {
-            match self.tls.focus() {
-                TlsSectionFocus::ClientCaAddButton => {
-                    self.tls.client_ca_add_dialog =
-                        Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
-                    return EventResult::Consumed;
-                }
-                TlsSectionFocus::ClientCaDeleteButton => {
-                    self.tls.delete_selected_client_ca();
-                    return EventResult::Consumed;
-                }
-                _ => {}
-            }
+            return self.tls.handle_events(modifiers, code);
         }
 
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
@@ -1522,6 +1498,46 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&ca);
+    }
+
+    /// UI-R-026 — the client-CA add sub-dialog's path field, sharing `TlsSection`'s routing,
+    /// honors the general suggestion-popup contract: Enter accepts the highlighted suggestion
+    /// while the popup is open, rather than submitting the sub-dialog immediately.
+    #[test]
+    fn ut_client_ca_add_dialog_enter_accepts_suggestion_before_submit() {
+        let mut d = wss_dialog(1); // Server
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        d.tls.client_cert_skip_verify.state.set_selection(0);
+        d.sync_tls();
+        focus_tls_until(&mut d, TlsSectionFocus::ClientCaAddButton);
+        d.focus = OcppSetupDialogFocus::Tls;
+
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        let sub = d.tls.client_ca_add_dialog.as_mut().unwrap();
+        sub.path.state.set_focused(true);
+        sub.path
+            .state
+            .handle_events(KeyModifiers::NONE, KeyCode::Char('s'));
+        assert!(
+            sub.path.state.suggestions_open(),
+            "no completion popup offered for a 's' prefix (expects to match e.g. 'src')"
+        );
+
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        let sub = d.tls.client_ca_add_dialog.as_ref().unwrap();
+        assert_ne!(
+            sub.path.state.input(),
+            "s",
+            "Enter with the completion popup open must accept the highlighted suggestion, \
+             extending the typed prefix -- unchanged text means Enter fell through to submit \
+             (and failed) instead of accepting the popup"
+        );
+        assert!(
+            d.tls.client_ca_add_dialog.is_some(),
+            "accepting a (possibly partial) suggestion must not itself close the sub-dialog"
+        );
     }
 
     #[test]

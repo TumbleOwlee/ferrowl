@@ -479,49 +479,19 @@ impl SetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
-        if let Some(dialog) = self.tls.client_ca_add_dialog.as_mut() {
-            match (modifiers, code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => {
-                    self.tls.client_ca_add_dialog = None;
-                }
-                // While the path field's completion popup is open, Enter accepts the
-                // highlighted suggestion (mirroring every other suggest-input field) rather
-                // than submitting the sub-dialog.
-                (KeyModifiers::NONE, KeyCode::Enter) if dialog.path.state.suggestions_open() => {
-                    let _ = dialog.path.state.handle_events(modifiers, code);
-                }
-                (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
-                    Ok(path) => {
-                        self.tls.client_ca_files.state.values_mut().push(path);
-                        let idx = self.tls.client_ca_files.state.values().len() - 1;
-                        self.tls.client_ca_files.state.set_selection(idx);
-                        self.tls.client_ca_add_dialog = None;
-                    }
-                    Err(e) => dialog.error.state = e,
-                },
-                _ => {
-                    let _ = dialog.path.state.handle_events(modifiers, code);
-                }
-            }
-            return EventResult::Consumed;
+        if self.tls.client_ca_add_dialog.is_some() {
+            return self.tls.handle_events(modifiers, code);
         }
 
         if modifiers == KeyModifiers::NONE
             && matches!(code, KeyCode::Enter | KeyCode::Char(' '))
             && self.focus == SetupDialogFocus::Tls
+            && matches!(
+                self.tls.focus(),
+                TlsSectionFocus::ClientCaAddButton | TlsSectionFocus::ClientCaDeleteButton
+            )
         {
-            match self.tls.focus() {
-                TlsSectionFocus::ClientCaAddButton => {
-                    self.tls.client_ca_add_dialog =
-                        Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
-                    return EventResult::Consumed;
-                }
-                TlsSectionFocus::ClientCaDeleteButton => {
-                    self.tls.delete_selected_client_ca();
-                    return EventResult::Consumed;
-                }
-                _ => {}
-            }
+            return self.tls.handle_events(modifiers, code);
         }
 
         if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
