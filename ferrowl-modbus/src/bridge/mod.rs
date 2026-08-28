@@ -38,7 +38,7 @@ where
     L: LogFn + Clone + Send + Sync + 'static,
 {
     use crate::bridge::config::BridgeEndpointKind::{AsciiOverTcp, Rtu, RtuOverTcp, Tcp};
-    // BR-R-015, design decision 4: downstream.unit_ids is never read.
+    // BR-R-015 — downstream.unit_ids is never read.
     let unit_filter = config.upstream.unit_ids.clone();
 
     // Builds the downstream link and the `BridgeService` relaying onto it, then hands the

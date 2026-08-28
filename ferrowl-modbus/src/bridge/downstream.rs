@@ -74,10 +74,9 @@ where
                             ))
                             .await;
                             if !reconnect {
-                                // A connect failure with reconnect disabled never retries
-                                // (design decision 2): the task ends here, so a later
-                                // notify_one() (from a subsequent forward() failure) has no
-                                // listener and is silently absorbed.
+                                // A connect failure with reconnect disabled never retries: the
+                                // task ends here, so a later notify_one() (from a subsequent
+                                // forward() failure) has no listener and is silently absorbed.
                                 return;
                             }
                             tokio::time::sleep(backoff).await;
@@ -86,9 +85,8 @@ where
                     }
                 }
                 if !reconnect {
-                    // Connected once; an exchange failure afterwards must not retry either
-                    // (design decision 2) — end the task rather than waiting for another
-                    // notify_one().
+                    // Connected once; an exchange failure afterwards must not retry either —
+                    // end the task rather than waiting for another notify_one().
                     return;
                 }
             }
@@ -342,7 +340,7 @@ mod tests {
         assert_eq!(result, Ok(None));
     }
 
-    /// Shared design decision 2 — with `reconnect = false`, a downstream connect failure is
+    /// With `reconnect = false`, a downstream connect failure is
     /// never retried: every subsequent `forward` answers `GatewayPathUnavailable` and the
     /// `connect` closure is invoked only once.
     #[tokio::test]
