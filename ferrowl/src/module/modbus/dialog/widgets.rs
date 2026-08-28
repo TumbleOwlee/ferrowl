@@ -8,6 +8,7 @@
 //! parsed in the dialogs' `validate()`/`apply()` paths and surfaced as dialog error messages.
 
 use super::{AccessOption, Alignment, Endian, Format, KindOption, WordOrder};
+use crate::dialog::widgets::field_margin;
 use ferrowl_codec::format::{
     Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
     Resolution, WordOrder as RegisterWordOrder,
@@ -16,23 +17,15 @@ use ferrowl_codec::{Access, Kind};
 use ferrowl_ui::state::ButtonState;
 use ferrowl_ui::{
     Border, COLOR_SCHEME,
-    state::{InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder},
+    state::{InputFieldState, InputFieldStateBuilder, SelectionState},
     style::{ButtonStyle, InputFieldStyle, SelectionStyle, TextStyle},
     traits::ToLabel,
     widgets::{
-        Button, InputField, InputFieldBuilder, Selection, SelectionBuilder, Text, TextBuilder,
-        Title, Validate, Widget,
+        Button, InputField, InputFieldBuilder, Selection, Text, TextBuilder, Title, Validate,
+        Widget,
     },
 };
 use ratatui::layout::{HorizontalAlignment, Margin};
-
-/// Standard field margin inside the dialog: no vertical, one column horizontal.
-fn field_margin() -> Margin {
-    Margin {
-        vertical: 0,
-        horizontal: 1,
-    }
-}
 
 /// An unfocused, bordered, titled input field with a placeholder.
 pub(crate) fn input<T: Validate + Clone>(
@@ -103,22 +96,9 @@ pub(crate) fn selection<T: ToLabel + Clone>(
     values: Vec<T>,
     selected: usize,
 ) -> Widget<SelectionState<T>, Selection<T>> {
-    let mut state = SelectionStateBuilder::default()
-        .focused(false)
-        .values(values)
-        .build()
-        .expect("static selection state");
-    state.set_selection(selected);
-    Widget {
-        state,
-        widget: SelectionBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(title.into()))
-            .margin(field_margin())
-            .style(SelectionStyle::default())
-            .build()
-            .expect("static selection config"),
-    }
+    let mut widget = crate::dialog::widgets::selection(title, values, &SelectionStyle::default());
+    widget.state.set_selection(selected);
+    widget
 }
 
 /// An unfocused, center-aligned button labelled `label`, with `horizontal` outer margin.

@@ -11,6 +11,7 @@ mod script_manager;
 pub mod scripts;
 pub mod template_browser;
 pub mod tls_section;
+pub(crate) mod widgets;
 
 pub use crate::module::modbus::dialog::{EditedRegister, parse_raw_value};
 pub use crate::module::modbus::setup_dialog::SetupDialog;
