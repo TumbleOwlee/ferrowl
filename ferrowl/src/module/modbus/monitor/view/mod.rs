@@ -411,7 +411,7 @@ fn resolved_row(
             let raw_value = hex_words(&words);
             // When the decoded value exactly matches one of the interpretation's
             // named values, show the label alone (not "label (value)", unlike the full modbus
-            // module's own `Definition::values` — Shared/api-contract), using the same
+            // module's own `Definition::values`), using the same
             // `Scalar::Int`-vs-raw-int-or-string matching logic (`table.rs`'s own `values()`).
             let raw_int = parse_raw_value(&raw_value);
             if let Some(named) = def.values.iter().find(|nv| match &nv.value {
