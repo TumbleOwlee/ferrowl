@@ -1077,7 +1077,7 @@ impl OcppSetupDialog {
         }
 
         if show_hint {
-            self.hint.state = "Self-signed certificate is generated at each start (clients: skip-verify or pinned certs)".to_string();
+            self.hint.state = "Self-signed certificate is generated at each start".to_string();
             render_field!(self, hint, rows[8], buf);
         }
 
@@ -1296,7 +1296,7 @@ fn hint_text() -> Widget<String, Text> {
                 vertical: 0,
                 horizontal: 1,
             })
-            .horizontal_alignment(HorizontalAlignment::Left)
+            .horizontal_alignment(HorizontalAlignment::Center)
             .style(TextStyle::default())
             .build()
             .expect("all required builder fields are set"),
