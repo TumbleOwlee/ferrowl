@@ -40,19 +40,12 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         }
     };
 
-    let mut log_file = match args.log_file.as_deref() {
-        Some(path) => match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ferrowl_util::path::expand(path))
-        {
-            Ok(f) => Some(f),
-            Err(e) => {
-                eprintln!("Error: failed to open --log-file '{path}': {e}");
-                return 1;
-            }
-        },
-        None => None,
+    let mut log_file = match crate::cli::open_log_file(args.log_file.as_deref()) {
+        Ok(f) => f,
+        Err((path, e)) => {
+            eprintln!("Error: failed to open --log-file '{path}': {e}");
+            return 1;
+        }
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -87,7 +80,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         tokio::select! {
             msg = rx.recv() => {
                 let Some(msg) = msg else { break };
-                let line = format!("[{}] {SOURCE} | {msg}", format_timestamp(now_ms()));
+                let line = format!("[{}] {SOURCE} | {msg}", format_timestamp(crate::cli::now_ms()));
                 println!("{line}");
                 if let Some(f) = log_file.as_mut() {
                     let _ = writeln!(f, "{line}");
@@ -109,13 +102,6 @@ pub async fn run(args: &BridgeArgs) -> i32 {
     }
     handle.abort();
     exit_code
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

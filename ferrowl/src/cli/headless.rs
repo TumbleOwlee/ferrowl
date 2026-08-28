@@ -161,7 +161,7 @@ async fn drain_log(
         let dropped = new_count - window.len() as u64;
         lines.push(format!(
             "[{}] [{}] {name} | ({dropped} lines dropped: ring overflowed between ticks)",
-            format_timestamp(now_ms()),
+            format_timestamp(crate::cli::now_ms()),
             Level::Error
         ));
     }
@@ -225,13 +225,6 @@ fn load_session_scripts(args: &RunArgs) -> Result<Option<(Vec<ScriptDef>, Durati
     )))
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 /// Stop every module (best-effort: a stop failure is logged but does not change the exit code —
 /// we're already tearing down).
 async fn stop_all(modules: &mut [RunModule]) {
@@ -254,20 +247,13 @@ pub async fn run(args: &RunArgs) -> i32 {
         }
     };
 
-    let mut log_file = match args.log_file.as_deref() {
-        Some(path) => match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ferrowl_util::path::expand(path))
-        {
-            Ok(f) => Some(f),
-            Err(e) => {
-                eprintln!("Error: failed to open --log-file '{path}': {e}");
-                stop_all(&mut modules).await;
-                return 1;
-            }
-        },
-        None => None,
+    let mut log_file = match crate::cli::open_log_file(args.log_file.as_deref()) {
+        Ok(f) => f,
+        Err((path, e)) => {
+            eprintln!("Error: failed to open --log-file '{path}': {e}");
+            stop_all(&mut modules).await;
+            return 1;
+        }
     };
 
     let registry = build_registry(&modules);
