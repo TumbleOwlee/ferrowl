@@ -489,6 +489,9 @@ impl TlsSection {
 
         if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
             match (modifiers, code) {
+                (KeyModifiers::NONE, KeyCode::Esc) if dialog.path.state.suggestions_open() => {
+                    let _ = dialog.path.state.handle_events(modifiers, code);
+                }
                 (KeyModifiers::NONE, KeyCode::Esc) => {
                     self.client_ca_add_dialog = None;
                 }
@@ -1011,6 +1014,53 @@ mod tests {
         // Deleting down to an empty list must not leave `focus` stuck on the now-ineligible DEL
         // button — it falls back to ADD.
         assert_eq!(section.focus, TlsSectionFocus::ClientCaAddButton);
+    }
+
+    /// UI-R-026 — Esc while the path field's completion popup is open dismisses only the popup;
+    /// a second Esc (popup now closed) closes the sub-dialog itself.
+    #[test]
+    fn ut_client_ca_add_dialog_esc_dismisses_popup_before_sub_dialog() {
+        let mut section = TlsSection::new();
+        section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
+        section.self_signed.state.set_selection(1);
+
+        section.focus = TlsSectionFocus::ClientCaAddButton;
+        section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(
+            &mut section.client_ca_add_dialog.as_mut().unwrap().path.state,
+            "s",
+        );
+        assert!(
+            section
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .path
+                .state
+                .suggestions_open(),
+            "no completion popup offered for a 's' prefix"
+        );
+
+        section.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            section.client_ca_add_dialog.is_some(),
+            "Esc with the popup open must dismiss the popup, not the sub-dialog"
+        );
+        assert!(
+            !section
+                .client_ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .path
+                .state
+                .suggestions_open()
+        );
+
+        section.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(
+            section.client_ca_add_dialog.is_none(),
+            "Esc with the popup already closed must close the sub-dialog"
+        );
     }
 
     /// MB-R-136 — deleting the last remaining client-CA entry moves focus off the now-
