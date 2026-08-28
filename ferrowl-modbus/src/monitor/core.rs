@@ -2,10 +2,18 @@
 
 use super::record::{MonitorRecord, RecordStatus, SharedRecordLog, TableShape};
 use super::table::SharedObservedTable;
-use crate::{Key, LogFn, SlaveKey};
+use crate::common::serial_config_from;
+use crate::server_core::wait_reconnect_backoff;
+use crate::{
+    ConnectedCell, Error, Key, LogFn, PathConflictCell, SerialError, ServerCommand, SlaveKey,
+};
 
 use ferrowl_codec::Kind;
-use rust_modbus::{Framing, RegisterValue, RequestPdu, ResponsePdu, UnitId};
+use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
+use rust_modbus::{
+    AduReader, Direction, Framing, RegisterValue, RequestPdu, ResponsePdu, TransportConfig, UnitId,
+    open_serial,
+};
 use std::time::Instant;
 
 /// State of the monitor's decode/match state machine (MB-R-142): either awaiting the next
@@ -645,6 +653,139 @@ where
             _ = commands.recv() => return MonitorEnd::Terminated,
         }
     }
+}
+
+/// Opens the configured serial port receive-only under framing `F` and drives
+/// [`drive_monitor`], retrying the open with the shared backoff policy on failure
+/// (MB-R-141, MB-R-130–134). Before every OS-level open, `path_conflict` is checked against
+/// the freshly `~`-expanded path (MB-R-150); a conflict is a `Failed` outcome carrying the
+/// ordinary reconnect setting and is logged before returning, since a `reconnect: true` monitor
+/// would otherwise retry it forever with no observable trace at all.
+#[allow(clippy::too_many_arguments)] // config/table/records/receiver/log/status/path_conflict/open
+pub(crate) async fn run_serial_monitor<F, L, St>(
+    config: std::sync::Arc<tokio::sync::RwLock<crate::rtu::Config>>,
+    table: SharedObservedTable,
+    records: SharedRecordLog,
+    receiver: tokio::sync::mpsc::Receiver<ServerCommand>,
+    log: L,
+    status: St,
+    path_conflict: PathConflictCell,
+    open: ConnectedCell,
+) -> Result<(), Error>
+where
+    F: Framing<Header = UnitId> + Send + 'static,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+{
+    let receiver = tokio::sync::Mutex::new(receiver);
+    let activity = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let attempt = || {
+        let config = config.clone();
+        let table = table.clone();
+        let records = records.clone();
+        let log = log.clone();
+        let activity = activity.clone();
+        let receiver = &receiver;
+        let path_conflict = path_conflict.clone();
+        let open = open.clone();
+        async move {
+            activity.store(false, std::sync::atomic::Ordering::Relaxed);
+            let guard = config.read().await;
+            let reconnect = guard.reconnect;
+            let serial = match serial_config_from(
+                guard.baud_rate,
+                guard.data_bits,
+                guard.stop_bits,
+                guard.parity.as_deref(),
+            ) {
+                Ok(serial) => serial,
+                Err(e) => {
+                    return AttemptOutcome::Failed {
+                        error: e.into(),
+                        reconnect: false,
+                        reset: false,
+                    };
+                }
+            };
+            let path = guard.path.clone();
+            drop(guard);
+            let expanded = ferrowl_util::path::expand(&path);
+            let expanded = expanded.to_string_lossy().into_owned();
+            if let Some(other) = path_conflict.check(&expanded) {
+                log.invoke(format!(
+                    "Serial path '{expanded}' is already in use by module '{other}' in this \
+                     session; skipping open."
+                ))
+                .await;
+                return AttemptOutcome::Failed {
+                    error: Error::PathConflict {
+                        path: expanded,
+                        other,
+                    },
+                    reconnect,
+                    reset: false,
+                };
+            }
+            let transport_config = match TransportConfig::from_serial(&serial) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    return AttemptOutcome::Failed {
+                        error: SerialError::Error(e).into(),
+                        reconnect: false,
+                        reset: false,
+                    };
+                }
+            };
+            match open_serial::<F>(&path, serial) {
+                Err(e) => AttemptOutcome::Failed {
+                    error: SerialError::Error(e).into(),
+                    reconnect,
+                    reset: false,
+                },
+                Ok(transport) => {
+                    open.set(true);
+                    let stream = transport.into_inner();
+                    let reader = AduReader::<_, F>::with_config(
+                        stream,
+                        Direction::Request,
+                        transport_config,
+                    );
+                    let mut receiver = receiver.lock().await;
+                    let end = drive_monitor::<_, F, _>(
+                        reader,
+                        log.clone(),
+                        table.clone(),
+                        records.clone(),
+                        &activity,
+                        &mut receiver,
+                    )
+                    .await;
+                    open.set(false);
+                    match end {
+                        MonitorEnd::Terminated => AttemptOutcome::Done,
+                        MonitorEnd::Failed(e) => AttemptOutcome::Failed {
+                            error: Error::Server(e),
+                            reconnect,
+                            reset: activity.load(std::sync::atomic::Ordering::Relaxed),
+                        },
+                    }
+                }
+            }
+        }
+    };
+
+    let wait_abortable = |backoff: std::time::Duration| {
+        let receiver = &receiver;
+        async move {
+            let mut receiver = receiver.lock().await;
+            wait_reconnect_backoff(&mut receiver, backoff).await
+        }
+    };
+
+    let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
+    status.invoke("Monitor stopped".to_string()).await;
+    result
 }
 
 #[cfg(test)]

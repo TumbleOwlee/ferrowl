@@ -12,4 +12,4 @@ pub use record::{
 };
 pub use table::{ObservedTable, SharedObservedTable};
 
-pub(crate) use core::{MonitorEnd, drive_monitor};
+pub(crate) use core::run_serial_monitor;
