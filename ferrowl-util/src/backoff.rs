@@ -87,6 +87,46 @@ where
     }
 }
 
+/// Waits out a fixed `backoff` window while draining `receiver`, for a retry loop that must keep
+/// accepting and logging commands during the wait rather than leaving them queued on the channel.
+///
+/// Returns `true` if the wait ended early because a terminate-matching command (per
+/// `is_terminate`) arrived or the channel closed (`None`) — the caller should stop retrying.
+/// Returns `false` if the full `backoff` elapsed with no such command — the caller should
+/// attempt again.
+///
+/// The deadline is computed once, before the loop, and awaited with `sleep_until` rather than
+/// re-running `sleep(backoff)` on every iteration: the loop re-enters after every dropped
+/// non-terminate command, and restarting the sleep on each one would let a chatty caller extend
+/// the backoff indefinitely instead of bounding it at `backoff`.
+///
+/// Any command that does not match `is_terminate` is logged via `log` with `dropped_msg` and the
+/// wait continues.
+pub async fn wait_backoff<T, LFut>(
+    receiver: &mut tokio::sync::mpsc::Receiver<T>,
+    backoff: Duration,
+    dropped_msg: &str,
+    is_terminate: impl Fn(&T) -> bool,
+    log: impl Fn(String) -> LFut,
+) -> bool
+where
+    LFut: Future<Output = ()>,
+{
+    let deadline = tokio::time::Instant::now() + backoff;
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(deadline) => return false,
+            cmd = receiver.recv() => match cmd {
+                None => return true,
+                Some(cmd) if is_terminate(&cmd) => return true,
+                Some(_) => {
+                    log(dropped_msg.to_string()).await;
+                }
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +287,133 @@ mod tests {
         let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
         assert_eq!(result, Ok(()));
         assert_eq!(*calls.lock().unwrap(), 1);
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum TestCmd {
+        Terminate,
+        Other,
+    }
+
+    /// The deadline elapsing with no command arriving returns `false`.
+    #[tokio::test(start_paused = true)]
+    async fn ut_wait_backoff_returns_false_when_deadline_elapses() {
+        let (_tx, mut rx) = tokio::sync::mpsc::channel::<TestCmd>(1);
+        let result = wait_backoff(
+            &mut rx,
+            Duration::from_secs(5),
+            "dropped",
+            |c: &TestCmd| matches!(c, TestCmd::Terminate),
+            |_msg| async {},
+        );
+        tokio::pin!(result);
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert!(!result.await);
+    }
+
+    /// A terminate-matching command ends the wait early with `true`.
+    #[tokio::test(start_paused = true)]
+    async fn ut_wait_backoff_returns_true_on_terminate_command() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TestCmd>(1);
+        tx.send(TestCmd::Terminate).await.unwrap();
+        let result = wait_backoff(
+            &mut rx,
+            Duration::from_secs(5),
+            "dropped",
+            |c: &TestCmd| matches!(c, TestCmd::Terminate),
+            |_msg| async {},
+        )
+        .await;
+        assert!(result);
+    }
+
+    /// A closed channel (sender dropped, no command) ends the wait early with `true`.
+    #[tokio::test(start_paused = true)]
+    async fn ut_wait_backoff_returns_true_on_closed_channel() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TestCmd>(1);
+        drop(tx);
+        let result = wait_backoff(
+            &mut rx,
+            Duration::from_secs(5),
+            "dropped",
+            |c: &TestCmd| matches!(c, TestCmd::Terminate),
+            |_msg| async {},
+        )
+        .await;
+        assert!(result);
+    }
+
+    /// A non-terminate command logs `dropped_msg` and keeps waiting rather than returning.
+    #[tokio::test(start_paused = true)]
+    async fn ut_wait_backoff_logs_and_continues_on_non_terminate_command() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TestCmd>(2);
+        let logged: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let logged_for_closure = logged.clone();
+        tx.send(TestCmd::Other).await.unwrap();
+        let result = wait_backoff(
+            &mut rx,
+            Duration::from_secs(5),
+            "Command dropped: test.",
+            |c: &TestCmd| matches!(c, TestCmd::Terminate),
+            move |msg| {
+                let logged_for_closure = logged_for_closure.clone();
+                async move { logged_for_closure.lock().unwrap().push(msg) }
+            },
+        );
+        tokio::pin!(result);
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert!(!result.await);
+        assert_eq!(
+            *logged.lock().unwrap(),
+            vec!["Command dropped: test.".to_string()]
+        );
+    }
+
+    /// Repeated non-terminate commands do not extend the deadline past the original backoff:
+    /// the `sleep_until` deadline is computed once, so draining commands throughout the window
+    /// still returns `false` at exactly the original 5s mark, not later.
+    #[tokio::test(start_paused = true)]
+    async fn ut_wait_backoff_deadline_not_extended_by_repeated_commands() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<TestCmd>(4);
+        let result = wait_backoff(
+            &mut rx,
+            Duration::from_secs(5),
+            "dropped",
+            |c: &TestCmd| matches!(c, TestCmd::Terminate),
+            |_msg| async {},
+        );
+        tokio::pin!(result);
+
+        // The future must be polled before any clock movement: `wait_backoff` establishes its
+        // deadline on first poll, so leaving it unpolled here would silently start the clock at
+        // whatever time the first `poll!` happens to land on and make every assertion below
+        // vacuous.
+        let start = tokio::time::Instant::now();
+        assert!(futures_util::poll!(&mut result).is_pending());
+
+        // A chatty command every second for 4 seconds, each one polled through so it is actually
+        // consumed by the loop rather than left queued on the channel.
+        for _ in 0..4 {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            tx.try_send(TestCmd::Other).unwrap();
+            assert!(futures_util::poll!(&mut result).is_pending());
+        }
+
+        tokio::time::advance(Duration::from_millis(900)).await;
+        assert!(
+            futures_util::poll!(&mut result).is_pending(),
+            "must still be pending just before the original 5s deadline"
+        );
+
+        tokio::time::advance(Duration::from_millis(100)).await;
+        assert!(!result.await);
+
+        // Resolution timed against the original deadline, not merely "eventually": an
+        // implementation that restarted its sleep per dropped command would land at 9s.
+        assert_eq!(
+            start.elapsed(),
+            Duration::from_secs(5),
+            "four dropped commands must not push the deadline out"
+        );
     }
 }

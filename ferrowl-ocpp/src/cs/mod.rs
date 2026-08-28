@@ -68,38 +68,6 @@ async fn dial<V: Version>(config: &Config, cache: &SelfSignedCache) -> Result<Ws
     Ok(ws)
 }
 
-/// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command channel
-/// closing (returns `true`). Any other command received while disconnected is dropped with a log
-/// line rather than queued for after reconnect — a `SendActionAwait`'s `oneshot::Sender` is
-/// simply dropped, which naturally surfaces `Error::ChannelClosed` to whichever caller was
-/// awaiting the reply (the same failure mode a closed channel already produces elsewhere).
-/// Mirrors `ferrowl_modbus::client_core::wait_reconnect_backoff` exactly (OC-R-106).
-async fn wait_reconnect_backoff<V, L>(
-    receiver: &mut mpsc::Receiver<Command<V>>,
-    backoff: Duration,
-    log: &L,
-) -> bool
-where
-    V: Version,
-    L: LogFn,
-{
-    let deadline = tokio::time::Instant::now() + backoff;
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep_until(deadline) => return false,
-            cmd = receiver.recv() => match cmd {
-                None | Some(Command::Terminate) => return true,
-                Some(_) => {
-                    log.invoke(
-                        "Command dropped: client is disconnected and reconnecting.".to_string(),
-                    )
-                    .await;
-                }
-            },
-        }
-    }
-}
-
 /// What happened during one connection attempt, as fed to [`classify_attempt`].
 enum AttemptResult {
     /// The dial itself failed; no handshake ever completed.
@@ -212,7 +180,19 @@ where
             log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
                 .await;
             let mut receiver = receiver.lock().await;
-            wait_reconnect_backoff(&mut receiver, backoff, &log).await
+            // Any command other than `Terminate` received while disconnected is dropped with a
+            // log line rather than queued for after reconnect — a `SendActionAwait`'s
+            // `oneshot::Sender` is simply dropped, which naturally surfaces `Error::ChannelClosed`
+            // to whichever caller was awaiting the reply (the same failure mode a closed channel
+            // already produces elsewhere). OC-R-106.
+            ferrowl_util::backoff::wait_backoff(
+                &mut receiver,
+                backoff,
+                "Command dropped: client is disconnected and reconnecting.",
+                |cmd: &Command<V>| matches!(cmd, Command::Terminate),
+                |msg| log.invoke(msg),
+            )
+            .await
         }
     };
 

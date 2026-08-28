@@ -728,9 +728,9 @@ where
 }
 
 /// Waits out a bind/open backoff, aborting early on `ServerCommand::Terminate` or the command
-/// channel closing (mirrors [`crate::client_core::wait_reconnect_backoff`], simplified:
-/// `ServerCommand` has only one variant, so there is no "drop a non-terminate command" case to
-/// log).
+/// channel closing. Deliberately simpler than [`ferrowl_util::backoff::wait_backoff`]:
+/// `ServerCommand` has only one variant, so any command received aborts the wait and there is no
+/// "drop a non-terminate command" case to log.
 pub(crate) async fn wait_reconnect_backoff(
     receiver: &mut tokio::sync::mpsc::Receiver<crate::ServerCommand>,
     backoff: std::time::Duration,
