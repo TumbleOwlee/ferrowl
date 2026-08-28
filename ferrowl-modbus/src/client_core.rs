@@ -85,7 +85,7 @@ pub(crate) struct ClientCore<S, F> {
     pub(crate) client: Client<S, F>,
 }
 
-/// Opens the configured serial port under framing `F`, shared by the ASCII and RTU clients (MB-R-122).
+/// Opens the configured serial port under framing `F`, shared by the ASCII and RTU clients.
 ///
 /// The port is not bound to a slave address: each request carries the slave id of the
 /// operation or command that issued it (MB-R-048).
