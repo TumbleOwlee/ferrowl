@@ -181,7 +181,7 @@ where
         Self::exec_collecting_errors(self.iter_mut())
     }
 
-    /// Execute all loaded scripts while skipping all scrips executed in the last timeframe of
+    /// Execute all loaded scripts while skipping all scripts executed in the last timeframe of
     /// given duration
     pub fn refresh_all(
         &mut self,
