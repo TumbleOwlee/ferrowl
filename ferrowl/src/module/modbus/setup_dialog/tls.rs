@@ -7,6 +7,7 @@
 use ferrowl_ui::traits::ToLabel;
 
 use crate::config::ClientOrServer;
+use crate::dialog::tls_section::EffectiveTlsLevel;
 use ferrowl_modbus::tcp::ModbusTlsConfig;
 use ferrowl_util::tls::{
     ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
@@ -32,46 +33,15 @@ impl ToLabel for TlsLevel {
     }
 }
 
-/// "Generate an ephemeral self-signed certificate/identity" toggle, offered whenever `Tls`/
-/// `MutualTls` is selected. The *same* widget field is reused for both roles (they are never
-/// shown at the same time, since a dialog instance is fixed to one role): for the server role it
-/// toggles the presented server certificate's source (MB-R-106) whenever `Tls`/`MutualTls` is
-/// selected; for the client role it toggles the client's own mTLS identity (MB-R-138/139)
-/// whenever `MutualTls` is selected (the identity only exists under mTLS).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelfSignedChoice {
-    Off,
-    On,
-}
-
-impl ToLabel for SelfSignedChoice {
-    fn to_label(&self) -> String {
-        match self {
-            SelfSignedChoice::Off => "Off",
-            SelfSignedChoice::On => "On",
+/// Modbus's TLS level has no credential tier (unlike OCPP's `SecurityLevel::BasicAuth`), so this
+/// mapping is a plain 1:1 rename rather than a collapse.
+impl From<TlsLevel> for EffectiveTlsLevel {
+    fn from(level: TlsLevel) -> Self {
+        match level {
+            TlsLevel::Off => EffectiveTlsLevel::Off,
+            TlsLevel::Tls => EffectiveTlsLevel::Tls,
+            TlsLevel::MutualTls => EffectiveTlsLevel::MutualTls,
         }
-        .to_string()
-    }
-}
-
-/// A binary skip-verify toggle, offered whenever `Tls`/`MutualTls` is selected. Two distinct
-/// widget fields use this shape: the client-role "accept any server certificate" toggle (shown
-/// at `Tls`+) and the server-role "accept any client certificate" toggle (`client_cert_skip_verify`,
-/// MB-R-136, shown at `MutualTls` only) — never the same field, since each role only ever shows
-/// one of the two rows this shape backs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkipVerifyChoice {
-    Off,
-    On,
-}
-
-impl ToLabel for SkipVerifyChoice {
-    fn to_label(&self) -> String {
-        match self {
-            SkipVerifyChoice::Off => "Off",
-            SkipVerifyChoice::On => "On",
-        }
-        .to_string()
     }
 }
 
@@ -286,6 +256,24 @@ pub(super) fn validate_tls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    /// UI-R-049 — `TlsLevel` collapses 1:1 into the shared widget's level type, since Modbus's
+    /// own level has no credential tier to fold away (unlike OCPP's `SecurityLevel`).
+    fn ut_effective_tls_level_from_tls_level() {
+        assert_eq!(
+            EffectiveTlsLevel::from(TlsLevel::Off),
+            EffectiveTlsLevel::Off
+        );
+        assert_eq!(
+            EffectiveTlsLevel::from(TlsLevel::Tls),
+            EffectiveTlsLevel::Tls
+        );
+        assert_eq!(
+            EffectiveTlsLevel::from(TlsLevel::MutualTls),
+            EffectiveTlsLevel::MutualTls
+        );
+    }
 
     fn inputs<'a>(
         ca_file: &'a str,
