@@ -597,7 +597,16 @@ where
                 log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
                     .await;
                 let mut guard = receiver.lock().await;
-                let aborted = wait_reconnect_backoff(&mut guard, backoff, &log).await;
+                // Any non-terminate command received while disconnected is dropped with a log
+                // line rather than queued for after reconnect.
+                let aborted = ferrowl_util::backoff::wait_backoff(
+                    &mut guard,
+                    backoff,
+                    "Command dropped: client is disconnected and reconnecting.",
+                    |cmd: &Command| matches!(cmd, Command::Terminate),
+                    |msg| log.invoke(msg),
+                )
+                .await;
                 drop(guard);
                 if aborted {
                     status.invoke("Client disconnected".to_string()).await;
@@ -612,34 +621,6 @@ where
             wait_abortable,
         )
         .await
-    }
-}
-
-/// Waits out a reconnect backoff, aborting early on `Command::Terminate` or the command
-/// channel closing (returns `true`). Any other command received while disconnected is
-/// dropped with a log line rather than queued for after reconnect.
-pub(crate) async fn wait_reconnect_backoff<L>(
-    receiver: &mut Receiver<Command>,
-    backoff: Duration,
-    log: &L,
-) -> bool
-where
-    L: LogFn,
-{
-    let deadline = tokio::time::Instant::now() + backoff;
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep_until(deadline) => return false,
-            cmd = receiver.recv() => match cmd {
-                None | Some(Command::Terminate) => return true,
-                Some(_) => {
-                    log.invoke(
-                        "Command dropped: client is disconnected and reconnecting.".to_string(),
-                    )
-                    .await;
-                }
-            },
-        }
     }
 }
 
@@ -908,7 +889,14 @@ mod tests {
         ))
         .await
         .unwrap();
-        let aborted = wait_reconnect_backoff(&mut rx, Duration::from_millis(50), &log).await;
+        let aborted = ferrowl_util::backoff::wait_backoff(
+            &mut rx,
+            Duration::from_millis(50),
+            "Command dropped: client is disconnected and reconnecting.",
+            |cmd: &Command| matches!(cmd, Command::Terminate),
+            log,
+        )
+        .await;
         assert!(!aborted);
         assert!(lines.lock().iter().any(|l| l.contains("Command dropped")));
     }
@@ -920,11 +908,29 @@ mod tests {
         // Terminate aborts (returns true).
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(4);
         tx.send(Command::Terminate).await.unwrap();
-        assert!(wait_reconnect_backoff(&mut rx, Duration::from_secs(30), &sink).await);
+        assert!(
+            ferrowl_util::backoff::wait_backoff(
+                &mut rx,
+                Duration::from_secs(30),
+                "Command dropped: client is disconnected and reconnecting.",
+                |cmd: &Command| matches!(cmd, Command::Terminate),
+                &sink,
+            )
+            .await
+        );
         // The channel closing aborts too.
         let (tx2, mut rx2) = tokio::sync::mpsc::channel::<Command>(4);
         drop(tx2);
-        assert!(wait_reconnect_backoff(&mut rx2, Duration::from_secs(30), &sink).await);
+        assert!(
+            ferrowl_util::backoff::wait_backoff(
+                &mut rx2,
+                Duration::from_secs(30),
+                "Command dropped: client is disconnected and reconnecting.",
+                |cmd: &Command| matches!(cmd, Command::Terminate),
+                sink,
+            )
+            .await
+        );
     }
 
     #[tokio::test]
