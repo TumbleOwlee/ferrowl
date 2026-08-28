@@ -87,9 +87,8 @@ where
     }
 }
 
-/// Waits out a fixed `backoff` window while draining `receiver`, used by every command-driven
-/// reconnect/retry loop (Modbus client, OCPP CS, OCPP CSMS) that needs to keep accepting and
-/// logging commands while it waits rather than blocking the channel.
+/// Waits out a fixed `backoff` window while draining `receiver`, for a retry loop that must keep
+/// accepting and logging commands during the wait rather than leaving them queued on the channel.
 ///
 /// Returns `true` if the wait ended early because a terminate-matching command (per
 /// `is_terminate`) arrived or the channel closed (`None`) — the caller should stop retrying.
@@ -385,22 +384,36 @@ mod tests {
         );
         tokio::pin!(result);
 
-        // Send a chatty command every second for 4 seconds — well inside the 5s backoff —
-        // and confirm the wait is still pending at 4.9s despite the churn.
+        // The future must be polled before any clock movement: `wait_backoff` establishes its
+        // deadline on first poll, so leaving it unpolled here would silently start the clock at
+        // whatever time the first `poll!` happens to land on and make every assertion below
+        // vacuous.
+        let start = tokio::time::Instant::now();
+        assert!(futures_util::poll!(&mut result).is_pending());
+
+        // A chatty command every second for 4 seconds, each one polled through so it is actually
+        // consumed by the loop rather than left queued on the channel.
         for _ in 0..4 {
             tokio::time::advance(Duration::from_secs(1)).await;
             tx.try_send(TestCmd::Other).unwrap();
-            tokio::task::yield_now().await;
+            assert!(futures_util::poll!(&mut result).is_pending());
         }
+
         tokio::time::advance(Duration::from_millis(900)).await;
         assert!(
             futures_util::poll!(&mut result).is_pending(),
-            "wait must still be pending just before the original 5s deadline"
+            "must still be pending just before the original 5s deadline"
         );
 
-        // Crossing the original deadline (5.0s total) resolves it to `false`, proving the
-        // deadline was never pushed out by the four dropped commands.
         tokio::time::advance(Duration::from_millis(100)).await;
         assert!(!result.await);
+
+        // Resolution timed against the original deadline, not merely "eventually": an
+        // implementation that restarted its sleep per dropped command would land at 9s.
+        assert_eq!(
+            start.elapsed(),
+            Duration::from_secs(5),
+            "four dropped commands must not push the deadline out"
+        );
     }
 }
