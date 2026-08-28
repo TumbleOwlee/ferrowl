@@ -896,7 +896,7 @@ mod tests {
         }
     }
 
-    /// Poll until the CSMS listener has bound (`spawn` no longer binds synchronously).
+    /// Poll until the CSMS listener has bound (`spawn` binds asynchronously).
     async fn bound_addr(server: &ferrowl_ocpp::csms::Server<ferrowl_ocpp::V1_6>) -> String {
         for _ in 0..50 {
             if let Some(addr) = server.local_addr() {

@@ -943,7 +943,7 @@ mod tests {
     #[tokio::test]
     /// MB-R-150 — "recovers automatically once the conflicting instance stops": once one of two
     /// Rtu server instances sharing a path is stopped, the surviving instance's own next attempt
-    /// no longer reports a conflict.
+    /// does not report a conflict.
     async fn ut_stopping_one_instance_lets_the_other_recover() {
         let mut app = super::testkit::build_app(vec![
             mb_r_150_rtu_server_view("a"),

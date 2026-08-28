@@ -2004,7 +2004,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — the security row no longer carries a side toggle: Self-Signed/Skip Verify
+    /// UI-R-024 — the security row carries no side toggle: Self-Signed/Skip Verify
     /// never appear on the same line as Username/Password.
     fn ut_security_row_has_no_side_toggle() {
         let mut d = wss_dialog(1); // Server

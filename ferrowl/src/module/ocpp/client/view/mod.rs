@@ -1181,12 +1181,11 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-048, OC-R-105 (revised) — `start`/`restart` no longer fails synchronously against an
+    /// OC-R-048, OC-R-105 (revised) — `start`/`restart` does not fail synchronously against an
     /// unreachable CSMS: the dial happens inside the retried task, so the view reports
-    /// "Reconnecting" at Info level even against a dead endpoint, instead of the old synchronous
-    /// "assume connected"/fail-fast behavior this test used to cover (OC-R-102's Error-level
+    /// "Reconnecting" at Info level even against a dead endpoint (OC-R-102's Error-level
     /// reporting path is still exercised by a genuine `stop`/`start` failure — e.g. the CSMS's
-    /// still-synchronous OC-R-040 TLS-misconfiguration check — just no longer reachable from the
+    /// still-synchronous OC-R-040 TLS-misconfiguration check — not reachable from the
     /// CS role's `start`).
     async fn ut_restart_against_unreachable_csms_still_succeeds() {
         let mut v = client_view::<V2_0_1>(OcppVersion::V2_0_1);

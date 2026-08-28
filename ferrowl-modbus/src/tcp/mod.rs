@@ -148,8 +148,8 @@ mod tests {
     }
 
     /// MB-R-136 — the legacy singular `client_ca_file` field (pre-multi-CA) still deserializes
-    /// through `tcp::Config`'s nested `ModbusTlsConfig`, exactly as it did before MB-R-136 added
-    /// plural `client_ca_files`.
+    /// through `tcp::Config`'s nested `ModbusTlsConfig`, unchanged by the addition of the
+    /// plural `client_ca_files` field.
     #[test]
     fn ut_tcp_config_tls_legacy_singular_client_ca_file_deserializes() {
         let json = r#"{

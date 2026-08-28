@@ -1207,7 +1207,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a server that turns on Self-Signed no longer needs (or shows) the
+    /// UI-R-024 — a server that turns on Self-Signed does not need (or show) the
     /// cert/key file row; toggling it back off restores the row.
     fn ut_self_signed_hides_server_cert_row() {
         let mut dialog = SetupDialog::create(Timing {
@@ -1227,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a client that turns on Skip Verify no longer needs (or shows) the CA-file
+    /// UI-R-024 — a client that turns on Skip Verify does not need (or show) the CA-file
     /// row; toggling it back off restores the row.
     fn ut_skip_verify_hides_ca_file_row() {
         let mut dialog = SetupDialog::create(Timing {

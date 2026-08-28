@@ -244,7 +244,7 @@ impl ModbusModule {
     }
 
     /// Resolve effective timing for an instance from the device config, falling back to the
-    /// built-in defaults. Timing is no longer a per-instance (session) override.
+    /// built-in defaults.
     pub fn resolve_timing(device: &DeviceConfig) -> Timing {
         Timing {
             timeout_ms: device.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),

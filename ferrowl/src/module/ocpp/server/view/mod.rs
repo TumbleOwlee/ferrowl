@@ -675,8 +675,8 @@ mod tests {
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
     }
 
-    /// Poll until the CSMS listener has bound: `start()` no longer binds synchronously, retrying
-    /// a failed bind with backoff instead (OC-R-083), so `bound_addr()` is `None` until the first
+    /// Poll until the CSMS listener has bound: `start()` binds asynchronously, retrying
+    /// a failed bind with backoff (OC-R-083), so `bound_addr()` is `None` until the first
     /// successful bind lands.
     async fn poll_bound_addr(
         backend: &crate::module::ocpp::server::backend::OcppServer<V1_6>,
