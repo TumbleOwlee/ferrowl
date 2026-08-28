@@ -178,18 +178,7 @@ where
     /// Execute all loaded scripts
     pub fn call_all(&mut self) -> std::result::Result<(), Vec<Error>> {
         self.begin_cycle();
-        let errors: Vec<_> = self
-            .iter_mut()
-            .map(|(_, v)| v.exec())
-            .filter(std::result::Result::is_err)
-            .map(|e| e.expect_err("filter kept only Err results"))
-            .collect();
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        Self::exec_collecting_errors(self.iter_mut())
     }
 
     /// Execute all loaded scripts while skipping all scrips executed in the last timeframe of
@@ -199,9 +188,20 @@ where
         since: std::time::Duration,
     ) -> std::result::Result<(), Vec<Error>> {
         self.begin_cycle();
-        let errors: Vec<_> = self
-            .iter_mut()
-            .filter(|(_, v)| v.since_last_execution() >= since)
+        Self::exec_collecting_errors(
+            self.iter_mut()
+                .filter(|(_, v)| v.since_last_execution() >= since),
+        )
+    }
+
+    /// Execute every script yielded by `scripts`, collecting the errors of the failing ones
+    fn exec_collecting_errors<'a>(
+        scripts: impl Iterator<Item = (&'a K, &'a mut Script)>,
+    ) -> std::result::Result<(), Vec<Error>>
+    where
+        K: 'a,
+    {
+        let errors: Vec<_> = scripts
             .map(|(_, v)| v.exec())
             .filter(std::result::Result::is_err)
             .map(|e| e.expect_err("filter kept only Err results"))
