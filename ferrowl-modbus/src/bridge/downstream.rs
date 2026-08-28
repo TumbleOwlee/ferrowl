@@ -40,7 +40,7 @@ where
     /// doubling backoff (`ferrowl_util::backoff::BackoffPolicy::default()`'s `initial`..=`max`,
     /// MB-R-051's exact rule) whenever the link is down and `reconnect` is true; with
     /// `reconnect` false a lost/failed
-    /// connection is never retried (Shared design decision 2). `log` receives lifecycle
+    /// connection is never retried. `log` receives lifecycle
     /// lines (unprefixed) and failure lines (prefixed `ERROR_PREFIX`).
     pub fn spawn<C, Fut, L>(mut connect: C, reconnect: bool, log: L) -> Self
     where
