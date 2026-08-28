@@ -6,15 +6,12 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
-    state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
-    },
-    style::{InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
+    state::{InputFieldState, SelectionState, SuggestInputState},
+    style::{InputFieldStyle, SelectionStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
-        SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
+        GetValue, InputField, Selection, SuggestInput, Text, TextBuilder, Validate, ValidateResult,
+        Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -30,6 +27,7 @@ use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::dialog::tls_section::{EffectiveTlsLevel, TlsSection, TlsSectionFocus};
+use crate::dialog::widgets::{input, selection, set_input, set_suggest_input, suggest_input};
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
@@ -201,6 +199,7 @@ impl OcppSetupDialog {
                 "Config",
                 "device.toml",
                 &input_style,
+                true,
                 FsPathProvider::with_extensions(&["toml", "json"]),
             ))
             .version(selection(
@@ -208,9 +207,8 @@ impl OcppSetupDialog {
                 vec![OcppVersion::V1_6, OcppVersion::V2_0_1, OcppVersion::V2_1],
                 &selection_style,
             ))
-            .role(aligned_selection(
-                "Role",
-                Some(HorizontalAlignment::Center),
+            .role(selection(
+                ("Role", HorizontalAlignment::Center),
                 vec![OcppRole::Client, OcppRole::Server],
                 &selection_style,
             ))
@@ -226,9 +224,8 @@ impl OcppSetupDialog {
             .header_name_input(header_name_input(crate::view::border_style()))
             .header_value_input(header_value_input(crate::view::border_style()))
             .extra_headers(Vec::new())
-            .reconnect(aligned_selection(
-                "Reconnect",
-                Some(HorizontalAlignment::Right),
+            .reconnect(selection(
+                ("Reconnect", HorizontalAlignment::Right),
                 vec![ReconnectChoice::On, ReconnectChoice::Off],
                 &selection_style,
             ))
@@ -271,8 +268,8 @@ impl OcppSetupDialog {
         let mut d = Self::new();
         d.extra_headers = extra_headers.to_vec();
         d.headers_table = header_table(headers::rows(&d.extra_headers));
-        set_text(&mut d.name, &spec.name);
-        set_suggest_text(&mut d.config_path, device_path);
+        set_input(&mut d.name, &spec.name);
+        set_suggest_input(&mut d.config_path, device_path);
         d.version.state.set_selection(match spec.version {
             OcppVersion::V1_6 => 0,
             OcppVersion::V2_0_1 => 1,
@@ -286,20 +283,20 @@ impl OcppSetupDialog {
             OcppProtocol::Ws => 0,
             OcppProtocol::Wss => 1,
         });
-        set_text(&mut d.ip, &spec.ip);
-        set_text(&mut d.port, &spec.port.to_string());
-        set_text(&mut d.path, &spec.path);
+        set_input(&mut d.ip, &spec.ip);
+        set_input(&mut d.port, &spec.port.to_string());
+        set_input(&mut d.path, &spec.path);
         d.reconnect
             .state
             .set_selection(if spec.reconnect.unwrap_or(true) { 0 } else { 1 });
 
         let level = SecurityLevel::from_config(&spec.security, spec.role);
         d.security.state.set_selection(level.index());
-        set_text(
+        set_input(
             &mut d.username,
             spec.security.username.as_deref().unwrap_or(""),
         );
-        set_text(
+        set_input(
             &mut d.password,
             spec.security.password.as_deref().unwrap_or(""),
         );
@@ -898,114 +895,6 @@ impl OcppSetupDialog {
     }
 }
 
-fn input<T: Validate + Clone>(
-    title: &str,
-    placeholder: &str,
-    style: &InputFieldStyle,
-    focused: bool,
-) -> Widget<InputFieldState, InputField<T>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(focused)
-            .disabled(false)
-            .placeholder(Some(placeholder.to_string()))
-            .allowed_for::<T>()
-            .build()
-            .expect("all required builder fields are set"),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some((title, HorizontalAlignment::Left).into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn set_text<T: Validate + Clone>(w: &mut Widget<InputFieldState, InputField<T>>, value: &str) {
-    w.state.set_input(value.to_string());
-    w.state.set_cursor(value.chars().count());
-}
-
-fn suggest_input<T: Validate + Clone>(
-    title: &str,
-    placeholder: &str,
-    style: &InputFieldStyle,
-    provider: FsPathProvider,
-) -> Widget<SuggestInputState<FsPathProvider>, SuggestInput<T, FsPathProvider>> {
-    let mut state = SuggestInputStateBuilder::default()
-        .provider(provider)
-        .build()
-        .expect("all required builder fields are set");
-    state.set_placeholder(Some(placeholder.to_string()));
-
-    Widget {
-        state,
-        widget: SuggestInputBuilder::default()
-            .input_field(
-                InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some((title, HorizontalAlignment::Left).into()))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(style.clone())
-                    .build()
-                    .expect("all required builder fields are set"),
-            )
-            .popup_style(SuggestInputStyle::default())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn set_suggest_text<T: Validate + Clone>(
-    w: &mut Widget<SuggestInputState<FsPathProvider>, SuggestInput<T, FsPathProvider>>,
-    value: &str,
-) {
-    w.state.set_input(value.to_string());
-    w.state.set_cursor(value.chars().count());
-}
-
-fn selection<T: ToLabel + Clone>(
-    title: &str,
-    values: Vec<T>,
-    style: &SelectionStyle,
-) -> Widget<SelectionState<T>, Selection<T>> {
-    aligned_selection(title, None, values, style)
-}
-
-fn aligned_selection<T: ToLabel + Clone>(
-    title: &str,
-    title_alignment: Option<HorizontalAlignment>,
-    values: Vec<T>,
-    style: &SelectionStyle,
-) -> Widget<SelectionState<T>, Selection<T>> {
-    Widget {
-        state: SelectionStateBuilder::default()
-            .focused(false)
-            .values(values)
-            .build()
-            .expect("all required builder fields are set"),
-        widget: SelectionBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(
-                (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
-            ))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
 fn text(style: TextStyle) -> Widget<String, Text> {
     Widget {
         state: String::new(),
@@ -1116,8 +1005,8 @@ mod tests {
 
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.cert_file, &format!("~/{cert_name}"));
-        set_suggest_text(&mut d.tls.key_file, &format!("~/{key_name}"));
+        set_suggest_input(&mut d.tls.cert_file, &format!("~/{cert_name}"));
+        set_suggest_input(&mut d.tls.key_file, &format!("~/{key_name}"));
 
         let outcome = d.resolve();
         let _ = std::fs::remove_file(home.join(&cert_name));
@@ -1130,7 +1019,7 @@ mod tests {
     /// OC-R-048, OC-R-107 — the setup dialog resolves a reconnect-off selection into the spec.
     fn ut_resolve_reconnect_off_maps_to_some_false() {
         let mut d = OcppSetupDialog::new(); // Client by default
-        set_text(&mut d.name, "cs-1");
+        set_input(&mut d.name, "cs-1");
         d.reconnect.state.set_selection(1); // Off
         let spec = d.resolve().expect("valid client config");
         assert_eq!(spec.reconnect, Some(false));
@@ -1141,7 +1030,7 @@ mod tests {
     /// the client role.
     fn ut_resolve_server_role_reports_reconnect() {
         let mut d = OcppSetupDialog::new();
-        set_text(&mut d.name, "csms-1");
+        set_input(&mut d.name, "csms-1");
         d.role.state.set_selection(1); // Server
         let spec = d.resolve().expect("valid server config");
         assert_eq!(spec.reconnect, Some(true));
@@ -1230,7 +1119,7 @@ mod tests {
 
     fn wss_dialog(role_idx: usize) -> OcppSetupDialog {
         let mut d = OcppSetupDialog::new();
-        set_text(&mut d.name, "cs-1");
+        set_input(&mut d.name, "cs-1");
         d.protocol.state.set_selection(1); // Wss
         d.role.state.set_selection(role_idx);
         d
@@ -1273,8 +1162,8 @@ mod tests {
     fn ut_resolve_self_signed_excludes_stale_cert_key_text() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.cert_file, "s.crt");
-        set_suggest_text(&mut d.tls.key_file, "s.key");
+        set_suggest_input(&mut d.tls.cert_file, "s.crt");
+        set_suggest_input(&mut d.tls.key_file, "s.key");
         d.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let spec = d.resolve().expect("self-signed needs no cert/key files");
@@ -1318,7 +1207,7 @@ mod tests {
     fn ut_resolve_skip_verify_excludes_stale_ca_file_text() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.ca_file, "ca.pem");
+        set_suggest_input(&mut d.tls.ca_file, "ca.pem");
         d.tls.skip_verify.state.set_selection(1); // On, after the text was typed
 
         let spec = d.resolve().expect("skip-verify needs no ca file");
@@ -1353,8 +1242,8 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::BasicAuth.index());
-        set_text(&mut d.username, "cp001");
-        set_text(&mut d.password, "s3cret");
+        set_input(&mut d.username, "cp001");
+        set_input(&mut d.password, "s3cret");
         let spec = d
             .resolve()
             .expect("below-TLS server should self-sign, not error");
@@ -1384,7 +1273,7 @@ mod tests {
         let cert = tmp_file("cert_alone.crt");
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.cert_file, &cert);
+        set_suggest_input(&mut d.tls.cert_file, &cert);
         let err = d.resolve().unwrap_err();
         assert!(err.contains("must both be set, or neither"), "{err}");
     }
@@ -1394,8 +1283,8 @@ mod tests {
     fn ut_server_tls_nonexistent_cert_is_rejected() {
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.cert_file, "/no/such/cert.crt");
-        set_suggest_text(&mut d.tls.key_file, "/no/such/key.key");
+        set_suggest_input(&mut d.tls.cert_file, "/no/such/cert.crt");
+        set_suggest_input(&mut d.tls.key_file, "/no/such/key.key");
         let err = d.resolve().unwrap_err();
         assert!(err.contains("Certificate file not found"), "{err}");
     }
@@ -1407,8 +1296,8 @@ mod tests {
         let key = tmp_file("key.key");
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.cert_file, &cert);
-        set_suggest_text(&mut d.tls.key_file, &key);
+        set_suggest_input(&mut d.tls.cert_file, &cert);
+        set_suggest_input(&mut d.tls.key_file, &key);
         assert!(d.resolve().is_ok());
     }
 
@@ -1421,8 +1310,8 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        set_suggest_text(&mut d.tls.cert_file, &cert);
-        set_suggest_text(&mut d.tls.key_file, &key);
+        set_suggest_input(&mut d.tls.cert_file, &cert);
+        set_suggest_input(&mut d.tls.key_file, &key);
         let err = d.resolve().unwrap_err();
         assert!(err.contains("Client CA list is required"), "{err}");
     }
@@ -1480,7 +1369,7 @@ mod tests {
 
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(d.tls.client_ca_add_dialog.is_some());
-        set_suggest_text(&mut d.tls.client_ca_add_dialog.as_mut().unwrap().path, &ca);
+        set_suggest_input(&mut d.tls.client_ca_add_dialog.as_mut().unwrap().path, &ca);
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(d.tls.client_ca_add_dialog.is_none());
         assert_eq!(
@@ -1554,8 +1443,8 @@ mod tests {
             .set_selection(SecurityLevel::MutualTls.index());
         d.sync_tls();
         assert!(d.tls.show_self_signed_row());
-        set_suggest_text(&mut d.tls.client_cert_file, "stale.crt");
-        set_suggest_text(&mut d.tls.client_key_file, "stale.key");
+        set_suggest_input(&mut d.tls.client_cert_file, "stale.crt");
+        set_suggest_input(&mut d.tls.client_key_file, "stale.key");
         d.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let spec = d
@@ -1614,7 +1503,7 @@ mod tests {
     fn ut_client_ca_file_when_set_must_exist() {
         let mut d = wss_dialog(0);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.tls.ca_file, "/no/such/ca.pem");
+        set_suggest_input(&mut d.tls.ca_file, "/no/such/ca.pem");
         let err = d.resolve().unwrap_err();
         assert!(err.contains("CA file not found"), "{err}");
     }
@@ -1630,7 +1519,7 @@ mod tests {
     /// UI-R-024 — a ws setup never requires security material.
     fn ut_ws_never_requires_security() {
         let mut d = OcppSetupDialog::new(); // Ws, Client by default
-        set_text(&mut d.name, "cs-1");
+        set_input(&mut d.name, "cs-1");
         let spec = d.resolve().unwrap();
         assert_eq!(spec.security, OcppSecurityConfig::default());
     }
@@ -1730,8 +1619,8 @@ mod tests {
             .security
             .state
             .set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut without_hint.tls.cert_file, &cert);
-        set_suggest_text(&mut without_hint.tls.key_file, &key);
+        set_suggest_input(&mut without_hint.tls.cert_file, &cert);
+        set_suggest_input(&mut without_hint.tls.key_file, &key);
         let mut buf2 = Buffer::empty(area);
         without_hint.render(area, &mut buf2);
         let without_hint_text = buffer_text(&buf2);
@@ -2194,7 +2083,7 @@ mod tests {
 
     fn client_dialog() -> OcppSetupDialog {
         let mut d = OcppSetupDialog::new();
-        set_text(&mut d.name, "cs-1");
+        set_input(&mut d.name, "cs-1");
         d // Client by default
     }
 
