@@ -3,7 +3,7 @@
 //! Exit codes: `0` ran to completion (`--duration` elapsed or Ctrl-C), `1` `--upstream`/
 //! `--downstream` missing or malformed, or the bridge failed to start (upstream bind/listen/
 //! serial-open failure, BR-R-013), `3` `--exit-on-error` was set and a drained log line was
-//! `[bridge]`-prefixed (a genuine relay failure, Shared design decision 3).
+//! `[bridge]`-prefixed (a genuine relay failure).
 
 use std::io::Write as _;
 use std::time::{Duration, Instant};
@@ -12,8 +12,8 @@ use crate::cli::{BridgeArgs, parse_bridge_descriptor};
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
-/// BR-R-013 / Shared design decision 3 — the bridge's own error-line prefix, unlike headless
-/// `run`'s `--exit-on-error` (CL-R-031), which keys off log level rather than a prefix.
+/// BR-R-013 — the bridge's own error-line prefix, unlike headless `run`'s `--exit-on-error`
+/// (CL-R-031), which keys off log level rather than a prefix.
 const ERROR_PREFIX: &str = ferrowl_modbus::bridge::ERROR_PREFIX;
 
 /// Run the bridge described by `args`. Returns the process exit code; never panics on the
