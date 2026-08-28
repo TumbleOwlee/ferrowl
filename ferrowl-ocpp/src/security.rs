@@ -228,37 +228,21 @@ pub(crate) fn build_connector(
     Ok(Connector::Rustls(Arc::new(config)))
 }
 
-/// A [`ServerCertVerifier`] that accepts any server certificate without checking it. The
-/// connection remains TLS-encrypted (confidential, integrity-protected) but the peer is not
-/// authenticated at all -- suitable only for talking to a CSMS whose ephemeral self-signed
-/// certificate cannot be pinned in advance. Signature verification itself is still delegated to
-/// the default crypto provider so the handshake is cryptographically sound; only the
-/// certificate-chain/identity check is skipped.
+/// Shared signature-verification plumbing for [`AcceptAnyServerCert`]/[`AllowAnyClientCert`]:
+/// both skip peer chain/identity verification but must still delegate signature checks to the
+/// default crypto provider so the handshake stays cryptographically sound.
 #[derive(Debug)]
-struct AcceptAnyServerCert {
+struct SkipVerifySignaturePlumbing {
     supported_algs: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
-impl AcceptAnyServerCert {
+impl SkipVerifySignaturePlumbing {
     fn new() -> Self {
         Self {
             supported_algs: CryptoProvider::get_default()
                 .expect("a default rustls CryptoProvider is installed")
                 .signature_verification_algorithms,
         }
-    }
-}
-
-impl ServerCertVerifier for AcceptAnyServerCert {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -284,6 +268,60 @@ impl ServerCertVerifier for AcceptAnyServerCert {
     }
 }
 
+/// A [`ServerCertVerifier`] that accepts any server certificate without checking it. The
+/// connection remains TLS-encrypted (confidential, integrity-protected) but the peer is not
+/// authenticated at all -- suitable only for talking to a CSMS whose ephemeral self-signed
+/// certificate cannot be pinned in advance. Signature verification itself is still delegated to
+/// the default crypto provider so the handshake is cryptographically sound; only the
+/// certificate-chain/identity check is skipped.
+#[derive(Debug)]
+struct AcceptAnyServerCert {
+    sig: SkipVerifySignaturePlumbing,
+}
+
+impl AcceptAnyServerCert {
+    fn new() -> Self {
+        Self {
+            sig: SkipVerifySignaturePlumbing::new(),
+        }
+    }
+}
+
+impl ServerCertVerifier for AcceptAnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.sig.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.sig.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.sig.supported_verify_schemes()
+    }
+}
+
 /// A [`ClientCertVerifier`] that requires a client certificate be presented, but performs no
 /// chain/identity validation against any root store -- the server-role mirror of
 /// [`AcceptAnyServerCert`]. Backs `ServerTlsPolicy::MutualTls`'s `ClientCertVerification::
@@ -293,15 +331,13 @@ impl ServerCertVerifier for AcceptAnyServerCert {
 /// still delegated to the default crypto provider so the handshake stays cryptographically sound.
 #[derive(Debug)]
 struct AllowAnyClientCert {
-    supported_algs: rustls::crypto::WebPkiSupportedAlgorithms,
+    sig: SkipVerifySignaturePlumbing,
 }
 
 impl AllowAnyClientCert {
     fn new() -> Self {
         Self {
-            supported_algs: CryptoProvider::get_default()
-                .expect("a default rustls CryptoProvider is installed")
-                .signature_verification_algorithms,
+            sig: SkipVerifySignaturePlumbing::new(),
         }
     }
 }
@@ -328,7 +364,7 @@ impl ClientCertVerifier for AllowAnyClientCert {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls12_signature(message, cert, dss, &self.supported_algs)
+        self.sig.verify_tls12_signature(message, cert, dss)
     }
 
     fn verify_tls13_signature(
@@ -337,11 +373,11 @@ impl ClientCertVerifier for AllowAnyClientCert {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        verify_tls13_signature(message, cert, dss, &self.supported_algs)
+        self.sig.verify_tls13_signature(message, cert, dss)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.supported_algs.supported_schemes()
+        self.sig.supported_verify_schemes()
     }
 }
 
