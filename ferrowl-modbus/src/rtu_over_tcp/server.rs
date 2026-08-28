@@ -36,8 +36,8 @@ impl<T: KeyParams> ServerBuilder<T> {
     /// receives log lines, `status` receives a "Server stopped" line once the task ends, and
     /// `receiver` delivers `ServerCommand::Terminate`.
     ///
-    /// `spawn` itself always returns `Ok` — a bind or serve failure no longer fails the start
-    /// synchronously; it surfaces from the returned `JoinHandle` instead (MB-R-130/MB-R-134).
+    /// `spawn` itself always returns `Ok` — a bind or serve failure does not fail the start
+    /// synchronously; it surfaces from the returned `JoinHandle` (MB-R-130/MB-R-134).
     /// With `config.reconnect` set (the default), a bind failure or a mid-serve failure does not
     /// end the task: it logs, waits an exponential backoff (capped, reset after a serve loop
     /// that accepted at least one connection), and retries (MB-R-114, MB-R-130–134). A TLS
@@ -77,8 +77,7 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 }
 
-/// Every production server now logs per-request outcomes (MB-R-067); RtuOverTcp is no
-/// exception.
+/// Every production server logs per-request outcomes (MB-R-067).
 const VERBOSE: bool = true;
 
 /// MB-R-128 — this transport is never physical Rtu/Ascii serial (RtuOverTcp/AsciiOverTcp ride

@@ -246,8 +246,8 @@ impl<V: Version> ClientBuilder<V> {
     /// `handler` answers CSMS-initiated Calls. For the low-level API pass a [`CsActionHandler`];
     /// for the semantic API pass [`SemanticAdapter::new(your_cs_handler)`](SemanticAdapter).
     ///
-    /// `spawn` itself always returns `Ok` — a dial or mid-connection failure no longer fails the
-    /// start synchronously; it surfaces from [`Client::join`] instead (OC-R-048/OC-R-105). With
+    /// `spawn` itself always returns `Ok` — a dial or mid-connection failure does not fail the
+    /// start synchronously; it surfaces from [`Client::join`] (OC-R-048/OC-R-105). With
     /// `config.reconnect` set (the default), a failed dial or a dropped connection does not end
     /// the task: it logs, waits an exponential backoff (capped, reset after a connection whose
     /// handshake completed), and retries. `status` receives a "Client disconnected" line once

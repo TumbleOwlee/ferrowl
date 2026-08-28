@@ -44,17 +44,13 @@ pub trait TableEntry<const N: usize> {
     /// Optional true per-character-span styling for a column (UI-R-063: each byte/word of the
     /// Memory-layout panel's Hex/Ascii cells carries its own value-class/recency color, which a
     /// single per-cell [`Style`](ratatui::style::Style) from `cell_styles` cannot express).
-    /// `Some(spans)` renders that column from these `(text, style)` pairs as individually colored
-    /// `Span`s instead of `values()`'s plain string under `cell_styles`' one `Style` — that
-    /// column's `cell_styles` entry is then ignored. `None` (the default; every `TableEntry` impl
-    /// predating this method implicitly returns it) renders byte-for-byte as before this method
-    /// existed.
+    /// `Some(spans)` renders that column from these `(text, style)` pairs instead of the plain
+    /// string from `values()`, ignoring that column's `cell_styles` entry. `values()` must still
+    /// return an entry for the column either way — the render loop zips it with the column
+    /// widths, so a column with no `values()` entry does not exist to be styled.
     ///
-    /// A spans cell is never word-wrapped — Shared with the render loop's own doc comment: only
-    /// content already guaranteed to fit the column's width should use this (the Memory-layout
-    /// table's Hex/Ascii columns are sized for their fixed per-line byte/word count and never
-    /// wrap in practice). Content that doesn't fit simply overflows/truncates per the column's
-    /// width constraint rather than wrapping.
+    /// A spans cell is never word-wrapped: content must already fit the column's width, or it
+    /// overflows/truncates rather than wrapping.
     fn cell_spans(&self) -> [Option<Vec<(String, ratatui::style::Style)>>; N] {
         [const { None }; N]
     }

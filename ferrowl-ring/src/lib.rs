@@ -2,9 +2,8 @@
 //!
 //! [`Ring<T, CAP>`] holds up to `CAP` items of any type `T` in a FIFO order. Pushing into a full
 //! ring evicts the oldest item. Storage is a single inline `[Option<T>; CAP]` array — no per-push
-//! heap allocation for the buffer itself (individual `T`s may of course allocate). This was
-//! previously a log-specific buffer; it is now a general-purpose container (the timestamping and
-//! line truncation that used to live here belong to the caller).
+//! heap allocation for the buffer itself (individual `T`s may of course allocate). It is a
+//! general-purpose container: timestamping and line truncation belong to the caller.
 
 use std::array;
 

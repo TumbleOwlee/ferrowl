@@ -155,8 +155,6 @@ mod tests {
     #[test]
     /// UI-R-033 — multi-line call parentheses do not double-indent.
     fn ut_multiline_call_parens_do_not_double_indent() {
-        // Regression: `(` used to be tracked as a block opener alongside `function`,
-        // doubling the indent depth for continuation lines inside a multi-line signature.
         let src = "function foo(\na,\nb\n)\nbody()\nend";
         let expected = "function foo(\n    a,\n    b\n    )\n    body()\nend";
         assert_eq!(format(src), expected);

@@ -288,8 +288,8 @@ async fn self_signed_wins_over_explicit_files() {
 /// unset, fails at config *deserialization*, not server start: `ServerCertSource`'s custom
 /// `Deserialize` makes the illegal state impossible to construct at all (see `ferrowl-util`'s
 /// `ServerCertSource::resolve`), so `tcp::Config` never even parses. `ModbusTlsConfig`'s typed
-/// Rust constructor can no longer represent "cert_file alone" (there is no `Explicit`-with-only-
-/// one-file variant), which is exactly the point: this is now a compile-time-unrepresentable
+/// Rust constructor cannot represent "cert_file alone" (there is no `Explicit`-with-only-
+/// one-file variant), which is exactly the point: this is a compile-time-unrepresentable
 /// state, not just a runtime-checked one.
 #[test]
 fn lone_cert_or_key_file_fails_config_deserialization() {

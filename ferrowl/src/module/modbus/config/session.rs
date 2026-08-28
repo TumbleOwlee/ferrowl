@@ -98,9 +98,8 @@ impl Role {
 
 /// [`Role`] narrowed to the two variants every client/server-only code path (setup dialogs,
 /// instance construction, view host registration) actually handles. Converting away from
-/// `Role::Monitor` at the dispatch boundary ([`Role::client_or_server`]) turns what used to be a
-/// call-site convention — matching `Role` exhaustively and asserting `Monitor` unreachable — into
-/// a compile-time guarantee: these paths are no longer typed to accept a monitor role at all.
+/// `Role::Monitor` at the dispatch boundary ([`Role::client_or_server`]) makes that narrowing a
+/// compile-time guarantee: these paths are not typed to accept a monitor role at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientOrServer {
     Client,

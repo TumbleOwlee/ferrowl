@@ -21,8 +21,8 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
-/// Poll until the CSMS listener has bound: `spawn` no longer binds synchronously, retrying a
-/// failed bind with backoff instead (OC-R-083), so `local_addr()` is `None` until the first
+/// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
+/// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
 /// successful bind lands.
 async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
     for _ in 0..50 {

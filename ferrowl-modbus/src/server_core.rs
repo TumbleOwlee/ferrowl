@@ -1133,12 +1133,9 @@ mod tests {
         );
     }
 
-    // Regression: the service used to bridge into async via `block_in_place` +
-    // `Handle::block_on` purely to lock `memory`, which panics ("can call blocking only when
-    // running on the multi-threaded runtime") on the default current-thread flavor below. Now
-    // that the lock is synchronous (`parking_lot`) and `on_request` is an ordinary async fn the
-    // connection task just `.await`s, this must succeed on a current-thread runtime with no
-    // dedicated worker threads to bridge onto.
+    // The current-thread flavor is the point of this test: `memory` is a synchronous
+    // `parking_lot` lock and `on_request` an ordinary async fn, so the request path must need no
+    // worker thread to bridge blocking work onto.
     #[tokio::test]
     /// MB-R-057 — the server answers an inbound request directly from the shared store.
     async fn ut_server_call_works_on_current_thread_runtime() {
@@ -1498,8 +1495,8 @@ mod tests {
         .await
         .unwrap()
         .expect("request answered");
-        // Regression: the write range length must equal values.len(), not 1. Before the fix
-        // `Memory::write` rejected any multi-coil write (range.length() != values.len()).
+        // The write range length must equal values.len(), not 1: `Memory::write` rejects a range
+        // whose length disagrees with the value count, which would reject every multi-coil write.
         assert!(matches!(
             resp,
             ResponsePdu::WriteMultipleCoils {

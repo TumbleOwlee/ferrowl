@@ -63,8 +63,8 @@ where
     /// Spawn the server task, which binds the listening socket automatically (OC-R-083).
     /// `handler` answers inbound Calls for every connection.
     ///
-    /// A *bind* failure no longer fails the start synchronously; it is retried from inside the
-    /// task instead (OC-R-083, OC-R-108, OC-R-109). With `config.reconnect` set (the default), a
+    /// A *bind* failure does not fail the start synchronously; it is retried from inside the
+    /// task (OC-R-083, OC-R-108, OC-R-109). With `config.reconnect` set (the default), a
     /// failed bind is retried using the same backoff policy as the Modbus client (MB-R-051); with
     /// it unset, a failed bind ends the module task with that error, surfaced from
     /// [`Server::join`]/[`Server::terminate`].

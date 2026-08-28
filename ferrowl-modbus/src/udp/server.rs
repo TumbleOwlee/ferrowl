@@ -31,8 +31,8 @@ impl<T: KeyParams> ServerBuilder<T> {
     }
 
     /// Spawns the serve loop as a tokio task and always returns `Ok` (MB-R-130): the UDP bind
-    /// moves inside the retried task itself, so a bind failure no longer fails `spawn()`
-    /// synchronously — it surfaces from the joined `JoinHandle` instead, after exhausting
+    /// moves inside the retried task itself, so a bind failure does not fail `spawn()`
+    /// synchronously — it surfaces from the joined `JoinHandle`, after exhausting
     /// retries (`reconnect: false`, MB-R-134) or never, if `reconnect` stays true and the
     /// caller eventually sends `ServerCommand::Terminate` (MB-R-133). `log` receives log
     /// lines, `status` receives lifecycle status lines.

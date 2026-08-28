@@ -329,7 +329,7 @@ impl<V: Version> OcppClient<V> {
         .await?;
         *self.cmd_tx.write() = Some(client.sender());
         self.client = Some(client);
-        // `spawn` no longer dials synchronously (OC-R-048, OC-R-105): the handshake happens
+        // `spawn` dials asynchronously (OC-R-048, OC-R-105): the handshake happens
         // inside the retried task, so `online` stays false here and is flipped by the handler's
         // on_connected/on_disconnected callbacks once a real handshake actually completes.
         Ok(())
@@ -896,7 +896,7 @@ mod tests {
         }
     }
 
-    /// Poll until the CSMS listener has bound (`spawn` no longer binds synchronously).
+    /// Poll until the CSMS listener has bound (`spawn` binds asynchronously).
     async fn bound_addr(server: &ferrowl_ocpp::csms::Server<ferrowl_ocpp::V1_6>) -> String {
         for _ in 0..50 {
             if let Some(addr) = server.local_addr() {

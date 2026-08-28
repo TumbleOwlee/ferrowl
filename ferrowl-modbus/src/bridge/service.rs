@@ -329,7 +329,7 @@ mod tests {
         let _ = serving.await;
     }
 
-    /// BR-R-012 (design decision 3) — a downstream gateway exception is logged with the
+    /// BR-R-012 — a downstream gateway exception is logged with the
     /// `[bridge]` prefix, naming the unit id.
     #[tokio::test]
     async fn ut_service_gateway_exception_logged_with_bridge_prefix() {

@@ -346,7 +346,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// OC-R-083, OC-R-108-109 — `OcppServer::start()` against an occupied port still returns
-    /// `Ok(TlsBinding)` (spawn no longer fails synchronously on a failed bind); `bound_addr()`
+    /// `Ok(TlsBinding)`; `bound_addr()`
     /// stays `None` while backing off and becomes `Some(_)` once the port frees up.
     async fn it_csms_start_against_occupied_port_stays_running() {
         let occupier = tokio::net::TcpListener::bind("127.0.0.1:0")
