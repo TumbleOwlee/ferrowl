@@ -201,37 +201,6 @@ fn identity_from_path(path: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Waits out a listener-bind backoff, aborting early on `Command::Terminate` or the command
-/// channel closing (returns `true`). Mirrors `ferrowl_ocpp::cs`'s version exactly (OC-R-109):
-/// any other command received while the listener isn't bound yet is dropped with a log line,
-/// since there is nothing to send it to.
-async fn wait_reconnect_backoff<V, L>(
-    receiver: &mut mpsc::Receiver<Command<V>>,
-    backoff: std::time::Duration,
-    log: &L,
-) -> bool
-where
-    V: Version,
-    L: LogFn,
-{
-    let deadline = tokio::time::Instant::now() + backoff;
-    loop {
-        tokio::select! {
-            _ = tokio::time::sleep_until(deadline) => return false,
-            cmd = receiver.recv() => match cmd {
-                None | Some(Command::Terminate) => return true,
-                Some(_) => {
-                    log.invoke(
-                        "Command dropped: CSMS listener is not bound yet and retrying."
-                            .to_string(),
-                    )
-                    .await;
-                }
-            },
-        }
-    }
-}
-
 /// Drive the listener-bind retry loop: bind the configured address and run the accept loop,
 /// retrying a failed bind per [`BackoffPolicy`] when `config.reconnect` is set (OC-R-083,
 /// OC-R-108, OC-R-109); with it unset, a failed bind ends the loop with that error. `tls` is
@@ -317,7 +286,16 @@ where
         let log = log.clone();
         async move {
             let mut receiver = receiver.lock().await;
-            wait_reconnect_backoff(&mut receiver, backoff, &log).await
+            // There is nothing to send a non-`Terminate` command to while the listener isn't
+            // bound yet, so it is dropped with a log line rather than queued. OC-R-109.
+            ferrowl_util::backoff::wait_backoff(
+                &mut receiver,
+                backoff,
+                "Command dropped: CSMS listener is not bound yet and retrying.",
+                |cmd: &Command<V>| matches!(cmd, Command::Terminate),
+                |msg| log.invoke(msg),
+            )
+            .await
         }
     };
 
