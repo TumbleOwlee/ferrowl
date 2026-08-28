@@ -13,7 +13,7 @@ pub type RtuDownstream = DownstreamHandle<FrameTransport<SerialStream, Rtu>, Rtu
 /// MB-R-150's path-conflict check is scoped to `ferrowl::module::modbus` session instances
 /// (client/server/monitor tabs); bridge mode is a distinct architecture (see AGENTS.md "Bridging
 /// Modbus and OCPP" scope boundary) with no session registry to consult, so a default,
-/// never-conflicting cell is used here — behavior is unchanged from before this feature.
+/// never-conflicting cell is used here.
 pub fn spawn(config: rtu::Config, log: impl LogFn + Clone + 'static) -> RtuDownstream {
     let reconnect = config.reconnect;
     let path_conflict = PathConflictCell::default();
