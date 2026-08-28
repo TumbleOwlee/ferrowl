@@ -199,7 +199,7 @@ impl OcppSetupDialog {
                 "Config",
                 "device.toml",
                 &input_style,
-                true,
+                false,
                 FsPathProvider::with_extensions(&["toml", "json"]),
             ))
             .version(selection(
