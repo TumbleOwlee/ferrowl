@@ -9,18 +9,10 @@ pub enum Alignment {
     Right,
 }
 
-impl std::fmt::Display for Alignment {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Alignment::Left => {
-                write!(fmt, "Left")
-            }
-            Alignment::Right => {
-                write!(fmt, "Right")
-            }
-        }
-    }
-}
+crate::format::display_by_variant!(Alignment {
+    Left => "Left",
+    Right => "Right",
+});
 
 #[cfg(test)]
 mod tests {
