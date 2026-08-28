@@ -29,7 +29,7 @@ struct Context(HashMap<&'static str, Vec<Box<dyn Joinable>>>);
 
 /// Name of the global context
 ///
-/// A task spawned by `ferrowl_util::tokio::spawn_detach()` or `ferrowl_util::tokio::spawn()` will be part of
+/// A task spawned by `ferrowl_util::tokio::spawn_detach()` will be part of
 /// the global context. These tasks can be joined using `ferrowl_util::tokio::join_all()`.
 pub static GLOBAL_CONTEXT: &str = "";
 
@@ -53,10 +53,7 @@ static CONTEXT: Lazy<Mutex<Context>> = Lazy::new(|| Mutex::new(Context::default(
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     // Start the given future as tokio task detached
-///     spawn_detach(async move {
-///         // do something
-///     }).await;
+///     spawn_detach(async move {}).await;
 /// }
 /// ```
 pub async fn spawn_detach<F: Send + IntoFuture + Future + 'static>(future: F)
@@ -74,19 +71,6 @@ where
 /// This context is used to provide the `join_all()` and `join_all_of_context(ctx)` functionality.
 /// See the respective documentation for details.
 ///
-/// # Examples
-///
-/// ```rust
-/// use ferrowl_util::tokio::spawn_detach_with_context;
-///
-/// #[tokio::main]
-/// async fn main() {
-///     // Start the given future as tokio task detached
-///     spawn_detach_with_context("Context", async move {
-///         // do something
-///     }).await;
-/// }
-/// ```
 pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
     ctx: &'static str,
     future: F,
@@ -104,29 +88,8 @@ pub async fn spawn_detach_with_context<F: Send + IntoFuture + Future + 'static>(
 /// will be part of a background context. A call to `join_all()` will await all stored JoinHandle
 /// and will only return if at any given time no more tasks are stored in the context.
 ///
-/// This call will not gurantee that no more tasks are added after returning. It only awaits all
+/// This call will not guarantee that no more tasks are added after returning. It only awaits all
 /// tasks that were added before returning.
-///
-/// # Example
-///
-/// ```rust
-/// use ferrowl_util::tokio::{spawn_detach, spawn_detach_with_context, join_all};
-///
-/// #[tokio::main]
-/// async fn main() {
-///     // Start the given future as tokio task detached
-///     spawn_detach(async move {
-///         println!("Global Context!");
-///     }).await;
-///
-///     spawn_detach_with_context("Local", async move {
-///         println!("Local Context!");
-///     }).await;
-///
-///     // Will await both spawned tasks
-///     join_all().await;
-/// }
-/// ```
 pub async fn join_all() {
     loop {
         let mut context = CONTEXT.lock().await;
@@ -150,30 +113,8 @@ pub async fn join_all() {
 /// await all stored JoinHandle and will only return if at any given time no more tasks are stored
 /// for the given context name.
 ///
-/// This call will not gurantee that no more tasks are added to the context after returning.
+/// This call will not guarantee that no more tasks are added to the context after returning.
 /// It only awaits all tasks that were added before returning.
-///
-/// # Example
-///
-/// ```rust
-/// use ferrowl_util::tokio::{spawn_detach, spawn_detach_with_context, join_all_of_context};
-///
-/// #[tokio::main]
-/// async fn main() {
-///     // Start the given future as tokio task detached
-///     spawn_detach(async move {
-///         println!("Global Context!");
-///     }).await;
-///
-///     spawn_detach_with_context("Local", async move {
-///         println!("Local Context!");
-///     }).await;
-///
-///     // Will only await the JoinHandle added to context "Local"
-///     // You will have to call join_all() or join_all(GLOBAL_CONTEXT) to await the other one
-///     join_all_of_context("Local").await;
-/// }
-/// ```
 pub async fn join_all_of_context(ctx: &'static str) {
     loop {
         let mut context = CONTEXT.lock().await;

@@ -47,53 +47,44 @@ where
         self
     }
 
-    /// Add a new module to the lua context
-    pub fn with_module<T>(mut self, value: T) -> Self
-    where
-        T: 'static + Module + UserData,
-    {
+    /// Run `f` against the context if it is still `Ok`, latching any error it returns. Once
+    /// `self.context` is `Err`, later calls are no-ops that leave the stored error untouched.
+    fn try_apply(mut self, f: impl FnOnce(&mut Context<K>) -> Result<()>) -> Self {
         if let Ok(ref mut ctx) = self.context
-            && let Err(e) = ctx.add_module(value)
+            && let Err(e) = f(ctx)
         {
             self.context = Err(e);
         }
         self
     }
 
+    /// Add a new module to the lua context
+    pub fn with_module<T>(self, value: T) -> Self
+    where
+        T: 'static + Module + UserData,
+    {
+        self.try_apply(|ctx| ctx.add_module(value))
+    }
+
     /// Enable support of standard libraries in lua context
-    pub fn with_stdlib(mut self) -> Self {
-        if let Ok(ref mut ctx) = self.context
-            && let Err(e) = ctx.enable_stdlib()
-        {
-            self.context = Err(e);
-        }
-        self
+    pub fn with_stdlib(self) -> Self {
+        self.try_apply(Context::enable_stdlib)
     }
 
     /// Redirect the global `print` to a host log sink. Order relative to `with_stdlib()` does not
     /// matter in practice (enabling the standard libraries does not reload `base`/`print`), but
     /// call this after `with_stdlib()` to keep the builder chain reading top-to-bottom as setup
     /// followed by overrides.
-    pub fn with_print_sink<S>(mut self, sink: S) -> Self
+    pub fn with_print_sink<S>(self, sink: S) -> Self
     where
         S: LogSink + 'static,
     {
-        if let Ok(ref mut ctx) = self.context
-            && let Err(e) = ctx.redirect_print(sink)
-        {
-            self.context = Err(e);
-        }
-        self
+        self.try_apply(|ctx| ctx.redirect_print(sink))
     }
 
-    ///  Load a given script into the lua context and store it under the given key
-    pub fn with_script(mut self, key: K, script: &str) -> Self {
-        if let Ok(ref mut ctx) = self.context
-            && let Err(e) = ctx.load_script(key, script)
-        {
-            self.context = Err(e);
-        }
-        self
+    /// Load a given script into the lua context and store it under the given key
+    pub fn with_script(self, key: K, script: &str) -> Self {
+        self.try_apply(|ctx| ctx.load_script(key, script))
     }
 
     /// Build the final context, installing the SC-R-034 execution hook (wall-clock cap always,

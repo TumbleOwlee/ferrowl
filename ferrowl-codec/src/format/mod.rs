@@ -1,5 +1,19 @@
 //! Data formats describing how raw register words are interpreted.
 
+/// Implements `Display` for an enum whose variants each map to one fixed literal string.
+macro_rules! display_by_variant {
+    ($ty:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
+        impl std::fmt::Display for $ty {
+            fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $($ty::$variant => write!(fmt, $text)),+
+                }
+            }
+        }
+    };
+}
+pub(crate) use display_by_variant;
+
 mod alignment;
 mod bitfield;
 mod endian;

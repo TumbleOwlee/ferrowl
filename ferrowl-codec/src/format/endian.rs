@@ -9,18 +9,10 @@ pub enum Endian {
     Big,
 }
 
-impl std::fmt::Display for Endian {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Endian::Little => {
-                write!(fmt, "Little Endian")
-            }
-            Endian::Big => {
-                write!(fmt, "Big Endian")
-            }
-        }
-    }
-}
+crate::format::display_by_variant!(Endian {
+    Little => "Little Endian",
+    Big => "Big Endian",
+});
 
 #[cfg(test)]
 mod tests {
