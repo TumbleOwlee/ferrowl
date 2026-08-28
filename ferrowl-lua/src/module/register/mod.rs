@@ -56,7 +56,7 @@ where
         this.handle.write(name, value)
     }
 
-    /// `Has(name)` — checks if register existts.
+    /// `Has(name)` — checks if register exists.
     fn has(_: &mlua::Lua, this: &Register<T>, name: String) -> Result<bool> {
         this.handle.has(name)
     }
