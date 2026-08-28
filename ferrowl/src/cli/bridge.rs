@@ -3,7 +3,7 @@
 //! Exit codes: `0` ran to completion (`--duration` elapsed or Ctrl-C), `1` `--upstream`/
 //! `--downstream` missing or malformed, or the bridge failed to start (upstream bind/listen/
 //! serial-open failure, BR-R-013), `3` `--exit-on-error` was set and a drained log line was
-//! `[bridge]`-prefixed (a genuine relay failure, Shared design decision 3).
+//! `[bridge]`-prefixed (a genuine relay failure).
 
 use std::io::Write as _;
 use std::time::{Duration, Instant};
@@ -12,8 +12,8 @@ use crate::cli::{BridgeArgs, parse_bridge_descriptor};
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
-/// BR-R-013 / Shared design decision 3 — the bridge's own error-line prefix, unlike headless
-/// `run`'s `--exit-on-error` (CL-R-031), which keys off log level rather than a prefix.
+/// BR-R-013 — the bridge's own error-line prefix, unlike headless `run`'s `--exit-on-error`
+/// (CL-R-031), which keys off log level rather than a prefix.
 const ERROR_PREFIX: &str = ferrowl_modbus::bridge::ERROR_PREFIX;
 
 /// Run the bridge described by `args`. Returns the process exit code; never panics on the
@@ -40,19 +40,12 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         }
     };
 
-    let mut log_file = match args.log_file.as_deref() {
-        Some(path) => match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ferrowl_util::path::expand(path))
-        {
-            Ok(f) => Some(f),
-            Err(e) => {
-                eprintln!("Error: failed to open --log-file '{path}': {e}");
-                return 1;
-            }
-        },
-        None => None,
+    let mut log_file = match crate::cli::open_log_file(args.log_file.as_deref()) {
+        Ok(f) => f,
+        Err((path, e)) => {
+            eprintln!("Error: failed to open --log-file '{path}': {e}");
+            return 1;
+        }
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -87,7 +80,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         tokio::select! {
             msg = rx.recv() => {
                 let Some(msg) = msg else { break };
-                let line = format!("[{}] {SOURCE} | {msg}", format_timestamp(now_ms()));
+                let line = format!("[{}] {SOURCE} | {msg}", format_timestamp(crate::cli::now_ms()));
                 println!("{line}");
                 if let Some(f) = log_file.as_mut() {
                     let _ = writeln!(f, "{line}");
@@ -109,13 +102,6 @@ pub async fn run(args: &BridgeArgs) -> i32 {
     }
     handle.abort();
     exit_code
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

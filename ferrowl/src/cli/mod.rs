@@ -363,6 +363,33 @@ pub fn parse_ocpp_spec(input: &str) -> Result<OcppModuleSpec, String> {
     })
 }
 
+/// System clock before the epoch (misconfigured host) yields 0 rather than killing a running
+/// simulation, hence `unwrap_or_default` rather than `expect`.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Open `--log-file` (create-and-append, after `ferrowl_util::path::expand`), or `Ok(None)` when
+/// no path was given. On failure, returns the original path alongside the I/O error so the
+/// caller can print the exact `Error: failed to open --log-file '{path}': {e}` message and run
+/// its own cleanup before choosing its exit code.
+pub(crate) fn open_log_file(
+    path: Option<&str>,
+) -> Result<Option<std::fs::File>, (String, std::io::Error)> {
+    match path {
+        Some(path) => std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(ferrowl_util::path::expand(path))
+            .map(Some)
+            .map_err(|e| (path.to_string(), e)),
+        None => Ok(None),
+    }
+}
+
 fn parse_opt<T: std::str::FromStr>(
     value: Option<String>,
     field: &str,

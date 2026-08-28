@@ -161,7 +161,7 @@ async fn drain_log(
         let dropped = new_count - window.len() as u64;
         lines.push(format!(
             "[{}] [{}] {name} | ({dropped} lines dropped: ring overflowed between ticks)",
-            format_timestamp(now_ms()),
+            format_timestamp(crate::cli::now_ms()),
             Level::Error
         ));
     }
@@ -225,11 +225,27 @@ fn load_session_scripts(args: &RunArgs) -> Result<Option<(Vec<ScriptDef>, Durati
     )))
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+/// Print+append every drained line, and fold `hit_error` into `exit_code`/`should_stop`: an
+/// error line from either the module logs or the session sim's log gets the same
+/// exit-code-3-and-stop treatment (the source distinction is already baked into `lines` via
+/// `drain_log`'s `name` prefix).
+fn emit_drained(
+    lines: &[String],
+    log_file: &mut Option<std::fs::File>,
+    hit_error: bool,
+    exit_code: &mut i32,
+    should_stop: &mut bool,
+) {
+    for line in lines {
+        println!("{line}");
+        if let Some(f) = log_file.as_mut() {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+    if hit_error {
+        *exit_code = 3;
+        *should_stop = true;
+    }
 }
 
 /// Stop every module (best-effort: a stop failure is logged but does not change the exit code —
@@ -254,20 +270,13 @@ pub async fn run(args: &RunArgs) -> i32 {
         }
     };
 
-    let mut log_file = match args.log_file.as_deref() {
-        Some(path) => match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ferrowl_util::path::expand(path))
-        {
-            Ok(f) => Some(f),
-            Err(e) => {
-                eprintln!("Error: failed to open --log-file '{path}': {e}");
-                stop_all(&mut modules).await;
-                return 1;
-            }
-        },
-        None => None,
+    let mut log_file = match crate::cli::open_log_file(args.log_file.as_deref()) {
+        Ok(f) => f,
+        Err((path, e)) => {
+            eprintln!("Error: failed to open --log-file '{path}': {e}");
+            stop_all(&mut modules).await;
+            return 1;
+        }
     };
 
     let registry = build_registry(&modules);
@@ -314,31 +323,25 @@ pub async fn run(args: &RunArgs) -> i32 {
                 args.exit_on_error,
             )
             .await;
-            for line in &lines {
-                println!("{line}");
-                if let Some(f) = log_file.as_mut() {
-                    let _ = writeln!(f, "{line}");
-                }
-            }
-            if hit_error {
-                exit_code = 3;
-                should_stop = true;
-            }
+            emit_drained(
+                &lines,
+                &mut log_file,
+                hit_error,
+                &mut exit_code,
+                &mut should_stop,
+            );
         }
 
         if let Some((_, log, last_written)) = session_sim.as_mut() {
             let (lines, hit_error) =
                 drain_log(log, SESSION_SOURCE, last_written, args.exit_on_error).await;
-            for line in &lines {
-                println!("{line}");
-                if let Some(f) = log_file.as_mut() {
-                    let _ = writeln!(f, "{line}");
-                }
-            }
-            if hit_error {
-                exit_code = 3;
-                should_stop = true;
-            }
+            emit_drained(
+                &lines,
+                &mut log_file,
+                hit_error,
+                &mut exit_code,
+                &mut should_stop,
+            );
         }
 
         if should_stop {
