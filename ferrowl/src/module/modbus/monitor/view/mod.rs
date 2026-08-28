@@ -596,7 +596,7 @@ fn memory_cell_recency_active(
 /// buffer render.
 ///
 /// UI-R-063 requires each individual byte/word to carry its own value-class/recency color; the
-/// Hex/Ascii columns use `TableEntry::cell_spans` (Shared, `ferrowl-ui/src/widgets/table.rs`) to
+/// Hex/Ascii columns use `TableEntry::cell_spans` (`ferrowl-ui/src/widgets/table.rs`) to
 /// carry one `(text, style)` span per cell, so every byte/word keeps its own color — not the
 /// row's plain `cell_styles` (`Style`-per-whole-cell), which the Address column still uses since
 /// it has no sub-cell structure to color independently.
@@ -779,12 +779,10 @@ pub struct ModbusMonitorModuleView {
     /// `module.records()`.
     messages_table: MessageTable,
     /// Memory-layout table (MB-R-144/UI-R-063) for the selected unit id, rebuilt live
-    /// in `render()` (Shared with the Resolved-registers table's own live-rebuild pattern — it
-    /// also depends on `module.records()`'s recency markers, which change independent of any
-    /// `refresh()` tick).
+    /// in `render()` — it depends on `module.records()`'s recency markers, which change
+    /// independent of any `refresh()` tick.
     memory_table: MemoryTable,
-    /// UI-R-064 Resolved-registers table for the selected unit id, re-derived each tick (Shared
-    /// with the Messages table's own re-derivation pattern).
+    /// UI-R-064 Resolved-registers table for the selected unit id, re-derived each tick.
     resolved_table: ResolvedTable,
     overlay: MonitorOverlay,
     view_focused: bool,
@@ -937,8 +935,8 @@ impl ModbusMonitorModuleView {
     }
 
     /// MB-R-148 — apply the open `EditInterpretation` overlay's Confirm: edit the interpretation
-    /// in place under its (possibly new) name. Never touches `module.table()` (Shared: "neither
-    /// operation writes to the bus or otherwise touches the slave's observed-value table").
+    /// in place under its (possibly new) name. Never touches `module.table()`: this operation
+    /// does not write to the bus or otherwise touch the slave's observed-value table.
     /// No-op if the overlay isn't open, the dialog is invalid, or nothing is selected.
     fn confirm_edit_interpretation(&mut self) {
         let MonitorOverlay::EditInterpretation(dialog, original_name) = &self.overlay else {
@@ -959,8 +957,8 @@ impl ModbusMonitorModuleView {
     }
 
     /// MB-R-148 — apply the open `EditInterpretation` overlay's confirmed Delete: remove the
-    /// interpretation outright. Never touches `module.table()` (Shared, see
-    /// `confirm_edit_interpretation`). No-op if the overlay isn't open or nothing is selected.
+    /// interpretation outright. Never touches `module.table()`, same as `confirm_edit_interpretation`.
+    /// No-op if the overlay isn't open or nothing is selected.
     fn delete_interpretation(&mut self) {
         let MonitorOverlay::EditInterpretation(_, original_name) = &self.overlay else {
             return;
@@ -1353,7 +1351,7 @@ impl ModuleView for ModbusMonitorModuleView {
         }
         // UI-R-065 — `Resolved` is only reachable while the selected unit id has an
         // interpretation; `next`/`previous` alone don't know that, so skip it here at the call
-        // site (Shared's `MonitorPanel` doc comment).
+        // site (see `MonitorPanel`'s doc comment).
         let resolved_visible = self
             .selected_unit()
             .is_some_and(|u| self.has_interpretation(u));
@@ -3448,8 +3446,8 @@ mod tests {
         assert_eq!(rows[0].values()[5], "2/2");
     }
 
-    /// UI-R-062 (horizontal-overflow scrolling reuses `TableState::handle_events` unchanged,
-    /// Shared) — `Left`/`Right` reach the Messages table's own scroll handling when it's the
+    /// UI-R-062 (horizontal-overflow scrolling reuses `TableState::handle_events` unchanged)
+    /// — `Left`/`Right` reach the Messages table's own scroll handling when it's the
     /// panel-focused one, not the view's own unhandled fallback.
     #[test]
     fn ut_messages_panel_routes_left_right_to_table_horizontal_scroll() {
@@ -3770,7 +3768,7 @@ mod tests {
 
     /// When the decoded value exactly matches one of the
     /// interpretation's named values, the Value column shows the label alone (not
-    /// "label (value)", unlike the full modbus module's own `Definition::values` — Shared),
+    /// "label (value)", unlike the full modbus module's own `Definition::values`),
     /// using the same `Scalar::Int`-vs-raw-int-or-string matching logic.
     #[tokio::test]
     async fn ut_resolved_registers_table_value_shows_named_value_label_when_matched() {
@@ -4094,7 +4092,7 @@ mod tests {
     }
 
     /// An interpretation that already has aliases defined opens
-    /// focused directly on the alias list (`value`), not `Address` (Shared:
+    /// focused directly on the alias list (`value`), not `Address` (see
     /// `EditInterpretationDialog::from_interpretation`).
     #[tokio::test]
     async fn ut_enter_on_resolved_row_with_aliases_opens_dialog_focused_on_value() {
@@ -4128,7 +4126,7 @@ mod tests {
 
     /// Adding the first alias through the dialog's own
     /// "ADD ALIAS" sub-popup re-homes focus onto the alias list (`value`), mirroring the full
-    /// modbus module's own mode-switch-on-first-alias behavior (Shared:
+    /// modbus module's own mode-switch-on-first-alias behavior (see
     /// `EditInterpretationDialog::confirm_add_dialog`).
     #[tokio::test]
     async fn ut_edit_interpretation_add_first_alias_focuses_value() {
@@ -4174,7 +4172,7 @@ mod tests {
 
     /// Deleting the last remaining alias re-homes focus onto
     /// `Label`, mirroring the full modbus module's own mode-switch-back-on-last-delete behavior
-    /// (Shared: `EditInterpretationDialog::delete_selected_named_value`).
+    /// (see `EditInterpretationDialog::delete_selected_named_value`).
     #[tokio::test]
     async fn ut_edit_interpretation_delete_last_alias_focuses_label() {
         let mut v = view();
@@ -4198,7 +4196,7 @@ mod tests {
             assert!(!overlay.value.state.values().is_empty());
         }
 
-        // The dialog opens with `Value` focused (Shared: `from_interpretation`); Tab twice
+        // The dialog opens with `Value` focused (see `from_interpretation`); Tab twice
         // reaches `DeleteValueButton` (Value -> AddButton -> DeleteValueButton).
         v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         v.handle_events(KeyModifiers::NONE, KeyCode::Tab);

@@ -50,7 +50,7 @@ pub trait TableEntry<const N: usize> {
     /// predating this method implicitly returns it) renders byte-for-byte as before this method
     /// existed.
     ///
-    /// A spans cell is never word-wrapped — Shared with the render loop's own doc comment: only
+    /// A spans cell is never word-wrapped: only
     /// content already guaranteed to fit the column's width should use this (the Memory-layout
     /// table's Hex/Ascii columns are sized for their fixed per-line byte/word count and never
     /// wrap in practice). Content that doesn't fit simply overflows/truncates per the column's

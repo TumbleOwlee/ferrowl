@@ -24,7 +24,7 @@ fn free_port() -> u16 {
 
 #[test]
 /// BR-R-001..BR-R-006, BR-R-013 — a bridge with no downstream listening still starts (BR-R-013's
-/// setup-failure list does not include a downstream connect failure, Shared design decision 1)
+/// setup-failure list does not include a downstream connect failure)
 /// and, on its `--duration` deadline, exits 0.
 fn it_bridge_starts_with_unreachable_downstream_and_exits_clean_on_deadline() {
     let upstream_port = free_port();
