@@ -1,9 +1,6 @@
-use crate::client_core::{ClientCore, ConnectAttempt};
-use crate::common::serial_config_from;
+use crate::client_core::{ClientCore, ConnectAttempt, connect_serial};
 use crate::rtu::Config;
-use crate::{
-    Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, PathConflictCell, SerialError,
-};
+use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, PathConflictCell};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
@@ -13,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
 
-use rust_modbus::{Ascii, Client as ModbusClient, FrameTransport, SerialStream, open_serial};
+use rust_modbus::{Ascii, FrameTransport, SerialStream};
 
 /// Builds and spawns a Modbus ASCII client task that polls `operations` into
 /// the shared `memory` and executes incoming [`Command`]s.
@@ -38,7 +35,7 @@ impl<T: KeyParams> ClientBuilder<T> {
         }
     }
 
-    /// MB-R-150 — see `rtu::ClientBuilder::path_conflict` (same late-binding contract).
+    /// MB-R-150 — see [`PathConflictCell`] for the late-binding contract.
     pub fn path_conflict(&self) -> PathConflictCell {
         self.path_conflict.clone()
     }
@@ -108,37 +105,10 @@ pub struct Client {
 }
 
 impl Client {
-    /// Opens the configured serial port under ASCII framing (MB-R-122).
-    ///
-    /// The port is not bound to a slave address: each request carries the slave id of the
-    /// operation or command that issued it (MB-R-048).
-    ///
-    /// MB-R-150 — before the OS-level open, `path_conflict` is checked against the freshly
-    /// `~`-expanded path; a conflict short-circuits with `Error::PathConflict` and skips the
-    /// open attempt entirely.
+    /// Opens the configured serial port under ASCII framing; see `connect_serial` for the
+    /// MB-R-122/MB-R-150 connect contract shared with `rtu::Client::connect`.
     pub async fn connect(config: &Config, path_conflict: &PathConflictCell) -> Result<Self, Error> {
-        let serial = serial_config_from(
-            config.baud_rate,
-            config.data_bits,
-            config.stop_bits,
-            config.parity.as_deref(),
-        )?;
-        let expanded = ferrowl_util::path::expand(&config.path);
-        let expanded = expanded.to_string_lossy();
-        if let Some(other) = path_conflict.check(&expanded) {
-            return Err(Error::PathConflict {
-                path: expanded.into_owned(),
-                other,
-            });
-        }
-        match open_serial::<Ascii>(&config.path, serial) {
-            Ok(transport) => Ok(Self {
-                core: ClientCore {
-                    client: ModbusClient::new(transport),
-                },
-            }),
-            Err(e) => Err(SerialError::Error(e).into()),
-        }
+        connect_serial::<Ascii>(config, path_conflict).map(|core| Self { core })
     }
 }
 
