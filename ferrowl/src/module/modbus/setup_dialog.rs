@@ -8,15 +8,12 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
-    state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
-    },
+    state::{InputFieldState, SelectionState, SuggestInputState},
     style::{InputFieldStyle, SelectionStyle, TextStyle},
-    traits::{HandleEvents, ToLabel},
+    traits::HandleEvents,
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
-        SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
+        GetValue, InputField, Selection, SuggestInput, Text, TextBuilder, Validate, ValidateResult,
+        Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -33,6 +30,7 @@ use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::dialog::tls_section::{EffectiveTlsLevel, TlsSection, TlsSectionFocus};
+use crate::dialog::widgets::{input, selection, set_input, set_suggest_input, suggest_input};
 use ferrowl_modbus::tcp::ModbusTlsConfig;
 
 use super::build::Timing;
@@ -275,11 +273,10 @@ impl SetupDialog {
                 .bg(COLOR_SCHEME.bg),
         };
 
-        let mut name_field = input("Name", None, "module name", &input_style, true);
+        let mut name_field = input("Name", "module name", &input_style, true);
         set_input(&mut name_field, name);
         let mut config_path_field = suggest_input(
             "Config Path [TOML/JSON] (optional)",
-            None,
             "device.toml",
             &input_style,
             false,
@@ -292,7 +289,6 @@ impl SetupDialog {
             .config_path(config_path_field)
             .transport(selection(
                 "Transport",
-                None,
                 // Tcp=0, Rtu=1, RtuOverTcp=2, Udp=3, Ascii=4, AsciiOverTcp=5 — each appended
                 // last to keep prior indices stable rather than reordering around them.
                 vec![
@@ -306,78 +302,68 @@ impl SetupDialog {
                 &selection_style,
             ))
             .role(selection(
-                "Role",
-                Some(HorizontalAlignment::Right),
+                ("Role", HorizontalAlignment::Right),
                 vec![ClientOrServer::Server, ClientOrServer::Client],
                 &selection_style,
             ))
-            .ip(input("IP", None, "127.0.0.1", &input_style, false))
+            .ip(input("IP", "127.0.0.1", &input_style, false))
             .port(input(
-                "Port",
-                Some(HorizontalAlignment::Center),
+                ("Port", HorizontalAlignment::Center),
                 "502",
                 &input_style,
                 false,
             ))
             .path(suggest_input(
                 "Serial Path",
-                None,
                 "/dev/ttyUSB0",
                 &input_style,
                 false,
                 FsPathProvider::default(),
             ))
             .baud(input(
-                "Baud",
-                Some(HorizontalAlignment::Center),
+                ("Baud", HorizontalAlignment::Center),
                 "19200",
                 &input_style,
                 false,
             ))
             .parity(selection(
                 "Parity",
-                None,
                 vec![Parity::None, Parity::Odd, Parity::Even],
                 &selection_style,
             ))
             .data_bits(selection(
-                "Data Bits",
-                Some(HorizontalAlignment::Center),
+                ("Data Bits", HorizontalAlignment::Center),
                 vec![U8Choice(8), U8Choice(7), U8Choice(6), U8Choice(5)],
                 &selection_style,
             ))
             .stop_bits(selection(
-                "Stop Bits",
-                Some(HorizontalAlignment::Right),
+                ("Stop Bits", HorizontalAlignment::Right),
                 vec![U8Choice(1), U8Choice(2)],
                 &selection_style,
             ))
             .tls_level(selection(
-                "TLS",
-                Some(HorizontalAlignment::Center),
+                ("TLS", HorizontalAlignment::Center),
                 vec![TlsLevel::Off, TlsLevel::Tls, TlsLevel::MutualTls],
                 &selection_style,
             ))
             .tls(TlsSection::new())
-            .timeout(input("Timeout ms", None, "", &input_style, false))
-            .delay(input("Delay ms", None, "", &input_style, false))
-            .interval(input("Interval ms", None, "", &input_style, false))
+            .timeout(input("Timeout ms", "", &input_style, false))
+            .delay(input("Delay ms", "", &input_style, false))
+            .interval(input("Interval ms", "", &input_style, false))
             .reconnect(selection(
-                "Reconnect",
-                Some(HorizontalAlignment::Right),
+                ("Reconnect", HorizontalAlignment::Right),
                 vec![ReconnectChoice::On, ReconnectChoice::Off],
                 &selection_style,
             ))
             .holding_ranges(input(
                 "Holding ranges",
-                None,
                 "0-100,140-160",
                 &input_style,
                 false,
             ))
-            .input_ranges(input("Input ranges", None, "0-9", &input_style, false))
-            .coil_ranges(input("Coil ranges", None, "0-31", &input_style, false))
-            .discrete_ranges(input("Discrete ranges", None, "0-31", &input_style, false))
+            .input_ranges(input("Input ranges", "0-9", &input_style, false))
+            .coil_ranges(input("Coil ranges", "0-31", &input_style, false))
+            .discrete_ranges(input("Discrete ranges", "0-31", &input_style, false))
             .error(Widget {
                 state: String::new(),
                 widget: TextBuilder::default()
@@ -983,123 +969,6 @@ fn select_u8(state: &mut SelectionState<U8Choice>, current: Option<u8>) {
     {
         state.set_selection(index);
     }
-}
-
-fn input<T: Validate + Clone>(
-    title: &str,
-    title_alignment: Option<HorizontalAlignment>,
-    placeholder: &str,
-    style: &InputFieldStyle,
-    focused: bool,
-) -> Widget<InputFieldState, InputField<T>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(focused)
-            .disabled(false)
-            .placeholder(Some(placeholder.to_string()))
-            .allowed_for::<T>()
-            .build()
-            .expect("all required builder fields are set"),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(
-                (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
-            ))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-/// Build a [`SuggestInput`] field with the same title/border/margin/style defaults as
-/// [`input`], backed by `provider` for the completion popup.
-fn suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider + Clone>(
-    title: &str,
-    title_alignment: Option<HorizontalAlignment>,
-    placeholder: &str,
-    style: &InputFieldStyle,
-    focused: bool,
-    provider: P,
-) -> Widget<SuggestInputState<P>, SuggestInput<T, P>> {
-    Widget {
-        state: SuggestInputStateBuilder::default()
-            .field(
-                InputFieldStateBuilder::default()
-                    .focused(focused)
-                    .disabled(false)
-                    .placeholder(Some(placeholder.to_string()))
-                    .allowed_for::<T>()
-                    .build()
-                    .expect("all required builder fields are set"),
-            )
-            .provider(provider)
-            .build()
-            .expect("all required builder fields are set"),
-        widget: SuggestInputBuilder::default()
-            .input_field(
-                InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some(
-                        (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
-                    ))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(style.clone())
-                    .build()
-                    .expect("all required builder fields are set"),
-            )
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn selection<T: ToLabel + Clone>(
-    title: &str,
-    title_alignment: Option<HorizontalAlignment>,
-    values: Vec<T>,
-    style: &SelectionStyle,
-) -> Widget<SelectionState<T>, Selection<T>> {
-    Widget {
-        state: SelectionStateBuilder::default()
-            .focused(false)
-            .values(values)
-            .build()
-            .expect("all required builder fields are set"),
-        widget: SelectionBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(
-                (title, title_alignment.unwrap_or(HorizontalAlignment::Left)).into(),
-            ))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn set_input<T: Validate + Clone>(
-    widget: &mut Widget<InputFieldState, InputField<T>>,
-    value: &str,
-) {
-    widget.state.set_input(value.to_string());
-    widget.state.set_cursor(value.chars().count());
-}
-
-fn set_suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider + Clone>(
-    widget: &mut Widget<SuggestInputState<P>, SuggestInput<T, P>>,
-    value: &str,
-) {
-    widget.state.set_input(value.to_string());
-    widget.state.set_cursor(value.chars().count());
 }
 
 #[cfg(test)]
