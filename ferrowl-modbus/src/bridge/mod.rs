@@ -5,6 +5,7 @@ mod downstream_ascii_over_tcp;
 mod downstream_rtu;
 mod downstream_rtu_over_tcp;
 mod downstream_tcp;
+mod downstream_tcp_family;
 mod service;
 mod upstream_rtu;
 mod upstream_tcp;
