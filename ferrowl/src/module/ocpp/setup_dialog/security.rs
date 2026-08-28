@@ -11,6 +11,7 @@ use ferrowl_util::tls::{
     ServerCertSource, ServerTlsPolicy,
 };
 
+use crate::dialog::tls_section::EffectiveTlsLevel;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::OcppRole;
 
@@ -37,45 +38,16 @@ impl ToLabel for SecurityLevel {
     }
 }
 
-/// Client-only "accept any server certificate" toggle. **OC-R-111**: shown only at `Tls`/
-/// `MutualTls` (not at every wss level as before this spec diff) — an out-of-band credential
-/// check (Basic Auth) has nothing to do with certificate verification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkipVerifyChoice {
-    Off,
-    On,
-}
-
-impl ToLabel for SkipVerifyChoice {
-    fn to_label(&self) -> String {
-        match self {
-            SkipVerifyChoice::Off => "Off",
-            SkipVerifyChoice::On => "On",
+/// `None`/`BasicAuth` both collapse to `Off` — neither carries a transport-security guarantee,
+/// and the shared widget's own gates never distinguish a credential-only connection from an
+/// unauthenticated one (that distinction, `show_credentials`, stays on `OcppSetupDialog` itself).
+impl From<SecurityLevel> for EffectiveTlsLevel {
+    fn from(level: SecurityLevel) -> Self {
+        match level {
+            SecurityLevel::None | SecurityLevel::BasicAuth => EffectiveTlsLevel::Off,
+            SecurityLevel::Tls => EffectiveTlsLevel::Tls,
+            SecurityLevel::MutualTls => EffectiveTlsLevel::MutualTls,
         }
-        .to_string()
-    }
-}
-
-/// "Generate an ephemeral self-signed certificate/identity" toggle, offered whenever `Tls`/
-/// `MutualTls` is selected. The *same* widget field is reused for both roles (they are never
-/// shown at the same time, since a dialog instance is fixed to one role): for the server role it
-/// toggles the presented server certificate's source (OC-R-110) whenever `Tls`/`MutualTls` is
-/// selected; for the client role it toggles the client's own mTLS identity (OC-R-116) whenever
-/// `MutualTls` is selected (the identity only exists under mTLS). Mirrors the Modbus dialog's
-/// `SelfSignedChoice` byte-for-byte.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelfSignedChoice {
-    Off,
-    On,
-}
-
-impl ToLabel for SelfSignedChoice {
-    fn to_label(&self) -> String {
-        match self {
-            SelfSignedChoice::Off => "Off",
-            SelfSignedChoice::On => "On",
-        }
-        .to_string()
     }
 }
 
@@ -334,6 +306,29 @@ pub(super) fn validate_security(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    /// UI-R-049 — `SecurityLevel::BasicAuth` collapses to `EffectiveTlsLevel::Off` alongside
+    /// `None`: every predicate the shared widget owns only ever tests `>= Tls`/`== MutualTls`,
+    /// never distinguishing `None` from `BasicAuth`.
+    fn ut_effective_tls_level_from_security_level() {
+        assert_eq!(
+            EffectiveTlsLevel::from(SecurityLevel::None),
+            EffectiveTlsLevel::Off
+        );
+        assert_eq!(
+            EffectiveTlsLevel::from(SecurityLevel::BasicAuth),
+            EffectiveTlsLevel::Off
+        );
+        assert_eq!(
+            EffectiveTlsLevel::from(SecurityLevel::Tls),
+            EffectiveTlsLevel::Tls
+        );
+        assert_eq!(
+            EffectiveTlsLevel::from(SecurityLevel::MutualTls),
+            EffectiveTlsLevel::MutualTls
+        );
+    }
 
     #[allow(clippy::too_many_arguments)]
     fn inputs<'a>(

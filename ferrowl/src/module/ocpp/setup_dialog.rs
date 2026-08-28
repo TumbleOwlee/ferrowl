@@ -7,31 +7,29 @@ use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{
-        ButtonState, InputFieldState, InputFieldStateBuilder, SelectionState,
-        SelectionStateBuilder, SuggestInputState, SuggestInputStateBuilder,
+        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
+        SuggestInputState, SuggestInputStateBuilder,
     },
-    style::{ButtonStyle, InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
+    style::{InputFieldStyle, SelectionStyle, SuggestInputStyle, TextStyle},
     traits::{HandleEvents, ToLabel},
     widgets::{
-        Button, GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
+        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
         SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
 use ferrowl_util::convert::FileType;
-use ferrowl_util::tls::{
-    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-    ServerCertSource, ServerTlsPolicy,
-};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
     widgets::{Block, Clear, Widget as UiWidget},
 };
 
+use crate::config::ClientOrServer;
 use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
+use crate::dialog::tls_section::{EffectiveTlsLevel, TlsSection, TlsSectionFocus};
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
@@ -41,9 +39,7 @@ use headers::{
     HeaderEditOutcome, HeaderEditPrompt, HeaderTable, HeaderTableRef, header_name_input,
     header_table, header_value_input, route_header_edit,
 };
-use security::{
-    SecurityInputs, SecurityLevel, SelfSignedChoice, SkipVerifyChoice, validate_security,
-};
+use security::{SecurityInputs, SecurityLevel, validate_security};
 
 use crate::module::modbus::dialog::{
     ConfirmDeleteDialog, DeleteConfirmOutcome, route_delete_confirm,
@@ -164,58 +160,12 @@ pub struct OcppSetupDialog {
     /// `username`; the field is not obscured on screen.
     #[focus(when = {self.show_credentials()})]
     pub password: Widget<InputFieldState, InputField<String>>,
-    /// Server: "generate an ephemeral self-signed certificate" toggle (OC-R-110, shown at TLS+).
-    /// Client, at mTLS only: "generate an ephemeral self-signed client identity" toggle
-    /// (OC-R-116) — the same widget field backs both, since only one role is ever active for a
-    /// given dialog instance. Mirrors the Modbus dialog's `self_signed` field exactly.
-    #[focus(when = {self.show_self_signed()})]
-    pub self_signed: Widget<SelectionState<SelfSignedChoice>, Selection<SelfSignedChoice>>,
-    /// Server role only: certificate chain presented to connecting clients.
-    #[focus(when = {self.show_server_cert()})]
-    pub cert_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
-    /// Server role only: private key matching `cert_file`.
-    #[focus(when = {self.show_server_cert()})]
-    pub key_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
-    /// Server-only, at mTLS only: "accept any client certificate" toggle (OC-R-113). On hides the
-    /// client-CA list below and excludes it from the resolved config; the list's own text is
-    /// preserved (never cleared) so toggling back Off restores it.
-    #[focus(when = {self.show_client_cert_skip_verify()})]
-    pub client_cert_skip_verify:
-        Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
-    /// Client role only: client certificate presented for mutual TLS.
-    #[focus(when = {self.show_client_cert()})]
-    pub client_cert_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
-    /// Client role only: private key matching `client_cert_file`.
-    #[focus(when = {self.show_client_cert()})]
-    pub client_key_file:
-        Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
-    /// Server-only list of CAs used to verify client certificates under mTLS (OC-R-113) — a
-    /// certificate signed by any one is sufficient. An add/remove list (mirrors the Modbus
-    /// dialog's `client_ca_files` cluster exactly, sharing `AddCaFileDialog`): `Selection<String>`
-    /// browses/selects the current entries; `client_ca_add_button`/`client_ca_delete_button` add
-    /// via `client_ca_add_dialog` or remove the selected entry. Selecting mTLS as server implies
-    /// `ServerTlsPolicy::MutualTls` in the resolved config (unless `client_cert_skip_verify` is
-    /// on, in which case this list is ignored).
-    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
-    pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
-    #[focus(when = {self.show_client_ca()})]
-    pub client_ca_add_button: Widget<ButtonState, Button>,
-    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
-    pub client_ca_delete_button: Widget<ButtonState, Button>,
-    /// Client role only: accept any server certificate without authenticating it. **OC-R-111**:
-    /// shown only at `Tls`/`MutualTls` (not at every wss level) — Basic Auth alone has nothing to
-    /// do with certificate verification.
-    #[focus(when = {self.show_skip_verify()})]
-    pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
-    /// Client role only: extra trust anchor for a self-signed CSMS certificate.
-    #[focus(when = {self.show_ca_file()})]
-    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`; not
-    /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring `close_confirm`.
-    #[builder(default)]
-    pub client_ca_add_dialog: Option<crate::dialog::ca_file_list::AddCaFileDialog>,
+    /// The TLS/mTLS cluster (self-signed toggle, own-identity cert/key pair, skip-verify toggle,
+    /// peer-verification input, client-CA add/remove list), shared with the Modbus setup dialog.
+    /// `tls_shown()` alone gates entry — once entered, `TlsSection`'s own internal `when` gates
+    /// (fed by `sync`, called at the top of every funnel method below) take over.
+    #[focus(nested, when = {self.tls_shown()})]
+    pub tls: TlsSection,
     /// Security section the dialog was opened with (`edit`; `Default` for a fresh dialog).
     /// [`resolve`](Self::resolve) returns it untouched while the protocol is `ws`: the security
     /// UI is hidden then, and a hidden section must never clobber a config-file-only setup
@@ -244,7 +194,6 @@ impl OcppSetupDialog {
     pub fn new() -> Self {
         let input_style = InputFieldStyle::default();
         let selection_style = SelectionStyle::default();
-        let cert_provider = || FsPathProvider::with_extensions(&["pem", "crt", "key"]);
 
         OcppSetupDialogBuilder::default()
             .name(input("Name", "cs-1", &input_style, true))
@@ -295,66 +244,7 @@ impl OcppSetupDialog {
             ))
             .username(input("Username", "cp001", &input_style, false))
             .password(input("Password", "", &input_style, false))
-            .skip_verify(selection(
-                "Skip Verify",
-                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
-                &selection_style,
-            ))
-            .self_signed(selection(
-                "Self-Signed",
-                vec![SelfSignedChoice::Off, SelfSignedChoice::On],
-                &selection_style,
-            ))
-            .client_cert_skip_verify(selection(
-                "Skip Verify",
-                vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
-                &selection_style,
-            ))
-            .ca_file(suggest_input(
-                "CA File",
-                "ca.pem",
-                &input_style,
-                cert_provider(),
-            ))
-            .cert_file(suggest_input(
-                "Cert File",
-                "server.crt",
-                &input_style,
-                cert_provider(),
-            ))
-            .key_file(suggest_input(
-                "Key File",
-                "server.key",
-                &input_style,
-                cert_provider(),
-            ))
-            .client_cert_file(suggest_input(
-                "Client Cert",
-                "client.crt",
-                &input_style,
-                cert_provider(),
-            ))
-            .client_key_file(suggest_input(
-                "Client Key",
-                "client.key",
-                &input_style,
-                cert_provider(),
-            ))
-            .client_ca_files(selection(
-                "Client CA(s)",
-                Vec::<String>::new(),
-                &selection_style,
-            ))
-            .client_ca_add_button(ferrowl_ui::widgets::button(
-                "ADD",
-                ButtonStyle::default(),
-                1,
-            ))
-            .client_ca_delete_button(ferrowl_ui::widgets::button(
-                "DEL",
-                ButtonStyle::default(),
-                1,
-            ))
+            .tls(TlsSection::new())
             .preserved_security(OcppSecurityConfig::default())
             .fs_cache(Default::default())
             .error(text(TextStyle {
@@ -414,82 +304,18 @@ impl OcppSetupDialog {
             spec.security.password.as_deref().unwrap_or(""),
         );
 
-        match spec.role {
-            OcppRole::Server => {
-                let (server_cert, client_verification) = match &spec.security.server {
-                    ServerTlsPolicy::MutualTls {
-                        server_cert,
-                        client_verification,
-                    } => (server_cert.clone(), Some(client_verification.clone())),
-                    ServerTlsPolicy::Tls { server_cert } => (server_cert.clone(), None),
-                    ServerTlsPolicy::NoTls => (ServerCertSource::Unset, None),
-                };
-                d.self_signed
-                    .state
-                    .set_selection(if server_cert == ServerCertSource::SelfSigned {
-                        1
-                    } else {
-                        0
-                    });
-                let (cert_file, key_file) = match &server_cert {
-                    ServerCertSource::Explicit {
-                        cert_file,
-                        key_file,
-                    } => (cert_file.as_str(), key_file.as_str()),
-                    _ => ("", ""),
-                };
-                set_suggest_text(&mut d.cert_file, cert_file);
-                set_suggest_text(&mut d.key_file, key_file);
-                let (ca_files, skip) = match &client_verification {
-                    Some(ClientCertVerification::Verify { ca_files }) => (ca_files.clone(), false),
-                    Some(ClientCertVerification::SkipVerify) => (Vec::new(), true),
-                    None => (Vec::new(), false),
-                };
-                *d.client_ca_files.state.values_mut() = ca_files;
-                d.client_ca_files.state.set_selection(0);
-                d.client_cert_skip_verify
-                    .state
-                    .set_selection(if skip { 1 } else { 0 });
-            }
-            OcppRole::Client => {
-                let (client_verification, client_identity) = match &spec.security.client {
-                    ClientTlsPolicy::MutualTls {
-                        client_verification,
-                        client_identity,
-                    } => (client_verification.clone(), Some(client_identity.clone())),
-                    ClientTlsPolicy::Tls {
-                        client_verification,
-                    } => (client_verification.clone(), None),
-                    ClientTlsPolicy::NoTls => (ClientVerification::Verify { ca_file: None }, None),
-                };
-                d.skip_verify.state.set_selection(
-                    if client_verification == ClientVerification::SkipVerify {
-                        1
-                    } else {
-                        0
-                    },
-                );
-                let ca_file = match &client_verification {
-                    ClientVerification::Verify { ca_file } => ca_file.as_deref().unwrap_or(""),
-                    ClientVerification::SkipVerify => "",
-                };
-                set_suggest_text(&mut d.ca_file, ca_file);
-                let self_signed_client =
-                    matches!(client_identity, Some(ClientCertSource::SelfSigned));
-                d.self_signed
-                    .state
-                    .set_selection(if self_signed_client { 1 } else { 0 });
-                let (ccert, ckey) = match &client_identity {
-                    Some(ClientCertSource::Explicit {
-                        client_cert_file,
-                        client_key_file,
-                    }) => (client_cert_file.as_str(), client_key_file.as_str()),
-                    _ => ("", ""),
-                };
-                set_suggest_text(&mut d.client_cert_file, ccert);
-                set_suggest_text(&mut d.client_key_file, ckey);
-            }
-        }
+        // `TlsSection`'s public surface is typed on `ClientOrServer` (Modbus's own role enum, the
+        // repo's existing cross-module client/server marker), not `OcppRole` — a local 2-arm
+        // match at each of `TlsSection`'s 3 call sites in this file, not a shared trait impl.
+        let role_for_tls = match spec.role {
+            OcppRole::Client => ClientOrServer::Client,
+            OcppRole::Server => ClientOrServer::Server,
+        };
+        d.tls.prefill(
+            role_for_tls,
+            Some(&spec.security.server),
+            Some(&spec.security.client),
+        );
         d.preserved_security = spec.security.clone();
         d
     }
@@ -545,26 +371,30 @@ impl OcppSetupDialog {
             fn blank_below_tls(tls: bool, s: &str) -> &str {
                 if tls { s } else { "" }
             }
+            // `extract()` never reads `self.tls`'s own `role`/`level` (it's a uniform read of
+            // raw text/toggle state, regardless of what's currently focusable/visible), so this
+            // read-only path needs no `sync()` call first — unlike `render`/`handle_events`,
+            // which do read `TlsSection`'s `when`-gated fields and must stay fresh.
+            let extracted = self.tls.extract();
             let effective_self_signed = if is_server {
-                level < SecurityLevel::Tls || self.self_signed.get_value() == SelfSignedChoice::On
+                level < SecurityLevel::Tls || extracted.self_signed
             } else {
-                self.self_signed.get_value() == SelfSignedChoice::On
+                extracted.self_signed
             };
             let mut cfg = level.build_config(
                 role,
                 SecurityInputs {
                     username: self.username.state.input(),
                     password: self.password.state.input(),
-                    ca_file: blank_below_tls(tls, self.ca_file.state.input()),
-                    cert_file: blank_below_tls(tls, self.cert_file.state.input()),
-                    key_file: blank_below_tls(tls, self.key_file.state.input()),
-                    client_cert_file: self.client_cert_file.state.input(),
-                    client_key_file: self.client_key_file.state.input(),
-                    client_ca_files: self.client_ca_files.state.values(),
+                    ca_file: blank_below_tls(tls, &extracted.ca_file),
+                    cert_file: blank_below_tls(tls, &extracted.cert_file),
+                    key_file: blank_below_tls(tls, &extracted.key_file),
+                    client_cert_file: &extracted.client_cert_file,
+                    client_key_file: &extracted.client_key_file,
+                    client_ca_files: &extracted.client_ca_files,
                     self_signed: effective_self_signed,
-                    skip_verify: is_client && self.skip_verify.get_value() == SkipVerifyChoice::On,
-                    client_cert_skip_verify: is_server
-                        && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::On,
+                    skip_verify: is_client && extracted.skip_verify,
+                    client_cert_skip_verify: is_server && extracted.client_cert_skip_verify,
                 },
             )?;
             // Stitch the inactive role's half back in from the config the dialog was opened
@@ -612,6 +442,8 @@ impl OcppSetupDialog {
     /// (with nothing else open) opens the close-confirm popup; everything else falls through to
     /// the derived per-field routing.
     pub fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        self.sync_tls();
+
         match route_close_confirm(&mut self.close_confirm, modifiers, code) {
             CloseConfirmOutcome::NotActive => {}
             CloseConfirmOutcome::Close => {
@@ -621,17 +453,17 @@ impl OcppSetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
-        if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
+        if let Some(dialog) = self.tls.client_ca_add_dialog.as_mut() {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => {
-                    self.client_ca_add_dialog = None;
+                    self.tls.client_ca_add_dialog = None;
                 }
                 (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
                     Ok(path) => {
-                        self.client_ca_files.state.values_mut().push(path);
-                        let idx = self.client_ca_files.state.values().len() - 1;
-                        self.client_ca_files.state.set_selection(idx);
-                        self.client_ca_add_dialog = None;
+                        self.tls.client_ca_files.state.values_mut().push(path);
+                        let idx = self.tls.client_ca_files.state.values().len() - 1;
+                        self.tls.client_ca_files.state.set_selection(idx);
+                        self.tls.client_ca_add_dialog = None;
                     }
                     Err(e) => dialog.error.state = e,
                 },
@@ -709,15 +541,18 @@ impl OcppSetupDialog {
             return EventResult::Consumed;
         }
 
-        if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
-            match self.focus {
-                OcppSetupDialogFocus::ClientCaAddButton => {
-                    self.client_ca_add_dialog =
+        if modifiers == KeyModifiers::NONE
+            && matches!(code, KeyCode::Enter | KeyCode::Char(' '))
+            && self.focus == OcppSetupDialogFocus::Tls
+        {
+            match self.tls.focus() {
+                TlsSectionFocus::ClientCaAddButton => {
+                    self.tls.client_ca_add_dialog =
                         Some(crate::dialog::ca_file_list::AddCaFileDialog::new());
                     return EventResult::Consumed;
                 }
-                OcppSetupDialogFocus::ClientCaDeleteButton => {
-                    self.delete_selected_client_ca();
+                TlsSectionFocus::ClientCaDeleteButton => {
+                    self.tls.delete_selected_client_ca();
                     return EventResult::Consumed;
                 }
                 _ => {}
@@ -730,34 +565,6 @@ impl OcppSetupDialog {
         }
 
         <Self as HandleEvents>::handle_events(self, modifiers, code)
-    }
-
-    /// Remove the currently-selected client-CA entry (OC-R-113), if any, adjusting the
-    /// selection cursor to stay in bounds.
-    fn delete_selected_client_ca(&mut self) {
-        let idx = self.client_ca_files.state.selection();
-        let vals = self.client_ca_files.state.values_mut();
-        if vals.is_empty() {
-            return;
-        }
-        vals.remove(idx);
-        let new_len = self.client_ca_files.state.values().len();
-        let new_idx = if new_len == 0 {
-            0
-        } else {
-            idx.min(new_len - 1)
-        };
-        self.client_ca_files.state.set_selection(new_idx);
-        if new_len == 0 {
-            // DEL is no longer eligible (`#[focus(when = ...)]` excludes it once the list is
-            // empty) — leaving `self.focus` pointed at it would strand further Tab navigation on
-            // a dead target, so fall back to ADD (mirrors the Modbus setup dialog's fix).
-            // `focus_previous()` correctly pairs the widget-level blur/focus with the enum
-            // update, unlike a raw enum assignment. Callers only reach here with
-            // `self.focus == ClientCaDeleteButton` (the Enter/Space handler guards on that), so
-            // "previous" always lands on ADD.
-            self.focus_previous();
-        }
     }
 
     /// Whether the close-confirm popup was confirmed since the last call; clears the flag.
@@ -806,6 +613,28 @@ impl OcppSetupDialog {
         self.security.get_value()
     }
 
+    /// Whether `TlsSection`'s own fields are reachable at all — `wss()` alone isn't enough, since
+    /// Basic-Auth-only connections (below `Tls`) show none of them.
+    fn tls_shown(&self) -> bool {
+        self.wss() && self.level() >= SecurityLevel::Tls
+    }
+
+    /// Push this dialog's own live role/level widgets into `self.tls` so its `when` gates read
+    /// fresh state. Below `tls_shown()`, the level collapses to `Off` regardless of the raw
+    /// `security` widget's own value — a hidden section's fields must never appear reachable.
+    fn sync_tls(&mut self) {
+        let level = if self.tls_shown() {
+            self.level().into()
+        } else {
+            EffectiveTlsLevel::Off
+        };
+        let role = match self.role.get_value() {
+            OcppRole::Client => ClientOrServer::Client,
+            OcppRole::Server => ClientOrServer::Server,
+        };
+        self.tls.sync(role, level);
+    }
+
     // --- Security-field visibility -----------------------------------------------------------
     // Single source of truth consumed by the `#[focus(when)]` gates, the render branches and the
     // dialog-height computation, so keyboard focus, painting and layout can never disagree about
@@ -819,84 +648,6 @@ impl OcppSetupDialog {
     /// Basic Auth credential inputs (wss at Basic Auth level or above).
     fn show_credentials(&self) -> bool {
         self.wss() && self.level() >= SecurityLevel::BasicAuth
-    }
-
-    /// The client-side skip-verify toggle. **OC-R-111**: shown only at `Tls`/`MutualTls` (not at
-    /// every wss level as before this spec diff) — a Basic-Auth-only connection has nothing to do
-    /// with certificate verification.
-    fn show_skip_verify(&self) -> bool {
-        self.wss()
-            && self.role.get_value() == OcppRole::Client
-            && self.level() >= SecurityLevel::Tls
-    }
-
-    /// Client trust-anchor input (wss client at TLS level or above, Skip-Verify Off — OC-R-111).
-    fn show_ca_file(&self) -> bool {
-        self.wss()
-            && self.level() >= SecurityLevel::Tls
-            && self.role.get_value() == OcppRole::Client
-            && self.skip_verify.get_value() == SkipVerifyChoice::Off
-    }
-
-    /// Server: self-signed server-certificate toggle (TLS level or above, OC-R-110). Client, at
-    /// mTLS only: self-signed client-identity toggle (OC-R-116) — same widget, different meaning
-    /// per role (see the field's doc comment).
-    fn show_self_signed(&self) -> bool {
-        self.wss()
-            && ((self.role.get_value() == OcppRole::Server && self.level() >= SecurityLevel::Tls)
-                || (self.role.get_value() == OcppRole::Client
-                    && self.level() == SecurityLevel::MutualTls))
-    }
-
-    /// Server-only, mTLS only: "accept any client certificate" toggle (OC-R-113).
-    fn show_client_cert_skip_verify(&self) -> bool {
-        self.wss()
-            && self.role.get_value() == OcppRole::Server
-            && self.level() == SecurityLevel::MutualTls
-    }
-
-    /// Row: the Skip Verify toggle — server's `client_cert_skip_verify` (mTLS only), or the
-    /// client's `skip_verify` (TLS level or above) — exactly one applies for a given role.
-    fn show_skip_verify_row(&self) -> bool {
-        self.show_client_cert_skip_verify() || self.show_skip_verify()
-    }
-
-    /// Server certificate/key inputs (wss server at TLS level or above, Self-Signed Off).
-    fn show_server_cert(&self) -> bool {
-        self.wss()
-            && self.level() >= SecurityLevel::Tls
-            && self.role.get_value() == OcppRole::Server
-            && self.self_signed.get_value() == SelfSignedChoice::Off
-    }
-
-    /// Client mTLS certificate/key inputs — hidden when the client's self-signed-identity toggle
-    /// is on (OC-R-116), mirroring the server's `show_server_cert`.
-    fn show_client_cert(&self) -> bool {
-        self.wss()
-            && self.level() == SecurityLevel::MutualTls
-            && self.role.get_value() == OcppRole::Client
-            && self.self_signed.get_value() == SelfSignedChoice::Off
-    }
-
-    /// Server mTLS client-CA list input — hidden when `client_cert_skip_verify` is on
-    /// (OC-R-113), preserving the list's own text so toggling back Off restores it.
-    fn show_client_ca(&self) -> bool {
-        self.wss()
-            && self.level() == SecurityLevel::MutualTls
-            && self.role.get_value() == OcppRole::Server
-            && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
-    }
-
-    /// Row: the own-identity cert/key pair sharing the Self-Signed row — server's
-    /// `cert_file`/`key_file`, or the client's `client_cert_file`/`client_key_file`.
-    fn show_identity_row(&self) -> bool {
-        self.show_server_cert() || self.show_client_cert()
-    }
-
-    /// Row: the peer-verification input sharing the Skip Verify row — server's
-    /// `client_ca_files` list, or the client's `ca_file`.
-    fn show_peer_verify_row(&self) -> bool {
-        self.show_client_ca() || self.show_ca_file()
     }
 
     /// Cached `Path::exists` with a short TTL: `render` re-runs `resolve` (and so the security
@@ -923,6 +674,8 @@ impl OcppSetupDialog {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.sync_tls();
+
         match (self.resolve(), &self.header_error) {
             (Err(e), _) => self.error.state = e,
             (Ok(_), Some(e)) => self.error.state = e.clone(),
@@ -940,10 +693,10 @@ impl OcppSetupDialog {
         // also carries the own-identity cert/key pair, and a Skip Verify row that also carries
         // the peer-verification input — each combined row's existence is governed by its toggle
         // field's own gate, since the paired file field's gate is always a strict subset of it.
-        let show_self_signed_row = self.show_self_signed();
-        let show_identity_row = self.show_identity_row();
-        let show_skip_verify_row = self.show_skip_verify_row();
-        let show_peer_verify_row = self.show_peer_verify_row();
+        let show_self_signed_row = self.tls.show_self_signed_row();
+        let show_identity_row = self.tls.show_identity_row();
+        let show_skip_verify_row = self.tls.show_skip_verify_row();
+        let show_peer_verify_row = self.tls.show_peer_verify_row();
         let show_hint = self.show_hint();
 
         // border(2) + inner margin(2) + name(3) + config path(3) + version|role|reconnect(3)
@@ -1056,63 +809,69 @@ impl OcppSetupDialog {
 
         // Self-Signed row: always Self-Signed itself, plus (when applicable) the role's own
         // identity cert/key pair sharing the same row.
-        if show_self_signed_row {
-            if show_identity_row {
-                if is_server {
-                    render_row!(self, rows[7], buf;
-                        self_signed => Constraint::Percentage(25),
-                        cert_file => Constraint::Fill(1),
-                        key_file => Constraint::Fill(1)
-                    );
+        {
+            // Rebinding so `render_field!`/`render_row!` see a bare ident bound to `TlsSection`
+            // instead of literally `self` — the macros only need `.field.widget`/`.field.state`
+            // on whatever they're given, not `self` specifically.
+            let tls = &mut self.tls;
+            if show_self_signed_row {
+                if show_identity_row {
+                    if is_server {
+                        render_row!(tls, rows[7], buf;
+                            self_signed => Constraint::Percentage(25),
+                            cert_file => Constraint::Fill(1),
+                            key_file => Constraint::Fill(1)
+                        );
+                    } else {
+                        render_row!(tls, rows[7], buf;
+                            self_signed => Constraint::Percentage(25),
+                            client_cert_file => Constraint::Fill(1),
+                            client_key_file => Constraint::Fill(1)
+                        );
+                    }
                 } else {
-                    render_row!(self, rows[7], buf;
-                        self_signed => Constraint::Percentage(25),
-                        client_cert_file => Constraint::Fill(1),
-                        client_key_file => Constraint::Fill(1)
-                    );
+                    render_field!(tls, self_signed, rows[7], buf);
                 }
-            } else {
-                render_field!(self, self_signed, rows[7], buf);
+            }
+
+            // Skip Verify row: always the Skip Verify toggle itself, plus (when applicable) the
+            // peer-verification input sharing the same row.
+            if show_skip_verify_row {
+                if show_peer_verify_row {
+                    if is_server {
+                        // No client-CA entries yet: give ADD the remaining width and skip DEL
+                        // entirely rather than paint an empty, nothing-to-delete button.
+                        if tls.client_ca_files.state.values().is_empty() {
+                            render_row!(tls, rows[9], buf;
+                                client_cert_skip_verify => Constraint::Percentage(25),
+                                client_ca_files => Constraint::Percentage(60),
+                                client_ca_add_button => Constraint::Fill(1)
+                            );
+                        } else {
+                            render_row!(tls, rows[9], buf;
+                                client_cert_skip_verify => Constraint::Percentage(25),
+                                client_ca_files => Constraint::Percentage(45),
+                                client_ca_add_button => Constraint::Percentage(15),
+                                client_ca_delete_button => Constraint::Fill(1)
+                            );
+                        }
+                    } else {
+                        render_row!(tls, rows[9], buf;
+                            skip_verify => Constraint::Percentage(25),
+                            ca_file => Constraint::Fill(1)
+                        );
+                    }
+                } else if is_server {
+                    render_field!(tls, client_cert_skip_verify, rows[9], buf);
+                } else {
+                    render_field!(tls, skip_verify, rows[9], buf);
+                }
             }
         }
 
         if show_hint {
             self.hint.state = "Self-signed certificate is generated at each start".to_string();
             render_field!(self, hint, rows[8], buf);
-        }
-
-        // Skip Verify row: always the Skip Verify toggle itself, plus (when applicable) the
-        // peer-verification input sharing the same row.
-        if show_skip_verify_row {
-            if show_peer_verify_row {
-                if is_server {
-                    // No client-CA entries yet: give ADD the remaining width and skip DEL
-                    // entirely rather than paint an empty, nothing-to-delete button.
-                    if self.client_ca_files.state.values().is_empty() {
-                        render_row!(self, rows[9], buf;
-                            client_cert_skip_verify => Constraint::Percentage(25),
-                            client_ca_files => Constraint::Percentage(60),
-                            client_ca_add_button => Constraint::Fill(1)
-                        );
-                    } else {
-                        render_row!(self, rows[9], buf;
-                            client_cert_skip_verify => Constraint::Percentage(25),
-                            client_ca_files => Constraint::Percentage(45),
-                            client_ca_add_button => Constraint::Percentage(15),
-                            client_ca_delete_button => Constraint::Fill(1)
-                        );
-                    }
-                } else {
-                    render_row!(self, rows[9], buf;
-                        skip_verify => Constraint::Percentage(25),
-                        ca_file => Constraint::Fill(1)
-                    );
-                }
-            } else if is_server {
-                render_field!(self, client_cert_skip_verify, rows[9], buf);
-            } else {
-                render_field!(self, skip_verify, rows[9], buf);
-            }
         }
 
         if has_error {
@@ -1125,25 +884,28 @@ impl OcppSetupDialog {
         self.config_path
             .widget
             .render_overlay(area, buf, &mut self.config_path.state);
-        self.ca_file
-            .widget
-            .render_overlay(area, buf, &mut self.ca_file.state);
-        self.cert_file
-            .widget
-            .render_overlay(area, buf, &mut self.cert_file.state);
-        self.key_file
-            .widget
-            .render_overlay(area, buf, &mut self.key_file.state);
-        self.client_cert_file
-            .widget
-            .render_overlay(area, buf, &mut self.client_cert_file.state);
-        self.client_key_file
-            .widget
-            .render_overlay(area, buf, &mut self.client_key_file.state);
-        // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+        {
+            let tls = &mut self.tls;
+            tls.ca_file
+                .widget
+                .render_overlay(area, buf, &mut tls.ca_file.state);
+            tls.cert_file
+                .widget
+                .render_overlay(area, buf, &mut tls.cert_file.state);
+            tls.key_file
+                .widget
+                .render_overlay(area, buf, &mut tls.key_file.state);
+            tls.client_cert_file
+                .widget
+                .render_overlay(area, buf, &mut tls.client_cert_file.state);
+            tls.client_key_file
+                .widget
+                .render_overlay(area, buf, &mut tls.client_key_file.state);
+            // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
 
-        if let Some(d) = self.client_ca_add_dialog.as_mut() {
-            d.render(area, buf);
+            if let Some(d) = tls.client_ca_add_dialog.as_mut() {
+                d.render(area, buf);
+            }
         }
 
         if let Some(prompt) = self.header_edit_prompt.as_mut() {
@@ -1322,8 +1084,13 @@ fn keybinds_text() -> Widget<String, Text> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dialog::tls_section::SkipVerifyChoice;
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::{IsFocus, SetFocus};
+    use ferrowl_util::tls::{
+        ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
+        ServerCertSource, ServerTlsPolicy,
+    };
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
@@ -1373,8 +1140,8 @@ mod tests {
 
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.cert_file, &format!("~/{cert_name}"));
-        set_suggest_text(&mut d.key_file, &format!("~/{key_name}"));
+        set_suggest_text(&mut d.tls.cert_file, &format!("~/{cert_name}"));
+        set_suggest_text(&mut d.tls.key_file, &format!("~/{key_name}"));
 
         let outcome = d.resolve();
         let _ = std::fs::remove_file(home.join(&cert_name));
@@ -1476,6 +1243,13 @@ mod tests {
         assert_eq!(resolved.security, security);
     }
 
+    fn type_into(state: &mut InputFieldState, s: &str) {
+        state.set_focused(true);
+        for c in s.chars() {
+            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
     // --- dialog-level validation ---------------------------------------------------------------
 
     fn wss_dialog(role_idx: usize) -> OcppSetupDialog {
@@ -1493,12 +1267,14 @@ mod tests {
     fn ut_show_self_signed_only_at_tls_and_above_for_server() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(d.show_self_signed());
+        d.sync_tls();
+        assert!(d.tls.show_self_signed_row());
 
         d.security
             .state
             .set_selection(SecurityLevel::BasicAuth.index());
-        assert!(!d.show_self_signed());
+        d.sync_tls();
+        assert!(!d.tls.show_self_signed_row());
     }
 
     #[test]
@@ -1506,11 +1282,12 @@ mod tests {
     fn ut_self_signed_hides_server_cert_row() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(d.show_server_cert());
-        d.self_signed.state.set_selection(1); // On
-        assert!(!d.show_server_cert());
-        d.self_signed.state.set_selection(0); // Off again
-        assert!(d.show_server_cert());
+        d.sync_tls();
+        assert!(d.tls.show_identity_row());
+        d.tls.self_signed.state.set_selection(1); // On
+        assert!(!d.tls.show_identity_row());
+        d.tls.self_signed.state.set_selection(0); // Off again
+        assert!(d.tls.show_identity_row());
     }
 
     #[test]
@@ -1520,9 +1297,9 @@ mod tests {
     fn ut_resolve_self_signed_excludes_stale_cert_key_text() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.cert_file, "s.crt");
-        set_suggest_text(&mut d.key_file, "s.key");
-        d.self_signed.state.set_selection(1); // On, after the text was typed
+        set_suggest_text(&mut d.tls.cert_file, "s.crt");
+        set_suggest_text(&mut d.tls.key_file, "s.key");
+        d.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let spec = d.resolve().expect("self-signed needs no cert/key files");
         assert_eq!(
@@ -1532,8 +1309,8 @@ mod tests {
             }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
-        assert_eq!(d.cert_file.state.input(), "s.crt");
-        assert_eq!(d.key_file.state.input(), "s.key");
+        assert_eq!(d.tls.cert_file.state.input(), "s.crt");
+        assert_eq!(d.tls.key_file.state.input(), "s.key");
     }
 
     #[test]
@@ -1542,7 +1319,7 @@ mod tests {
     fn ut_validate_security_self_signed_needs_no_cert_files() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        d.self_signed.state.set_selection(1); // On
+        d.tls.self_signed.state.set_selection(1); // On
         assert!(d.resolve().is_ok());
     }
 
@@ -1551,11 +1328,12 @@ mod tests {
     fn ut_skip_verify_hides_ca_file_row() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(d.show_ca_file());
-        d.skip_verify.state.set_selection(1); // On
-        assert!(!d.show_ca_file());
-        d.skip_verify.state.set_selection(0); // Off again
-        assert!(d.show_ca_file());
+        d.sync_tls();
+        assert!(d.tls.show_peer_verify_row());
+        d.tls.skip_verify.state.set_selection(1); // On
+        assert!(!d.tls.show_peer_verify_row());
+        d.tls.skip_verify.state.set_selection(0); // Off again
+        assert!(d.tls.show_peer_verify_row());
     }
 
     #[test]
@@ -1564,8 +1342,8 @@ mod tests {
     fn ut_resolve_skip_verify_excludes_stale_ca_file_text() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.ca_file, "ca.pem");
-        d.skip_verify.state.set_selection(1); // On, after the text was typed
+        set_suggest_text(&mut d.tls.ca_file, "ca.pem");
+        d.tls.skip_verify.state.set_selection(1); // On, after the text was typed
 
         let spec = d.resolve().expect("skip-verify needs no ca file");
         assert_eq!(
@@ -1574,7 +1352,7 @@ mod tests {
                 client_verification: ClientVerification::SkipVerify
             }
         );
-        assert_eq!(d.ca_file.state.input(), "ca.pem");
+        assert_eq!(d.tls.ca_file.state.input(), "ca.pem");
     }
 
     #[test]
@@ -1614,7 +1392,8 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a server TLS setup missing its cert fails validation and keeps the dialog open.
+    /// OC-R-112, UI-R-024 — a server TLS setup with both `cert_file`/`key_file` blank and
+    /// `self_signed` off refuses to resolve, keeping the dialog open.
     fn ut_server_tls_missing_cert_is_rejected() {
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1623,12 +1402,24 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-112 — `cert_file` set alone (not both), while `self_signed` is off, fails resolution
+    /// rather than silently falling through to an inert listener.
+    fn ut_server_tls_cert_file_alone_is_rejected() {
+        let cert = tmp_file("cert_alone.crt");
+        let mut d = wss_dialog(1);
+        d.security.state.set_selection(SecurityLevel::Tls.index());
+        set_suggest_text(&mut d.tls.cert_file, &cert);
+        let err = d.resolve().unwrap_err();
+        assert!(err.contains("must both be set, or neither"), "{err}");
+    }
+
+    #[test]
     /// UI-R-024 — a server TLS setup with a nonexistent cert file fails validation.
     fn ut_server_tls_nonexistent_cert_is_rejected() {
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.cert_file, "/no/such/cert.crt");
-        set_suggest_text(&mut d.key_file, "/no/such/key.key");
+        set_suggest_text(&mut d.tls.cert_file, "/no/such/cert.crt");
+        set_suggest_text(&mut d.tls.key_file, "/no/such/key.key");
         let err = d.resolve().unwrap_err();
         assert!(err.contains("Certificate file not found"), "{err}");
     }
@@ -1640,8 +1431,8 @@ mod tests {
         let key = tmp_file("key.key");
         let mut d = wss_dialog(1);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.cert_file, &cert);
-        set_suggest_text(&mut d.key_file, &key);
+        set_suggest_text(&mut d.tls.cert_file, &cert);
+        set_suggest_text(&mut d.tls.key_file, &key);
         assert!(d.resolve().is_ok());
     }
 
@@ -1654,135 +1445,83 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        set_suggest_text(&mut d.cert_file, &cert);
-        set_suggest_text(&mut d.key_file, &key);
+        set_suggest_text(&mut d.tls.cert_file, &cert);
+        set_suggest_text(&mut d.tls.key_file, &key);
         let err = d.resolve().unwrap_err();
         assert!(err.contains("Client CA list is required"), "{err}");
     }
 
-    fn type_into(state: &mut ferrowl_ui::state::InputFieldState, s: &str) {
-        state.set_focused(true);
-        for c in s.chars() {
-            state.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+    /// Steps `d.tls.focus_next()` until it lands on `target`, bounded at `TlsSection`'s own field
+    /// count so a `target` that's ineligible under the caller's role/level setup panics
+    /// immediately instead of spinning forever.
+    fn focus_tls_until(d: &mut OcppSetupDialog, target: TlsSectionFocus) {
+        for _ in 0..11 {
+            if d.tls.focus() == target {
+                return;
+            }
+            d.tls.focus_next();
         }
+        panic!("{target:?} never became eligible under the current role/level setup");
     }
 
     #[test]
-    /// OC-R-113 — the client-CA row is a genuine add/remove list: the ADD button opens a
-    /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes
-    /// whichever entry is currently selected — not a comma-separated text field.
-    fn ut_client_ca_files_add_remove_edit() {
-        let cert = tmp_file("mca_cert.crt");
-        let key = tmp_file("mca_key.key");
-        let ca1 = tmp_file("mca_ca1.pem");
-        let ca2 = tmp_file("mca_ca2.pem");
+    /// OC-R-113 — the setup dialog's own ADD/DEL routing (`handle_events`, not `TlsSection`'s
+    /// inherent method of the same name, which this dialog doesn't call): ADD opens the sub-
+    /// dialog; an empty path is rejected with an inline error and nothing appended; Esc closes
+    /// the sub-dialog with nothing appended; a confirmed path is appended; DEL removes the
+    /// selected entry, and draining to empty falls focus back to ADD.
+    fn ut_client_ca_add_delete_lifecycle_via_outer_dialog() {
+        let ca = tmp_file("ocpp_outer_ca.pem");
         let mut d = wss_dialog(1); // Server
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        set_suggest_text(&mut d.cert_file, &cert);
-        set_suggest_text(&mut d.key_file, &key);
+        d.tls.client_cert_skip_verify.state.set_selection(0); // Off: client-CA row shows
+        d.sync_tls();
+        focus_tls_until(&mut d, TlsSectionFocus::ClientCaAddButton);
+        d.focus = OcppSetupDialogFocus::Tls;
 
-        assert!(d.client_ca_files.state.values().is_empty());
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.tls.client_ca_add_dialog.is_some());
 
-        // ADD: open the sub-dialog, type a path, confirm with Enter.
-        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
+        // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.client_ca_add_dialog.is_some());
-        type_into(
-            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
-            &ca1,
-        );
-        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.client_ca_add_dialog.is_none());
-        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
-
-        // ADD a second entry.
-        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
-        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        type_into(
-            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
-            &ca2,
-        );
-        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert_eq!(
-            d.client_ca_files.state.values(),
-            &[ca1.clone(), ca2.clone()]
-        );
-
-        // A path that doesn't exist on disk is rejected: the sub-dialog stays open with an
-        // error, nothing appended (only a file present on disk can be confirmed).
-        d.focus = OcppSetupDialogFocus::ClientCaAddButton;
-        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        type_into(
-            &mut d.client_ca_add_dialog.as_mut().unwrap().path.state,
-            "/nonexistent/ca-does-not-exist.pem",
-        );
-        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.client_ca_add_dialog.is_some());
+        assert!(d.tls.client_ca_add_dialog.is_some());
         assert!(
-            !d.client_ca_add_dialog
+            !d.tls
+                .client_ca_add_dialog
                 .as_ref()
                 .unwrap()
                 .error
                 .state
                 .is_empty()
         );
+
+        // Esc closes the sub-dialog with nothing appended.
         d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
-        assert!(d.client_ca_add_dialog.is_none());
+        assert!(d.tls.client_ca_add_dialog.is_none());
+        assert!(d.tls.client_ca_files.state.values().is_empty());
+
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.tls.client_ca_add_dialog.is_some());
+        set_suggest_text(&mut d.tls.client_ca_add_dialog.as_mut().unwrap().path, &ca);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.tls.client_ca_add_dialog.is_none());
         assert_eq!(
-            d.client_ca_files.state.values(),
-            &[ca1.clone(), ca2.clone()]
+            d.tls.client_ca_files.state.values(),
+            std::slice::from_ref(&ca)
         );
 
-        let spec = d.resolve().expect("two CAs resolve");
-        match spec.security.server {
-            ServerTlsPolicy::MutualTls {
-                client_verification: ClientCertVerification::Verify { ca_files },
-                ..
-            } => assert_eq!(ca_files, vec![ca1.clone(), ca2.clone()]),
-            other => panic!("expected MutualTls with Verify, got {other:?}"),
-        }
-
-        // DEL: remove the currently-selected entry (selection sits on the last-added item).
-        assert_eq!(d.client_ca_files.state.selection(), 1);
-        d.focus = OcppSetupDialogFocus::ClientCaDeleteButton;
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(d.client_ca_files.state.values(), std::slice::from_ref(&ca1));
-
-        let spec = d.resolve().expect("one CA resolves");
-        match spec.security.server {
-            ServerTlsPolicy::MutualTls {
-                client_verification: ClientCertVerification::Verify { ca_files },
-                ..
-            } => assert_eq!(ca_files, vec![ca1]),
-            other => panic!("expected MutualTls with Verify, got {other:?}"),
-        }
-
-        // Remove all: needs Skip Verify on to resolve without error.
-        d.client_ca_delete_button.state.set_focused(true);
-        d.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert!(d.client_ca_files.state.values().is_empty());
-        // Deleting down to an empty list must not leave `focus` stuck on the now-ineligible DEL
-        // button — it falls back to ADD, so Tab from there keeps working. The fallback must also
-        // move the widget-level highlight, not just the tracking enum, or DEL stays visually
-        // focused (though hidden) and ADD stays unhighlighted until the next real Tab press.
-        assert_eq!(d.focus, OcppSetupDialogFocus::ClientCaAddButton);
-        assert!(!d.client_ca_delete_button.state.is_focused());
-        assert!(d.client_ca_add_button.state.is_focused());
-        assert!(d.resolve().is_err());
-        d.client_cert_skip_verify.state.set_selection(1); // On
-        let spec = d.resolve().expect("skip-verify needs no CA list");
-        assert_eq!(
-            spec.security.server,
-            ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
-                    cert_file: cert,
-                    key_file: key,
-                },
-                client_verification: ClientCertVerification::SkipVerify,
-            }
+        focus_tls_until(&mut d, TlsSectionFocus::ClientCaDeleteButton);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(d.tls.client_ca_files.state.values().is_empty());
+        assert_ne!(
+            d.tls.focus(),
+            TlsSectionFocus::ClientCaDeleteButton,
+            "draining the list must not strand focus on the now-hidden DEL button"
         );
+
+        let _ = std::fs::remove_file(&ca);
     }
 
     #[test]
@@ -1791,15 +1530,17 @@ mod tests {
     fn ut_client_self_signed_shown_only_at_mutual_tls_and_excludes_stale_cert_key() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(!d.show_self_signed());
+        d.sync_tls();
+        assert!(!d.tls.show_self_signed_row());
 
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        assert!(d.show_self_signed());
-        set_suggest_text(&mut d.client_cert_file, "stale.crt");
-        set_suggest_text(&mut d.client_key_file, "stale.key");
-        d.self_signed.state.set_selection(1); // On, after the text was typed
+        d.sync_tls();
+        assert!(d.tls.show_self_signed_row());
+        set_suggest_text(&mut d.tls.client_cert_file, "stale.crt");
+        set_suggest_text(&mut d.tls.client_key_file, "stale.key");
+        d.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let spec = d
             .resolve()
@@ -1811,8 +1552,8 @@ mod tests {
                 client_identity: ClientCertSource::SelfSigned,
             }
         );
-        assert_eq!(d.client_cert_file.state.input(), "stale.crt");
-        assert_eq!(d.client_key_file.state.input(), "stale.key");
+        assert_eq!(d.tls.client_cert_file.state.input(), "stale.crt");
+        assert_eq!(d.tls.client_key_file.state.input(), "stale.key");
     }
 
     #[test]
@@ -1821,15 +1562,17 @@ mod tests {
     fn ut_server_client_cert_skip_verify_shown_only_at_mutual_tls_hides_ca_list() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(!d.show_client_cert_skip_verify());
+        d.sync_tls();
+        assert!(!d.tls.show_skip_verify_row());
 
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        assert!(d.show_client_cert_skip_verify());
-        assert!(d.show_client_ca());
-        d.client_cert_skip_verify.state.set_selection(1); // On
-        assert!(!d.show_client_ca());
+        d.sync_tls();
+        assert!(d.tls.show_skip_verify_row());
+        assert!(d.tls.show_peer_verify_row());
+        d.tls.client_cert_skip_verify.state.set_selection(1); // On
+        assert!(!d.tls.show_peer_verify_row());
     }
 
     #[test]
@@ -1855,7 +1598,7 @@ mod tests {
     fn ut_client_ca_file_when_set_must_exist() {
         let mut d = wss_dialog(0);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut d.ca_file, "/no/such/ca.pem");
+        set_suggest_text(&mut d.tls.ca_file, "/no/such/ca.pem");
         let err = d.resolve().unwrap_err();
         assert!(err.contains("CA file not found"), "{err}");
     }
@@ -1933,7 +1676,10 @@ mod tests {
             },
         };
         let dialog = OcppSetupDialog::edit(&spec, "device.toml", &[]);
-        assert_eq!(dialog.skip_verify.state.get_value(), SkipVerifyChoice::On);
+        assert_eq!(
+            dialog.tls.skip_verify.state.get_value(),
+            SkipVerifyChoice::On
+        );
         let resolved = dialog.resolve().expect("valid client config");
         assert_eq!(
             resolved.security.client,
@@ -1968,8 +1714,8 @@ mod tests {
             .security
             .state
             .set_selection(SecurityLevel::Tls.index());
-        set_suggest_text(&mut without_hint.cert_file, &cert);
-        set_suggest_text(&mut without_hint.key_file, &key);
+        set_suggest_text(&mut without_hint.tls.cert_file, &cert);
+        set_suggest_text(&mut without_hint.tls.key_file, &key);
         let mut buf2 = Buffer::empty(area);
         without_hint.render(area, &mut buf2);
         let without_hint_text = buffer_text(&buf2);
@@ -1986,12 +1732,12 @@ mod tests {
     // --- focus traversal ------------------------------------------------------------------------
 
     #[test]
-    /// UI-R-022 — a ws selection hides (skips) all security fields in the focus cycle.
+    /// UI-R-022 — a ws selection hides (skips) all security fields in the focus cycle,
+    /// including the entire nested `tls` field (never entered, since `tls_shown()` is false).
     fn ut_focus_ws_hides_all_security_fields() {
         let mut d = OcppSetupDialog::new(); // Ws by default
         d.set_focused(true);
         assert_eq!(d.focus, OcppSetupDialogFocus::Name);
-        // Cycle through every focusable slot; none should land on a security field while Ws.
         for _ in 0..20 {
             d.focus_next();
             assert!(!matches!(
@@ -1999,20 +1745,15 @@ mod tests {
                 OcppSetupDialogFocus::Security
                     | OcppSetupDialogFocus::Username
                     | OcppSetupDialogFocus::Password
-                    | OcppSetupDialogFocus::SkipVerify
-                    | OcppSetupDialogFocus::CaFile
-                    | OcppSetupDialogFocus::CertFile
-                    | OcppSetupDialogFocus::KeyFile
-                    | OcppSetupDialogFocus::ClientCertFile
-                    | OcppSetupDialogFocus::ClientKeyFile
-                    | OcppSetupDialogFocus::ClientCaFiles
+                    | OcppSetupDialogFocus::Tls
             ));
         }
     }
 
     #[test]
     /// UI-R-022 — a wss client focus cycle includes the security selection at level None, but
-    /// not the skip-verify field (OC-R-111 hides it below TLS).
+    /// never enters the nested `tls` field (`tls_shown()` requires `>= Tls`) or reaches Username
+    /// (`show_credentials()` requires `>= BasicAuth`).
     fn ut_focus_wss_none_shows_security_selection_for_client() {
         let mut d = wss_dialog(0); // Client, wss, level None
         d.set_focused(true);
@@ -2022,9 +1763,8 @@ mod tests {
             visited.push(d.focus);
         }
         assert!(visited.contains(&OcppSetupDialogFocus::Security));
-        assert!(!visited.contains(&OcppSetupDialogFocus::SkipVerify));
+        assert!(!visited.contains(&OcppSetupDialogFocus::Tls));
         assert!(!visited.contains(&OcppSetupDialogFocus::Username));
-        assert!(!visited.contains(&OcppSetupDialogFocus::CaFile));
     }
 
     #[test]
@@ -2034,24 +1774,28 @@ mod tests {
         let mut d = wss_dialog(0); // Client
 
         d.security.state.set_selection(SecurityLevel::None.index());
-        assert!(!d.show_skip_verify());
+        d.sync_tls();
+        assert!(!d.tls.show_skip_verify_row());
 
         d.security
             .state
             .set_selection(SecurityLevel::BasicAuth.index());
-        assert!(!d.show_skip_verify());
+        d.sync_tls();
+        assert!(!d.tls.show_skip_verify_row());
 
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        assert!(d.show_skip_verify());
+        d.sync_tls();
+        assert!(d.tls.show_skip_verify_row());
 
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        assert!(d.show_skip_verify());
+        d.sync_tls();
+        assert!(d.tls.show_skip_verify_row());
     }
 
     #[test]
-    /// UI-R-022 — a wss server focus cycle omits the skip-verify field.
+    /// UI-R-022 — a wss server focus cycle at level None never enters the nested `tls` field.
     fn ut_focus_wss_none_server_has_no_skip_verify() {
         let mut d = wss_dialog(1); // Server, wss, level None
         d.set_focused(true);
@@ -2061,32 +1805,165 @@ mod tests {
             visited.push(d.focus);
         }
         assert!(visited.contains(&OcppSetupDialogFocus::Security));
-        assert!(!visited.contains(&OcppSetupDialogFocus::SkipVerify));
+        assert!(!visited.contains(&OcppSetupDialogFocus::Tls));
+    }
+
+    /// One stop of the flattened Tab walk used by the tab-order tests below: while `self.focus`
+    /// sits on the nested `Tls` field, a Tab keystroke steps *within* `TlsSection`'s own panes
+    /// (dispatched to its `HandleEvents` impl, which tries `NestedFocus::try_focus_next` on an
+    /// `Unhandled` Tab/BackTab from its own current pane); once that inner scan is exhausted, the
+    /// outer struct's own `focus_next()` advances `self.focus` to the next top-level field — the
+    /// two mechanisms combined are what actually walk a full nested Tab sequence, since the outer
+    /// struct's own wrap-around walk only ever treats `tls` as a single field, one step.
+    #[derive(Debug, Clone, PartialEq)]
+    enum Stop {
+        Outer(OcppSetupDialogFocus),
+        Tls(TlsSectionFocus),
+    }
+
+    fn current_stop(d: &OcppSetupDialog) -> Stop {
+        if d.focus == OcppSetupDialogFocus::Tls {
+            Stop::Tls(d.tls.focus())
+        } else {
+            Stop::Outer(d.focus)
+        }
+    }
+
+    /// Drive a flattened forward Tab walk from `OcppSetupDialogFocus::Security` back around to
+    /// `OcppSetupDialogFocus::Name` (`tls` is the last declared focusable field, so the outer
+    /// wrap-around walk returns to `Name` once past it), recording every stop.
+    fn tab_sequence_from_security(d: &mut OcppSetupDialog) -> Vec<Stop> {
+        // Mirrors production: `handle_events()` (which calls `sync_tls()` first) always runs
+        // before Tab/BackTab reaches the outer struct's generated `focus_next()`/
+        // `focus_previous()`, so `self.tls`'s role/level are fresh by the time entry into it is
+        // attempted. A test driving `focus_next()` directly must reproduce that precondition
+        // explicitly — at the builder-default `Off` level every pane is ineligible, so an
+        // unsynced `tls` looks entirely empty and `focus_next()` skips over it.
+        d.sync_tls();
+        d.focus = OcppSetupDialogFocus::Security;
+        let mut seq = vec![current_stop(d)];
+        loop {
+            if d.focus == OcppSetupDialogFocus::Tls {
+                let result = d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+                if matches!(result, EventResult::Consumed) {
+                    seq.push(current_stop(d));
+                    continue;
+                }
+                d.focus_next();
+            } else {
+                d.focus_next();
+            }
+            seq.push(current_stop(d));
+            if d.focus == OcppSetupDialogFocus::Name {
+                break;
+            }
+        }
+        seq
+    }
+
+    /// Backward counterpart, driven with `SHIFT`+`BackTab` from `OcppSetupDialogFocus::Name` back
+    /// to `OcppSetupDialogFocus::Security`. Entering `tls` *backward* must land on its *last*
+    /// eligible pane, not its first — the regression this pins down.
+    fn back_tab_sequence_from_name(d: &mut OcppSetupDialog) -> Vec<Stop> {
+        d.sync_tls();
+        d.focus = OcppSetupDialogFocus::Name;
+        let mut seq = vec![current_stop(d)];
+        loop {
+            if d.focus == OcppSetupDialogFocus::Tls {
+                let result = d.handle_events(KeyModifiers::SHIFT, KeyCode::BackTab);
+                if matches!(result, EventResult::Consumed) {
+                    seq.push(current_stop(d));
+                    continue;
+                }
+                d.focus_previous();
+            } else {
+                d.focus_previous();
+            }
+            seq.push(current_stop(d));
+            if d.focus == OcppSetupDialogFocus::Security {
+                break;
+            }
+        }
+        seq
     }
 
     #[test]
-    /// UI-R-022 — a mutual-TLS server focus cycle reaches the client-CA field.
-    fn ut_focus_wss_mutual_tls_server_reaches_client_ca_file() {
+    /// OC-R-113, UI-R-049 — the mTLS server-role Tab order: own cert/key, then Skip Verify,
+    /// then the client-CA list and its ADD/DEL buttons — reached by bubbling into/out of the
+    /// nested `tls` field. Also proves entering `tls` backward lands on its last pane (DEL), not
+    /// its first (Self-Signed). This is also the effective per-role sequence pre-migration's
+    /// interleaved 11-field declaration produced, now collapsed onto `TlsSection`'s single order.
+    fn ut_tab_order_server_mtls() {
         let mut d = wss_dialog(1); // Server
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        // `client_ca_files` is focus-eligible only when non-empty (an empty list hides
-        // the field, matching its no-longer-rendered DEL button) — populate it so this cycle
-        // actually reaches it.
-        d.client_ca_files
+        d.tls
+            .client_ca_files
             .state
-            .set_values(vec!["ca1.pem".to_string()]);
-        d.set_focused(true);
-        let mut visited = Vec::new();
-        for _ in 0..20 {
-            d.focus_next();
-            visited.push(d.focus);
-        }
-        assert!(visited.contains(&OcppSetupDialogFocus::ClientCaFiles));
-        assert!(visited.contains(&OcppSetupDialogFocus::CertFile));
-        assert!(visited.contains(&OcppSetupDialogFocus::KeyFile));
-        assert!(!visited.contains(&OcppSetupDialogFocus::ClientCertFile));
+            .set_values(vec!["ca1.pem".to_string()]); // non-empty, so DEL is eligible
+        let seq = tab_sequence_from_security(&mut d);
+        assert_eq!(
+            seq,
+            vec![
+                Stop::Outer(OcppSetupDialogFocus::Security),
+                Stop::Outer(OcppSetupDialogFocus::Username),
+                Stop::Outer(OcppSetupDialogFocus::Password),
+                Stop::Tls(TlsSectionFocus::SelfSigned),
+                Stop::Tls(TlsSectionFocus::CertFile),
+                Stop::Tls(TlsSectionFocus::KeyFile),
+                Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
+                Stop::Tls(TlsSectionFocus::ClientCaFiles),
+                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
+                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
+                Stop::Outer(OcppSetupDialogFocus::Name),
+            ]
+        );
+
+        let back_seq = back_tab_sequence_from_name(&mut d);
+        assert_eq!(
+            back_seq,
+            vec![
+                Stop::Outer(OcppSetupDialogFocus::Name),
+                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
+                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
+                Stop::Tls(TlsSectionFocus::ClientCaFiles),
+                Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
+                Stop::Tls(TlsSectionFocus::KeyFile),
+                Stop::Tls(TlsSectionFocus::CertFile),
+                Stop::Tls(TlsSectionFocus::SelfSigned),
+                Stop::Outer(OcppSetupDialogFocus::Password),
+                Stop::Outer(OcppSetupDialogFocus::Username),
+                Stop::Outer(OcppSetupDialogFocus::Security),
+            ]
+        );
+    }
+
+    #[test]
+    /// OC-R-111, OC-R-116, UI-R-049 — the mTLS client-role Tab order: own cert/key, then Skip
+    /// Verify, then the CA-file trust-anchor input (no ADD/DEL — client role never shows the
+    /// client-CA list). Also the effective per-role sequence pre-migration's interleaved 11-field
+    /// declaration produced, now collapsed onto `TlsSection`'s single order.
+    fn ut_tab_order_client_mtls() {
+        let mut d = wss_dialog(0); // Client
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        let seq = tab_sequence_from_security(&mut d);
+        assert_eq!(
+            seq,
+            vec![
+                Stop::Outer(OcppSetupDialogFocus::Security),
+                Stop::Outer(OcppSetupDialogFocus::Username),
+                Stop::Outer(OcppSetupDialogFocus::Password),
+                Stop::Tls(TlsSectionFocus::SelfSigned),
+                Stop::Tls(TlsSectionFocus::ClientCertFile),
+                Stop::Tls(TlsSectionFocus::ClientKeyFile),
+                Stop::Tls(TlsSectionFocus::SkipVerify),
+                Stop::Tls(TlsSectionFocus::CaFile),
+                Stop::Outer(OcppSetupDialogFocus::Name),
+            ]
+        );
     }
 
     /// Typing into the config-path field opens the filesystem suggestion popup, and the popup is
@@ -2245,23 +2122,27 @@ mod tests {
         );
     }
 
-    #[test]
     /// UI-R-024 — an empty client-CA list shows no placeholder entry, and the DEL button is not
-    /// rendered at all, so ADD gets the row's full width (mirrors the Modbus dialog).
-    fn ut_client_ca_empty_hides_delete_button() {
+    /// rendered at all, so ADD gets the row's full width, exercised through the outer dialog's
+    /// own render (unlike the Modbus dialog, this render path does not itself recover focus off
+    /// a now-hidden DEL button — that guard exists only in Modbus's render(); OCPP's own DEL
+    /// handler, `TlsSection::delete_selected_client_ca`, already handles the fallback whenever
+    /// the list is actually drained via the button, which is the reachable path in practice).
+    #[test]
+    fn ut_render_client_ca_empty_list_hides_delete_button_outer() {
         let mut d = wss_dialog(1); // Server
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        assert!(d.client_ca_files.state.values().is_empty());
+        d.tls.client_cert_skip_verify.state.set_selection(0);
+        d.sync_tls();
+        assert!(d.tls.client_ca_files.state.values().is_empty());
+
         let area = Rect::new(0, 0, 80, 60);
         let mut buf = Buffer::empty(area);
         d.render(area, &mut buf);
         let text = buffer_text(&buf);
-        assert!(
-            !text.contains("DEL"),
-            "DEL button rendered with an empty client-CA list:\n{text}"
-        );
+        assert!(!text.contains("DEL"), "empty list must hide DEL:\n{text}");
         assert!(text.contains("ADD"), "ADD button missing:\n{text}");
     }
 
@@ -2273,7 +2154,8 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        d.client_ca_files
+        d.tls
+            .client_ca_files
             .state
             .set_values(vec!["ca1.pem".to_string()]);
         let area = Rect::new(0, 0, 80, 60);
@@ -2293,32 +2175,6 @@ mod tests {
             rightmost_non_space(&buf, name_row),
             rightmost_non_space(&buf, ca_row),
             "DEL button leaves trailing dead space vs. the dialog's other full-width rows"
-        );
-    }
-
-    #[test]
-    /// UI-R-024 — the client-CA list's row stays a fixed 3 rows tall regardless of entry count;
-    /// more entries scroll/clip, never grow the box (mirrors the Modbus dialog).
-    fn ut_client_ca_row_height_fixed_regardless_of_entry_count() {
-        let mut d = wss_dialog(1); // Server
-        d.security
-            .state
-            .set_selection(SecurityLevel::MutualTls.index());
-        d.client_ca_files
-            .state
-            .set_values((0..10).map(|i| format!("ca{i}.pem")).collect::<Vec<_>>());
-        let area = Rect::new(0, 0, 80, 60);
-        let mut buf = Buffer::empty(area);
-        d.render(area, &mut buf);
-        let text = buffer_text(&buf);
-        let ca_row = row_of(&buf, "Client CA(s)");
-        let keybinds_row = row_of(&buf, "Esc");
-        // The client-CA box is 1 content row + 2 border rows, immediately followed by the
-        // error row (0 or 3 lines) and keybinds; with >3 entries the extras scroll/clip, they
-        // must never push keybinds further down than a fixed 3-row box would.
-        assert!(
-            keybinds_row - ca_row <= 6,
-            "client-CA row appears to have grown beyond a fixed 3-row box:\n{text}"
         );
     }
 
