@@ -233,8 +233,6 @@ mod tests {
     #[test]
     /// UI-R-056 — scrolling past the bottom of the help overlay does not overflow.
     fn ut_handle_key_g_then_j_stays_at_max_no_overflow() {
-        // Regression: `G` used to jump to `u16::MAX`, and `j` at the bottom used to keep
-        // incrementing unboundedly. Both must clamp to `max_scroll`.
         let mut o = overlay();
         o.max_scroll = 7;
         assert!(!o.handle_key(KeyModifiers::NONE, KeyCode::Char('G')));

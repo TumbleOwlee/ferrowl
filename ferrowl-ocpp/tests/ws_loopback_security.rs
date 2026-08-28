@@ -522,8 +522,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
 // at construction (`ClientCertVerification::resolve`/`Deserialize`), before a `ServerTlsPolicy`
 // carrying that combination can even exist -- see
 // `ferrowl_util::tls::tests::ut_server_tls_policy_deserialize_mutual_tls_empty_ca_files_is_error`.
-// There is no longer a "builds, but is then rejected by `build_server_config`" state to cover
-// here.
+// No "builds, but is then rejected by `build_server_config`" state exists to cover here.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 /// OC-R-040 — `require_client_cert` combined with a self-signed CSMS certificate succeeds,

@@ -1034,7 +1034,7 @@ mod tests {
             !msg.contains("self-signed"),
             "a plain listener must not report a self-signed certificate, got: {msg}"
         );
-        // OC-R-083: the listener no longer binds synchronously inside `start()` — poll for it.
+        // OC-R-083: `start()` binds the listener asynchronously — poll until it is bound.
         assert!(
             poll_bound_addr(&v.backend).await.is_some(),
             "the listener must bind promptly against a free port"
@@ -1068,7 +1068,7 @@ mod tests {
             v.entries.is_empty(),
             "restart must discard every observed charging-station entry"
         );
-        // OC-R-083: the listener no longer binds synchronously — poll for it.
+        // OC-R-083: the listener binds asynchronously — poll until it is bound.
         assert!(
             poll_bound_addr(&v.backend).await.is_some(),
             "restart must start a new instance"
