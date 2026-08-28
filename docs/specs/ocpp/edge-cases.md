@@ -217,3 +217,28 @@ Teardown (OC-R-121) aborts an in-flight inbound Call handler task rather than
 waiting for it. If the handler had already begun a side effect (e.g. a partial
 state mutation) before cancellation, that partial effect is not rolled back —
 only the reply is guaranteed never to be sent.
+
+### 6.12 The CS and CSMS connection drivers stay separate
+
+`cs::core::run` and `csms::core::run_connection` share a skeleton — build the
+dispatch, start the connection, `on_connected`, a `select!` loop over commands,
+`shutdown`, `on_disconnected` — and are deliberately not unified.
+
+The differences are threaded through the whole body rather than isolated at the
+ends. The CSMS side carries a `ConnectionId` and passes it to every handler call
+(`on_connected(conn)`, `handle_call(conn, action)`, `on_disconnected(conn)`), so
+`CsActionHandler` and `CsmsActionHandler` have different method signatures and no
+single generic bound covers both without a further adapter trait. The CS side
+returns `RunEnd::{Terminated, Disconnected}`, which its caller's retry loop
+classifies to choose between stopping and backing off; the CSMS side returns `()`
+and deregisters from the connection registry instead. Their command enums differ
+in name and variants.
+
+Consequence: a change to the duplex loop must be made twice. That is the accepted
+price — unifying costs a handler-adapter trait plus a generic over the return
+type to save roughly 45 lines across two 90-line files, and would obscure the
+retry-classification contract `RunEnd` exists to make explicit.
+
+The shared `wait_backoff` helper in `ferrowl-util` is a different case and is
+already shared: it is a utility over a channel and a clock, not a lifecycle
+abstraction spanning the two roles.
