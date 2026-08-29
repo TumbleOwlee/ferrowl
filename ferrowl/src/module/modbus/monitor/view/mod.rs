@@ -73,15 +73,14 @@ impl MonitorPanel {
 enum MonitorOverlay {
     None,
     /// `:add`/`:a` interpretation dialog (UI-R-061) — a fresh, non-`deletable`
-    /// `EditInterpretationDialog`, scoped to the currently selected unit id, identical to
-    /// `EditInterpretation` below apart from prefill/deletability (mirrors the modbus module's
+    /// `EditInterpretationDialog`, scoped to the currently selected unit id, differing from
+    /// `EditInterpretation` below in prefill, `deletable`, and where focus starts (mirrors the
+    /// modbus module's
     /// own `EditInputDialog::new()`/`from_register` split). The struct's own
     /// `#[focus(when = ...)]` gates handle the alias-list-shown-vs-hidden presentation
-    /// internally — no mode-switch wrapper needed here.
+    /// internally.
     Add(Box<EditInterpretationDialog>),
-    /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device. Renamed from
-    /// `Edit` to make room for `EditInterpretation` below, which
-    /// this could otherwise be confused with.
+    /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device.
     EditSetup(Box<MonitorSetupDialog>),
     /// MB-R-148 — `Enter` on a Resolved-registers row opens this, prefilled from the
     /// selected row. The `String` is the interpretation's original name, needed for the
@@ -123,9 +122,8 @@ const TABLE_KINDS: [Kind; 4] = [
     Kind::InputRegister,
 ];
 
-/// One row of the Units panel: one observed unit id. A real `Table`/`TableEntry` row
-/// like the other panels, replacing the previous hand-built `List`/`ListItem`, for
-/// rendering consistency with the other 3 panels.
+/// One row of the Units panel: one observed unit id. A `Table`/`TableEntry` row like the other
+/// panels, for rendering consistency across all four.
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = UnitHeader)]
 struct UnitRow {
@@ -592,8 +590,7 @@ fn memory_cell_recency_active(
 
 /// One row of the Memory-layout table: a rendered line (starting address, its cells'
 /// hex values space-separated, their character representation). Real `Table`/`TableEntry`
-/// machinery, like the other panels, replaces the previous hand-painted-into-the-
-/// buffer render.
+/// machinery, like the other panels.
 ///
 /// UI-R-063 requires each individual byte/word to carry its own value-class/recency color; the
 /// Hex/Ascii columns use `TableEntry::cell_spans` (`ferrowl-ui/src/widgets/table.rs`) to
@@ -929,8 +926,6 @@ impl ModbusMonitorModuleView {
             return;
         };
         let dialog = EditInterpretationDialog::from_interpretation(&name, def);
-        // `from_interpretation` itself already opens focused on the alias list when `def.values`
-        // is non-empty and the kind isn't boolean — no separate mode-switch needed here.
         self.overlay = MonitorOverlay::EditInterpretation(Box::new(dialog), name);
     }
 
@@ -1076,17 +1071,15 @@ impl ModuleView for ModbusMonitorModuleView {
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-        // Every Tab-cyclable panel is now a real `Table` widget whose own border
-        // color already tracks `state.focused()` (`ferrowl_ui::style::TableStyle`'s
-        // `border`/`general`) — each panel below just calls `.set_focused(view_focused
-        // && panel_focus == <panel>)` before rendering, no separate `style_for` computation
-        // needed here anymore.
+        // Every Tab-cyclable panel is a `Table` widget whose own border color tracks
+        // `state.focused()` (`ferrowl_ui::style::TableStyle`'s `border`/`general`) — each panel
+        // below just calls `.set_focused(view_focused && panel_focus == <panel>)` before
+        // rendering, so no separate style computation is needed here.
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(10), Constraint::Min(1)]).areas(content_area);
 
         let buf = frame.buffer_mut();
 
-        // Units panel (a real Table/TableEntry — was a hand-built List/ListItem).
         self.units_table.state.set_values(
             self.unit_ids
                 .iter()
@@ -1374,11 +1367,11 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             // UI-R-065 — Units shares the same `TableState::handle_events` navigation as
             // every other panel (Up/Down/PageUp/PageDown/Home/End/left-right scroll, whatever
-            // the shared widget supports) instead of its own hand-rolled +/-1 Up/Down. `selected`
-            // stays the source of truth other panels key off (which unit id's data they show),
-            // but input now flows table -> selected: the table handles the keypress first, then
-            // `selected` picks up the resulting `table_state().selected()` index (the reverse of
-            // render's existing `select_index(self.selected)` sync).
+            // the shared widget supports). `selected` stays the source of truth other panels key
+            // off (which unit id's data they show), but input flows table -> selected: the table
+            // handles the keypress first, then `selected` picks up the resulting
+            // `table_state().selected()` index (the reverse of render's existing
+            // `select_index(self.selected)` sync).
             _ if self.panel_focus == MonitorPanel::Units => {
                 let result = self.units_table.state.handle_events(modifiers, code);
                 if let Some(idx) = self.units_table.state.table_state().selected() {
@@ -1887,11 +1880,10 @@ mod tests {
         assert!(!v.units_table.widget.show_selection_marker());
     }
 
-    /// UI-R-065 (manual-exercise follow-up) — Units shares the same `TableState::handle_events`
-    /// navigation keys as every other panel (`j`/`k`/Up/Down here, but also Home/End/`g`/`G`)
-    /// instead of its own hand-rolled +/-1 Up/Down that only understood Up/Down. `selected`
-    /// (which drives which unit id's data the other panels show) follows the table's own
-    /// resulting selection index.
+    /// UI-R-065 — Units shares the same `TableState::handle_events` navigation keys as every
+    /// other panel; Down, `G` and Home are the ones exercised here. `selected` (which drives
+    /// which unit id's data the other panels show) follows the table's own resulting selection
+    /// index.
     #[test]
     fn ut_units_panel_navigation_matches_other_panels_table_state_keys() {
         let mut v = view();
@@ -1936,9 +1928,8 @@ mod tests {
         assert_eq!(v.selected, 2);
     }
 
-    /// UI-R-065 (manual-exercise follow-up) — Memory previously had no navigation arm at all
-    /// (`_ => EventResult::Unhandled`); it now delegates straight to its own `TableState`, same
-    /// as Messages/Resolved.
+    /// UI-R-065 — Memory delegates navigation straight to its own `TableState`, same as
+    /// Messages/Resolved; `Down` is the key exercised here.
     #[test]
     fn ut_memory_panel_navigation_delegates_to_its_own_table_state() {
         let mut v = view();
@@ -2141,9 +2132,8 @@ mod tests {
         assert!(contents.contains("Resolved registers"));
     }
 
-    /// Regression — panel titles must not show requirement IDs; they're not useful to the
-    /// application's user. Previously "Messages (MB-R-143)", "Memory layout (MB-R-144)" and
-    /// "Resolved registers (MB-R-145)" leaked the spec IDs into the rendered UI.
+    /// Panel titles carry no requirement IDs — a spec ID in the rendered UI means nothing to
+    /// the application's user.
     #[test]
     fn ut_panel_titles_have_no_requirement_ids() {
         let mut v = view();
@@ -2160,9 +2150,8 @@ mod tests {
         assert!(!contents.contains("MB-R-145"));
     }
 
-    /// Regression — every panel's border must track the view's own focus (blue when focused,
-    /// light gray otherwise), same as every other module content view; previously every border
-    /// used the terminal's plain default color with no focus differentiation at all.
+    /// A panel's border tracks the view's own focus, switching between `COLOR_SCHEME::border`
+    /// and `COLOR_SCHEME::hi`; the Units panel's corner is the cell asserted here.
     #[test]
     fn ut_panel_borders_track_view_focus() {
         use ferrowl_ui::COLOR_SCHEME;
@@ -2200,9 +2189,7 @@ mod tests {
         );
     }
 
-    /// Regression — previously every panel shared one `panel_style` driven only by
-    /// `view_focused`, so all panels turned blue together with no way to tell which one had
-    /// input focus. Now exactly one Tab-cyclable panel is highlighted at a time, defaulting to
+    /// Exactly one Tab-cyclable panel is highlighted at a time, defaulting to
     /// Units, and Tab/BackTab cycle Units -> Messages -> Memory -> Units (and back).
     #[test]
     fn ut_tab_cycles_panel_focus_units_messages_memory_and_back() {
@@ -2651,10 +2638,7 @@ mod tests {
         assert!(matches!(v.overlay, MonitorOverlay::None));
     }
 
-    /// The device-config-path field must actually apply on
-    /// edit-confirm; previously `MonitorSetupOutcome::device` was always `None` in Edit mode, so
-    /// `confirm_edit` silently discarded whatever the user typed there and reset `spec.device`
-    /// to `""` on every single edit.
+    /// `confirm_edit` carries the typed device-config path through to `spec.device`.
     #[tokio::test]
     async fn ut_edit_confirm_applies_device_path_field() {
         let mut v = view();
@@ -2692,8 +2676,8 @@ mod tests {
             panic!("dialog must stay open, unconfirmed, while the popup handles Enter");
         };
         // The `ferrowl` crate root (test cwd) has an `src/` dir, a partial match for "s" that
-        // re-queries and stays open (UI-R-026) — if `Enter` had instead been routed straight to
-        // `confirm_edit` (the bug), the field would never see it and stay at "s".
+        // re-queries and stays open (UI-R-026) — were `Enter` routed straight to `confirm_edit`,
+        // the field would never see it and would stay at "s".
         assert_eq!(
             dialog.config_path.state.input(),
             "src/",
@@ -3543,10 +3527,9 @@ mod tests {
         assert_eq!(rows[1].kind, "Holding Register");
     }
 
-    /// MB-R-147/UI-R-063 — a line with an active recency marker on any of its cells renders its
-    /// whole row `hi` (`MemoryRow`'s own doc comment: line-granular, not per-cell, once real
-    /// `Table`/`TableEntry` machinery replaces buffer-painting); once the marker lapses (>2s
-    /// old), the line's ordinary value-class color (`warning` here) shows again.
+    /// MB-R-147/UI-R-063 — recency colouring is per cell, not per row: the observed cell's Hex
+    /// span renders `hi` while its marker is active, and falls back to its ordinary value-class
+    /// colour (`warning` here) once the marker lapses (>2s old).
     #[test]
     fn ut_memory_layout_recency_marker_overrides_value_class_color_while_active() {
         use ferrowl_ui::COLOR_SCHEME;
@@ -3930,9 +3913,9 @@ mod tests {
         assert_eq!(dialog.address.state.input(), "10");
     }
 
-    /// Same "Add predefined" sub-popup routing fix as
-    /// `ut_add_predefined_popup_receives_keyboard_focus`, but from `EditInterpretationDialog`'s
-    /// own "Add predefined" flow (`:edit`/Enter-on-Resolved-row), not `:add`'s.
+    /// The same "Add predefined" sub-popup routing as
+    /// `ut_add_predefined_popup_receives_keyboard_focus`, but reached from
+    /// `EditInterpretationDialog`'s own flow (`:edit`/Enter-on-Resolved-row), not `:add`'s.
     #[tokio::test]
     async fn ut_edit_interpretation_add_predefined_popup_receives_keyboard_focus() {
         let mut v = view();
@@ -4124,9 +4107,8 @@ mod tests {
         );
     }
 
-    /// Adding the first alias through the dialog's own
-    /// "ADD ALIAS" sub-popup re-homes focus onto the alias list (`value`), mirroring the full
-    /// modbus module's own mode-switch-on-first-alias behavior (see
+    /// Adding the first alias through the dialog's own "ADD ALIAS" sub-popup re-homes focus
+    /// onto the alias list (`value`), which has just become focusable (see
     /// `EditInterpretationDialog::confirm_add_dialog`).
     #[tokio::test]
     async fn ut_edit_interpretation_add_first_alias_focuses_value() {
@@ -4170,9 +4152,8 @@ mod tests {
         );
     }
 
-    /// Deleting the last remaining alias re-homes focus onto
-    /// `Label`, mirroring the full modbus module's own mode-switch-back-on-last-delete behavior
-    /// (see `EditInterpretationDialog::delete_selected_named_value`).
+    /// Deleting the last remaining alias re-homes focus onto `Label`, since the alias list has
+    /// just become unfocusable (see `EditInterpretationDialog::delete_selected_named_value`).
     #[tokio::test]
     async fn ut_edit_interpretation_delete_last_alias_focuses_label() {
         let mut v = view();

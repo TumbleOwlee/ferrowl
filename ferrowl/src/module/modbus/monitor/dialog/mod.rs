@@ -3,11 +3,10 @@
 //! currently selected unit id (the dialog itself never asks for a slave id). One struct serves
 //! both `:add` (`deletable == false`, `new()`) and the MB-R-148 edit-on-a-row dialog
 //! (`deletable == true`, `from_interpretation(...)`) — mirroring the modbus module's own
-//! `EditInputDialog`'s `deletable` field/`from_register` split (`dialog/input/mod.rs`), rather
-//! than the two near-duplicate structs this module used to keep. It also folds in what used to be
-//! a second near-duplicate struct, `EditInterpretationSelectionDialog`: the alias-list widgets
-//! (`value`/`delete_value_button`) are always present, gated by `#[focus(when = ...)]` on whether
-//! the alias list is currently empty, rather than swapping between two struct types.
+//! `EditInputDialog`'s `deletable` field/`from_register` split (`dialog/input/mod.rs`). The
+//! alias-list widgets (`value`/`delete_value_button`) are always present, gated by
+//! `#[focus(when = ...)]` on the interpretation being non-boolean-kind and its alias list being
+//! non-empty.
 //!
 //! Deliberately a new, small struct rather than a "monitor mode" bolted onto
 //! [`crate::module::modbus::dialog::EditInputDialog`]: that struct's `access`/`value`/
@@ -54,9 +53,9 @@ use crate::module::modbus::dialog::{
 
 /// Coil/DiscreteInput interpretations have no meaningful "format" — their only two states are
 /// ON/OFF — so the alias UI is hidden entirely and these two aliases are always the effective
-/// `values` (manual-exercise fix, item 6). Exposed at the module level (not just as a method on
-/// each dialog struct) so `view/mod.rs`'s `open_edit_interpretation` can apply the same check to a
-/// raw `Kind` before a dialog even exists.
+/// `values`. Exposed at the module level (not just as a method on each dialog struct) so
+/// `view/mod.rs`'s `open_edit_interpretation` can apply the same check to a raw `Kind` before a
+/// dialog even exists.
 pub(super) fn is_boolean_kind(kind: &Kind) -> bool {
     matches!(kind, Kind::Coil | Kind::DiscreteInput)
 }
@@ -78,22 +77,17 @@ fn boolean_kind_values() -> Vec<NamedValue> {
 /// `deletable == true`) dialog: the field set plus a Delete button/confirmation flow gated on
 /// `deletable`, and prefill-from-existing-row support (`from_interpretation`). Mirrors the
 /// modbus module's own `EditInputDialog`'s `deletable` field / `new()` vs `from_register` split
-/// (`dialog/input/mod.rs`) — a single struct rather than the two near-duplicate structs
-/// (`AddInterpretationDialog`/`EditInterpretationDialog`) this module used to keep, which
-/// differed only in that gated Delete button and the mode-switch-to-selection wiring. A new,
-/// small struct rather than a mode bolted onto `EditInputDialog` itself, for the same reason
-/// this module's doc comment gives: no `access`/`value`/`default_value` fields apply to
-/// a monitor interpretation.
+/// (`dialog/input/mod.rs`) — one struct for both flows, which differ in prefill, `deletable`, and
+/// where focus starts. A new, small struct rather than a mode bolted onto `EditInputDialog`
+/// itself, for the same reason this module's doc comment gives: no `access`/`value`/
+/// `default_value` fields apply to a monitor interpretation.
 ///
-/// The alias list (`value`/`add_button`/`delete_value_button`) used to live on a separate
-/// `EditInterpretationSelectionDialog` struct, swapped in via `to_selection_dialog`/
-/// `to_input_dialog` once the list transitioned empty<->non-empty. It's folded into this struct
-/// instead: `value`/`delete_value_button` are always present, gated
-/// `#[focus(when = { !self.is_boolean_kind() && !self.value.state.values().is_empty() })]` so
-/// they're simply unfocusable/unrendered while the list is empty, and `confirm_add_dialog`/
-/// `delete_selected_named_value` explicitly re-home focus at the exact two points the list
-/// transitions (see their own doc comments) — reproducing the old swap's forced-refocus behavior
-/// without a second struct type.
+/// `value`/`delete_value_button` are always present, gated
+/// `#[focus(when = { !self.is_boolean_kind() && !self.value.state.values().is_empty() })]` so they
+/// are unfocusable and unrendered while the list is empty; `confirm_add_dialog`/
+/// `delete_selected_named_value` re-home focus at the exact two points the list transitions
+/// (see their own doc comments); the delete direction has to, since the field focus sits on is
+/// among those the emptied list makes unfocusable.
 #[focusable]
 #[derive(Builder, Debug, Focus)]
 pub struct EditInterpretationDialog {
@@ -124,13 +118,13 @@ pub struct EditInterpretationDialog {
     pub text_width: Widget<InputFieldState, InputField<usize>>,
     /// The alias list itself — the source of truth `apply()` reads. Unfocusable/unrendered while
     /// empty (a full-width "ADD ALIAS" button takes its place instead, see `render`) or while
-    /// `is_boolean_kind()` (manual-exercise fix, item 6): ON/OFF are the only possible aliases for
+    /// `is_boolean_kind()`: ON/OFF are the only possible aliases for
     /// a Coil/DiscreteInput interpretation, so there's nothing to show.
     #[focus(when = { !self.is_boolean_kind() && !self.value.state.values().is_empty() })]
     pub value: Widget<SelectionState<NamedValue>, Selection<NamedValue>>,
     /// A full-width "ADD ALIAS" button while `value` is empty, or a narrower one alongside the
-    /// alias list once it isn't (see `render`). Hidden entirely for a boolean-kind interpretation
-    /// (manual-exercise fix, item 6).
+    /// alias list once it isn't (see `render`). Hidden entirely for a boolean-kind
+    /// interpretation.
     #[focus(when = { !self.is_boolean_kind() })]
     pub add_button: Widget<ButtonState, Button>,
     #[focus(when = { !self.is_boolean_kind() && !self.value.state.values().is_empty() })]
@@ -233,11 +227,7 @@ impl EditInterpretationDialog {
     /// Build the dialog pre-filled from `name`/`def` (MB-R-148). Focus starts on Address (the
     /// common edit target), same reasoning `EditInputDialog::from_register`'s own doc comment
     /// gives for starting on Value there — unless `def.values` is already non-empty and the kind
-    /// isn't boolean, in which case focus starts on the alias list instead (the old two-struct
-    /// design reached this by prefilling an `EditInterpretationDialog` on Address, then
-    /// immediately mode-switching into `EditInterpretationSelectionDialog` via
-    /// `to_selection_dialog`, which force-focused `Value`; folded into one step here since there's
-    /// no second struct to switch into).
+    /// isn't boolean, in which case focus starts on the alias list instead.
     pub fn from_interpretation(name: &str, def: &MonitorRegisterDef) -> Self {
         let mut dialog = Self::new();
         dialog.deletable = true;
@@ -444,9 +434,9 @@ impl EditInterpretationDialog {
 
     /// Once the sub-dialog produces a valid `NamedValue`, push it onto `value`. The moment this
     /// transitions the list from empty to non-empty (and the kind isn't boolean, where the alias
-    /// UI stays hidden regardless), re-home focus onto `value` — mirroring the old
-    /// `to_selection_dialog`'s forced focus onto its own default (`Value`,
-    /// `EditInterpretationSelectionDialog::new`) once the swap happened.
+    /// UI stays hidden regardless), re-home focus onto `value`, which has just become focusable
+    /// — focus lands on what the user just created. `add_button` stays focusable and rendered
+    /// either way, so this is a convenience, not a rescue from an unfocusable field.
     pub fn confirm_add_dialog(&mut self) {
         let result = self.add_dialog.as_ref().map(AddNamedValueDialog::apply);
         match result {
@@ -477,9 +467,9 @@ impl EditInterpretationDialog {
     /// Delete the `value`-selected alias immediately (no confirm popup — this deletes one alias,
     /// not the interpretation), mirroring `EditSelectionDialog::delete_selected` minus its
     /// `default_value` bookkeeping (this dialog has no default-value field). Once this
-    /// empties the list, re-home focus onto `Label` — mirroring the old `to_input_dialog`'s
-    /// forced focus onto its own default (`Label`, `EditInterpretationDialog::new`) once the swap
-    /// happened.
+    /// empties the list, re-home focus onto `Label`. This one is load-bearing: the only route
+    /// here is Space on `delete_value_button`, and emptying the list makes that button — along
+    /// with `value` — unfocusable, so focus would otherwise be left on a hidden field.
     pub fn delete_selected_named_value(&mut self) {
         let idx = self.value.state.selection();
         let vals = self.value.state.values_mut();
@@ -656,11 +646,9 @@ impl EditInterpretationDialog {
                 }
             }
         }
-        // Hidden entirely for a boolean-kind interpretation (manual-exercise fix, item 6): ON/OFF
-        // are the only possible aliases. Otherwise, a plain full-width "ADD ALIAS" button while
-        // the alias list is empty, or the list itself plus a narrower add/delete button pair once
-        // it isn't — folds what used to be `EditInterpretationDialog::render`'s and
-        // `EditInterpretationSelectionDialog::render`'s own rows[5] bodies into one.
+        // Hidden entirely for a boolean-kind interpretation: ON/OFF are the only possible
+        // aliases. Otherwise, a plain full-width "ADD ALIAS" button while the alias list is
+        // empty, or the list itself plus a narrower add/delete button pair once it isn't.
         if !self.is_boolean_kind() {
             if self.value.state.values().is_empty() {
                 StatefulWidget::render(
@@ -724,8 +712,7 @@ impl EditInterpretationDialog {
                 &mut self.confirm_button.state,
             );
         }
-        // Same class of bug as `setup_dialog::MonitorSetupDialog::render`: no error box
-        // drawn at all while the dialog validates cleanly.
+        // No error box at all while the dialog validates cleanly — not an empty bordered one.
         if !self.error.state.is_empty() {
             StatefulWidget::render(&self.error.widget, rows[7], buf, &mut self.error.state);
         }
@@ -835,10 +822,10 @@ mod tests {
         assert_eq!(def.slave_id, 0);
     }
 
-    /// Regression — selecting Number (or Text) value type must show its associated fields
-    /// (Format/Endian/Resolution/[Order]/[Bitmask], or Alignment/Width); previously the struct
-    /// held these fields and `apply()` already read them, but `render()` never drew any of them
-    /// at all, so the user had no way to see or edit a Number/Text interpretation's format.
+    /// Selecting the Number value type renders Format, Endian and Resolution. The default
+    /// format is `U8`, a single-register integer, so Order (gated on
+    /// `is_multi_register_format`) is absent while Bitmask (gated on `is_integer_format`) does
+    /// render — it is simply outside the set asserted here.
     #[test]
     fn ut_render_shows_number_format_fields_when_number_type_selected() {
         let mut dialog = EditInterpretationDialog::new();
@@ -858,7 +845,8 @@ mod tests {
         }
     }
 
-    /// Same regression, for the Text branch's Alignment/Width fields.
+    /// Selecting the Text value type renders Alignment and Width, the pair it shows in place of
+    /// the Number branch's fields.
     #[test]
     fn ut_render_shows_text_format_fields_when_text_type_selected() {
         let mut dialog = EditInterpretationDialog::new();
@@ -878,9 +866,8 @@ mod tests {
         }
     }
 
-    /// Same class of bug as
-    /// `setup_dialog::ut_render_hides_error_box_when_valid_and_shows_it_when_invalid`: the error
-    /// box must not draw at all while the dialog validates cleanly, only once it doesn't.
+    /// The error box does not draw at all while the dialog validates cleanly, only once it
+    /// doesn't.
     #[test]
     fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 120, 40);
@@ -943,7 +930,7 @@ mod tests {
     }
 
     /// The add-named-value button reads "ADD ALIAS", not "ADD PREDEFINED". Uses a non-boolean
-    /// kind — `new()`'s default `Kind::Coil` now hides the button entirely (item 6).
+    /// kind — `new()`'s default `Kind::Coil` hides the button entirely.
     #[test]
     fn ut_add_button_label_is_add_alias() {
         let area = Rect::new(0, 0, 120, 40);
@@ -954,13 +941,12 @@ mod tests {
         assert!(text.contains("ADD ALIAS"), "missing button label:\n{text}");
         assert!(
             !text.contains("PREDEFINED"),
-            "stale label still present:\n{text}"
+            "the button must not read PREDEFINED:\n{text}"
         );
     }
 
-    /// Regression — the dialog's border must be styled like every other setup/edit popup in
-    /// the crate (blue border, themed background), not the terminal's plain default; previously
-    /// `Block::bordered()` had no `.style(...)` at all.
+    /// The dialog's border is styled like every other setup/edit popup in the crate —
+    /// `COLOR_SCHEME.hi` on `COLOR_SCHEME.bg` — rather than the terminal's plain default.
     #[test]
     fn ut_render_styles_the_border_with_the_theme_colors() {
         use ratatui::Terminal;
@@ -1003,8 +989,9 @@ mod tests {
         buf.area
     }
 
-    /// Regression guard: `AddNamedValueDialog` still behaves as `dialog/add_value.rs`'s own
-    /// tests already prove — nothing about wiring it into this dialog broke it.
+    /// Wiring `AddNamedValueDialog` into this dialog leaves its own behaviour intact: an alias
+    /// entered through the sub-popup reaches this dialog's list unchanged. `dialog/add_value.rs`
+    /// covers the sub-popup itself; this guards the seam.
     #[test]
     fn ut_add_named_value_flow_reused_unchanged() {
         let mut dialog = EditInterpretationDialog::new();
@@ -1021,11 +1008,8 @@ mod tests {
         assert_eq!(dialog.value.state.values()[0].name, "on");
     }
 
-    /// Once `:add` accumulates its first alias, the alias-list UI (`value`) takes over from the
-    /// full-width "ADD ALIAS" button — same underlying fact
-    /// `ut_selection_dialog_not_deletable_by_default_shows_confirm_alone` used to prove through a
-    /// separate `EditInterpretationSelectionDialog::new()` call, now provable directly on the
-    /// merged struct's own state.
+    /// `new()` builds a non-deletable dialog, so an Add dialog carrying an alias still offers
+    /// CONFIRM alone — the Delete button is gated on `deletable`, not on the alias list.
     #[test]
     fn ut_dialog_with_alias_not_deletable_by_default_shows_confirm_alone() {
         let area = Rect::new(0, 0, 120, 40);
@@ -1117,8 +1101,8 @@ mod tests {
         assert!(dialog.confirm_delete.is_some());
     }
 
-    /// `EditInterpretationDialog` has the identical error-box-always-drawn bug as
-    /// `AddInterpretationDialog`.
+    /// The error box is drawn only while the dialog is invalid — absent on a valid dialog,
+    /// present once a field fails to parse.
     #[test]
     fn ut_edit_interpretation_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 120, 40);
@@ -1154,7 +1138,7 @@ mod tests {
         assert!(text.contains("ADD ALIAS"), "missing add button:\n{text}");
         assert!(
             !text.contains("No predefined values"),
-            "the old inline-list placeholder must be gone:\n{text}"
+            "no placeholder line must be drawn in place of the list:\n{text}"
         );
     }
 
@@ -1238,14 +1222,11 @@ mod tests {
         assert_eq!(applied.values[1].name, "OFF");
     }
 
-    /// `confirm_add_dialog` carries every shared field's state
-    /// forward unchanged (here: the label) while adding the first alias, and re-homes focus onto
-    /// `value` the moment the list transitions from empty to non-empty — replaces the old
-    /// `to_selection_dialog`-based test of the same underlying fact
-    /// (`ut_edit_interpretation_to_selection_dialog_carries_state_and_values`), now provable
-    /// without a second struct.
+    /// `confirm_add_dialog` carries every shared field's state forward unchanged (here: the
+    /// label) across successive alias additions. The focus re-homing it also performs is
+    /// asserted by `view/mod.rs`'s `ut_edit_interpretation_add_first_alias_focuses_value`.
     #[test]
-    fn ut_confirm_add_dialog_first_alias_carries_state_and_focuses_value() {
+    fn ut_confirm_add_dialog_carries_state_across_alias_additions() {
         let mut dialog = EditInterpretationDialog::from_interpretation("power", &sample_def());
         let label_before = dialog.label.state.input().to_string();
 
@@ -1303,13 +1284,11 @@ mod tests {
         assert_eq!(dialog.value.state.values()[0].name, "on");
     }
 
-    /// Once the alias list empties out (deleting the last one),
-    /// `delete_selected_named_value` re-homes focus onto `Label` — replaces the old
-    /// `to_input_dialog`-based test of the same underlying fact
-    /// (`ut_edit_interpretation_selection_dialog_to_input_dialog_carries_state`), now provable
-    /// without a second struct.
+    /// Deleting the last alias empties the list and leaves the shared fields untouched. The
+    /// focus re-homing onto `Label` is asserted by `view/mod.rs`'s
+    /// `ut_edit_interpretation_delete_last_alias_focuses_label`.
     #[test]
-    fn ut_delete_last_alias_carries_state_and_focuses_label() {
+    fn ut_delete_last_alias_carries_state_and_empties_the_list() {
         let mut dialog = EditInterpretationDialog::new();
         dialog
             .kind
@@ -1333,10 +1312,8 @@ mod tests {
 
     /// `from_interpretation` starts focus on Address for a row with no aliases yet (sanity: the
     /// pre-existing common-case default is unchanged), but on `value` once `def.values` is
-    /// already non-empty and the kind isn't boolean — the old two-struct design reached the
-    /// latter through `from_interpretation` (always Address) followed by a mode-switch into
-    /// `EditInterpretationSelectionDialog` (which force-focused `Value`); this test proves exactly
-    /// one field ends up focused either way, matching `dialog.focus`.
+    /// already non-empty and the kind isn't boolean; exactly one field ends up focused either
+    /// way, matching `dialog.focus`.
     #[test]
     fn ut_from_interpretation_focuses_exactly_one_field_depending_on_alias_presence() {
         let def = sample_def();
