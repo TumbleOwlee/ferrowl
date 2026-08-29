@@ -10,7 +10,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Address, Key, ServerCommand, SlaveKey, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{ExceptionCode, Quantity, RequestPdu};
 use tokio::sync::{RwLock, mpsc};
@@ -70,7 +70,7 @@ async fn it_tcp_downstream_connects_and_forwards() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(

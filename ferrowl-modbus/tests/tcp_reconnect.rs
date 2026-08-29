@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::{Address, Key, ServerCommand, SlaveKey, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 
@@ -41,7 +41,7 @@ fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(

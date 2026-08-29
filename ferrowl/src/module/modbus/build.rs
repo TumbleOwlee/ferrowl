@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ferrowl_codec::{Access, Address, Kind, Register};
 use ferrowl_modbus::{FunctionCode, Key, Operation, SlaveKey, Transport as NetConfig, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use tokio::sync::RwLock;
 
 use crate::config::{ClientOrServer, Endpoint, device::NamedValue, device::ReadRanges};
@@ -180,7 +180,7 @@ pub(crate) fn build_read_operations(
 pub(crate) fn declare_or_reject_msg(
     memory: &mut Memory<Key<SlaveKey>>,
     key: Key<SlaveKey>,
-    kind: &MemKind,
+    kind: &CellKind,
     range: &Range,
     subject: &str,
 ) -> Result<(), String> {
@@ -208,7 +208,7 @@ pub(crate) fn gap_cell_subject(key: &Key<SlaveKey>) -> String {
 pub(crate) fn explicit_read_coverage(
     registers: &[(String, String, Register, Vec<NamedValue>)],
     read_ranges: &ReadRanges,
-) -> Vec<(Key<SlaveKey>, MemKind, Range)> {
+) -> Vec<(Key<SlaveKey>, CellKind, Range)> {
     let mut out = Vec::new();
     for ((slave, _), (_, kind, mut spans)) in group_readable_spans(registers, true) {
         let explicit = read_ranges.ranges_for(kind.clone());
@@ -229,7 +229,7 @@ pub(crate) fn explicit_read_coverage(
         };
         for r in &explicit {
             for gap in subtract_spans(r.start(), r.end(), &covered) {
-                out.push((key.clone(), MemKind::read(mem_type), gap));
+                out.push((key.clone(), CellKind::read(mem_type), gap));
             }
         }
     }
@@ -475,7 +475,7 @@ mod tests {
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::Access as MemAccess;
-    use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+    use ferrowl_store::{CellKind, CellType, Memory, Range};
 
     fn entry(
         slave: u8,
@@ -766,7 +766,7 @@ mod tests {
         };
         memory.add_ranges(
             key.clone(),
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 1)],
         );
 
@@ -1040,7 +1040,7 @@ mod tests {
         let result = super::declare_or_reject_msg(
             &mut memory,
             key,
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &Range::new(0, 2),
             "register 'r'",
         );
@@ -1062,7 +1062,7 @@ mod tests {
         // Pre-populate a Read-only cell at [0,2) — mirrors a `read_ranges` gap declaration.
         assert!(memory.add_ranges(
             key.clone(),
-            &MemKind::read(CellType::Register),
+            &CellKind::read(CellType::Register),
             &[Range::new(0, 2)]
         ));
 
@@ -1070,7 +1070,7 @@ mod tests {
         let result = super::declare_or_reject_msg(
             &mut memory,
             key,
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &range,
             "register 'r'",
         );

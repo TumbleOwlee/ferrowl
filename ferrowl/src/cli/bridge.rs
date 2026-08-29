@@ -166,7 +166,7 @@ mod tests {
         tokio::task::JoinHandle<Result<(), ferrowl_modbus::Error>>,
     ) {
         use ferrowl_codec::Kind as RegKind;
-        use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+        use ferrowl_store::{CellKind, CellType, Memory, Range};
         use parking_lot::RwLock as MemLock;
         use std::sync::Arc;
 
@@ -177,7 +177,7 @@ mod tests {
         let mut mem = Memory::<ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>>::default();
         mem.add_ranges(
             key.clone(),
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(key, &CellType::Register, &Range::new(0, 1), &[value])
@@ -272,11 +272,11 @@ mod tests {
     fn client_mem() -> std::sync::Arc<
         parking_lot::RwLock<ferrowl_store::Memory<ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>>>,
     > {
-        use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+        use ferrowl_store::{CellKind, CellType, Memory, Range};
         let mut mem = Memory::<ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>>::default();
         mem.add_ranges(
             client_key(),
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         std::sync::Arc::new(parking_lot::RwLock::new(mem))

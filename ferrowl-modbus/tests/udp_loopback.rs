@@ -14,7 +14,7 @@ use ferrowl_modbus::udp;
 use ferrowl_modbus::{
     Command, Error, FunctionCode, Key, Operation, ServerCommand, SlaveKey, TcpError, UnitId,
 };
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address as RmAddress, Client as RmClient, Quantity as RmQuantity, RegisterValue, UdpConfig,
@@ -60,7 +60,7 @@ fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(UnitId(1), RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -72,7 +72,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(UnitId(0), RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -163,12 +163,12 @@ fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(UnitId(1), RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.add_ranges(
         key(UnitId(0), RegKind::HoldingRegister),
-        &MemKind::read_write(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     Arc::new(MemLock::new(mem))

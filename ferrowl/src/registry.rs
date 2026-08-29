@@ -305,7 +305,7 @@ mod tests {
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::{ModuleDirModule, ValueType};
     use ferrowl_modbus::{Key, SlaveKey};
-    use ferrowl_store::{CellKind as MemKind, Memory, Range};
+    use ferrowl_store::{CellKind, Memory, Range};
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
@@ -335,7 +335,7 @@ mod tests {
         };
         memory.add_ranges(
             key,
-            &MemKind::read_write(ferrowl_store::CellType::Register),
+            &CellKind::read_write(ferrowl_store::CellType::Register),
             &[Range::new(0, 1)],
         );
         Arc::new(RwLock::new(memory))

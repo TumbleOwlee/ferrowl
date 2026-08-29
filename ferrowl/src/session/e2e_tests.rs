@@ -16,7 +16,7 @@ use ferrowl_codec::{Access, Format, Kind, Register, RegisterBuilder};
 use ferrowl_lua::module::{ModuleDirectory, ModuleHost, ValueType};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ocpp::V1_6;
-use ferrowl_store::{CellKind as MemKind, Memory, Range};
+use ferrowl_store::{CellKind, Memory, Range};
 
 use crate::app::LOG_SIZE;
 use crate::config::script::ScriptDef;
@@ -96,7 +96,7 @@ fn evse_memory() -> Arc<RwLock<Memory<Key<SlaveKey>>>> {
     let mut memory: Memory<Key<SlaveKey>> = Memory::default();
     memory.add_ranges(
         modbus_memory_key(),
-        &MemKind::read_write(ferrowl_store::CellType::Register),
+        &CellKind::read_write(ferrowl_store::CellType::Register),
         &[Range::new(0, 2)],
     );
     Arc::new(RwLock::new(memory))

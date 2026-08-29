@@ -321,7 +321,7 @@ mod tests {
     use ferrowl_codec::{Access, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::SlaveKey;
     use ferrowl_modbus::UnitId;
-    use ferrowl_store::{CellKind as MemKind, CellType, Memory};
+    use ferrowl_store::{CellKind, CellType, Memory};
     use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
 
@@ -352,7 +352,7 @@ mod tests {
         };
         memory.add_ranges(
             key,
-            &MemKind::read_write(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 2)],
         );
         Arc::new(MemLock::new(memory))

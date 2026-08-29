@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ferrowl_codec::{Address, Kind, Register};
 use ferrowl_modbus::{Key, Operation, SlaveKey, UnitId};
-use ferrowl_store::{CellKind as MemKind, Memory, Range};
+use ferrowl_store::{CellKind, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::RwLock;
 
@@ -139,8 +139,8 @@ impl ModbusModule {
                     },
                 };
                 let mem_kind = match def.kind() {
-                    Kind::Coil | Kind::HoldingRegister => MemKind::read_write(def.mem_type()),
-                    Kind::DiscreteInput | Kind::InputRegister => MemKind::read(def.mem_type()),
+                    Kind::Coil | Kind::HoldingRegister => CellKind::read_write(def.mem_type()),
+                    Kind::DiscreteInput | Kind::InputRegister => CellKind::read(def.mem_type()),
                 };
                 if let Err(msg) = declare_or_reject_msg(
                     &mut memory,
