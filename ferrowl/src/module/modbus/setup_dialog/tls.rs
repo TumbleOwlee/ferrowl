@@ -43,15 +43,15 @@ impl From<TlsLevel> for EffectiveTlsLevel {
 }
 
 /// Raw text of every TLS path field, plus every toggle, passed by name so the many look-alike
-/// path fields cannot be transposed at a call site. `client_ca_files` is the add/remove/edit
-/// list widget's current entries (MB-R-136) — already individual paths, no further parsing.
+/// path fields cannot be transposed at a call site. `ca_files` is the shared add/remove/edit
+/// list widget's current entries (MB-R-136/MB-R-156) — already individual paths, no further
+/// parsing.
 pub struct TlsInputs<'a> {
-    pub ca_file: &'a str,
     pub cert_file: &'a str,
     pub key_file: &'a str,
     pub client_cert_file: &'a str,
     pub client_key_file: &'a str,
-    pub client_ca_files: &'a [String],
+    pub ca_files: &'a [String],
     /// Server: server certificate is self-signed (MB-R-106). Client, at `MutualTls` only: the
     /// client's own mTLS identity is self-signed (MB-R-138/139).
     pub self_signed: bool,
@@ -59,6 +59,9 @@ pub struct TlsInputs<'a> {
     pub skip_verify: bool,
     /// Server, at `MutualTls` only: accept any client certificate (MB-R-136).
     pub client_cert_skip_verify: bool,
+    /// Client-only Root Store toggle (MB-R-156): On resolves `ca_files` as `CertVerification::
+    /// RootStore`'s `extra_ca_files`; Off, as `CertVerification::CaFiles`'s `ca_files`.
+    pub root_store: bool,
 }
 
 impl TlsLevel {
@@ -91,15 +94,15 @@ impl TlsLevel {
         inputs: TlsInputs<'_>,
     ) -> Result<ModbusTlsConfig, String> {
         let TlsInputs {
-            ca_file,
             cert_file,
             key_file,
             client_cert_file,
             client_key_file,
-            client_ca_files,
+            ca_files,
             self_signed,
             skip_verify,
             client_cert_skip_verify,
+            root_store,
         } = inputs;
         let opt = |s: &str| {
             let t = s.trim();
@@ -127,7 +130,7 @@ impl TlsLevel {
                     }
                 };
                 cfg.server = if mtls {
-                    let ca_files = client_ca_files.to_vec();
+                    let ca_files = ca_files.to_vec();
                     if !client_cert_skip_verify && ca_files.is_empty() {
                         return Err(
                             "Client CA list is required for mTLS (or enable Skip Verify)."
@@ -150,9 +153,18 @@ impl TlsLevel {
             ClientOrServer::Client => {
                 let verification = if skip_verify {
                     CertVerification::Skip {}
-                } else {
+                } else if root_store {
                     CertVerification::RootStore {
-                        extra_ca_files: opt(ca_file).into_iter().collect(),
+                        extra_ca_files: ca_files.to_vec(),
+                    }
+                } else if ca_files.is_empty() {
+                    return Err(
+                        "Server CA list is required when Root Store is Off (or enable Root Store / Skip Verify)."
+                            .to_string(),
+                    );
+                } else {
+                    CertVerification::CaFiles {
+                        ca_files: ca_files.to_vec(),
                     }
                 };
                 cfg.client = if mtls {
@@ -303,23 +315,22 @@ mod tests {
     }
 
     fn inputs<'a>(
-        ca_file: &'a str,
         cert_file: &'a str,
         key_file: &'a str,
         client_cert_file: &'a str,
         client_key_file: &'a str,
-        client_ca_files: &'a [String],
+        ca_files: &'a [String],
     ) -> TlsInputs<'a> {
         TlsInputs {
-            ca_file,
             cert_file,
             key_file,
             client_cert_file,
             client_key_file,
-            client_ca_files,
+            ca_files,
             self_signed: false,
             skip_verify: false,
             client_cert_skip_verify: false,
+            root_store: true,
         }
     }
 
@@ -382,10 +393,7 @@ mod tests {
     /// UI-R-024 — a server TLS build resolves cert/key from raw text when self-signed is off.
     fn ut_build_config_tls_server_resolves_cert_key() {
         let cfg = TlsLevel::Tls
-            .build_config(
-                ClientOrServer::Server,
-                inputs("", "cert", "key", "", "", &[]),
-            )
+            .build_config(ClientOrServer::Server, inputs("cert", "key", "", "", &[]))
             .unwrap();
         assert_eq!(
             cfg.server,
@@ -406,7 +414,6 @@ mod tests {
             .build_config(
                 ClientOrServer::Server,
                 inputs(
-                    "",
                     "cert",
                     "key",
                     "",
@@ -430,10 +437,7 @@ mod tests {
     /// `CertVerification::CaFiles { ca_files: vec![] }`).
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
         let err = TlsLevel::MutualTls
-            .build_config(
-                ClientOrServer::Server,
-                inputs("", "cert", "key", "", "", &[]),
-            )
+            .build_config(ClientOrServer::Server, inputs("cert", "key", "", "", &[]))
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
     }
@@ -441,7 +445,7 @@ mod tests {
     #[test]
     /// MB-R-136 — a mutual-TLS server build with skip-verify on needs no CA list at all.
     fn ut_build_config_mutual_tls_server_skip_verify_needs_no_ca_list() {
-        let mut i = inputs("", "cert", "key", "", "", &[]);
+        let mut i = inputs("cert", "key", "", "", &[]);
         i.client_cert_skip_verify = true;
         let cfg = TlsLevel::MutualTls
             .build_config(ClientOrServer::Server, i)
@@ -462,7 +466,7 @@ mod tests {
     /// MB-R-139 — a mutual-TLS client build with the self-signed toggle on excludes the
     /// (possibly stale) client-cert/key text and resolves to `CertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
-        let mut i = inputs("", "", "", "stale.crt", "stale.key", &[]);
+        let mut i = inputs("", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
         let cfg = TlsLevel::MutualTls
             .build_config(ClientOrServer::Client, i)
@@ -479,14 +483,64 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-156 — Root Store On resolves the client verification to `CertVerification::
+    /// RootStore` with the list as `extra_ca_files`, empty or not.
+    fn ut_client_root_store_on_resolves_root_store_with_list() {
+        let list = ["ca1.pem".to_string(), "ca2.pem".to_string()];
+        let mut i = inputs("", "", "", "", &list);
+        i.root_store = true;
+        let cfg = TlsLevel::Tls
+            .build_config(ClientOrServer::Client, i)
+            .unwrap();
+        assert_eq!(
+            cfg.client,
+            ClientTlsPolicy::Tls {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["ca1.pem".to_string(), "ca2.pem".to_string()],
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// MB-R-156 — Root Store Off resolves the client verification to `CertVerification::
+    /// CaFiles` with the list as `ca_files`.
+    fn ut_client_root_store_off_resolves_ca_files() {
+        let list = ["ca1.pem".to_string()];
+        let mut i = inputs("", "", "", "", &list);
+        i.root_store = false;
+        let cfg = TlsLevel::Tls
+            .build_config(ClientOrServer::Client, i)
+            .unwrap();
+        assert_eq!(
+            cfg.client,
+            ClientTlsPolicy::Tls {
+                verification: CertVerification::CaFiles {
+                    ca_files: vec!["ca1.pem".to_string()],
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// MB-R-156 — Root Store Off with an empty CA list is a validation error, mirroring
+    /// MB-R-136's empty-list rule on the server side: a verification naming no trust anchor
+    /// rejects every server certificate and is never the user's intent.
+    fn ut_client_root_store_off_with_empty_list_is_validation_error() {
+        let mut i = inputs("", "", "", "", &[]);
+        i.root_store = false;
+        let err = TlsLevel::Tls
+            .build_config(ClientOrServer::Client, i)
+            .unwrap_err();
+        assert!(err.contains("Root Store is Off"));
+    }
+
+    #[test]
     /// UI-R-024 — building the config for the inactive role leaves it at `ModbusTlsConfig`'s
     /// default placeholder (the caller stitches in the real inactive-role config, if any).
     fn ut_build_config_leaves_inactive_role_at_default() {
         let cfg = TlsLevel::Tls
-            .build_config(
-                ClientOrServer::Server,
-                inputs("", "cert", "key", "", "", &[]),
-            )
+            .build_config(ClientOrServer::Server, inputs("cert", "key", "", "", &[]))
             .unwrap();
         assert_eq!(cfg.client, ModbusTlsConfig::default().client);
     }

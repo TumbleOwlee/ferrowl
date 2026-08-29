@@ -1,5 +1,6 @@
 //! Shared TLS/mTLS cluster widget for the Modbus and OCPP setup dialogs (MB-R-104..112,
-//! MB-R-136, MB-R-139, OC-R-110, OC-R-111, OC-R-113, OC-R-116). Lives in `ferrowl/src/dialog/`
+//! MB-R-136, MB-R-139, MB-R-156, OC-R-110, OC-R-111, OC-R-113, OC-R-116, OC-R-125). Lives in
+//! `ferrowl/src/dialog/`
 //! (not `ferrowl-ui`) because it needs `ferrowl_util::tls`'s policy types and
 //! `crate::dialog::path_suggest::FsPathProvider`, neither of which `ferrowl-ui` depends on —
 //! mirrors `ca_file_list.rs`'s own doc-comment precedent for this same layering reason.
@@ -100,20 +101,45 @@ impl ToLabel for SkipVerifyChoice {
     }
 }
 
+/// Client-only Root Store toggle (MB-R-156/OC-R-125), offered whenever the shared CA list is
+/// shown for the client role (TLS+, Skip Verify Off): On resolves the verification to
+/// `CertVerification::RootStore` with the list as `extra_ca_files` (empty allowed — the platform
+/// roots are still trusted); Off resolves to `CertVerification::CaFiles` with the list as
+/// `ca_files`, and an empty list is then a validation error (mirrors the server-role client-CA
+/// list's own empty-list rule, MB-R-136/OC-R-113).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootStoreChoice {
+    Off,
+    On,
+}
+
+impl ToLabel for RootStoreChoice {
+    fn to_label(&self) -> String {
+        match self {
+            RootStoreChoice::Off => "Off",
+            RootStoreChoice::On => "On",
+        }
+        .to_string()
+    }
+}
+
 /// Raw TLS-proper field values, read by `extract`/consumed by each outer dialog's own
 /// `build_config` (Modbus: `TlsInputs`, unaffected; OCPP: `SecurityInputs`, unaffected) to
 /// assemble the wire config together with that dialog's own non-TLS inputs (Modbus: none extra;
 /// OCPP: `username`/`password`, which stay outer).
 pub struct TlsSectionInputs {
-    pub ca_file: String,
     pub cert_file: String,
     pub key_file: String,
     pub client_cert_file: String,
     pub client_key_file: String,
-    pub client_ca_files: Vec<String>,
+    pub ca_files: Vec<String>,
     pub self_signed: bool,
     pub skip_verify: bool,
     pub client_cert_skip_verify: bool,
+    /// Client-only Root Store toggle (MB-R-156/OC-R-125): On resolves `ca_files` as
+    /// `CertVerification::RootStore`'s `extra_ca_files`, Off as `CertVerification::CaFiles`'s
+    /// `ca_files`.
+    pub root_store: bool,
 }
 
 /// Shared TLS/mTLS cluster: self-signed toggle, own-identity cert/key pair, skip-verify toggle,
@@ -152,23 +178,25 @@ pub struct TlsSection {
     /// Client-only "accept any server certificate" toggle.
     #[focus(when = {self.show_skip_verify()})]
     pub skip_verify: Widget<SelectionState<SkipVerifyChoice>, Selection<SkipVerifyChoice>>,
-    /// Client-only extra trust anchor for a self-signed server certificate.
-    #[focus(when = {self.show_ca_file()})]
-    pub ca_file: Widget<SuggestInputState<FsPathProvider>, SuggestInput<String, FsPathProvider>>,
-    /// Server-only list of CAs used to verify client certificates under mTLS (MB-R-136) — a
-    /// certificate signed by any one is sufficient. An add/remove list (`Selection<String>`
-    /// browses/selects the current entries; `client_ca_add_button`/`client_ca_delete_button` add
-    /// via `client_ca_add_dialog` or remove the selected entry).
-    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
-    pub client_ca_files: Widget<SelectionState<String>, Selection<String>>,
-    #[focus(when = {self.show_client_ca()})]
-    pub client_ca_add_button: Widget<ButtonState, Button>,
-    #[focus(when = {self.show_client_ca() && !self.client_ca_files.state.values().is_empty()})]
-    pub client_ca_delete_button: Widget<ButtonState, Button>,
-    /// Sub-dialog for adding one path to `client_ca_files`, opened by `client_ca_add_button`; not
-    /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring `close_confirm`.
+    /// Client-only Root Store toggle (MB-R-156/OC-R-125).
+    #[focus(when = {self.show_root_store()})]
+    pub root_store: Widget<SelectionState<RootStoreChoice>, Selection<RootStoreChoice>>,
+    /// List of CAs used to verify the peer's certificate, shared by both roles (MB-R-136/
+    /// OC-R-113/MB-R-156/OC-R-125) — a certificate signed by any one is sufficient. Server role:
+    /// verifies an incoming client certificate under mTLS. Client role: verifies the server
+    /// certificate, either as `extra_ca_files` (Root Store On) or `ca_files` (Root Store Off).
+    /// An add/remove list (`Selection<String>` browses/selects the current entries;
+    /// `ca_add_button`/`ca_delete_button` add via `ca_add_dialog` or remove the selected entry).
+    #[focus(when = {self.show_ca_list() && !self.ca_files.state.values().is_empty()})]
+    pub ca_files: Widget<SelectionState<String>, Selection<String>>,
+    #[focus(when = {self.show_ca_list()})]
+    pub ca_add_button: Widget<ButtonState, Button>,
+    #[focus(when = {self.show_ca_list() && !self.ca_files.state.values().is_empty()})]
+    pub ca_delete_button: Widget<ButtonState, Button>,
+    /// Sub-dialog for adding one path to `ca_files`, opened by `ca_add_button`; not itself a
+    /// `#[focus]` field — routed specially in `handle_events`, mirroring `close_confirm`.
     #[builder(default)]
-    pub client_ca_add_dialog: Option<AddCaFileDialog>,
+    pub ca_add_dialog: Option<AddCaFileDialog>,
     /// The role this section is currently rendering/gating for, set fresh by `sync` before any
     /// entry point (`render`/`handle_events`/`extract` in the owning dialog) reads a `when` gate.
     #[builder(default = "ClientOrServer::Server")]
@@ -201,11 +229,10 @@ impl TlsSection {
                 vec![SkipVerifyChoice::Off, SkipVerifyChoice::On],
                 &selection_style,
             ))
-            .ca_file(suggest_input(
-                "CA File",
-                "ca.pem",
-                &input_style,
-                FsPathProvider::with_extensions(&["pem", "crt", "key"]),
+            .root_store(selection(
+                "Root Store",
+                vec![RootStoreChoice::On, RootStoreChoice::Off],
+                &selection_style,
             ))
             .cert_file(suggest_input(
                 "Cert File",
@@ -231,17 +258,13 @@ impl TlsSection {
                 &input_style,
                 FsPathProvider::with_extensions(&["pem", "crt", "key"]),
             ))
-            .client_ca_files(selection(
-                "Client CA(s)",
-                Vec::<String>::new(),
-                &selection_style,
-            ))
-            .client_ca_add_button(ferrowl_ui::widgets::button(
+            .ca_files(selection("CA(s)", Vec::<String>::new(), &selection_style))
+            .ca_add_button(ferrowl_ui::widgets::button(
                 "ADD",
                 ButtonStyle::default(),
                 1,
             ))
-            .client_ca_delete_button(ferrowl_ui::widgets::button(
+            .ca_delete_button(ferrowl_ui::widgets::button(
                 "DEL",
                 ButtonStyle::default(),
                 1,
@@ -295,11 +318,18 @@ impl TlsSection {
         self.role == ClientOrServer::Server && self.level == EffectiveTlsLevel::MutualTls
     }
 
-    /// Client trust-anchor input (client at TLS level or above).
-    fn show_ca_file(&self) -> bool {
+    /// Client-only Root Store toggle (MB-R-156/OC-R-125): client at TLS level or above, with
+    /// Skip Verify Off (mirrors the shared CA list's own client-role gate).
+    fn show_root_store(&self) -> bool {
         self.role == ClientOrServer::Client
             && self.level >= EffectiveTlsLevel::Tls
             && self.skip_verify.get_value() == SkipVerifyChoice::Off
+    }
+
+    /// Row (Root Store toggle): client-only (MB-R-156/OC-R-125) — a dialog folding this onto an
+    /// existing row for its own layout still needs this to decide whether to paint it at all.
+    pub fn show_root_store_row(&self) -> bool {
+        self.show_root_store()
     }
 
     /// Server certificate/key inputs (server at TLS level or above).
@@ -317,12 +347,16 @@ impl TlsSection {
             && self.self_signed.get_value() == SelfSignedChoice::Off
     }
 
-    /// Server mTLS client-CA list input — hidden when `client_cert_skip_verify` is on
-    /// (MB-R-136), preserving the list's own text so toggling back Off restores it.
-    fn show_client_ca(&self) -> bool {
-        self.role == ClientOrServer::Server
+    /// Shared CA list input (MB-R-136/OC-R-113/MB-R-156/OC-R-125), by role: server at mTLS with
+    /// `client_cert_skip_verify` Off, or client at TLS+ with `skip_verify` Off — hidden state is
+    /// preserved (never cleared) so toggling the gating flag back restores it.
+    fn show_ca_list(&self) -> bool {
+        (self.role == ClientOrServer::Server
             && self.level == EffectiveTlsLevel::MutualTls
-            && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off
+            && self.client_cert_skip_verify.get_value() == SkipVerifyChoice::Off)
+            || (self.role == ClientOrServer::Client
+                && self.level >= EffectiveTlsLevel::Tls
+                && self.skip_verify.get_value() == SkipVerifyChoice::Off)
     }
 
     /// Row (skip-verify toggle): server's `client_cert_skip_verify`, or the client's
@@ -337,10 +371,9 @@ impl TlsSection {
         self.show_server_cert() || self.show_client_cert()
     }
 
-    /// Row (peer-verification input): server's `client_ca_files` list, or the client's
-    /// `ca_file` — exactly one applies for a given role.
+    /// Row (peer-verification input): the shared CA list, by role.
     pub fn show_peer_verify_row(&self) -> bool {
-        self.show_client_ca() || self.show_ca_file()
+        self.show_ca_list()
     }
 
     /// Prefill every field from an existing policy (Edit mode), by role.
@@ -385,8 +418,8 @@ impl TlsSection {
                     }
                     None => (Vec::new(), false),
                 };
-                *self.client_ca_files.state.values_mut() = ca_files;
-                self.client_ca_files.state.set_selection(0);
+                *self.ca_files.state.values_mut() = ca_files;
+                self.ca_files.state.set_selection(0);
                 self.client_cert_skip_verify
                     .state
                     .set_selection(if skip { 1 } else { 0 });
@@ -413,20 +446,22 @@ impl TlsSection {
                         0
                     },
                 );
-                // This dialog offers a single-path client CA input, not the Root Store
-                // toggle/multi-CA list: `extra_ca_files`/`ca_files`, either way, shows its
-                // first entry (there is at most one, since this input never wrote more than
-                // one).
-                let ca_file = match &verification {
+                // MB-R-156/OC-R-125: `RootStore`/`CaFiles` set the toggle and the shared list
+                // together; `Skip {}` leaves both untouched (hidden-field-exclusion pattern,
+                // MB-R-135), so toggling Skip Verify back Off restores whatever was there.
+                match &verification {
                     CertVerification::RootStore { extra_ca_files } => {
-                        extra_ca_files.first().map_or("", String::as_str)
+                        self.root_store.state.set_selection(0); // On
+                        self.ca_files.state.values_mut().clone_from(extra_ca_files);
+                        self.ca_files.state.set_selection(0);
                     }
                     CertVerification::CaFiles { ca_files } => {
-                        ca_files.first().map_or("", String::as_str)
+                        self.root_store.state.set_selection(1); // Off
+                        self.ca_files.state.values_mut().clone_from(ca_files);
+                        self.ca_files.state.set_selection(0);
                     }
-                    CertVerification::Skip {} => "",
-                };
-                set_suggest_input(&mut self.ca_file, ca_file);
+                    CertVerification::Skip {} => {}
+                }
                 let self_signed_client = matches!(identity, Some(CertSource::SelfSigned {}));
                 self.self_signed
                     .state
@@ -448,35 +483,35 @@ impl TlsSection {
     /// caller (each outer dialog's own `build_config`) selects the right half.
     pub fn extract(&self) -> TlsSectionInputs {
         TlsSectionInputs {
-            ca_file: self.ca_file.state.input().to_string(),
             cert_file: self.cert_file.state.input().to_string(),
             key_file: self.key_file.state.input().to_string(),
             client_cert_file: self.client_cert_file.state.input().to_string(),
             client_key_file: self.client_key_file.state.input().to_string(),
-            client_ca_files: self.client_ca_files.state.values().to_vec(),
+            ca_files: self.ca_files.state.values().to_vec(),
             self_signed: self.self_signed.state.get_value() == SelfSignedChoice::On,
             skip_verify: self.skip_verify.state.get_value() == SkipVerifyChoice::On,
             client_cert_skip_verify: self.client_cert_skip_verify.state.get_value()
                 == SkipVerifyChoice::On,
+            root_store: self.root_store.state.get_value() == RootStoreChoice::On,
         }
     }
 
-    /// Remove the currently-selected client-CA entry (MB-R-136), if any, adjusting the
-    /// selection cursor to stay in bounds.
-    pub(crate) fn delete_selected_client_ca(&mut self) {
-        let idx = self.client_ca_files.state.selection();
-        let vals = self.client_ca_files.state.values_mut();
+    /// Remove the currently-selected entry from the shared CA list (MB-R-136), if any, adjusting
+    /// the selection cursor to stay in bounds.
+    pub(crate) fn delete_selected_ca(&mut self) {
+        let idx = self.ca_files.state.selection();
+        let vals = self.ca_files.state.values_mut();
         if vals.is_empty() {
             return;
         }
         vals.remove(idx);
-        let new_len = self.client_ca_files.state.values().len();
+        let new_len = self.ca_files.state.values().len();
         let new_idx = if new_len == 0 {
             0
         } else {
             idx.min(new_len - 1)
         };
-        self.client_ca_files.state.set_selection(new_idx);
+        self.ca_files.state.set_selection(new_idx);
         if new_len == 0 {
             // DEL is no longer eligible (`#[focus(when = ...)]` excludes it once the list is
             // empty) — leaving `self.focus` pointed at it would strand further Tab navigation on
@@ -495,23 +530,23 @@ impl TlsSection {
     ) -> EventResult {
         use crossterm::event::{KeyCode, KeyModifiers};
 
-        if let Some(dialog) = self.client_ca_add_dialog.as_mut() {
+        if let Some(dialog) = self.ca_add_dialog.as_mut() {
             match (modifiers, code) {
                 (KeyModifiers::NONE, KeyCode::Esc) if dialog.path.state.suggestions_open() => {
                     let _ = dialog.path.state.handle_events(modifiers, code);
                 }
                 (KeyModifiers::NONE, KeyCode::Esc) => {
-                    self.client_ca_add_dialog = None;
+                    self.ca_add_dialog = None;
                 }
                 (KeyModifiers::NONE, KeyCode::Enter) if dialog.path.state.suggestions_open() => {
                     let _ = dialog.path.state.handle_events(modifiers, code);
                 }
                 (KeyModifiers::NONE, KeyCode::Enter) => match dialog.apply() {
                     Ok(path) => {
-                        self.client_ca_files.state.values_mut().push(path);
-                        let idx = self.client_ca_files.state.values().len() - 1;
-                        self.client_ca_files.state.set_selection(idx);
-                        self.client_ca_add_dialog = None;
+                        self.ca_files.state.values_mut().push(path);
+                        let idx = self.ca_files.state.values().len() - 1;
+                        self.ca_files.state.set_selection(idx);
+                        self.ca_add_dialog = None;
                     }
                     Err(e) => dialog.error.state = e,
                 },
@@ -524,12 +559,12 @@ impl TlsSection {
 
         if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
             match self.focus {
-                TlsSectionFocus::ClientCaAddButton => {
-                    self.client_ca_add_dialog = Some(AddCaFileDialog::new());
+                TlsSectionFocus::CaAddButton => {
+                    self.ca_add_dialog = Some(AddCaFileDialog::new());
                     return EventResult::Consumed;
                 }
-                TlsSectionFocus::ClientCaDeleteButton => {
-                    self.delete_selected_client_ca();
+                TlsSectionFocus::CaDeleteButton => {
+                    self.delete_selected_ca();
                     return EventResult::Consumed;
                 }
                 _ => {}
@@ -652,7 +687,7 @@ mod tests {
 
     fn confirm_ca_add(section: &mut TlsSection) {
         while section
-            .client_ca_add_dialog
+            .ca_add_dialog
             .as_ref()
             .unwrap()
             .path
@@ -685,21 +720,22 @@ mod tests {
         if tls.show_skip_verify_row() {
             if is_server {
                 render_field!(tls, client_cert_skip_verify, rows[idx], buf);
+            } else if tls.show_root_store_row() {
+                render_row!(tls, rows[idx], buf;
+                    skip_verify => Constraint::Percentage(50),
+                    root_store => Constraint::Fill(1)
+                );
             } else {
                 render_field!(tls, skip_verify, rows[idx], buf);
             }
             idx += 1;
         }
         if tls.show_peer_verify_row() {
-            if is_server {
-                render_row!(tls, rows[idx], buf;
-                    client_ca_files => Constraint::Percentage(60),
-                    client_ca_add_button => Constraint::Percentage(20),
-                    client_ca_delete_button => Constraint::Fill(1)
-                );
-            } else {
-                render_field!(tls, ca_file, rows[idx], buf);
-            }
+            render_row!(tls, rows[idx], buf;
+                ca_files => Constraint::Percentage(60),
+                ca_add_button => Constraint::Percentage(20),
+                ca_delete_button => Constraint::Fill(1)
+            );
         }
     }
 
@@ -742,7 +778,7 @@ mod tests {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         section.self_signed.state.set_selection(1); // On
-        *section.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
+        *section.ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let extracted = section.extract();
         assert!(extracted.self_signed);
     }
@@ -767,19 +803,46 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135/OC-R-111 — toggling Skip-Verify On is reflected in the extracted inputs, and the
-    /// stale ca_file text is preserved on the widget (only excluded downstream).
-    fn ut_extract_skip_verify_excludes_stale_ca_file_text() {
+    /// MB-R-135/OC-R-111 — toggling Skip-Verify On hides the Root Store toggle and the shared
+    /// CA list (`show_root_store_row`/`show_peer_verify_row` both false), while the extracted
+    /// list/toggle state is preserved on the widgets (only excluded downstream, by
+    /// `TlsLevel`/`SecurityLevel`'s own `build_config`).
+    fn ut_client_skip_verify_hides_root_store_and_list() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
-        set_suggest_input(&mut section.ca_file, "ca.pem");
-        section.skip_verify.state.set_selection(1); // On, after text was typed
+        assert!(section.show_root_store_row());
+        assert!(section.show_peer_verify_row());
+        *section.ca_files.state.values_mut() = vec!["ca.pem".to_string()];
+        section.root_store.state.set_selection(1); // Off, after the list was populated
+        section.skip_verify.state.set_selection(1); // On, after Root Store was set
+
+        assert!(!section.show_root_store_row());
+        assert!(!section.show_peer_verify_row());
 
         let extracted = section.extract();
         assert!(extracted.skip_verify);
-        assert_eq!(extracted.ca_file, "ca.pem");
-        // Resolving this flag into `CertVerification::Skip {}` is `TlsLevel::build_config`'s/
-        // `SecurityLevel::build_config`'s job (see their own tests).
+        assert!(!extracted.root_store);
+        assert_eq!(extracted.ca_files, vec!["ca.pem".to_string()]);
+    }
+
+    #[test]
+    /// MB-R-135 — toggling Skip-Verify back Off restores the previously entered Root Store
+    /// selection and CA list, since hiding never clears them.
+    fn ut_toggle_skip_verify_back_off_restores_list_and_toggle() {
+        let mut section = TlsSection::new();
+        section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
+        *section.ca_files.state.values_mut() = vec!["ca1.pem".to_string(), "ca2.pem".to_string()];
+        section.root_store.state.set_selection(1); // Off
+        section.skip_verify.state.set_selection(1); // On
+        section.skip_verify.state.set_selection(0); // Off again
+
+        let extracted = section.extract();
+        assert!(!extracted.skip_verify);
+        assert!(!extracted.root_store);
+        assert_eq!(
+            extracted.ca_files,
+            vec!["ca1.pem".to_string(), "ca2.pem".to_string()]
+        );
     }
 
     #[test]
@@ -851,7 +914,7 @@ mod tests {
         assert_eq!(extracted.cert_file, "s.crt");
         assert_eq!(extracted.key_file, "s.key");
         assert_eq!(
-            extracted.client_ca_files,
+            extracted.ca_files,
             vec!["ca1.pem".to_string(), "ca2.pem".to_string()]
         );
         assert!(!extracted.client_cert_skip_verify);
@@ -888,7 +951,7 @@ mod tests {
         let self_signed_row = row_of(&buf, "Self-Signed");
         let cert_row = row_of(&buf, "Cert File");
         let skip_row = row_of(&buf, "Skip Verify");
-        let ca_row = row_of(&buf, "Client CA(s)");
+        let ca_row = row_of(&buf, "CA(s)");
         assert!(self_signed_row < cert_row);
         assert!(cert_row < skip_row);
         assert!(skip_row < ca_row);
@@ -896,7 +959,7 @@ mod tests {
 
     #[test]
     /// UI-R-024 — mTLS row order, client role: Self-Signed first, then the client's own
-    /// cert/key pair, then Skip Verify, then the CA-file input.
+    /// cert/key pair, then Skip Verify (folded with Root Store), then the shared CA list.
     fn ut_mtls_row_order_client() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::MutualTls);
@@ -906,9 +969,14 @@ mod tests {
         let self_signed_row = row_of(&buf, "Self-Signed");
         let cert_row = row_of(&buf, "Client Cert");
         let skip_row = row_of(&buf, "Skip Verify");
-        let ca_row = row_of(&buf, "CA File");
+        let root_store_row = row_of(&buf, "Root Store");
+        let ca_row = row_of(&buf, "CA(s)");
         assert!(self_signed_row < cert_row);
         assert!(cert_row < skip_row);
+        assert_eq!(
+            skip_row, root_store_row,
+            "Skip Verify and Root Store share a row"
+        );
         assert!(skip_row < ca_row);
     }
 
@@ -916,51 +984,45 @@ mod tests {
     /// sub-dialog whose confirmed path is appended and selected, and the DEL button removes
     /// whichever entry is currently selected — not a comma-separated text field.
     #[test]
-    fn ut_client_ca_files_add_remove_edit() {
+    fn ut_ca_files_add_remove_edit() {
         let ca1 = tmp_file("mca1.pem");
         let ca2 = tmp_file("mca2.pem");
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1); // server cert self-signed, no file needed
 
-        assert!(section.client_ca_files.state.values().is_empty());
+        assert!(section.ca_files.state.values().is_empty());
 
         // ADD: open the sub-dialog, type a path, confirm with Enter.
-        section.focus = TlsSectionFocus::ClientCaAddButton;
+        section.focus = TlsSectionFocus::CaAddButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(section.client_ca_add_dialog.is_some());
+        assert!(section.ca_add_dialog.is_some());
         type_into(
-            &mut section.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &mut section.ca_add_dialog.as_mut().unwrap().path.state,
             &ca1,
         );
         confirm_ca_add(&mut section);
-        assert!(section.client_ca_add_dialog.is_none());
-        assert_eq!(
-            section.client_ca_files.state.values(),
-            std::slice::from_ref(&ca1)
-        );
+        assert!(section.ca_add_dialog.is_none());
+        assert_eq!(section.ca_files.state.values(), std::slice::from_ref(&ca1));
 
         // ADD a second entry.
-        section.focus = TlsSectionFocus::ClientCaAddButton;
+        section.focus = TlsSectionFocus::CaAddButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         type_into(
-            &mut section.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &mut section.ca_add_dialog.as_mut().unwrap().path.state,
             &ca2,
         );
         confirm_ca_add(&mut section);
-        assert_eq!(
-            section.client_ca_files.state.values(),
-            &[ca1.clone(), ca2.clone()]
-        );
+        assert_eq!(section.ca_files.state.values(), &[ca1.clone(), ca2.clone()]);
 
         // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
-        section.focus = TlsSectionFocus::ClientCaAddButton;
+        section.focus = TlsSectionFocus::CaAddButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(section.client_ca_add_dialog.is_some());
+        assert!(section.ca_add_dialog.is_some());
         assert!(
             !section
-                .client_ca_add_dialog
+                .ca_add_dialog
                 .as_ref()
                 .unwrap()
                 .error
@@ -971,14 +1033,14 @@ mod tests {
         // A path that doesn't exist on disk is also rejected: same sub-dialog stays open with an
         // error, nothing appended.
         type_into(
-            &mut section.client_ca_add_dialog.as_mut().unwrap().path.state,
+            &mut section.ca_add_dialog.as_mut().unwrap().path.state,
             "/nonexistent/ca-does-not-exist.pem",
         );
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(section.client_ca_add_dialog.is_some());
+        assert!(section.ca_add_dialog.is_some());
         assert!(
             !section
-                .client_ca_add_dialog
+                .ca_add_dialog
                 .as_ref()
                 .unwrap()
                 .error
@@ -986,49 +1048,114 @@ mod tests {
                 .is_empty()
         );
         section.handle_events(KeyModifiers::NONE, KeyCode::Esc);
-        assert!(section.client_ca_add_dialog.is_none());
-        assert_eq!(
-            section.client_ca_files.state.values(),
-            &[ca1.clone(), ca2.clone()]
-        );
+        assert!(section.ca_add_dialog.is_none());
+        assert_eq!(section.ca_files.state.values(), &[ca1.clone(), ca2.clone()]);
 
         // DEL: remove the currently-selected entry (selection sits on the last-added item).
-        assert_eq!(section.client_ca_files.state.selection(), 1);
-        section.focus = TlsSectionFocus::ClientCaDeleteButton;
+        assert_eq!(section.ca_files.state.selection(), 1);
+        section.focus = TlsSectionFocus::CaDeleteButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert_eq!(
-            section.client_ca_files.state.values(),
-            std::slice::from_ref(&ca1)
-        );
+        assert_eq!(section.ca_files.state.values(), std::slice::from_ref(&ca1));
 
         // Removing the last entry leaves the list empty and the DEL button no longer eligible.
-        section.focus = TlsSectionFocus::ClientCaDeleteButton;
+        section.focus = TlsSectionFocus::CaDeleteButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
-        assert!(section.client_ca_files.state.values().is_empty());
-        assert!(!section.show_client_ca() || section.client_ca_files.state.values().is_empty());
+        assert!(section.ca_files.state.values().is_empty());
+        assert!(!section.show_ca_list() || section.ca_files.state.values().is_empty());
 
         // Deleting down to an empty list must not leave `focus` stuck on the now-ineligible DEL
         // button — it falls back to ADD.
-        assert_eq!(section.focus, TlsSectionFocus::ClientCaAddButton);
+        assert_eq!(section.focus, TlsSectionFocus::CaAddButton);
+    }
+
+    /// MB-R-136/MB-R-156 — the shared CA list is the exact same `ca_files`/`ca_add_button`/
+    /// `ca_delete_button` fields for the client role too, not a second copy: add-then-remove
+    /// through the client role's own gates (Root Store Off, TLS level) round-trips identically
+    /// to the server-role sequence above.
+    #[test]
+    fn ut_ca_list_shared_by_both_roles_add_remove_edit() {
+        let ca = tmp_file("cca1.pem");
+        let mut section = TlsSection::new();
+        section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
+        section.root_store.state.set_selection(1); // Off, so the list is required/shown
+
+        assert!(section.ca_files.state.values().is_empty());
+        section.focus = TlsSectionFocus::CaAddButton;
+        section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        type_into(&mut section.ca_add_dialog.as_mut().unwrap().path.state, &ca);
+        confirm_ca_add(&mut section);
+        assert_eq!(section.ca_files.state.values(), std::slice::from_ref(&ca));
+
+        section.focus = TlsSectionFocus::CaDeleteButton;
+        section.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        assert!(section.ca_files.state.values().is_empty());
+    }
+
+    /// MB-R-136 — an empty path and a path with an extension outside pem/crt/key are both
+    /// rejected by the shared sub-dialog: it stays open with an inline error and nothing is
+    /// appended to the list.
+    #[test]
+    fn ut_ca_add_rejects_missing_or_wrong_extension() {
+        let mut section = TlsSection::new();
+        section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
+        section.self_signed.state.set_selection(1);
+
+        section.focus = TlsSectionFocus::CaAddButton;
+        section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            section.ca_add_dialog.is_some(),
+            "empty path must not close the sub-dialog"
+        );
+        assert!(
+            !section
+                .ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty(),
+            "empty path must set an inline error"
+        );
+        assert!(section.ca_files.state.values().is_empty());
+
+        let bad = tmp_file("wrong-ext.txt");
+        type_into(
+            &mut section.ca_add_dialog.as_mut().unwrap().path.state,
+            &bad,
+        );
+        section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            section.ca_add_dialog.is_some(),
+            "wrong extension must not close the sub-dialog"
+        );
+        assert!(
+            !section
+                .ca_add_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .state
+                .is_empty(),
+            "wrong extension must set an inline error"
+        );
+        assert!(section.ca_files.state.values().is_empty());
     }
 
     /// UI-R-026 — Esc while the path field's completion popup is open dismisses only the popup;
     /// a second Esc (popup now closed) closes the sub-dialog itself.
     #[test]
-    fn ut_client_ca_add_dialog_esc_dismisses_popup_before_sub_dialog() {
+    fn ut_ca_add_dialog_esc_dismisses_popup_before_sub_dialog() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1);
 
-        section.focus = TlsSectionFocus::ClientCaAddButton;
+        section.focus = TlsSectionFocus::CaAddButton;
         section.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        type_into(
-            &mut section.client_ca_add_dialog.as_mut().unwrap().path.state,
-            "s",
-        );
+        type_into(&mut section.ca_add_dialog.as_mut().unwrap().path.state, "s");
         assert!(
             section
-                .client_ca_add_dialog
+                .ca_add_dialog
                 .as_ref()
                 .unwrap()
                 .path
@@ -1039,12 +1166,12 @@ mod tests {
 
         section.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(
-            section.client_ca_add_dialog.is_some(),
+            section.ca_add_dialog.is_some(),
             "Esc with the popup open must dismiss the popup, not the sub-dialog"
         );
         assert!(
             !section
-                .client_ca_add_dialog
+                .ca_add_dialog
                 .as_ref()
                 .unwrap()
                 .path
@@ -1054,7 +1181,7 @@ mod tests {
 
         section.handle_events(KeyModifiers::NONE, KeyCode::Esc);
         assert!(
-            section.client_ca_add_dialog.is_none(),
+            section.ca_add_dialog.is_none(),
             "Esc with the popup already closed must close the sub-dialog"
         );
     }
@@ -1066,20 +1193,20 @@ mod tests {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section
-            .client_ca_files
+            .ca_files
             .state
             .set_values(vec!["ca1.pem".to_string()]);
-        section.focus = TlsSectionFocus::ClientCaDeleteButton;
-        section.client_ca_delete_button.state.set_focused(true);
+        section.focus = TlsSectionFocus::CaDeleteButton;
+        section.ca_delete_button.state.set_focused(true);
 
         section.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
 
-        assert!(section.client_ca_files.state.values().is_empty());
-        assert_eq!(section.focus, TlsSectionFocus::ClientCaAddButton);
-        assert!(!section.client_ca_delete_button.state.is_focused());
-        assert!(section.client_ca_add_button.state.is_focused());
+        assert!(section.ca_files.state.values().is_empty());
+        assert_eq!(section.focus, TlsSectionFocus::CaAddButton);
+        assert!(!section.ca_delete_button.state.is_focused());
+        assert!(section.ca_add_button.state.is_focused());
         section.focus_next();
-        assert_ne!(section.focus, TlsSectionFocus::ClientCaDeleteButton);
+        assert_ne!(section.focus, TlsSectionFocus::CaDeleteButton);
     }
 
     /// UI-R-024 — an empty client-CA list shows no placeholder entry, and the DEL button is not
@@ -1088,18 +1215,18 @@ mod tests {
     fn ut_client_ca_empty_hides_delete_button() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
-        assert!(section.client_ca_files.state.values().is_empty());
+        assert!(section.ca_files.state.values().is_empty());
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         render_field!(section, self_signed, Rect::new(0, 0, 80, 3), &mut buf);
         // No client-CA entries: give ADD the row's full remaining width, DEL entirely skipped,
         // mirroring the outer dialog's own render() empty-list branch.
-        if section.focus == TlsSectionFocus::ClientCaDeleteButton {
+        if section.focus == TlsSectionFocus::CaDeleteButton {
             section.focus_previous();
         }
         render_row!(section, Rect::new(0, 3, 80, 3), &mut buf;
-            client_ca_files => Constraint::Percentage(80),
-            client_ca_add_button => Constraint::Fill(1)
+            ca_files => Constraint::Percentage(80),
+            ca_add_button => Constraint::Fill(1)
         );
         let text = buffer_text(&buf);
         assert!(
@@ -1109,21 +1236,21 @@ mod tests {
         assert!(text.contains("ADD"), "ADD button missing:\n{text}");
     }
 
-    /// UI-R-024 — with an empty client-CA list, the `client_ca_files` box still occupies the
+    /// UI-R-024 — with an empty client-CA list, the `ca_files` box still occupies the
     /// full fixed 3-row slot (top border + content + bottom border) rather than shrinking to a
     /// 2-row box.
     #[test]
     fn ut_client_ca_empty_list_box_keeps_full_row_height() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
-        assert!(section.client_ca_files.state.values().is_empty());
+        assert!(section.ca_files.state.values().is_empty());
         let area = Rect::new(0, 0, 80, 3);
         let mut buf = Buffer::empty(area);
         render_row!(section, area, &mut buf;
-            client_ca_files => Constraint::Percentage(80),
-            client_ca_add_button => Constraint::Fill(1)
+            ca_files => Constraint::Percentage(80),
+            ca_add_button => Constraint::Fill(1)
         );
-        let ca_row = row_of(&buf, "Client CA(s)");
+        let ca_row = row_of(&buf, "CA(s)");
         let bottom_line: String = (0..buf.area.width)
             .map(|x| buf[(x, ca_row + 2)].symbol().to_string())
             .collect();
@@ -1141,7 +1268,7 @@ mod tests {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section
-            .client_ca_files
+            .ca_files
             .state
             .set_values((0..10).map(|i| format!("ca{i}.pem")).collect::<Vec<_>>());
         let area = Rect::new(0, 0, 80, 6);
@@ -1150,15 +1277,15 @@ mod tests {
             ratatui::layout::Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
                 .areas(area);
         render_row!(section, row0, &mut buf;
-            client_ca_files => Constraint::Percentage(60),
-            client_ca_add_button => Constraint::Percentage(20),
-            client_ca_delete_button => Constraint::Fill(1)
+            ca_files => Constraint::Percentage(60),
+            ca_add_button => Constraint::Percentage(20),
+            ca_delete_button => Constraint::Fill(1)
         );
-        // Something else painted in row1, to prove the client-CA box didn't bleed into it.
-        render_field!(section, ca_file, row1, &mut buf);
+        // Something else painted in row1, to prove the CA-list box didn't bleed into it.
+        render_field!(section, self_signed, row1, &mut buf);
         let text = buffer_text(&buf);
-        let ca_row = row_of(&buf, "Client CA(s)");
-        let next_row = row_of(&buf, "CA File");
+        let ca_row = row_of(&buf, "CA(s)");
+        let next_row = row_of(&buf, "Self-Signed");
         assert_eq!(
             next_row - ca_row,
             3,

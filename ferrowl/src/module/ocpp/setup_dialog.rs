@@ -119,7 +119,7 @@ pub struct OcppSetupDialog {
     pub path: Widget<InputFieldState, InputField<String>>,
     /// Extra HTTP headers sent on the client's websocket handshake (OC-R-117/118/119,
     /// UI-R-059). Client role only — a CSMS server has no outbound handshake to attach headers
-    /// to. Hidden while `extra_headers` is empty (mirrors `client_ca_files`) — an empty table
+    /// to. Hidden while `extra_headers` is empty (mirrors `ca_files`) — an empty table
     /// has nothing to select/edit/delete, so it is skipped by focus and never painted.
     #[focus(when = {self.show_headers_table()})]
     pub headers_table: HeaderTable,
@@ -137,7 +137,7 @@ pub struct OcppSetupDialog {
     pub extra_headers: Vec<ferrowl_ocpp::HeaderDef>,
     /// Edit-in-place popup for the selected header row, opened by Enter on `headers_table`; not
     /// itself a `#[focus]` field — routed specially in `handle_events`, mirroring
-    /// `client_ca_add_dialog`.
+    /// `ca_add_dialog`.
     #[builder(default)]
     pub header_edit_prompt: Option<HeaderEditPrompt>,
     /// Delete-confirmation popup for the selected header row, opened by `d` on `headers_table`.
@@ -362,9 +362,9 @@ impl OcppSetupDialog {
             // Below TLS, a wss server still generates an ephemeral self-signed certificate at
             // each start rather than binding plain TCP (OC-R-095's fallback) -- folded into the
             // `self_signed` input passed to `build_config` rather than a post-processing
-            // override, so `build_config` alone decides the outcome. A field hidden
-            // below TLS (the client's `ca_file` trust anchor) is blanked here so stale text never
-            // leaks into the resolved config once the level drops back down.
+            // override, so `build_config` alone decides the outcome. A field hidden below TLS
+            // (the client's shared CA list) is blanked here so stale entries never leak into the
+            // resolved config once the level drops back down.
             fn blank_below_tls(tls: bool, s: &str) -> &str {
                 if tls { s } else { "" }
             }
@@ -378,20 +378,26 @@ impl OcppSetupDialog {
             } else {
                 extracted.self_signed
             };
+            let no_ca_files: Vec<String> = Vec::new();
+            let ca_files: &[String] = if tls {
+                &extracted.ca_files
+            } else {
+                &no_ca_files
+            };
             let mut cfg = level.build_config(
                 role,
                 SecurityInputs {
                     username: self.username.state.input(),
                     password: self.password.state.input(),
-                    ca_file: blank_below_tls(tls, &extracted.ca_file),
                     cert_file: blank_below_tls(tls, &extracted.cert_file),
                     key_file: blank_below_tls(tls, &extracted.key_file),
                     client_cert_file: &extracted.client_cert_file,
                     client_key_file: &extracted.client_key_file,
-                    client_ca_files: &extracted.client_ca_files,
+                    ca_files,
                     self_signed: effective_self_signed,
                     skip_verify: is_client && extracted.skip_verify,
                     client_cert_skip_verify: is_server && extracted.client_cert_skip_verify,
+                    root_store: extracted.root_store,
                 },
             )?;
             // Stitch the inactive role's half back in from the config the dialog was opened
@@ -450,7 +456,7 @@ impl OcppSetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
-        if self.tls.client_ca_add_dialog.is_some() {
+        if self.tls.ca_add_dialog.is_some() {
             return self.tls.handle_events(modifiers, code);
         }
 
@@ -526,7 +532,7 @@ impl OcppSetupDialog {
             && self.focus == OcppSetupDialogFocus::Tls
             && matches!(
                 self.tls.focus(),
-                TlsSectionFocus::ClientCaAddButton | TlsSectionFocus::ClientCaDeleteButton
+                TlsSectionFocus::CaAddButton | TlsSectionFocus::CaDeleteButton
             )
         {
             return self.tls.handle_events(modifiers, code);
@@ -558,8 +564,8 @@ impl OcppSetupDialog {
     }
 
     /// The table itself, as opposed to the always-visible add-inputs (when `show_headers`):
-    /// hidden while `extra_headers` is empty, mirroring `client_ca_files`'s
-    /// `show_client_ca() && !values().is_empty()` gate — an empty table has nothing to
+    /// hidden while `extra_headers` is empty, mirroring `ca_files`'s
+    /// `show_ca_list() && !values().is_empty()` gate — an empty table has nothing to
     /// select/edit/delete, so painting an empty box would waste a row for no purpose.
     fn show_headers_table(&self) -> bool {
         self.show_headers() && !self.extra_headers.is_empty()
@@ -808,30 +814,42 @@ impl OcppSetupDialog {
             }
 
             // Skip Verify row: always the Skip Verify toggle itself, plus (when applicable) the
-            // peer-verification input sharing the same row.
+            // Root Store toggle (client only, OC-R-125) and the peer-verification list
+            // sharing the same row.
             if show_skip_verify_row {
                 if show_peer_verify_row {
+                    // No CA entries yet: give ADD the remaining width and skip DEL entirely
+                    // rather than paint an empty, nothing-to-delete button.
+                    let empty = tls.ca_files.state.values().is_empty();
                     if is_server {
-                        // No client-CA entries yet: give ADD the remaining width and skip DEL
-                        // entirely rather than paint an empty, nothing-to-delete button.
-                        if tls.client_ca_files.state.values().is_empty() {
+                        if empty {
                             render_row!(tls, rows[9], buf;
                                 client_cert_skip_verify => Constraint::Percentage(25),
-                                client_ca_files => Constraint::Percentage(60),
-                                client_ca_add_button => Constraint::Fill(1)
+                                ca_files => Constraint::Percentage(60),
+                                ca_add_button => Constraint::Fill(1)
                             );
                         } else {
                             render_row!(tls, rows[9], buf;
                                 client_cert_skip_verify => Constraint::Percentage(25),
-                                client_ca_files => Constraint::Percentage(45),
-                                client_ca_add_button => Constraint::Percentage(15),
-                                client_ca_delete_button => Constraint::Fill(1)
+                                ca_files => Constraint::Percentage(45),
+                                ca_add_button => Constraint::Percentage(15),
+                                ca_delete_button => Constraint::Fill(1)
                             );
                         }
+                    } else if empty {
+                        render_row!(tls, rows[9], buf;
+                            skip_verify => Constraint::Percentage(25),
+                            root_store => Constraint::Percentage(20),
+                            ca_files => Constraint::Percentage(40),
+                            ca_add_button => Constraint::Fill(1)
+                        );
                     } else {
                         render_row!(tls, rows[9], buf;
                             skip_verify => Constraint::Percentage(25),
-                            ca_file => Constraint::Fill(1)
+                            root_store => Constraint::Percentage(20),
+                            ca_files => Constraint::Percentage(25),
+                            ca_add_button => Constraint::Percentage(15),
+                            ca_delete_button => Constraint::Fill(1)
                         );
                     }
                 } else if is_server {
@@ -859,9 +877,6 @@ impl OcppSetupDialog {
             .render_overlay(area, buf, &mut self.config_path.state);
         {
             let tls = &mut self.tls;
-            tls.ca_file
-                .widget
-                .render_overlay(area, buf, &mut tls.ca_file.state);
             tls.cert_file
                 .widget
                 .render_overlay(area, buf, &mut tls.cert_file.state);
@@ -874,9 +889,9 @@ impl OcppSetupDialog {
             tls.client_key_file
                 .widget
                 .render_overlay(area, buf, &mut tls.client_key_file.state);
-            // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+            // `ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
 
-            if let Some(d) = tls.client_ca_add_dialog.as_mut() {
+            if let Some(d) = tls.ca_add_dialog.as_mut() {
                 d.render(area, buf);
             }
         }
@@ -1187,34 +1202,79 @@ mod tests {
 
     #[test]
     /// OC-R-111 — toggling Skip-Verify On hides the CA-file row.
-    fn ut_skip_verify_hides_ca_file_row() {
+    fn ut_cs_skip_verify_hides_root_store_and_list() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
         d.sync_tls();
         assert!(d.tls.show_peer_verify_row());
+        assert!(d.tls.show_root_store_row());
         d.tls.skip_verify.state.set_selection(1); // On
         assert!(!d.tls.show_peer_verify_row());
+        assert!(!d.tls.show_root_store_row());
         d.tls.skip_verify.state.set_selection(0); // Off again
         assert!(d.tls.show_peer_verify_row());
+        assert!(d.tls.show_root_store_row());
     }
 
     #[test]
-    /// OC-R-111 — toggling Skip-Verify On excludes stale ca_file text from the resolved config,
-    /// even though the widget's stored text is untouched.
-    fn ut_resolve_skip_verify_excludes_stale_ca_file_text() {
+    /// OC-R-111 — the Root Store toggle is hidden under `SecurityLevel::None`/`BasicAuth`, same
+    /// as the shared CA list it's paired with; it only appears once the level reaches `Tls`.
+    fn ut_root_store_row_hidden_under_security_level_none() {
+        let mut d = wss_dialog(0); // Client
+        d.sync_tls();
+        assert!(!d.tls.show_root_store_row());
+        d.security
+            .state
+            .set_selection(SecurityLevel::BasicAuth.index());
+        d.sync_tls();
+        assert!(!d.tls.show_root_store_row());
+        d.security.state.set_selection(SecurityLevel::Tls.index());
+        d.sync_tls();
+        assert!(d.tls.show_root_store_row());
+    }
+
+    #[test]
+    /// OC-R-113/OC-R-125 — the CA list is the exact same shared field for both the CSMS (server)
+    /// and CS (client) roles, not a second copy: switching role alone flips which gate
+    /// (`client_cert_skip_verify` vs `skip_verify`) controls `show_peer_verify_row`, but both
+    /// paths read the one `ca_files` widget.
+    fn ut_ca_list_shared_by_csms_and_cs_roles() {
+        let mut d = wss_dialog(1); // Server (CSMS)
+        d.security
+            .state
+            .set_selection(SecurityLevel::MutualTls.index());
+        d.sync_tls();
+        *d.tls.ca_files.state.values_mut() = vec!["fleet-ca.pem".to_string()];
+        assert!(d.tls.show_peer_verify_row());
+
+        d.role.state.set_selection(0); // Client (CS)
+        d.security.state.set_selection(SecurityLevel::Tls.index());
+        d.sync_tls();
+        assert!(d.tls.show_peer_verify_row());
+        assert_eq!(
+            d.tls.ca_files.state.values(),
+            &["fleet-ca.pem".to_string()],
+            "the same widget/list survives a role switch"
+        );
+    }
+
+    #[test]
+    /// OC-R-111 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
+    /// even though the widget's stored list is untouched.
+    fn ut_resolve_skip_verify_excludes_stale_ca_list() {
         let mut d = wss_dialog(0); // Client
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_input(&mut d.tls.ca_file, "ca.pem");
-        d.tls.skip_verify.state.set_selection(1); // On, after the text was typed
+        *d.tls.ca_files.state.values_mut() = vec!["ca.pem".to_string()];
+        d.tls.skip_verify.state.set_selection(1); // On, after the list was populated
 
-        let spec = d.resolve().expect("skip-verify needs no ca file");
+        let spec = d.resolve().expect("skip-verify needs no ca list");
         assert_eq!(
             spec.security.tls.client,
             ClientTlsPolicy::Tls {
                 verification: CertVerification::Skip {}
             }
         );
-        assert_eq!(d.tls.ca_file.state.input(), "ca.pem");
+        assert_eq!(d.tls.ca_files.state.values(), &["ca.pem".to_string()]);
     }
 
     #[test]
@@ -1340,46 +1400,35 @@ mod tests {
             .set_selection(SecurityLevel::MutualTls.index());
         d.tls.client_cert_skip_verify.state.set_selection(0); // Off: client-CA row shows
         d.sync_tls();
-        focus_tls_until(&mut d, TlsSectionFocus::ClientCaAddButton);
+        focus_tls_until(&mut d, TlsSectionFocus::CaAddButton);
         d.focus = OcppSetupDialogFocus::Tls;
 
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.tls.client_ca_add_dialog.is_some());
+        assert!(d.tls.ca_add_dialog.is_some());
 
         // An empty path is rejected: the sub-dialog stays open with an error, nothing appended.
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.tls.client_ca_add_dialog.is_some());
-        assert!(
-            !d.tls
-                .client_ca_add_dialog
-                .as_ref()
-                .unwrap()
-                .error
-                .state
-                .is_empty()
-        );
+        assert!(d.tls.ca_add_dialog.is_some());
+        assert!(!d.tls.ca_add_dialog.as_ref().unwrap().error.state.is_empty());
 
         // Esc closes the sub-dialog with nothing appended.
         d.handle_events(KeyModifiers::NONE, KeyCode::Esc);
-        assert!(d.tls.client_ca_add_dialog.is_none());
-        assert!(d.tls.client_ca_files.state.values().is_empty());
+        assert!(d.tls.ca_add_dialog.is_none());
+        assert!(d.tls.ca_files.state.values().is_empty());
 
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.tls.client_ca_add_dialog.is_some());
-        set_suggest_input(&mut d.tls.client_ca_add_dialog.as_mut().unwrap().path, &ca);
+        assert!(d.tls.ca_add_dialog.is_some());
+        set_suggest_input(&mut d.tls.ca_add_dialog.as_mut().unwrap().path, &ca);
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.tls.client_ca_add_dialog.is_none());
-        assert_eq!(
-            d.tls.client_ca_files.state.values(),
-            std::slice::from_ref(&ca)
-        );
+        assert!(d.tls.ca_add_dialog.is_none());
+        assert_eq!(d.tls.ca_files.state.values(), std::slice::from_ref(&ca));
 
-        focus_tls_until(&mut d, TlsSectionFocus::ClientCaDeleteButton);
+        focus_tls_until(&mut d, TlsSectionFocus::CaDeleteButton);
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(d.tls.client_ca_files.state.values().is_empty());
+        assert!(d.tls.ca_files.state.values().is_empty());
         assert_ne!(
             d.tls.focus(),
-            TlsSectionFocus::ClientCaDeleteButton,
+            TlsSectionFocus::CaDeleteButton,
             "draining the list must not strand focus on the now-hidden DEL button"
         );
 
@@ -1390,18 +1439,18 @@ mod tests {
     /// honors the general suggestion-popup contract: Enter accepts the highlighted suggestion
     /// while the popup is open, rather than submitting the sub-dialog immediately.
     #[test]
-    fn ut_client_ca_add_dialog_enter_accepts_suggestion_before_submit() {
+    fn ut_ca_add_dialog_enter_accepts_suggestion_before_submit() {
         let mut d = wss_dialog(1); // Server
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
         d.tls.client_cert_skip_verify.state.set_selection(0);
         d.sync_tls();
-        focus_tls_until(&mut d, TlsSectionFocus::ClientCaAddButton);
+        focus_tls_until(&mut d, TlsSectionFocus::CaAddButton);
         d.focus = OcppSetupDialogFocus::Tls;
 
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        let sub = d.tls.client_ca_add_dialog.as_mut().unwrap();
+        let sub = d.tls.ca_add_dialog.as_mut().unwrap();
         sub.path.state.set_focused(true);
         sub.path
             .state
@@ -1412,7 +1461,7 @@ mod tests {
         );
 
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        let sub = d.tls.client_ca_add_dialog.as_ref().unwrap();
+        let sub = d.tls.ca_add_dialog.as_ref().unwrap();
         assert_ne!(
             sub.path.state.input(),
             "s",
@@ -1421,7 +1470,7 @@ mod tests {
              (and failed) instead of accepting the popup"
         );
         assert!(
-            d.tls.client_ca_add_dialog.is_some(),
+            d.tls.ca_add_dialog.is_some(),
             "accepting a (possibly partial) suggestion must not itself close the sub-dialog"
         );
     }
@@ -1498,11 +1547,11 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024 — a client CA file, when set, must exist to pass validation.
-    fn ut_client_ca_file_when_set_must_exist() {
+    /// UI-R-024 — a client CA list entry, when set, must exist to pass validation.
+    fn ut_client_ca_files_entry_when_set_must_exist() {
         let mut d = wss_dialog(0);
         d.security.state.set_selection(SecurityLevel::Tls.index());
-        set_suggest_input(&mut d.tls.ca_file, "/no/such/ca.pem");
+        *d.tls.ca_files.state.values_mut() = vec!["/no/such/ca.pem".to_string()];
         let err = d.resolve().unwrap_err();
         assert!(err.contains("CA file not found"), "{err}");
     }
@@ -1805,10 +1854,7 @@ mod tests {
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        d.tls
-            .client_ca_files
-            .state
-            .set_values(vec!["ca1.pem".to_string()]); // non-empty, so DEL is eligible
+        d.tls.ca_files.state.set_values(vec!["ca1.pem".to_string()]); // non-empty, so DEL is eligible
         let seq = tab_sequence_from_security(&mut d);
         assert_eq!(
             seq,
@@ -1820,9 +1866,9 @@ mod tests {
                 Stop::Tls(TlsSectionFocus::CertFile),
                 Stop::Tls(TlsSectionFocus::KeyFile),
                 Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
-                Stop::Tls(TlsSectionFocus::ClientCaFiles),
-                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
-                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
+                Stop::Tls(TlsSectionFocus::CaFiles),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
+                Stop::Tls(TlsSectionFocus::CaDeleteButton),
                 Stop::Outer(OcppSetupDialogFocus::Name),
             ]
         );
@@ -1832,9 +1878,9 @@ mod tests {
             back_seq,
             vec![
                 Stop::Outer(OcppSetupDialogFocus::Name),
-                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
-                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
-                Stop::Tls(TlsSectionFocus::ClientCaFiles),
+                Stop::Tls(TlsSectionFocus::CaDeleteButton),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
+                Stop::Tls(TlsSectionFocus::CaFiles),
                 Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
                 Stop::Tls(TlsSectionFocus::KeyFile),
                 Stop::Tls(TlsSectionFocus::CertFile),
@@ -1847,9 +1893,8 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-111, OC-R-116, UI-R-049 — the mTLS client-role Tab order: own cert/key, then Skip
-    /// Verify, then the CA-file trust-anchor input (no ADD/DEL — client role never shows the
-    /// client-CA list).
+    /// OC-R-111/OC-R-116/OC-R-125, UI-R-049 — the mTLS client-role Tab order: own cert/key,
+    /// Skip Verify, Root Store, then the shared CA list's ADD button (empty list, no DEL).
     fn ut_tab_order_client_mtls() {
         let mut d = wss_dialog(0); // Client
         d.security
@@ -1866,7 +1911,8 @@ mod tests {
                 Stop::Tls(TlsSectionFocus::ClientCertFile),
                 Stop::Tls(TlsSectionFocus::ClientKeyFile),
                 Stop::Tls(TlsSectionFocus::SkipVerify),
-                Stop::Tls(TlsSectionFocus::CaFile),
+                Stop::Tls(TlsSectionFocus::RootStore),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
                 Stop::Outer(OcppSetupDialogFocus::Name),
             ]
         );
@@ -1953,7 +1999,7 @@ mod tests {
         let self_signed_row = row_of(&buf, "Self-Signed");
         let cert_row = row_of(&buf, "Cert File");
         let skip_row = row_of(&buf, "Skip Verify");
-        let ca_row = row_of(&buf, "Client CA(s)");
+        let ca_row = row_of(&buf, "CA(s)");
         assert!(
             security_row < self_signed_row,
             "security must render before self-signed:\n{text}"
@@ -1989,7 +2035,8 @@ mod tests {
         let self_signed_row = row_of(&buf, "Self-Signed");
         let cert_row = row_of(&buf, "Client Cert");
         let skip_row = row_of(&buf, "Skip Verify");
-        let ca_row = row_of(&buf, "CA File");
+        let root_store_row = row_of(&buf, "Root Store");
+        let ca_row = row_of(&buf, "CA(s)");
         assert!(
             security_row < self_signed_row,
             "security must render before self-signed:\n{text}"
@@ -2003,8 +2050,12 @@ mod tests {
             "self-signed must render before skip-verify:\n{text}"
         );
         assert_eq!(
+            skip_row, root_store_row,
+            "skip-verify and root-store must share a row:\n{text}"
+        );
+        assert_eq!(
             skip_row, ca_row,
-            "skip-verify and the CA-file input must share a row:\n{text}"
+            "skip-verify and the CA list must share a row:\n{text}"
         );
     }
 
@@ -2032,7 +2083,7 @@ mod tests {
     /// rendered at all, so ADD gets the row's full width, exercised through the outer dialog's
     /// own render (unlike the Modbus dialog, this render path does not itself recover focus off
     /// a now-hidden DEL button — that guard exists only in Modbus's render(); OCPP's own DEL
-    /// handler, `TlsSection::delete_selected_client_ca`, already handles the fallback whenever
+    /// handler, `TlsSection::delete_selected_ca`, already handles the fallback whenever
     /// the list is actually drained via the button, which is the reachable path in practice).
     #[test]
     fn ut_render_client_ca_empty_list_hides_delete_button_outer() {
@@ -2042,7 +2093,7 @@ mod tests {
             .set_selection(SecurityLevel::MutualTls.index());
         d.tls.client_cert_skip_verify.state.set_selection(0);
         d.sync_tls();
-        assert!(d.tls.client_ca_files.state.values().is_empty());
+        assert!(d.tls.ca_files.state.values().is_empty());
 
         let area = Rect::new(0, 0, 80, 60);
         let mut buf = Buffer::empty(area);
@@ -2055,15 +2106,12 @@ mod tests {
     #[test]
     /// UI-R-024 — the client-CA row's DEL button hugs the dialog's right inner edge with no
     /// trailing dead space, matching every other full-width row (mirrors the Modbus dialog).
-    fn ut_client_ca_delete_button_hugs_right_edge() {
+    fn ut_ca_delete_button_hugs_right_edge() {
         let mut d = wss_dialog(1); // Server
         d.security
             .state
             .set_selection(SecurityLevel::MutualTls.index());
-        d.tls
-            .client_ca_files
-            .state
-            .set_values(vec!["ca1.pem".to_string()]);
+        d.tls.ca_files.state.set_values(vec!["ca1.pem".to_string()]);
         let area = Rect::new(0, 0, 80, 60);
         let mut buf = Buffer::empty(area);
         d.render(area, &mut buf);
@@ -2076,7 +2124,7 @@ mod tests {
         }
 
         let name_row = row_of(&buf, "Name");
-        let ca_row = row_of(&buf, "Client CA(s)");
+        let ca_row = row_of(&buf, "CA(s)");
         assert_eq!(
             rightmost_non_space(&buf, name_row),
             rightmost_non_space(&buf, ca_row),
@@ -2335,18 +2383,15 @@ mod tests {
                 dialog.tls.client_cert_skip_verify.state.is_focused(),
             ),
             ("tls.skip_verify", dialog.tls.skip_verify.state.is_focused()),
-            ("tls.ca_file", dialog.tls.ca_file.state.is_focused()),
+            ("tls.root_store", dialog.tls.root_store.state.is_focused()),
+            ("tls.ca_files", dialog.tls.ca_files.state.is_focused()),
             (
-                "tls.client_ca_files",
-                dialog.tls.client_ca_files.state.is_focused(),
+                "tls.ca_add_button",
+                dialog.tls.ca_add_button.state.is_focused(),
             ),
             (
-                "tls.client_ca_add_button",
-                dialog.tls.client_ca_add_button.state.is_focused(),
-            ),
-            (
-                "tls.client_ca_delete_button",
-                dialog.tls.client_ca_delete_button.state.is_focused(),
+                "tls.ca_delete_button",
+                dialog.tls.ca_delete_button.state.is_focused(),
             ),
         ] {
             assert!(!focused, "{label} must open unfocused");

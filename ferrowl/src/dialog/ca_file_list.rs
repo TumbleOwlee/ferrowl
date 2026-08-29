@@ -1,9 +1,10 @@
-//! Shared "Add CA file" sub-dialog for the Modbus/OCPP client-CA list widgets (MB-R-136,
-//! OC-R-113). A minimal one-field sibling of `crate::module::modbus::dialog::AddNamedValueDialog`
-//! (label+value, register-specific): this one just takes a non-empty path and hands it back to
-//! the caller, which pushes it onto that role's `client_ca_files: Vec<String>` — the "add" half of
-//! the add/remove list interaction both dialogs' Client CA row uses (delete is a plain "remove the
-//! selected entry", handled by the caller directly against the `Vec` without needing a dialog).
+//! Shared "Add CA file" sub-dialog for the Modbus/OCPP shared CA list widget (MB-R-136/MB-R-156,
+//! OC-R-113/OC-R-125). A minimal one-field sibling of `crate::module::modbus::dialog::
+//! AddNamedValueDialog` (label+value, register-specific): this one just takes a non-empty path
+//! and hands it back to the caller, which pushes it onto `TlsSection`'s `ca_files: Vec<String>`
+//! — the "add" half of the add/remove list interaction both roles' CA row uses (delete is a
+//! plain "remove the selected entry", handled by the caller directly against the `Vec` without
+//! needing a dialog).
 
 use super::NonEmpty;
 use crate::dialog::path_suggest::FsPathProvider;

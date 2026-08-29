@@ -49,18 +49,17 @@ impl From<SecurityLevel> for EffectiveTlsLevel {
 }
 
 /// Raw text of every security input field, plus every toggle, passed by name so the many
-/// look-alike path fields cannot be transposed at a call site. `client_ca_files` is the
-/// add/remove/edit list widget's current entries (OC-R-113) — already individual paths, no
-/// further parsing.
+/// look-alike path fields cannot be transposed at a call site. `ca_files` is the shared
+/// add/remove/edit list widget's current entries (OC-R-113/OC-R-125) — already individual
+/// paths, no further parsing.
 pub struct SecurityInputs<'a> {
     pub username: &'a str,
     pub password: &'a str,
-    pub ca_file: &'a str,
     pub cert_file: &'a str,
     pub key_file: &'a str,
     pub client_cert_file: &'a str,
     pub client_key_file: &'a str,
-    pub client_ca_files: &'a [String],
+    pub ca_files: &'a [String],
     /// Server: server certificate is self-signed (OC-R-110). Client, at `MutualTls` only: the
     /// client's own mTLS identity is self-signed (OC-R-116).
     pub self_signed: bool,
@@ -68,6 +67,9 @@ pub struct SecurityInputs<'a> {
     pub skip_verify: bool,
     /// Server, at `MutualTls` only: accept any client certificate (OC-R-113).
     pub client_cert_skip_verify: bool,
+    /// Client-only Root Store toggle (OC-R-125): On resolves `ca_files` as `CertVerification::
+    /// RootStore`'s `extra_ca_files`; Off, as `CertVerification::CaFiles`'s `ca_files`.
+    pub root_store: bool,
 }
 
 impl SecurityLevel {
@@ -114,15 +116,15 @@ impl SecurityLevel {
         let SecurityInputs {
             username,
             password,
-            ca_file,
             cert_file,
             key_file,
             client_cert_file,
             client_key_file,
-            client_ca_files,
+            ca_files,
             self_signed,
             skip_verify,
             client_cert_skip_verify,
+            root_store,
         } = inputs;
         let opt = |s: &str| {
             let t = s.trim();
@@ -166,7 +168,7 @@ impl SecurityLevel {
                     }
                 };
                 cfg.tls.server = if mtls {
-                    let ca_files = client_ca_files.to_vec();
+                    let ca_files = ca_files.to_vec();
                     if !client_cert_skip_verify && ca_files.is_empty() {
                         return Err(
                             "Client CA list is required for mTLS (or enable Skip Verify)."
@@ -189,9 +191,18 @@ impl SecurityLevel {
             OcppRole::Client => {
                 let verification = if skip_verify {
                     CertVerification::Skip {}
-                } else {
+                } else if root_store {
                     CertVerification::RootStore {
-                        extra_ca_files: opt(ca_file).into_iter().collect(),
+                        extra_ca_files: ca_files.to_vec(),
+                    }
+                } else if ca_files.is_empty() {
+                    return Err(
+                        "Server CA list is required when Root Store is Off (or enable Root Store / Skip Verify)."
+                            .to_string(),
+                    );
+                } else {
+                    CertVerification::CaFiles {
+                        ca_files: ca_files.to_vec(),
                     }
                 };
                 cfg.tls.client = if mtls {
@@ -354,25 +365,24 @@ mod tests {
     fn inputs<'a>(
         username: &'a str,
         password: &'a str,
-        ca_file: &'a str,
         cert_file: &'a str,
         key_file: &'a str,
         client_cert_file: &'a str,
         client_key_file: &'a str,
-        client_ca_files: &'a [String],
+        ca_files: &'a [String],
     ) -> SecurityInputs<'a> {
         SecurityInputs {
             username,
             password,
-            ca_file,
             cert_file,
             key_file,
             client_cert_file,
             client_key_file,
-            client_ca_files,
+            ca_files,
             self_signed: false,
             skip_verify: false,
             client_cert_skip_verify: false,
+            root_store: true,
         }
     }
 
@@ -571,7 +581,6 @@ mod tests {
                 inputs(
                     "u",
                     "p",
-                    "ca",
                     "cert",
                     "key",
                     "ccert",
@@ -600,7 +609,6 @@ mod tests {
                 inputs(
                     "",
                     "",
-                    "",
                     "cert",
                     "key",
                     "",
@@ -623,10 +631,7 @@ mod tests {
     /// validation error.
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
         let err = SecurityLevel::MutualTls
-            .build_config(
-                OcppRole::Server,
-                inputs("", "", "", "cert", "key", "", "", &[]),
-            )
+            .build_config(OcppRole::Server, inputs("", "", "cert", "key", "", "", &[]))
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
     }
@@ -635,7 +640,7 @@ mod tests {
     /// OC-R-116 — a mutual-TLS client build with the self-signed toggle on excludes the
     /// (possibly stale) client-cert/key text and resolves to `CertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
-        let mut i = inputs("", "", "", "", "", "stale.crt", "stale.key", &[]);
+        let mut i = inputs("", "", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
         let cfg = SecurityLevel::MutualTls
             .build_config(OcppRole::Client, i)
@@ -658,7 +663,7 @@ mod tests {
         let cfg = SecurityLevel::MutualTls
             .build_config(
                 OcppRole::Client,
-                inputs("", "", "ca", "", "", "ccert", "ckey", &[]),
+                inputs("", "", "", "", "ccert", "ckey", &["ca".to_string()]),
             )
             .unwrap();
         assert_eq!(
@@ -673,6 +678,38 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    /// OC-R-125 — Root Store On resolves the client verification to `CertVerification::
+    /// RootStore` with the list as `extra_ca_files`, empty or not.
+    fn ut_cs_root_store_on_resolves_root_store_with_list() {
+        let list = ["ca1.pem".to_string()];
+        let mut i = inputs("", "", "", "", "", "", &list);
+        i.root_store = true;
+        let cfg = SecurityLevel::Tls
+            .build_config(OcppRole::Client, i)
+            .unwrap();
+        assert_eq!(
+            cfg.tls.client,
+            ClientTlsPolicy::Tls {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["ca1.pem".to_string()],
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// OC-R-125 — Root Store Off with an empty CA list is a validation error, mirroring
+    /// OC-R-113's empty-list rule on the server side.
+    fn ut_cs_root_store_off_empty_list_is_validation_error() {
+        let mut i = inputs("", "", "", "", "", "", &[]);
+        i.root_store = false;
+        let err = SecurityLevel::Tls
+            .build_config(OcppRole::Client, i)
+            .unwrap_err();
+        assert!(err.contains("Root Store is Off"));
     }
 
     // --- validate_security -----------------------------------------------------------------------
