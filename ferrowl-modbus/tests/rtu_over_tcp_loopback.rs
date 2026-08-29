@@ -322,7 +322,7 @@ async fn rtu_over_tcp_unparseable_address_is_error() {
     )
     .spawn(rx, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
     let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on an address error")

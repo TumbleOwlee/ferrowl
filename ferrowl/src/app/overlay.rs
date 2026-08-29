@@ -58,14 +58,12 @@ impl<S: DrawSurface> App<S> {
     /// From the type selector this swaps in the chosen module type's setup dialog; from a
     /// setup dialog it creates a new tab when the dialog validates.
     async fn confirm_overlay(&mut self) {
-        // Stage 1: type chosen -> open that module type's setup dialog.
         if let Some(Overlay::TypeSelect(d)) = &self.overlay {
             let setup = (MODULE_TYPES[d.selected_index()].new_setup_view)();
             self.overlay = Some(Overlay::Creation(setup));
             return;
         }
 
-        // Stage 2: setup dialog confirmed -> create the tab.
         let action = match &self.overlay {
             Some(Overlay::Creation(sv)) => sv.confirm().map(|(name, factory)| (name, factory())),
             _ => None,

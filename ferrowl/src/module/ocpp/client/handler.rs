@@ -474,8 +474,8 @@ mod tests {
     /// OC-R-070 — a remote start mints a transaction id and sends a real `TransactionEvent(Started)`
     /// to the CSMS (not just a local state mutation).
     /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
-    /// Bugfix — the connector status is the valid `"Occupied"`, not the invalid `"Charging"`
-    /// literal the removed inline mutation used to write.
+    /// The connector status is `"Occupied"`; `ConnectorStatusEnumType` has no `"Charging"`
+    /// variant.
     /// A remote stop clears the transaction and returns to available.
     async fn ut_request_start_then_stop_transaction() {
         let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -960,7 +960,8 @@ mod tests {
     /// OC-R-070 — the 2.1 binding sends a real `TransactionEvent(Started)` to the CSMS and mints a
     /// transaction; a remote stop clears it.
     /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
-    /// Bugfix — the connector status is the valid `"Occupied"`, not `"Charging"`.
+    /// The connector status is `"Occupied"`; `ConnectorStatusEnumType` has no `"Charging"`
+    /// variant.
     async fn ut_v21_request_start_then_stop_transaction() {
         let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let notify = Arc::new(tokio::sync::Notify::new());

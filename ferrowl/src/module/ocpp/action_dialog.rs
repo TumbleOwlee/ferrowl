@@ -8,7 +8,7 @@
 //! the payload — the view validates it (`decode_call`) and sends it.
 //!
 //! Actions with no spec open straight in JSON mode (transitional, removed once every action has a
-//! spec). Nested/abstracted actions supply a custom [`Assembler`] (see Stage 2).
+//! spec). Actions with list-valued or nested parts supply a custom [`Assembler`].
 
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::module::ocpp::widgets;
@@ -97,7 +97,7 @@ impl PropKind {
 pub enum PropSource {
     /// An observed-state field, resolved via `OcppFields::get_field`.
     StateField(&'static str),
-    /// A freshly generated transaction id (used by Stage 2 actions).
+    /// A freshly generated transaction id.
     #[allow(dead_code)]
     GeneratedTxId,
     /// The current time (RFC3339).
@@ -120,7 +120,7 @@ pub struct PropSpec {
 pub struct ActionSpec {
     pub props: &'static [PropSpec],
     pub assemble: Assembler,
-    /// Whether the action has list/nested parts the flat table can't fully express (Stage 2).
+    /// Whether the action has list/nested parts the flat table can't fully express.
     #[allow(dead_code)]
     pub complex: bool,
 }

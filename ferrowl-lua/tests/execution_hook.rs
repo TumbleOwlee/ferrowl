@@ -134,8 +134,7 @@ fn ut_hook_error_isolated_other_script_in_same_cycle_still_runs() {
 }
 
 #[test]
-/// Regression guard: an ordinary short script is unaffected by the hook, on both `call` and
-/// `call_all`.
+/// An ordinary short script is unaffected by the hook, on both `call` and `call_all`.
 fn ut_normal_short_script_unaffected_by_hook() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("ok".to_string(), "local x = 1 + 1")

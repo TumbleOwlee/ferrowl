@@ -73,7 +73,7 @@ async fn extra_headers_are_sent_on_upgrade_request() {
     let _client = cs::ClientBuilder::<V1_6>::new(config, ferrowl_ocpp::new_self_signed_cache())
         .spawn(TestCs, sink(), sink())
         .await
-        .expect("spawn always returns Ok now; the dial happens inside the task");
+        .expect("spawn always returns Ok; the dial happens inside the task");
 
     let mut found = Vec::new();
     for _ in 0..50 {

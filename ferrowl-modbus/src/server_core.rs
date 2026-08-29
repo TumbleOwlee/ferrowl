@@ -196,8 +196,8 @@ where
 
 /// MB-R-128 — `true` when `slave` has no declared region in any register table: every key
 /// `T::all_kinds_for(slave)` produces is absent from `memory`. A region declared for a
-/// *different* table than a particular failing request's own still makes this `false` — see
-/// the Shared section for why that single check is sufficient without inspecting which
+/// *different* table than a particular failing request's own still makes this `false`: a slave
+/// with any declared region anywhere is a known slave, so the check needs no knowledge of which
 /// `MemoryError` variant the failing request itself hit.
 fn slave_has_no_region<T>(slave: UnitId, memory: &Arc<RwLock<Memory<Key<T>>>>) -> bool
 where
@@ -1472,7 +1472,7 @@ mod tests {
         Arc::new(RwLock::new(mem))
     }
 
-    // ---- WriteMultipleCoils: regression for the hard-coded range length bug ----
+    // ---- WriteMultipleCoils: the written range's length comes from the request ----
 
     #[tokio::test]
     /// MB-R-062 — a multi-coil write is answered with the address written and the number of values written.
@@ -2338,7 +2338,7 @@ mod tests {
 
     #[tokio::test]
     /// MB-R-128 — the same wholly-unmapped slave id gets the ordinary exception, not silence, on
-    /// every non-`Rtu`/`Ascii` transport (edge-cases.md row 1 regression).
+    /// every non-`Rtu`/`Ascii` transport (edge-cases.md row 1).
     async fn ut_handle_request_exception_when_wholly_unmapped_and_not_physical_serial() {
         let mem = seeded_memory(&[10, 20]);
         let (log, _) = recording_log();

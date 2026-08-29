@@ -1080,9 +1080,9 @@ mod tests {
         );
     }
 
-    // Regression: editing a ws module whose device file carries a security section (Basic Auth
-    // over plain ws is valid, config-file-only) must hand that section back unchanged — the
-    // security UI is hidden for ws, and a hidden section must never clobber the file.
+    // Editing a ws module whose device file carries a security section (Basic Auth over plain ws
+    // is valid, config-file-only) hands that section back unchanged: the security UI is hidden for
+    // ws, and a hidden section must never clobber the file.
     #[test]
     /// UI-R-024 — a ws setup resolves preserving the prefilled security.
     fn ut_resolve_ws_preserves_prefilled_security() {
@@ -1157,8 +1157,8 @@ mod tests {
 
     #[test]
     /// OC-R-110 — toggling Self-Signed On excludes stale cert_file/key_file text from the
-    /// resolved config, even though the widgets' stored text is untouched (mirrors the Modbus
-    /// dialog's MB-R-135 fix).
+    /// resolved config, even though the widgets' stored text is untouched (mirrors MB-R-135 in
+    /// the Modbus dialog).
     fn ut_resolve_self_signed_excludes_stale_cert_key_text() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     /// OC-R-110 — Self-Signed On at TLS level needs no cert/key files to resolve successfully
-    /// (closes the gap `validate_security` used to require them unconditionally at Tls+).
+    /// — the cert/key requirement at Tls+ applies only while Self-Signed is Off.
     fn ut_validate_security_self_signed_needs_no_cert_files() {
         let mut d = wss_dialog(1); // Server
         d.security.state.set_selection(SecurityLevel::Tls.index());
@@ -1765,8 +1765,8 @@ mod tests {
     }
 
     /// Backward counterpart, driven with `SHIFT`+`BackTab` from `OcppSetupDialogFocus::Name` back
-    /// to `OcppSetupDialogFocus::Security`. Entering `tls` *backward* must land on its *last*
-    /// eligible pane, not its first — the regression this pins down.
+    /// to `OcppSetupDialogFocus::Security`. Entering `tls` *backward* lands on its *last*
+    /// eligible pane, not its first.
     fn back_tab_sequence_from_name(d: &mut OcppSetupDialog) -> Vec<Stop> {
         d.sync_tls();
         d.focus = OcppSetupDialogFocus::Name;
@@ -2350,8 +2350,8 @@ mod tests {
 
     /// UI-R-067 — the `:edit` open path establishes the same single-focus state as `new()`.
     /// Worth its own test because `edit` does not merely fill fields in: it replaces
-    /// `headers_table` wholesale with a freshly built widget, which is exactly the shape of the
-    /// regression this coverage exists for — a constructor deciding a field's focus flag.
+    /// `headers_table` wholesale with a freshly built widget — a constructor deciding a field's
+    /// focus flag, which is the shape this coverage guards against.
     #[test]
     fn ut_edit_dialog_matches_the_derive_normalised_focus_state() {
         let spec = OcppSpec {

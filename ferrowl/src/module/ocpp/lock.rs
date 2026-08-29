@@ -46,8 +46,8 @@ mod tests {
     /// later, separate `with_state_mut` call over the same lock. This is the safe shape — the read
     /// guard from the first call is fully dropped before the second call ever asks for a write
     /// guard. Nesting the closures themselves (calling `with_state_mut` from *inside* a `with_state`
-    /// closure over the same lock) would instead reproduce the fixed reentrancy deadlock; that
-    /// shape must never appear in this codebase.
+    /// closure over the same lock) would deadlock — a write guard requested while a read guard is
+    /// still live; that shape must never appear in this codebase.
     #[test]
     fn ut_sequential_with_state_result_then_with_state_mut() {
         let state = Arc::new(RwLock::new(vec![1, 2, 3]));

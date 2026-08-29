@@ -1264,9 +1264,8 @@ mod tests {
     #[test]
     /// UI-R-022 — Tab cycles focus through the setup overlay fields.
     fn ut_setup_overlay_tab_cycles_focus_via_derive() {
-        // Regression for the `#[derive(Overlay)]` port: `Setup` is tagged `focus_cycle`, so Tab
-        // must still advance the dialog's own focus once the dialog itself leaves the key
-        // unhandled (no close-confirm open).
+        // `Setup` is tagged `focus_cycle`, so Tab advances the dialog's own focus once the
+        // dialog itself leaves the key unhandled (no close-confirm open).
         use ferrowl_ui::traits::IsFocus;
         let mut view = new_view();
         drop(view.handle_command("edit"));
@@ -1302,9 +1301,9 @@ mod tests {
     #[test]
     /// UI-R-021 — an open register overlay consumes table-navigation keys.
     fn ut_register_overlay_swallows_table_navigation_key() {
-        // Regression: while the register overlay is open, `Down` must be consumed by the
-        // overlay's own dispatch (untagged -> bespoke `handle_overlay_key`), not fall through to
-        // the underlying table's selection movement.
+        // While the register overlay is open, `Down` is consumed by the overlay's own dispatch
+        // (untagged -> bespoke `handle_overlay_key`) and must not fall through to the underlying
+        // table's selection movement.
         let mut view = view_for(device_with_defs());
         view.table.select_first();
         let before = view.table.selected().map(|d| d.name.clone());
@@ -1321,9 +1320,8 @@ mod tests {
     #[test]
     /// UI-R-022 — Enter confirms the edit dialog after field routing.
     fn ut_enter_still_confirms_edit_dialog_after_offer_first_routing() {
-        // Regression for the offer-first key-routing refactor: the setup dialog is now offered
-        // every key before the default Esc/Enter/Tab/BackTab handling runs, but Enter must still
-        // confirm the dialog and apply the edit exactly as before.
+        // The setup dialog is offered every key before the default Esc/Enter/Tab/BackTab
+        // handling runs; Enter must still reach it, confirm the dialog and apply the edit.
         let mut view = new_view();
         drop(view.handle_command("edit"));
         assert!(view.is_overlay_active());

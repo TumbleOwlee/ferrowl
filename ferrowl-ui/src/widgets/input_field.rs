@@ -254,7 +254,6 @@ where
                 let remaining = width - (cursor - x_start);
                 x_end = std::cmp::min(text_len, x_end + remaining);
             }
-            // Get displayable text area
             text = text.chars().enumerate().fold(
                 String::with_capacity(x_end - x_start),
                 |mut s, (i, c)| {

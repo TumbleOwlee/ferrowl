@@ -1,6 +1,6 @@
 //! Low-level layer: a CSMS server and a CS client exchange Calls in both directions over a real
 //! websocket loopback, OCPP 2.1. Mirrors `ws_loopback_v201.rs`; its primary job is to prove the
-//! `ocpp2.1` subprotocol is negotiated end-to-end (regression guard for the 400-Bad-Request bug).
+//! `ocpp2.1` subprotocol is negotiated end-to-end.
 
 // Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
 #![allow(clippy::unwrap_used)]
@@ -116,8 +116,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
 
     let clear_cache_seen = Arc::new(AtomicBool::new(false));
-    // A successful connect here is the subprotocol regression guard: the client advertises
-    // `ocpp2.1` and the server must accept it (previously it could end up bound as `ocpp1.6`).
+    // The client advertises `ocpp2.1`; a successful connect proves the server accepted it.
     let client = cs::ClientBuilder::<V2_1>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),

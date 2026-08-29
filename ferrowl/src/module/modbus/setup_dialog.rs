@@ -1914,8 +1914,7 @@ mod tests {
 
     /// Backward counterpart of [`tab_sequence_from_role`], driven with `SHIFT`+`BackTab` from
     /// `SetupDialogFocus::Ip` down to and including `SetupDialogFocus::Role`. Entering `tls`
-    /// *backward* must land on its *last* eligible pane, not its first — the regression this
-    /// pins down.
+    /// *backward* lands on its *last* eligible pane, not its first.
     fn back_tab_sequence_from_ip(dialog: &mut SetupDialog) -> Vec<Stop> {
         dialog.sync_tls(); // see `tab_sequence_from_role`'s comment on why this must run first
         dialog.focus = SetupDialogFocus::Ip;

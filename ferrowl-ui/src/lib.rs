@@ -49,7 +49,7 @@ pub struct ColorScheme {
     pub success: Color,
     pub info: Color,
     pub warning: Color,
-    /// Text on bright status backgrounds (e.g. ONLINE/OFFLINE bar on
+    /// Text on bright status backgrounds (e.g. the connection-status bar on
     /// `success`/`error`); dark for readability.
     pub text_status: Color,
     pub syntax: SyntaxColorScheme,

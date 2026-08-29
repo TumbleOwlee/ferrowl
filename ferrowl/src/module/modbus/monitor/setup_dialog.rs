@@ -690,10 +690,9 @@ mod tests {
     use super::*;
     use ferrowl_ui::traits::IsFocus;
 
-    /// Regression — the monitor setup dialog must render as a centered floating popup, same as
-    /// every other setup dialog (`module/modbus/setup_dialog.rs::SetupDialog`), not fill the
-    /// whole given area. A far corner of a larger area must stay untouched by the dialog's own
-    /// border/content.
+    /// The dialog renders as a centered floating popup, same as every other setup dialog
+    /// (`module/modbus/setup_dialog.rs::SetupDialog`), rather than filling the area it is given:
+    /// a far corner of a larger area stays untouched by its border and content.
     #[test]
     fn ut_render_centers_the_dialog_instead_of_filling_the_area() {
         let mut dialog = MonitorSetupDialog::create();
@@ -740,9 +739,9 @@ mod tests {
         out
     }
 
-    /// Regression — `render` must populate `error.state` from `resolve()`, same as
-    /// `module/modbus/setup_dialog.rs::SetupDialog`; previously the error field's state was
-    /// never written, so an invalid dialog (e.g. empty name) never showed its error message.
+    /// `render` populates `error.state` from `resolve()`, same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`, so an invalid dialog carries its message
+    /// (here: an empty name) and a valid one carries none.
     #[test]
     fn ut_render_populates_error_state_from_resolve() {
         let mut dialog = MonitorSetupDialog::create();
@@ -758,9 +757,8 @@ mod tests {
         assert!(dialog.error.state.is_empty());
     }
 
-    /// Regression — the error box must stay hidden (no border/title drawn) while there is no
-    /// error, and must show the error message once one is present; previously the empty box
-    /// always drew regardless of validity.
+    /// The error box stays hidden — no border or title drawn — while there is no error, and
+    /// appears with its message once one is present.
     #[test]
     fn ut_render_hides_error_box_when_valid_and_shows_it_when_invalid() {
         let area = Rect::new(0, 0, 100, 60);
@@ -785,9 +783,8 @@ mod tests {
         );
     }
 
-    /// Regression — Serial path/baud/reconnect must share one row and parity/data bits/stop
-    /// bits must share the next, same as `module/modbus/setup_dialog.rs::SetupDialog`'s RTU
-    /// layout; previously every field got its own full-width row.
+    /// Serial path/baud/reconnect share one row and parity/data bits/stop bits share the next,
+    /// same as `module/modbus/setup_dialog.rs::SetupDialog`'s RTU layout.
     #[test]
     fn ut_render_lays_out_endpoint_fields_in_two_shared_rows() {
         let mut dialog = MonitorSetupDialog::create();
@@ -814,10 +811,10 @@ mod tests {
         );
     }
 
-    /// Regression — Tab order must follow the visual row layout (Serial Path, Baud, Reconnect
-    /// on one row; Parity, Data Bits, Stop Bits on the next), same as
-    /// `module/modbus/setup_dialog.rs::SetupDialog`'s RTU field order; previously Reconnect was
-    /// declared last, so Tab visited Path, Baud, Parity, Data Bits, Stop Bits, Reconnect.
+    /// Tab order follows the visual row layout — Serial Path, Baud, Reconnect on one row;
+    /// Parity, Data Bits, Stop Bits on the next — same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`'s RTU field order. Declaration order is what
+    /// the `Focus` derive walks, so it has to match the rendered rows.
     #[test]
     fn ut_tab_order_follows_path_baud_reconnect_then_parity_data_bits_stop_bits() {
         let mut dialog = MonitorSetupDialog::create();
@@ -926,9 +923,8 @@ mod tests {
         assert_eq!(cursors, 1, "expected one cursor:\n{}", buffer_text(&buf));
     }
 
-    /// Regression — there must be a 1-cell margin between the dialog's border and its content
-    /// on every side, same as `module/modbus/setup_dialog.rs::SetupDialog`; previously fields
-    /// were laid out flush against the border with no gap.
+    /// A margin separates the dialog's border from its content — one row vertically, two columns
+    /// horizontally (`Margin::new(2, 1)`), same as `module/modbus/setup_dialog.rs::SetupDialog`.
     #[test]
     fn ut_render_leaves_a_margin_between_border_and_content() {
         let mut dialog = MonitorSetupDialog::create();
@@ -951,7 +947,7 @@ mod tests {
         );
 
         // The column directly right of the left border, on the first field's row, must be a
-        // blank horizontal-margin column (the field's own border starts one cell further in).
+        // blank horizontal-margin column (the field's own border starts two cells in).
         let first_field_row_y = border_top_y + 2;
         assert_eq!(
             buf[(border_left_x + 1, first_field_row_y)].symbol(),
@@ -960,10 +956,8 @@ mod tests {
         );
     }
 
-    /// Regression — the dialog's border/background must use `COLOR_SCHEME.hi`/`COLOR_SCHEME.bg`
-    /// and its title must be centered, same as `module/modbus/setup_dialog.rs::SetupDialog`;
-    /// previously the block had no style (default fg/bg, unpainted background) and a
-    /// left-aligned title.
+    /// The dialog's border and background use `COLOR_SCHEME.hi`/`COLOR_SCHEME.bg` and its title
+    /// is centered, same as `module/modbus/setup_dialog.rs::SetupDialog`.
     #[test]
     fn ut_render_styles_the_border_and_centers_the_title() {
         let mut dialog = MonitorSetupDialog::create();
@@ -991,9 +985,8 @@ mod tests {
         );
     }
 
-    /// Regression — Esc must open the close-confirm popup and Enter must confirm it, same as
-    /// `module/modbus/setup_dialog.rs::SetupDialog`; previously Esc did nothing at all, so the
-    /// dialog could not be cancelled.
+    /// Esc opens the close-confirm popup and Enter confirms it, same as
+    /// `module/modbus/setup_dialog.rs::SetupDialog`.
     #[test]
     fn ut_esc_then_enter_sets_close_request_and_clears_after_take() {
         let mut dialog = MonitorSetupDialog::create();
@@ -1069,10 +1062,9 @@ mod tests {
         assert_eq!(dialog.path.state.input(), "/dev/ttyS0");
     }
 
-    /// Regression (gate 3 blocker) — MB-R-140 is only enforced at
-    /// `ModbusMonitorModule::start()`, never at construction, so a hand-edited session file can
-    /// carry `role = "monitor"` with a non-serial transport. `:edit`ing such a tab must not
-    /// panic; it degrades to the dialog's Rtu default instead.
+    /// `:edit` on a monitor tab whose session file carries a non-serial transport degrades to
+    /// the dialog's Rtu default rather than panicking (see `edit`'s own comment for why such a
+    /// spec can exist at all).
     #[test]
     fn ut_edit_does_not_panic_on_non_serial_endpoint() {
         let spec = ModuleSpec {

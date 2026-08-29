@@ -51,7 +51,7 @@ fn config(port: u16, reconnect: bool) -> udp::Config {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-120 (revised), MB-R-130 — with `reconnect` enabled (the default), a Udp bind failure
+/// MB-R-120, MB-R-130 — with `reconnect` enabled (the default), a Udp bind failure
 /// does not fail the server's start: `spawn()` returns `Ok(handle)`, the task keeps retrying
 /// the bind on the shared backoff policy, and once the port frees up a real request round-trips.
 async fn udp_server_bind_failure_retries_then_succeeds() {
@@ -65,7 +65,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
 
     sleep(Duration::from_millis(200)).await;
     assert!(
@@ -96,7 +96,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-120 (revised), MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
+/// MB-R-120, MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
 /// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the bind error.
 async fn udp_server_bind_failure_reconnect_false_ends_task() {
     let port = free_udp_port().await;
@@ -111,7 +111,7 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
     )
     .spawn(rx, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
 
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
@@ -134,7 +134,7 @@ async fn udp_server_terminate_while_backing_off_ends_task_ok() {
         udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
 
     sleep(Duration::from_millis(100)).await;
     tx.send(ServerCommand::Terminate).await.unwrap();

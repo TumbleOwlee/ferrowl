@@ -2,7 +2,7 @@
 //! column: a connector table (CS row + one row per connector) over an add-connector input, then the
 //! selected entry's state table, the scripts button, the action list and (CS-level only) the
 //! config/variable block. Right column: the message log (filtered to the selected entry) over a JSON
-//! payload viewer; an ONLINE/OFFLINE status line.
+//! payload viewer; a connection-status line.
 //!
 //! Selecting the CS row shows CS-level state (identity), the config table, and non-connector
 //! actions. Selecting a connector shows that connector's metering/status, hides config, and shows
@@ -1181,7 +1181,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-048, OC-R-105 (revised) — `start`/`restart` does not fail synchronously against an
+    /// OC-R-048, OC-R-105 — `start`/`restart` does not fail synchronously against an
     /// unreachable CSMS: the dial happens inside the retried task, so the view reports
     /// "Reconnecting" at Info level even against a dead endpoint. OC-R-102's Error-level
     /// reporting path is reached only by a genuine `stop`/`start` failure, such as the CSMS's

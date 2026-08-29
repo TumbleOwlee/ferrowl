@@ -152,7 +152,7 @@ struct RawClientCertVerification {
 }
 
 /// The `(ca_files, skip_verify)` wire pair for a [`ClientCertVerification`], shared by its own
-/// `Serialize` impl and by [`ServerTlsPolicy`]'s `MutualTls` arm (issue #207 item 2).
+/// `Serialize` impl and by [`ServerTlsPolicy`]'s `MutualTls` arm.
 fn client_cert_verification_fields(v: &ClientCertVerification) -> (Vec<String>, bool) {
     match v {
         ClientCertVerification::SkipVerify => (Vec::new(), true),
@@ -198,7 +198,7 @@ struct RawClientCertSource {
 }
 
 /// The `(self_signed, cert_file, key_file)` wire triple for a [`ClientCertSource`], shared by
-/// its own `Serialize` impl and by [`ClientTlsPolicy`]'s `MutualTls` arm (issue #207 item 2).
+/// its own `Serialize` impl and by [`ClientTlsPolicy`]'s `MutualTls` arm.
 fn client_cert_source_fields(source: &ClientCertSource) -> (bool, Option<String>, Option<String>) {
     match source {
         ClientCertSource::SelfSigned => (true, None, None),
@@ -295,7 +295,7 @@ struct RawServerTlsPolicy {
 impl Serialize for ServerTlsPolicy {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let raw = match self {
-            // issue #207 item 1: this arm serializes to the same all-defaults wire form as
+            // This arm serializes to the same all-defaults wire form as
             // `Tls { server_cert: Unset }` below, and deserializes back as `Tls`, never `NoTls`
             // — see `ut_server_tls_policy_notls_serializes_as_tls_unset_asymmetry`. Harmless
             // today: `NoTls` is only ever produced by the containing wire config's
@@ -380,7 +380,7 @@ struct RawClientTlsPolicy {
 impl Serialize for ClientTlsPolicy {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let raw = match self {
-            // issue #207 item 1: same asymmetry as `ServerTlsPolicy::NoTls` — see
+            // Same asymmetry as `ServerTlsPolicy::NoTls` — see
             // `ut_client_tls_policy_notls_serializes_as_tls_default_asymmetry`.
             ClientTlsPolicy::NoTls => RawClientTlsPolicy::default(),
             ClientTlsPolicy::Tls {
@@ -455,7 +455,7 @@ struct RawServerCert {
 }
 
 /// The `(self_signed, cert_file, key_file)` wire triple for a [`ServerCertSource`], shared by
-/// its own `Serialize` impl and by [`ServerTlsPolicy`]'s (issue #207 item 2).
+/// its own `Serialize` impl and by [`ServerTlsPolicy`]'s.
 fn server_cert_fields(source: &ServerCertSource) -> (bool, Option<String>, Option<String>) {
     match source {
         ServerCertSource::SelfSigned => (true, None, None),
@@ -499,7 +499,7 @@ struct RawClientVerification {
 }
 
 /// The `(ca_file, insecure_skip_verify)` wire pair for a [`ClientVerification`], shared by its
-/// own `Serialize` impl and by [`ClientTlsPolicy`]'s `Tls`/`MutualTls` arms (issue #207 item 2).
+/// own `Serialize` impl and by [`ClientTlsPolicy`]'s `Tls`/`MutualTls` arms.
 fn client_verification_fields(v: &ClientVerification) -> (Option<String>, bool) {
     match v {
         ClientVerification::SkipVerify => (None, true),
@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(back.server, mtls.server);
     }
 
-    /// issue #207 item 1 — `NoTls` serializes to the same all-defaults wire form as
+    /// `NoTls` serializes to the same all-defaults wire form as
     /// `Tls { server_cert: Unset }`, and round-trips back as `Tls`, never `NoTls`. Pinned so a
     /// future change to this asymmetry is deliberate, not accidental.
     #[test]
@@ -777,7 +777,7 @@ mod tests {
         assert_eq!(back.client, mtls.client);
     }
 
-    /// issue #207 item 1 — same asymmetry as `ServerTlsPolicy::NoTls`: `NoTls` serializes to
+    /// Same asymmetry as `ServerTlsPolicy::NoTls`: `NoTls` serializes to
     /// the same all-defaults wire form as `Tls { client_verification: Verify { ca_file: None } }`
     /// and round-trips back as `Tls`, never `NoTls`.
     #[test]

@@ -409,8 +409,8 @@ impl ModbusModule {
         }
     }
 
-    /// Whether the Lua simulation thread is currently running. Test-only: no production caller
-    /// remains once the manual `:lua start|stop|status` command was removed (Stage 1b).
+    /// Whether the Lua simulation thread is currently running. Test-only: production code never
+    /// asks — `ensure_sim` alone decides whether the sim runs.
     #[cfg(test)]
     pub(crate) fn lua_running(&self) -> bool {
         self.sim.is_some()

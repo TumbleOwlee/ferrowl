@@ -2,7 +2,7 @@
 //! [`ServerVersion`] impls in `v1_6`/`v2_0_1`). Left: a table of connected charging stations and
 //! their connectors, a "Lua Scripts" button, and the CSMS action list (filtered by the selected
 //! entry's level); right: the selected entry's message log over a JSON payload viewer; an
-//! ONLINE/OFFLINE status line for the listening socket.
+//! connection-status line for the listening socket.
 //!
 //! Each WebSocket connection yields a CS-level entry (no connector id) plus a connector entry for
 //! every `connectorId` seen in inbound traffic. The selected entry scopes the message log and the
@@ -690,10 +690,10 @@ mod tests {
         None
     }
 
-    // Regression (structural since the backend stopped owning a spec copy): applying a resolved
-    // `:edit` updates the view's spec — the single source the backend binds from on every
-    // `start(&spec, ..)` — and stops the old listener so the next start rebinds with the edited
-    // endpoint/security (e.g. wss + Basic Auth no longer leaves a plain unauthenticated listener).
+    // Applying a resolved `:edit` updates the view's spec — the single source the backend binds
+    // from on every `start(&spec, ..)` — and stops the running listener, so the next start rebinds
+    // with the edited endpoint and security. Hence the wss + Basic Auth edit below: the rebind
+    // must not leave a plain unauthenticated listener bound.
     #[tokio::test]
     /// UI-R-024 — applying an edit updates the module spec and stops its listener.
     async fn ut_edit_apply_updates_spec_and_stops_listener() {
@@ -986,8 +986,8 @@ mod tests {
         v.actions.state.move_down();
         let chosen = v.actions.state.selection();
         assert_ne!(chosen, 0);
-        // A later sync with no CS entry selected must not rebuild/reset the list (the bug:
-        // it rebuilt every frame, snapping the selection back to the top).
+        // A later sync with no CS entry selected must leave the list alone: rebuilding it would
+        // snap the selection back to the top on every frame.
         v.sync_actions();
         assert_eq!(
             v.actions.state.selection(),

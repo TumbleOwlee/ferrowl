@@ -800,10 +800,10 @@ mod tests {
         assert!(!instance.active());
     }
 
-    /// MB-R-123, MB-R-130 (revised) — an Ascii server instance's `start` now always succeeds
-    /// (the serial-open failure moved inside the retried task itself, per MB-R-075/124's
-    /// revision); with `reconnect` disabled the instance still ends up inactive shortly after,
-    /// exactly like an RTU server instance and like `ascii_client_open_failure_ends_task` above.
+    /// MB-R-123, MB-R-130 — an Ascii server instance's `start` always succeeds (the serial-open
+    /// failure surfaces inside the retried task); with `reconnect` disabled the instance still
+    /// ends up inactive shortly after, exactly like an RTU server instance and like
+    /// `ascii_client_open_failure_ends_task` above.
     #[tokio::test]
     async fn ascii_server_open_failure_ends_task() {
         let mut instance = Instance::with_ascii_server(config::ServerConfig {
@@ -815,7 +815,7 @@ mod tests {
         instance
             .start(sink(), sink())
             .await
-            .expect("spawn always returns Ok now; the open error surfaces from the task");
+            .expect("spawn always returns Ok; the open error surfaces from the task");
 
         for _ in 0..50 {
             if !instance.active() {

@@ -98,8 +98,8 @@ impl SetupView for ModbusSetupView {
 mod tests {
     use super::*;
 
-    // Regression: the `SetupView::close_requested` default trait method must be overridden here
-    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
+    // `SetupView::close_requested`'s default trait method must be overridden here to delegate to
+    // the dialog's close-confirm popup; without the override the creation overlay's Esc/Enter
     // silently do nothing for a Modbus module setup.
     #[test]
     /// UI-R-023 — the module setup delegates close-requested to the dialog's close-request flag.

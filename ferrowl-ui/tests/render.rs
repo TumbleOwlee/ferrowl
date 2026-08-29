@@ -611,10 +611,10 @@ fn table_render_variants() {
 /// UI-R-066 — a `Table` with fewer rows than its area's height fills the whole bordered area with the
 /// table's own background — the row/header area below the last row must not be left at the
 /// buffer's default (uncleared) style, matching every other bordered widget's own filled
-/// background. Narrow enough that `total_width > area.width` (the h-scroll copy path, Shared
+/// background. Narrow enough that `total_width > area.width` (the h-scroll copy path, shared
 /// with `table_render_variants`'s own narrow-area case) — that path renders into a fresh, blank
-/// `Buffer` before copying the visible slice back, which previously dropped the border's
-/// already-painted background for any row/header area the table itself didn't touch.
+/// `Buffer` before copying the visible slice back, and must preserve the border's already-painted
+/// background for any row/header area the table itself did not touch.
 fn table_fills_unused_row_area_with_its_own_background_not_default() {
     let w = TableBuilder::<Row, Cols, 2>::default()
         .border(full_border())
@@ -768,7 +768,7 @@ fn table_show_selection_marker_false_keeps_selected_row_visibly_highlighted_when
 /// UI-R-066 — the marker gutter's reserved width tracks the table's real selection state: zero
 /// with nothing selected (an empty table), the highlight glyph's own width once a row is
 /// selected — not a flat constant that over- or under-reserves relative to what's actually
-/// drawn (#220's phantom-scroll/geometry-jump report).
+/// drawn.
 fn table_marker_gutter_width_tracks_selection_state_empty_to_non_empty() {
     let w = TableBuilder::<Row, Cols, 2>::default().build().unwrap();
     let mut st = TableStateBuilder::default()
@@ -829,8 +829,7 @@ impl TableEntry<2> for SpanRow {
 #[test]
 /// UI-R-063 — a `cell_spans`-returning column renders each span with its own color, distinct
 /// from its neighbor's, rather than one flat cell color (the mechanism UI-R-063's Memory-layout
-/// per-byte/word coloring is built on); a `None` column (col 1) renders exactly as before this
-/// method existed.
+/// per-byte/word coloring is built on).
 fn table_cell_spans_render_distinct_per_span_colors() {
     let w = TableBuilder::<SpanRow, Cols, 2>::default().build().unwrap();
     // Two rows so row index 1 (rendered on buffer row 2) is unselected — the table's default
