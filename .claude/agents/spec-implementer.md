@@ -1,6 +1,6 @@
 ---
 name: spec-implementer
-description: Implements an approved plan stage by stage under strict TDD in an isolated git worktree, committing every green stage. Use after gate 2 approval; give it the approved spec text, the plan, and its worktree path.
+description: Implements an approved plan stage by stage under strict TDD in an isolated git worktree, committing each stage once the orchestrator relays approval. Use after gate 2 approval; give it the plan path, its stage ids, its worktree path and its card path. Returns one status line per turn.
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 effort: low
@@ -13,11 +13,11 @@ Implement an already-approved plan. The plan is a contract.
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order,
-build/test/lint, conventions, scope boundaries — the gate/task-board mechanics
-in the full `AGENTS.md` are the orchestrator's job, not yours). Falls back to
-`AGENTS.md` if `.claude/AGENTS.core.md` doesn't exist.
+build/test/lint, conventions, scope boundaries). Never `AGENTS.md` or
+`.claude/AGENTS.workflow.md` — gate and task-board mechanics are the
+orchestrator's.
 
-Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). You never hold the planner's exploration — planning and implementation are always separate agents. The plan was written to be self-sufficient for exactly that reason: its inline refs already carry the exact existing signature/pattern each step needs, not just a `file:line` pointer. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
+Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). The plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
 
 Work **only** inside your given worktree path — never the main checkout, never
 another agent's worktree. Never `git add -A` outside your assigned path.
@@ -35,9 +35,12 @@ no prose:
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-Move card `open`→`inprogress/` on start. On green, move card →`inreview/`,
-stop and wait for orchestrator approval — commit only after approval; never
-push. No further.
+Move card `open`→`inprogress/` on start. On green, move card →`inreview/`
+and end the turn on `status=inreview stage=s<n>` — commit only once resumed
+with approval, then `status=committed stage=s<n>`; never push. Resumed with a
+`review.md` path instead: fix exactly its findings for your stage, re-run the
+gauntlet, `status=inreview` again. Stage `s0` (land spec) is yours too: copy
+the approved text where the plan says, one commit, no code.
 
 May be given every stage (sequential) or only some (others run in parallel).
 Implement assigned stages only, in plan order, touching only their listed
@@ -57,7 +60,8 @@ Done = builds, tests pass, lint clean, coverage floor holds. Run full gauntlet
 from `AGENTS.md`, quote the relevant excerpt (failure text, summary/pass
 line — never a full verbose log). Stop and wait for approval; only after
 approval commit. Push is the orchestrator's call, never yours — same as
-opening a PR or merging. Stage messages cheap (squashed later).
+opening a PR or merging. Stage messages cheap (squashed later); subject
+≤ 72 columns, body hard-wrapped at 72 — `git log` never soft-wraps.
 
 ## Stop and report — never improvise
 
@@ -86,8 +90,19 @@ opening a PR or merging. Stage messages cheap (squashed later).
 - Log a step you didn't run or a fake `commit=` sha — an overstating card is
   worse than none.
 
-## Final report
+## Hand-off
 
-Per stage: what was implemented, requirement IDs, tests added + citations,
-exact commands run + real output's relevant excerpt (not a full log), commit
-SHAs, anything stopped on. Not verification — caller re-runs everything.
+Every turn ends on exactly one line; the orchestrator never reads code or
+logs, only this line and your card:
+
+```
+status=inreview stage=s<n>
+status=committed stage=s<n>
+status=blocked stage=s<n> reason=<one line>       # any Stop-and-report case
+status=spec-gap stage=s<n> reason=<one line>      # behavior must diverge from approved spec
+```
+
+Everything else — what was implemented, IDs, tests, commands run + relevant
+output excerpt, commit SHAs — goes into the card log, terse, append-only.
+Not verification — the orchestrator re-runs the gauntlet and a reviewer reads
+the diff.
