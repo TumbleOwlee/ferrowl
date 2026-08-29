@@ -197,7 +197,6 @@ where
                 init
             });
 
-        // Get real column width respecting input constraints
         let column_widths: Vec<u16> = H::widths()
             .iter()
             .zip(column_max_widths.iter())
@@ -208,7 +207,7 @@ where
             .collect();
 
         let column_spacings = 2 * (N as u16) + (N as u16 - 1);
-        // #220 — under ratatui's default `HighlightSpacing::WhenSelected` (no explicit
+        // Under ratatui's default `HighlightSpacing::WhenSelected` (no explicit
         // `.highlight_spacing(...)` call: the gutter reserves zero width whenever nothing is
         // selected, for every table), the real reserved width is 0 with no selection, else the
         // highlight symbol's own width (3 for `" █ "` when the marker is shown, 1 for `" "` when

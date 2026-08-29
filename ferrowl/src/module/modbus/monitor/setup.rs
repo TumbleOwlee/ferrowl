@@ -114,10 +114,9 @@ mod tests {
         assert!(!text.trim().is_empty());
     }
 
-    // Regression: the `SetupView::close_requested` default trait method must be overridden here
-    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc/Enter would
-    // silently do nothing for a Monitor module setup (mirrors `ModbusSetupView`'s own
-    // regression test).
+    // `SetupView::close_requested`'s default trait method must be overridden here to delegate to
+    // the dialog's close-confirm popup; without the override the creation overlay's Esc/Enter
+    // silently do nothing for a Monitor module setup (mirrors `ModbusSetupView`'s own test).
     #[test]
     fn ut_close_requested_delegates_to_dialog_take_close_request() {
         let mut sv = MonitorSetupView::new_create();

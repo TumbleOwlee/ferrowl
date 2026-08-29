@@ -415,7 +415,7 @@ async fn tcp_unparseable_address_is_error() {
     )
     .spawn(rx, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
     let server_err = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on an address error")
@@ -527,7 +527,7 @@ async fn tcp_client_reconnect_false_dies_on_refused_connect() {
     )
     .spawn(rx, sink(), sink())
     .await
-    .expect("spawn itself always succeeds now; the connect error surfaces from the task");
+    .expect("spawn itself always succeeds; the connect error surfaces from the task");
 
     let joined = tokio::time::timeout(Duration::from_secs(5), client)
         .await
@@ -617,7 +617,7 @@ async fn tcp_client_terminate_during_backoff_exits_promptly() {
     )
     .spawn(rx, sink(), sink())
     .await
-    .expect("spawn itself always succeeds now");
+    .expect("spawn itself always succeeds");
 
     // Give the first failed connect attempt time to happen and enter the backoff wait.
     sleep(Duration::from_millis(100)).await;

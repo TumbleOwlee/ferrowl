@@ -89,11 +89,11 @@ where
     }
 }
 
-// This stage's own tests live as crate-internal unit tests, not `tests/` integration tests:
-// both `upstream_tcp::run` and `BridgeService` are `pub(crate)` — deliberately never part of
-// the crate's public surface, only `bridge::run` constructs/calls them — and so are
-// unreachable from an external `tests/` crate. Real
-// TCP loopback (ephemeral ports on both sides) is still exercised, just from inside the crate.
+// These tests live as crate-internal unit tests, not `tests/` integration tests: both
+// `upstream_tcp::run` and `BridgeService` are `pub(crate)` — deliberately never part of the
+// crate's public surface, only `bridge::run` constructs and calls them — and so are unreachable
+// from an external `tests/` crate. Real TCP loopback (ephemeral ports on both sides) is still
+// exercised, just from inside the crate.
 #[cfg(test)]
 mod tests {
     use super::*;

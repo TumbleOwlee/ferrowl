@@ -131,7 +131,7 @@ async fn basic_auth_accepts_matching_credentials() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -162,7 +162,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
     .expect("server failed to bind");
 
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
-    // OC-R-048/OC-R-105: `spawn` always succeeds now (the dial moved inside the retried task);
+    // OC-R-048/OC-R-105: `spawn` always succeeds (the dial moved inside the retried task);
     // `reconnect: false` ends the task on the first failed dial instead of retrying forever, and
     // the credential-mismatch error surfaces from `join()`.
     let mut result = cs::ClientBuilder::<V1_6>::new(
@@ -181,7 +181,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     assert!(
         result.join().await.is_err(),
@@ -226,7 +226,7 @@ async fn basic_auth_rejects_missing_credentials() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     assert!(
         result.join().await.is_err(),
@@ -284,7 +284,7 @@ async fn tls_loopback_over_self_signed_cert() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -342,7 +342,7 @@ async fn tls_loopback_rejects_untrusted_cert() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     assert!(
         result.join().await.is_err(),
@@ -388,7 +388,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -433,7 +433,7 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     assert!(
         result.join().await.is_err(),
@@ -485,7 +485,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -509,7 +509,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial error surfaces from the task");
+    .expect("spawn always returns Ok; the dial error surfaces from the task");
     assert!(
         wrong.join().await.is_err(),
         "mismatched credentials should be rejected even over a self-signed TLS connection"
@@ -589,7 +589,7 @@ async fn it_csms_self_signed_with_require_client_cert_and_client_ca_accepts_conn
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -674,7 +674,7 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));
@@ -725,7 +725,7 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     let resp = client.call(boot_action()).await.expect("boot call failed");
     assert!(matches!(resp, Response16::BootNotification(_)));

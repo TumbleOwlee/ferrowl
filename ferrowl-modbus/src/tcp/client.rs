@@ -45,7 +45,7 @@ impl<T: KeyParams> ClientBuilder<T> {
     /// task: it logs, waits an exponential backoff (capped, reset after a run that got at least
     /// one read through), and reconnects. `Command::Terminate` (or the channel closing) aborts a
     /// backoff wait immediately. With `config.reconnect` unset, a transport error ends the task
-    /// exactly as before this behavior was added.
+    /// with that error.
     pub async fn spawn<L, S>(
         &self,
         receiver: Receiver<Command>,

@@ -674,9 +674,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// OC-R-048, OC-R-105-107 — `OcppClient::start()` against an unreachable CSMS returns `Ok(())`
-    /// immediately (spawn always succeeds now, the dial happens inside the retried task) and
-    /// stays offline until a real handshake completes, instead of the old synchronous
-    /// "assume connected" flip.
+    /// immediately: the dial happens inside the spawned retry task rather than during `start()`,
+    /// so an unreachable CSMS surfaces as staying offline, not as a synchronous error.
     async fn it_cs_start_against_unreachable_csms_stays_running() {
         let spec = OcppSpec {
             name: "cs".to_owned(),

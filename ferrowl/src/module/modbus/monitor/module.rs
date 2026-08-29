@@ -170,7 +170,7 @@ impl ModbusMonitorModule {
     }
 
     /// Whether the monitor's receive task is currently running (started and not yet stopped),
-    /// the connection-state signal the view's ONLINE/OFFLINE status line drives off of,
+    /// the connection-state signal the view's status line drives off of,
     /// mirroring `ModbusModule::bound_addr` for the full
     /// client/server module (a monitor is RTU/ASCII-only, so there is no bound TCP address to
     /// report instead).
@@ -589,12 +589,10 @@ mod tests {
         );
     }
 
-    /// `is_running` tracks the receive task's own
-    /// started/stopped state, the ONLINE/OFFLINE signal for the status line.
-    /// MB-R-152 — the direct regression test for the truthfulness bug: `is_running()` must not
-    /// trust a stale `command_tx` alone once the task backing it has already finished, mirroring
-    /// `instance/mod.rs`'s own `send_command_on_server_is_invalid_operation` fixture (a hand-built
-    /// handle wrapping an already-finished `tokio::spawn`).
+    /// MB-R-152 — `is_running()` must not trust a stale `command_tx` alone once the task backing
+    /// it has already finished, mirroring `instance/mod.rs`'s own
+    /// `send_command_on_server_is_invalid_operation` fixture (a hand-built handle wrapping an
+    /// already-finished `tokio::spawn`).
     #[tokio::test]
     async fn ut_monitor_is_running_false_after_task_ends_even_if_command_tx_set() {
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());

@@ -1,4 +1,4 @@
-//! Cross-component end-to-end regression tests for session-level Lua scripts
+//! Cross-component end-to-end tests for session-level Lua scripts
 //! (`SessionSim` + `ModuleRegistry`): real modbus/OCPP module fixtures wired into a real
 //! `ModuleRegistry`, driven through the actual `SessionSim` sim thread (no mocks, no networking),
 //! asserting effects land in real memory/state across module boundaries. Complements the

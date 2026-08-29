@@ -86,7 +86,7 @@ fn config(url: String, reconnect: bool) -> Arc<RwLock<cs::Config>> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-048 (revised) — with `reconnect: true` (the default), a CS whose very first dial fails
+/// OC-R-048 — with `reconnect: true` (the default), a CS whose very first dial fails
 /// never ends its task: it stays alive, backing off and retrying.
 async fn cs_dial_failure_retries_while_reconnect_enabled() {
     let dead_port = free_port();
@@ -96,7 +96,7 @@ async fn cs_dial_failure_retries_while_reconnect_enabled() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     sleep(Duration::from_millis(200)).await;
 
@@ -111,7 +111,7 @@ async fn cs_dial_failure_retries_while_reconnect_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-048 (revised) — with `reconnect: false`, a CS whose dial fails ends its task with that
+/// OC-R-048 — with `reconnect: false`, a CS whose dial fails ends its task with that
 /// error (after emitting a disconnected status), instead of retrying.
 async fn cs_dial_failure_reconnect_false_ends_task() {
     let dead_port = free_port();
@@ -121,7 +121,7 @@ async fn cs_dial_failure_reconnect_false_ends_task() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial error surfaces from the task");
+    .expect("spawn always returns Ok; the dial error surfaces from the task");
 
     let result = tokio::time::timeout(Duration::from_secs(2), client.join())
         .await
@@ -141,7 +141,7 @@ async fn cs_terminate_while_backing_off_ends_task_ok() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     // Give the first (failing) dial attempt time to run and enter its backoff wait.
     sleep(Duration::from_millis(100)).await;
@@ -167,7 +167,7 @@ async fn cs_config_reread_on_every_dial() {
     )
     .spawn(TestCs, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the dial happens inside the task");
+    .expect("spawn always returns Ok; the dial happens inside the task");
 
     // First connect attempt fails; while it backs off, repoint the config at a live CSMS.
     sleep(Duration::from_millis(200)).await;

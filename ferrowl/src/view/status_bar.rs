@@ -86,8 +86,8 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-137 — `Reconnecting` renders its label in the warning color (previously unused for
-    /// this purpose — the bug this stage fixes is a status bar that could never show it).
+    /// MB-R-137 — `Reconnecting` renders its label in the warning color, the only status that
+    /// uses it.
     fn ut_render_status_bar_reconnecting_uses_warning_color_and_label() {
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);

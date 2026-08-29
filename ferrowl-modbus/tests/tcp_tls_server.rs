@@ -676,7 +676,7 @@ async fn malformed_pem_fails_server_start() {
         tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, on a TLS configuration error")

@@ -291,10 +291,9 @@ impl Inbound for V2_1 {
                 // resolved connector), but the actual `TransactionEvent(Started)` + coupled
                 // `StatusNotification` (OC-R-122) are sent asynchronously through the same send
                 // path the RFID/operator flow uses, so the CSMS observes them as real Calls
-                // rather than a local state mutation. This also drops the invalid `"Charging"`
-                // status literal (`ConnectorStatusEnumType` has no such variant) that the removed
-                // inline mutation used to write directly — the real send path's
-                // `V::start_event`/`apply_post_send` already write the valid `"Occupied"`.
+                // rather than a local state mutation. The send path's
+                // `V::start_event`/`apply_post_send` write `"Occupied"`;
+                // `ConnectorStatusEnumType` has no `"Charging"` variant.
                 let has_target = with_state(state, |s| {
                     req.evse_id
                         .filter(|&e| e != 0)

@@ -733,9 +733,8 @@ mod tests {
         .expect("server failed to bind")
     }
 
-    /// Connect a real `OcppClient<V1_6>` to `server`, backed by `state`, and return it once the
-    /// live-sender fix makes it usable (the handler's `sender` is captured before `start()`, per
-    /// the Shared plumbing in this task's s1).
+    /// Connect a real `OcppClient<V1_6>` to `server`, backed by `state`. The handler's `sender`
+    /// is captured before `start()`, so the returned client is usable straight away.
     async fn connected_client(
         server: &ferrowl_ocpp::csms::Server<V1_6>,
         state: Arc<RwLock<CsState>>,

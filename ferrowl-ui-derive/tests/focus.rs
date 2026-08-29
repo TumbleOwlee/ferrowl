@@ -398,9 +398,8 @@ fn ut_nested_forward_tab_at_last_pane_advances_to_after() {
 }
 
 #[test]
-/// UI-R-049 — the load-bearing regression case: BackTab from the field after a `#[focus(nested)]`
-/// field lands on its *last* pane, not its first (the case a direction-blind, remembered-or-first
-/// entry would get wrong).
+/// UI-R-049 — BackTab from the field after a `#[focus(nested)]` field lands on its *last* pane,
+/// not its first: the case a direction-blind, remembered-or-first entry rule gets wrong.
 fn ut_nested_backtab_from_after_lands_on_last_pane() {
     use crossterm::event::{KeyCode, KeyModifiers};
 

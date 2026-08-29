@@ -105,9 +105,9 @@ mod tests {
     use crate::module::ocpp::config::session::OcppVersion;
     use crossterm::event::{KeyCode, KeyModifiers};
 
-    // Regression: the `SetupView::close_requested` default trait method must be overridden here
-    // to delegate to the dialog's close-confirm popup, or the creation overlay's Esc→confirm
-    // flow would silently do nothing for an OCPP module setup.
+    // `SetupView::close_requested`'s default trait method must be overridden here to delegate to
+    // the dialog's close-confirm popup; without the override the creation overlay's Esc→confirm
+    // flow silently does nothing for an OCPP module setup.
     #[test]
     /// UI-R-023 — the OCPP setup delegates close-requested to the dialog's close-request flag.
     fn ut_close_requested_delegates_to_dialog_take_close_request() {

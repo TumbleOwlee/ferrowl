@@ -134,7 +134,7 @@ macro_rules! define_ocpp_version {
 
         // Catches drift between each row's hand-maintained `yes`/`no` validate flag and whether
         // the request type actually derives `validator::Validate` (see `ocpp_validate_arm!`'s
-        // doc comment — this exact drift bit 24 v2.0.1 actions previously).
+        // doc comment).
         #[cfg(test)]
         mod ut_validate_flags {
             #[test]

@@ -46,7 +46,7 @@ fn bad_config(reconnect: bool) -> rtu::Config {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-075 (revised), MB-R-130 — with `reconnect` enabled (the default), a serial-open failure
+/// MB-R-075, MB-R-130 — with `reconnect` enabled (the default), a serial-open failure
 /// does not fail an RTU server's start: `spawn()` returns `Ok(handle)`, and the task keeps
 /// retrying the open on the shared backoff policy instead of ending.
 async fn rtu_server_open_failure_retries_while_reconnect_enabled() {
@@ -55,7 +55,7 @@ async fn rtu_server_open_failure_retries_while_reconnect_enabled() {
         rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
     sleep(Duration::from_millis(200)).await;
     assert!(
         !handle.is_finished(),
@@ -65,18 +65,17 @@ async fn rtu_server_open_failure_retries_while_reconnect_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-075 (revised), MB-R-134 — with `reconnect` disabled, a serial-open failure fails the
-/// RTU server: `spawn()` still returns `Ok(handle)`, but the joined task carries the serial
-/// error, same shape as before this stage, just surfaced from the task instead of `spawn()`
-/// itself. MB-R-074 — the RTU server opens the port once at start (no accept loop deferring
-/// it), so this is the same open-failure path as ever, just relocated.
+/// MB-R-075, MB-R-134 — with `reconnect` disabled, a serial-open failure fails the RTU
+/// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the serial error.
+/// MB-R-074 — the RTU server opens the port once at start, with no accept loop deferring it, so
+/// that first open is what fails here.
 async fn rtu_server_open_failure_reconnect_false_ends_task() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
     let (handle, _open) =
         rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")
@@ -93,7 +92,7 @@ async fn rtu_server_terminate_while_backing_off_ends_task_ok() {
         rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(true))), empty_mem())
             .spawn(rx, sink(), sink())
             .await
-            .expect("spawn always returns Ok now");
+            .expect("spawn always returns Ok");
     sleep(Duration::from_millis(100)).await;
     tx.send(ServerCommand::Terminate).await.unwrap();
     let result = tokio::time::timeout(Duration::from_secs(5), handle)

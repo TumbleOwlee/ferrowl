@@ -119,7 +119,6 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     // Generate enum name based on struct name.
     let enum_name = Ident::new(&format!("{identifier}Focus"), Span::call_site());
 
-    // Create static array for indexing.
     let enum_fields = definitions.iter().map(|i| &i.enum_field);
     let impl_array = quote! {
         // Array for static indexing
@@ -143,8 +142,8 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
     };
 
     // Generate code for enabling new focus. Built once per direction: for a plain field the two
-    // are byte-for-byte identical (the `else` branch below, unchanged from before this field ever
-    // existed); for a `#[focus(nested)]` field, forward entry calls the direction-aware
+    // are byte-for-byte identical (the `else` branch below); for a `#[focus(nested)]` field,
+    // forward entry calls the direction-aware
     // "enter at first eligible" helper and backward entry calls "enter at last eligible" instead
     // of the direction-blind `SetFocus::set_focused(true)` — and, since finding no eligible inner
     // pane is possible (a nested field can be structurally `when`-eligible yet have zero eligible
@@ -202,7 +201,6 @@ pub fn expand_focus(input: syn::DeriveInput) -> syn::Result<TokenStream> {
 
             #impl_disable
 
-            // Get index of current focus
             let index = focuses.iter().position(|f| *f == self.focus).unwrap();
 
             let mut current_index = (index + #delta) % #def_len;

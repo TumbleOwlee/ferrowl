@@ -366,8 +366,9 @@ fn new_resolved_table() -> ResolvedTable {
                     .build()
                     .expect("all required builder fields are set"),
             )
-            // Compact is the default (tui/api-contract.md §2.1, commit c38dac3) — a deliberate
-            // divergence from `TableView::new`'s own expanded-by-default: no vertical padding.
+            // Compact is the default here (`:compact` toggles it, tui/api-contract.md §2.1) — a
+            // deliberate divergence from `TableView::new`'s own expanded-by-default: no vertical
+            // padding.
             .row_margin(ratatui::layout::Margin {
                 vertical: 0,
                 horizontal: 0,
@@ -600,8 +601,8 @@ fn memory_cell_recency_active(
 #[derive(Clone, Debug, Default, TableEntry)]
 #[table_entry(header = MemoryHeader, styles = memory_row_styles, spans = memory_row_spans)]
 struct MemoryRow {
-    // UI-R-063 (amended, commit 5574858) — the line's table kind, same `Kind` `Display` naming
-    // the modbus module's own register table uses.
+    // UI-R-063 — the line's table kind, same `Kind` `Display` naming the modbus module's own
+    // register table uses.
     #[column(name = "Kind", min = 16, max = 16)]
     kind: String,
     #[column(name = "Address", min = 6, max = 10)]
@@ -1065,9 +1066,9 @@ impl ModuleView for ModbusMonitorModuleView {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         use ratatui::layout::{Constraint, Layout};
 
-        // An ONLINE/OFFLINE status bar, same shape/position as `ModbusModuleView`'s own
-        //: one line tall, below the module's own panels (`content_area`), which the
-        // outer app-level compositor then draws the shared log pane below in turn.
+        // A connection-status bar (CONNECTED/RECONNECTING/DISCONNECTED), same shape and position
+        // as `ModbusModuleView`'s own: one line tall, below the module's own panels
+        // (`content_area`). The app-level compositor then draws the shared log pane below that.
         let [content_area, status_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
@@ -1610,8 +1611,8 @@ impl ModuleView for ModbusMonitorModuleView {
 
             ModbusMonitorCmd::Compact => {
                 self.compact = !self.compact;
-                // Real row-padding toggle (UI-R-064), mirroring `TableView::set_compact`
-                //: 1 row of vertical margin expanded, 0 compact.
+                // Real row-padding toggle (UI-R-064), mirroring `TableView::set_compact`: one
+                // row of vertical margin when expanded, none when compact.
                 let vertical = if self.compact { 0 } else { 1 };
                 self.resolved_table
                     .widget
@@ -2759,9 +2760,8 @@ mod tests {
             })
     }
 
-    /// tui/api-contract.md §2.1 — `:compact` toggles the resolved-registers section between the
-    /// default (compact, name + value only, commit c38dac3) layout and the expanded (description
-    /// shown) layout.
+    /// tui/api-contract.md §2.1 — `:compact` toggles the resolved-registers table's row padding:
+    /// no vertical row margin when compact, one row of it when expanded.
     #[tokio::test]
     async fn ut_compact_command_toggles_resolved_table_row_margin() {
         let mut v = view();
@@ -3259,7 +3259,7 @@ mod tests {
         assert_eq!(rows[0].values()[3], "ReadCoils");
     }
 
-    /// (perf, no spec ID) — regression: `refresh()` must read a unit's generation and its
+    /// (perf, no spec ID) — `refresh()` must read a unit's generation and its
     /// records/recent-tail off exactly *one* `RecordLog` read guard, not two separate
     /// acquisitions. Two separate acquisitions leave a window where a concurrent push (the
     /// modbus receive-loop task runs on the same multi-threaded runtime and pushes independently
@@ -3497,8 +3497,7 @@ mod tests {
         assert_eq!(memory_cell_value_style(&other), COLOR_SCHEME.warning);
     }
 
-    /// UI-R-063 (amended, commit 5574858) — the Memory table has exactly 4 columns,
-    /// Kind/Address/Hex/Ascii, in order.
+    /// UI-R-063 — the Memory table has exactly 4 columns, Kind/Address/Hex/Ascii, in order.
     #[test]
     fn ut_memory_table_has_exactly_4_columns_kind_address_hex_ascii() {
         assert_eq!(
@@ -3512,8 +3511,8 @@ mod tests {
         );
     }
 
-    /// UI-R-063 (amended, commit 5574858) — a real line's Kind cell renders the line's table
-    /// kind with the same `Kind` `Display` naming the modbus module's own register table uses.
+    /// UI-R-063 — a real line's Kind cell renders the line's table kind with the same `Kind`
+    /// `Display` naming the modbus module's own register table uses.
     #[test]
     fn ut_memory_table_kind_column_shows_line_kind() {
         let lines = memory_layout_lines(&[(Kind::HoldingRegister, vec![(0, 1), (20, 2)])]);
@@ -3630,7 +3629,7 @@ mod tests {
         );
     }
 
-    /// UI-R-063 (regression on `memory_rows`'s existing filter) — a table kind with no
+    /// UI-R-063 — a table kind with no
     /// observed traffic for the selected unit is omitted entirely, not rendered as an empty
     /// section.
     #[tokio::test]

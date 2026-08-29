@@ -83,7 +83,7 @@ async fn tcp_server_bind_failure_retries_then_succeeds() {
     )
     .spawn(receiver, sink(), sink())
     .await
-    .expect("spawn always returns Ok now; the bind failure surfaces from the task instead");
+    .expect("spawn always returns Ok; the bind failure surfaces from the task instead");
 
     // Bind is failing and retrying, not ending the task.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -133,7 +133,7 @@ async fn tcp_server_bind_failure_reconnect_false_ends_task() {
     )
     .spawn(receiver, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
 
     let result = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
@@ -159,7 +159,7 @@ async fn tcp_server_terminate_while_backing_off_ends_task_ok() {
     )
     .spawn(receiver, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
 
     // Give the first bind attempt (and its failure) time to happen, so the task is certainly
     // in its backoff wait by the time Terminate is sent.
@@ -190,7 +190,7 @@ async fn rtu_over_tcp_server_bind_failure_retries_then_succeeds() {
     )
     .spawn(receiver, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(
@@ -237,7 +237,7 @@ async fn ascii_over_tcp_server_bind_failure_retries_then_succeeds() {
     )
     .spawn(receiver, sink(), sink())
     .await
-    .expect("spawn always returns Ok now");
+    .expect("spawn always returns Ok");
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(
