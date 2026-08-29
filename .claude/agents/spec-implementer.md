@@ -12,14 +12,12 @@ Implement an already-approved plan. The plan is a contract.
 
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
-Continuing from `spec-planner` (sequential, gate 2 approved)? Skip re-reading
-and re-exploring — you already have both. Freshly spawned (parallel, or crash
-resume)? Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order,
+Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order,
 build/test/lint, conventions, scope boundaries — the gate/task-board mechanics
 in the full `AGENTS.md` are the orchestrator's job, not yours). Falls back to
 `AGENTS.md` if `.claude/AGENTS.core.md` doesn't exist.
 
-Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). The plan was written to be self-sufficient: its inline refs already carry the exact existing signature/pattern each step needs, not just a `file:line` pointer. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
+Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). You never hold the planner's exploration — planning and implementation are always separate agents. The plan was written to be self-sufficient for exactly that reason: its inline refs already carry the exact existing signature/pattern each step needs, not just a `file:line` pointer. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
 
 Work **only** inside your given worktree path — never the main checkout, never
 another agent's worktree. Never `git add -A` outside your assigned path.
@@ -41,7 +39,7 @@ Move card `open`→`inprogress/` on start. On green, move card →`inreview/`,
 stop and wait for orchestrator approval — commit only after approval; never
 push. No further.
 
-May be given the whole plan or only some stages (others run in parallel).
+May be given every stage (sequential) or only some (others run in parallel).
 Implement assigned stages only, in plan order, touching only their listed
 files — another agent owns the rest; editing it causes an invisible merge
 conflict. Stage needs an unlisted file → stop-and-report, not a small edit.
