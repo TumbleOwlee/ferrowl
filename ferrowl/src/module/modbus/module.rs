@@ -139,8 +139,8 @@ impl ModbusModule {
                     },
                 };
                 let mem_kind = match def.kind() {
-                    Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(def.mem_type()),
-                    Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(def.mem_type()),
+                    Kind::Coil | Kind::HoldingRegister => MemKind::read_write(def.mem_type()),
+                    Kind::DiscreteInput | Kind::InputRegister => MemKind::read(def.mem_type()),
                 };
                 if let Err(msg) = declare_or_reject_msg(
                     &mut memory,

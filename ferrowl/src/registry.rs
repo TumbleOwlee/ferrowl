@@ -335,7 +335,7 @@ mod tests {
         };
         memory.add_ranges(
             key,
-            &MemKind::ReadWrite(ferrowl_store::CellType::Register),
+            &MemKind::read_write(ferrowl_store::CellType::Register),
             &[Range::new(0, 1)],
         );
         Arc::new(RwLock::new(memory))

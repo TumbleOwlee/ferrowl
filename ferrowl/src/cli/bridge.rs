@@ -177,7 +177,7 @@ mod tests {
         let mut mem = Memory::<ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>>::default();
         mem.add_ranges(
             key.clone(),
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(key, &CellType::Register, &Range::new(0, 1), &[value])
@@ -276,7 +276,7 @@ mod tests {
         let mut mem = Memory::<ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>>::default();
         mem.add_ranges(
             client_key(),
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         std::sync::Arc::new(parking_lot::RwLock::new(mem))

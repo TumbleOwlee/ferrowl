@@ -96,7 +96,7 @@ fn evse_memory() -> Arc<RwLock<Memory<Key<SlaveKey>>>> {
     let mut memory: Memory<Key<SlaveKey>> = Memory::default();
     memory.add_ranges(
         modbus_memory_key(),
-        &MemKind::ReadWrite(ferrowl_store::CellType::Register),
+        &MemKind::read_write(ferrowl_store::CellType::Register),
         &[Range::new(0, 2)],
     );
     Arc::new(RwLock::new(memory))

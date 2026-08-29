@@ -75,7 +75,7 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -134,7 +134,7 @@ async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -193,7 +193,7 @@ async fn it_bridge_run_wires_ascii_over_tcp_upstream_ascii_over_tcp_downstream()
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(

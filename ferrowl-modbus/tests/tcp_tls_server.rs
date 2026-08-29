@@ -37,7 +37,7 @@ fn memory() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     Arc::new(MemLock::new(mem))

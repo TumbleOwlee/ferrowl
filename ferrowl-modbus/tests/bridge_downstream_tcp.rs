@@ -70,7 +70,7 @@ async fn it_tcp_downstream_connects_and_forwards() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(

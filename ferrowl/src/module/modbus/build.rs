@@ -229,7 +229,7 @@ pub(crate) fn explicit_read_coverage(
         };
         for r in &explicit {
             for gap in subtract_spans(r.start(), r.end(), &covered) {
-                out.push((key.clone(), MemKind::Read(mem_type), gap));
+                out.push((key.clone(), MemKind::read(mem_type), gap));
             }
         }
     }
@@ -474,6 +474,7 @@ mod tests {
     use ferrowl_codec::{Access, Address, Format, Kind, RegisterBuilder};
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
+    use ferrowl_store::Access as MemAccess;
     use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
 
     fn entry(
@@ -745,7 +746,7 @@ mod tests {
         // Every declared gap is a read-only cell.
         assert!(
             cov.iter()
-                .all(|(_, kind, _)| matches!(kind, MemKind::Read(_)))
+                .all(|(_, kind, _)| kind.access == MemAccess::Read)
         );
         let mut gaps: Vec<_> = cov.iter().map(|(_, _, r)| (r.start(), r.end())).collect();
         gaps.sort_unstable();
@@ -765,7 +766,7 @@ mod tests {
         };
         memory.add_ranges(
             key.clone(),
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &[Range::new(0, 1)],
         );
 
@@ -1039,7 +1040,7 @@ mod tests {
         let result = super::declare_or_reject_msg(
             &mut memory,
             key,
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &Range::new(0, 2),
             "register 'r'",
         );
@@ -1061,7 +1062,7 @@ mod tests {
         // Pre-populate a Read-only cell at [0,2) — mirrors a `read_ranges` gap declaration.
         assert!(memory.add_ranges(
             key.clone(),
-            &MemKind::Read(CellType::Register),
+            &MemKind::read(CellType::Register),
             &[Range::new(0, 2)]
         ));
 
@@ -1069,7 +1070,7 @@ mod tests {
         let result = super::declare_or_reject_msg(
             &mut memory,
             key,
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &range,
             "register 'r'",
         );

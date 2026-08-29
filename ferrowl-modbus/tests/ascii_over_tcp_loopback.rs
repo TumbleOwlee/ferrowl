@@ -72,7 +72,7 @@ fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::Coil),
-        &MemKind::ReadWrite(CellType::Coil),
+        &MemKind::read_write(CellType::Coil),
         &[Range::new(0, 8)],
     );
     mem.write(
@@ -84,7 +84,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::DiscreteInput),
-        &MemKind::ReadWrite(CellType::Coil),
+        &MemKind::read_write(CellType::Coil),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -96,7 +96,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::InputRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -108,7 +108,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 8)],
     );
     mem.write(
@@ -126,22 +126,22 @@ fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::Coil),
-        &MemKind::ReadWrite(CellType::Coil),
+        &MemKind::read_write(CellType::Coil),
         &[Range::new(0, 8)],
     );
     mem.add_ranges(
         key(RegKind::DiscreteInput),
-        &MemKind::ReadWrite(CellType::Coil),
+        &MemKind::read_write(CellType::Coil),
         &[Range::new(0, 4)],
     );
     mem.add_ranges(
         key(RegKind::InputRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 8)],
     );
     Arc::new(MemLock::new(mem))
@@ -396,7 +396,7 @@ async fn ascii_over_tcp_client_fire_and_forget_broadcast_write() {
     });
     srv_mem_raw.add_ranges(
         broadcast_key.clone(),
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));
@@ -473,7 +473,7 @@ async fn ascii_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
     });
     srv_mem_raw.add_ranges(
         broadcast_key,
-        &MemKind::ReadWrite(CellType::Register),
+        &MemKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     let srv_mem: Mem = Arc::new(MemLock::new(srv_mem_raw));

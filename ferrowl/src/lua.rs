@@ -352,7 +352,7 @@ mod tests {
         };
         memory.add_ranges(
             key,
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &[Range::new(0, 2)],
         );
         Arc::new(MemLock::new(memory))

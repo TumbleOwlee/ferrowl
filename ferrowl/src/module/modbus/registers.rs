@@ -34,8 +34,8 @@ pub(crate) fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<
     };
     let ty = mem_type(register);
     let kind = match register.kind() {
-        Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
-        Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
+        Kind::Coil | Kind::HoldingRegister => MemKind::read_write(ty),
+        Kind::DiscreteInput | Kind::InputRegister => MemKind::read(ty),
     };
     let key = Key {
         id: SlaveKey {
@@ -228,22 +228,13 @@ mod tests {
     /// MB-R-078 — coil/holding bind read/write cells; discrete-input/input bind read-only cells.
     fn ut_register_mem_binding_kind_direction() {
         let bind = |k| register_mem_binding(&reg(k, Address::Fixed(2))).unwrap().0;
-        assert!(matches!(
-            bind(Kind::Coil),
-            MemKind::ReadWrite(CellType::Coil)
-        ));
-        assert!(matches!(
-            bind(Kind::DiscreteInput),
-            MemKind::Read(CellType::Coil)
-        ));
-        assert!(matches!(
+        assert_eq!(bind(Kind::Coil), MemKind::read_write(CellType::Coil));
+        assert_eq!(bind(Kind::DiscreteInput), MemKind::read(CellType::Coil));
+        assert_eq!(
             bind(Kind::HoldingRegister),
-            MemKind::ReadWrite(CellType::Register)
-        ));
-        assert!(matches!(
-            bind(Kind::InputRegister),
-            MemKind::Read(CellType::Register)
-        ));
+            MemKind::read_write(CellType::Register)
+        );
+        assert_eq!(bind(Kind::InputRegister), MemKind::read(CellType::Register));
     }
 
     #[test]

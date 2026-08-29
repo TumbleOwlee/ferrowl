@@ -14,7 +14,7 @@ fn it_declared_readwrite_region_roundtrips_values() {
     let mut m = mem();
     assert!(m.add_ranges(
         1,
-        &CellKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)]
     ));
     m.write(1, &CellType::Register, &Range::new(0, 4), &[10, 20, 30, 40])
@@ -41,7 +41,7 @@ fn it_write_with_wrong_length_is_length_mismatch() {
     let mut m = mem();
     m.add_ranges(
         1,
-        &CellKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     let err = m
@@ -60,7 +60,7 @@ fn it_write_with_wrong_length_is_length_mismatch() {
 /// MB-R-033 — a checked write to a read-only region fails with `AddressNotWritable`.
 fn it_write_to_read_only_region_is_not_writable() {
     let mut m = mem();
-    m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 2)]);
+    m.add_ranges(1, &CellKind::read(CellType::Register), &[Range::new(0, 2)]);
     let err = m
         .write(1, &CellType::Register, &Range::new(0, 2), &[1, 2])
         .expect_err("a read-only region rejects writes");
@@ -71,7 +71,7 @@ fn it_write_to_read_only_region_is_not_writable() {
 /// MB-R-033 — a checked read from a write-only region fails with `AddressNotReadable`.
 fn it_read_from_write_only_region_is_not_readable() {
     let mut m = mem();
-    m.add_ranges(1, &CellKind::Write(CellType::Register), &[Range::new(0, 2)]);
+    m.add_ranges(1, &CellKind::write(CellType::Register), &[Range::new(0, 2)]);
     let err = m
         .read(1, &CellType::Register, &Range::new(0, 2))
         .expect_err("a write-only region rejects reads");
@@ -82,9 +82,9 @@ fn it_read_from_write_only_region_is_not_readable() {
 /// MB-R-031 — a write range overlapping a read region of the same type widens it to read/write.
 fn it_overlapping_read_and_write_ranges_widen_to_readwrite() {
     let mut m = mem();
-    assert!(m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 4)]));
+    assert!(m.add_ranges(1, &CellKind::read(CellType::Register), &[Range::new(0, 4)]));
     // A write range over the same cells widens their access rather than conflicting.
-    assert!(m.add_ranges(1, &CellKind::Write(CellType::Register), &[Range::new(0, 4)]));
+    assert!(m.add_ranges(1, &CellKind::write(CellType::Register), &[Range::new(0, 4)]));
     m.write(1, &CellType::Register, &Range::new(0, 4), &[5, 6, 7, 8])
         .expect("widened cells accept writes");
     let got = m
@@ -99,13 +99,17 @@ fn it_incompatible_cell_type_overlap_is_rejected_and_leaves_memory_unchanged() {
     let mut m = mem();
     assert!(m.add_ranges(
         1,
-        &CellKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)]
     ));
     m.write(1, &CellType::Register, &Range::new(0, 4), &[1, 2, 3, 4])
         .expect("initial write succeeds");
     // A coil range over register cells is an incompatible type: all-or-nothing rejection.
-    assert!(!m.add_ranges(1, &CellKind::ReadWrite(CellType::Coil), &[Range::new(2, 4)]));
+    assert!(!m.add_ranges(
+        1,
+        &CellKind::read_write(CellType::Coil),
+        &[Range::new(2, 4)]
+    ));
     let got = m
         .read(1, &CellType::Register, &Range::new(0, 4))
         .expect("the rejected declaration left the register region intact");
@@ -116,11 +120,11 @@ fn it_incompatible_cell_type_overlap_is_rejected_and_leaves_memory_unchanged() {
 /// MB-R-032 — a read/write declaration overlapping a read region is rejected and leaves the region's values intact.
 fn it_readwrite_range_over_read_region_is_rejected_and_leaves_memory_unchanged() {
     let mut m = mem();
-    assert!(m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 4)]));
+    assert!(m.add_ranges(1, &CellKind::read(CellType::Register), &[Range::new(0, 4)]));
     assert!(m.write_unchecked(1, &Range::new(0, 4), &[1, 2, 3, 4]));
     assert!(!m.add_ranges(
         1,
-        &CellKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)]
     ));
     let got = m

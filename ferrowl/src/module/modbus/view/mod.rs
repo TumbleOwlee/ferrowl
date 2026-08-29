@@ -1122,7 +1122,7 @@ mod tests {
         };
         memory.add_ranges(
             key.clone(),
-            &CellKind::ReadWrite(ferrowl_store::CellType::Register),
+            &CellKind::read_write(ferrowl_store::CellType::Register),
             std::slice::from_ref(&Range::new(0, 1)),
         );
         memory.write_unchecked(key, &Range::new(0, 1), &[42u16]);
@@ -1199,7 +1199,7 @@ mod tests {
         };
         memory.add_ranges(
             key.clone(),
-            &CellKind::ReadWrite(ferrowl_store::CellType::Register),
+            &CellKind::read_write(ferrowl_store::CellType::Register),
             std::slice::from_ref(&Range::new(0, 1)),
         );
         memory.write_unchecked(key.clone(), &Range::new(0, 1), &[1u16]);

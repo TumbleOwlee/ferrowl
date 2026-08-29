@@ -174,7 +174,7 @@ mod tests {
         let mut mem = Memory::<crate::Key<crate::SlaveKey>>::default();
         mem.add_ranges(
             key(RegKind::HoldingRegister),
-            &MemKind::ReadWrite(CellType::Register),
+            &MemKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(
