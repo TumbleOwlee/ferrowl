@@ -285,7 +285,7 @@ pub struct Timing {
 pub(crate) fn endpoint_to_config(
     endpoint: &Endpoint,
     timing: &Timing,
-    tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
+    tls: ferrowl_modbus::tcp::ModbusTlsConfig,
 ) -> NetConfig {
     match endpoint {
         Endpoint::Tcp { ip, port } => NetConfig::Tcp(ferrowl_modbus::tcp::Config {
@@ -822,12 +822,12 @@ mod tests {
             interval_ms: 0,
             reconnect: true,
         };
-        let tls = Some(ModbusTlsConfig {
+        let tls = ModbusTlsConfig {
             server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+                identity: ferrowl_util::tls::CertSource::SelfSigned {},
             },
             ..Default::default()
-        });
+        };
         let endpoint = Endpoint::Tcp {
             ip: "127.0.0.1".to_string(),
             port: 502,
@@ -855,12 +855,12 @@ mod tests {
             interval_ms: 0,
             reconnect: true,
         };
-        let tls = Some(ModbusTlsConfig {
+        let tls = ModbusTlsConfig {
             server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+                identity: ferrowl_util::tls::CertSource::SelfSigned {},
             },
             ..Default::default()
-        });
+        };
         let endpoint = Endpoint::RtuOverTcp {
             ip: "127.0.0.1".to_string(),
             port: 502,
@@ -879,6 +879,7 @@ mod tests {
         use super::{Timing, endpoint_to_config};
         use crate::config::Endpoint;
         use ferrowl_modbus::Transport as NetConfig;
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
 
         let timing = Timing {
             timeout_ms: 1000,
@@ -890,7 +891,7 @@ mod tests {
             ip: "127.0.0.1".to_string(),
             port: 502,
         };
-        let net_config = endpoint_to_config(&endpoint, &timing, None);
+        let net_config = endpoint_to_config(&endpoint, &timing, ModbusTlsConfig::default());
         match net_config {
             NetConfig::Udp(cfg) => {
                 assert_eq!(cfg.ip, "127.0.0.1");
@@ -916,12 +917,12 @@ mod tests {
             interval_ms: 0,
             reconnect: true,
         };
-        let tls = Some(ModbusTlsConfig {
+        let tls = ModbusTlsConfig {
             server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+                identity: ferrowl_util::tls::CertSource::SelfSigned {},
             },
             ..Default::default()
-        });
+        };
         let endpoint = Endpoint::AsciiOverTcp {
             ip: "127.0.0.1".to_string(),
             port: 502,
@@ -941,6 +942,7 @@ mod tests {
         use super::{Timing, endpoint_to_config};
         use crate::config::Endpoint;
         use ferrowl_modbus::Transport as NetConfig;
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
 
         let timing = Timing {
             timeout_ms: 1000,
@@ -955,7 +957,7 @@ mod tests {
             data_bits: None,
             stop_bits: None,
         };
-        let net_config = endpoint_to_config(&endpoint, &timing, None);
+        let net_config = endpoint_to_config(&endpoint, &timing, ModbusTlsConfig::default());
         match net_config {
             NetConfig::Ascii(cfg) => {
                 assert_eq!(cfg.path, "/dev/ttyUSB0");

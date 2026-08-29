@@ -142,10 +142,13 @@ mod tests {
     fn ut_ws_preserves_loaded_security() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {
-                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
-                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                        ca_file: Some("existing-ca.pem".into()),
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::RootStore {
+                            extra_ca_files: vec!["existing-ca.pem".into()],
+                        },
                     },
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -154,10 +157,10 @@ mod tests {
         let spec = base_spec(OcppProtocol::Ws);
         apply_security_precedence(&mut loaded, &spec);
         assert_eq!(
-            loaded.security.client,
+            loaded.security.tls.client,
             ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("existing-ca.pem".into())
+                verification: ferrowl_util::tls::CertVerification::RootStore {
+                    extra_ca_files: vec!["existing-ca.pem".into()],
                 }
             }
         );
@@ -169,10 +172,13 @@ mod tests {
     fn ut_wss_overwrites_loaded_security_with_dialog() {
         let mut loaded = OcppDeviceConfig {
             security: OcppSecurityConfig {
-                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
-                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                        ca_file: Some("existing-ca.pem".into()),
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::RootStore {
+                            extra_ca_files: vec!["existing-ca.pem".into()],
+                        },
                     },
+                    ..Default::default()
                 },
                 ..Default::default()
             },

@@ -54,8 +54,12 @@ pub enum TlsError {
     NoCertificates(String),
     #[error("no private key found in {0}")]
     NoPrivateKey(String),
-    #[error("require_client_cert is set but no client_ca_file was configured")]
-    MissingClientCa,
+    #[error("verify = \"ca-files\": ca_files must be non-empty")]
+    EmptyCaFiles,
+    #[error("source = \"ephemeral\" is not a valid client identity")]
+    EphemeralClientIdentity,
+    #[error("verify = \"root-store\" is client-only, not valid on a server")]
+    RootStoreOnServer,
     #[error("client certificate verifier configuration failed: {0}")]
     ClientVerifier(String),
     #[error("failed to generate self-signed certificate: {0}")]
@@ -64,6 +68,18 @@ pub enum TlsError {
     SelfSignedKeyEncoding(&'static str),
     #[error("rustls configuration error: {0}")]
     Rustls(#[from] rustls::Error),
+}
+
+impl From<ferrowl_util::tls::PolicyError> for TlsError {
+    fn from(err: ferrowl_util::tls::PolicyError) -> Self {
+        match err {
+            ferrowl_util::tls::PolicyError::EmptyCaFiles => TlsError::EmptyCaFiles,
+            ferrowl_util::tls::PolicyError::EphemeralClientIdentity => {
+                TlsError::EphemeralClientIdentity
+            }
+            ferrowl_util::tls::PolicyError::RootStoreOnServer => TlsError::RootStoreOnServer,
+        }
+    }
 }
 
 /// `extra_headers` (OC-R-117/OC-R-118) construction failure: a reserved/collided name, or a

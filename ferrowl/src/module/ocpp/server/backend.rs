@@ -223,22 +223,13 @@ where
         // self-signed certificate instead of silently binding plain TCP.
         let tls = spec.effective_csms_tls();
         let binding = match &tls {
-            None => TlsBinding::Plain,
-            Some(
-                ferrowl_util::tls::ServerTlsPolicy::Tls { server_cert }
-                | ferrowl_util::tls::ServerTlsPolicy::MutualTls { server_cert, .. },
-            ) => {
-                match server_cert {
-                    ferrowl_util::tls::ServerCertSource::SelfSigned => TlsBinding::SelfSigned,
-                    ferrowl_util::tls::ServerCertSource::Explicit { .. } => {
-                        TlsBinding::Certificates
-                    }
-                    // `effective_csms_tls` never returns `Tls{server_cert: Unset}` — a wss
-                    // endpoint without configured material falls back to `SelfSigned` instead.
-                    ferrowl_util::tls::ServerCertSource::Unset => TlsBinding::Plain,
-                }
-            }
-            Some(ferrowl_util::tls::ServerTlsPolicy::NoTls) => TlsBinding::Plain,
+            ferrowl_util::tls::ServerTlsPolicy::None {} => TlsBinding::Plain,
+            ferrowl_util::tls::ServerTlsPolicy::Tls { identity }
+            | ferrowl_util::tls::ServerTlsPolicy::Mutual { identity, .. } => match identity {
+                ferrowl_util::tls::CertSource::SelfSigned {}
+                | ferrowl_util::tls::CertSource::Ephemeral {} => TlsBinding::SelfSigned,
+                ferrowl_util::tls::CertSource::Files { .. } => TlsBinding::Certificates,
+            },
         };
         if self.server.is_some() {
             return Ok(binding);

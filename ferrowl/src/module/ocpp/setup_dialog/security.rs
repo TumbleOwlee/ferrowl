@@ -6,10 +6,7 @@
 //! `OC-R-039`, `OC-R-040`, `OC-R-096`, `OC-R-111`, `OC-R-113`, `OC-R-115`, `OC-R-116`.
 
 use ferrowl_ui::traits::ToLabel;
-use ferrowl_util::tls::{
-    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-    ServerCertSource, ServerTlsPolicy,
-};
+use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
 use crate::dialog::tls_section::EffectiveTlsLevel;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
@@ -75,34 +72,25 @@ pub struct SecurityInputs<'a> {
 
 impl SecurityLevel {
     /// Infer the level an existing [`OcppSecurityConfig`] represents, by role, from that role's
-    /// own nested policy (`cfg.server`/`cfg.client` — the other role's half is always present on
-    /// the wire too, per `device.rs`'s doc comment, but never consulted here).
+    /// own nested policy (`cfg.tls.server`/`cfg.tls.client` — the other role's half is always
+    /// present on the wire too, per `device.rs`'s doc comment, but never consulted here).
     pub fn from_config(cfg: &OcppSecurityConfig, role: OcppRole) -> SecurityLevel {
+        // OC-R-126: the level is decided by matching the role's own policy variant directly,
+        // never by comparing against an all-unset field-presence baseline -- the variant *is*
+        // the state (api-contract.md §9.1). `Ephemeral` (OC-R-095's "nothing configured, fall
+        // back and log" identity) still resolves to `Tls` here, same as `SelfSigned`/`Files`:
+        // it is distinguished from `None {}` by the outer `mode`, not by which identity a `Tls`
+        // policy carries.
         let tls_level = match role {
-            OcppRole::Client => match &cfg.client {
-                ClientTlsPolicy::MutualTls { .. } => Some(SecurityLevel::MutualTls),
-                ClientTlsPolicy::Tls {
-                    client_verification,
-                } if !matches!(
-                    client_verification,
-                    ClientVerification::Verify { ca_file: None }
-                ) =>
-                {
-                    Some(SecurityLevel::Tls)
-                }
-                _ => None,
+            OcppRole::Client => match &cfg.tls.client {
+                ClientTlsPolicy::Mutual { .. } => Some(SecurityLevel::MutualTls),
+                ClientTlsPolicy::Tls { .. } => Some(SecurityLevel::Tls),
+                ClientTlsPolicy::None {} => None,
             },
-            OcppRole::Server => match &cfg.server {
-                ServerTlsPolicy::MutualTls { .. } => Some(SecurityLevel::MutualTls),
-                // Deliberately not `!matches!(.., Unset)`: `SelfSigned` alone must not imply
-                // `Tls` here, since `resolve()`'s below-`Tls` auto-fallback (OC-R-095) also sets
-                // `server_cert: SelfSigned` -- treating that as `Tls` on a later `edit()` would
-                // promote the level and make the fallback irreversible. Matches the
-                // pre-OC-R-110 behavior, which ignored `self_signed` here too.
-                ServerTlsPolicy::Tls {
-                    server_cert: ServerCertSource::Explicit { .. },
-                } => Some(SecurityLevel::Tls),
-                _ => None,
+            OcppRole::Server => match &cfg.tls.server {
+                ServerTlsPolicy::Mutual { .. } => Some(SecurityLevel::MutualTls),
+                ServerTlsPolicy::Tls { .. } => Some(SecurityLevel::Tls),
+                ServerTlsPolicy::None {} => None,
             },
         };
         tls_level.unwrap_or(if cfg.username.is_some() {
@@ -161,8 +149,23 @@ impl SecurityLevel {
                 } else {
                     (None, None)
                 };
-                let server_cert = ServerCertSource::resolve(self_signed, cert_file, key_file)?;
-                cfg.server = if mtls {
+                let identity = if self_signed {
+                    CertSource::SelfSigned {}
+                } else {
+                    match (cert_file, key_file) {
+                        (Some(c), Some(k)) => CertSource::Files {
+                            cert_file: c,
+                            key_file: k,
+                        },
+                        (None, None) => CertSource::Ephemeral {},
+                        _ => {
+                            return Err(
+                                "cert_file and key_file must both be set, or neither".to_string()
+                            );
+                        }
+                    }
+                };
+                cfg.tls.server = if mtls {
                     let ca_files = client_ca_files.to_vec();
                     if !client_cert_skip_verify && ca_files.is_empty() {
                         return Err(
@@ -170,32 +173,50 @@ impl SecurityLevel {
                                 .to_string(),
                         );
                     }
-                    let client_verification =
-                        ClientCertVerification::resolve(client_cert_skip_verify, ca_files)?;
-                    ServerTlsPolicy::MutualTls {
-                        server_cert,
-                        client_verification,
+                    let verification = if client_cert_skip_verify {
+                        CertVerification::Skip {}
+                    } else {
+                        CertVerification::CaFiles { ca_files }
+                    };
+                    ServerTlsPolicy::Mutual {
+                        identity,
+                        verification,
                     }
                 } else {
-                    ServerTlsPolicy::Tls { server_cert }
+                    ServerTlsPolicy::Tls { identity }
                 };
             }
             OcppRole::Client => {
-                let client_verification = ClientVerification::resolve(skip_verify, opt(ca_file));
-                cfg.client = if mtls {
-                    let client_identity = ClientCertSource::resolve(
-                        self_signed,
-                        opt(client_cert_file),
-                        opt(client_key_file),
-                    )?;
-                    ClientTlsPolicy::MutualTls {
-                        client_verification,
-                        client_identity,
+                let verification = if skip_verify {
+                    CertVerification::Skip {}
+                } else {
+                    CertVerification::RootStore {
+                        extra_ca_files: opt(ca_file).into_iter().collect(),
+                    }
+                };
+                cfg.tls.client = if mtls {
+                    let identity = if self_signed {
+                        CertSource::SelfSigned {}
+                    } else {
+                        match (opt(client_cert_file), opt(client_key_file)) {
+                            (Some(c), Some(k)) => CertSource::Files {
+                                cert_file: c,
+                                key_file: k,
+                            },
+                            _ => {
+                                return Err(
+                                    "client_cert_file and client_key_file must both be set, or self-signed set"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    };
+                    ClientTlsPolicy::Mutual {
+                        verification,
+                        identity,
                     }
                 } else {
-                    ClientTlsPolicy::Tls {
-                        client_verification,
-                    }
+                    ClientTlsPolicy::Tls { verification }
                 };
             }
         }
@@ -233,70 +254,68 @@ pub(super) fn validate_security(
 
     match role {
         OcppRole::Server => {
-            let server_cert = match &cfg.server {
-                ServerTlsPolicy::Tls { server_cert }
-                | ServerTlsPolicy::MutualTls { server_cert, .. } => server_cert,
-                ServerTlsPolicy::NoTls => &ServerCertSource::Unset,
+            let identity = match &cfg.tls.server {
+                ServerTlsPolicy::Tls { identity } | ServerTlsPolicy::Mutual { identity, .. } => {
+                    identity
+                }
+                ServerTlsPolicy::None {} => &CertSource::Ephemeral {},
             };
             // OC-R-110: Self-Signed needs no cert/key files.
-            if level >= SecurityLevel::Tls && !matches!(server_cert, ServerCertSource::SelfSigned) {
-                match server_cert {
-                    ServerCertSource::Explicit {
+            if level >= SecurityLevel::Tls && !matches!(identity, CertSource::SelfSigned {}) {
+                match identity {
+                    CertSource::Files {
                         cert_file,
                         key_file,
                     } => {
                         exists("Certificate file", cert_file)?;
                         exists("Key file", key_file)?;
                     }
-                    ServerCertSource::Unset => {
+                    CertSource::Ephemeral {} => {
                         return Err("Certificate file is required for TLS.".to_string());
                     }
-                    ServerCertSource::SelfSigned => unreachable!("excluded by the outer !matches!"),
+                    CertSource::SelfSigned {} => unreachable!("excluded by the outer !matches!"),
                 }
             }
             if level == SecurityLevel::MutualTls
-                && let ServerTlsPolicy::MutualTls {
-                    client_verification,
-                    ..
-                } = &cfg.server
+                && let ServerTlsPolicy::Mutual { verification, .. } = &cfg.tls.server
             {
-                match client_verification {
-                    ClientCertVerification::Verify { ca_files } => {
+                match verification {
+                    CertVerification::CaFiles { ca_files } => {
                         for ca in ca_files {
                             exists("Client CA file", ca)?;
                         }
                     }
-                    ClientCertVerification::SkipVerify => {}
+                    CertVerification::Skip {} | CertVerification::RootStore { .. } => {}
                 }
             }
         }
         OcppRole::Client => {
-            let client_verification = match &cfg.client {
-                ClientTlsPolicy::Tls {
-                    client_verification,
-                }
-                | ClientTlsPolicy::MutualTls {
-                    client_verification,
-                    ..
-                } => client_verification,
-                ClientTlsPolicy::NoTls => &ClientVerification::Verify { ca_file: None },
+            let verification = match &cfg.tls.client {
+                ClientTlsPolicy::Tls { verification }
+                | ClientTlsPolicy::Mutual { verification, .. } => verification,
+                ClientTlsPolicy::None {} => &CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
             };
-            if let ClientVerification::Verify { ca_file: Some(ca) } = client_verification
-                && !ca.is_empty()
-            {
-                exists("CA file", ca)?;
+            let ca_paths: &[String] = match verification {
+                CertVerification::RootStore { extra_ca_files } => extra_ca_files,
+                CertVerification::CaFiles { ca_files } => ca_files,
+                CertVerification::Skip {} => &[],
+            };
+            for ca in ca_paths {
+                if !ca.is_empty() {
+                    exists("CA file", ca)?;
+                }
             }
             if level == SecurityLevel::MutualTls
-                && let ClientTlsPolicy::MutualTls {
-                    client_identity, ..
-                } = &cfg.client
-                && let ClientCertSource::Explicit {
-                    client_cert_file,
-                    client_key_file,
-                } = client_identity
+                && let ClientTlsPolicy::Mutual { identity, .. } = &cfg.tls.client
+                && let CertSource::Files {
+                    cert_file,
+                    key_file,
+                } = identity
             {
-                exists("Client certificate file", client_cert_file)?;
-                exists("Client key file", client_key_file)?;
+                exists("Client certificate file", cert_file)?;
+                exists("Client key file", key_file)?;
             }
         }
     }
@@ -306,6 +325,7 @@ pub(super) fn validate_security(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module::ocpp::config::device::OcppTlsConfig;
 
     #[test]
     /// UI-R-049 — `SecurityLevel::BasicAuth` collapses to `EffectiveTlsLevel::Off` alongside
@@ -394,10 +414,13 @@ mod tests {
     /// UI-R-024 — a client TLS config loads into the CA-file field.
     fn ut_from_config_tls_client_is_ca_file() {
         let cfg = OcppSecurityConfig {
-            client: ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::Verify {
-                    ca_file: Some("ca.pem".into()),
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Tls {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec!["ca.pem".into()],
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -411,11 +434,78 @@ mod tests {
     /// UI-R-024 — a server TLS config loads into the cert and key fields.
     fn ut_from_config_tls_server_is_cert_and_key() {
         let cfg = OcppSecurityConfig {
-            server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Explicit {
-                    cert_file: "s.crt".into(),
-                    key_file: "s.key".into(),
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Tls {
+                    identity: CertSource::Files {
+                        cert_file: "s.crt".into(),
+                        key_file: "s.key".into(),
+                    },
                 },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            SecurityLevel::from_config(&cfg, OcppRole::Server),
+            SecurityLevel::Tls
+        );
+    }
+
+    #[test]
+    /// OC-R-126 — the level is decided by the policy variant alone, never by comparing against
+    /// an all-unset field-presence baseline: a client `Tls` policy whose `RootStore` carries an
+    /// empty `extra_ca_files` (the widget's own default state) is still `Tls`, not `Off`.
+    fn ut_from_config_tls_client_with_empty_root_store_is_still_tls() {
+        let cfg = OcppSecurityConfig {
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Tls {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec![],
+                    },
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            SecurityLevel::from_config(&cfg, OcppRole::Client),
+            SecurityLevel::Tls
+        );
+    }
+
+    #[test]
+    /// OC-R-126 — a server `Tls` policy with a `SelfSigned` identity is still `Tls`, never
+    /// falling through to `None`/`BasicAuth`: the variant is the state, distinguishable from the
+    /// OC-R-095 `Ephemeral` fallback by construction rather than by a "was anything configured"
+    /// comparison.
+    fn ut_from_config_tls_server_self_signed_is_still_tls() {
+        let cfg = OcppSecurityConfig {
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Tls {
+                    identity: CertSource::SelfSigned {},
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            SecurityLevel::from_config(&cfg, OcppRole::Server),
+            SecurityLevel::Tls
+        );
+    }
+
+    #[test]
+    /// OC-R-126 — the OC-R-095 fallback state (`Ephemeral`) is distinguished from a real `Off`
+    /// only by whether the policy is `None {}` at all, not by which identity variant it carries;
+    /// `Ephemeral` itself is unreachable from the dialog (only `SelfSigned`/`Files` are offered),
+    /// but a hand-edited config carrying it still reports `Tls`, matching OC-R-096's fallback.
+    fn ut_from_config_tls_server_ephemeral_is_still_tls() {
+        let cfg = OcppSecurityConfig {
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Tls {
+                    identity: CertSource::Ephemeral {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -429,12 +519,17 @@ mod tests {
     /// UI-R-024/OC-R-116 — a mutual-TLS client config loads into the client-cert fields.
     fn ut_from_config_mutual_tls_client_is_client_cert() {
         let cfg = OcppSecurityConfig {
-            client: ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::default(),
-                client_identity: ClientCertSource::Explicit {
-                    client_cert_file: "c.crt".into(),
-                    client_key_file: "c.key".into(),
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Mutual {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec![],
+                    },
+                    identity: CertSource::Files {
+                        cert_file: "c.crt".into(),
+                        key_file: "c.key".into(),
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -448,11 +543,14 @@ mod tests {
     /// UI-R-024/OC-R-113 — a mutual-TLS server config loads at the MutualTls level.
     fn ut_from_config_mutual_tls_server() {
         let cfg = OcppSecurityConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::Verify {
-                    ca_files: vec!["ca.pem".to_string()],
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Mutual {
+                    identity: CertSource::SelfSigned {},
+                    verification: CertVerification::CaFiles {
+                        ca_files: vec!["ca.pem".to_string()],
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -485,16 +583,16 @@ mod tests {
         assert_eq!(cfg.username.as_deref(), Some("u"));
         assert_eq!(cfg.password.as_deref(), Some("p"));
         assert_eq!(
-            cfg.server,
+            cfg.tls.server,
             ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Unset
+                identity: CertSource::Ephemeral {}
             }
         );
     }
 
     #[test]
     /// OC-R-113 — a mutual-TLS server build parses the comma-separated CA list and sets a
-    /// `MutualTls` policy with `Verify{ca_files}`.
+    /// `Mutual` policy with `CaFiles{ca_files}`.
     fn ut_build_config_mutual_tls_server_parses_ca_list() {
         let cfg = SecurityLevel::MutualTls
             .build_config(
@@ -511,12 +609,12 @@ mod tests {
                 ),
             )
             .unwrap();
-        match cfg.server {
-            ServerTlsPolicy::MutualTls {
-                client_verification: ClientCertVerification::Verify { ca_files },
+        match cfg.tls.server {
+            ServerTlsPolicy::Mutual {
+                verification: CertVerification::CaFiles { ca_files },
                 ..
             } => assert_eq!(ca_files, vec!["ca1.pem".to_string(), "ca2.pem".to_string()]),
-            other => panic!("expected MutualTls with Verify, got {other:?}"),
+            other => panic!("expected Mutual with CaFiles, got {other:?}"),
         }
     }
 
@@ -535,7 +633,7 @@ mod tests {
 
     #[test]
     /// OC-R-116 — a mutual-TLS client build with the self-signed toggle on excludes the
-    /// (possibly stale) client-cert/key text and resolves to `ClientCertSource::SelfSigned`.
+    /// (possibly stale) client-cert/key text and resolves to `CertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
         let mut i = inputs("", "", "", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
@@ -543,10 +641,12 @@ mod tests {
             .build_config(OcppRole::Client, i)
             .unwrap();
         assert_eq!(
-            cfg.client,
-            ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::default(),
-                client_identity: ClientCertSource::SelfSigned,
+            cfg.tls.client,
+            ClientTlsPolicy::Mutual {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
+                identity: CertSource::SelfSigned {},
             }
         );
     }
@@ -562,14 +662,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            cfg.client,
-            ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::Verify {
-                    ca_file: Some("ca".to_string())
+            cfg.tls.client,
+            ClientTlsPolicy::Mutual {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["ca".to_string()],
                 },
-                client_identity: ClientCertSource::Explicit {
-                    client_cert_file: "ccert".to_string(),
-                    client_key_file: "ckey".to_string(),
+                identity: CertSource::Files {
+                    cert_file: "ccert".to_string(),
+                    key_file: "ckey".to_string(),
                 },
             }
         );
@@ -581,8 +681,11 @@ mod tests {
     /// OC-R-110 — a server at TLS with self_signed set needs no cert/key files.
     fn ut_validate_security_server_self_signed_needs_no_files() {
         let cfg = OcppSecurityConfig {
-            server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned,
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Tls {
+                    identity: CertSource::SelfSigned {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -593,11 +696,14 @@ mod tests {
     /// OC-R-113 — a server at mTLS additionally requires every listed client CA file to exist.
     fn ut_validate_security_server_mutual_tls_requires_client_ca_files() {
         let cfg = OcppSecurityConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::Verify {
-                    ca_files: vec!["ca1.pem".to_string(), "ca2.pem".to_string()],
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Mutual {
+                    identity: CertSource::SelfSigned {},
+                    verification: CertVerification::CaFiles {
+                        ca_files: vec!["ca1.pem".to_string(), "ca2.pem".to_string()],
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -614,9 +720,12 @@ mod tests {
     /// OC-R-113 — a server at mTLS with skip-verify on needs no CA files checked.
     fn ut_validate_security_server_mutual_tls_skip_verify_on_needs_no_ca_files() {
         let cfg = OcppSecurityConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::SkipVerify,
+            tls: OcppTlsConfig {
+                server: ServerTlsPolicy::Mutual {
+                    identity: CertSource::SelfSigned {},
+                    verification: CertVerification::Skip {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -629,10 +738,13 @@ mod tests {
     /// UI-R-024 — a client's CA file, when set, must exist; skip-verify alone needs no file.
     fn ut_validate_security_client_ca_file_must_exist_when_set() {
         let cfg = OcppSecurityConfig {
-            client: ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::Verify {
-                    ca_file: Some("ca.pem".into()),
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Tls {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec!["ca.pem".into()],
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -644,12 +756,17 @@ mod tests {
     /// UI-R-024 — a client at mTLS requires existing client cert and key files.
     fn ut_validate_security_client_mutual_tls_requires_client_cert_key_files() {
         let cfg = OcppSecurityConfig {
-            client: ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::default(),
-                client_identity: ClientCertSource::Explicit {
-                    client_cert_file: "c.crt".into(),
-                    client_key_file: "c.key".into(),
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Mutual {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec![],
+                    },
+                    identity: CertSource::Files {
+                        cert_file: "c.crt".into(),
+                        key_file: "c.key".into(),
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -666,9 +783,14 @@ mod tests {
     /// OC-R-116 — a client at mTLS with self-signed set needs no cert/key files checked.
     fn ut_validate_security_client_self_signed_needs_no_files() {
         let cfg = OcppSecurityConfig {
-            client: ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::default(),
-                client_identity: ClientCertSource::SelfSigned,
+            tls: OcppTlsConfig {
+                client: ClientTlsPolicy::Mutual {
+                    verification: CertVerification::RootStore {
+                        extra_ca_files: vec![],
+                    },
+                    identity: CertSource::SelfSigned {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };

@@ -58,10 +58,7 @@ async fn dial<V: Version>(config: &Config, cache: &SelfSignedCache) -> Result<Ws
                 .expect("HeaderDef::new already validated the value is printable ASCII"),
         );
     }
-    let connector = match &config.tls {
-        Some(tls) => Some(build_connector(tls, cache)?),
-        None => None,
-    };
+    let connector = Some(build_connector(&config.tls, cache)?);
     let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
         .await
         .map_err(WsError::from)?;
@@ -439,7 +436,7 @@ mod tests {
             url: format!("ws://127.0.0.1:{}/CS001", free_port()),
             timeout_ms: 1_000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
             extra_headers: Vec::new(),
             reconnect,
         }))

@@ -575,7 +575,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         }
     }
 
@@ -866,7 +866,7 @@ mod tests {
                     delay_ms: 0,
                     interval_ms: 0,
                     reconnect: true,
-                    tls: None,
+                    tls: Default::default(),
                 })),
                 memory: Arc::new(MemLock::new(
                     ferrowl_store::Memory::<Key<SlaveKey>>::default(),
@@ -920,7 +920,7 @@ mod tests {
                     delay_ms: 0,
                     interval_ms: 0,
                     reconnect: true,
-                    tls: None,
+                    tls: Default::default(),
                 })),
                 memory: Arc::new(MemLock::new(
                     ferrowl_store::Memory::<Key<SlaveKey>>::default(),
@@ -969,7 +969,7 @@ mod tests {
                     delay_ms: 0,
                     interval_ms: 0,
                     reconnect: true,
-                    tls: None,
+                    tls: Default::default(),
                 })),
                 memory: Arc::new(MemLock::new(
                     ferrowl_store::Memory::<Key<SlaveKey>>::default(),
@@ -1011,7 +1011,7 @@ mod tests {
                     delay_ms: 0,
                     interval_ms: 0,
                     reconnect: true,
-                    tls: None,
+                    tls: Default::default(),
                 })),
                 memory: Arc::new(MemLock::new(
                     ferrowl_store::Memory::<Key<SlaveKey>>::default(),

@@ -82,12 +82,7 @@ where
     {
         // OC-R-040: checked once, synchronously — a permanent misconfiguration, not a transient
         // failure the retry loop below should ever see.
-        let tls = self
-            .config
-            .tls
-            .as_ref()
-            .map(|policy| build_server_config(policy, &self.config.host, &self.cache))
-            .transpose()?;
+        let tls = build_server_config(&self.config.tls, &self.config.host, &self.cache)?;
         // OC-R-095/OC-R-096: log when no TLS material at all was configured and the listener
         // falls back to an ephemeral self-signed certificate.
         if let Some((_, used_fallback)) = &tls
@@ -568,7 +563,7 @@ mod tests {
             timeout_ms: 1_000,
             reconnect: false,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         };
         let server = super::ServerBuilder::<V1_6>::new(config, new_self_signed_cache())
             .spawn(NoopHandler, |_s: String| async move {})

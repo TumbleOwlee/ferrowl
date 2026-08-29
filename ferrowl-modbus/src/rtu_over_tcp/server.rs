@@ -156,7 +156,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         };
         let memory = std::sync::Arc::new(parking_lot::RwLock::new(ferrowl_store::Memory::<
             Key<SlaveKey>,

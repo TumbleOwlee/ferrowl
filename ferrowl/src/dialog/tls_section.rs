@@ -32,10 +32,7 @@ use crate::config::ClientOrServer;
 use crate::dialog::NonEmpty;
 use crate::dialog::ca_file_list::AddCaFileDialog;
 use crate::dialog::path_suggest::FsPathProvider;
-use ferrowl_util::tls::{
-    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-    ServerCertSource, ServerTlsPolicy,
-};
+use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use std::fmt::Debug;
 
 /// TLS/mTLS level, collapsed from either dialog's own richer level type. `Off` covers both "no
@@ -356,23 +353,23 @@ impl TlsSection {
         match role {
             ClientOrServer::Server => {
                 let Some(tls) = server else { return };
-                let (server_cert, client_verification) = match tls {
-                    ServerTlsPolicy::MutualTls {
-                        server_cert,
-                        client_verification,
-                    } => (server_cert.clone(), Some(client_verification.clone())),
-                    ServerTlsPolicy::Tls { server_cert } => (server_cert.clone(), None),
-                    ServerTlsPolicy::NoTls => (ServerCertSource::Unset, None),
+                let (identity, verification) = match tls {
+                    ServerTlsPolicy::Mutual {
+                        identity,
+                        verification,
+                    } => (identity.clone(), Some(verification.clone())),
+                    ServerTlsPolicy::Tls { identity } => (identity.clone(), None),
+                    ServerTlsPolicy::None {} => (CertSource::Ephemeral {}, None),
                 };
                 self.self_signed.state.set_selection(
-                    if server_cert == ServerCertSource::SelfSigned {
+                    if matches!(identity, CertSource::SelfSigned {}) {
                         1
                     } else {
                         0
                     },
                 );
-                let (cert_file, key_file) = match &server_cert {
-                    ServerCertSource::Explicit {
+                let (cert_file, key_file) = match &identity {
+                    CertSource::Files {
                         cert_file,
                         key_file,
                     } => (cert_file.as_str(), key_file.as_str()),
@@ -380,9 +377,12 @@ impl TlsSection {
                 };
                 set_suggest_input(&mut self.cert_file, cert_file);
                 set_suggest_input(&mut self.key_file, key_file);
-                let (ca_files, skip) = match &client_verification {
-                    Some(ClientCertVerification::Verify { ca_files }) => (ca_files.clone(), false),
-                    Some(ClientCertVerification::SkipVerify) => (Vec::new(), true),
+                let (ca_files, skip) = match &verification {
+                    Some(CertVerification::CaFiles { ca_files }) => (ca_files.clone(), false),
+                    Some(CertVerification::Skip {}) => (Vec::new(), true),
+                    Some(CertVerification::RootStore { extra_ca_files }) => {
+                        (extra_ca_files.clone(), false)
+                    }
                     None => (Vec::new(), false),
                 };
                 *self.client_ca_files.state.values_mut() = ca_files;
@@ -393,38 +393,49 @@ impl TlsSection {
             }
             ClientOrServer::Client => {
                 let Some(tls) = client else { return };
-                let (client_verification, client_identity) = match tls {
-                    ClientTlsPolicy::MutualTls {
-                        client_verification,
-                        client_identity,
-                    } => (client_verification.clone(), Some(client_identity.clone())),
-                    ClientTlsPolicy::Tls {
-                        client_verification,
-                    } => (client_verification.clone(), None),
-                    ClientTlsPolicy::NoTls => (ClientVerification::Verify { ca_file: None }, None),
+                let (verification, identity) = match tls {
+                    ClientTlsPolicy::Mutual {
+                        verification,
+                        identity,
+                    } => (verification.clone(), Some(identity.clone())),
+                    ClientTlsPolicy::Tls { verification } => (verification.clone(), None),
+                    ClientTlsPolicy::None {} => (
+                        CertVerification::RootStore {
+                            extra_ca_files: vec![],
+                        },
+                        None,
+                    ),
                 };
                 self.skip_verify.state.set_selection(
-                    if client_verification == ClientVerification::SkipVerify {
+                    if matches!(verification, CertVerification::Skip {}) {
                         1
                     } else {
                         0
                     },
                 );
-                let ca_file = match &client_verification {
-                    ClientVerification::Verify { ca_file } => ca_file.as_deref().unwrap_or(""),
-                    ClientVerification::SkipVerify => "",
+                // This dialog offers a single-path client CA input, not the Root Store
+                // toggle/multi-CA list: `extra_ca_files`/`ca_files`, either way, shows its
+                // first entry (there is at most one, since this input never wrote more than
+                // one).
+                let ca_file = match &verification {
+                    CertVerification::RootStore { extra_ca_files } => {
+                        extra_ca_files.first().map_or("", String::as_str)
+                    }
+                    CertVerification::CaFiles { ca_files } => {
+                        ca_files.first().map_or("", String::as_str)
+                    }
+                    CertVerification::Skip {} => "",
                 };
                 set_suggest_input(&mut self.ca_file, ca_file);
-                let self_signed_client =
-                    matches!(client_identity, Some(ClientCertSource::SelfSigned));
+                let self_signed_client = matches!(identity, Some(CertSource::SelfSigned {}));
                 self.self_signed
                     .state
                     .set_selection(if self_signed_client { 1 } else { 0 });
-                let (ccert, ckey) = match &client_identity {
-                    Some(ClientCertSource::Explicit {
-                        client_cert_file,
-                        client_key_file,
-                    }) => (client_cert_file.as_str(), client_key_file.as_str()),
+                let (ccert, ckey) = match &identity {
+                    Some(CertSource::Files {
+                        cert_file,
+                        key_file,
+                    }) => (cert_file.as_str(), key_file.as_str()),
                     _ => ("", ""),
                 };
                 set_suggest_input(&mut self.client_cert_file, ccert);
@@ -722,18 +733,18 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-104..112 — a server TLS section at `Tls` with self-signed on extracts and resolves
-    /// to `ServerTlsPolicy::Tls { server_cert: ServerCertSource::SelfSigned }`, dropping the
-    /// mTLS-only client-CA list entirely.
-    fn ut_extract_server_self_signed_builds_config() {
+    /// MB-R-104..112 — a server TLS section at `Tls` with Self-Signed toggled On extracts
+    /// `self_signed: true`, regardless of whatever the (mTLS-only) client-CA list holds.
+    /// Resolving this flag into `ServerTlsPolicy::Tls { identity: CertSource::SelfSigned {} }`
+    /// is `TlsLevel::build_config`'s/`SecurityLevel::build_config`'s job (see their own tests);
+    /// this layer only extracts the raw toggle state uniformly.
+    fn ut_extract_self_signed_flag_set_regardless_of_client_ca_list() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         section.self_signed.state.set_selection(1); // On
         *section.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let extracted = section.extract();
         assert!(extracted.self_signed);
-        let server_cert = ServerCertSource::resolve(extracted.self_signed, None, None).unwrap();
-        assert_eq!(server_cert, ServerCertSource::SelfSigned);
     }
 
     #[test]
@@ -749,16 +760,10 @@ mod tests {
         let extracted = section.extract();
         assert!(extracted.self_signed);
         // The stored text survives the toggle -- extract still reports it, since excluding it
-        // from the resolved policy is `ServerCertSource::resolve`'s job, not `extract`'s.
+        // from the resolved identity is the outer dialog's `build_config`'s job, not `extract`'s
+        // (see `TlsLevel`/`SecurityLevel`'s own `build_config` tests for that resolution).
         assert_eq!(extracted.cert_file, "s.crt");
         assert_eq!(extracted.key_file, "s.key");
-        let server_cert = ServerCertSource::resolve(
-            extracted.self_signed,
-            Some(extracted.cert_file.clone()),
-            Some(extracted.key_file.clone()),
-        )
-        .unwrap();
-        assert_eq!(server_cert, ServerCertSource::SelfSigned);
     }
 
     #[test]
@@ -773,8 +778,8 @@ mod tests {
         let extracted = section.extract();
         assert!(extracted.skip_verify);
         assert_eq!(extracted.ca_file, "ca.pem");
-        let verification = ClientVerification::resolve(extracted.skip_verify, None);
-        assert_eq!(verification, ClientVerification::SkipVerify);
+        // Resolving this flag into `CertVerification::Skip {}` is `TlsLevel::build_config`'s/
+        // `SecurityLevel::build_config`'s job (see their own tests).
     }
 
     #[test]
@@ -828,12 +833,12 @@ mod tests {
     /// MB-R-104..112 — `prefill` restores a server-role `MutualTls` policy's fields (self-signed,
     /// client-CA list, client_cert_skip_verify) and round-trips through `extract`.
     fn ut_prefill_server_mutual_tls_round_trips() {
-        let server = ServerTlsPolicy::MutualTls {
-            server_cert: ServerCertSource::Explicit {
+        let server = ServerTlsPolicy::Mutual {
+            identity: CertSource::Files {
                 cert_file: "s.crt".to_string(),
                 key_file: "s.key".to_string(),
             },
-            client_verification: ClientCertVerification::Verify {
+            verification: CertVerification::CaFiles {
                 ca_files: vec!["ca1.pem".to_string(), "ca2.pem".to_string()],
             },
         };
@@ -855,9 +860,11 @@ mod tests {
     #[test]
     /// MB-R-139 — `prefill` restores a client-role self-signed `MutualTls` identity.
     fn ut_prefill_client_mutual_tls_self_signed_round_trips() {
-        let client = ClientTlsPolicy::MutualTls {
-            client_verification: ClientVerification::default(),
-            client_identity: ClientCertSource::SelfSigned,
+        let client = ClientTlsPolicy::Mutual {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+            identity: CertSource::SelfSigned {},
         };
         let mut section = TlsSection::new();
         section.prefill(ClientOrServer::Client, None, Some(&client));

@@ -310,8 +310,8 @@ impl OcppSetupDialog {
         };
         d.tls.prefill(
             role_for_tls,
-            Some(&spec.security.server),
-            Some(&spec.security.client),
+            Some(&spec.security.tls.server),
+            Some(&spec.security.tls.client),
         );
         d.preserved_security = spec.security.clone();
         d
@@ -362,7 +362,7 @@ impl OcppSetupDialog {
             // Below TLS, a wss server still generates an ephemeral self-signed certificate at
             // each start rather than binding plain TCP (OC-R-095's fallback) -- folded into the
             // `self_signed` input passed to `build_config` rather than a post-processing
-            // override, so `ServerCertSource::resolve` alone decides the outcome. A field hidden
+            // override, so `build_config` alone decides the outcome. A field hidden
             // below TLS (the client's `ca_file` trust anchor) is blanked here so stale text never
             // leaks into the resolved config once the level drops back down.
             fn blank_below_tls(tls: bool, s: &str) -> &str {
@@ -399,8 +399,8 @@ impl OcppSetupDialog {
             // security settings instead of resetting them to `OcppSecurityConfig::default`'s
             // placeholder (mirrors the Modbus dialog's `original_tls` stitching).
             match role {
-                OcppRole::Server => cfg.client = self.preserved_security.client.clone(),
-                OcppRole::Client => cfg.server = self.preserved_security.server.clone(),
+                OcppRole::Server => cfg.tls.client = self.preserved_security.tls.client.clone(),
+                OcppRole::Client => cfg.tls.server = self.preserved_security.tls.server.clone(),
             }
             validate_security(&cfg, role, level, &|p| self.path_exists(p))?;
             cfg
@@ -952,10 +952,7 @@ mod tests {
     use crate::dialog::tls_section::SkipVerifyChoice;
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::{IsFocus, SetFocus};
-    use ferrowl_util::tls::{
-        ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-        ServerCertSource, ServerTlsPolicy,
-    };
+    use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
     fn buffer_text(buf: &Buffer) -> String {
         let mut out = String::new();
@@ -1168,9 +1165,9 @@ mod tests {
 
         let spec = d.resolve().expect("self-signed needs no cert/key files");
         assert_eq!(
-            spec.security.server,
+            spec.security.tls.server,
             ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned
+                identity: CertSource::SelfSigned {}
             }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
@@ -1212,9 +1209,9 @@ mod tests {
 
         let spec = d.resolve().expect("skip-verify needs no ca file");
         assert_eq!(
-            spec.security.client,
+            spec.security.tls.client,
             ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::SkipVerify
+                verification: CertVerification::Skip {}
             }
         );
         assert_eq!(d.tls.ca_file.state.input(), "ca.pem");
@@ -1228,9 +1225,9 @@ mod tests {
             .resolve()
             .expect("below-TLS server should self-sign, not error");
         assert_eq!(
-            spec.security.server,
+            spec.security.tls.server,
             ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned
+                identity: CertSource::SelfSigned {}
             }
         );
     }
@@ -1248,9 +1245,9 @@ mod tests {
             .resolve()
             .expect("below-TLS server should self-sign, not error");
         assert_eq!(
-            spec.security.server,
+            spec.security.tls.server,
             ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned
+                identity: CertSource::SelfSigned {}
             }
         );
         assert_eq!(spec.security.username.as_deref(), Some("cp001"));
@@ -1451,10 +1448,12 @@ mod tests {
             .resolve()
             .expect("self-signed client needs no cert/key files");
         assert_eq!(
-            spec.security.client,
-            ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::default(),
-                client_identity: ClientCertSource::SelfSigned,
+            spec.security.tls.client,
+            ClientTlsPolicy::Mutual {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
+                identity: CertSource::SelfSigned {},
             }
         );
         assert_eq!(d.tls.client_cert_file.state.input(), "stale.crt");
@@ -1488,7 +1487,7 @@ mod tests {
             .state
             .set_selection(SecurityLevel::MutualTls.index());
         let err = d.resolve().unwrap_err();
-        // `ClientCertSource::resolve` itself rejects "neither cert nor key nor self-signed" before
+        // `SecurityLevel::build_config` itself rejects "neither cert nor key nor self-signed" before
         // `validate_security` ever runs (mirrors the Modbus dialog's `build_config`, which resolves
         // the client identity the same way) — the raw resolver message, not `validate_security`'s
         // own (now unreachable for this exact case) "Client certificate file is required" text.
@@ -1543,14 +1542,17 @@ mod tests {
             timeout_ms: None,
             reconnect: None,
             security: OcppSecurityConfig {
-                server: ServerTlsPolicy::MutualTls {
-                    server_cert: ServerCertSource::Explicit {
-                        cert_file: cert,
-                        key_file: key,
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    server: ServerTlsPolicy::Mutual {
+                        identity: CertSource::Files {
+                            cert_file: cert,
+                            key_file: key,
+                        },
+                        verification: CertVerification::CaFiles {
+                            ca_files: vec![cca],
+                        },
                     },
-                    client_verification: ClientCertVerification::Verify {
-                        ca_files: vec![cca],
-                    },
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -1574,8 +1576,11 @@ mod tests {
             timeout_ms: None,
             reconnect: None,
             security: OcppSecurityConfig {
-                client: ClientTlsPolicy::Tls {
-                    client_verification: ClientVerification::SkipVerify,
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    client: ClientTlsPolicy::Tls {
+                        verification: CertVerification::Skip {},
+                    },
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -1587,9 +1592,9 @@ mod tests {
         );
         let resolved = dialog.resolve().expect("valid client config");
         assert_eq!(
-            resolved.security.client,
+            resolved.security.tls.client,
             ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::SkipVerify
+                verification: CertVerification::Skip {}
             }
         );
     }
@@ -2370,14 +2375,17 @@ mod tests {
             timeout_ms: None,
             reconnect: Some(false),
             security: OcppSecurityConfig {
-                client: ClientTlsPolicy::MutualTls {
-                    client_verification: ClientVerification::Verify {
-                        ca_file: Some("ca.pem".to_string()),
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    client: ClientTlsPolicy::Mutual {
+                        verification: CertVerification::RootStore {
+                            extra_ca_files: vec!["ca.pem".to_string()],
+                        },
+                        identity: CertSource::Files {
+                            cert_file: "client.crt".to_string(),
+                            key_file: "client.key".to_string(),
+                        },
                     },
-                    client_identity: ClientCertSource::Explicit {
-                        client_cert_file: "client.crt".to_string(),
-                        client_key_file: "client.key".to_string(),
-                    },
+                    ..Default::default()
                 },
                 ..OcppSecurityConfig::default()
             },

@@ -15,10 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, BasicAuth, CallError, CallErrorCode, Response16, V1_6};
-use ferrowl_util::tls::{
-    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-    ServerCertSource, ServerTlsPolicy,
-};
+use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use serde_json::json;
 
 /// No-op log sink.
@@ -109,7 +106,7 @@ async fn basic_auth_accepts_matching_credentials() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: Some(auth.clone()),
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -125,7 +122,7 @@ async fn basic_auth_accepts_matching_credentials() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: Some(auth),
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -153,7 +150,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
                 username: "cp001".to_owned(),
                 password: "s3cret".to_owned(),
             }),
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -175,7 +172,7 @@ async fn basic_auth_rejects_mismatched_credentials() {
                 username: "cp001".to_owned(),
                 password: "wrong".to_owned(),
             }),
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -204,7 +201,7 @@ async fn basic_auth_rejects_missing_credentials() {
                 username: "cp001".to_owned(),
                 password: "s3cret".to_owned(),
             }),
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -220,7 +217,7 @@ async fn basic_auth_rejects_missing_credentials() {
             reconnect: false,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -237,7 +234,7 @@ async fn basic_auth_rejects_missing_credentials() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-034 — a CS trusts a certificate supplied via `ca_file`, completing a TLS loopback to the CSMS.
+/// OC-R-034 — a CS trusts a certificate supplied via `CertVerification::RootStore`'s `extra_ca_files`, completing a TLS loopback to the CSMS.
 /// OC-R-050 — when TLS is configured, the CSMS terminates TLS on the accepted socket before the WebSocket handshake (the CS reaches the OCPP layer only through the completed TLS session).
 async fn tls_loopback_over_self_signed_cert() {
     let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
@@ -255,12 +252,12 @@ async fn tls_loopback_over_self_signed_cert() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Explicit {
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Files {
                     cert_file: cert_file.clone(),
                     key_file,
                 },
-            }),
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -276,9 +273,11 @@ async fn tls_loopback_over_self_signed_cert() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(false, Some(cert_file)),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![cert_file],
+                },
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -294,7 +293,7 @@ async fn tls_loopback_over_self_signed_cert() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-034 — a CS rejects a server certificate not trusted by the webpki roots or its configured `ca_file`.
+/// OC-R-034 — a CS rejects a server certificate not trusted by the webpki roots or its `RootStore`'s `extra_ca_files`.
 async fn tls_loopback_rejects_untrusted_cert() {
     let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
     let cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
@@ -311,12 +310,12 @@ async fn tls_loopback_rejects_untrusted_cert() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Explicit {
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Files {
                     cert_file,
                     key_file,
                 },
-            }),
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -324,8 +323,8 @@ async fn tls_loopback_rejects_untrusted_cert() {
     .await
     .expect("server failed to bind");
 
-    // No `ca_file`: only the webpki root store is trusted, so the self-signed cert must be
-    // rejected.
+    // `extra_ca_files` empty: only the webpki root store is trusted, so the self-signed cert
+    // must be rejected.
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
@@ -334,9 +333,11 @@ async fn tls_loopback_rejects_untrusted_cert() {
             reconnect: false,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(false, None),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -353,7 +354,7 @@ async fn tls_loopback_rejects_untrusted_cert() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-036 — a CS with `insecure_skip_verify` accepts any server certificate and connects.
+/// OC-R-036 — a CS with `CertVerification::Skip` accepts any server certificate and connects.
 async fn self_signed_csms_with_skip_verify_client_connects() {
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -362,9 +363,9 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned,
-            }),
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::SelfSigned {},
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -380,9 +381,9 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(true, None),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -398,7 +399,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-036 — without `insecure_skip_verify`, a CS rejects an untrusted self-signed CSMS certificate.
+/// OC-R-036 — with `CertVerification::RootStore` (not `Skip`), a CS rejects an untrusted self-signed CSMS certificate.
 async fn self_signed_csms_without_skip_verify_client_rejects() {
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -407,9 +408,9 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned,
-            }),
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::SelfSigned {},
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -425,9 +426,11 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
             reconnect: false,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(false, None),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -437,7 +440,7 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
 
     assert!(
         result.join().await.is_err(),
-        "connect should fail without insecure_skip_verify: a per-start self-signed cert can't be pinned"
+        "connect should fail under RootStore verification: a per-start self-signed cert can't be pinned"
     );
 
     server.terminate().await.expect("server terminate failed");
@@ -450,9 +453,9 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
         username: "cp001".to_owned(),
         password: "s3cret".to_owned(),
     };
-    let tls = Some(ServerTlsPolicy::Tls {
-        server_cert: ServerCertSource::SelfSigned,
-    });
+    let tls = ServerTlsPolicy::Tls {
+        identity: CertSource::SelfSigned {},
+    };
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -477,9 +480,9 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: Some(auth),
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(true, None),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -501,9 +504,9 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
                 username: "cp001".to_owned(),
                 password: "wrong".to_owned(),
             }),
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::resolve(true, None),
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -518,19 +521,19 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     server.terminate().await.expect("server terminate failed");
 }
 
-// OC-R-040/OC-R-039's "require_client_cert without a client_ca_file is rejected" is now enforced
-// at construction (`ClientCertVerification::resolve`/`Deserialize`), before a `ServerTlsPolicy`
-// carrying that combination can even exist -- see
-// `ferrowl_util::tls::tests::ut_server_tls_policy_deserialize_mutual_tls_empty_ca_files_is_error`.
-// No "builds, but is then rejected by `build_server_config`" state exists to cover here.
+// OC-R-040/OC-R-039's "Mutual with CaFiles{ca_files: []}" is rejected by `ServerTlsPolicy::
+// validate()` before `build_server_config` ever runs -- see
+// `ferrowl_ocpp::security::tests::ut_build_server_config_rejects_empty_ca_files`, which asserts
+// the rejection (and its mapped `TlsError::EmptyCaFiles` variant) directly; no OCPP handshake-
+// level test is needed since the policy is rejected before any socket work starts.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-040 — `require_client_cert` combined with a self-signed CSMS certificate succeeds,
-/// end-to-end over a real TLS+mTLS handshake, when a `client_ca_file` is configured: the
-/// server's own self-signed identity and the CA trusted for verifying client certificates are
-/// independent (unlike `build_server_config`'s unit-level coverage of the same rule in
-/// `ferrowl-ocpp/src/security.rs`, this exercises the full CS/CSMS wire handshake).
-async fn it_csms_self_signed_with_require_client_cert_and_client_ca_accepts_connection() {
+/// OC-R-035/OC-R-040 — a `Mutual` CS identity is presented and a self-signed CSMS's `Mutual`
+/// policy with a `CertVerification::CaFiles` list accepts it end-to-end over a real TLS+mTLS
+/// handshake: the server's own self-signed identity and the CA trusted for verifying client
+/// certificates are independent (unlike `build_server_config`'s unit-level coverage of the same
+/// rule in `ferrowl-ocpp/src/security.rs`, this exercises the full CS/CSMS wire handshake).
+async fn it_csms_self_signed_mutual_with_ca_files_accepts_connection() {
     let ca_key = rcgen::KeyPair::generate().expect("ca keypair generation failed");
     let ca_params =
         rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca".to_owned()]).expect("ca params");
@@ -553,20 +556,18 @@ async fn it_csms_self_signed_with_require_client_cert_and_client_ca_accepts_conn
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::Verify {
+            tls: ServerTlsPolicy::Mutual {
+                identity: CertSource::SelfSigned {},
+                verification: CertVerification::CaFiles {
                     ca_files: vec![ca_file],
                 },
-            }),
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
     .spawn(TestCsms, sink())
     .await
-    .expect(
-        "server should start: self-signed + require_client_cert is valid with a client_ca_file",
-    );
+    .expect("server should start: self-signed identity + Mutual with CaFiles is a valid policy");
 
     let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
     let client = cs::ClientBuilder::<V1_6>::new(
@@ -576,14 +577,14 @@ async fn it_csms_self_signed_with_require_client_cert_and_client_ca_accepts_conn
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::MutualTls {
+            tls: ClientTlsPolicy::Mutual {
                 // The server's identity is an ephemeral self-signed cert, unpinnable in advance.
-                client_verification: ClientVerification::SkipVerify,
-                client_identity: ClientCertSource::Explicit {
-                    client_cert_file,
-                    client_key_file,
+                verification: CertVerification::Skip {},
+                identity: CertSource::Files {
+                    cert_file: client_cert_file,
+                    key_file: client_key_file,
                 },
-            }),
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -641,12 +642,12 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::Verify {
+            tls: ServerTlsPolicy::Mutual {
+                identity: CertSource::SelfSigned {},
+                verification: CertVerification::CaFiles {
                     ca_files: vec![ca1_file, ca2_file],
                 },
-            }),
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -662,13 +663,13 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::SkipVerify,
-                client_identity: ClientCertSource::Explicit {
-                    client_cert_file,
-                    client_key_file,
+            tls: ClientTlsPolicy::Mutual {
+                verification: CertVerification::Skip {},
+                identity: CertSource::Files {
+                    cert_file: client_cert_file,
+                    key_file: client_key_file,
                 },
-            }),
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -697,10 +698,10 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: Some(ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::SelfSigned,
-                client_verification: ClientCertVerification::SkipVerify,
-            }),
+            tls: ServerTlsPolicy::Mutual {
+                identity: CertSource::SelfSigned {},
+                verification: CertVerification::Skip {},
+            },
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -716,10 +717,10 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::MutualTls {
-                client_verification: ClientVerification::SkipVerify,
-                client_identity: ClientCertSource::SelfSigned,
-            }),
+            tls: ClientTlsPolicy::Mutual {
+                verification: CertVerification::Skip {},
+                identity: CertSource::SelfSigned {},
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -732,4 +733,136 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
 
     client.terminate().await.expect("client terminate failed");
     server.terminate().await.expect("server terminate failed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-034/OC-R-036 — `CertVerification::CaFiles` trusts only the named CA, never the webpki
+/// root store: a CSMS presenting a certificate signed by the named CA is trusted, and the same
+/// policy against a differently self-signed CSMS (not signed by that CA, and not a publicly
+/// trusted root either) is rejected.
+async fn it_cs_cafiles_trusts_only_named_ca() {
+    let ca_key = rcgen::KeyPair::generate().expect("ca keypair generation failed");
+    let ca_params =
+        rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca".to_owned()]).expect("ca params");
+    let ca_cert = ca_params.self_signed(&ca_key).expect("self-signed ca cert");
+    let ca_file = write_pem("cafiles-ca", &ca_cert.pem());
+
+    let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+    let server_key = rcgen::KeyPair::generate().expect("server keypair generation failed");
+    let server_cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
+        .expect("server params")
+        .signed_by(&server_key, &issuer)
+        .expect("ca-signed server cert");
+    let server_cert_file = write_pem("cafiles-server-cert", &server_cert.pem());
+    let server_key_file = write_pem("cafiles-server-key", &server_key.serialize_pem());
+
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Files {
+                    cert_file: server_cert_file,
+                    key_file: server_key_file,
+                },
+            },
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+
+    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let client = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url,
+            reconnect: true,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::CaFiles {
+                    ca_files: vec![ca_file],
+                },
+            },
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok; the dial happens inside the task");
+
+    let resp = client.call(boot_action()).await.expect("boot call failed");
+    assert!(matches!(resp, Response16::BootNotification(_)));
+    client.terminate().await.expect("client terminate failed");
+    server.terminate().await.expect("server terminate failed");
+
+    // A second, unrelated self-signed CSMS: the same CaFiles policy trusts only the first CA,
+    // not the webpki root store, so this handshake must fail.
+    let key_pair = rcgen::KeyPair::generate().expect("keypair generation failed");
+    let other_cert = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
+        .expect("cert params")
+        .self_signed(&key_pair)
+        .expect("self-signed cert");
+    let other_cert_file = write_pem("cafiles-other-cert", &other_cert.pem());
+    let other_key_file = write_pem("cafiles-other-key", &key_pair.serialize_pem());
+    let other_server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Files {
+                    cert_file: other_cert_file,
+                    key_file: other_key_file,
+                },
+            },
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+
+    let other_ca_file = write_pem(
+        "cafiles-ca-2",
+        &rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca-2".to_owned()])
+            .expect("ca params")
+            .self_signed(&rcgen::KeyPair::generate().expect("ca2 keypair"))
+            .expect("self-signed ca2 cert")
+            .pem(),
+    );
+    let other_url = format!("wss://{}/ocpp/CS001", bound_addr(&other_server).await);
+    let mut untrusted = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url: other_url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::CaFiles {
+                    ca_files: vec![other_ca_file],
+                },
+            },
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok; the dial happens inside the task");
+    assert!(
+        untrusted.join().await.is_err(),
+        "a server cert not signed by the named CA (and not a webpki root) must be rejected"
+    );
+    other_server
+        .terminate()
+        .await
+        .expect("server terminate failed");
 }

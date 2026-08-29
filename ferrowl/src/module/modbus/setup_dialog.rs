@@ -57,10 +57,10 @@ pub struct SetupValues {
     pub read_ranges: ReadRanges,
     /// The device config's `tls` setting (MB-R-104). `None` when the TLS section is hidden
     /// (RTU transport, MB-R-112) — a hidden section must never clobber a device config's
-    /// existing setting. `Some(None)` means shown-and-explicitly-off; `Some(Some(cfg))` means
-    /// shown at a level above Off. Mirrors `reconnect`'s hidden-vs-explicit shape one level
-    /// deeper (the value itself, not just whether to touch it, is optional).
-    pub tls: Option<Option<ModbusTlsConfig>>,
+    /// existing setting. `Some(cfg)` means shown, with `cfg` both-`None` when the level is Off
+    /// (MB-R-104's two-role container makes "off" a value of `ModbusTlsConfig` itself, not a
+    /// separate `Option` layer).
+    pub tls: Option<ModbusTlsConfig>,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
@@ -668,7 +668,7 @@ impl SetupDialog {
         ) {
             let level = self.tls_level.state.get_value();
             if level == TlsLevel::Off {
-                Some(None)
+                Some(ModbusTlsConfig::default())
             } else {
                 // MB-R-135/136/139: `build_config` resolves the active role's policy directly
                 // from the raw text together with the toggle widgets (self_signed/skip_verify/
@@ -705,7 +705,7 @@ impl SetupDialog {
                 validate_tls(&cfg, role, level, &|p| {
                     ferrowl_util::path::expand(p).exists()
                 })?;
-                Some(Some(cfg))
+                Some(cfg)
             }
         } else {
             None
@@ -1129,13 +1129,13 @@ mod tests {
         // The widest client-role shape: verifying, explicit-identity mTLS renders the CA-file
         // input and the client cert/key pair, which SkipVerify/SelfSigned would hide.
         let tls = ModbusTlsConfig {
-            client: ferrowl_util::tls::ClientTlsPolicy::MutualTls {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("ca.pem".to_string()),
+            client: ferrowl_util::tls::ClientTlsPolicy::Mutual {
+                verification: ferrowl_util::tls::CertVerification::RootStore {
+                    extra_ca_files: vec!["ca.pem".to_string()],
                 },
-                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
-                    client_cert_file: "client.crt".to_string(),
-                    client_key_file: "client.key".to_string(),
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: "client.crt".to_string(),
+                    key_file: "client.key".to_string(),
                 },
             },
             ..ModbusTlsConfig::default()
@@ -1722,7 +1722,7 @@ mod tests {
         });
         set_input(&mut dialog.name, "dev");
         let outcome = dialog.resolve().unwrap();
-        assert_eq!(outcome.values.tls, Some(None));
+        assert_eq!(outcome.values.tls, Some(ModbusTlsConfig::default()));
     }
 
     #[test]
@@ -1740,11 +1740,11 @@ mod tests {
         dialog.tls.self_signed.state.set_selection(1); // On
         *dialog.tls.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                identity: ferrowl_util::tls::CertSource::SelfSigned {}
             }
         );
     }
@@ -1766,11 +1766,11 @@ mod tests {
         dialog.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                identity: ferrowl_util::tls::CertSource::SelfSigned {}
             }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
@@ -1795,11 +1795,11 @@ mod tests {
         dialog.tls.skip_verify.state.set_selection(1); // On, after the text was typed
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.client,
             ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify
+                verification: ferrowl_util::tls::CertVerification::Skip {}
             }
         );
         assert_eq!(dialog.tls.ca_file.state.input(), "ca.pem");
@@ -1830,11 +1830,11 @@ mod tests {
         dialog.tls.self_signed.state.set_selection(0); // Off again
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                identity: ferrowl_util::tls::CertSource::Files {
                     cert_file: cert,
                     key_file: key,
                 }

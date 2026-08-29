@@ -191,7 +191,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         };
         // The sender must be returned alongside the handle and kept alive by the caller for as
         // long as the server should keep running: the shared server core treats the command
@@ -242,7 +242,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 50,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         };
         let operations = std::sync::Arc::new(tokio::sync::RwLock::new(vec![Operation {
             slave_id: UnitId(1),

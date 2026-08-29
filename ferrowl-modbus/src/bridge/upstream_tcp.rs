@@ -140,7 +140,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         }
     }
 

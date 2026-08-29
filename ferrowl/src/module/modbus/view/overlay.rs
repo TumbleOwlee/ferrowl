@@ -18,7 +18,7 @@ pub(super) enum PendingAction {
         original_name: String,
     },
     Delete(String),
-    ApplySetup(SetupValues),
+    ApplySetup(Box<SetupValues>),
 }
 
 /// Internal register-edit/add overlay state.

@@ -11,7 +11,7 @@ use ferrowl_modbus::rtu_over_tcp;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
-use ferrowl_util::tls::{ClientTlsPolicy, ClientVerification, ServerCertSource, ServerTlsPolicy};
+use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -72,7 +72,7 @@ fn config(port: u16, tls: tcp::ModbusTlsConfig) -> tcp::Config {
         delay_ms: 0,
         interval_ms: 0,
         reconnect: true,
-        tls: Some(tls),
+        tls,
     }
 }
 
@@ -87,7 +87,7 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
     // Server: an ephemeral self-signed cert (`self_signed = true`, no cert_file/key_file).
     let server_tls = tcp::ModbusTlsConfig {
         server: ServerTlsPolicy::Tls {
-            server_cert: ServerCertSource::SelfSigned,
+            identity: CertSource::SelfSigned {},
         },
         ..Default::default()
     };
@@ -110,7 +110,7 @@ async fn rtu_over_tcp_client_server_tls_roundtrip() {
     // tcp_tls_client.rs tests already cover in depth).
     let client_tls = tcp::ModbusTlsConfig {
         client: ClientTlsPolicy::Tls {
-            client_verification: ClientVerification::SkipVerify,
+            verification: CertVerification::Skip {},
         },
         ..Default::default()
     };
@@ -172,7 +172,7 @@ async fn rtu_over_tcp_tls_handshake_failure_is_connect_failure() {
         plain_addr.port(),
         tcp::ModbusTlsConfig {
             client: ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::SkipVerify,
+                verification: CertVerification::Skip {},
             },
             ..Default::default()
         },

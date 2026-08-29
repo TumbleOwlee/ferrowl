@@ -41,11 +41,11 @@ pub struct Config {
     #[arg(long, default_value_t = true)]
     pub reconnect: bool,
 
-    /// TLS material for this endpoint. Unset (the default) keeps the endpoint on
-    /// plain TCP (MB-R-104).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// TLS material for this endpoint: a two-role container, both policies defaulting to
+    /// `None` (MB-R-104).
+    #[serde(default, skip_serializing_if = "ModbusTlsConfig::is_none")]
     #[arg(skip)]
-    pub tls: Option<ModbusTlsConfig>,
+    pub tls: ModbusTlsConfig,
 }
 
 fn default_reconnect() -> bool {
@@ -53,36 +53,28 @@ fn default_reconnect() -> bool {
 }
 
 impl Config {
-    /// This endpoint's server-role TLS policy (MB-R-105): `NoTls` when `tls` is unset at all,
-    /// otherwise the flattened `server` field of whatever's configured — never read when this
-    /// endpoint runs as a client.
+    /// This endpoint's server-role TLS policy (MB-R-104): the container's own `server` field —
+    /// never read when this endpoint runs as a client, and treated as inert if it is anything
+    /// other than `None` while this endpoint runs as a client.
     pub(crate) fn server_tls_policy(&self) -> ferrowl_util::tls::ServerTlsPolicy {
-        self.tls
-            .as_ref()
-            .map_or(ferrowl_util::tls::ServerTlsPolicy::NoTls, |t| {
-                t.server.clone()
-            })
+        self.tls.server.clone()
     }
 
-    /// This endpoint's client-role TLS policy (MB-R-105): `NoTls` when `tls` is unset at all,
-    /// otherwise the flattened `client` field of whatever's configured — never read when this
-    /// endpoint runs as a server.
+    /// This endpoint's client-role TLS policy (MB-R-104): the container's own `client` field —
+    /// never read when this endpoint runs as a server.
     pub(crate) fn client_tls_policy(&self) -> ferrowl_util::tls::ClientTlsPolicy {
-        self.tls
-            .as_ref()
-            .map_or(ferrowl_util::tls::ClientTlsPolicy::NoTls, |t| {
-                t.client.clone()
-            })
+        self.tls.client.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
-    /// MB-R-104 — a `tcp::Config` with no `tls` key deserializes with `tls: None`.
+    /// MB-R-104 — a `tcp::Config` with no `tls` key deserializes both policies to `None`.
     #[test]
-    fn ut_tcp_config_tls_absent_deserializes_to_none() {
+    fn ut_tcp_config_tls_absent_deserializes_to_default() {
         let json = r#"{
             "ip": "127.0.0.1",
             "port": 502,
@@ -91,13 +83,13 @@ mod tests {
             "interval_ms": 0
         }"#;
         let cfg: Config = serde_json::from_str(json).expect("deserializes");
-        assert_eq!(cfg.tls, None);
+        assert!(cfg.tls.is_none());
     }
 
-    /// MB-R-104, MB-R-105 — a `tcp::Config` with a full `tls` object deserializes
-    /// into the matching `Some(ModbusTlsConfig { .. })`.
+    /// MB-R-104, MB-R-105 — a `tcp::Config` with a full block-form `tls` object deserializes
+    /// into the matching two-role container, and round-trips back through TOML unchanged.
     #[test]
-    fn ut_tcp_config_tls_present_deserializes() {
+    fn ut_tcp_config_tls_block_roundtrips() {
         let json = r#"{
             "ip": "127.0.0.1",
             "port": 502,
@@ -105,75 +97,39 @@ mod tests {
             "delay_ms": 0,
             "interval_ms": 0,
             "tls": {
-                "ca_file": "ca.pem",
-                "cert_file": "cert.pem",
-                "key_file": "key.pem",
-                "client_cert_file": "client.pem",
-                "client_key_file": "client-key.pem",
-                "client_ca_file": "client-ca.pem",
-                "require_client_cert": true,
-                "self_signed": false,
-                "insecure_skip_verify": true
+                "server": {
+                    "mode": "mutual",
+                    "identity": {"source": "files", "cert_file": "cert.pem", "key_file": "key.pem"},
+                    "verification": {"verify": "ca-files", "ca_files": ["client-ca.pem"]}
+                },
+                "client": {
+                    "mode": "tls",
+                    "verification": {"verify": "skip"}
+                }
             }
         }"#;
         let cfg: Config = serde_json::from_str(json).expect("deserializes");
-        let tls = cfg.tls.expect("tls present");
-        // Both cert_file/key_file are set and self_signed is false, so server_cert resolves
-        // Explicit; require_client_cert is true and no client_cert_skip_verify was given, so the
-        // legacy singular client_ca_file backfills client_ca_files (MB-R-136 backward compat).
         assert_eq!(
-            tls.server,
-            ferrowl_util::tls::ServerTlsPolicy::MutualTls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+            cfg.tls.server,
+            ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: "cert.pem".to_string(),
                     key_file: "key.pem".to_string(),
                 },
-                client_verification: ferrowl_util::tls::ClientCertVerification::Verify {
+                verification: CertVerification::CaFiles {
                     ca_files: vec!["client-ca.pem".to_string()],
                 },
             }
         );
-        // insecure_skip_verify wins over ca_file (MB-R-109); client_cert_file/client_key_file
-        // are both set, so the client role resolves MutualTls too, presenting that identity.
         assert_eq!(
-            tls.client,
-            ferrowl_util::tls::ClientTlsPolicy::MutualTls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
-                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
-                    client_cert_file: "client.pem".to_string(),
-                    client_key_file: "client-key.pem".to_string(),
-                },
+            cfg.tls.client,
+            ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
             }
         );
-    }
 
-    /// MB-R-136 — the legacy singular `client_ca_file` field (pre-multi-CA) still deserializes
-    /// through `tcp::Config`'s nested `ModbusTlsConfig`, unchanged by the addition of the
-    /// plural `client_ca_files` field.
-    #[test]
-    fn ut_tcp_config_tls_legacy_singular_client_ca_file_deserializes() {
-        let json = r#"{
-            "ip": "127.0.0.1",
-            "port": 502,
-            "timeout_ms": 3000,
-            "delay_ms": 0,
-            "interval_ms": 0,
-            "tls": {
-                "self_signed": true,
-                "require_client_cert": true,
-                "client_ca_file": "client-ca.pem"
-            }
-        }"#;
-        let cfg: Config = serde_json::from_str(json).expect("deserializes");
-        let tls = cfg.tls.expect("tls present");
-        assert_eq!(
-            tls.server,
-            ferrowl_util::tls::ServerTlsPolicy::MutualTls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
-                client_verification: ferrowl_util::tls::ClientCertVerification::Verify {
-                    ca_files: vec!["client-ca.pem".to_string()],
-                },
-            }
-        );
+        let json = serde_json::to_string(&cfg.tls).expect("serialize json");
+        let back: super::ModbusTlsConfig = serde_json::from_str(&json).expect("deserialize json");
+        assert_eq!(cfg.tls, back);
     }
 }

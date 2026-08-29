@@ -15,7 +15,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
-use ferrowl_util::tls::{ClientCertVerification, ServerCertSource, ServerTlsPolicy};
+use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
 use rcgen::{CertificateParams, Issuer, KeyPair};
@@ -114,7 +114,7 @@ fn config(port: u16, tls: tcp::ModbusTlsConfig) -> tcp::Config {
         delay_ms: 0,
         interval_ms: 0,
         reconnect: true,
-        tls: Some(tls),
+        tls,
     }
 }
 
@@ -142,11 +142,20 @@ async fn raw_connect(
 }
 
 #[tokio::test]
-/// MB-R-106 — with none of `cert_file`/`key_file`/`self_signed` set, the server falls
-/// back to an ephemeral self-signed certificate, and logs that fallback.
+/// MB-R-106/OC-R-095 — with an `Ephemeral` identity (the variant standing for "no TLS
+/// material configured"), the server falls back to an ephemeral self-signed certificate,
+/// and logs that fallback.
 async fn self_signed_fallback_is_used_and_logged() {
     let port = free_port();
-    let cfg = Arc::new(RwLock::new(config(port, tcp::ModbusTlsConfig::default())));
+    let cfg = Arc::new(RwLock::new(config(
+        port,
+        tcp::ModbusTlsConfig {
+            server: ServerTlsPolicy::Tls {
+                identity: CertSource::Ephemeral {},
+            },
+            ..Default::default()
+        },
+    )));
     let (log, captured) = capturing();
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let (server, _bound_addr) =
@@ -178,15 +187,15 @@ async fn self_signed_fallback_is_used_and_logged() {
 }
 
 #[tokio::test]
-/// MB-R-106 — an explicit `self_signed: true` uses a self-signed certificate without
-/// logging the "no configuration" fallback line.
+/// MB-R-106/OC-R-095 — an explicit `SelfSigned` identity uses a self-signed certificate
+/// without logging the "no configuration" fallback line.
 async fn explicit_self_signed_is_used_without_fallback_log() {
     let port = free_port();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
             server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned,
+                identity: CertSource::SelfSigned {},
             },
             ..Default::default()
         },
@@ -214,99 +223,32 @@ async fn explicit_self_signed_is_used_without_fallback_log() {
             .lock()
             .iter()
             .any(|line| line.contains("self-signed")),
-        "expected no fallback log line when self_signed was explicitly requested, got: {:?}",
+        "expected no fallback log line when SelfSigned was explicitly requested, got: {:?}",
         captured.lock()
     );
 
     server.abort();
 }
 
-#[tokio::test]
-/// MB-R-106 (new precedence) — `self_signed` wins unconditionally over `cert_file`/`key_file`
-/// present in the same config: the server presents an ephemeral self-signed certificate, not
-/// the one from the (structurally unreachable) explicit files, and no fallback log line is
-/// produced since `self_signed` was explicitly requested.
-async fn self_signed_wins_over_explicit_files() {
-    let (cert_pem, key_pem) = self_signed_pem();
-    let cert_file = write_pem("explicit-cert", &cert_pem);
-    let key_file = write_pem("explicit-key", &key_pem);
-
-    let port = free_port();
-    let cfg = Arc::new(RwLock::new(config(
-        port,
-        tcp::ModbusTlsConfig {
-            server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::SelfSigned,
-            },
-            ..Default::default()
-        },
-    )));
-    // `cert_file`/`key_file` are structurally unreachable on `ServerCertSource::SelfSigned` —
-    // the files written above exist only to prove they are never consulted.
-    let _ = (&cert_file, &key_file);
-
-    let (log, captured) = capturing();
-    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
-    let (server, _bound_addr) =
-        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
-            .spawn(srv_rx, log, sink())
-            .await
-            .expect("server should start with self_signed");
-
-    // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
-    // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
-    // unlike the ferrowl client, never retries.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-
-    // A client trusting only the (unused) explicit cert fails: the server presents a different,
-    // ephemeral certificate.
-    assert!(
-        raw_connect(addr, Some(&cert_pem), None).await.is_err(),
-        "server must not present the explicit cert_file when self_signed is set"
-    );
-    // A client with verification disabled still connects: the server did present *some*
-    // certificate (the ephemeral self-signed one), it just isn't the explicit one.
-    raw_connect(addr, None, None)
-        .await
-        .expect("server should present an ephemeral self-signed cert");
-
-    assert!(
-        !captured
-            .lock()
-            .iter()
-            .any(|line| line.contains("self-signed")),
-        "expected no fallback log line when self_signed was explicitly requested, got: {:?}",
-        captured.lock()
-    );
-
-    server.abort();
-}
-
-/// MB-R-107 (new timing) — `cert_file` or `key_file` set alone (not both), with `self_signed`
-/// unset, fails at config *deserialization*, not server start: `ServerCertSource`'s custom
-/// `Deserialize` makes the illegal state impossible to construct at all (see `ferrowl-util`'s
-/// `ServerCertSource::resolve`), so `tcp::Config` never even parses. `ModbusTlsConfig`'s typed
-/// Rust constructor cannot represent "cert_file alone" (there is no `Explicit`-with-only-
-/// one-file variant), which is exactly the point: this is a compile-time-unrepresentable
-/// state, not just a runtime-checked one.
+/// MB-R-107 — `CertSource::Files` naming only `cert_file` (or only `key_file`) fails at config
+/// *deserialization*: the type's own required fields make the illegal state unrepresentable,
+/// so `tcp::Config` never even parses.
 #[test]
 fn lone_cert_or_key_file_fails_config_deserialization() {
     let cert_only = r#"{"ip":"127.0.0.1","port":0,"timeout_ms":1000,"delay_ms":0,
-        "interval_ms":0,"tls":{"cert_file":"whatever.pem"}}"#;
+        "interval_ms":0,"tls":{"server":{"mode":"tls","identity":{"source":"files","cert_file":"whatever.pem"}}}}"#;
     let result: Result<tcp::Config, _> = serde_json::from_str(cert_only);
     assert!(result.is_err(), "cert_file alone must fail to deserialize");
 
     let key_only = r#"{"ip":"127.0.0.1","port":0,"timeout_ms":1000,"delay_ms":0,
-        "interval_ms":0,"tls":{"key_file":"whatever.pem"}}"#;
+        "interval_ms":0,"tls":{"server":{"mode":"tls","identity":{"source":"files","key_file":"whatever.pem"}}}}"#;
     let result: Result<tcp::Config, _> = serde_json::from_str(key_only);
     assert!(result.is_err(), "key_file alone must fail to deserialize");
 }
 
 #[tokio::test]
-/// MB-R-108 — `require_client_cert` accepts a client signed by the configured CA,
-/// and rejects one presenting none or one signed by an unrelated CA.
+/// MB-R-108 — `Mutual`'s `CaFiles` verification accepts a client signed by the configured
+/// CA, and rejects one presenting none or one signed by an unrelated CA.
 async fn require_client_cert_enforced() {
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem("mtls-server-cert", &server_cert_pem);
@@ -322,12 +264,12 @@ async fn require_client_cert_enforced() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: server_cert_file.clone(),
                     key_file: server_key_file,
                 },
-                client_verification: ClientCertVerification::Verify {
+                verification: CertVerification::CaFiles {
                     ca_files: vec![ca_file],
                 },
             },
@@ -387,11 +329,11 @@ async fn require_client_cert_enforced() {
 }
 
 #[tokio::test]
-/// MB-R-108 — server-role `SkipVerify` (`ClientCertVerification::SkipVerify`) still requires a
-/// client certificate be presented (a handshake with none fails, same as `Verify`), but performs
-/// no chain/identity validation against any root store: a client presenting a certificate signed
-/// by nobody the server trusts (a bare self-signed cert, not chained to any configured CA — here
-/// there is no CA configured at all) is still accepted.
+/// MB-R-108 — server-role `Skip` still requires a client certificate be presented (a
+/// handshake with none fails, same as `CaFiles`), but performs no chain/identity validation
+/// against any root store: a client presenting a certificate signed by nobody the server
+/// trusts (a bare self-signed cert, not chained to any configured CA — here there is no CA
+/// configured at all) is still accepted.
 async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem("skip-verify-server-cert", &server_cert_pem);
@@ -404,12 +346,12 @@ async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: server_cert_file,
                     key_file: server_key_file,
                 },
-                client_verification: ClientCertVerification::SkipVerify,
+                verification: CertVerification::Skip {},
             },
             ..Default::default()
         },
@@ -440,7 +382,7 @@ async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
         }),
     )
     .await
-    .expect("SkipVerify must accept a presented certificate with no chain validation");
+    .expect("Skip must accept a presented certificate with no chain validation");
 
     // No client certificate presented at all: still rejected (see the TLS 1.3 client-side
     // completion quirk note in `require_client_cert_enforced` — the connect future can appear to
@@ -466,12 +408,12 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: server_cert_file.clone(),
                     key_file: server_key_file,
                 },
-                client_verification: ClientCertVerification::Verify {
+                verification: CertVerification::CaFiles {
                     ca_files: vec![ca_file],
                 },
             },
@@ -529,12 +471,12 @@ async fn require_client_cert_rejection_is_logged() {
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: server_cert_file.clone(),
                     key_file: server_key_file,
                 },
-                client_verification: ClientCertVerification::Verify {
+                verification: CertVerification::CaFiles {
                     ca_files: vec![ca_file],
                 },
             },
@@ -587,29 +529,23 @@ async fn require_client_cert_rejection_is_logged() {
 }
 
 #[tokio::test]
-/// MB-R-108 — with `require_client_cert` unset (false), a configured `client_ca_file`
-/// is ignored: a client presenting no certificate at all is still accepted.
-async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
+/// MB-R-108 — `Tls` never requests a client certificate at all: a client presenting none is
+/// still accepted, regardless of what verification `Mutual` would otherwise apply.
+async fn it_tls_policy_never_requests_a_client_certificate() {
     let (server_cert_pem, server_key_pem) = self_signed_pem();
-    let server_cert_file = write_pem("no-require-server-cert", &server_cert_pem);
-    let server_key_file = write_pem("no-require-server-key", &server_key_pem);
-
-    let (ca_pem, ..) = ca_and_signed_client_pem();
-    let _ca_file = write_pem("no-require-ca", &ca_pem);
+    let server_cert_file = write_pem("no-mtls-server-cert", &server_cert_pem);
+    let server_key_file = write_pem("no-mtls-server-key", &server_key_pem);
 
     let port = free_port();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
             server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Explicit {
+                identity: CertSource::Files {
                     cert_file: server_cert_file,
                     key_file: server_key_file,
                 },
             },
-            // client_ca_file is not even representable here: `Tls` (require_client_cert
-            // unset) carries no client_verification field at all, so a configured CA is
-            // structurally ignored rather than merely unread at runtime.
             ..Default::default()
         },
     )));
@@ -618,7 +554,7 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
         tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
             .spawn(srv_rx, sink(), sink())
             .await
-            .expect("server should start: a client_ca_file without require_client_cert is valid");
+            .expect("server should start: Tls never requests a client certificate");
 
     // `spawn()` only guarantees the task was scheduled, not that its first bind/TLS-config
     // attempt has run yet (MB-R-130/MB-R-134); give it a moment before a raw connect that,
@@ -628,25 +564,51 @@ async fn client_ca_file_is_ignored_when_require_client_cert_is_unset() {
     let addr: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     raw_connect(addr, Some(&server_cert_pem), None)
         .await
-        .expect("a client presenting no certificate should be accepted");
+        .expect("a client presenting no certificate should be accepted under Tls");
 
     server.abort();
 }
 
-/// MB-R-108 (new timing) — `require_client_cert` without any `client_ca_files`/`client_ca_file`
-/// now fails at config *deserialization*, not server start: `ClientCertVerification`'s custom
-/// `Deserialize` (via `ServerTlsPolicy`'s) makes the illegal "empty ca_files" state impossible to
-/// construct from JSON at all — mirrors `lone_cert_or_key_file_fails_config_deserialization`
-/// above for MB-R-107.
-#[test]
-fn require_client_cert_without_ca_fails_config_deserialization() {
-    let json = r#"{"ip":"127.0.0.1","port":0,"timeout_ms":1000,"delay_ms":0,
-        "interval_ms":0,"tls":{"self_signed":true,"require_client_cert":true}}"#;
-    let result: Result<tcp::Config, _> = serde_json::from_str(json);
-    assert!(
-        result.is_err(),
-        "require_client_cert without any CA must fail to deserialize"
-    );
+#[tokio::test]
+/// MB-R-108 — `Mutual`'s `CaFiles { ca_files: [] }` is rejected by `validate()` before the
+/// server ever binds, surfacing as the same TLS-configuration-error tier as a malformed PEM.
+async fn it_empty_ca_files_fails_server_start() {
+    let (cert_pem, key_pem) = self_signed_pem();
+    let cert_file = write_pem("empty-ca-server-cert", &cert_pem);
+    let key_file = write_pem("empty-ca-server-key", &key_pem);
+
+    let cfg = Arc::new(RwLock::new(config(
+        free_port(),
+        tcp::ModbusTlsConfig {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
+                    cert_file,
+                    key_file,
+                },
+                verification: CertVerification::CaFiles { ca_files: vec![] },
+            },
+            ..Default::default()
+        },
+    )));
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound_addr) =
+        tcp::ServerBuilder::new(cfg, memory(), tcp::new_self_signed_cache())
+            .spawn(rx, sink(), sink())
+            .await
+            .expect("spawn always returns Ok");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("task should end promptly on a rejected policy, not hang")
+        .expect("task must not panic");
+    match result {
+        Err(ferrowl_modbus::Error::Tcp(ferrowl_modbus::TcpError::Configuration(msg))) => {
+            assert!(
+                msg.contains("ca_files"),
+                "expected the empty-ca_files rejection message, got: {msg}"
+            );
+        }
+        other => panic!("expected TcpError::Configuration naming ca_files, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -663,7 +625,7 @@ async fn malformed_pem_fails_server_start() {
         free_port(),
         tcp::ModbusTlsConfig {
             server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Explicit {
+                identity: CertSource::Files {
                     cert_file: bad_cert,
                     key_file,
                 },

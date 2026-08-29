@@ -81,7 +81,7 @@ fn config(url: String, reconnect: bool) -> Arc<RwLock<cs::Config>> {
         reconnect,
         timeout_ms: 1000,
         basic_auth: None,
-        tls: None,
+        tls: Default::default(),
     }))
 }
 
@@ -178,7 +178,7 @@ async fn cs_config_reread_on_every_dial() {
             timeout_ms: 1000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )

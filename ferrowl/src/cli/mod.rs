@@ -519,15 +519,14 @@ pub fn parse_bridge_descriptor(
     Ok(ferrowl_modbus::bridge::BridgeEndpointSpec { kind, unit_ids })
 }
 
-/// BR-R-011 — the `tls` field set (MB-R-104–111 field names), tcp-only. This mini-language is
-/// flat (`key=val,key=val`), unlike JSON's nested `"tls": {...}` object, so each field is its
-/// own top-level descriptor key exactly as spelled in [`ferrowl_modbus::tcp::ModbusTlsConfig`]
-/// (no `tls_` prefix — the field names are already unambiguous against the other descriptor
-/// keys). "Opt-in" (MB-R-104): `tls` stays `None` unless at least one of these nine keys is
-/// present in the descriptor.
+/// BR-R-011 — the `tls` field set, built onto the tagged-enum types (MB-R-105) from the flat
+/// descriptor key names (`self_signed`, `cert_file`, `key_file`, `client_cert_file`,
+/// `client_key_file`, `client_ca_file`, `require_client_cert`, `ca_file`,
+/// `insecure_skip_verify`). "Opt-in" (MB-R-104): the container's two policies stay `None` unless
+/// at least one of these nine keys is present.
 fn build_descriptor_tls(
     get: &impl Fn(&str) -> Option<String>,
-) -> Result<Option<ferrowl_modbus::tcp::ModbusTlsConfig>, String> {
+) -> Result<ferrowl_modbus::tcp::ModbusTlsConfig, String> {
     let any_present = [
         "ca_file",
         "cert_file",
@@ -542,7 +541,7 @@ fn build_descriptor_tls(
     .iter()
     .any(|k| get(k).is_some());
     if !any_present {
-        return Ok(None);
+        return Ok(ferrowl_modbus::tcp::ModbusTlsConfig::default());
     }
     let parse_bool = |k: &str| -> Result<bool, String> {
         match get(k).as_deref() {
@@ -554,47 +553,51 @@ fn build_descriptor_tls(
             )),
         }
     };
-    let server_cert = ferrowl_util::tls::ServerCertSource::resolve(
-        parse_bool("self_signed")?,
-        get("cert_file"),
-        get("key_file"),
-    )?;
+    let self_signed = parse_bool("self_signed")?;
+    let identity = match (self_signed, get("cert_file"), get("key_file")) {
+        (true, _, _) => ferrowl_util::tls::CertSource::SelfSigned {},
+        (false, Some(cert_file), Some(key_file)) => ferrowl_util::tls::CertSource::Files {
+            cert_file,
+            key_file,
+        },
+        (false, None, None) => ferrowl_util::tls::CertSource::Ephemeral {},
+        (false, _, _) => {
+            return Err("cert_file and key_file must both be set, or neither".to_string());
+        }
+    };
     // Both `server` and `client` are always present regardless of which role this endpoint
     // turns out to be (MB-R-105) — the descriptor's fields map 1:1 onto whichever half a
     // downstream/upstream role actually consults; the other half is simply inert.
     let server = if parse_bool("require_client_cert")? {
         let ca_files = get("client_ca_file").into_iter().collect::<Vec<_>>();
-        ferrowl_util::tls::ServerTlsPolicy::MutualTls {
-            server_cert,
-            client_verification: ferrowl_util::tls::ClientCertVerification::resolve(
-                false, ca_files,
-            )?,
+        if ca_files.is_empty() {
+            return Err("ca_files must be non-empty".to_string());
+        }
+        ferrowl_util::tls::ServerTlsPolicy::Mutual {
+            identity: identity.clone(),
+            verification: ferrowl_util::tls::CertVerification::CaFiles { ca_files },
         }
     } else {
-        ferrowl_util::tls::ServerTlsPolicy::Tls { server_cert }
+        ferrowl_util::tls::ServerTlsPolicy::Tls { identity }
     };
-    let client_verification = ferrowl_util::tls::ClientVerification::resolve(
-        parse_bool("insecure_skip_verify")?,
-        get("ca_file"),
-    );
-    let client = match (get("client_cert_file"), get("client_key_file")) {
-        (Some(client_cert_file), Some(client_key_file)) => {
-            ferrowl_util::tls::ClientTlsPolicy::MutualTls {
-                client_verification,
-                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
-                    client_cert_file,
-                    client_key_file,
-                },
-            }
+    let verification = if parse_bool("insecure_skip_verify")? {
+        ferrowl_util::tls::CertVerification::Skip {}
+    } else {
+        ferrowl_util::tls::CertVerification::RootStore {
+            extra_ca_files: get("ca_file").into_iter().collect(),
         }
-        _ => ferrowl_util::tls::ClientTlsPolicy::Tls {
-            client_verification,
-        },
     };
-    Ok(Some(ferrowl_modbus::tcp::ModbusTlsConfig {
-        server,
-        client,
-    }))
+    let client = match (get("client_cert_file"), get("client_key_file")) {
+        (Some(cert_file), Some(key_file)) => ferrowl_util::tls::ClientTlsPolicy::Mutual {
+            verification,
+            identity: ferrowl_util::tls::CertSource::Files {
+                cert_file,
+                key_file,
+            },
+        },
+        _ => ferrowl_util::tls::ClientTlsPolicy::Tls { verification },
+    };
+    Ok(ferrowl_modbus::tcp::ModbusTlsConfig { server, client })
 }
 
 #[cfg(test)]
@@ -1262,7 +1265,7 @@ mod tests {
                 ferrowl_modbus::bridge::BridgeEndpointKind::AsciiOverTcp(cfg) => cfg.tls,
                 _ => panic!("expected an over-tcp variant"),
             };
-            assert!(tls.is_some(), "{transport} must accept tls fields");
+            assert!(!tls.is_none(), "{transport} must accept tls fields");
         }
     }
 
@@ -1293,7 +1296,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls` stays `None` unless at least one tls key is present.
+    /// BR-R-011 — `tls` stays both-`None` unless at least one tls key is present.
     fn ut_parse_bridge_descriptor_tls_opt_in() {
         let no_tls = parse_bridge_descriptor("port=502").unwrap();
         match no_tls.kind {
@@ -1304,11 +1307,10 @@ mod tests {
         let with_tls = parse_bridge_descriptor("port=502,self_signed=true").unwrap();
         match with_tls.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
-                let tls = cfg.tls.expect("tls present");
                 assert_eq!(
-                    tls.server,
+                    cfg.tls.server,
                     ferrowl_util::tls::ServerTlsPolicy::Tls {
-                        server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                        identity: ferrowl_util::tls::CertSource::SelfSigned {}
                     }
                 );
             }
@@ -1325,11 +1327,10 @@ mod tests {
                 .unwrap();
         match parsed.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
-                let tls = cfg.tls.expect("tls present");
                 assert_eq!(
-                    tls.server,
+                    cfg.tls.server,
                     ferrowl_util::tls::ServerTlsPolicy::Tls {
-                        server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                        identity: ferrowl_util::tls::CertSource::SelfSigned {}
                     }
                 );
             }

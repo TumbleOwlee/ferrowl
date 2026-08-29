@@ -8,10 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use ferrowl_util::tls::{
-    ClientCertSource, ClientCertVerification, ClientTlsPolicy, ClientVerification,
-    ServerCertSource, ServerTlsPolicy,
-};
+use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use parking_lot::Mutex;
 use rust_modbus::{
     ClientCertPolicy, ClientIdentity, RootStore, ServerCertVerification, TlsClientConfig,
@@ -22,28 +19,24 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::TcpError;
 
-/// TLS material for a Modbus/TCP endpoint (MB-R-105): a role-pure `server` policy (consulted
+/// TLS material for a Modbus/TCP endpoint (MB-R-104): a role-pure `server` policy (consulted
 /// only when this endpoint runs as a server) and a role-pure `client` policy (consulted only
-/// when this endpoint runs as a client) — both fields are always present on the wire (flattened
-/// siblings), even though only one is read at any given call site.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+/// when this endpoint runs as a client), both always present as a two-role container since a
+/// device config records no role.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ModbusTlsConfig {
-    #[serde(flatten)]
     pub server: ServerTlsPolicy,
-    #[serde(flatten)]
     pub client: ClientTlsPolicy,
 }
 
-impl Default for ModbusTlsConfig {
-    fn default() -> Self {
-        ModbusTlsConfig {
-            server: ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Unset,
-            },
-            client: ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::Verify { ca_file: None },
-            },
-        }
+impl ModbusTlsConfig {
+    /// MB-R-104 — an absent `tls` block, an empty one, and one whose two policies are both
+    /// `None` denote the same state; this is what `#[serde(skip_serializing_if)]` checks so a
+    /// saved file stays free of two dead tables.
+    pub fn is_none(&self) -> bool {
+        matches!(self.server, ServerTlsPolicy::None {})
+            && matches!(self.client, ClientTlsPolicy::None {})
     }
 }
 
@@ -119,11 +112,10 @@ impl AsyncWrite for ClientStream {
     }
 }
 
-/// Resolve a self-signed pair via the cache/regenerate rule (MB-R-106/MB-R-138, shared design —
-/// `## Shared` in the tls-mtls-role-split plan): reused whenever the resolved source stays
-/// self-signed, regenerated the first time or after any transition away from self-signed cleared
-/// it. `PrivateKeyDer` is not `Clone` (by design, `rustls-pki-types` 1.15.1); `clone_key()` is
-/// its explicit deep-copy escape hatch, used on every cache hit.
+/// Resolve a self-signed pair via the cache/regenerate rule (MB-R-106/MB-R-138): reused whenever
+/// the resolved source stays self-signed, regenerated the first time or after any transition
+/// away from self-signed cleared it. `PrivateKeyDer` is not `Clone` (by design, `rustls-pki-types`
+/// 1.15.1); `clone_key()` is its explicit deep-copy escape hatch, used on every cache hit.
 fn resolve_self_signed(
     host: &str,
     cache: &SelfSignedCache,
@@ -137,46 +129,60 @@ fn resolve_self_signed(
     Ok((chain, key))
 }
 
-/// Build the `rust_modbus` client TLS config from a resolved [`ClientTlsPolicy`]: `NoTls` means
+/// Build the `rust_modbus` client TLS config from a resolved [`ClientTlsPolicy`]: `None {}` means
 /// this endpoint runs plain TCP entirely (no `TlsClientConfig` built at all — `Ok(None)`).
-/// `Tls`/`MutualTls` build server-certificate verification identically (MB-R-109: skip-verify
-/// wins over `ca_file`, never combined); `MutualTls` additionally presents a client identity —
-/// `Explicit` loads from disk, `SelfSigned` generates/reuses via the cache rule (MB-R-138).
+/// `Tls`/`Mutual` build server-certificate verification identically per the `CertVerification`
+/// mapping (MB-R-109); `Mutual` additionally presents a client identity — `Files` loads from
+/// disk, `SelfSigned` generates/reuses via the cache rule (MB-R-138); `Ephemeral` is rejected by
+/// `validate()` before either builder runs (MB-R-110).
 pub(crate) fn build_client_tls_config(
     policy: &ClientTlsPolicy,
     cache: &SelfSignedCache,
 ) -> Result<Option<TlsClientConfig>, TcpError> {
-    let (client_verification, client_identity_source) = match policy {
-        ClientTlsPolicy::NoTls => return Ok(None),
-        ClientTlsPolicy::Tls {
-            client_verification,
-        } => (client_verification, None),
-        ClientTlsPolicy::MutualTls {
-            client_verification,
-            client_identity,
-        } => (client_verification, Some(client_identity)),
+    policy
+        .validate()
+        .map_err(|e| TcpError::Configuration(e.to_string()))?;
+    let (verification, identity_source) = match policy {
+        ClientTlsPolicy::None {} => return Ok(None),
+        ClientTlsPolicy::Tls { verification } => (verification, None),
+        ClientTlsPolicy::Mutual {
+            verification,
+            identity,
+        } => (verification, Some(identity)),
     };
-    let server_cert = match client_verification {
-        ClientVerification::SkipVerify => ServerCertVerification::DangerousDisableVerification,
-        ClientVerification::Verify { ca_file } => {
+    let server_cert = match verification {
+        CertVerification::Skip {} => ServerCertVerification::DangerousDisableVerification,
+        CertVerification::RootStore { extra_ca_files } => {
             let mut roots = RootStore::native();
-            if let Some(path) = ca_file {
+            for path in extra_ca_files {
+                roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
+            }
+            ServerCertVerification::Verify(roots)
+        }
+        CertVerification::CaFiles { ca_files } => {
+            let mut roots = RootStore::empty();
+            for path in ca_files {
                 roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
             }
             ServerCertVerification::Verify(roots)
         }
     };
-    let client_identity = match client_identity_source {
-        Some(ClientCertSource::Explicit {
-            client_cert_file,
-            client_key_file,
+    let client_identity = match identity_source {
+        Some(CertSource::Files {
+            cert_file,
+            key_file,
         }) => Some(ClientIdentity {
-            cert_chain: load_pem_cert_chain(&read_pem(client_cert_file)?).map_err(map_tls_err)?,
-            key: load_pem_private_key(&read_pem(client_key_file)?).map_err(map_tls_err)?,
+            cert_chain: load_pem_cert_chain(&read_pem(cert_file)?).map_err(map_tls_err)?,
+            key: load_pem_private_key(&read_pem(key_file)?).map_err(map_tls_err)?,
         }),
-        Some(ClientCertSource::SelfSigned) => {
+        Some(CertSource::SelfSigned {}) => {
             let (cert_chain, key) = resolve_self_signed("ferrowl-modbus-client", cache)?;
             Some(ClientIdentity { cert_chain, key })
+        }
+        Some(CertSource::Ephemeral {}) => {
+            return Err(TcpError::Configuration(
+                ferrowl_util::tls::PolicyError::EphemeralClientIdentity.to_string(),
+            ));
         }
         None => None,
     };
@@ -186,23 +192,20 @@ pub(crate) fn build_client_tls_config(
     }))
 }
 
-/// Resolve the server's presented certificate per MB-R-106, and whether an
-/// ephemeral self-signed certificate was used *without* being explicitly
-/// requested (the caller logs that case). `self_signed` wins unconditionally over
-/// `cert_file`/`key_file` (edge-cases.md "TLS boundaries") — enforced by
-/// `ServerCertSource` at construction (MB-R-107), so the "one set, not the other"
-/// case is unrepresentable here and needs no error arm.
+/// Resolve the server's presented certificate per MB-R-106, and whether an ephemeral
+/// self-signed certificate was used *without* being explicitly requested (the caller logs that
+/// case).
 pub(crate) fn resolve_server_identity(
-    server_cert: &ServerCertSource,
+    identity: &CertSource,
     bind_host: &str,
     cache: &SelfSignedCache,
 ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, bool), TcpError> {
-    match server_cert {
-        ServerCertSource::SelfSigned => {
+    match identity {
+        CertSource::SelfSigned {} => {
             let (chain, k) = resolve_self_signed(bind_host, cache)?;
             Ok((chain, k, false))
         }
-        ServerCertSource::Explicit {
+        CertSource::Files {
             cert_file,
             key_file,
         } => {
@@ -224,7 +227,7 @@ pub(crate) fn resolve_server_identity(
             let k = rust_modbus::load_pem_private_key(&read_pem(key_file)?).map_err(map_tls_err)?;
             Ok((chain, k, false))
         }
-        ServerCertSource::Unset => {
+        CertSource::Ephemeral {} => {
             let (chain, k) = resolve_self_signed(bind_host, cache)?;
             Ok((chain, k, true))
         }
@@ -258,15 +261,16 @@ fn generate_self_signed(
     Ok((vec![cert_der], key_der))
 }
 
-/// Build the full `rust_modbus` server TLS config from a resolved [`ServerTlsPolicy`]: `NoTls`
+/// Build the full `rust_modbus` server TLS config from a resolved [`ServerTlsPolicy`]: `None {}`
 /// means this endpoint runs plain TCP entirely (`Ok(None)`, caller binds a bare `TcpListener`).
-/// `Tls` never requests a client certificate (`ClientCertPolicy::None`) — `MutualTls` is the
-/// sole trigger, in either verification mode (MB-R-108). `MutualTls`'s `Verify{ca_files}` trusts
-/// a client certificate signed by *any one* of the configured CAs (`RootStore::add_pem` called
-/// once per file, accumulating into one trust store — MB-R-108/MB-R-136's "any one is
-/// sufficient, not all").
+/// `Tls` never requests a client certificate (`ClientCertPolicy::None`) — `Mutual` is the sole
+/// trigger, in either verification mode (MB-R-108). `Mutual`'s `CaFiles{ca_files}` trusts a
+/// client certificate signed by *any one* of the configured CAs (`RootStore::add_pem` called once
+/// per file, accumulating into one trust store — MB-R-108/MB-R-136's "any one is sufficient, not
+/// all"). `RootStore` verification is rejected by `validate()` before either builder runs
+/// (MB-R-108).
 ///
-/// `MutualTls`'s `SkipVerify` ("require a client cert but skip chain validation") maps to
+/// `Mutual`'s `Skip {}` ("require a client cert but skip chain validation") maps to
 /// `ClientCertPolicy::AllowAny` — added upstream at
 /// <https://github.com/TumbleOwlee/rust-modbus/issues/40> (rev pinned in the workspace
 /// `Cargo.toml` includes the fix) specifically to cover this case: a handshake presenting no
@@ -277,25 +281,33 @@ pub(crate) fn build_server_tls_config(
     bind_host: &str,
     cache: &SelfSignedCache,
 ) -> Result<Option<(TlsServerConfig, bool)>, TcpError> {
-    let (server_cert, client_verification) = match policy {
-        ServerTlsPolicy::NoTls => return Ok(None),
-        ServerTlsPolicy::Tls { server_cert } => (server_cert, None),
-        ServerTlsPolicy::MutualTls {
-            server_cert,
-            client_verification,
-        } => (server_cert, Some(client_verification)),
+    policy
+        .validate()
+        .map_err(|e| TcpError::Configuration(e.to_string()))?;
+    let (identity, verification) = match policy {
+        ServerTlsPolicy::None {} => return Ok(None),
+        ServerTlsPolicy::Tls { identity } => (identity, None),
+        ServerTlsPolicy::Mutual {
+            identity,
+            verification,
+        } => (identity, Some(verification)),
     };
-    let (cert_chain, key, used_fallback) = resolve_server_identity(server_cert, bind_host, cache)?;
-    let client_certs = match client_verification {
+    let (cert_chain, key, used_fallback) = resolve_server_identity(identity, bind_host, cache)?;
+    let client_certs = match verification {
         None => ClientCertPolicy::None,
-        Some(ClientCertVerification::Verify { ca_files }) => {
+        Some(CertVerification::CaFiles { ca_files }) => {
             let mut roots = RootStore::empty();
             for ca in ca_files {
                 roots.add_pem(&read_pem(ca)?).map_err(map_tls_err)?;
             }
             ClientCertPolicy::Require(roots)
         }
-        Some(ClientCertVerification::SkipVerify) => ClientCertPolicy::AllowAny,
+        Some(CertVerification::Skip {}) => ClientCertPolicy::AllowAny,
+        Some(CertVerification::RootStore { .. }) => {
+            return Err(TcpError::Configuration(
+                ferrowl_util::tls::PolicyError::RootStoreOnServer.to_string(),
+            ));
+        }
     };
     Ok(Some((
         TlsServerConfig {
@@ -347,55 +359,44 @@ mod tests {
         (cert.pem(), key.serialize_pem())
     }
 
-    /// MB-R-105 — `ModbusTlsConfig`'s default resolves both roles to their off/unset `Tls`
-    /// state (never `NoTls` — that variant is only produced by the outer `Option` accessor).
+    /// MB-R-104 — `ModbusTlsConfig`'s default is both policies `None`, and `is_none()` holds for
+    /// it.
     #[test]
-    fn ut_modbus_tls_config_defaults() {
-        use ferrowl_util::tls::{
-            ClientTlsPolicy, ClientVerification, ServerCertSource, ServerTlsPolicy,
-        };
-
+    fn ut_modbus_tls_config_defaults_to_both_none() {
         let cfg = ModbusTlsConfig::default();
-        assert_eq!(
-            cfg.server,
-            ServerTlsPolicy::Tls {
-                server_cert: ServerCertSource::Unset
-            }
-        );
-        assert_eq!(
-            cfg.client,
-            ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::Verify { ca_file: None }
-            }
-        );
+        assert!(cfg.is_none());
     }
 
-    /// MB-R-110 — a client identity is presented only under `MutualTls`; a bare `Tls` policy
-    /// never presents one, regardless of what would otherwise be configured.
+    /// MB-R-110 — a client identity is presented only under `Mutual`; a bare `Tls` policy never
+    /// presents one, regardless of what would otherwise be configured.
     #[test]
-    fn ut_build_client_tls_config_identity_only_under_mutual_tls() {
+    fn ut_build_client_tls_config_identity_only_under_mutual() {
         use super::build_client_tls_config;
-        use ferrowl_util::tls::{ClientCertSource, ClientTlsPolicy, ClientVerification};
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
 
         let cache = new_self_signed_cache();
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cert_file = write_pem("cert", &cert_pem);
         let key_file = write_pem("key", &key_pem);
 
-        let mtls = ClientTlsPolicy::MutualTls {
-            client_verification: ClientVerification::Verify { ca_file: None },
-            client_identity: ClientCertSource::Explicit {
-                client_cert_file: cert_file,
-                client_key_file: key_file,
+        let mtls = ClientTlsPolicy::Mutual {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+            identity: CertSource::Files {
+                cert_file,
+                key_file,
             },
         };
         let built = build_client_tls_config(&mtls, &cache)
             .expect("builds")
-            .expect("Some, MutualTls is TLS");
+            .expect("Some, Mutual is TLS");
         assert!(built.client_identity.is_some());
 
         let tls_only = ClientTlsPolicy::Tls {
-            client_verification: ClientVerification::Verify { ca_file: None },
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
         };
         let built = build_client_tls_config(&tls_only, &cache)
             .expect("builds")
@@ -403,31 +404,55 @@ mod tests {
         assert!(built.client_identity.is_none());
     }
 
-    /// MB-R-104 — `NoTls` builds nothing at all: the caller runs plain TCP.
+    /// MB-R-110 — `Mutual` with `CertSource::Files` presents a non-empty chain as the client
+    /// identity.
     #[test]
-    fn ut_build_client_tls_config_no_tls_builds_none() {
+    fn ut_build_client_tls_config_mutual_files_presents_pair() {
+        use super::build_client_tls_config;
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
+
+        let cache = new_self_signed_cache();
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let cert_file = write_pem("cert2", &cert_pem);
+        let key_file = write_pem("key2", &key_pem);
+        let policy = ClientTlsPolicy::Mutual {
+            verification: CertVerification::Skip {},
+            identity: CertSource::Files {
+                cert_file,
+                key_file,
+            },
+        };
+        let built = build_client_tls_config(&policy, &cache)
+            .expect("builds")
+            .expect("Some");
+        let identity = built.client_identity.expect("Some, Mutual presents one");
+        assert!(!identity.cert_chain.is_empty());
+    }
+
+    /// MB-R-104 — `None {}` builds nothing at all: the caller runs plain TCP.
+    #[test]
+    fn ut_build_client_tls_config_none_builds_none() {
         use super::build_client_tls_config;
         use ferrowl_util::tls::ClientTlsPolicy;
 
         let cache = new_self_signed_cache();
-        let built = build_client_tls_config(&ClientTlsPolicy::NoTls, &cache).expect("builds");
+        let built = build_client_tls_config(&ClientTlsPolicy::None {}, &cache).expect("builds");
         assert!(built.is_none());
     }
 
-    /// MB-R-109 — `SkipVerify` disables server certificate verification and ignores `ca_file`,
-    /// rather than combining the two.
+    /// MB-R-109 — `Skip` disables server certificate verification entirely.
     #[test]
-    fn ut_build_client_tls_config_client_verification_skip_wins() {
+    fn ut_build_client_tls_config_verification_skip() {
         use super::build_client_tls_config;
-        use ferrowl_util::tls::{ClientTlsPolicy, ClientVerification};
+        use ferrowl_util::tls::{CertVerification, ClientTlsPolicy};
         use rust_modbus::ServerCertVerification;
 
         let cache = new_self_signed_cache();
         let policy = ClientTlsPolicy::Tls {
-            client_verification: ClientVerification::SkipVerify,
+            verification: CertVerification::Skip {},
         };
         let built = build_client_tls_config(&policy, &cache)
-            .expect("builds despite no ca_file")
+            .expect("builds despite no ca_files")
             .expect("Some");
         assert!(matches!(
             built.server_cert,
@@ -438,14 +463,16 @@ mod tests {
     /// MB-R-138 — a `SelfSigned` client identity is generated once and reused across repeated
     /// calls sharing the same cache (cache hit, not a fresh key pair each time).
     #[test]
-    fn ut_build_client_tls_config_self_signed_identity_reuses_cache() {
+    fn ut_build_client_tls_config_self_signed_identity_uses_cache() {
         use super::build_client_tls_config;
-        use ferrowl_util::tls::{ClientCertSource, ClientTlsPolicy, ClientVerification};
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
 
         let cache: SelfSignedCache = new_self_signed_cache();
-        let policy = ClientTlsPolicy::MutualTls {
-            client_verification: ClientVerification::Verify { ca_file: None },
-            client_identity: ClientCertSource::SelfSigned,
+        let policy = ClientTlsPolicy::Mutual {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+            identity: CertSource::SelfSigned {},
         };
         let first = build_client_tls_config(&policy, &cache)
             .expect("builds")
@@ -463,33 +490,32 @@ mod tests {
         );
     }
 
-    /// MB-R-106 — a `SelfSigned` server_cert never reads cert_file/key_file (there are none in
-    /// the variant) and is not the fallback (used_fallback == false: it was explicitly asked
-    /// for).
+    /// MB-R-106 — a `SelfSigned` identity never reads cert_file/key_file (there are none in the
+    /// variant) and is not the fallback (used_fallback == false: it was explicitly asked for).
     #[test]
-    fn ut_resolve_server_identity_self_signed_variant_never_reads_disk() {
+    fn ut_resolve_server_identity_self_signed() {
         use super::resolve_server_identity;
-        use ferrowl_util::tls::ServerCertSource;
+        use ferrowl_util::tls::CertSource;
 
         let cache = new_self_signed_cache();
         let (_chain, _key, used_fallback) =
-            resolve_server_identity(&ServerCertSource::SelfSigned, "localhost", &cache)
+            resolve_server_identity(&CertSource::SelfSigned {}, "localhost", &cache)
                 .expect("self-signed generation succeeds");
         assert!(!used_fallback);
     }
 
-    /// MB-R-106 — an `Explicit` server_cert loads exactly the named cert/key PEM files.
+    /// MB-R-106 — a `Files` identity loads exactly the named cert/key PEM files.
     #[test]
-    fn ut_resolve_server_identity_explicit_variant_loads_files() {
+    fn ut_resolve_server_identity_files() {
         use super::resolve_server_identity;
-        use ferrowl_util::tls::ServerCertSource;
+        use ferrowl_util::tls::CertSource;
 
         let cache = new_self_signed_cache();
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cert_file = write_pem("srv-cert", &cert_pem);
         let key_file = write_pem("srv-key", &key_pem);
 
-        let source = ServerCertSource::Explicit {
+        let source = CertSource::Files {
             cert_file,
             key_file,
         };
@@ -499,55 +525,55 @@ mod tests {
         assert!(!used_fallback);
     }
 
-    /// MB-R-106 — an `Unset` server_cert falls back to an ephemeral self-signed certificate and
+    /// MB-R-106 — an `Ephemeral` identity falls back to an ephemeral self-signed certificate and
     /// flags the fallback so the caller can log it.
     #[test]
-    fn ut_resolve_server_identity_unset_variant_falls_back_and_flags_it() {
+    fn ut_resolve_server_identity_ephemeral() {
         use super::resolve_server_identity;
-        use ferrowl_util::tls::ServerCertSource;
+        use ferrowl_util::tls::CertSource;
 
         let cache = new_self_signed_cache();
         let (_chain, _key, used_fallback) =
-            resolve_server_identity(&ServerCertSource::Unset, "localhost", &cache)
+            resolve_server_identity(&CertSource::Ephemeral {}, "localhost", &cache)
                 .expect("falls back to self-signed");
         assert!(used_fallback);
     }
 
-    /// MB-R-106 (cache reuse) — a `SelfSigned` server_cert reuses the cached pair across repeat
+    /// MB-R-106 (cache reuse) — a `SelfSigned` identity reuses the cached pair across repeat
     /// calls sharing the same cache, rather than regenerating a fresh key pair each time.
     #[test]
     fn ut_resolve_server_identity_self_signed_reuses_cached_pair_across_calls() {
         use super::resolve_server_identity;
-        use ferrowl_util::tls::ServerCertSource;
+        use ferrowl_util::tls::CertSource;
 
         let cache = new_self_signed_cache();
         let (chain1, _key1, _) =
-            resolve_server_identity(&ServerCertSource::SelfSigned, "localhost", &cache)
+            resolve_server_identity(&CertSource::SelfSigned {}, "localhost", &cache)
                 .expect("builds");
         let (chain2, _key2, _) =
-            resolve_server_identity(&ServerCertSource::SelfSigned, "localhost", &cache)
+            resolve_server_identity(&CertSource::SelfSigned {}, "localhost", &cache)
                 .expect("builds");
         assert_eq!(chain1, chain2, "cache hit reuses the same certificate");
     }
 
-    /// MB-R-106 (cache regen) — resolving `Explicit` clears the cache, so a later reversion to
+    /// MB-R-106 (cache regen) — resolving `Files` clears the cache, so a later reversion to
     /// `SelfSigned` regenerates fresh material rather than reusing anything from before the
     /// explicit interlude.
     #[test]
-    fn ut_resolve_server_identity_explicit_then_self_signed_regenerates() {
+    fn ut_resolve_server_identity_files_then_self_signed_regenerates() {
         use super::resolve_server_identity;
-        use ferrowl_util::tls::ServerCertSource;
+        use ferrowl_util::tls::CertSource;
 
         let cache = new_self_signed_cache();
         let (chain1, _key1, _) =
-            resolve_server_identity(&ServerCertSource::SelfSigned, "localhost", &cache)
+            resolve_server_identity(&CertSource::SelfSigned {}, "localhost", &cache)
                 .expect("builds");
 
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cert_file = write_pem("explicit-cert", &cert_pem);
         let key_file = write_pem("explicit-key", &key_pem);
         let _ = resolve_server_identity(
-            &ServerCertSource::Explicit {
+            &CertSource::Files {
                 cert_file,
                 key_file,
             },
@@ -557,37 +583,37 @@ mod tests {
         .expect("builds");
 
         let (chain2, _key2, _) =
-            resolve_server_identity(&ServerCertSource::SelfSigned, "localhost", &cache)
+            resolve_server_identity(&CertSource::SelfSigned {}, "localhost", &cache)
                 .expect("builds");
         assert_ne!(
             chain1, chain2,
-            "an explicit interlude must clear the cache, forcing regeneration"
+            "a Files interlude must clear the cache, forcing regeneration"
         );
     }
 
-    /// MB-R-104 — `NoTls` builds nothing at all: the caller binds a plain `TcpListener`.
+    /// MB-R-104 — `None {}` builds nothing at all: the caller binds a plain `TcpListener`.
     #[test]
-    fn ut_build_server_tls_config_no_tls_builds_none() {
+    fn ut_build_server_tls_config_none_builds_none() {
         use super::build_server_tls_config;
         use ferrowl_util::tls::ServerTlsPolicy;
 
         let cache = new_self_signed_cache();
-        let built =
-            build_server_tls_config(&ServerTlsPolicy::NoTls, "localhost", &cache).expect("builds");
+        let built = build_server_tls_config(&ServerTlsPolicy::None {}, "localhost", &cache)
+            .expect("builds");
         assert!(built.is_none());
     }
 
     /// MB-R-108 — a bare `Tls` policy never requests a client certificate at all
     /// (`ClientCertPolicy::None`), regardless of how verification would otherwise be configured.
     #[test]
-    fn ut_build_server_tls_config_tls_level_never_requests_client_cert() {
+    fn ut_build_server_tls_config_tls_never_requests_client_cert() {
         use super::build_server_tls_config;
-        use ferrowl_util::tls::{ServerCertSource, ServerTlsPolicy};
+        use ferrowl_util::tls::{CertSource, ServerTlsPolicy};
         use rust_modbus::ClientCertPolicy;
 
         let cache = new_self_signed_cache();
         let policy = ServerTlsPolicy::Tls {
-            server_cert: ServerCertSource::SelfSigned,
+            identity: CertSource::SelfSigned {},
         };
         let (built, _fallback) = build_server_tls_config(&policy, "localhost", &cache)
             .expect("builds")
@@ -595,14 +621,14 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::None));
     }
 
-    /// MB-R-108/MB-R-136 — `MutualTls`'s `Verify{ca_files}` trusts a client certificate signed
-    /// by any *one* of several configured CAs, not all of them: a chain signed only by the
-    /// second CA still resolves (config-resolution level; the actual handshake accept is proven
-    /// end-to-end by the loopback integration test).
+    /// MB-R-108/MB-R-136 — `Mutual`'s `CaFiles{ca_files}` trusts a client certificate signed by
+    /// any *one* of several configured CAs, not all of them: a chain signed only by the second CA
+    /// still resolves (config-resolution level; the actual handshake accept is proven end-to-end
+    /// by the loopback integration test).
     #[test]
     fn ut_build_server_tls_config_multi_ca_accumulates_into_one_root_store() {
         use super::build_server_tls_config;
-        use ferrowl_util::tls::{ClientCertVerification, ServerCertSource, ServerTlsPolicy};
+        use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
         use rust_modbus::ClientCertPolicy;
 
         let cache = new_self_signed_cache();
@@ -611,9 +637,9 @@ mod tests {
         let ca1 = write_pem("ca1", &ca1_pem);
         let ca2 = write_pem("ca2", &ca2_pem);
 
-        let policy = ServerTlsPolicy::MutualTls {
-            server_cert: ServerCertSource::SelfSigned,
-            client_verification: ClientCertVerification::Verify {
+        let policy = ServerTlsPolicy::Mutual {
+            identity: CertSource::SelfSigned {},
+            verification: CertVerification::CaFiles {
                 ca_files: vec![ca1, ca2],
             },
         };
@@ -623,25 +649,41 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::Require(_)));
     }
 
-    /// MB-R-108 — server-role `SkipVerify` maps to `ClientCertPolicy::AllowAny`: a client
-    /// certificate is still required (unlike `Tls`'s `ClientCertPolicy::None`), but no chain/
-    /// identity validation is performed against any root store. The actual handshake behavior
-    /// this produces (a presented-but-untrusted cert is accepted, no cert at all is rejected) is
+    /// MB-R-108 — server-role `Skip` maps to `ClientCertPolicy::AllowAny`: a client certificate
+    /// is still required (unlike `Tls`'s `ClientCertPolicy::None`), but no chain/identity
+    /// validation is performed against any root store. The actual handshake behavior this
+    /// produces (a presented-but-untrusted cert is accepted, no cert at all is rejected) is
     /// proven end-to-end by the loopback integration test in `tests/tcp_tls_server.rs`.
     #[test]
     fn ut_build_server_tls_config_skip_verify_maps_to_allow_any() {
         use super::build_server_tls_config;
-        use ferrowl_util::tls::{ClientCertVerification, ServerCertSource, ServerTlsPolicy};
+        use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
         use rust_modbus::ClientCertPolicy;
 
         let cache = new_self_signed_cache();
-        let policy = ServerTlsPolicy::MutualTls {
-            server_cert: ServerCertSource::SelfSigned,
-            client_verification: ClientCertVerification::SkipVerify,
+        let policy = ServerTlsPolicy::Mutual {
+            identity: CertSource::SelfSigned {},
+            verification: CertVerification::Skip {},
         };
         let (built, _fallback) = build_server_tls_config(&policy, "localhost", &cache)
             .expect("builds")
             .expect("Some");
         assert!(matches!(built.client_certs, ClientCertPolicy::AllowAny));
+    }
+
+    /// MB-R-108 — `RootStore` verification is rejected on a server before either builder runs.
+    #[test]
+    fn ut_server_policy_rejects_root_store_verification() {
+        use super::build_server_tls_config;
+        use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
+
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Mutual {
+            identity: CertSource::SelfSigned {},
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+        };
+        assert!(build_server_tls_config(&policy, "localhost", &cache).is_err());
     }
 }

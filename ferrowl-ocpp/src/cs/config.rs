@@ -20,9 +20,10 @@ pub struct Config {
     /// `tls` for Security Profile 2 (Basic Auth over TLS).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub basic_auth: Option<BasicAuth>,
-    /// TLS material for `wss://` URLs (Security Profiles 2 and 3). Ignored for `ws://` URLs.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<ClientTlsPolicy>,
+    /// TLS material for `wss://` URLs (Security Profiles 2 and 3); `None` for a plain
+    /// connection. Inert for `ws://` URLs (OC-R-042).
+    #[serde(default)]
+    pub tls: ClientTlsPolicy,
     /// Extra headers sent on the WebSocket upgrade request, in addition to the client's own
     /// (OC-R-117). Already validated at construction — see `HeaderDef::new`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
