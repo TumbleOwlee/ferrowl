@@ -109,11 +109,13 @@ mod tests {
 
     #[test]
     fn ut_builder_from_err_context_short_circuits() {
-        // An already-failed context is carried through unchanged, and further
-        // chained calls are no-ops.
+        // First error wins. The chained script is deliberately invalid Lua: a regression that ran
+        // later steps against an already-`Err` context would latch that syntax error over the
+        // original, so the surviving variant — not merely the presence of an error — is what
+        // distinguishes correct short-circuiting from an overwrite.
         let builder = ContextBuilder::<String>::from(Err(mlua::Error::BindError))
             .with_stdlib()
-            .with_script("k".to_string(), "local x = 1");
-        assert!(builder.build().is_err());
+            .with_script("k".to_string(), "this is not ! valid lua");
+        assert!(matches!(builder.build(), Err(mlua::Error::BindError)));
     }
 }
