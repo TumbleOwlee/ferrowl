@@ -16,11 +16,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh .claude/scripts/hook-guard-cat.sh"
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-cat.sh"
           },
           {
             "type": "command",
-            "command": "sh .claude/scripts/hook-guard-attribution.sh"
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-attribution.sh"
           }
         ]
       }
