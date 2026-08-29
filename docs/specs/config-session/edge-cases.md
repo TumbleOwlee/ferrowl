@@ -129,3 +129,11 @@ the per-register `update` field is never written back.
   either outcome is easy to miss because startup continues.
 - **`migrate` has no already-current guard.** §7: it unconditionally interprets its
   input as legacy, so it is only meaningful on pre-v0.4.0 `modbus-cli-rs` files.
+- **Retired TLS field** — a TLS block naming a pre-merge field fails the load with an
+  error naming the replacement, rather than being ignored under CS-R-052. Ignoring
+  them is not a neutral loss of a setting: dropping a server's
+  `require_client_cert`/`client_ca_files` would downgrade a mutual-TLS listener to
+  one accepting any client, silently and at startup. The remaining retired names
+  fail closed on their own — a client that stops presenting an identity, or stops
+  trusting a private CA, fails its handshake loudly — but are rejected alongside
+  them so one rule covers the block.

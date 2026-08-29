@@ -84,10 +84,31 @@ Fields of the TCP transport config, shared by the client and server roles.
 | `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
 | `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry a listener bind, serial-port open, or mid-serve failure with the same backoff instead of ending the server task (MB-R-130–134) |
-| `tls` | optional `ModbusTlsConfig` | unset | client+server | see requirements.md MB-R-104ff |
+| `tls` | `ModbusTlsConfig` | both policies `None` | client+server | two-role container, `[tls.server]`/`[tls.client]`; see requirements.md MB-R-104ff |
 
 When these fields are absent from a serialized config, `reconnect` defaults to
 `true`; the remaining fields have no serde defaults and must be present.
+
+Example TLS configuration, server side presenting a private-CA-issued identity
+under mTLS, client side trusting the platform root store plus one private CA:
+
+```toml
+[tls.server]
+mode = "mutual"
+[tls.server.identity]
+source = "files"
+cert_file = "/etc/ferrowl/server.crt"
+key_file  = "/etc/ferrowl/server.key"
+[tls.server.verification]
+verify = "ca-files"
+ca_files = ["/etc/ferrowl/fleet-ca.pem"]
+
+[tls.client]
+mode = "tls"
+[tls.client.verification]
+verify = "root-store"
+extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
+```
 
 The `RtuOverTcp` transport (tag value `rtu_over_tcp`) uses this exact same
 field table — no additions or removals.

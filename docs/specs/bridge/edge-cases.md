@@ -37,3 +37,11 @@ point-to-point upstream link.
 
 `--exit-on-error` uses exit code 3, distinct from the clap usage-error code
 (2), mirroring `run`'s scheme (see `cli-headless/edge-cases.md`).
+
+- **`;` inside a descriptor value** — a multi-file CA list is the one descriptor
+  value that carries its own delimiter, because `,` is already spent separating
+  keys and the merged `CertVerification` genuinely takes a list where the retired
+  `ca_file`/`client_ca_file` took one path. A path containing a literal `;` is
+  therefore unreachable through a descriptor; bridge mode is a CLI-only relay
+  (BR-R-002) with no config file to fall back on, and the alternative — a repeated
+  key — would break BR-R-004's one-key-one-value grammar for every other key too.
