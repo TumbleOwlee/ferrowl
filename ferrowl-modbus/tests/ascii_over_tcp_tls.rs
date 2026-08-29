@@ -10,7 +10,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::ascii_over_tcp;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use ferrowl_util::tls::{ClientTlsPolicy, ClientVerification, ServerCertSource, ServerTlsPolicy};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -41,7 +41,7 @@ fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -58,7 +58,7 @@ fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     Arc::new(MemLock::new(mem))

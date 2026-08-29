@@ -22,7 +22,7 @@ impl Slice {
     /// given access `kind`.
     pub fn from_range(kind: &CellKind, range: Range) -> Self {
         Self {
-            buffer: vec![Cell::default(kind); range.length()],
+            buffer: vec![Cell::zeroed(kind); range.length()],
             range,
         }
     }
@@ -32,11 +32,11 @@ impl Slice {
     pub fn from_value_range<'a>(kind: &CellKind, range: ValueRange<'a>) -> Self {
         Self {
             buffer: range
-                .get_values()
+                .values()
                 .iter()
                 .map(|v| Cell::from_u16(kind, *v))
                 .collect(),
-            range: range.get_range(),
+            range: range.range(),
         }
     }
 
@@ -47,7 +47,7 @@ impl Slice {
         if range.end == self.range.start {
             let mut buffer: Vec<Cell> = vec![];
             std::mem::swap(&mut buffer, &mut self.buffer);
-            self.buffer = itertools::repeat_n(Cell::default(kind), range.length())
+            self.buffer = itertools::repeat_n(Cell::zeroed(kind), range.length())
                 .chain(buffer)
                 .collect();
             self.range = Range::new(range.start, range.length() + self.range.length());
@@ -57,7 +57,7 @@ impl Slice {
             std::mem::swap(&mut buffer, &mut self.buffer);
             self.buffer = buffer
                 .into_iter()
-                .chain(itertools::repeat_n(Cell::default(kind), range.length()))
+                .chain(itertools::repeat_n(Cell::zeroed(kind), range.length()))
                 .collect();
             self.range = Range::new(self.range.start, range.length() + self.range.length());
             true
@@ -110,7 +110,7 @@ impl Slice {
         let ok = self.contains(range) && range.length() == values.len();
         if ok {
             for (mem, val) in self.cells_in_mut(range).zip(values.iter()) {
-                mem.set_value(*val);
+                mem.value = *val;
             }
         }
         ok
@@ -132,7 +132,7 @@ impl Slice {
         if !self.contains(range) {
             return None;
         }
-        Some(self.cells_in(range).map(Cell::value).collect())
+        Some(self.cells_in(range).map(|c| c.value).collect())
     }
 
     /// Returns `true` if `range` lies within the slice and every cell in it
@@ -145,31 +145,50 @@ impl Slice {
 #[cfg(test)]
 mod tests {
     use super::{Cell, CellKind, CellType, Range, Slice, ValueRange};
+    use crate::cell::Access;
 
     #[test]
     fn ut_slice_from_range() {
-        let slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
+        let slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for value in slice.buffer.iter() {
-            assert_eq!(*value, Cell::Read(CellType::Coil, 0));
+            assert_eq!(
+                *value,
+                Cell {
+                    kind: CellKind::read(CellType::Coil),
+                    value: 0,
+                }
+            );
         }
 
-        let slice = Slice::from_range(&CellKind::Write(CellType::Coil), Range::new(123, 45));
+        let slice = Slice::from_range(&CellKind::write(CellType::Coil), Range::new(123, 45));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for value in slice.buffer.iter() {
-            assert_eq!(*value, Cell::Write(CellType::Coil, 0));
+            assert_eq!(
+                *value,
+                Cell {
+                    kind: CellKind::write(CellType::Coil),
+                    value: 0,
+                }
+            );
         }
 
-        let slice = Slice::from_range(&CellKind::ReadWrite(CellType::Coil), Range::new(123, 45));
+        let slice = Slice::from_range(&CellKind::read_write(CellType::Coil), Range::new(123, 45));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for value in slice.buffer.iter() {
-            assert_eq!(*value, Cell::ReadWrite(CellType::Coil, 0));
+            assert_eq!(
+                *value,
+                Cell {
+                    kind: CellKind::read_write(CellType::Coil),
+                    value: 0,
+                }
+            );
         }
     }
 
@@ -177,80 +196,134 @@ mod tests {
     fn ut_slice_from_value_range() {
         let values: Vec<u16> = (1..46).collect();
         let slice = Slice::from_value_range(
-            &CellKind::Read(CellType::Coil),
+            &CellKind::read(CellType::Coil),
             ValueRange::new(123, &values),
         );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for (v1, v2) in slice.buffer.iter().zip(values) {
-            assert_eq!(*v1, Cell::Read(CellType::Coil, v2));
+            assert_eq!(
+                *v1,
+                Cell {
+                    kind: CellKind::read(CellType::Coil),
+                    value: v2,
+                }
+            );
         }
 
         let values: Vec<u16> = (1..46).collect();
         let slice = Slice::from_value_range(
-            &CellKind::Write(CellType::Coil),
+            &CellKind::write(CellType::Coil),
             ValueRange::new(123, &values),
         );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for (v1, v2) in slice.buffer.iter().zip(values) {
-            assert_eq!(*v1, Cell::Write(CellType::Coil, v2));
+            assert_eq!(
+                *v1,
+                Cell {
+                    kind: CellKind::write(CellType::Coil),
+                    value: v2,
+                }
+            );
         }
 
         let values: Vec<u16> = (1..46).collect();
         let slice = Slice::from_value_range(
-            &CellKind::ReadWrite(CellType::Coil),
+            &CellKind::read_write(CellType::Coil),
             ValueRange::new(123, &values),
         );
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
         for (v1, v2) in slice.buffer.iter().zip(values) {
-            assert_eq!(*v1, Cell::ReadWrite(CellType::Coil, v2));
+            assert_eq!(
+                *v1,
+                Cell {
+                    kind: CellKind::read_write(CellType::Coil),
+                    value: v2,
+                }
+            );
         }
     }
 
     #[test]
     /// MB-R-095 — extending a region with adjacent ranges merges them into one contiguous region.
     fn ut_slice_extend() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
         assert_eq!(slice.buffer.len(), 45);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 168);
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(168, 32)));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(168, 32)));
         assert_eq!(slice.buffer.len(), 77);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 200);
 
         for (idx, value) in slice.buffer.iter().enumerate() {
             if idx < 45 {
-                assert_eq!(*value, Cell::Read(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::read(CellType::Coil),
+                        value: 0,
+                    }
+                );
             } else {
-                assert_eq!(*value, Cell::Write(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::write(CellType::Coil),
+                        value: 0,
+                    }
+                );
             }
         }
 
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(200, 50)));
         assert_eq!(slice.buffer.len(), 127);
         assert_eq!(slice.range.start, 123);
         assert_eq!(slice.range.end, 250);
 
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(0, 123)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(0, 123)));
         assert_eq!(slice.buffer.len(), 250);
         assert_eq!(slice.range.start, 0);
         assert_eq!(slice.range.end, 250);
 
         for (idx, value) in slice.buffer.iter().enumerate() {
             if idx < 123 {
-                assert_eq!(*value, Cell::ReadWrite(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::read_write(CellType::Coil),
+                        value: 0,
+                    }
+                );
             } else if idx < 168 {
-                assert_eq!(*value, Cell::Read(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::read(CellType::Coil),
+                        value: 0,
+                    }
+                );
             } else if idx < 200 {
-                assert_eq!(*value, Cell::Write(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::write(CellType::Coil),
+                        value: 0,
+                    }
+                );
             } else if idx < 250 {
-                assert_eq!(*value, Cell::ReadWrite(CellType::Coil, 0));
+                assert_eq!(
+                    *value,
+                    Cell {
+                        kind: CellKind::read_write(CellType::Coil),
+                        value: 0,
+                    }
+                );
             } else {
                 unreachable!();
             }
@@ -260,10 +333,10 @@ mod tests {
     #[test]
     /// MB-R-033 — a range is writable only where its cells accept writes of the requested cell type.
     fn ut_slice_writable() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(250, 50)));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(168, 32)));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(250, 50)));
 
         assert!(!slice.writable(&CellType::Coil, &Range::new(130, 10)));
         assert!(slice.writable(&CellType::Coil, &Range::new(175, 10)));
@@ -274,10 +347,10 @@ mod tests {
     #[test]
     /// MB-R-033 — a checked write succeeds on writable cells and fails out of range or on the wrong type.
     fn ut_slice_write() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(250, 50)));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(168, 32)));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(250, 50)));
 
         let values: Vec<u16> = (1..21).collect();
         assert!(slice.write(&Range::new(175, 20), &values));
@@ -286,10 +359,10 @@ mod tests {
             .take(20)
             .zip(values.iter())
         {
-            match v1 {
-                Cell::Write(_, w) => assert_eq!(w, v2),
-                Cell::Read(_, _) => unreachable!(),
-                Cell::ReadWrite(_, rw) => assert_eq!(rw, v2),
+            match v1.kind.access {
+                Access::Write => assert_eq!(v1.value, *v2),
+                Access::Read => unreachable!(),
+                Access::ReadWrite => assert_eq!(v1.value, *v2),
             };
         }
 
@@ -300,10 +373,10 @@ mod tests {
             .take(20)
             .zip(values.iter())
         {
-            match v1 {
-                Cell::Write(_, w) => assert_eq!(w, v2),
-                Cell::Read(_, _) => unreachable!(),
-                Cell::ReadWrite(_, rw) => assert_eq!(rw, v2),
+            match v1.kind.access {
+                Access::Write => assert_eq!(v1.value, *v2),
+                Access::Read => unreachable!(),
+                Access::ReadWrite => assert_eq!(v1.value, *v2),
             };
         }
 
@@ -327,10 +400,10 @@ mod tests {
     #[test]
     /// MB-R-033 — a range is readable only where its cells accept reads of the requested cell type.
     fn ut_slice_readable() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(250, 50)));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(168, 32)));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(250, 50)));
 
         assert!(slice.readable(&CellType::Coil, &Range::new(130, 10)));
         assert!(!slice.readable(&CellType::Coil, &Range::new(175, 10)));
@@ -341,20 +414,20 @@ mod tests {
     #[test]
     /// MB-R-033 — a checked read returns readable cells and fails out of range.
     fn ut_slice_read() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(123, 45));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(168, 32)));
-        assert!(slice.extend(&CellKind::Write(CellType::Coil), &Range::new(200, 50)));
-        assert!(slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(250, 50)));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(123, 45));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(168, 32)));
+        assert!(slice.extend(&CellKind::write(CellType::Coil), &Range::new(200, 50)));
+        assert!(slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(250, 50)));
 
         let values: Vec<u16> = (1..21).collect();
         for (v1, v2) in slice.buffer[130 - slice.range.start..]
             .iter_mut()
             .zip(values)
         {
-            match v1 {
-                Cell::Write(_, _) => unreachable!(),
-                Cell::Read(_, r) => *r = v2,
-                Cell::ReadWrite(_, rw) => *rw = v2,
+            match v1.kind.access {
+                Access::Write => unreachable!(),
+                Access::Read => v1.value = v2,
+                Access::ReadWrite => v1.value = v2,
             };
         }
 
@@ -368,10 +441,10 @@ mod tests {
             .take(20)
             .zip(result.iter())
         {
-            match v1 {
-                Cell::Write(_, _) => unreachable!(),
-                Cell::Read(_, r) => assert_eq!(r, v2),
-                Cell::ReadWrite(_, rw) => assert_eq!(rw, v2),
+            match v1.kind.access {
+                Access::Write => unreachable!(),
+                Access::Read => assert_eq!(v1.value, *v2),
+                Access::ReadWrite => assert_eq!(v1.value, *v2),
             };
         }
 
@@ -380,10 +453,10 @@ mod tests {
             .iter_mut()
             .zip(values)
         {
-            match v1 {
-                Cell::Write(_, _) => unreachable!(),
-                Cell::Read(_, r) => *r = v2,
-                Cell::ReadWrite(_, rw) => *rw = v2,
+            match v1.kind.access {
+                Access::Write => unreachable!(),
+                Access::Read => v1.value = v2,
+                Access::ReadWrite => v1.value = v2,
             };
         }
 
@@ -397,10 +470,10 @@ mod tests {
             .take(20)
             .zip(result.iter())
         {
-            match v1 {
-                Cell::Write(_, _) => unreachable!(),
-                Cell::Read(_, r) => assert_eq!(r, v2),
-                Cell::ReadWrite(_, rw) => assert_eq!(rw, v2),
+            match v1.kind.access {
+                Access::Write => unreachable!(),
+                Access::Read => assert_eq!(v1.value, *v2),
+                Access::ReadWrite => assert_eq!(v1.value, *v2),
             };
         }
 
@@ -412,9 +485,9 @@ mod tests {
     #[test]
     /// MB-R-096 — a non-adjacent extend is a no-op, so regions never merge into an overlapping span.
     fn ut_slice_extend_non_adjacent() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(100, 10));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(100, 10));
         // Range neither ends at start nor starts at end -> no-op, returns false.
-        assert!(!slice.extend(&CellKind::Write(CellType::Coil), &Range::new(200, 10)));
+        assert!(!slice.extend(&CellKind::write(CellType::Coil), &Range::new(200, 10)));
         assert_eq!(slice.buffer.len(), 10);
         assert_eq!(slice.range, Range::new(100, 10));
     }
@@ -422,9 +495,9 @@ mod tests {
     #[test]
     /// MB-R-034 — an unchecked write forces values into read/write/read-only cells alike, within coverage.
     fn ut_slice_write_unchecked() {
-        let mut slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(0, 5));
-        slice.extend(&CellKind::Write(CellType::Coil), &Range::new(5, 3));
-        slice.extend(&CellKind::ReadWrite(CellType::Coil), &Range::new(8, 2));
+        let mut slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(0, 5));
+        slice.extend(&CellKind::write(CellType::Coil), &Range::new(5, 3));
+        slice.extend(&CellKind::read_write(CellType::Coil), &Range::new(8, 2));
 
         // Forces writes into Read, Write and ReadWrite cells alike.
         let values: Vec<u16> = (1..=10).collect();
@@ -440,7 +513,7 @@ mod tests {
     #[test]
     /// MB-R-034 — an unchecked read returns the stored value of write-only cells.
     fn ut_slice_read_unchecked() {
-        let mut slice = Slice::from_range(&CellKind::Write(CellType::Register), Range::new(0, 4));
+        let mut slice = Slice::from_range(&CellKind::write(CellType::Register), Range::new(0, 4));
         // Write-only cells are unreadable via read() but read_unchecked returns stored values.
         assert!(slice.read(&Range::new(0, 4)).is_none());
         assert!(slice.write(&Range::new(0, 4), &[11, 22, 33, 44]));
@@ -456,7 +529,7 @@ mod tests {
     #[test]
     /// MB-R-029 — addresses outside the declared region are neither readable nor writable.
     fn ut_slice_readable_out_of_range() {
-        let slice = Slice::from_range(&CellKind::Read(CellType::Coil), Range::new(10, 5));
+        let slice = Slice::from_range(&CellKind::read(CellType::Coil), Range::new(10, 5));
         assert!(!slice.readable(&CellType::Coil, &Range::new(0, 5)));
         assert!(!slice.writable(&CellType::Coil, &Range::new(0, 5)));
     }

@@ -3,7 +3,7 @@
 
 use ferrowl_codec::{Access, Address, Kind, Register};
 use ferrowl_modbus::{Address as WireAddress, Command, Key, SlaveKey, UnitId, Word};
-use ferrowl_store::{CellKind as MemKind, CellType, Range};
+use ferrowl_store::{CellKind, CellType, Range};
 
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType, WordOrderCfg,
@@ -28,14 +28,16 @@ pub(crate) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(Stri
 }
 
 /// Memory binding `(kind, key, range)` backing a fixed-address register, or `None` if virtual.
-pub(crate) fn register_mem_binding(register: &Register) -> Option<(MemKind, Key<SlaveKey>, Range)> {
+pub(crate) fn register_mem_binding(
+    register: &Register,
+) -> Option<(CellKind, Key<SlaveKey>, Range)> {
     let Address::Fixed(addr) = register.address() else {
         return None;
     };
     let ty = mem_type(register);
     let kind = match register.kind() {
-        Kind::Coil | Kind::HoldingRegister => MemKind::ReadWrite(ty),
-        Kind::DiscreteInput | Kind::InputRegister => MemKind::Read(ty),
+        Kind::Coil | Kind::HoldingRegister => CellKind::read_write(ty),
+        Kind::DiscreteInput | Kind::InputRegister => CellKind::read(ty),
     };
     let key = Key {
         id: SlaveKey {
@@ -228,22 +230,16 @@ mod tests {
     /// MB-R-078 — coil/holding bind read/write cells; discrete-input/input bind read-only cells.
     fn ut_register_mem_binding_kind_direction() {
         let bind = |k| register_mem_binding(&reg(k, Address::Fixed(2))).unwrap().0;
-        assert!(matches!(
-            bind(Kind::Coil),
-            MemKind::ReadWrite(CellType::Coil)
-        ));
-        assert!(matches!(
-            bind(Kind::DiscreteInput),
-            MemKind::Read(CellType::Coil)
-        ));
-        assert!(matches!(
+        assert_eq!(bind(Kind::Coil), CellKind::read_write(CellType::Coil));
+        assert_eq!(bind(Kind::DiscreteInput), CellKind::read(CellType::Coil));
+        assert_eq!(
             bind(Kind::HoldingRegister),
-            MemKind::ReadWrite(CellType::Register)
-        ));
-        assert!(matches!(
+            CellKind::read_write(CellType::Register)
+        );
+        assert_eq!(
             bind(Kind::InputRegister),
-            MemKind::Read(CellType::Register)
-        ));
+            CellKind::read(CellType::Register)
+        );
     }
 
     #[test]

@@ -130,7 +130,7 @@ mod tests {
     use super::*;
     use crate::bridge::service::BridgeService;
     use ferrowl_codec::Kind as RegKind;
-    use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+    use ferrowl_store::{CellKind, CellType, Memory, Range};
     use parking_lot::RwLock as MemLock;
     use rust_modbus::{
         Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, Rtu as RtuFraming,
@@ -268,7 +268,7 @@ mod tests {
         let mut mem = Memory::<crate::Key<crate::SlaveKey>>::default();
         mem.add_ranges(
             key(RegKind::HoldingRegister),
-            &MemKind::ReadWrite(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(
