@@ -1,12 +1,16 @@
 //! Data formats describing how raw register words are interpreted.
 
-/// Implements `Display` for an enum whose variants each map to one fixed literal string.
+/// Implements `Display` for an enum whose variants each map to one fixed literal string. The
+/// literal is written as an argument, never as the format string, so text containing `{` or `}`
+/// is emitted verbatim rather than parsed as a substitution. Passing it as an argument also means
+/// any literal is accepted, not only a string one; every current caller passes a string, and a
+/// non-string literal would simply render through its own `Display`.
 macro_rules! display_by_variant {
     ($ty:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
         impl std::fmt::Display for $ty {
             fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
-                    $($ty::$variant => write!(fmt, $text)),+
+                    $($ty::$variant => write!(fmt, "{}", $text)),+
                 }
             }
         }
@@ -305,6 +309,20 @@ mod tests {
     use super::{
         Alignment, BitField, Endian, FloatKind, Format, IntKind, Resolution, Width, WordOrder,
     };
+
+    /// A display literal is emitted verbatim, braces included — the macro passes it as an
+    /// argument, so it is never parsed as a format string. No current variant carries a brace;
+    /// this pins the property before one does.
+    #[test]
+    fn ut_display_by_variant_emits_braces_verbatim() {
+        #[derive(Debug)]
+        enum Braced {
+            Curly,
+        }
+        super::display_by_variant!(Braced { Curly => "{not a placeholder}" });
+
+        assert_eq!(Braced::Curly.to_string(), "{not a placeholder}");
+    }
 
     fn res() -> Resolution {
         Resolution(1.0)
