@@ -48,7 +48,7 @@ impl CellKind {
 
 impl Cell {
     /// Creates a zero-initialized cell with the access rights of `kind`.
-    pub fn default(kind: &CellKind) -> Self {
+    pub fn zeroed(kind: &CellKind) -> Self {
         Self::from_u16(kind, 0)
     }
 
@@ -123,12 +123,12 @@ impl<'a> ValueRange<'a> {
     }
 
     /// Returns the raw values.
-    pub fn get_values(&self) -> &'a [u16] {
+    pub fn values(&self) -> &'a [u16] {
         self.values
     }
 
     /// Returns the address range covered by the values.
-    pub fn get_range(&self) -> Range {
+    pub fn range(&self) -> Range {
         self.range.clone()
     }
 }
@@ -139,17 +139,17 @@ mod tests {
 
     #[test]
     /// MB-R-030 — a cell carries both a cell type and an access direction (read/write/read-write).
-    fn ut_value_default() {
+    fn ut_value_zeroed() {
         assert_eq!(
-            Cell::default(&CellKind::Read(CellType::Coil)),
+            Cell::zeroed(&CellKind::Read(CellType::Coil)),
             Cell::Read(CellType::Coil, 0)
         );
         assert_eq!(
-            Cell::default(&CellKind::Write(CellType::Coil)),
+            Cell::zeroed(&CellKind::Write(CellType::Coil)),
             Cell::Write(CellType::Coil, 0)
         );
         assert_eq!(
-            Cell::default(&CellKind::ReadWrite(CellType::Coil)),
+            Cell::zeroed(&CellKind::ReadWrite(CellType::Coil)),
             Cell::ReadWrite(CellType::Coil, 0)
         );
     }
@@ -198,7 +198,7 @@ mod tests {
     fn ut_value_range_accessors() {
         let values: Vec<u16> = vec![7, 8, 9];
         let range = ValueRange::new(50, &values);
-        assert_eq!(range.get_values(), &[7, 8, 9]);
-        assert_eq!(range.get_range(), crate::range::Range::new(50, 3));
+        assert_eq!(range.values(), &[7, 8, 9]);
+        assert_eq!(range.range(), crate::range::Range::new(50, 3));
     }
 }

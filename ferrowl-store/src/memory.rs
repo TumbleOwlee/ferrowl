@@ -173,7 +173,7 @@ where
 
     /// Returns `Ok(())` if every cell in `range` exists and accepts writes of type `ty`,
     /// otherwise returns [`MemoryError::UnknownKey`] or [`MemoryError::AddressNotWritable`].
-    pub fn writable(&mut self, id: &K, ty: &CellType, range: &Range) -> Result<(), MemoryError> {
+    pub fn writable(&self, id: &K, ty: &CellType, range: &Range) -> Result<(), MemoryError> {
         match self.slices.get(id) {
             Some(map) => {
                 if walk_slices(map, range, |slice, seg| slice.writable(ty, &seg)) {
@@ -299,18 +299,18 @@ mod tests {
     use crate::{Cell, CellKind, CellType, Memory, MemoryError, range::Range};
 
     #[test]
-    /// MB-R-030 — a default cell carries its cell type and access direction, zero-initialized.
+    /// MB-R-030 — a zero-initialized cell carries its cell type and access direction.
     fn ut_memory() {
         assert_eq!(
-            Cell::default(&CellKind::Read(CellType::Coil)),
+            Cell::zeroed(&CellKind::Read(CellType::Coil)),
             Cell::Read(CellType::Coil, 0)
         );
         assert_eq!(
-            Cell::default(&CellKind::Write(CellType::Coil)),
+            Cell::zeroed(&CellKind::Write(CellType::Coil)),
             Cell::Write(CellType::Coil, 0)
         );
         assert_eq!(
-            Cell::default(&CellKind::ReadWrite(CellType::Coil)),
+            Cell::zeroed(&CellKind::ReadWrite(CellType::Coil)),
             Cell::ReadWrite(CellType::Coil, 0)
         );
     }

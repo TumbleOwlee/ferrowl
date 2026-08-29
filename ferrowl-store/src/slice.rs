@@ -22,7 +22,7 @@ impl Slice {
     /// given access `kind`.
     pub fn from_range(kind: &CellKind, range: Range) -> Self {
         Self {
-            buffer: vec![Cell::default(kind); range.length()],
+            buffer: vec![Cell::zeroed(kind); range.length()],
             range,
         }
     }
@@ -32,11 +32,11 @@ impl Slice {
     pub fn from_value_range<'a>(kind: &CellKind, range: ValueRange<'a>) -> Self {
         Self {
             buffer: range
-                .get_values()
+                .values()
                 .iter()
                 .map(|v| Cell::from_u16(kind, *v))
                 .collect(),
-            range: range.get_range(),
+            range: range.range(),
         }
     }
 
@@ -47,7 +47,7 @@ impl Slice {
         if range.end == self.range.start {
             let mut buffer: Vec<Cell> = vec![];
             std::mem::swap(&mut buffer, &mut self.buffer);
-            self.buffer = itertools::repeat_n(Cell::default(kind), range.length())
+            self.buffer = itertools::repeat_n(Cell::zeroed(kind), range.length())
                 .chain(buffer)
                 .collect();
             self.range = Range::new(range.start, range.length() + self.range.length());
@@ -57,7 +57,7 @@ impl Slice {
             std::mem::swap(&mut buffer, &mut self.buffer);
             self.buffer = buffer
                 .into_iter()
-                .chain(itertools::repeat_n(Cell::default(kind), range.length()))
+                .chain(itertools::repeat_n(Cell::zeroed(kind), range.length()))
                 .collect();
             self.range = Range::new(self.range.start, range.length() + self.range.length());
             true
