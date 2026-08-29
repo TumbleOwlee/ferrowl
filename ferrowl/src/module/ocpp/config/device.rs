@@ -36,6 +36,7 @@ impl OcppTlsConfig {
 /// irrelevant to the instance's [`OcppRole`] is simply inert (same convention as the role-specific
 /// fields elsewhere in [`OcppDeviceConfig`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct OcppSecurityConfig {
     /// Basic Auth username. Client role: sent on connect. Server role: required to accept a
     /// connection (together with `password`).
@@ -668,5 +669,39 @@ mod tests {
         });
         let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
         assert_eq!(cfg.extra_headers, Vec::new());
+    }
+
+    /// CS-R-055 — a retired flat field beside the `security` table's defined members
+    /// (`username`, `password`, `tls`) fails the load rather than being silently ignored.
+    #[test]
+    fn ut_security_table_rejects_unknown_field() {
+        let json = serde_json::json!({
+            "username": "cp001",
+            "password": "s3cret",
+            "require_client_cert": true,
+        });
+        let err = serde_json::from_value::<OcppSecurityConfig>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `require_client_cert`"),
+            "got: {err}"
+        );
+    }
+
+    /// CS-R-055 — `username`/`password` remain defined members of `security` and are unaffected
+    /// by the strictness that governs the rest of the table.
+    #[test]
+    fn ut_security_table_accepts_username_password_beside_tls() {
+        let json = serde_json::json!({
+            "username": "cp001",
+            "password": "s3cret",
+            "tls": {
+                "server": {"mode": "none"},
+                "client": {"mode": "none"},
+            },
+        });
+        let cfg: OcppSecurityConfig = serde_json::from_value(json).expect("defined fields load");
+        assert_eq!(cfg.username, Some("cp001".into()));
+        assert_eq!(cfg.password, Some("s3cret".into()));
     }
 }

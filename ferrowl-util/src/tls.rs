@@ -419,4 +419,45 @@ mod tests {
             .is_ok()
         );
     }
+
+    /// CS-R-055 — a `None {}` policy block naming a retired flat field fails the load with an
+    /// unknown-field error, rather than silently discarding it under CS-R-052.
+    #[test]
+    fn ut_policy_rejects_unknown_field_in_none_block() {
+        let err =
+            toml::from_str::<ServerTlsPolicy>("mode = \"none\"\nrequire_client_cert = true\n")
+                .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `require_client_cert`"),
+            "got: {err}"
+        );
+    }
+
+    /// CS-R-055 — a `self-signed` `CertSource` naming a retired flat field (`client_self_signed`)
+    /// fails the load rather than being ignored.
+    #[test]
+    fn ut_cert_source_rejects_unknown_field_in_self_signed_block() {
+        let err =
+            toml::from_str::<CertSource>("source = \"self-signed\"\nclient_self_signed = true\n")
+                .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `client_self_signed`"),
+            "got: {err}"
+        );
+    }
+
+    /// CS-R-055 — a `skip` `CertVerification` naming `ca_files` (a field belonging only to the
+    /// `ca-files` variant) fails the load rather than being ignored.
+    #[test]
+    fn ut_verification_rejects_ca_files_under_skip() {
+        let err =
+            toml::from_str::<CertVerification>("verify = \"skip\"\nca_files = [\"ca.pem\"]\n")
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field `ca_files`"),
+            "got: {err}"
+        );
+    }
 }

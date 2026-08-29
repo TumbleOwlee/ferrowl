@@ -121,19 +121,11 @@ the per-register `update` field is never written back.
   compatibility shims"; no such shim exists — nothing keys off the version. Loading
   a file written by any past or future build behaves identically regardless of the
   stamped value. (CS-R-018, CS-R-022.)
-- **No strict field validation.** Because no config type rejects unknown fields, a
-  misspelled key is silently ignored and its intended field silently takes its
-  default. Hand-edited files get no feedback on typos.
+- **Strict field validation is scoped to the TLS subtree and the OCPP `security` table (CS-R-055).** Everywhere else, no config type rejects unknown fields, so a misspelled key outside them is silently ignored and its intended field silently takes its default, with no feedback on the typo.
 - **Missing Modbus device file drops the tab silently; missing OCPP device file
   degrades to defaults.** The asymmetry in §3 is by construction, not a mistake, but
   either outcome is easy to miss because startup continues.
 - **`migrate` has no already-current guard.** §7: it unconditionally interprets its
   input as legacy, so it is only meaningful on pre-v0.4.0 `modbus-cli-rs` files.
-- **Retired TLS field** — a TLS block naming a pre-merge field fails the load with an
-  error naming the replacement, rather than being ignored under CS-R-052. Ignoring
-  them is not a neutral loss of a setting: dropping a server's
-  `require_client_cert`/`client_ca_files` would downgrade a mutual-TLS listener to
-  one accepting any client, silently and at startup. The remaining retired names
-  fail closed on their own — a client that stops presenting an identity, or stops
-  trusting a private CA, fails its handshake loudly — but are rejected alongside
-  them so one rule covers the block.
+- **Retired TLS field** — a TLS block naming a pre-merge field fails the load with an error naming the retired fields found and the current block shape, rather than being ignored under CS-R-052. Ignoring them is not a neutral loss of a setting: dropping a server's `require_client_cert`/`client_ca_files` would downgrade a mutual-TLS listener to one accepting any client, silently and at startup. The remaining retired names fail closed on their own — a client that stops presenting an identity, or stops trusting a private CA, fails its handshake loudly — but are rejected alongside them so one rule covers the block.
+- **Retired-field scan is keyed off field names, not schema position.** The generic re-parse that phrases the retired-field error (CS-R-055) enters scope on any key literally named `tls` or `security`, at any depth in the document, not only at the known TLS-subtree positions — a register/script/module coincidentally named `tls` or `security` would be scanned as if it were a TLS container. No current schema uses either name for anything else, so this is a latent rather than live limitation. The scan does descend into array elements.
