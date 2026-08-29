@@ -1028,7 +1028,7 @@ mod tests {
     use crate::module::view::{CommandResult, ModuleView};
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
-    use ferrowl_codec::{Access, Address, Kind, RegisterBuilder, Value};
+    use ferrowl_codec::{Access, Address, Kind, NumericPrimitive, RegisterBuilder, Value};
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
@@ -1081,12 +1081,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         Definition::new("hold".to_string(), "d".to_string(), register, vec![])
@@ -1098,12 +1098,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         Definition::new("virt".to_string(), "d".to_string(), register, vec![])
@@ -1128,7 +1128,10 @@ mod tests {
         memory.write_unchecked(key, &Range::new(0, 1), &[42u16]);
         let empty_vs: HashMap<String, Value> = HashMap::new();
         let decoded = decode_definition(def, &memory, &empty_vs);
-        assert!(matches!(decoded.value, Value::U16((42, _))));
+        assert!(matches!(
+            decoded.value,
+            Value::Numeric(NumericPrimitive::U16(42), _)
+        ));
         assert_eq!(decoded.raw_value, "[002a]");
     }
 
@@ -1139,7 +1142,10 @@ mod tests {
         let memory = Memory::<Key<SlaveKey>>::default();
         let empty_vs: HashMap<String, Value> = HashMap::new();
         let decoded = decode_definition(def, &memory, &empty_vs);
-        assert!(matches!(decoded.value, Value::U16((0, _))));
+        assert!(matches!(
+            decoded.value,
+            Value::Numeric(NumericPrimitive::U16(0), _)
+        ));
     }
 
     #[test]
@@ -1148,9 +1154,12 @@ mod tests {
         let def = virtual_def();
         let memory = Memory::<Key<SlaveKey>>::default();
         let mut vs: HashMap<String, Value> = HashMap::new();
-        vs.insert("virt".into(), Value::U16((9, Resolution(1.0))));
+        vs.insert("virt".into(), Value::u16(9, Resolution(1.0)));
         let decoded = decode_definition(def, &memory, &vs);
-        assert!(matches!(decoded.value, Value::U16((9, _))));
+        assert!(matches!(
+            decoded.value,
+            Value::Numeric(NumericPrimitive::U16(9), _)
+        ));
         assert_eq!(decoded.raw_value, "[0009]");
     }
 

@@ -370,3 +370,7 @@ behavior, stated limitations).
 **MB-R-151** — The add/edit register dialog's Value and Default Value inputs shall be hidden and unfocusable for a `ReadOnly` register on a **client** module, since MB-R-091 excludes such a register from client-side writes and any value the user could type would go nowhere. On a **server** module, where MB-R-090 bypasses cell access checks, the inputs shall remain shown and editable regardless of the register's declared access.
 
 **MB-R-152** — A monitor module's displayed connection status shall follow the same three-state rule as a client module's (MB-R-137), substituting "serial port open" for "transport connected": `CONNECTED` while the port is open and being read; `RECONNECTING` while the monitor task is running but the port is not currently open (an open attempt in progress or a reconnect backoff wait, MB-R-130–MB-R-134, MB-R-141); `DISCONNECTED` while the monitor task is not running.
+
+**MB-R-154** — A format's display text shall be its format name followed by a parenthesized qualifier: for a numeric format the byte order (`Big Endian` or `Little Endian`), and for `Ascii` its alignment (`Left` or `Right`). The `Ascii` format shall display its name as `ASCII`; every other format displays the name given in the data contract's format table. Register order, resolution, and the bit-field selector shall not appear in the display text.
+
+**MB-R-155** — A codec error that names a format shall render it using the format's display text (MB-R-154), not a derived debug form.

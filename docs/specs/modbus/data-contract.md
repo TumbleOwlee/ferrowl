@@ -32,21 +32,21 @@ coil cell reports as set.
 
 Thirteen formats. Every one of them determines a fixed width in 16-bit registers.
 
-| Format | Width (registers) | Bytes | Signed | Endian | Bit-field | Resolution |
-|---|---|---|---|---|---|---|
-| `U8` | 1 | 2 | no | yes | yes | yes |
-| `I8` | 1 | 2 | yes | yes | yes | yes |
-| `U16` | 1 | 2 | no | yes | yes | yes |
-| `I16` | 1 | 2 | yes | yes | yes | yes |
-| `U32` | 2 | 4 | no | yes | yes | yes |
-| `I32` | 2 | 4 | yes | yes | yes | yes |
-| `U64` | 4 | 8 | no | yes | yes | yes |
-| `I64` | 4 | 8 | yes | yes | yes | yes |
-| `U128` | 8 | 16 | no | yes | yes | yes |
-| `I128` | 8 | 16 | yes | yes | yes | yes |
-| `F32` | 2 | 4 | IEEE 754 | yes | no | yes |
-| `F64` | 4 | 8 | IEEE 754 | yes | no | yes |
-| `Ascii` | configured `length` | 2 × length | n/a | no | no | no |
+| Format | Width (registers) | Bytes | Signed | Endian | Bit-field | Resolution | Display |
+|---|---|---|---|---|---|---|---|
+| `U8` | 1 | 2 | no | yes | yes | yes | `U8 (<Endian>)` |
+| `I8` | 1 | 2 | yes | yes | yes | yes | `I8 (<Endian>)` |
+| `U16` | 1 | 2 | no | yes | yes | yes | `U16 (<Endian>)` |
+| `I16` | 1 | 2 | yes | yes | yes | yes | `I16 (<Endian>)` |
+| `U32` | 2 | 4 | no | yes | yes | yes | `U32 (<Endian>)` |
+| `I32` | 2 | 4 | yes | yes | yes | yes | `I32 (<Endian>)` |
+| `U64` | 4 | 8 | no | yes | yes | yes | `U64 (<Endian>)` |
+| `I64` | 4 | 8 | yes | yes | yes | yes | `I64 (<Endian>)` |
+| `U128` | 8 | 16 | no | yes | yes | yes | `U128 (<Endian>)` |
+| `I128` | 8 | 16 | yes | yes | yes | yes | `I128 (<Endian>)` |
+| `F32` | 2 | 4 | IEEE 754 | yes | no | yes | `F32 (<Endian>)` |
+| `F64` | 4 | 8 | IEEE 754 | yes | no | yes | `F64 (<Endian>)` |
+| `Ascii` | configured `length` | 2 × length | n/a | no | no | no | `ASCII (<Alignment>)` |
 
 ### 2.1 `U8` / `I8`
 

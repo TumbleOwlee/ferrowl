@@ -456,12 +456,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(addr))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap()
     }
@@ -472,12 +472,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap()
     }

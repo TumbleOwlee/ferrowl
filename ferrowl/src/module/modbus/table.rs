@@ -314,12 +314,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         Definition::new("reg".to_string(), "d".to_string(), register, vec![])
@@ -355,12 +355,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         Definition::new(name.to_string(), "d".to_string(), register, vec![])
