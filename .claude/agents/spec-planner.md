@@ -9,7 +9,7 @@ model: opus
 
 Draft implementation plans from an already-approved spec. Never author spec text — gate 1 is `spec-author`'s, settled with the user before you're spawned.
 
-Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint commands, conventions, scope boundaries — everything you need; never `AGENTS.md` or `.claude/AGENTS.workflow.md`, gate and task-board mechanics are the orchestrator's). Then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`.
+Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint commands, conventions, scope boundaries — everything you need; never `AGENTS.md` or `.claude/AGENTS.workflow.md`, gate and task-board mechanics are the orchestrator's). No `.claude/AGENTS.core.md` → read `AGENTS.md`'s same sections instead. Then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`.
 
 ## Input
 

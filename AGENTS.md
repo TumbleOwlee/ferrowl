@@ -47,9 +47,11 @@ crates building one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure:
 ## Workflow
 
 Triggers on **behavior change, any size**: new public function, changed
-default, new error variant, any observable semantics. Not a behavior change:
-refactor, rename, perf-with-identical-semantics, tests, docs — no gates, just
-do it. Size sets stage count, never gate existence.
+default, new error variant, any observable semantics. Size sets stage count,
+never gate existence. Non-behavior change (refactor, rename,
+perf-with-identical-semantics, test-only, docs, tooling): gate 1 skipped,
+the rest still runs. Trivial edit (one file, no semantics, no test/CI/build
+effect — typo, comment, doc wording): no gates, branch + PR.
 
 Full gate/task-board mechanics (Gate 1 through Merge, Resume): read
 [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md) — split out

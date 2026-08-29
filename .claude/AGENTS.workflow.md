@@ -317,8 +317,10 @@ while the stage is cheap to change; gate 3 reads the whole branch at once and
 is the only pass that can see cross-stage bugs, spec drift across stages, and
 scope creep that no single stage's diff reveals.
 
-Parallel: one worktree+branch per agent, branched off the feature branch at
-wave start —
+Parallel: one worktree+branch per agent, branched off the feature branch's
+current tip at wave start — already containing every earlier wave's merged
+stages, so a dependent stage's worktree never starts without its
+dependencies' code physically present —
 `git worktree add .claude/worktrees/<slug>-<n> -b <type>/<slug>-<n> <type>/<slug>`
 — one **fresh** implementer each; concurrent agents can't share a running
 context. Never two agents, one worktree. Each wave:
@@ -326,17 +328,30 @@ context. Never two agents, one worktree. Each wave:
 1. Runnable stage cards (`blocked-by` all in `done/`) up to approved count.
    Wave-gate card → `inprogress/`.
 2. One implementer per stage: its worktree path, its stage only, its own
-   card's absolute path.
+   card's absolute path. It commits its stage on green in its own worktree
+   (a merge needs a commit) — that commit is still unreviewed and never
+   leaves the worktree until step 4 clears it.
 3. Wait for the whole wave; each card lands in `inreview/`.
-4. Per card: merge into feature branch, `gauntlet.sh` on merged result,
-   card → `done/`, remove worktree.
+4. Per card: `gauntlet.sh` in its worktree, fresh `spec-reviewer` in
+   `stage s<n>` scope (base = the wave's branch point). `clean` → merge into
+   the feature branch — **this merge is the new base**, the commit every
+   later wave's worktrees branch from — `gauntlet.sh` on the merged result,
+   card → `done/`, remove worktree. `findings` → card → `inprogress/`, same
+   implementer resumes with `review.md`'s path, fixes, amends its stage
+   commit, back to this step. Nothing unreviewed is ever merged.
 5. All `done` → wave gate → `inreview/`: fresh `spec-reviewer`, scope
-   `wave w<n>`. `clean` → wave gate `done/`, next wave unblocks, no approval
-   prompt. `findings` → stop, forward the status line, implicated stage cards
-   → `inprogress/`; a fresh implementer per card gets `review.md`'s path.
+   `wave w<n>`. `clean` → wave gate `done/`, **stop: ask the user for
+   approval before the next wave starts**. `findings` → stop, forward the
+   status line, implicated stage cards → `inprogress/`; a fresh implementer
+   per card gets `review.md`'s path.
 
-Clean wave gate is not an approval stop — gate 2 already approved these
-stages. A finding, red gauntlet, or merge conflict always is.
+A clean wave gate still stops for approval — the merge that closed this wave
+is the new base the next wave's worktrees get built on, a fresh checkpoint
+even though gate 2 already approved the stages themselves. A finding, red
+gauntlet, or merge conflict stops it too. Per-stage approval in sequential
+mode and the wave-gate approval in parallel mode are the same checkpoint at
+different granularity: nothing lands on the feature branch the user hasn't
+seen a clean review for.
 
 Merge conflict between two stages in a wave = dependency tree was wrong —
 report, fix the tree, never hand-resolve and continue. Mid-wave stop stops
