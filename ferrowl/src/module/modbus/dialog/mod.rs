@@ -16,8 +16,8 @@ pub use selection::*;
 pub use subdialog::*;
 
 use ferrowl_codec::format::{
-    Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
-    Resolution, WordOrder as RegisterWordOrder,
+    Alignment as TextAlignment, BitField, Endian as RegisterEndian, FloatFormat, FloatKind,
+    Format as RegisterFormat, IntKind, NumericFormat, Resolution, WordOrder as RegisterWordOrder,
 };
 use ferrowl_codec::{Access, Address, Kind};
 
@@ -46,22 +46,11 @@ pub struct Format(pub(crate) RegisterFormat);
 
 impl ToLabel for Format {
     fn to_label(&self) -> String {
-        match self.0 {
-            RegisterFormat::U8(_) => "U8",
-            RegisterFormat::U16(_) => "U16",
-            RegisterFormat::U32(_) => "U32",
-            RegisterFormat::U64(_) => "U64",
-            RegisterFormat::U128(_) => "U128",
-            RegisterFormat::I8(_) => "I8",
-            RegisterFormat::I16(_) => "I16",
-            RegisterFormat::I32(_) => "I32",
-            RegisterFormat::I64(_) => "I64",
-            RegisterFormat::I128(_) => "I128",
-            RegisterFormat::F32(_) => "F32",
-            RegisterFormat::F64(_) => "F64",
-            RegisterFormat::Ascii(_) => "ASCII",
+        match &self.0 {
+            RegisterFormat::Numeric(nf) => nf.kind.to_string(),
+            RegisterFormat::Float(ff) => ff.kind.to_string(),
+            RegisterFormat::Ascii(_, _) => "ASCII".to_string(),
         }
-        .to_string()
     }
 }
 
@@ -208,19 +197,17 @@ pub(crate) fn word_order_index(word_order: &RegisterWordOrder) -> usize {
 /// that forgets to gate on value type first degrades gracefully instead of panicking.
 pub(crate) fn format_index(format: &RegisterFormat) -> usize {
     match format {
-        RegisterFormat::U8(_) => 0,
-        RegisterFormat::U16(_) => 1,
-        RegisterFormat::U32(_) => 2,
-        RegisterFormat::U64(_) => 3,
-        RegisterFormat::U128(_) => 4,
-        RegisterFormat::I8(_) => 5,
-        RegisterFormat::I16(_) => 6,
-        RegisterFormat::I32(_) => 7,
-        RegisterFormat::I64(_) => 8,
-        RegisterFormat::I128(_) => 9,
-        RegisterFormat::F32(_) => 10,
-        RegisterFormat::F64(_) => 11,
-        RegisterFormat::Ascii(_) => 0,
+        RegisterFormat::Numeric(nf) => IntKind::ALL
+            .iter()
+            .position(|k| *k == nf.kind)
+            .expect("IntKind::ALL lists every IntKind"),
+        RegisterFormat::Float(ff) => {
+            10 + FloatKind::ALL
+                .iter()
+                .position(|k| *k == ff.kind)
+                .expect("FloatKind::ALL lists every FloatKind")
+        }
+        RegisterFormat::Ascii(_, _) => 0,
     }
 }
 
@@ -228,20 +215,19 @@ pub(crate) fn numeric_parts(
     format: &RegisterFormat,
 ) -> (RegisterEndian, RegisterWordOrder, Resolution, BitField) {
     match format {
-        RegisterFormat::U8((e, w, r, bf))
-        | RegisterFormat::U16((e, w, r, bf))
-        | RegisterFormat::U32((e, w, r, bf))
-        | RegisterFormat::U64((e, w, r, bf))
-        | RegisterFormat::U128((e, w, r, bf))
-        | RegisterFormat::I8((e, w, r, bf))
-        | RegisterFormat::I16((e, w, r, bf))
-        | RegisterFormat::I32((e, w, r, bf))
-        | RegisterFormat::I64((e, w, r, bf))
-        | RegisterFormat::I128((e, w, r, bf)) => (e.clone(), *w, r.clone(), bf.clone()),
-        RegisterFormat::F32((e, w, r)) | RegisterFormat::F64((e, w, r)) => {
-            (e.clone(), *w, r.clone(), BitField::default())
-        }
-        RegisterFormat::Ascii(_) => (
+        RegisterFormat::Numeric(nf) => (
+            nf.endian.clone(),
+            nf.word_order,
+            nf.resolution.clone(),
+            nf.bit_field.clone(),
+        ),
+        RegisterFormat::Float(ff) => (
+            ff.endian.clone(),
+            ff.word_order,
+            ff.resolution.clone(),
+            BitField::default(),
+        ),
+        RegisterFormat::Ascii(_, _) => (
             RegisterEndian::Big,
             RegisterWordOrder::Normal,
             Resolution(1.0),
@@ -253,19 +239,7 @@ pub(crate) fn numeric_parts(
 /// Whether `format` is an integer type (carries a [`BitField`]); false for
 /// floats and ASCII. Used to gate the bitmask input field in the edit dialogs.
 pub(crate) fn is_integer_format(format: &RegisterFormat) -> bool {
-    matches!(
-        format,
-        RegisterFormat::U8(_)
-            | RegisterFormat::U16(_)
-            | RegisterFormat::U32(_)
-            | RegisterFormat::U64(_)
-            | RegisterFormat::U128(_)
-            | RegisterFormat::I8(_)
-            | RegisterFormat::I16(_)
-            | RegisterFormat::I32(_)
-            | RegisterFormat::I64(_)
-            | RegisterFormat::I128(_)
-    )
+    matches!(format, RegisterFormat::Numeric(_))
 }
 
 /// Whether `format` occupies more than one register (`width > 1`). Used to gate
@@ -300,22 +274,28 @@ pub(crate) fn with_numeric_parts(
     resolution: Resolution,
     bitfield: BitField,
 ) -> RegisterFormat {
-    let int = (endian.clone(), word_order, resolution.clone(), bitfield);
-    let float = (endian, word_order, resolution);
     match format {
-        RegisterFormat::U8(_) => RegisterFormat::U8(int),
-        RegisterFormat::U16(_) => RegisterFormat::U16(int),
-        RegisterFormat::U32(_) => RegisterFormat::U32(int),
-        RegisterFormat::U64(_) => RegisterFormat::U64(int),
-        RegisterFormat::U128(_) => RegisterFormat::U128(int),
-        RegisterFormat::I8(_) => RegisterFormat::I8(int),
-        RegisterFormat::I16(_) => RegisterFormat::I16(int),
-        RegisterFormat::I32(_) => RegisterFormat::I32(int),
-        RegisterFormat::I64(_) => RegisterFormat::I64(int),
-        RegisterFormat::I128(_) => RegisterFormat::I128(int),
-        RegisterFormat::F32(_) => RegisterFormat::F32(float),
-        RegisterFormat::F64(_) => RegisterFormat::F64(float),
-        RegisterFormat::Ascii(_) => RegisterFormat::U16(int),
+        RegisterFormat::Numeric(nf) => RegisterFormat::Numeric(NumericFormat {
+            kind: nf.kind,
+            endian,
+            word_order,
+            resolution,
+            bit_field: bitfield,
+        }),
+        RegisterFormat::Float(ff) => RegisterFormat::Float(FloatFormat {
+            kind: ff.kind,
+            endian,
+            word_order,
+            resolution,
+        }),
+        // ASCII has no number format of its own; falls back to U16.
+        RegisterFormat::Ascii(_, _) => RegisterFormat::Numeric(NumericFormat {
+            kind: IntKind::U16,
+            endian,
+            word_order,
+            resolution,
+            bit_field: bitfield,
+        }),
     }
 }
 
@@ -357,45 +337,45 @@ mod helper_tests {
         let r = Resolution(1.0);
         let e = RegisterEndian::Big;
         assert_eq!(
-            format_index(&RegisterFormat::U8((
+            format_index(&RegisterFormat::u8(
                 e.clone(),
                 RegisterWordOrder::Normal,
                 r.clone(),
                 bf.clone()
-            ))),
+            )),
             0
         );
         assert_eq!(
-            format_index(&RegisterFormat::I128((
+            format_index(&RegisterFormat::i128(
                 e.clone(),
                 RegisterWordOrder::Normal,
                 r.clone(),
                 bf.clone()
-            ))),
+            )),
             9
         );
         assert_eq!(
-            format_index(&RegisterFormat::F32((
+            format_index(&RegisterFormat::f32(
                 e.clone(),
                 RegisterWordOrder::Normal,
                 r.clone()
-            ))),
+            )),
             10
         );
         assert_eq!(
-            format_index(&RegisterFormat::F64((
+            format_index(&RegisterFormat::f64(
                 e.clone(),
                 RegisterWordOrder::Normal,
                 r.clone()
-            ))),
+            )),
             11
         );
         // ASCII has no number-format slot and maps to index 0.
         assert_eq!(
-            format_index(&RegisterFormat::Ascii((
+            format_index(&RegisterFormat::Ascii(
                 TextAlignment::Left,
                 ferrowl_codec::format::Width(2)
-            ))),
+            )),
             0
         );
     }
@@ -405,27 +385,27 @@ mod helper_tests {
         let bf = BitField::default();
         let r = Resolution(1.0);
         let e = RegisterEndian::Big;
-        assert!(is_integer_format(&RegisterFormat::U16((
+        assert!(is_integer_format(&RegisterFormat::u16(
             e.clone(),
             RegisterWordOrder::Normal,
             r.clone(),
             bf.clone()
-        ))));
-        assert!(is_integer_format(&RegisterFormat::I64((
+        )));
+        assert!(is_integer_format(&RegisterFormat::i64(
             e.clone(),
             RegisterWordOrder::Normal,
             r.clone(),
             bf.clone()
-        ))));
-        assert!(!is_integer_format(&RegisterFormat::F32((
+        )));
+        assert!(!is_integer_format(&RegisterFormat::f32(
             e.clone(),
             RegisterWordOrder::Normal,
             r.clone()
-        ))));
-        assert!(!is_integer_format(&RegisterFormat::Ascii((
+        )));
+        assert!(!is_integer_format(&RegisterFormat::Ascii(
             TextAlignment::Left,
             ferrowl_codec::format::Width(2)
-        ))));
+        )));
     }
 
     #[test]
@@ -441,12 +421,12 @@ mod helper_tests {
 
     #[test]
     fn ut_with_numeric_parts_preserves_variant_and_applies_fields() {
-        let src = RegisterFormat::U32((
+        let src = RegisterFormat::u32(
             RegisterEndian::Big,
             RegisterWordOrder::Normal,
             Resolution(1.0),
             BitField::default(),
-        ));
+        );
         let rebuilt = with_numeric_parts(
             &src,
             RegisterEndian::Little,
@@ -457,20 +437,20 @@ mod helper_tests {
         // Same variant (U32), new endian/word order/resolution/bitfield.
         assert_eq!(
             rebuilt,
-            RegisterFormat::U32((
+            RegisterFormat::u32(
                 RegisterEndian::Little,
                 RegisterWordOrder::Reversed,
                 Resolution(0.25),
                 BitField { mask: 0x0F0F }
-            ))
+            )
         );
         // Floats ignore the supplied bitfield.
         let float = with_numeric_parts(
-            &RegisterFormat::F32((
+            &RegisterFormat::f32(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
-            )),
+            ),
             RegisterEndian::Little,
             RegisterWordOrder::Reversed,
             Resolution(2.0),
@@ -478,11 +458,11 @@ mod helper_tests {
         );
         assert_eq!(
             float,
-            RegisterFormat::F32((
+            RegisterFormat::f32(
                 RegisterEndian::Little,
                 RegisterWordOrder::Reversed,
                 Resolution(2.0)
-            ))
+            )
         );
     }
 }

@@ -23,7 +23,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_codec::Kind;
 use ferrowl_codec::format::{
-    BitField, Endian as RegisterEndian, Format as RegisterFormat, WordOrder as RegisterWordOrder,
+    BitField, Endian as RegisterEndian, FloatKind, Format as RegisterFormat, IntKind,
+    WordOrder as RegisterWordOrder,
 };
 use ferrowl_ui::COLOR_SCHEME;
 use ferrowl_ui::{
@@ -249,7 +250,7 @@ impl EditInterpretationDialog {
         dialog.kind.state.set_selection(kind_index(&def.kind));
 
         match def.format() {
-            RegisterFormat::Ascii((align, width)) => {
+            RegisterFormat::Ascii(align, width) => {
                 dialog.value_type.state.set_selection(1);
                 dialog
                     .text_alignment
@@ -774,19 +775,23 @@ fn alignment_cfg(a: ferrowl_codec::Alignment) -> AlignmentCfg {
 fn value_type_from_format(format: &RegisterFormat) -> crate::config::device::ValueType {
     use crate::config::device::ValueType as VT;
     match format {
-        RegisterFormat::U8(_) => VT::U8,
-        RegisterFormat::U16(_) => VT::U16,
-        RegisterFormat::U32(_) => VT::U32,
-        RegisterFormat::U64(_) => VT::U64,
-        RegisterFormat::U128(_) => VT::U128,
-        RegisterFormat::I8(_) => VT::I8,
-        RegisterFormat::I16(_) => VT::I16,
-        RegisterFormat::I32(_) => VT::I32,
-        RegisterFormat::I64(_) => VT::I64,
-        RegisterFormat::I128(_) => VT::I128,
-        RegisterFormat::F32(_) => VT::F32,
-        RegisterFormat::F64(_) => VT::F64,
-        RegisterFormat::Ascii(_) => VT::Ascii,
+        RegisterFormat::Numeric(nf) => match nf.kind {
+            IntKind::U8 => VT::U8,
+            IntKind::U16 => VT::U16,
+            IntKind::U32 => VT::U32,
+            IntKind::U64 => VT::U64,
+            IntKind::U128 => VT::U128,
+            IntKind::I8 => VT::I8,
+            IntKind::I16 => VT::I16,
+            IntKind::I32 => VT::I32,
+            IntKind::I64 => VT::I64,
+            IntKind::I128 => VT::I128,
+        },
+        RegisterFormat::Float(ff) => match ff.kind {
+            FloatKind::F32 => VT::F32,
+            FloatKind::F64 => VT::F64,
+        },
+        RegisterFormat::Ascii(_, _) => VT::Ascii,
     }
 }
 

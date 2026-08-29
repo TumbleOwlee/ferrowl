@@ -72,12 +72,12 @@ fn holding(addr: u16) -> Register {
         .access(Access::ReadWrite)
         .kind(Kind::HoldingRegister)
         .address(ferrowl_codec::Address::Fixed(addr))
-        .format(Format::U16((
+        .format(Format::u16(
             Endian::Big,
             WordOrder::Normal,
             Resolution(1.0),
             BitField::default(),
-        )))
+        ))
         .build()
         .unwrap()
 }

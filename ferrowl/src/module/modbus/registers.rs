@@ -78,7 +78,7 @@ pub(crate) fn write_command(
 /// Sync the mutable `RegisterDef` fields (address, format, access, kind) from an edited
 /// `Register`. Named values are handled separately in `apply_edit`.
 pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
-    use ferrowl_codec::Format;
+    use ferrowl_codec::{FloatKind, Format, IntKind};
 
     def.slave_id = register.slave_id().0;
     def.access = match register.access() {
@@ -123,19 +123,29 @@ pub(crate) fn sync_register_def(def: &mut RegisterDef, register: &Register) {
         }};
     }
     match register.format() {
-        Format::U8((e, w, r, bf)) => integer!(U8, e, w, r, bf),
-        Format::U16((e, w, r, bf)) => integer!(U16, e, w, r, bf),
-        Format::U32((e, w, r, bf)) => integer!(U32, e, w, r, bf),
-        Format::U64((e, w, r, bf)) => integer!(U64, e, w, r, bf),
-        Format::U128((e, w, r, bf)) => integer!(U128, e, w, r, bf),
-        Format::I8((e, w, r, bf)) => integer!(I8, e, w, r, bf),
-        Format::I16((e, w, r, bf)) => integer!(I16, e, w, r, bf),
-        Format::I32((e, w, r, bf)) => integer!(I32, e, w, r, bf),
-        Format::I64((e, w, r, bf)) => integer!(I64, e, w, r, bf),
-        Format::I128((e, w, r, bf)) => integer!(I128, e, w, r, bf),
-        Format::F32((e, w, r)) => float!(F32, e, w, r),
-        Format::F64((e, w, r)) => float!(F64, e, w, r),
-        Format::Ascii((align, width)) => {
+        Format::Numeric(nf) => {
+            let (e, w, r, bf) = (&nf.endian, &nf.word_order, &nf.resolution, &nf.bit_field);
+            match nf.kind {
+                IntKind::U8 => integer!(U8, e, w, r, bf),
+                IntKind::U16 => integer!(U16, e, w, r, bf),
+                IntKind::U32 => integer!(U32, e, w, r, bf),
+                IntKind::U64 => integer!(U64, e, w, r, bf),
+                IntKind::U128 => integer!(U128, e, w, r, bf),
+                IntKind::I8 => integer!(I8, e, w, r, bf),
+                IntKind::I16 => integer!(I16, e, w, r, bf),
+                IntKind::I32 => integer!(I32, e, w, r, bf),
+                IntKind::I64 => integer!(I64, e, w, r, bf),
+                IntKind::I128 => integer!(I128, e, w, r, bf),
+            }
+        }
+        Format::Float(ff) => {
+            let (e, w, r) = (&ff.endian, &ff.word_order, &ff.resolution);
+            match ff.kind {
+                FloatKind::F32 => float!(F32, e, w, r),
+                FloatKind::F64 => float!(F64, e, w, r),
+            }
+        }
+        Format::Ascii(align, width) => {
             def.value_type = DevValueType::Ascii;
             def.alignment = match align {
                 ferrowl_codec::format::Alignment::Left => AlignmentCfg::Left,
@@ -175,12 +185,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(kind)
             .address(address)
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap()
     }
@@ -290,11 +300,11 @@ mod tests {
             .access(Access::WriteOnly)
             .kind(Kind::Coil)
             .address(Address::Virtual)
-            .format(Format::F32((
+            .format(Format::f32(
                 Endian::Little,
                 WordOrder::Reversed,
                 Resolution(0.5),
-            )))
+            ))
             .build()
             .unwrap();
         sync_register_def(&mut def, &register);

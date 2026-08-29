@@ -381,12 +381,12 @@ mod render_tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         let mut dialog = EditInputDialog::from_register("temp", "d", &register, "42", None, true);
