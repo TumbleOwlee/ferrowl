@@ -8,10 +8,10 @@ implementer/reviewer agents) never read this file.
 
 ## Workflow
 
-Triggers on **behavior change, any size**: new public function, changed
-default, new error variant, any observable semantics. Not a behavior change:
-refactor, rename, perf-with-identical-semantics, tests, docs — no gates, just
-do it. Size sets stage count, never gate existence.
+What triggers a gated run is `AGENTS.md`'s `## Workflow`. Every heading
+below is one `extract-section.sh` pull; never read this file whole.
+
+### Principles
 
 - Replaces any generic workflow skill (`/workflow`) — don't run one.
   `docs/specs/` is already the PRD and design record.
@@ -74,7 +74,9 @@ do it. Size sets stage count, never gate existence.
   table updated, same as adding any area. User approves; this doesn't fire
   silently.
 
-Verify before every approval request — by running, never by reading:
+### Verify before an approval stop
+
+By running, never by reading:
 - **Plan / spec** — a fresh `spec-reviewer` in `plan` scope checks the plan
   against `spec-diff.md` (quoted text matches file, appended IDs unused,
   nothing contradicts an existing requirement, proposes what was asked) and
@@ -124,10 +126,11 @@ branch: <type>/<slug>-3
 worktree: .claude/worktrees/<slug>-3
 ---
 2026-01-02T14:02 spawn agent=impl
-2026-01-02T14:05 test-red <ID> rejects_short_input
-2026-01-02T14:11 green commit=abc123f
 2026-01-02T14:12 gauntlet=pass
 ```
+
+Log line = `<ISO minute> <event> [key=value …]`; the implementer's own file
+carries the stage-event vocabulary.
 
 Parent frontmatter: `issue`, `branch`, `mode: sequential|parallel(N)`,
 `gate1`/`gate2` approval dates, current `wave`, `artifacts`. Never the goal or
@@ -235,7 +238,7 @@ An edited body destroys what was originally filed vs. refined later.
 
 Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md`'s path, affected
 area(s), anything user volunteered at gate 1. Nothing else — gate 1 did no
-code research; agent explores the repo itself. Never mention the issue.
+code research; agent explores the repo itself.
 
 Writes `plan.md` (shape: `spec-planner.md`'s `## Output`; always opens with
 `## Stage s0: land spec`, the stage that copies `spec-diff.md` into
@@ -255,11 +258,9 @@ posts the comment, then resumes the *same* planner (never respawns).
 user at `plan.md` for approval. `findings` → resume the planner with
 `review.md`'s path; re-review; only a clean plan reaches the user.
 
-Plus **Dependency tree**: per stage, dependencies + files touched. No path
-between + disjoint files → parallel-capable; else ordered. Read as waves — a
-stage is runnable once its dependencies merge. Overlapping files = a
-dependency, not a race to resolve later. Fully-sequential plan states so
-explicitly — normal outcome, not a decomposition failure.
+The plan's dependency tree (`spec-planner.md`'s `## Output` defines it)
+reads as waves: a stage is runnable once its dependencies merge. A fully
+sequential tree is a normal outcome, not a decomposition failure.
 
 Approval also settles **how it's implemented** — unanswered = not approved:
 - **Sequential** — one fresh `spec-implementer` runs every stage in plan
@@ -354,8 +355,8 @@ happen once, on the merged feature branch, never per agent.
   *is* wrapped (`git log` never soft-wraps); spec, issue, PR text never. Spec = first stage, first commit.
 - **Never add `Co-Authored-By`, "Generated with," or any tool attribution
   trailer** to a commit, PR body, issue, or comment — no information, pure
-  `git log` noise, forever. Applies to every agent, every gate, including the
-  squash message and the gate 4 PR body.
+  `git log` noise, forever. Every agent, every gate, squash message and PR
+  body included; `hook-guard-attribution.sh` denies the command anyway.
 - Every new/changed requirement ships ≥1 ID-citing test.
 - Every existing test pinning observable behavior cites its requirement.
   Pure internal/helper-detail tests may stay untagged. Behavior no
@@ -384,9 +385,8 @@ sharing the implementer's context reproduces its blind spots). Stages were
 already reviewed one at a time; this is the whole-branch pass, the only one
 that can catch cross-stage bugs, spec drift across stages, and scope creep
 no single stage's diff shows. Give it the base ref, the artifact dir, the
-worktree path, and the stage ids in scope (all of them) — never the issue
-number, same as every agent in this workflow. It reads its own rules
-(`.claude/AGENTS.core.md`) itself. Four axes — spec fidelity, standards,
+worktree path, and the stage ids in scope (all of them). It reads its own
+rules (`.claude/AGENTS.core.md`) itself. Four axes — spec fidelity, standards,
 TDD honesty, docs currency; full criteria: `spec-reviewer.md`'s `## Four
 axes, reported separately`.
 
@@ -417,10 +417,6 @@ when review starts.
   (what was actually run, ending with the current coverage percentage), and
   `Closes #<issue>` — the one line the orchestrator appends itself, since
   only it knows the number.
-- Never add `Co-Authored-By`, "Generated with," or any tool attribution
-  trailer to the commit or the PR body — same rule as everywhere else in
-  this workflow, restated here because this is the step it's most often
-  missed at.
 
 ### Merge
 

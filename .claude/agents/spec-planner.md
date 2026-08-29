@@ -9,7 +9,7 @@ model: opus
 
 Draft implementation plans from an already-approved spec. Never author spec text — gate 1 is `spec-author`'s, settled with the user before you're spawned.
 
-Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint commands, conventions, scope boundaries — everything you need; skip the full `AGENTS.md`, its gate/task-board mechanics are the orchestrator's job, not yours). If `.claude/AGENTS.core.md` doesn't exist, read `AGENTS.md` instead. Then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`.
+Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint commands, conventions, scope boundaries — everything you need; never `AGENTS.md` or `.claude/AGENTS.workflow.md`, gate and task-board mechanics are the orchestrator's). Then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`.
 
 ## Input
 
@@ -21,7 +21,7 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 **Spec gap found:** end turn on `status=spec-gap reason=<what's missing and why>`. Stay running — orchestrator has `spec-author` amend `spec-diff.md`, then resumes you; re-read only the amended `## <ID>` sections, no re-exploration.
 
-**Area docs unwieldy** (an area's `requirements.md`/`edge-cases.md` costs real context just to read): flag it in your report, don't act on it — splitting an area is the orchestrator's call, at gate 1, along a real sub-capability seam, not yours to decide mid-plan.
+**Area docs unwieldy** (`requirements.md`/`edge-cases.md` costs real context to read): one line in `## Shared`, never act on it — splitting an area is a gate 1 decision.
 
 ## Output
 

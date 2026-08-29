@@ -13,11 +13,11 @@ Implement an already-approved plan. The plan is a contract.
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order,
-build/test/lint, conventions, scope boundaries — the gate/task-board mechanics
-in the full `AGENTS.md` are the orchestrator's job, not yours). Falls back to
-`AGENTS.md` if `.claude/AGENTS.core.md` doesn't exist.
+build/test/lint, conventions, scope boundaries). Never `AGENTS.md` or
+`.claude/AGENTS.workflow.md` — gate and task-board mechanics are the
+orchestrator's.
 
-Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). You never hold the planner's exploration — planning and implementation are always separate agents. The plan was written to be self-sufficient for exactly that reason: its inline refs already carry the exact existing signature/pattern each step needs, not just a `file:line` pointer. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
+Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). The plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
 
 Work **only** inside your given worktree path — never the main checkout, never
 another agent's worktree. Never `git add -A` outside your assigned path.

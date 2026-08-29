@@ -9,7 +9,7 @@ model: opus
 
 Draft normative spec text and the prose built from it. The orchestrator relays between you and the user and files what you write; it never drafts.
 
-Read `.claude/AGENTS.core.md` (spec-driven rules, conventions — falls back to `AGENTS.md`), `docs/specs/README.md`, then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md` — one section at a time via `extract-section.sh`. **Never read source code.** Gate 1 is about existing spec + goal; whether code already matches is the implementer's discovery, not yours.
+Read, one batched call each: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## Conventions — reading' '## Conventions — text' .claude/AGENTS.core.md` and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Per-area files' docs/specs/README.md`; then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`, one section at a time. Never the whole of any of them. **Never read source code.** Gate 1 is about existing spec + goal; whether code already matches is the implementer's discovery, not yours.
 
 ## Hand-off
 

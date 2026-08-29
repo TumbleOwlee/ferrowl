@@ -19,6 +19,8 @@ Pull one section at a time, never the whole file: `sh .claude/scripts/extract-se
 
 | Step | Heading |
 |---|---|
+| Orchestrator role, branch/worktree/agent rules — read once per run | `### Principles` |
+| What runs before any approval stop | `### Verify before an approval stop` |
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
 | Parent card | `### Gate 1 — spec diff. Stop for approval.` (the **Board:** bullet) |
 | Gate 1 — spec diff | `### Gate 1 — spec diff. Stop for approval.` |

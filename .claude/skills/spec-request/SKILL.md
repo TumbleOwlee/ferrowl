@@ -17,6 +17,7 @@ Pull one section at a time, never the whole file: `sh .claude/scripts/extract-se
 
 | Step | Heading |
 |---|---|
+| Orchestrator role — read once | `### Principles` |
 | Agent hand-off | `### Agent hand-off` |
 | Gate 1 — spec diff, dialogue only, no board | `### Gate 1 — spec diff. Stop for approval.` |
 | Gate 1b — tracking issue | `### Gate 1b — tracking issue. Stop for approval.` |

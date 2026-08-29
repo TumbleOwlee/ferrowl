@@ -110,7 +110,7 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
 <!-- CORE:END build -->
 
 <!-- CORE:BEGIN conventions -->
-## Conventions
+## Conventions — reading
 
 - **Never read a whole file when only part of it is needed.** For any
   markdown file (not just `docs/specs/` — skill `SKILL.md`s, other repos'
@@ -135,6 +135,8 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
 - **Don't re-run a read-only command for output already in context this
   session.** `git diff`, `git log`, `git show` etc. against the same
   refs/paths already shown once — scroll back instead of re-running.
+## Conventions — code
+
 - Unit tests live in `#[cfg(test)] mod tests` at the bottom of the file under
   test, function names prefixed `ut_`. Integration tests belong in each
   crate's `tests/`, function names prefixed `it_` (notably in `ferrowl-ui`
@@ -195,6 +197,8 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   rule spanning fields. This applies to config and session schemas as much as
   to in-memory types; changing a wire shape is a breaking configuration change
   and needs its own CS-R spec change.
+## Conventions — text
+
 - **No hard line wrap on anything posted externally** — issue bodies, PR
   bodies, PR/review comments. The host (GitHub) soft-wraps for display; a
   manually inserted `\n` mid-sentence survives rendering as a real line
