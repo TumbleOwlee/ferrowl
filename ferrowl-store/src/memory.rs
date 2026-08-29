@@ -726,6 +726,16 @@ mod tests {
             &[Range::new(0, 5)],
         );
         assert!(!memory.add_ranges(1u8, &CellKind::write(CellType::Coil), &[Range::new(0, 5)]));
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_ok()
+        );
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_ok()
+        );
     }
 
     #[test]

@@ -50,11 +50,6 @@ impl CellKind {
             access: Access::ReadWrite,
         }
     }
-
-    /// Returns the underlying register [`CellType`], ignoring the access direction.
-    pub fn cell_type(&self) -> CellType {
-        self.ty
-    }
 }
 
 /// A single memory cell: its kind and current value.
@@ -198,15 +193,9 @@ mod tests {
     #[test]
     /// MB-R-030 — a region's declared kind exposes its underlying cell type independent of access direction.
     fn ut_kind_get_type() {
-        assert_eq!(CellKind::read(CellType::Coil).cell_type(), CellType::Coil);
-        assert_eq!(
-            CellKind::write(CellType::Register).cell_type(),
-            CellType::Register
-        );
-        assert_eq!(
-            CellKind::read_write(CellType::Coil).cell_type(),
-            CellType::Coil
-        );
+        assert_eq!(CellKind::read(CellType::Coil).ty, CellType::Coil);
+        assert_eq!(CellKind::write(CellType::Register).ty, CellType::Register);
+        assert_eq!(CellKind::read_write(CellType::Coil).ty, CellType::Coil);
     }
 
     #[test]
