@@ -9,6 +9,7 @@ use std::io::Write as _;
 use std::time::{Duration, Instant};
 
 use crate::cli::{BridgeArgs, parse_bridge_descriptor};
+use crate::config::ClientOrServer;
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
@@ -25,14 +26,14 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         eprintln!("Error: --upstream and --downstream are both required");
         return 1;
     };
-    let upstream = match parse_bridge_descriptor(upstream) {
+    let upstream = match parse_bridge_descriptor(upstream, ClientOrServer::Server) {
         Ok(spec) => spec,
         Err(e) => {
             eprintln!("Error: invalid --upstream: {e}");
             return 1;
         }
     };
-    let downstream = match parse_bridge_descriptor(downstream) {
+    let downstream = match parse_bridge_descriptor(downstream, ClientOrServer::Client) {
         Ok(spec) => spec,
         Err(e) => {
             eprintln!("Error: invalid --downstream: {e}");
@@ -140,6 +141,20 @@ mod tests {
     async fn ut_bridge_run_invalid_descriptor_returns_one() {
         let mut args = base_args();
         args.upstream = Some("not-a-valid-descriptor".to_string());
+        args.downstream = Some("transport=tcp,ip=127.0.0.1,port=1".to_string());
+        assert_eq!(run(&args).await, 1);
+    }
+
+    /// BR-R-013 — an `--upstream` descriptor naming `tls.verification.verify=root-store`
+    /// (client-only, rejected on a server role) returns exit code 1.
+    #[tokio::test]
+    async fn ut_bridge_run_invalid_tls_key_returns_one() {
+        let mut args = base_args();
+        args.upstream = Some(
+            "transport=tcp,ip=127.0.0.1,port=1,tls.mode=mutual,\
+             tls.identity.source=self-signed,tls.verification.verify=root-store"
+                .to_string(),
+        );
         args.downstream = Some("transport=tcp,ip=127.0.0.1,port=1".to_string());
         assert_eq!(run(&args).await, 1);
     }

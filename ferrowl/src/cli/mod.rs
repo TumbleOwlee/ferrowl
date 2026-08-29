@@ -10,7 +10,7 @@ pub mod bridge;
 pub mod headless;
 
 use crate::config::ocpp::OcppProtocol;
-use crate::config::{self, Endpoint, ModuleSpec, OcppModuleSpec, Role};
+use crate::config::{self, ClientOrServer, Endpoint, ModuleSpec, OcppModuleSpec, Role};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Ferrowl — a modbus client/server TUI", long_about = None)]
@@ -401,8 +401,12 @@ fn parse_opt<T: std::str::FromStr>(
 
 /// Parse a single `--upstream`/`--downstream` value (`key=val,key=val,...`) into a
 /// [`ferrowl_modbus::bridge::BridgeEndpointSpec`] (BR-R-004). Mirrors [`parse_module_spec`].
+/// `role` is the interface's fixed role (BR-R-005/BR-R-006: upstream is always `Server`,
+/// downstream always `Client`), consulted only to pick which half of the TLS descriptor keys
+/// (BR-R-011) applies.
 pub fn parse_bridge_descriptor(
     input: &str,
+    role: ClientOrServer,
 ) -> Result<ferrowl_modbus::bridge::BridgeEndpointSpec, String> {
     // A plain `,`-split would break `unit_ids=1,3,5-8` (BR-R-015's own list/range grammar
     // uses the same comma the descriptor uses between keys): a comma-separated segment with
@@ -453,7 +457,7 @@ pub fn parse_bridge_descriptor(
     let transport = get("transport").unwrap_or_else(|| "tcp".to_string());
     let kind = match transport.as_str() {
         "tcp" => {
-            let tls = build_descriptor_tls(&get)?;
+            let tls = build_descriptor_tls(&map, role)?;
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(ferrowl_modbus::tcp::Config {
                 ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
                 port: get("port")
@@ -468,7 +472,7 @@ pub fn parse_bridge_descriptor(
             })
         }
         "rtu_over_tcp" => {
-            let tls = build_descriptor_tls(&get)?;
+            let tls = build_descriptor_tls(&map, role)?;
             ferrowl_modbus::bridge::BridgeEndpointKind::RtuOverTcp(ferrowl_modbus::tcp::Config {
                 ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
                 port: get("port")
@@ -483,7 +487,7 @@ pub fn parse_bridge_descriptor(
             })
         }
         "ascii_over_tcp" => {
-            let tls = build_descriptor_tls(&get)?;
+            let tls = build_descriptor_tls(&map, role)?;
             ferrowl_modbus::bridge::BridgeEndpointKind::AsciiOverTcp(ferrowl_modbus::tcp::Config {
                 ip: get("ip").unwrap_or_else(|| "127.0.0.1".to_string()),
                 port: get("port")
@@ -519,85 +523,185 @@ pub fn parse_bridge_descriptor(
     Ok(ferrowl_modbus::bridge::BridgeEndpointSpec { kind, unit_ids })
 }
 
-/// BR-R-011 — the `tls` field set, built onto the tagged-enum types (MB-R-105) from the flat
-/// descriptor key names (`self_signed`, `cert_file`, `key_file`, `client_cert_file`,
-/// `client_key_file`, `client_ca_file`, `require_client_cert`, `ca_file`,
-/// `insecure_skip_verify`). "Opt-in" (MB-R-104): the container's two policies stay `None` unless
-/// at least one of these nine keys is present.
+/// BR-R-011 — the dotted `tls.*` descriptor keys, mapped onto whichever tagged-enum policy
+/// (MB-R-105) `role` selects: an upstream (`Server`) descriptor fills `ModbusTlsConfig.server`
+/// and leaves `client` at its `None {}` default (BR-R-005), a downstream (`Client`) descriptor
+/// the reverse (BR-R-006). The two CA-list keys split on `;`, `,` already being the descriptor's
+/// key separator.
 fn build_descriptor_tls(
-    get: &impl Fn(&str) -> Option<String>,
+    map: &HashMap<String, String>,
+    role: ClientOrServer,
 ) -> Result<ferrowl_modbus::tcp::ModbusTlsConfig, String> {
-    let any_present = [
-        "ca_file",
-        "cert_file",
-        "key_file",
-        "client_cert_file",
-        "client_key_file",
-        "client_ca_file",
-        "require_client_cert",
-        "self_signed",
-        "insecure_skip_verify",
-    ]
-    .iter()
-    .any(|k| get(k).is_some());
-    if !any_present {
-        return Ok(ferrowl_modbus::tcp::ModbusTlsConfig::default());
+    const IDENTITY_KEYS: [&str; 3] = [
+        "tls.identity.source",
+        "tls.identity.cert_file",
+        "tls.identity.key_file",
+    ];
+    const VERIFICATION_KEYS: [&str; 3] = [
+        "tls.verification.verify",
+        "tls.verification.ca_files",
+        "tls.verification.extra_ca_files",
+    ];
+
+    let get = |k: &str| map.get(k).cloned();
+
+    // BR-R-011 — any `tls.*` key that is neither `tls.mode` nor a member of either variant's
+    // own key set is unrecognized (a misspelling, or a key that names a path the selected
+    // variant does not define under a different mode) and is a setup failure rather than being
+    // silently ignored.
+    for key in map.keys() {
+        if key == "tls.mode" {
+            continue;
+        }
+        if key.starts_with("tls.")
+            && !IDENTITY_KEYS.contains(&key.as_str())
+            && !VERIFICATION_KEYS.contains(&key.as_str())
+        {
+            return Err(format!("unrecognized descriptor key '{key}'"));
+        }
     }
-    let parse_bool = |k: &str| -> Result<bool, String> {
-        match get(k).as_deref() {
-            None => Ok(false),
-            Some("true") => Ok(true),
-            Some("false") => Ok(false),
+
+    let mode = get("tls.mode").unwrap_or_else(|| "none".to_string());
+    let reject_present = |keys: &[&str]| -> Result<(), String> {
+        for key in keys {
+            if get(key).is_some() {
+                return Err(format!("'{key}' is not valid with tls.mode={mode}"));
+            }
+        }
+        Ok(())
+    };
+    let split_list = |value: String| -> Vec<String> {
+        value
+            .split(';')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+
+    let identity = || -> Result<ferrowl_util::tls::CertSource, String> {
+        match get("tls.identity.source").as_deref() {
+            None | Some("ephemeral") => {
+                if get("tls.identity.cert_file").is_some() || get("tls.identity.key_file").is_some()
+                {
+                    return Err("'tls.identity.cert_file'/'tls.identity.key_file' require \
+                         tls.identity.source=files"
+                        .to_string());
+                }
+                Ok(ferrowl_util::tls::CertSource::Ephemeral {})
+            }
+            Some("self-signed") => {
+                if get("tls.identity.cert_file").is_some() || get("tls.identity.key_file").is_some()
+                {
+                    return Err("'tls.identity.cert_file'/'tls.identity.key_file' require \
+                         tls.identity.source=files"
+                        .to_string());
+                }
+                Ok(ferrowl_util::tls::CertSource::SelfSigned {})
+            }
+            Some("files") => {
+                let cert_file = get("tls.identity.cert_file")
+                    .ok_or("tls.identity.source=files requires 'tls.identity.cert_file'")?;
+                let key_file = get("tls.identity.key_file")
+                    .ok_or("tls.identity.source=files requires 'tls.identity.key_file'")?;
+                Ok(ferrowl_util::tls::CertSource::Files {
+                    cert_file,
+                    key_file,
+                })
+            }
             Some(other) => Err(format!(
-                "invalid '{k}' value '{other}' (expected true|false)"
+                "invalid 'tls.identity.source' value '{other}' (expected ephemeral|self-signed|files)"
             )),
         }
     };
-    let self_signed = parse_bool("self_signed")?;
-    let identity = match (self_signed, get("cert_file"), get("key_file")) {
-        (true, _, _) => ferrowl_util::tls::CertSource::SelfSigned {},
-        (false, Some(cert_file), Some(key_file)) => ferrowl_util::tls::CertSource::Files {
-            cert_file,
-            key_file,
-        },
-        (false, None, None) => ferrowl_util::tls::CertSource::Ephemeral {},
-        (false, _, _) => {
-            return Err("cert_file and key_file must both be set, or neither".to_string());
+
+    let verification = || -> Result<ferrowl_util::tls::CertVerification, String> {
+        match get("tls.verification.verify").as_deref() {
+            None | Some("root-store") => {
+                if get("tls.verification.ca_files").is_some() {
+                    return Err("'tls.verification.ca_files' is not valid with \
+                         tls.verification.verify=root-store"
+                        .to_string());
+                }
+                Ok(ferrowl_util::tls::CertVerification::RootStore {
+                    extra_ca_files: get("tls.verification.extra_ca_files")
+                        .map(split_list)
+                        .unwrap_or_default(),
+                })
+            }
+            Some("skip") => {
+                if get("tls.verification.ca_files").is_some()
+                    || get("tls.verification.extra_ca_files").is_some()
+                {
+                    return Err(
+                        "'tls.verification.ca_files'/'tls.verification.extra_ca_files' are not \
+                         valid with tls.verification.verify=skip"
+                            .to_string(),
+                    );
+                }
+                Ok(ferrowl_util::tls::CertVerification::Skip {})
+            }
+            Some("ca-files") => {
+                if get("tls.verification.extra_ca_files").is_some() {
+                    return Err("'tls.verification.extra_ca_files' is not valid with \
+                         tls.verification.verify=ca-files"
+                        .to_string());
+                }
+                Ok(ferrowl_util::tls::CertVerification::CaFiles {
+                    ca_files: get("tls.verification.ca_files")
+                        .map(split_list)
+                        .unwrap_or_default(),
+                })
+            }
+            Some(other) => Err(format!(
+                "invalid 'tls.verification.verify' value '{other}' (expected skip|root-store|ca-files)"
+            )),
         }
     };
-    // Both `server` and `client` are always present regardless of which role this endpoint
-    // turns out to be (MB-R-105) — the descriptor's fields map 1:1 onto whichever half a
-    // downstream/upstream role actually consults; the other half is simply inert.
-    let server = if parse_bool("require_client_cert")? {
-        let ca_files = get("client_ca_file").into_iter().collect::<Vec<_>>();
-        if ca_files.is_empty() {
-            return Err("ca_files must be non-empty".to_string());
+
+    let mut tls = ferrowl_modbus::tcp::ModbusTlsConfig::default();
+    match (role, mode.as_str()) {
+        (_, "none") => {
+            reject_present(&IDENTITY_KEYS)?;
+            reject_present(&VERIFICATION_KEYS)?;
         }
-        ferrowl_util::tls::ServerTlsPolicy::Mutual {
-            identity: identity.clone(),
-            verification: ferrowl_util::tls::CertVerification::CaFiles { ca_files },
+        (ClientOrServer::Server, "tls") => {
+            reject_present(&VERIFICATION_KEYS)?;
+            tls.server = ferrowl_util::tls::ServerTlsPolicy::Tls {
+                identity: identity()?,
+            };
         }
-    } else {
-        ferrowl_util::tls::ServerTlsPolicy::Tls { identity }
-    };
-    let verification = if parse_bool("insecure_skip_verify")? {
-        ferrowl_util::tls::CertVerification::Skip {}
-    } else {
-        ferrowl_util::tls::CertVerification::RootStore {
-            extra_ca_files: get("ca_file").into_iter().collect(),
+        (ClientOrServer::Server, "mutual") => {
+            tls.server = ferrowl_util::tls::ServerTlsPolicy::Mutual {
+                identity: identity()?,
+                verification: verification()?,
+            };
         }
-    };
-    let client = match (get("client_cert_file"), get("client_key_file")) {
-        (Some(cert_file), Some(key_file)) => ferrowl_util::tls::ClientTlsPolicy::Mutual {
-            verification,
-            identity: ferrowl_util::tls::CertSource::Files {
-                cert_file,
-                key_file,
-            },
-        },
-        _ => ferrowl_util::tls::ClientTlsPolicy::Tls { verification },
-    };
-    Ok(ferrowl_modbus::tcp::ModbusTlsConfig { server, client })
+        (ClientOrServer::Client, "tls") => {
+            reject_present(&IDENTITY_KEYS)?;
+            tls.client = ferrowl_util::tls::ClientTlsPolicy::Tls {
+                verification: verification()?,
+            };
+        }
+        (ClientOrServer::Client, "mutual") => {
+            tls.client = ferrowl_util::tls::ClientTlsPolicy::Mutual {
+                verification: verification()?,
+                identity: identity()?,
+            };
+        }
+        (_, other) => {
+            return Err(format!(
+                "invalid 'tls.mode' value '{other}' (expected none|tls|mutual)"
+            ));
+        }
+    }
+
+    match role {
+        ClientOrServer::Server => tls.server.validate().map_err(|e| e.to_string())?,
+        ClientOrServer::Client => tls.client.validate().map_err(|e| e.to_string())?,
+    }
+
+    Ok(tls)
 }
 
 #[cfg(test)]
@@ -1187,7 +1291,7 @@ mod tests {
     /// BR-R-004 — a bare `port=502` descriptor defaults transport/ip/timeout/reconnect/tls/
     /// unit_ids.
     fn ut_parse_bridge_descriptor_tcp_defaults() {
-        let spec = parse_bridge_descriptor("port=502").unwrap();
+        let spec = parse_bridge_descriptor("port=502", ClientOrServer::Server).unwrap();
         assert!(spec.unit_ids.is_none());
         match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
@@ -1207,6 +1311,7 @@ mod tests {
     fn ut_parse_bridge_descriptor_rtu_over_tcp_full() {
         let spec = parse_bridge_descriptor(
             "transport=rtu_over_tcp,ip=10.0.0.9,port=1502,timeout_ms=500,reconnect=false",
+            ClientOrServer::Server,
         )
         .unwrap();
         match spec.kind {
@@ -1223,7 +1328,7 @@ mod tests {
     #[test]
     /// BR-R-004 — a rtu_over_tcp descriptor missing `port` errors, same as plain tcp.
     fn ut_parse_bridge_descriptor_rtu_over_tcp_requires_port() {
-        assert!(parse_bridge_descriptor("transport=rtu_over_tcp").is_err());
+        assert!(parse_bridge_descriptor("transport=rtu_over_tcp", ClientOrServer::Server).is_err());
     }
 
     #[test]
@@ -1232,6 +1337,7 @@ mod tests {
     fn ut_parse_bridge_descriptor_ascii_over_tcp_full() {
         let spec = parse_bridge_descriptor(
             "transport=ascii_over_tcp,ip=10.0.0.10,port=1503,timeout_ms=500,reconnect=false",
+            ClientOrServer::Server,
         )
         .unwrap();
         match spec.kind {
@@ -1248,17 +1354,22 @@ mod tests {
     #[test]
     /// BR-R-004 — an ascii_over_tcp descriptor missing `port` errors, same as plain tcp.
     fn ut_parse_bridge_descriptor_ascii_over_tcp_requires_port() {
-        assert!(parse_bridge_descriptor("transport=ascii_over_tcp").is_err());
+        assert!(
+            parse_bridge_descriptor("transport=ascii_over_tcp", ClientOrServer::Server).is_err()
+        );
     }
 
     #[test]
-    /// BR-R-011 — rtu_over_tcp/ascii_over_tcp descriptors accept the same opt-in `tls` field
+    /// BR-R-011 — rtu_over_tcp/ascii_over_tcp descriptors accept the same dotted `tls.*` key
     /// set as plain tcp (BR-R-004's shared tcp::Config field set).
     fn ut_parse_bridge_descriptor_over_tcp_variants_accept_tls() {
         for transport in ["rtu_over_tcp", "ascii_over_tcp"] {
-            let spec = parse_bridge_descriptor(&format!(
-                "transport={transport},port=502,self_signed=true"
-            ))
+            let spec = parse_bridge_descriptor(
+                &format!(
+                    "transport={transport},port=502,tls.mode=tls,tls.identity.source=self-signed"
+                ),
+                ClientOrServer::Server,
+            )
             .unwrap();
             let tls = match spec.kind {
                 ferrowl_modbus::bridge::BridgeEndpointKind::RtuOverTcp(cfg) => cfg.tls,
@@ -1275,6 +1386,7 @@ mod tests {
         let spec = parse_bridge_descriptor(
             "transport=rtu,path=/dev/ttyUSB0,baud=9600,parity=even,data_bits=7,stop_bits=2,\
              timeout_ms=500,reconnect=false,unit_ids=1,3",
+            ClientOrServer::Server,
         )
         .unwrap();
         assert_eq!(
@@ -1296,21 +1408,86 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls` stays both-`None` unless at least one tls key is present.
-    fn ut_parse_bridge_descriptor_tls_opt_in() {
-        let no_tls = parse_bridge_descriptor("port=502").unwrap();
-        match no_tls.kind {
+    /// BR-R-011 — absent `tls.mode` defaults to `none`, leaving `tls` both-`None`.
+    fn ut_bridge_descriptor_absent_tls_mode_defaults_to_none() {
+        let spec = parse_bridge_descriptor("port=502", ClientOrServer::Server).unwrap();
+        match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => assert!(cfg.tls.is_none()),
             _ => unreachable!(),
         }
+    }
 
-        let with_tls = parse_bridge_descriptor("port=502,self_signed=true").unwrap();
-        match with_tls.kind {
+    #[test]
+    /// BR-R-011 — an upstream (`Server`) descriptor's `tls.*` keys build a `ServerTlsPolicy`,
+    /// leaving `client` at its `None {}` default.
+    fn ut_bridge_descriptor_upstream_server_policy_from_dotted_keys() {
+        let spec = parse_bridge_descriptor(
+            "port=502,tls.mode=mutual,tls.identity.source=files,\
+             tls.identity.cert_file=s.crt,tls.identity.key_file=s.key,\
+             tls.verification.verify=ca-files,tls.verification.ca_files=ca.pem",
+            ClientOrServer::Server,
+        )
+        .unwrap();
+        match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 assert_eq!(
                     cfg.tls.server,
-                    ferrowl_util::tls::ServerTlsPolicy::Tls {
-                        identity: ferrowl_util::tls::CertSource::SelfSigned {}
+                    ferrowl_util::tls::ServerTlsPolicy::Mutual {
+                        identity: ferrowl_util::tls::CertSource::Files {
+                            cert_file: "s.crt".to_string(),
+                            key_file: "s.key".to_string(),
+                        },
+                        verification: ferrowl_util::tls::CertVerification::CaFiles {
+                            ca_files: vec!["ca.pem".to_string()]
+                        },
+                    }
+                );
+                assert_eq!(cfg.tls.client, ferrowl_util::tls::ClientTlsPolicy::None {});
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// BR-R-011 — a downstream (`Client`) descriptor's `tls.*` keys build a `ClientTlsPolicy`,
+    /// leaving `server` at its `None {}` default.
+    fn ut_bridge_descriptor_downstream_client_policy_from_dotted_keys() {
+        let spec = parse_bridge_descriptor(
+            "port=502,tls.mode=tls,tls.verification.verify=skip",
+            ClientOrServer::Client,
+        )
+        .unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                assert_eq!(
+                    cfg.tls.client,
+                    ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::Skip {}
+                    }
+                );
+                assert_eq!(cfg.tls.server, ferrowl_util::tls::ServerTlsPolicy::None {});
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// BR-R-011 — `tls.verification.extra_ca_files` (under `verify=root-store`) splits on `;`.
+    fn ut_bridge_descriptor_ca_files_split_on_semicolon() {
+        let spec = parse_bridge_descriptor(
+            "port=502,tls.mode=tls,tls.verification.verify=root-store,\
+             tls.verification.extra_ca_files=a.pem;b.pem",
+            ClientOrServer::Client,
+        )
+        .unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                assert_eq!(
+                    cfg.tls.client,
+                    ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::RootStore {
+                            extra_ca_files: vec!["a.pem".to_string(), "b.pem".to_string()]
+                        }
                     }
                 );
             }
@@ -1319,18 +1496,22 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-106 — via the CLI mini-language: `self_signed=true` wins unconditionally over
-    /// `cert_file`/`key_file` present in the same descriptor.
-    fn ut_parse_bridge_descriptor_tls_self_signed_wins_over_cert_files() {
-        let parsed =
-            parse_bridge_descriptor("port=502,self_signed=true,cert_file=s.crt,key_file=s.key")
-                .unwrap();
-        match parsed.kind {
+    /// BR-R-011 — `tls.verification.ca_files` (under `verify=ca-files`) also splits on `;`.
+    fn ut_bridge_descriptor_ca_files_under_verify_ca_files_split_on_semicolon() {
+        let spec = parse_bridge_descriptor(
+            "port=502,tls.mode=tls,tls.verification.verify=ca-files,\
+             tls.verification.ca_files=a.pem;b.pem",
+            ClientOrServer::Client,
+        )
+        .unwrap();
+        match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 assert_eq!(
-                    cfg.tls.server,
-                    ferrowl_util::tls::ServerTlsPolicy::Tls {
-                        identity: ferrowl_util::tls::CertSource::SelfSigned {}
+                    cfg.tls.client,
+                    ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::CaFiles {
+                            ca_files: vec!["a.pem".to_string(), "b.pem".to_string()]
+                        }
                     }
                 );
             }
@@ -1339,24 +1520,221 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-107 — via the CLI mini-language: `cert_file` set alone (no `self_signed`, no
-    /// `key_file`) is a configuration-resolution error.
-    fn ut_parse_bridge_descriptor_tls_cert_file_alone_is_error() {
-        assert!(parse_bridge_descriptor("port=502,cert_file=s.crt").is_err());
+    /// BR-R-011 — `tls.verification.ca_files` under `verify=root-store` (the ca-files key
+    /// belongs to `verify=ca-files`, not `root-store`) is a setup failure.
+    fn ut_bridge_descriptor_rejects_ca_files_under_verify_root_store() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.verification.verify=root-store,\
+                 tls.verification.ca_files=ca.pem",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — a `tls.*` key outside the selected variant is a setup failure: `tls.identity.*`
+    /// under `tls.mode=none`, and `tls.verification.*` under a server's `tls.mode=tls` (a server's
+    /// `Tls` variant has no `verification` field — `Mutual` is the sole trigger).
+    fn ut_bridge_descriptor_rejects_key_outside_selected_variant() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.identity.source=self-signed",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.identity.source=self-signed,\
+                 tls.verification.verify=skip",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — a `tls.*` key not among `tls.mode` or the selected variant's own keys (a
+    /// misspelling like `tls.identiy.source`, or an invented one like `tls.verify`) is a setup
+    /// failure rather than being silently ignored.
+    fn ut_bridge_descriptor_rejects_unrecognized_tls_key() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.identiy.source=self-signed",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.verify=skip",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — an unrecognized value on `tls.mode`, `tls.identity.source`, or
+    /// `tls.verification.verify` is a setup failure.
+    fn ut_bridge_descriptor_rejects_unknown_enum_values() {
+        assert!(
+            parse_bridge_descriptor("port=502,tls.mode=bogus", ClientOrServer::Server).is_err()
+        );
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.identity.source=bogus",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.verification.verify=bogus",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011/MB-R-107 — `tls.identity.source=files` with only `tls.identity.cert_file` set
+    /// (no `tls.identity.key_file`) is a setup failure.
+    fn ut_bridge_descriptor_rejects_files_identity_with_only_cert_file() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.identity.source=files,tls.identity.cert_file=s.crt",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — `tls.verification.verify=root-store` on an upstream (`Server`) descriptor is
+    /// rejected: `RootStore` is client-only, never a server's client-certificate verification.
+    fn ut_bridge_descriptor_rejects_root_store_upstream() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=mutual,tls.identity.source=self-signed,\
+                 tls.verification.verify=root-store",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — `tls.identity.source=ephemeral` on a downstream (`Client`) descriptor is
+    /// rejected: "nothing configured, fall back and log" is a server-side behavior.
+    fn ut_bridge_descriptor_rejects_ephemeral_downstream() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=mutual,tls.verification.verify=skip,\
+                 tls.identity.source=ephemeral",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — a bare upstream `tls.mode=tls` (no `tls.identity.source`) accepts the
+    /// defaulted `ephemeral` identity.
+    fn ut_bridge_descriptor_upstream_bare_tls_mode_defaults_to_ephemeral_identity() {
+        let spec =
+            parse_bridge_descriptor("port=502,tls.mode=tls", ClientOrServer::Server).unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                assert_eq!(
+                    cfg.tls.server,
+                    ferrowl_util::tls::ServerTlsPolicy::Tls {
+                        identity: ferrowl_util::tls::CertSource::Ephemeral {}
+                    }
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// BR-R-011 — a bare downstream `tls.mode=tls` (no `tls.verification.verify`) accepts the
+    /// defaulted `root-store` verification with an empty `extra_ca_files`.
+    fn ut_bridge_descriptor_downstream_bare_tls_mode_defaults_to_root_store_verification() {
+        let spec =
+            parse_bridge_descriptor("port=502,tls.mode=tls", ClientOrServer::Client).unwrap();
+        match spec.kind {
+            ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
+                assert_eq!(
+                    cfg.tls.client,
+                    ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::RootStore {
+                            extra_ca_files: vec![]
+                        }
+                    }
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    /// BR-R-011 — an upstream `tls.mode=mutual` with no `tls.verification.verify` defaults the
+    /// verification to `root-store`, which is a setup failure on a server exactly as if it had
+    /// been written explicitly.
+    fn ut_bridge_descriptor_rejects_upstream_mutual_with_defaulted_root_store() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=mutual,tls.identity.source=self-signed",
+                ClientOrServer::Server
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — a downstream `tls.mode=mutual` with no `tls.identity.source` defaults the
+    /// identity to `ephemeral`, which is a setup failure on a client exactly as if it had been
+    /// written explicitly.
+    fn ut_bridge_descriptor_rejects_downstream_mutual_with_defaulted_ephemeral() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=mutual,tls.verification.verify=skip",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    /// BR-R-011 — `tls.verification.verify=ca-files` with an empty `tls.verification.ca_files`
+    /// is rejected.
+    fn ut_bridge_descriptor_rejects_empty_ca_files() {
+        assert!(
+            parse_bridge_descriptor(
+                "port=502,tls.mode=tls,tls.verification.verify=ca-files",
+                ClientOrServer::Client
+            )
+            .is_err()
+        );
     }
 
     #[test]
     /// BR-R-004 — an unknown transport, a tcp descriptor missing `port`, and an rtu descriptor
     /// missing `path` all error.
     fn ut_parse_bridge_descriptor_rejects_invalid_transport_and_missing_required() {
-        assert!(parse_bridge_descriptor("transport=usb,port=502").is_err());
-        assert!(parse_bridge_descriptor("transport=tcp").is_err());
-        assert!(parse_bridge_descriptor("transport=rtu").is_err());
+        assert!(parse_bridge_descriptor("transport=usb,port=502", ClientOrServer::Server).is_err());
+        assert!(parse_bridge_descriptor("transport=tcp", ClientOrServer::Server).is_err());
+        assert!(parse_bridge_descriptor("transport=rtu", ClientOrServer::Server).is_err());
     }
 
     #[test]
     /// BR-R-004 — an invalid `reconnect` value errors.
     fn ut_parse_bridge_descriptor_rejects_bad_reconnect_value() {
-        assert!(parse_bridge_descriptor("port=502,reconnect=maybe").is_err());
+        assert!(
+            parse_bridge_descriptor("port=502,reconnect=maybe", ClientOrServer::Server).is_err()
+        );
     }
 }
