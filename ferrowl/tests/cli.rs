@@ -14,6 +14,29 @@ fn evse_device() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../configs/evse.toml")
 }
 
+/// Bit 2 (value 2) of `/proc/<pid>/status`'s `SigCgt:` mask is SIGINT; its presence means the
+/// process has installed a handler for it (tokio's `ctrl_c()`) rather than left it default.
+fn has_installed_sigint_handler(pid: u32) -> bool {
+    let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+        return false;
+    };
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("SigCgt:"))
+        .and_then(|mask| u64::from_str_radix(mask.trim(), 16).ok())
+        .is_some_and(|mask| mask & 0x2 != 0)
+}
+
+fn send_sigint(pid: u32) {
+    assert!(
+        Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .status()
+            .expect("send SIGINT")
+            .success()
+    );
+}
+
 #[test]
 /// CL-R-025 — a SIGINT (Ctrl-C) during a headless run ends the loop as a clean shutdown (exit 0).
 fn it_sigint_is_a_clean_shutdown() {
@@ -30,18 +53,38 @@ fn it_sigint_is_a_clean_shutdown() {
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn ferrowl run");
+    let pid = child.id();
 
-    // Let it build the module and enter the tick loop before signalling.
-    std::thread::sleep(Duration::from_millis(800));
-    assert!(
-        Command::new("kill")
-            .args(["-INT", &child.id().to_string()])
-            .status()
-            .expect("send SIGINT")
-            .success()
-    );
+    // Wait for the process to install its SIGINT handler rather than sleeping a fixed guess: a
+    // signal sent before tokio's ctrl_c() handler is registered is dropped, not queued, which
+    // previously hung this test's unbounded `child.wait()` on a loaded machine.
+    let readiness_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !has_installed_sigint_handler(pid) {
+        if std::time::Instant::now() >= readiness_deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("ferrowl run never installed a SIGINT handler within 10s");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
-    let status = child.wait().expect("wait for ferrowl");
+    send_sigint(pid);
+
+    // Bound the wait: re-send SIGINT every 200ms in case the first one raced the handler
+    // installation, and fail with a clear message instead of hanging if it never exits.
+    let exit_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll ferrowl") {
+            break status;
+        }
+        if std::time::Instant::now() >= exit_deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("ferrowl run did not exit within 10s of SIGINT");
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        send_sigint(pid);
+    };
     assert_eq!(status.code(), Some(0), "SIGINT must be a clean exit 0");
 }
 
