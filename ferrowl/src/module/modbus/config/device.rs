@@ -278,19 +278,19 @@ impl RegisterDef {
         let wo: WordOrder = self.word_order.into();
         let bf = self.bitfield();
         match self.value_type {
-            ValueType::U8 => Format::U8((endian, wo, res, bf)),
-            ValueType::U16 => Format::U16((endian, wo, res, bf)),
-            ValueType::U32 => Format::U32((endian, wo, res, bf)),
-            ValueType::U64 => Format::U64((endian, wo, res, bf)),
-            ValueType::U128 => Format::U128((endian, wo, res, bf)),
-            ValueType::I8 => Format::I8((endian, wo, res, bf)),
-            ValueType::I16 => Format::I16((endian, wo, res, bf)),
-            ValueType::I32 => Format::I32((endian, wo, res, bf)),
-            ValueType::I64 => Format::I64((endian, wo, res, bf)),
-            ValueType::I128 => Format::I128((endian, wo, res, bf)),
-            ValueType::F32 => Format::F32((endian, wo, res)),
-            ValueType::F64 => Format::F64((endian, wo, res)),
-            ValueType::Ascii => Format::Ascii((self.alignment.into(), Width(self.length))),
+            ValueType::U8 => Format::u8(endian, wo, res, bf),
+            ValueType::U16 => Format::u16(endian, wo, res, bf),
+            ValueType::U32 => Format::u32(endian, wo, res, bf),
+            ValueType::U64 => Format::u64(endian, wo, res, bf),
+            ValueType::U128 => Format::u128(endian, wo, res, bf),
+            ValueType::I8 => Format::i8(endian, wo, res, bf),
+            ValueType::I16 => Format::i16(endian, wo, res, bf),
+            ValueType::I32 => Format::i32(endian, wo, res, bf),
+            ValueType::I64 => Format::i64(endian, wo, res, bf),
+            ValueType::I128 => Format::i128(endian, wo, res, bf),
+            ValueType::F32 => Format::f32(endian, wo, res),
+            ValueType::F64 => Format::f64(endian, wo, res),
+            ValueType::Ascii => Format::Ascii(self.alignment.into(), Width(self.length)),
         }
     }
 
@@ -678,11 +678,11 @@ mod tests {
         assert!(matches!(Scalar::from_input("abc"), Scalar::Text(_)));
         assert!(matches!(
             Scalar::Int(1).to_value(1.0),
-            ferrowl_codec::Value::I64(_)
+            ferrowl_codec::Value::Numeric(ferrowl_codec::NumericPrimitive::I64(_), _)
         ));
         assert!(matches!(
             Scalar::Float(1.0).to_value(1.0),
-            ferrowl_codec::Value::F64(_)
+            ferrowl_codec::Value::Numeric(ferrowl_codec::NumericPrimitive::F64(_), _)
         ));
         assert!(matches!(
             Scalar::Text("x".into()).to_value(1.0),

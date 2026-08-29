@@ -223,7 +223,7 @@ impl EditSelectionDialog<NamedValue> {
         dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {
-            RegisterFormat::Ascii((align, width)) => {
+            RegisterFormat::Ascii(align, width) => {
                 dialog.value_type.state.set_selection(1);
                 dialog
                     .text_alignment
@@ -309,7 +309,7 @@ impl EditSelectionDialog<NamedValue> {
                     .trim()
                     .parse::<usize>()
                     .map_err(|_| "Width must be a number.".to_string())?;
-                RegisterFormat::Ascii((alignment, Width(width)))
+                RegisterFormat::Ascii(alignment, Width(width))
             }
         };
 
@@ -524,12 +524,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(10),
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let edited = EditSelectionDialog::from_register(
             "state",
@@ -555,12 +555,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(0),
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let dialog = EditSelectionDialog::from_register(
             "s",
@@ -580,12 +580,12 @@ mod apply_tests {
         let original = reg(
             Kind::HoldingRegister,
             Address::Fixed(0),
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let mut dialog = EditSelectionDialog::from_register(
             "s",
@@ -632,12 +632,12 @@ mod focus_tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(RegisterFormat::U16((
+            .format(RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         let values = vec![NamedValue {
@@ -691,12 +691,12 @@ mod default_and_conversion_tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(7))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap()
     }

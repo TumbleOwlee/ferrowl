@@ -10,8 +10,8 @@
 use super::{AccessOption, Alignment, Endian, Format, KindOption, WordOrder};
 use crate::dialog::widgets::field_margin;
 use ferrowl_codec::format::{
-    Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
-    Resolution, WordOrder as RegisterWordOrder,
+    Alignment as TextAlignment, BitField, Endian as RegisterEndian, FloatFormat, FloatKind,
+    Format as RegisterFormat, IntKind, NumericFormat, Resolution, WordOrder as RegisterWordOrder,
 };
 use ferrowl_codec::{Access, Kind};
 use ferrowl_ui::state::ButtonState;
@@ -180,36 +180,26 @@ pub(super) fn access_options() -> Vec<AccessOption> {
 
 /// The numeric format options, in display order.
 pub(crate) fn format_options() -> Vec<Format> {
-    let n = || {
-        (
-            RegisterEndian::Big,
-            RegisterWordOrder::Normal,
-            Resolution(1.0),
-            BitField::default(),
-        )
-    };
-    vec![
-        Format(RegisterFormat::U8(n())),
-        Format(RegisterFormat::U16(n())),
-        Format(RegisterFormat::U32(n())),
-        Format(RegisterFormat::U64(n())),
-        Format(RegisterFormat::U128(n())),
-        Format(RegisterFormat::I8(n())),
-        Format(RegisterFormat::I16(n())),
-        Format(RegisterFormat::I32(n())),
-        Format(RegisterFormat::I64(n())),
-        Format(RegisterFormat::I128(n())),
-        Format(RegisterFormat::F32((
-            RegisterEndian::Big,
-            RegisterWordOrder::Normal,
-            Resolution(1.0),
-        ))),
-        Format(RegisterFormat::F64((
-            RegisterEndian::Big,
-            RegisterWordOrder::Normal,
-            Resolution(1.0),
-        ))),
-    ]
+    IntKind::ALL
+        .into_iter()
+        .map(|kind| {
+            Format(RegisterFormat::Numeric(NumericFormat {
+                kind,
+                endian: RegisterEndian::Big,
+                word_order: RegisterWordOrder::Normal,
+                resolution: Resolution(1.0),
+                bit_field: BitField::default(),
+            }))
+        })
+        .chain(FloatKind::ALL.into_iter().map(|kind| {
+            Format(RegisterFormat::Float(FloatFormat {
+                kind,
+                endian: RegisterEndian::Big,
+                word_order: RegisterWordOrder::Normal,
+                resolution: Resolution(1.0),
+            }))
+        }))
+        .collect()
 }
 
 /// The endianness options, in display order.

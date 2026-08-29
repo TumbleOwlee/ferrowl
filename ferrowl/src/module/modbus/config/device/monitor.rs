@@ -88,19 +88,19 @@ impl MonitorRegisterDef {
         let wo: WordOrder = self.word_order.into();
         let bf = parse_bitmask(self.bitmask.as_deref());
         match self.value_type {
-            ValueType::U8 => Format::U8((endian, wo, res, bf)),
-            ValueType::U16 => Format::U16((endian, wo, res, bf)),
-            ValueType::U32 => Format::U32((endian, wo, res, bf)),
-            ValueType::U64 => Format::U64((endian, wo, res, bf)),
-            ValueType::U128 => Format::U128((endian, wo, res, bf)),
-            ValueType::I8 => Format::I8((endian, wo, res, bf)),
-            ValueType::I16 => Format::I16((endian, wo, res, bf)),
-            ValueType::I32 => Format::I32((endian, wo, res, bf)),
-            ValueType::I64 => Format::I64((endian, wo, res, bf)),
-            ValueType::I128 => Format::I128((endian, wo, res, bf)),
-            ValueType::F32 => Format::F32((endian, wo, res)),
-            ValueType::F64 => Format::F64((endian, wo, res)),
-            ValueType::Ascii => Format::Ascii((self.alignment.into(), Width(self.length))),
+            ValueType::U8 => Format::u8(endian, wo, res, bf),
+            ValueType::U16 => Format::u16(endian, wo, res, bf),
+            ValueType::U32 => Format::u32(endian, wo, res, bf),
+            ValueType::U64 => Format::u64(endian, wo, res, bf),
+            ValueType::U128 => Format::u128(endian, wo, res, bf),
+            ValueType::I8 => Format::i8(endian, wo, res, bf),
+            ValueType::I16 => Format::i16(endian, wo, res, bf),
+            ValueType::I32 => Format::i32(endian, wo, res, bf),
+            ValueType::I64 => Format::i64(endian, wo, res, bf),
+            ValueType::I128 => Format::i128(endian, wo, res, bf),
+            ValueType::F32 => Format::f32(endian, wo, res),
+            ValueType::F64 => Format::f64(endian, wo, res),
+            ValueType::Ascii => Format::Ascii(self.alignment.into(), Width(self.length)),
         }
     }
 
@@ -217,12 +217,12 @@ update = "C_Time:Sleep(1)"
         assert_eq!(def.address(), Address::Fixed(5));
         assert_eq!(
             def.format(),
-            Format::U16((
+            Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default()
-            ))
+            )
         );
     }
 }

@@ -110,8 +110,8 @@ impl Scalar {
 
     pub fn to_value(&self, res: f64) -> ferrowl_codec::Value {
         match self {
-            Scalar::Int(i) => ferrowl_codec::Value::I64((*i, Resolution(res))),
-            Scalar::Float(f) => ferrowl_codec::Value::F64((*f, Resolution(res))),
+            Scalar::Int(i) => ferrowl_codec::Value::i64(*i, Resolution(res)),
+            Scalar::Float(f) => ferrowl_codec::Value::f64(*f, Resolution(res)),
             Scalar::Text(s) => ferrowl_codec::Value::Ascii(s.clone()),
         }
     }

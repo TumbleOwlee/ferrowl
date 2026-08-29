@@ -1,9 +1,9 @@
 //! Decode register words into [`Value`]s and encode string input back into words.
 
 use crate::error::CodecError;
-use crate::format::{Alignment, Endian, Format, WordOrder};
+use crate::format::{Alignment, Endian, FloatKind, Format, IntKind, WordOrder};
 use crate::traits::{IntoVec, ParseFromU8};
-use crate::value::Value;
+use crate::value::{NumericPrimitive, Value};
 
 /// Decodes raw register words into a typed [`Value`] according to `format`.
 ///
@@ -29,89 +29,66 @@ pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
         // first. The raw word is taken in the unsigned domain (`$uty`) so the
         // mask/shift act on the bit pattern, then cast to the target type.
         macro_rules! decode_int {
-            ($variant:ident, $uty:ty, $ty:ty, $e:expr, $r:expr, $bf:expr) => {{
+            ($variant:ident, $uty:ty, $ty:ty, $e:expr, $bf:expr) => {{
                 let raw: $uty = match $e {
                     Endian::Big => bytes.parse(),
                     Endian::Little => bytes.rev().parse(),
                 };
                 let field = (((raw as u128) & $bf.mask) >> $bf.shift()) as $ty;
-                Ok(Value::$variant((field, $r.clone())))
+                NumericPrimitive::$variant(field)
             }};
         }
         // U8/I8 occupy a single register, so parse a u16 then narrow.
         macro_rules! decode_byte {
-            ($variant:ident, $ty:ty, $e:expr, $r:expr, $bf:expr) => {{
+            ($variant:ident, $ty:ty, $e:expr, $bf:expr) => {{
                 let raw: u16 = match $e {
                     Endian::Big => ParseFromU8::<u16>::parse(bytes),
                     Endian::Little => ParseFromU8::<u16>::parse(bytes.rev()),
                 };
                 let field = (((raw as u128) & $bf.mask) >> $bf.shift()) as $ty;
-                Ok(Value::$variant((field, $r.clone())))
+                NumericPrimitive::$variant(field)
             }};
         }
-        macro_rules! check_width {
-            ($bf:expr, $bits:expr) => {
-                if !$bf.fits($bits) {
+        match format {
+            Format::Numeric(nf) => {
+                if !nf.bit_field.fits(nf.kind.bits()) {
                     return Err(CodecError::BitFieldWidth(format.clone()));
                 }
-            };
-        }
-        match format {
-            Format::U8((e, _, r, bf)) => {
-                check_width!(bf, 8);
-                decode_byte!(U8, u8, e, r, bf)
-            }
-            Format::I8((e, _, r, bf)) => {
-                check_width!(bf, 8);
-                decode_byte!(I8, i8, e, r, bf)
-            }
-            Format::U16((e, _, r, bf)) => {
-                check_width!(bf, 16);
-                decode_int!(U16, u16, u16, e, r, bf)
-            }
-            Format::U32((e, _, r, bf)) => {
-                check_width!(bf, 32);
-                decode_int!(U32, u32, u32, e, r, bf)
-            }
-            Format::U64((e, _, r, bf)) => {
-                check_width!(bf, 64);
-                decode_int!(U64, u64, u64, e, r, bf)
-            }
-            Format::U128((e, _, r, bf)) => {
-                check_width!(bf, 128);
-                decode_int!(U128, u128, u128, e, r, bf)
-            }
-            Format::I16((e, _, r, bf)) => {
-                check_width!(bf, 16);
-                decode_int!(I16, u16, i16, e, r, bf)
-            }
-            Format::I32((e, _, r, bf)) => {
-                check_width!(bf, 32);
-                decode_int!(I32, u32, i32, e, r, bf)
-            }
-            Format::I64((e, _, r, bf)) => {
-                check_width!(bf, 64);
-                decode_int!(I64, u64, i64, e, r, bf)
-            }
-            Format::I128((e, _, r, bf)) => {
-                check_width!(bf, 128);
-                decode_int!(I128, u128, i128, e, r, bf)
-            }
-            Format::F32((e, _, r)) => {
-                let u: u32 = match e {
-                    Endian::Big => bytes.parse(),
-                    Endian::Little => bytes.rev().parse(),
+                let (e, bf) = (&nf.endian, &nf.bit_field);
+                let prim = match nf.kind {
+                    IntKind::U8 => decode_byte!(U8, u8, e, bf),
+                    IntKind::I8 => decode_byte!(I8, i8, e, bf),
+                    IntKind::U16 => decode_int!(U16, u16, u16, e, bf),
+                    IntKind::I16 => decode_int!(I16, u16, i16, e, bf),
+                    IntKind::U32 => decode_int!(U32, u32, u32, e, bf),
+                    IntKind::I32 => decode_int!(I32, u32, i32, e, bf),
+                    IntKind::U64 => decode_int!(U64, u64, u64, e, bf),
+                    IntKind::I64 => decode_int!(I64, u64, i64, e, bf),
+                    IntKind::U128 => decode_int!(U128, u128, u128, e, bf),
+                    IntKind::I128 => decode_int!(I128, u128, i128, e, bf),
                 };
-                Ok(Value::F32((f32::from_bits(u), r.clone())))
+                Ok(Value::Numeric(prim, nf.resolution.clone()))
             }
-            Format::F64((e, _, r)) => {
-                let u: u64 = match e {
-                    Endian::Big => bytes.parse(),
-                    Endian::Little => bytes.rev().parse(),
+            Format::Float(ff) => {
+                let prim = match ff.kind {
+                    FloatKind::F32 => {
+                        let u: u32 = match ff.endian {
+                            Endian::Big => bytes.parse(),
+                            Endian::Little => bytes.rev().parse(),
+                        };
+                        NumericPrimitive::F32(f32::from_bits(u))
+                    }
+                    FloatKind::F64 => {
+                        let u: u64 = match ff.endian {
+                            Endian::Big => bytes.parse(),
+                            Endian::Little => bytes.rev().parse(),
+                        };
+                        NumericPrimitive::F64(f64::from_bits(u))
+                    }
                 };
-                Ok(Value::F64((f64::from_bits(u), r.clone())))
+                Ok(Value::Numeric(prim, ff.resolution.clone()))
             }
-            Format::Ascii(_) => Ok(Value::Ascii(
+            Format::Ascii(_, _) => Ok(Value::Ascii(
                 String::from_utf8(bytes.collect()).map_err(|_| CodecError::PackedAscii)?,
             )),
         }
@@ -129,19 +106,19 @@ pub fn decode(format: &Format, bytes: &[u16]) -> Result<Value, CodecError> {
 fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
     // Multi-byte unsigned: parse decimal or `0x` hex.
     macro_rules! parse_uint {
-        ($variant:ident, $ty:ty, $r:expr, $s:expr) => {{
+        ($variant:ident, $ty:ty, $s:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("0x") {
                 <$ty>::from_str_radix(s, 16)?
             } else {
                 $s.parse()?
             };
-            Ok(Value::$variant((val, $r.clone())))
+            NumericPrimitive::$variant(val)
         }};
     }
     // Multi-byte signed: also accept `-0x` hex; `$uty` is the same-width unsigned type
     // used to reinterpret a `0x` literal as a bit pattern.
     macro_rules! parse_int {
-        ($variant:ident, $ty:ty, $uty:ty, $r:expr, $s:expr) => {{
+        ($variant:ident, $ty:ty, $uty:ty, $s:expr) => {{
             let val: $ty = if let Some(s) = $s.strip_prefix("-0x") {
                 (<$uty>::from_str_radix(s, 16)? as $ty).wrapping_neg()
             } else if let Some(s) = $s.strip_prefix("0x") {
@@ -149,99 +126,50 @@ fn parse_value(format: &Format, s: &str) -> Result<Value, CodecError> {
             } else {
                 $s.parse()?
             };
-            Ok(Value::$variant((val, $r.clone())))
+            NumericPrimitive::$variant(val)
         }};
     }
     match format {
-        Format::F32((_, _, r)) => {
-            let val: f32 = if let Some(s) = s.strip_prefix("0x") {
-                u32::from_str_radix(s, 16).map(f32::from_bits)?
-            } else {
-                s.parse()?
+        Format::Numeric(nf) => {
+            if !nf.bit_field.fits(nf.kind.bits()) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            let prim = match nf.kind {
+                IntKind::U8 => parse_uint!(U8, u8, s),
+                IntKind::U16 => parse_uint!(U16, u16, s),
+                IntKind::U32 => parse_uint!(U32, u32, s),
+                IntKind::U64 => parse_uint!(U64, u64, s),
+                IntKind::U128 => parse_uint!(U128, u128, s),
+                IntKind::I8 => parse_int!(I8, i8, u8, s),
+                IntKind::I16 => parse_int!(I16, i16, u16, s),
+                IntKind::I32 => parse_int!(I32, i32, u32, s),
+                IntKind::I64 => parse_int!(I64, i64, u64, s),
+                IntKind::I128 => parse_int!(I128, i128, u128, s),
             };
-            Ok(Value::F32((val, r.clone())))
+            Ok(Value::Numeric(prim, nf.resolution.clone()))
         }
-        Format::F64((_, _, r)) => {
-            let val: f64 = if let Some(s) = s.strip_prefix("0x") {
-                u64::from_str_radix(s, 16).map(f64::from_bits)?
-            } else {
-                s.parse()?
+        Format::Float(ff) => {
+            let prim = match ff.kind {
+                FloatKind::F32 => {
+                    let val: f32 = if let Some(s) = s.strip_prefix("0x") {
+                        u32::from_str_radix(s, 16).map(f32::from_bits)?
+                    } else {
+                        s.parse()?
+                    };
+                    NumericPrimitive::F32(val)
+                }
+                FloatKind::F64 => {
+                    let val: f64 = if let Some(s) = s.strip_prefix("0x") {
+                        u64::from_str_radix(s, 16).map(f64::from_bits)?
+                    } else {
+                        s.parse()?
+                    };
+                    NumericPrimitive::F64(val)
+                }
             };
-            Ok(Value::F64((val, r.clone())))
+            Ok(Value::Numeric(prim, ff.resolution.clone()))
         }
-        Format::Ascii(_) => Ok(Value::Ascii(s.to_string())),
-        Format::U8((_, _, r, bf)) => {
-            if !bf.fits(8) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            let val: u8 = if let Some(s) = s.strip_prefix("0x") {
-                u8::from_str_radix(s, 16)?
-            } else {
-                s.parse()?
-            };
-            Ok(Value::U8((val, r.clone())))
-        }
-        Format::U16((_, _, r, bf)) => {
-            if !bf.fits(16) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_uint!(U16, u16, r, s)
-        }
-        Format::U32((_, _, r, bf)) => {
-            if !bf.fits(32) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_uint!(U32, u32, r, s)
-        }
-        Format::U64((_, _, r, bf)) => {
-            if !bf.fits(64) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_uint!(U64, u64, r, s)
-        }
-        Format::U128((_, _, r, bf)) => {
-            if !bf.fits(128) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_uint!(U128, u128, r, s)
-        }
-        Format::I8((_, _, r, bf)) => {
-            if !bf.fits(8) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            let val: i8 = if let Some(s) = s.strip_prefix("-0x") {
-                (u8::from_str_radix(s, 16)? as i8).wrapping_neg()
-            } else if let Some(s) = s.strip_prefix("0x") {
-                u8::from_str_radix(s, 16)? as i8
-            } else {
-                s.parse()?
-            };
-            Ok(Value::I8((val, r.clone())))
-        }
-        Format::I16((_, _, r, bf)) => {
-            if !bf.fits(16) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_int!(I16, i16, u16, r, s)
-        }
-        Format::I32((_, _, r, bf)) => {
-            if !bf.fits(32) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_int!(I32, i32, u32, r, s)
-        }
-        Format::I64((_, _, r, bf)) => {
-            if !bf.fits(64) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_int!(I64, i64, u64, r, s)
-        }
-        Format::I128((_, _, r, bf)) => {
-            if !bf.fits(128) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            parse_int!(I128, i128, u128, r, s)
-        }
+        Format::Ascii(_, _) => Ok(Value::Ascii(s.to_string())),
     }
 }
 
@@ -264,52 +192,85 @@ pub fn encode_value(format: &Format, value: &Value) -> Result<Vec<u16>, CodecErr
     let mismatch = || CodecError::ValueFormatMismatch(format.clone());
     // Multi-byte unsigned: position the field per the bit-field, then split to register words.
     macro_rules! encode_uint {
-        ($variant:ident, $ty:ty, $e:expr, $bf:expr) => {{
-            match value {
-                Value::$variant((val, _)) => {
-                    let val = (((*val as u128) << $bf.shift()) & $bf.mask) as $ty;
-                    Ok(match $e {
-                        Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                        Endian::Little => val.to_le_bytes().iter().into_vec()?,
-                    })
-                }
-                _ => Err(mismatch()),
+        ($val:expr, $ty:ty, $e:expr, $bf:expr) => {{
+            let val = (((*$val as u128) << $bf.shift()) & $bf.mask) as $ty;
+            match $e {
+                Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_le_bytes().iter().into_vec()?,
             }
         }};
     }
     // Multi-byte signed: `$uty` is the same-width unsigned type used to apply the
     // bit-field in the unsigned domain.
     macro_rules! encode_int {
-        ($variant:ident, $ty:ty, $uty:ty, $e:expr, $bf:expr) => {{
-            match value {
-                Value::$variant((val, _)) => {
-                    let val =
-                        (((((*val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
-                    Ok(match $e {
-                        Endian::Big => val.to_be_bytes().iter().into_vec()?,
-                        Endian::Little => val.to_le_bytes().iter().into_vec()?,
-                    })
-                }
-                _ => Err(mismatch()),
+        ($val:expr, $ty:ty, $uty:ty, $e:expr, $bf:expr) => {{
+            let val = (((((*$val as $uty) as u128) << $bf.shift()) & $bf.mask) as $uty) as $ty;
+            match $e {
+                Endian::Big => val.to_be_bytes().iter().into_vec()?,
+                Endian::Little => val.to_le_bytes().iter().into_vec()?,
             }
         }};
     }
-    let words = match format {
-        Format::F32((e, _, _)) => match value {
-            Value::F32((val, _)) => Ok(match e {
-                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-            }),
+    let words: Result<Vec<u16>, CodecError> = match format {
+        Format::Numeric(nf) => {
+            if !nf.bit_field.fits(nf.kind.bits()) {
+                return Err(CodecError::BitFieldWidth(format.clone()));
+            }
+            let (e, bf) = (&nf.endian, &nf.bit_field);
+            match value {
+                Value::Numeric(prim, _) => match (nf.kind, prim) {
+                    (IntKind::U8, NumericPrimitive::U8(val)) => {
+                        let val = (((*val as u128) << bf.shift()) & bf.mask) as u8;
+                        Ok(match e {
+                            Endian::Big => vec![val as u16],
+                            Endian::Little => vec![(val as u16) << 8],
+                        })
+                    }
+                    (IntKind::I8, NumericPrimitive::I8(val)) => {
+                        let val = (((((*val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
+                        Ok(match e {
+                            Endian::Big => vec![val as u16],
+                            Endian::Little => vec![(val as u16) << 8],
+                        })
+                    }
+                    (IntKind::U16, NumericPrimitive::U16(val)) => Ok(encode_uint!(val, u16, e, bf)),
+                    (IntKind::U32, NumericPrimitive::U32(val)) => Ok(encode_uint!(val, u32, e, bf)),
+                    (IntKind::U64, NumericPrimitive::U64(val)) => Ok(encode_uint!(val, u64, e, bf)),
+                    (IntKind::U128, NumericPrimitive::U128(val)) => {
+                        Ok(encode_uint!(val, u128, e, bf))
+                    }
+                    (IntKind::I16, NumericPrimitive::I16(val)) => {
+                        Ok(encode_int!(val, i16, u16, e, bf))
+                    }
+                    (IntKind::I32, NumericPrimitive::I32(val)) => {
+                        Ok(encode_int!(val, i32, u32, e, bf))
+                    }
+                    (IntKind::I64, NumericPrimitive::I64(val)) => {
+                        Ok(encode_int!(val, i64, u64, e, bf))
+                    }
+                    (IntKind::I128, NumericPrimitive::I128(val)) => {
+                        Ok(encode_int!(val, i128, u128, e, bf))
+                    }
+                    _ => Err(mismatch()),
+                },
+                _ => Err(mismatch()),
+            }
+        }
+        Format::Float(ff) => match value {
+            Value::Numeric(prim, _) => match (ff.kind, prim) {
+                (FloatKind::F32, NumericPrimitive::F32(val)) => Ok(match ff.endian {
+                    Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                    Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+                }),
+                (FloatKind::F64, NumericPrimitive::F64(val)) => Ok(match ff.endian {
+                    Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
+                    Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
+                }),
+                _ => Err(mismatch()),
+            },
             _ => Err(mismatch()),
         },
-        Format::F64((e, _, _)) => match value {
-            Value::F64((val, _)) => Ok(match e {
-                Endian::Big => val.to_bits().to_be_bytes().iter().into_vec()?,
-                Endian::Little => val.to_bits().to_le_bytes().iter().into_vec()?,
-            }),
-            _ => Err(mismatch()),
-        },
-        Format::Ascii((a, w)) => match value {
+        Format::Ascii(a, w) => match value {
             Value::Ascii(s) => {
                 let length = 2 * w.0;
                 let zeroes = length.saturating_sub(s.len());
@@ -329,84 +290,6 @@ pub fn encode_value(format: &Format, value: &Value) -> Result<Vec<u16>, CodecErr
             }
             _ => Err(mismatch()),
         },
-        Format::U8((e, _, _, bf)) => {
-            if !bf.fits(8) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            match value {
-                Value::U8((val, _)) => {
-                    let val = (((*val as u128) << bf.shift()) & bf.mask) as u8;
-                    Ok(match e {
-                        Endian::Big => vec![val as u16],
-                        Endian::Little => vec![(val as u16) << 8],
-                    })
-                }
-                _ => Err(mismatch()),
-            }
-        }
-        Format::U16((e, _, _, bf)) => {
-            if !bf.fits(16) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_uint!(U16, u16, e, bf)
-        }
-        Format::U32((e, _, _, bf)) => {
-            if !bf.fits(32) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_uint!(U32, u32, e, bf)
-        }
-        Format::U64((e, _, _, bf)) => {
-            if !bf.fits(64) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_uint!(U64, u64, e, bf)
-        }
-        Format::U128((e, _, _, bf)) => {
-            if !bf.fits(128) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_uint!(U128, u128, e, bf)
-        }
-        Format::I8((e, _, _, bf)) => {
-            if !bf.fits(8) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            match value {
-                Value::I8((val, _)) => {
-                    let val = (((((*val as u8) as u128) << bf.shift()) & bf.mask) as u8) as i8;
-                    Ok(match e {
-                        Endian::Big => vec![val as u16],
-                        Endian::Little => vec![(val as u16) << 8],
-                    })
-                }
-                _ => Err(mismatch()),
-            }
-        }
-        Format::I16((e, _, _, bf)) => {
-            if !bf.fits(16) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_int!(I16, i16, u16, e, bf)
-        }
-        Format::I32((e, _, _, bf)) => {
-            if !bf.fits(32) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_int!(I32, i32, u32, e, bf)
-        }
-        Format::I64((e, _, _, bf)) => {
-            if !bf.fits(64) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_int!(I64, i64, u64, e, bf)
-        }
-        Format::I128((e, _, _, bf)) => {
-            if !bf.fits(128) {
-                return Err(CodecError::BitFieldWidth(format.clone()));
-            }
-            encode_int!(I128, i128, u128, e, bf)
-        }
     };
     // Register order (MB-R-099): reverse the encoded words *after* the byte-order
     // rule, so decode (which reverses *before*) stays its exact inverse.
@@ -432,18 +315,23 @@ pub fn mask_words(format: &Format) -> Vec<u16> {
         }};
     }
     let mut words = match format {
-        Format::U8((e, _, _, bf)) | Format::I8((e, _, _, bf)) => {
-            let m = bf.mask as u8;
-            match e {
-                Endian::Big => vec![m as u16],
-                Endian::Little => vec![(m as u16) << 8],
+        Format::Numeric(nf) => {
+            let (e, bf) = (&nf.endian, &nf.bit_field);
+            match nf.kind {
+                IntKind::U8 | IntKind::I8 => {
+                    let m = bf.mask as u8;
+                    match e {
+                        Endian::Big => vec![m as u16],
+                        Endian::Little => vec![(m as u16) << 8],
+                    }
+                }
+                IntKind::U16 | IntKind::I16 => mask_uint!(u16, e, bf),
+                IntKind::U32 | IntKind::I32 => mask_uint!(u32, e, bf),
+                IntKind::U64 | IntKind::I64 => mask_uint!(u64, e, bf),
+                IntKind::U128 | IntKind::I128 => mask_uint!(u128, e, bf),
             }
         }
-        Format::U16((e, _, _, bf)) | Format::I16((e, _, _, bf)) => mask_uint!(u16, e, bf),
-        Format::U32((e, _, _, bf)) | Format::I32((e, _, _, bf)) => mask_uint!(u32, e, bf),
-        Format::U64((e, _, _, bf)) | Format::I64((e, _, _, bf)) => mask_uint!(u64, e, bf),
-        Format::U128((e, _, _, bf)) | Format::I128((e, _, _, bf)) => mask_uint!(u128, e, bf),
-        Format::F32(_) | Format::F64(_) | Format::Ascii(_) => vec![0xFFFFu16; format.width()],
+        Format::Float(_) | Format::Ascii(_, _) => vec![0xFFFFu16; format.width()],
     };
     // Reverse the mask words in lockstep with the encoded words (MB-R-099) so the
     // read-modify-write merge still targets the bits each register owns.
@@ -457,7 +345,7 @@ pub fn mask_words(format: &Format) -> Vec<u16> {
 mod tests {
     use crate::codec::{decode, encode, encode_value};
     use crate::format::{Alignment, BitField, Endian, Format, Resolution, Width, WordOrder};
-    use crate::value::Value;
+    use crate::value::{NumericPrimitive, Value};
     use crate::{CodecError, Register, RegisterBuilder};
 
     fn reg(fmt: Format) -> Register {
@@ -475,31 +363,31 @@ mod tests {
     // --- Format helpers ---
 
     fn u8_be() -> Format {
-        Format::U8((Endian::Big, WordOrder::Normal, res(), bf()))
+        Format::u8(Endian::Big, WordOrder::Normal, res(), bf())
     }
     fn u8_le() -> Format {
-        Format::U8((Endian::Little, WordOrder::Normal, res(), bf()))
+        Format::u8(Endian::Little, WordOrder::Normal, res(), bf())
     }
     fn u32_be() -> Format {
-        Format::U32((Endian::Big, WordOrder::Normal, res(), bf()))
+        Format::u32(Endian::Big, WordOrder::Normal, res(), bf())
     }
     fn u32_le() -> Format {
-        Format::U32((Endian::Little, WordOrder::Normal, res(), bf()))
+        Format::u32(Endian::Little, WordOrder::Normal, res(), bf())
     }
     fn i8_be() -> Format {
-        Format::I8((Endian::Big, WordOrder::Normal, res(), bf()))
+        Format::i8(Endian::Big, WordOrder::Normal, res(), bf())
     }
     fn i32_be() -> Format {
-        Format::I32((Endian::Big, WordOrder::Normal, res(), bf()))
+        Format::i32(Endian::Big, WordOrder::Normal, res(), bf())
     }
     fn i32_le() -> Format {
-        Format::I32((Endian::Little, WordOrder::Normal, res(), bf()))
+        Format::i32(Endian::Little, WordOrder::Normal, res(), bf())
     }
     fn f32_be() -> Format {
-        Format::F32((Endian::Big, WordOrder::Normal, res()))
+        Format::f32(Endian::Big, WordOrder::Normal, res())
     }
     fn f64_be() -> Format {
-        Format::F64((Endian::Big, WordOrder::Normal, res()))
+        Format::f64(Endian::Big, WordOrder::Normal, res())
     }
 
     // --- Too few bytes ---
@@ -509,7 +397,7 @@ mod tests {
     fn ut_decode_too_few_bytes() {
         assert!(reg(u32_be()).decode(&[0x0001]).is_err());
         assert!(
-            reg(Format::U64((Endian::Big, WordOrder::Normal, res(), bf())))
+            reg(Format::u64(Endian::Big, WordOrder::Normal, res(), bf()))
                 .decode(&[])
                 .is_err()
         );
@@ -521,7 +409,7 @@ mod tests {
     /// MB-R-012 — a big-endian U8 reads the byte from the register's low byte.
     fn ut_decode_u8_big() {
         match reg(u8_be()).decode(&[0x00FF]).unwrap() {
-            Value::U8((v, _)) => assert_eq!(v, 0xFF),
+            Value::Numeric(NumericPrimitive::U8(v), _) => assert_eq!(v, 0xFF),
             _ => panic!("Wrong variant"),
         }
     }
@@ -530,7 +418,7 @@ mod tests {
     /// MB-R-012 — a little-endian U8 reads the byte from the register's high byte.
     fn ut_decode_u8_little() {
         match reg(u8_le()).decode(&[0xFF00]).unwrap() {
-            Value::U8((v, _)) => assert_eq!(v, 0xFF),
+            Value::Numeric(NumericPrimitive::U8(v), _) => assert_eq!(v, 0xFF),
             _ => panic!("Wrong variant"),
         }
     }
@@ -582,7 +470,7 @@ mod tests {
     fn ut_decode_i8_negative() {
         // -1i8 as u8 = 0xFF; stored in low byte of register
         match reg(i8_be()).decode(&[0x00FF]).unwrap() {
-            Value::I8((v, _)) => assert_eq!(v, -1i8),
+            Value::Numeric(NumericPrimitive::I8(v), _) => assert_eq!(v, -1i8),
             _ => panic!("Wrong variant"),
         }
     }
@@ -591,7 +479,7 @@ mod tests {
     /// MB-R-012 — a big-endian I8 reads the byte from the register's low byte (positive value).
     fn ut_decode_i8_positive() {
         match reg(i8_be()).decode(&[0x0042]).unwrap() {
-            Value::I8((v, _)) => assert_eq!(v, 66i8),
+            Value::Numeric(NumericPrimitive::I8(v), _) => assert_eq!(v, 66i8),
             _ => panic!("Wrong variant"),
         }
     }
@@ -637,7 +525,7 @@ mod tests {
     /// MB-R-013 — big-endian decodes the register words' byte stream in wire order.
     fn ut_decode_u32_big() {
         match reg(u32_be()).decode(&[0x0001, 0x0002]).unwrap() {
-            Value::U32((v, _)) => assert_eq!(v, 0x00010002),
+            Value::Numeric(NumericPrimitive::U32(v), _) => assert_eq!(v, 0x00010002),
             _ => panic!("Wrong variant"),
         }
     }
@@ -648,7 +536,7 @@ mod tests {
         // Bytes [0x01, 0x02, 0x03, 0x04] reversed = [0x04, 0x03, 0x02, 0x01]
         // parse = 0x04030201
         match reg(u32_le()).decode(&[0x0102, 0x0304]).unwrap() {
-            Value::U32((v, _)) => assert_eq!(v, 0x04030201),
+            Value::Numeric(NumericPrimitive::U32(v), _) => assert_eq!(v, 0x04030201),
             _ => panic!("Wrong variant"),
         }
     }
@@ -735,7 +623,7 @@ mod tests {
         let r = reg(i32_be());
         let words = r.encode("-0x01").unwrap();
         match r.decode(&words).unwrap() {
-            Value::I32((v, _)) => assert_eq!(v, -1),
+            Value::Numeric(NumericPrimitive::I32(v), _) => assert_eq!(v, -1),
             _ => panic!("Wrong variant"),
         }
     }
@@ -747,7 +635,7 @@ mod tests {
         let r = reg(i32_be());
         let words = r.encode("0xFFFFFFFF").unwrap();
         match r.decode(&words).unwrap() {
-            Value::I32((v, _)) => assert_eq!(v, -1),
+            Value::Numeric(NumericPrimitive::I32(v), _) => assert_eq!(v, -1),
             _ => panic!("Wrong variant"),
         }
     }
@@ -760,7 +648,7 @@ mod tests {
         let bits = 1.5f32.to_bits();
         let words = vec![((bits >> 16) & 0xFFFF) as u16, (bits & 0xFFFF) as u16];
         match reg(f32_be()).decode(&words).unwrap() {
-            Value::F32((f, _)) => assert!((f - 1.5f32).abs() < 1e-6),
+            Value::Numeric(NumericPrimitive::F32(f), _) => assert!((f - 1.5f32).abs() < 1e-6),
             _ => panic!("Wrong variant"),
         }
     }
@@ -779,7 +667,7 @@ mod tests {
         let r = reg(f32_be());
         let words = r.encode("1.5").unwrap();
         match r.decode(&words).unwrap() {
-            Value::F32((f, _)) => assert!((f - 1.5f32).abs() < 1e-6),
+            Value::Numeric(NumericPrimitive::F32(f), _) => assert!((f - 1.5f32).abs() < 1e-6),
             _ => panic!("Wrong variant"),
         }
     }
@@ -801,7 +689,7 @@ mod tests {
         let r = reg(f64_be());
         let words = r.encode("1.5").unwrap();
         match r.decode(&words).unwrap() {
-            Value::F64((f, _)) => assert!((f - 1.5f64).abs() < 1e-10),
+            Value::Numeric(NumericPrimitive::F64(f), _) => assert!((f - 1.5f64).abs() < 1e-10),
             _ => panic!("Wrong variant"),
         }
     }
@@ -812,7 +700,7 @@ mod tests {
     /// MB-R-019 — `Ascii` packs two characters per register.
     fn ut_decode_ascii_exact_fill() {
         // "ABCD" fills exactly 4 bytes (Width(2) = 2 registers = 4 bytes)
-        let r = reg(Format::Ascii((Alignment::Left, Width(2))));
+        let r = reg(Format::Ascii(Alignment::Left, Width(2)));
         match r.decode(&[0x4142, 0x4344]).unwrap() {
             Value::Ascii(s) => assert_eq!(s, "ABCD"),
             _ => panic!("Wrong variant"),
@@ -823,7 +711,7 @@ mod tests {
     /// MB-R-020 — `Left` alignment zero-pads on the right to `2 × width` bytes.
     fn ut_encode_ascii_left_aligned() {
         // "AB" left-aligned in 4 bytes: [0x41, 0x42, 0x00, 0x00]
-        let r = reg(Format::Ascii((Alignment::Left, Width(2))));
+        let r = reg(Format::Ascii(Alignment::Left, Width(2)));
         assert_eq!(r.encode("AB").unwrap(), vec![0x4142u16, 0x0000u16]);
     }
 
@@ -831,7 +719,7 @@ mod tests {
     /// MB-R-020 — `Right` alignment zero-pads on the left to `2 × width` bytes.
     fn ut_encode_ascii_right_aligned() {
         // "AB" right-aligned in 4 bytes: [0x00, 0x00, 0x41, 0x42]
-        let r = reg(Format::Ascii((Alignment::Right, Width(2))));
+        let r = reg(Format::Ascii(Alignment::Right, Width(2)));
         assert_eq!(r.encode("AB").unwrap(), vec![0x0000u16, 0x4142u16]);
     }
 
@@ -839,7 +727,7 @@ mod tests {
     /// MB-R-007 — encoding then decoding an exact-fill ASCII value recovers the string.
     fn ut_roundtrip_ascii_exact() {
         // Exact fill avoids null-padding in round-trip
-        let r = reg(Format::Ascii((Alignment::Left, Width(2))));
+        let r = reg(Format::Ascii(Alignment::Left, Width(2)));
         let words = r.encode("ABCD").unwrap();
         match r.decode(&words).unwrap() {
             Value::Ascii(s) => assert_eq!(s, "ABCD"),
@@ -851,7 +739,7 @@ mod tests {
     /// MB-R-024 — decoding an `Ascii` format whose bytes are not valid UTF-8 fails with a packed-ASCII error.
     fn ut_decode_ascii_invalid_utf8() {
         // 0xFF is never a valid UTF-8 lead byte.
-        let r = reg(Format::Ascii((Alignment::Left, Width(1))));
+        let r = reg(Format::Ascii(Alignment::Left, Width(1)));
         assert!(matches!(r.decode(&[0xFFFF]), Err(CodecError::PackedAscii)));
     }
 
@@ -860,12 +748,12 @@ mod tests {
     #[test]
     /// MB-R-021 — the display resolution scales the shown value but not the words on the wire.
     fn ut_decode_u16_with_resolution() {
-        let r = reg(Format::U16((
+        let r = reg(Format::u16(
             Endian::Big,
             WordOrder::Normal,
             Resolution(0.5),
             bf(),
-        )));
+        ));
         let words = r.encode("2048").unwrap();
         let decoded = r.decode(&words).unwrap();
         // 2048 * 0.5 = 1024.0
@@ -875,7 +763,7 @@ mod tests {
     // --- Bit-field mask + derived shift ---
 
     fn u16_be_mask(mask: u128) -> Format {
-        Format::U16((Endian::Big, WordOrder::Normal, res(), BitField { mask }))
+        Format::u16(Endian::Big, WordOrder::Normal, res(), BitField { mask })
     }
 
     #[test]
@@ -883,7 +771,7 @@ mod tests {
     fn ut_decode_u16_high_byte_field() {
         // mask 0xFF00 → shift 8: raw 0xAB12 reads as 0xAB.
         match reg(u16_be_mask(0xFF00)).decode(&[0xAB12]).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0xAB),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0xAB),
             _ => panic!("Wrong variant"),
         }
     }
@@ -893,7 +781,7 @@ mod tests {
     fn ut_decode_u16_low_byte_field() {
         // mask 0x00FF → shift 0: raw 0xAB12 reads as 0x12.
         match reg(u16_be_mask(0x00FF)).decode(&[0xAB12]).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0x12),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0x12),
             _ => panic!("Wrong variant"),
         }
     }
@@ -916,7 +804,7 @@ mod tests {
         // 0xAB << 4 & 0x0FF0 = 0x0AB0
         assert_eq!(words, vec![0x0AB0u16]);
         match r.decode(&words).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0xAB),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0xAB),
             _ => panic!("Wrong variant"),
         }
     }
@@ -928,7 +816,7 @@ mod tests {
         let r = reg(u16_be_mask(u128::MAX));
         assert_eq!(r.encode("0xABCD").unwrap(), vec![0xABCDu16]);
         match r.decode(&[0xABCD]).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0xABCD),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0xABCD),
             _ => panic!("Wrong variant"),
         }
     }
@@ -941,12 +829,12 @@ mod tests {
         // Full U16 mask narrows to 0xFFFF.
         assert_eq!(reg(u16_be_mask(u128::MAX)).write_mask(), vec![0xFFFFu16]);
         // U32 big-endian mask spans two words.
-        let r = reg(Format::U32((
+        let r = reg(Format::u32(
             Endian::Big,
             WordOrder::Normal,
             res(),
             BitField { mask: 0xFFFF_0000 },
-        )));
+        ));
         assert_eq!(r.write_mask(), vec![0xFFFFu16, 0x0000u16]);
         // U8 full mask only owns the low byte of its word.
         assert_eq!(reg(u8_be()).write_mask(), vec![0x00FFu16]);
@@ -959,11 +847,11 @@ mod tests {
     fn ut_roundtrip_wide_ints() {
         let e = [Endian::Big, Endian::Little];
         for endian in e {
-            let u64f = Format::U64((endian.clone(), WordOrder::Normal, res(), bf()));
-            let u128f = Format::U128((endian.clone(), WordOrder::Normal, res(), bf()));
-            let i16f = Format::I16((endian.clone(), WordOrder::Normal, res(), bf()));
-            let i64f = Format::I64((endian.clone(), WordOrder::Normal, res(), bf()));
-            let i128f = Format::I128((endian.clone(), WordOrder::Normal, res(), bf()));
+            let u64f = Format::u64(endian.clone(), WordOrder::Normal, res(), bf());
+            let u128f = Format::u128(endian.clone(), WordOrder::Normal, res(), bf());
+            let i16f = Format::i16(endian.clone(), WordOrder::Normal, res(), bf());
+            let i64f = Format::i64(endian.clone(), WordOrder::Normal, res(), bf());
+            let i128f = Format::i128(endian.clone(), WordOrder::Normal, res(), bf());
 
             // Display scales through f64, so values stay within f64's exact
             // integer range (< 2^53) to survive the round-trip string compare.
@@ -988,19 +876,19 @@ mod tests {
     /// a Big/Reversed U32 reads wire words `0x0102 0x0304` as `0x03040102`, and a
     /// Little/Reversed one as `0x02010403`.
     fn ut_decode_u32_reversed() {
-        let big_rev = reg(Format::U32((Endian::Big, WordOrder::Reversed, res(), bf())));
+        let big_rev = reg(Format::u32(Endian::Big, WordOrder::Reversed, res(), bf()));
         match big_rev.decode(&[0x0102, 0x0304]).unwrap() {
-            Value::U32((v, _)) => assert_eq!(v, 0x0304_0102),
+            Value::Numeric(NumericPrimitive::U32(v), _) => assert_eq!(v, 0x0304_0102),
             _ => panic!("Wrong variant"),
         }
-        let little_rev = reg(Format::U32((
+        let little_rev = reg(Format::u32(
             Endian::Little,
             WordOrder::Reversed,
             res(),
             bf(),
-        )));
+        ));
         match little_rev.decode(&[0x0102, 0x0304]).unwrap() {
-            Value::U32((v, _)) => assert_eq!(v, 0x0201_0403),
+            Value::Numeric(NumericPrimitive::U32(v), _) => assert_eq!(v, 0x0201_0403),
             _ => panic!("Wrong variant"),
         }
     }
@@ -1009,7 +897,7 @@ mod tests {
     /// MB-R-099 — encoding under `Reversed` reverses the words *after* the byte-order
     /// rule, the exact inverse of decode: `0x01020304` becomes wire words `0x0304 0x0102`.
     fn ut_encode_u32_reversed() {
-        let r = reg(Format::U32((Endian::Big, WordOrder::Reversed, res(), bf())));
+        let r = reg(Format::u32(Endian::Big, WordOrder::Reversed, res(), bf()));
         assert_eq!(r.encode("0x01020304").unwrap(), vec![0x0304, 0x0102]);
     }
 
@@ -1018,10 +906,10 @@ mod tests {
     /// multi-register width, in both byte orders.
     fn ut_roundtrip_reversed_all_widths() {
         for endian in [Endian::Big, Endian::Little] {
-            let u32f = Format::U32((endian.clone(), WordOrder::Reversed, res(), bf()));
-            let u64f = Format::U64((endian.clone(), WordOrder::Reversed, res(), bf()));
-            let u128f = Format::U128((endian.clone(), WordOrder::Reversed, res(), bf()));
-            let i32f = Format::I32((endian.clone(), WordOrder::Reversed, res(), bf()));
+            let u32f = Format::u32(endian.clone(), WordOrder::Reversed, res(), bf());
+            let u64f = Format::u64(endian.clone(), WordOrder::Reversed, res(), bf());
+            let u128f = Format::u128(endian.clone(), WordOrder::Reversed, res(), bf());
+            let i32f = Format::i32(endian.clone(), WordOrder::Reversed, res(), bf());
             for (f, s) in [
                 (u32f, "123456789"),
                 (u64f, "1234567890123"),
@@ -1033,16 +921,16 @@ mod tests {
                 assert_eq!(r.decode(&words).unwrap().to_string(), s);
             }
             // Floats compare by value to avoid display-formatting coupling.
-            let f32r = reg(Format::F32((endian.clone(), WordOrder::Reversed, res())));
+            let f32r = reg(Format::f32(endian.clone(), WordOrder::Reversed, res()));
             let w = f32r.encode("1.5").unwrap();
             match f32r.decode(&w).unwrap() {
-                Value::F32((v, _)) => assert!((v - 1.5f32).abs() < 1e-6),
+                Value::Numeric(NumericPrimitive::F32(v), _) => assert!((v - 1.5f32).abs() < 1e-6),
                 _ => panic!("Wrong variant"),
             }
-            let f64r = reg(Format::F64((endian.clone(), WordOrder::Reversed, res())));
+            let f64r = reg(Format::f64(endian.clone(), WordOrder::Reversed, res()));
             let w = f64r.encode("2.25").unwrap();
             match f64r.decode(&w).unwrap() {
-                Value::F64((v, _)) => assert!((v - 2.25f64).abs() < 1e-10),
+                Value::Numeric(NumericPrimitive::F64(v), _) => assert!((v - 2.25f64).abs() < 1e-10),
                 _ => panic!("Wrong variant"),
             }
         }
@@ -1053,16 +941,16 @@ mod tests {
     /// `Normal` and `Reversed` encode and decode identically for `U16`/`U8`.
     fn ut_word_order_noop_single_register() {
         for e in [Endian::Big, Endian::Little] {
-            let n16 = reg(Format::U16((e.clone(), WordOrder::Normal, res(), bf())));
-            let r16 = reg(Format::U16((e.clone(), WordOrder::Reversed, res(), bf())));
+            let n16 = reg(Format::u16(e.clone(), WordOrder::Normal, res(), bf()));
+            let r16 = reg(Format::u16(e.clone(), WordOrder::Reversed, res(), bf()));
             assert_eq!(
                 n16.decode(&[0x1234]).unwrap().to_string(),
                 r16.decode(&[0x1234]).unwrap().to_string()
             );
             assert_eq!(n16.encode("4660").unwrap(), r16.encode("4660").unwrap());
 
-            let n8 = reg(Format::U8((e.clone(), WordOrder::Normal, res(), bf())));
-            let r8 = reg(Format::U8((e.clone(), WordOrder::Reversed, res(), bf())));
+            let n8 = reg(Format::u8(e.clone(), WordOrder::Normal, res(), bf()));
+            let r8 = reg(Format::u8(e.clone(), WordOrder::Reversed, res(), bf()));
             assert_eq!(n8.encode("200").unwrap(), r8.encode("200").unwrap());
         }
     }
@@ -1072,13 +960,13 @@ mod tests {
     /// words under `Reversed`, so the read-modify-write merge still targets the right bits.
     fn ut_mask_words_reversed() {
         let mask = BitField { mask: 0xFFFF_0000 };
-        let normal = reg(Format::U32((
+        let normal = reg(Format::u32(
             Endian::Big,
             WordOrder::Normal,
             res(),
             mask.clone(),
-        )));
-        let reversed = reg(Format::U32((Endian::Big, WordOrder::Reversed, res(), mask)));
+        ));
+        let reversed = reg(Format::u32(Endian::Big, WordOrder::Reversed, res(), mask));
         assert_eq!(normal.write_mask(), vec![0xFFFF, 0x0000]);
         assert_eq!(reversed.write_mask(), vec![0x0000, 0xFFFF]);
     }
@@ -1086,17 +974,17 @@ mod tests {
     #[test]
     /// MB-R-018 — floats encode/decode via their bit pattern under little-endian byte order.
     fn ut_roundtrip_floats_little_endian() {
-        let f32le = reg(Format::F32((Endian::Little, WordOrder::Normal, res())));
+        let f32le = reg(Format::f32(Endian::Little, WordOrder::Normal, res()));
         let words = f32le.encode("1.5").unwrap();
         match f32le.decode(&words).unwrap() {
-            Value::F32((f, _)) => assert!((f - 1.5f32).abs() < 1e-6),
+            Value::Numeric(NumericPrimitive::F32(f), _) => assert!((f - 1.5f32).abs() < 1e-6),
             _ => panic!("Wrong variant"),
         }
 
-        let f64le = reg(Format::F64((Endian::Little, WordOrder::Normal, res())));
+        let f64le = reg(Format::f64(Endian::Little, WordOrder::Normal, res()));
         let words = f64le.encode("2.25").unwrap();
         match f64le.decode(&words).unwrap() {
-            Value::F64((f, _)) => assert!((f - 2.25f64).abs() < 1e-10),
+            Value::Numeric(NumericPrimitive::F64(f), _) => assert!((f - 2.25f64).abs() < 1e-10),
             _ => panic!("Wrong variant"),
         }
     }
@@ -1109,7 +997,7 @@ mod tests {
         let r = reg(f64_be());
         let words = r.encode(&hex_str).unwrap();
         match r.decode(&words).unwrap() {
-            Value::F64((f, _)) => assert!((f - 2.5f64).abs() < 1e-10),
+            Value::Numeric(NumericPrimitive::F64(f), _) => assert!((f - 2.5f64).abs() < 1e-10),
             _ => panic!("Wrong variant"),
         }
     }
@@ -1118,7 +1006,7 @@ mod tests {
     /// MB-R-012 — a little-endian I8 places the byte in the register's high byte.
     fn ut_encode_i8_little_endian() {
         // I8 little-endian places the byte in the high byte of the word.
-        let r = reg(Format::I8((Endian::Little, WordOrder::Normal, res(), bf())));
+        let r = reg(Format::i8(Endian::Little, WordOrder::Normal, res(), bf()));
         assert_eq!(r.encode("-1").unwrap(), vec![(-1i8 as u16) << 8]);
     }
 
@@ -1129,31 +1017,31 @@ mod tests {
         assert_eq!(reg(u8_le()).write_mask(), vec![0xFF00u16]);
         // U64 / U128 masks span multiple words.
         assert_eq!(
-            reg(Format::U64((
+            reg(Format::u64(
                 Endian::Big,
                 WordOrder::Normal,
                 res(),
                 BitField {
                     mask: u64::MAX as u128
                 }
-            )))
+            ))
             .write_mask(),
             vec![0xFFFFu16; 4]
         );
         assert_eq!(
-            reg(Format::U128((
+            reg(Format::u128(
                 Endian::Big,
                 WordOrder::Normal,
                 res(),
                 BitField { mask: u128::MAX }
-            )))
+            ))
             .write_mask(),
             vec![0xFFFFu16; 8]
         );
         // Float / ASCII masks are all-ones across their width.
         assert_eq!(reg(f32_be()).write_mask(), vec![0xFFFFu16; 2]);
         assert_eq!(
-            reg(Format::Ascii((Alignment::Left, Width(3)))).write_mask(),
+            reg(Format::Ascii(Alignment::Left, Width(3))).write_mask(),
             vec![0xFFFFu16; 3]
         );
     }
@@ -1172,11 +1060,11 @@ mod tests {
         assert_eq!(mem, vec![0x3412u16]);
         // Both fields decode back independently.
         match low.decode(&mem).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0x12),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0x12),
             _ => panic!("Wrong variant"),
         }
         match high.decode(&mem).unwrap() {
-            Value::U16((v, _)) => assert_eq!(v, 0x34),
+            Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 0x34),
             _ => panic!("Wrong variant"),
         }
     }
@@ -1190,63 +1078,63 @@ mod tests {
         for endian in e {
             let cases: Vec<(Format, Value, &str)> = vec![
                 (
-                    Format::U8((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::U8((200, res())),
+                    Format::u8(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::u8(200, res()),
                     "200",
                 ),
                 (
-                    Format::I8((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::I8((-1, res())),
+                    Format::i8(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::i8(-1, res()),
                     "-1",
                 ),
                 (
-                    Format::U16((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::U16((1234, res())),
+                    Format::u16(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::u16(1234, res()),
                     "1234",
                 ),
                 (
-                    Format::I16((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::I16((-1234, res())),
+                    Format::i16(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::i16(-1234, res()),
                     "-1234",
                 ),
                 (
-                    Format::U32((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::U32((123456789, res())),
+                    Format::u32(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::u32(123456789, res()),
                     "123456789",
                 ),
                 (
-                    Format::I32((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::I32((-123456789, res())),
+                    Format::i32(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::i32(-123456789, res()),
                     "-123456789",
                 ),
                 (
-                    Format::U64((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::U64((1234567890123, res())),
+                    Format::u64(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::u64(1234567890123, res()),
                     "1234567890123",
                 ),
                 (
-                    Format::I64((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::I64((-1234567890123, res())),
+                    Format::i64(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::i64(-1234567890123, res()),
                     "-1234567890123",
                 ),
                 (
-                    Format::U128((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::U128((123456789012345, res())),
+                    Format::u128(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::u128(123456789012345, res()),
                     "123456789012345",
                 ),
                 (
-                    Format::I128((endian.clone(), WordOrder::Normal, res(), bf())),
-                    Value::I128((-123456789012345, res())),
+                    Format::i128(endian.clone(), WordOrder::Normal, res(), bf()),
+                    Value::i128(-123456789012345, res()),
                     "-123456789012345",
                 ),
                 (
-                    Format::F32((endian.clone(), WordOrder::Normal, res())),
-                    Value::F32((1.5, res())),
+                    Format::f32(endian.clone(), WordOrder::Normal, res()),
+                    Value::f32(1.5, res()),
                     "1.5",
                 ),
                 (
-                    Format::F64((endian.clone(), WordOrder::Normal, res())),
-                    Value::F64((2.25, res())),
+                    Format::f64(endian.clone(), WordOrder::Normal, res()),
+                    Value::f64(2.25, res()),
                     "2.25",
                 ),
             ];
@@ -1257,7 +1145,7 @@ mod tests {
             }
         }
         // ASCII
-        let ascii = Format::Ascii((Alignment::Left, Width(2)));
+        let ascii = Format::Ascii(Alignment::Left, Width(2));
         assert_eq!(
             encode(&ascii, "AB").unwrap(),
             encode_value(&ascii, &Value::Ascii("AB".to_string())).unwrap()
@@ -1269,12 +1157,12 @@ mod tests {
     fn ut_encode_value_bitfield_and_resolution() {
         // Bit-field placement applies identically via the typed path.
         let format = u16_be_mask(0x0FF0);
-        let words = encode_value(&format, &Value::U16((0xAB, res()))).unwrap();
+        let words = encode_value(&format, &Value::u16(0xAB, res())).unwrap();
         assert_eq!(words, vec![0x0AB0u16]);
 
         // Resolution is not applied by encode_value, same as the string path.
-        let format = Format::U16((Endian::Big, WordOrder::Normal, Resolution(0.5), bf()));
-        let words = encode_value(&format, &Value::U16((2048, Resolution(0.5)))).unwrap();
+        let format = Format::u16(Endian::Big, WordOrder::Normal, Resolution(0.5), bf());
+        let words = encode_value(&format, &Value::u16(2048, Resolution(0.5))).unwrap();
         assert_eq!(words, encode(&format, "2048").unwrap());
     }
 
@@ -1283,9 +1171,9 @@ mod tests {
     fn ut_encode_value_roundtrip_via_decode() {
         let r = reg(i32_le());
         for val in [-2147483648i32, -1, 0, 1, 2147483647] {
-            let words = r.encode_value(&Value::I32((val, res()))).unwrap();
+            let words = r.encode_value(&Value::i32(val, res())).unwrap();
             match r.decode(&words).unwrap() {
-                Value::I32((v, _)) => assert_eq!(v, val),
+                Value::Numeric(NumericPrimitive::I32(v), _) => assert_eq!(v, val),
                 _ => panic!("Wrong variant"),
             }
         }
@@ -1297,22 +1185,22 @@ mod tests {
     /// MB-R-016 — a mask setting a bit at or above the format width is rejected on decode.
     fn ut_decode_bitfield_mask_out_of_width_errors() {
         // 0x1FF on a U8 sets bit 8, outside the 8-bit width.
-        let format = Format::U8((
+        let format = Format::u8(
             Endian::Big,
             WordOrder::Normal,
             res(),
             BitField { mask: 0x1FF },
-        ));
+        );
         let err = decode(&format, &[0x0001]).unwrap_err();
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
 
         // 0xFF00 on a U8 masks out every bit of the 8-bit value entirely.
-        let format = Format::U8((
+        let format = Format::u8(
             Endian::Big,
             WordOrder::Normal,
             res(),
             BitField { mask: 0xFF00 },
-        ));
+        );
         let err = decode(&format, &[0x0001]).unwrap_err();
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
     }
@@ -1320,16 +1208,16 @@ mod tests {
     #[test]
     /// MB-R-016 — a mask setting a bit at or above the format width is rejected on encode.
     fn ut_encode_bitfield_mask_out_of_width_errors() {
-        let format = Format::U8((
+        let format = Format::u8(
             Endian::Big,
             WordOrder::Normal,
             res(),
             BitField { mask: 0x1FF },
-        ));
+        );
         let err = encode(&format, "1").unwrap_err();
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
 
-        let err = encode_value(&format, &Value::U8((1, res()))).unwrap_err();
+        let err = encode_value(&format, &Value::u8(1, res())).unwrap_err();
         assert!(matches!(err, CodecError::BitFieldWidth(_)));
     }
 
@@ -1346,11 +1234,11 @@ mod tests {
     /// MB-R-008 — encoding a typed value whose type does not match the format fails with a mismatch error.
     fn ut_encode_value_mismatch_errors() {
         let format = u32_be();
-        let err = encode_value(&format, &Value::U16((1, res()))).unwrap_err();
+        let err = encode_value(&format, &Value::u16(1, res())).unwrap_err();
         assert!(matches!(err, CodecError::ValueFormatMismatch(_)));
 
-        let ascii = Format::Ascii((Alignment::Left, Width(2)));
-        let err = encode_value(&ascii, &Value::U8((1, res()))).unwrap_err();
+        let ascii = Format::Ascii(Alignment::Left, Width(2));
+        let err = encode_value(&ascii, &Value::u8(1, res())).unwrap_err();
         assert!(matches!(err, CodecError::ValueFormatMismatch(_)));
     }
 }

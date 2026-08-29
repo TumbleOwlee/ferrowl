@@ -182,11 +182,11 @@ impl EditInputDialog {
             set_input(&mut dialog.default_value, &def.to_string());
         }
         // Pre-populate the value field so the user can edit or clear it directly.
-        let is_ascii = matches!(register.format(), RegisterFormat::Ascii(_));
+        let is_ascii = matches!(register.format(), RegisterFormat::Ascii(_, _));
         if is_ascii {
             let value: String = if matches!(
                 register.format(),
-                RegisterFormat::Ascii((ferrowl_codec::Alignment::Left, _))
+                RegisterFormat::Ascii(ferrowl_codec::Alignment::Left, _)
             ) {
                 let value: String = value
                     .chars()
@@ -221,7 +221,7 @@ impl EditInputDialog {
         dialog.kind.state.set_selection(kind_index(register.kind()));
 
         match register.format() {
-            RegisterFormat::Ascii((align, width)) => {
+            RegisterFormat::Ascii(align, width) => {
                 dialog.value_type.state.set_selection(1);
                 dialog
                     .text_alignment
@@ -265,12 +265,12 @@ impl EditInputDialog {
         let address = parse_address(self.address.state.input())?;
 
         let format = if self.is_boolean_kind() {
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            ))
+            )
         } else {
             match self.value_type.state.get_value() {
                 ValueType::Number => {
@@ -303,11 +303,11 @@ impl EditInputDialog {
                         .trim()
                         .parse::<usize>()
                         .map_err(|_| "Width must be a number.".to_string())?;
-                    RegisterFormat::Ascii((alignment, Width(width)))
+                    RegisterFormat::Ascii(alignment, Width(width))
                 }
             }
         };
-        let is_ascii = matches!(format, RegisterFormat::Ascii(_));
+        let is_ascii = matches!(format, RegisterFormat::Ascii(_, _));
 
         let slave_id = self
             .slave_id
@@ -540,12 +540,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(100),
             7,
-            RegisterFormat::U32((
+            RegisterFormat::u32(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let edited =
             EditInputDialog::from_register("temp", "a sensor", &original, "42", None, true)
@@ -570,12 +570,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(10),
             1,
-            RegisterFormat::U32((
+            RegisterFormat::u32(
                 RegisterEndian::Big,
                 RegisterWordOrder::Reversed,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let edited = EditInputDialog::from_register("w", "", &original, "1", None, true)
             .apply()
@@ -590,12 +590,12 @@ mod apply_tests {
             Access::ReadOnly,
             Address::Virtual,
             1,
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Little,
                 RegisterWordOrder::Normal,
                 Resolution(0.5),
                 BitField::default(),
-            )),
+            ),
         );
         let edited = EditInputDialog::from_register("v", "", &original, "3", None, true)
             .apply()
@@ -613,12 +613,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(5),
             1,
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField { mask: 0xFF00 },
-            )),
+            ),
         );
         let edited = EditInputDialog::from_register("masked", "", &original, "0", None, true)
             .apply()
@@ -633,7 +633,7 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(0),
             1,
-            RegisterFormat::Ascii((TextAlignment::Left, Width(4))),
+            RegisterFormat::Ascii(TextAlignment::Left, Width(4)),
         );
         let edited = EditInputDialog::from_register("label", "", &original, "AB", None, true)
             .apply()
@@ -648,12 +648,12 @@ mod apply_tests {
             Access::ReadWrite,
             Address::Fixed(1),
             1,
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
         );
         let edited = EditInputDialog::from_register("c", "", &original, "1", None, true)
             .apply()
@@ -662,12 +662,12 @@ mod apply_tests {
         // Boolean kinds (Coil/DiscreteInput) always serialize as a default big-endian U16.
         assert_eq!(
             *edited.register.format(),
-            RegisterFormat::U16((
+            RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default()
-            ))
+            )
         );
     }
 
@@ -700,12 +700,12 @@ mod focus_tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(RegisterFormat::U32((
+            .format(RegisterFormat::u32(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         // `from_register` focuses the value field and sets the cursor at the end of "4".
@@ -718,12 +718,12 @@ mod focus_tests {
             .access(Access::ReadWrite)
             .kind(Kind::Coil)
             .address(Address::Fixed(0))
-            .format(RegisterFormat::U16((
+            .format(RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         EditInputDialog::from_register("c", "", &register, "1", None, true)
@@ -802,12 +802,12 @@ mod focus_tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(RegisterFormat::U16((
+            .format(RegisterFormat::u16(
                 RegisterEndian::Big,
                 RegisterWordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
         let mut single = EditInputDialog::from_register("name", "", &single, "4", None, true);

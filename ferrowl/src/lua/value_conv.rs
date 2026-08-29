@@ -2,7 +2,7 @@
 //! [`Value`]/[`Format`] the register store speaks: `virtual_value_from_type` and
 //! `typed_value_from_type` for the Set path, `value_to_type` for the Get path.
 
-use ferrowl_codec::{Format, Register, Value};
+use ferrowl_codec::{FloatKind, Format, IntKind, NumericPrimitive, Register, Value};
 use ferrowl_lua::module::ValueType;
 use ferrowl_lua::{Error, Result};
 
@@ -15,14 +15,14 @@ pub(super) fn virtual_value_from_type(value: ValueType, register: &Register) -> 
     match value {
         ValueType::Nil => Err(Error::RuntimeError("cannot Set nil value".to_string())),
         ValueType::String(s) => Ok(crate::module::modbus::str_to_value(&s, register)),
-        ValueType::Bool(b) => Ok(Value::I64((b as i64, res))),
+        ValueType::Bool(b) => Ok(Value::i64(b as i64, res)),
         ValueType::Int(v) => Ok(match i64::try_from(v) {
-            Ok(v) => Value::I64((v, res)),
+            Ok(v) => Value::i64(v, res),
             // Mirrors `Scalar::from_input`'s fallback for an out-of-i64-range literal: it fails
             // to parse as `i64` and is retried as `f64`.
-            Err(_) => Value::F64((v as f64, res)),
+            Err(_) => Value::f64(v as f64, res),
         }),
-        ValueType::Float(v) => Ok(Value::F64((v, res))),
+        ValueType::Float(v) => Ok(Value::f64(v, res)),
     }
 }
 
@@ -48,30 +48,34 @@ fn int_value_for_format(v: i128, format: &Format) -> Result<Value> {
     macro_rules! int_variant {
         ($variant:ident, $ty:ty) => {
             <$ty>::try_from(v)
-                .map(|val| Value::$variant((val, res.clone())))
+                .map(|val| Value::$variant(val, res.clone()))
                 .map_err(|_| {
                     Error::RuntimeError(format!("value {v} out of range for format {format}"))
                 })
         };
     }
     match format {
-        Format::U8(_) => int_variant!(U8, u8),
-        Format::U16(_) => int_variant!(U16, u16),
-        Format::U32(_) => int_variant!(U32, u32),
-        Format::U64(_) => int_variant!(U64, u64),
-        Format::U128(_) => u128::try_from(v)
-            .map(|val| Value::U128((val, res.clone())))
-            .map_err(|_| {
-                Error::RuntimeError(format!("value {v} out of range for format {format}"))
-            }),
-        Format::I8(_) => int_variant!(I8, i8),
-        Format::I16(_) => int_variant!(I16, i16),
-        Format::I32(_) => int_variant!(I32, i32),
-        Format::I64(_) => int_variant!(I64, i64),
-        Format::I128(_) => Ok(Value::I128((v, res))),
-        Format::F32(_) => Ok(Value::F32((v as f32, res))),
-        Format::F64(_) => Ok(Value::F64((v as f64, res))),
-        Format::Ascii(_) => Ok(Value::Ascii(v.to_string())),
+        Format::Numeric(nf) => match nf.kind {
+            IntKind::U8 => int_variant!(u8, u8),
+            IntKind::U16 => int_variant!(u16, u16),
+            IntKind::U32 => int_variant!(u32, u32),
+            IntKind::U64 => int_variant!(u64, u64),
+            IntKind::U128 => u128::try_from(v)
+                .map(|val| Value::u128(val, res.clone()))
+                .map_err(|_| {
+                    Error::RuntimeError(format!("value {v} out of range for format {format}"))
+                }),
+            IntKind::I8 => int_variant!(i8, i8),
+            IntKind::I16 => int_variant!(i16, i16),
+            IntKind::I32 => int_variant!(i32, i32),
+            IntKind::I64 => int_variant!(i64, i64),
+            IntKind::I128 => Ok(Value::i128(v, res)),
+        },
+        Format::Float(ff) => match ff.kind {
+            FloatKind::F32 => Ok(Value::f32(v as f32, res)),
+            FloatKind::F64 => Ok(Value::f64(v as f64, res)),
+        },
+        Format::Ascii(_, _) => Ok(Value::Ascii(v.to_string())),
     }
 }
 
@@ -92,24 +96,28 @@ fn float_value_for_format(v: f64, format: &Format) -> Result<Value> {
                     "value {v} out of range for format {format}"
                 )))
             } else {
-                Ok(Value::$variant((v as $ty, res.clone())))
+                Ok(Value::$variant(v as $ty, res.clone()))
             }
         }};
     }
     match format {
-        Format::U8(_) => float_int_variant!(U8, u8),
-        Format::U16(_) => float_int_variant!(U16, u16),
-        Format::U32(_) => float_int_variant!(U32, u32),
-        Format::U64(_) => float_int_variant!(U64, u64),
-        Format::U128(_) => float_int_variant!(U128, u128),
-        Format::I8(_) => float_int_variant!(I8, i8),
-        Format::I16(_) => float_int_variant!(I16, i16),
-        Format::I32(_) => float_int_variant!(I32, i32),
-        Format::I64(_) => float_int_variant!(I64, i64),
-        Format::I128(_) => float_int_variant!(I128, i128),
-        Format::F32(_) => Ok(Value::F32((v as f32, res))),
-        Format::F64(_) => Ok(Value::F64((v, res))),
-        Format::Ascii(_) => Ok(Value::Ascii(v.to_string())),
+        Format::Numeric(nf) => match nf.kind {
+            IntKind::U8 => float_int_variant!(u8, u8),
+            IntKind::U16 => float_int_variant!(u16, u16),
+            IntKind::U32 => float_int_variant!(u32, u32),
+            IntKind::U64 => float_int_variant!(u64, u64),
+            IntKind::U128 => float_int_variant!(u128, u128),
+            IntKind::I8 => float_int_variant!(i8, i8),
+            IntKind::I16 => float_int_variant!(i16, i16),
+            IntKind::I32 => float_int_variant!(i32, i32),
+            IntKind::I64 => float_int_variant!(i64, i64),
+            IntKind::I128 => float_int_variant!(i128, i128),
+        },
+        Format::Float(ff) => match ff.kind {
+            FloatKind::F32 => Ok(Value::f32(v as f32, res)),
+            FloatKind::F64 => Ok(Value::f64(v, res)),
+        },
+        Format::Ascii(_, _) => Ok(Value::Ascii(v.to_string())),
     }
 }
 
@@ -117,18 +125,20 @@ fn float_value_for_format(v: f64, format: &Format) -> Result<Value> {
 /// number so that a subsequent `Set` round-trips through `Register::encode`.
 pub(super) fn value_to_type(value: Value) -> ValueType {
     match value {
-        Value::U8((v, _)) => ValueType::Int(v as i128),
-        Value::U16((v, _)) => ValueType::Int(v as i128),
-        Value::U32((v, _)) => ValueType::Int(v as i128),
-        Value::U64((v, _)) => ValueType::Int(v as i128),
-        Value::U128((v, _)) => ValueType::Int(v as i128),
-        Value::I8((v, _)) => ValueType::Int(v as i128),
-        Value::I16((v, _)) => ValueType::Int(v as i128),
-        Value::I32((v, _)) => ValueType::Int(v as i128),
-        Value::I64((v, _)) => ValueType::Int(v as i128),
-        Value::I128((v, _)) => ValueType::Int(v),
-        Value::F32((v, _)) => ValueType::Float(v as f64),
-        Value::F64((v, _)) => ValueType::Float(v),
+        Value::Numeric(p, _) => match p {
+            NumericPrimitive::U8(v) => ValueType::Int(v as i128),
+            NumericPrimitive::U16(v) => ValueType::Int(v as i128),
+            NumericPrimitive::U32(v) => ValueType::Int(v as i128),
+            NumericPrimitive::U64(v) => ValueType::Int(v as i128),
+            NumericPrimitive::U128(v) => ValueType::Int(v as i128),
+            NumericPrimitive::I8(v) => ValueType::Int(v as i128),
+            NumericPrimitive::I16(v) => ValueType::Int(v as i128),
+            NumericPrimitive::I32(v) => ValueType::Int(v as i128),
+            NumericPrimitive::I64(v) => ValueType::Int(v as i128),
+            NumericPrimitive::I128(v) => ValueType::Int(v),
+            NumericPrimitive::F32(v) => ValueType::Float(v as f64),
+            NumericPrimitive::F64(v) => ValueType::Float(v),
+        },
         Value::Ascii(s) => ValueType::String(s),
     }
 }
@@ -140,28 +150,28 @@ mod tests {
     use ferrowl_codec::{Access, Address, Kind, RegisterBuilder};
     use ferrowl_modbus::UnitId;
 
-    fn int_fmt(kind: fn((Endian, WordOrder, Resolution, BitField)) -> Format) -> Format {
-        kind((
+    fn int_fmt(kind: fn(Endian, WordOrder, Resolution, BitField) -> Format) -> Format {
+        kind(
             Endian::Big,
             WordOrder::Normal,
             Resolution(1.0),
             BitField::default(),
-        ))
+        )
     }
 
     #[test]
     /// SC-R-027 — a read returns each stored value as its natural Lua type.
     fn ut_value_to_type_natural_types() {
         assert!(matches!(
-            value_to_type(Value::U16((7, Resolution(1.0)))),
+            value_to_type(Value::u16(7, Resolution(1.0))),
             ValueType::Int(7)
         ));
         assert!(matches!(
-            value_to_type(Value::I128((-9, Resolution(1.0)))),
+            value_to_type(Value::i128(-9, Resolution(1.0))),
             ValueType::Int(-9)
         ));
         assert!(matches!(
-            value_to_type(Value::F64((1.5, Resolution(1.0)))),
+            value_to_type(Value::f64(1.5, Resolution(1.0))),
             ValueType::Float(f) if f == 1.5
         ));
         assert!(matches!(
@@ -173,16 +183,16 @@ mod tests {
     #[test]
     /// SC-R-027 — an integer write range-checks against the target width instead of truncating.
     fn ut_typed_value_int_range_checked() {
-        let u8f = int_fmt(Format::U8);
+        let u8f = int_fmt(Format::u8);
         assert!(matches!(
             typed_value_from_type(ValueType::Int(200), &u8f).unwrap(),
-            Value::U8((200, _))
+            Value::Numeric(NumericPrimitive::U8(200), _)
         ));
         assert!(typed_value_from_type(ValueType::Int(300), &u8f).is_err()); // out of u8 range
         // A bool writes as 0/1 through the integer path.
         assert!(matches!(
             typed_value_from_type(ValueType::Bool(true), &u8f).unwrap(),
-            Value::U8((1, _))
+            Value::Numeric(NumericPrimitive::U8(1), _)
         ));
         // Nil always errors rather than coercing.
         assert!(typed_value_from_type(ValueType::Nil, &u8f).is_err());
@@ -191,10 +201,10 @@ mod tests {
     #[test]
     /// SC-R-027 — a float write into an integer format only accepts a whole, in-range number.
     fn ut_typed_value_float_into_int_requires_whole() {
-        let i16f = int_fmt(Format::I16);
+        let i16f = int_fmt(Format::i16);
         assert!(matches!(
             typed_value_from_type(ValueType::Float(42.0), &i16f).unwrap(),
-            Value::I16((42, _))
+            Value::Numeric(NumericPrimitive::I16(42), _)
         ));
         assert!(typed_value_from_type(ValueType::Float(3.5), &i16f).is_err()); // fractional
         assert!(typed_value_from_type(ValueType::Float(f64::NAN), &i16f).is_err()); // non-finite
@@ -203,12 +213,12 @@ mod tests {
 
     #[test]
     fn ut_typed_value_float_and_ascii_formats() {
-        let f32f = Format::F32((Endian::Big, WordOrder::Normal, Resolution(1.0)));
+        let f32f = Format::f32(Endian::Big, WordOrder::Normal, Resolution(1.0));
         assert!(matches!(
             typed_value_from_type(ValueType::Float(1.25), &f32f).unwrap(),
-            Value::F32((v, _)) if v == 1.25
+            Value::Numeric(NumericPrimitive::F32(v), _) if v == 1.25
         ));
-        let ascii = Format::Ascii((Alignment::Left, Width(4)));
+        let ascii = Format::Ascii(Alignment::Left, Width(4));
         assert!(matches!(
             typed_value_from_type(ValueType::Int(12), &ascii).unwrap(),
             Value::Ascii(ref s) if s == "12"
@@ -224,25 +234,25 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Virtual)
-            .format(int_fmt(Format::U16))
+            .format(int_fmt(Format::u16))
             .build()
             .unwrap();
         assert!(matches!(
             virtual_value_from_type(ValueType::Bool(true), &register).unwrap(),
-            Value::I64((1, _))
+            Value::Numeric(NumericPrimitive::I64(1), _)
         ));
         assert!(matches!(
             virtual_value_from_type(ValueType::Int(5), &register).unwrap(),
-            Value::I64((5, _))
+            Value::Numeric(NumericPrimitive::I64(5), _)
         ));
         // An out-of-i64 literal falls back to F64, mirroring the string path.
         assert!(matches!(
             virtual_value_from_type(ValueType::Int(i128::MAX), &register).unwrap(),
-            Value::F64(_)
+            Value::Numeric(NumericPrimitive::F64(_), _)
         ));
         assert!(matches!(
             virtual_value_from_type(ValueType::Float(2.5), &register).unwrap(),
-            Value::F64((v, _)) if v == 2.5
+            Value::Numeric(NumericPrimitive::F64(v), _) if v == 2.5
         ));
         assert!(virtual_value_from_type(ValueType::Nil, &register).is_err());
     }

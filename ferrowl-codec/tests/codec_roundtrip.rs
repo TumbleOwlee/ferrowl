@@ -4,8 +4,8 @@
 
 use ferrowl_codec::format::{Resolution, Width, WordOrder};
 use ferrowl_codec::{
-    Access, Alignment, BitField, Endian, Format, Kind, RegisterBuilder, UnitId, Value, decode,
-    encode, encode_value,
+    Access, Alignment, BitField, Endian, Format, Kind, NumericPrimitive, RegisterBuilder, UnitId,
+    Value, decode, encode, encode_value,
 };
 
 fn res() -> Resolution {
@@ -13,7 +13,7 @@ fn res() -> Resolution {
 }
 
 fn int(endian: Endian) -> Format {
-    Format::U16((endian, WordOrder::Normal, res(), BitField::default()))
+    Format::u16(endian, WordOrder::Normal, res(), BitField::default())
 }
 
 #[test]
@@ -33,10 +33,10 @@ fn it_register_builder_applies_documented_defaults() {
 /// MB-R-007 — a typed U16 value round-trips through raw register words.
 fn it_u16_value_roundtrips_through_words() {
     let fmt = int(Endian::Big);
-    let words = encode_value(&fmt, &Value::U16((300, res()))).expect("300 fits a u16 register");
+    let words = encode_value(&fmt, &Value::u16(300, res())).expect("300 fits a u16 register");
     let back = decode(&fmt, &words).expect("freshly encoded words decode");
     match back {
-        Value::U16((v, _)) => assert_eq!(v, 300),
+        Value::Numeric(NumericPrimitive::U16(v), _) => assert_eq!(v, 300),
         other => panic!("expected U16, got {other:?}"),
     }
 }
@@ -44,43 +44,43 @@ fn it_u16_value_roundtrips_through_words() {
 #[test]
 /// MB-R-013 — big- and little-endian produce different words but each decodes back to the same value.
 fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
-    let value = Value::U32((0x0001_0002, res()));
+    let value = Value::u32(0x0001_0002, res());
     let be = encode_value(
-        &Format::U32((Endian::Big, WordOrder::Normal, res(), BitField::default())),
+        &Format::u32(Endian::Big, WordOrder::Normal, res(), BitField::default()),
         &value,
     )
     .expect("value encodes big-endian");
     let le = encode_value(
-        &Format::U32((
+        &Format::u32(
             Endian::Little,
             WordOrder::Normal,
             res(),
             BitField::default(),
-        )),
+        ),
         &value,
     )
     .expect("value encodes little-endian");
     assert_ne!(be, le, "the two byte orders must differ for this value");
 
     let decoded = |fmt: Format, words: &[u16]| match decode(&fmt, words).expect("decodes") {
-        Value::U32((v, _)) => v,
+        Value::Numeric(NumericPrimitive::U32(v), _) => v,
         other => panic!("expected U32, got {other:?}"),
     };
     assert_eq!(
         decoded(
-            Format::U32((Endian::Big, WordOrder::Normal, res(), BitField::default())),
+            Format::u32(Endian::Big, WordOrder::Normal, res(), BitField::default()),
             &be
         ),
         0x0001_0002
     );
     assert_eq!(
         decoded(
-            Format::U32((
+            Format::u32(
                 Endian::Little,
                 WordOrder::Normal,
                 res(),
                 BitField::default()
-            )),
+            ),
             &le
         ),
         0x0001_0002
@@ -90,10 +90,10 @@ fn it_u32_big_and_little_endian_swap_word_order_but_decode_equal() {
 #[test]
 /// MB-R-007 — a negative signed value round-trips through raw register words.
 fn it_signed_value_roundtrips_negative() {
-    let fmt = Format::I16((Endian::Big, WordOrder::Normal, res(), BitField::default()));
-    let words = encode_value(&fmt, &Value::I16((-5, res()))).expect("encodes -5");
+    let fmt = Format::i16(Endian::Big, WordOrder::Normal, res(), BitField::default());
+    let words = encode_value(&fmt, &Value::i16(-5, res())).expect("encodes -5");
     match decode(&fmt, &words).expect("decodes") {
-        Value::I16((v, _)) => assert_eq!(v, -5),
+        Value::Numeric(NumericPrimitive::I16(v), _) => assert_eq!(v, -5),
         other => panic!("expected I16, got {other:?}"),
     }
 }
@@ -101,10 +101,10 @@ fn it_signed_value_roundtrips_negative() {
 #[test]
 /// MB-R-018 — a float value round-trips through its IEEE 754 register words.
 fn it_float_value_roundtrips() {
-    let fmt = Format::F32((Endian::Big, WordOrder::Normal, res()));
-    let words = encode_value(&fmt, &Value::F32((1.5, res()))).expect("encodes 1.5");
+    let fmt = Format::f32(Endian::Big, WordOrder::Normal, res());
+    let words = encode_value(&fmt, &Value::f32(1.5, res())).expect("encodes 1.5");
     match decode(&fmt, &words).expect("decodes") {
-        Value::F32((v, _)) => assert_eq!(v, 1.5),
+        Value::Numeric(NumericPrimitive::F32(v), _) => assert_eq!(v, 1.5),
         other => panic!("expected F32, got {other:?}"),
     }
 }
@@ -112,7 +112,7 @@ fn it_float_value_roundtrips() {
 #[test]
 /// MB-R-007 — an ASCII value round-trips through raw register words.
 fn it_ascii_value_roundtrips_through_string_encoding() {
-    let fmt = Format::Ascii((Alignment::Left, Width(4)));
+    let fmt = Format::Ascii(Alignment::Left, Width(4));
     let words = encode(&fmt, "Hi").expect("ASCII text encodes into 4 registers");
     match decode(&fmt, &words).expect("decodes") {
         Value::Ascii(s) => assert_eq!(s.trim_end_matches('\0').trim_end(), "Hi"),
@@ -123,7 +123,7 @@ fn it_ascii_value_roundtrips_through_string_encoding() {
 #[test]
 /// MB-R-023 — decoding fewer words than the format width is rejected.
 fn it_decode_rejects_too_few_words() {
-    let fmt = Format::U32((Endian::Big, WordOrder::Normal, res(), BitField::default()));
+    let fmt = Format::u32(Endian::Big, WordOrder::Normal, res(), BitField::default());
     assert!(
         decode(&fmt, &[0x0001]).is_err(),
         "a u32 needs two words; one must be rejected"

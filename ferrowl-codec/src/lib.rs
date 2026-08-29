@@ -18,16 +18,17 @@ pub mod value;
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
 pub use rust_modbus::UnitId;
-use serde::{Deserialize, Serialize};
 
 pub use crate::access::Access;
 pub use crate::address::Address;
 pub use crate::codec::{decode, encode, encode_value};
 pub use crate::error::CodecError;
-pub use crate::format::{Alignment, BitField, Endian, Format, WordOrder};
+pub use crate::format::{
+    Alignment, BitField, Endian, FloatFormat, FloatKind, Format, IntKind, NumericFormat, WordOrder,
+};
 pub use crate::kind::Kind;
 pub use crate::traits::{IntoVec, ParseFromU8};
-pub use crate::value::Value;
+pub use crate::value::{NumericPrimitive, Value};
 
 /// Description of a single logical register: location, access rights, and
 /// data format.
@@ -35,9 +36,7 @@ pub use crate::value::Value;
 /// Build with [`RegisterBuilder`]; only `format` is required. Use
 /// [`decode`](Self::decode)/[`encode`](Self::encode) to convert between raw
 /// register words and display/input strings according to the format.
-#[derive(
-    Builder, Serialize, Deserialize, Debug, Clone, Getters, Setters, CopyGetters, WithSetters,
-)]
+#[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
 pub struct Register {
     #[getset(get = "pub")]
@@ -107,12 +106,12 @@ mod tests {
     use crate::{Access, Address, Alignment, BitField, Kind, RegisterBuilder, UnitId};
 
     fn u16_be() -> Format {
-        Format::U16((
+        Format::u16(
             Endian::Big,
             WordOrder::Normal,
             Resolution(1.0),
             BitField::default(),
-        ))
+        )
     }
 
     #[test]
@@ -140,29 +139,29 @@ mod tests {
         // U16 = 1 word, F32 = 2 words, U64 = 4 words, U128 = 8 words, Ascii = its width.
         assert_eq!(u16_be().width(), 1);
         assert_eq!(
-            Format::F32((Endian::Big, WordOrder::Normal, Resolution(1.0))).width(),
+            Format::f32(Endian::Big, WordOrder::Normal, Resolution(1.0)).width(),
             2
         );
         assert_eq!(
-            Format::U64((
+            Format::u64(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default()
-            ))
+            )
             .width(),
             4
         );
         assert_eq!(
-            Format::U128((
+            Format::u128(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default()
-            ))
+            )
             .width(),
             8
         );
-        assert_eq!(Format::Ascii((Alignment::Left, Width(5))).width(), 5);
+        assert_eq!(Format::Ascii(Alignment::Left, Width(5)).width(), 5);
     }
 }

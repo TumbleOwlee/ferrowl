@@ -514,12 +514,12 @@ mod tests {
             slave,
             kind,
             addr,
-            Format::U16((
+            Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )),
+            ),
             access,
         )
     }
@@ -528,32 +528,32 @@ mod tests {
     /// MB-R-021 — parsed input carries the register's display resolution (non-numeric input falls through to ASCII).
     fn ut_str_to_value_uses_register_resolution() {
         use super::str_to_value;
-        use ferrowl_codec::Value;
+        use ferrowl_codec::{NumericPrimitive, Value};
 
         let reg = entry(
             1,
             Kind::HoldingRegister,
             0,
-            Format::U16((
+            Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(0.5),
                 BitField::default(),
-            )),
+            ),
             Access::ReadWrite,
         )
         .2;
 
         // Integer and float inputs carry the register's resolution.
         match str_to_value("10", &reg) {
-            Value::I64((v, r)) => {
+            Value::Numeric(NumericPrimitive::I64(v), r) => {
                 assert_eq!(v, 10);
                 assert_eq!(r.0, 0.5);
             }
             other => panic!("expected I64, got {other:?}"),
         }
         match str_to_value("1.5", &reg) {
-            Value::F64((v, r)) => {
+            Value::Numeric(NumericPrimitive::F64(v), r) => {
                 assert_eq!(v, 1.5);
                 assert_eq!(r.0, 0.5);
             }
@@ -611,12 +611,12 @@ mod tests {
                     1,
                     Kind::HoldingRegister,
                     i * 8,
-                    Format::U128((
+                    Format::u128(
                         Endian::Big,
                         WordOrder::Normal,
                         Resolution(1.0),
                         BitField::default(),
-                    )),
+                    ),
                     Access::ReadOnly,
                 )
             })
@@ -641,24 +641,24 @@ mod tests {
                 1,
                 Kind::HoldingRegister,
                 20,
-                Format::U128((
+                Format::u128(
                     Endian::Big,
                     WordOrder::Normal,
                     Resolution(1.0),
                     BitField::default(),
-                )), // width 8 -> 20..28
+                ), // width 8 -> 20..28
                 Access::ReadWrite,
             ),
             entry(
                 1,
                 Kind::HoldingRegister,
                 30,
-                Format::U16((
+                Format::u16(
                     Endian::Big,
                     WordOrder::Normal,
                     Resolution(1.0),
                     BitField::default(),
-                )), // 30..31
+                ), // 30..31
                 Access::ReadWrite,
             ),
         ];
@@ -774,12 +774,12 @@ mod tests {
             .access(Access::ReadWrite)
             .kind(Kind::HoldingRegister)
             .address(Address::Fixed(0))
-            .format(Format::U16((
+            .format(Format::u16(
                 Endian::Big,
                 WordOrder::Normal,
                 Resolution(1.0),
                 BitField::default(),
-            )))
+            ))
             .build()
             .unwrap();
 
