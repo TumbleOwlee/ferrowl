@@ -647,6 +647,80 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-031 — a read region overlapping a read cell of the same type merges without changing access.
+    fn ut_memory_widen_read_then_read_noop() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]);
+        assert!(memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]));
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_ok()
+        );
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_err()
+        );
+    }
+
+    #[test]
+    /// MB-R-032 — a read/write region overlapping a read cell is an incompatible access combination and is rejected.
+    fn ut_memory_widen_read_then_readwrite_rejected() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &CellKind::Read(CellType::Coil), &[Range::new(0, 5)]);
+        assert!(!memory.add_ranges(
+            1u8,
+            &CellKind::ReadWrite(CellType::Coil),
+            &[Range::new(0, 5)]
+        ));
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_ok()
+        );
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_err()
+        );
+    }
+
+    #[test]
+    /// MB-R-032 — a read/write region overlapping a write cell is an incompatible access combination and is rejected.
+    fn ut_memory_widen_write_then_readwrite_rejected() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(0, 5)]);
+        assert!(!memory.add_ranges(
+            1u8,
+            &CellKind::ReadWrite(CellType::Coil),
+            &[Range::new(0, 5)]
+        ));
+        assert!(
+            memory
+                .writable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_ok()
+        );
+        assert!(
+            memory
+                .readable(&1u8, &CellType::Coil, &Range::new(0, 5))
+                .is_err()
+        );
+    }
+
+    #[test]
+    /// MB-R-032 — a write region overlapping a read/write cell is an incompatible access combination and is rejected.
+    fn ut_memory_widen_readwrite_then_write_rejected() {
+        let mut memory: Memory<u8> = Memory::default();
+        memory.add_ranges(
+            1u8,
+            &CellKind::ReadWrite(CellType::Coil),
+            &[Range::new(0, 5)],
+        );
+        assert!(!memory.add_ranges(1u8, &CellKind::Write(CellType::Coil), &[Range::new(0, 5)]));
+    }
+
+    #[test]
     /// MB-R-032 — declaring a range overlapping a cell of incompatible cell type fails.
     fn ut_memory_widen_incompatible_read_cell() {
         // Read cell + overlapping incompatible access (wrong type) -> false.

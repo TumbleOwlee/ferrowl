@@ -111,3 +111,24 @@ fn it_incompatible_cell_type_overlap_is_rejected_and_leaves_memory_unchanged() {
         .expect("the rejected declaration left the register region intact");
     assert_eq!(got, vec![1, 2, 3, 4]);
 }
+
+#[test]
+/// MB-R-032 — a read/write declaration overlapping a read region is rejected and leaves the region's values intact.
+fn it_readwrite_range_over_read_region_is_rejected_and_leaves_memory_unchanged() {
+    let mut m = mem();
+    assert!(m.add_ranges(1, &CellKind::Read(CellType::Register), &[Range::new(0, 4)]));
+    assert!(m.write_unchecked(1, &Range::new(0, 4), &[1, 2, 3, 4]));
+    assert!(!m.add_ranges(
+        1,
+        &CellKind::ReadWrite(CellType::Register),
+        &[Range::new(0, 4)]
+    ));
+    let got = m
+        .read(1, &CellType::Register, &Range::new(0, 4))
+        .expect("the rejected declaration left the region's values intact");
+    assert_eq!(got, vec![1, 2, 3, 4]);
+    assert!(
+        m.writable(&1, &CellType::Register, &Range::new(0, 4))
+            .is_err()
+    );
+}
