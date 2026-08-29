@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Independent gate 3 review of a branch against the approved spec and the repo's standards, including TDD honesty. Use before proposing a PR; must be a different agent than the one that wrote the code.
+description: Independent review against the approved spec and the repo's standards, including TDD honesty — of a plan (gate 2), one stage, a wave, or the whole branch (gate 3). Writes artifacts/<slug>/review.md, returns one status line. Must be a different agent than the one that wrote the code.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -11,7 +11,7 @@ Review code you did not write. Read-only: report, never fix.
 
 Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint, conventions — the standards axis below is checked against these; falls back to `AGENTS.md` if `.claude/AGENTS.core.md` doesn't exist), `docs/specs/README.md` — review against these, not the caller's summary. No issue/PR knowledge — never reference one. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope = the base ref given: a wave (stages merged so far — cross-stage bugs live here) or the whole branch at gate 3. Never widen it. Caller tells you which stage ids are in scope.
+Scope token from the caller: `plan` (no diff — check `plan.md` against `spec-diff.md`: quoted requirement text matches, appended IDs unused in `docs/specs/`, nothing contradicts an existing requirement, every ID has a stage and a test, `s0` lands every ID; spec-fidelity axis only), `stage s<n>` (base = previous stage's commit), `wave w<n>` (stages merged so far — cross-stage bugs live here) or `branch` at gate 3. Never widen it. Caller tells you which stage ids are in scope.
 
 **`plan.md`:** wave review → pull only the in-scope stage sections, plus `## Shared` if any of them references it, in one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Stage s<m>: <name>' ...] ['## Shared'] artifacts/<slug>/plan.md`. Full branch at gate 3 → scope is every stage anyway, so read the whole file directly; slicing it section by section would cost more calls for the same content. Either way, never re-derive a stage's intent from the diff alone — the plan is the authority on what a stage was supposed to do.
 
@@ -58,16 +58,21 @@ same as a spec-fidelity gap.
 
 ## Output
 
-One line per finding: `<stage id> — path:line — severity — problem. fix.`
-Severity ∈ {blocker, major, minor}. `<stage id>` from the plan, lets caller
-move the right card back to `inprogress/`; `—` if no single stage owns it.
-Group by axis. No praise, no summary.
+Append to `artifacts/<slug>/review.md` — append only, never rewrite an
+earlier review's lines — under a heading `## <scope> <date>`. One line per
+finding: `<stage id> — path:line — severity — problem. fix.` Severity ∈
+{blocker, major, minor}. `<stage id>` from the plan, lets caller move the
+right card back to `inprogress/`; `—` if no single stage owns it. Group by
+axis; clean axis → one line saying so. No praise, no summary.
 
-Append to `artifacts/<slug>/review.md` if given an artifact dir — append only,
-never rewrite an earlier review's lines.
+Final message is one line, nothing else — the orchestrator never reads
+`review.md`, only forwards its path:
 
-Clean axis → one line saying so. Empty diff or unresolvable base ref → say so,
-stop.
+```
+status=clean file=artifacts/<slug>/review.md
+status=findings file=artifacts/<slug>/review.md count=<blockers> stage=[s2,s4]
+status=blocked reason=<empty diff | unresolvable base ref | …>
+```
 
 Findings needing a user decision (scope question, spec ambiguity, semver call)
 are flagged, not resolved.

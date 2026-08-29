@@ -183,11 +183,30 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   dialog, and version-independent *plumbing* that must inspect an arbitrary
   encoded action (e.g. a scope/EVSE guard spanning all actions) where no
   typed accessor exists.
+- **Model states as enums, never a flag plus dependent optionals.** A struct
+  whose fields are meaningful only under some combination of its own booleans
+  pushes validation into a resolve function and lets the wire carry states the
+  code must then reject. Give each state its own variant holding exactly the
+  fields that state needs, so the invalid combinations cannot be constructed
+  or deserialized at all. A tagged enum (`#[serde(tag = "…")]`) extends this
+  to the wire and replaces hand-written `Serialize`/`Deserialize` shadow
+  structs. Where a check genuinely cannot be expressed in a type — a `Vec`
+  that must be non-empty — keep it as one condition on one variant, never a
+  rule spanning fields. This applies to config and session schemas as much as
+  to in-memory types; changing a wire shape is a breaking configuration change
+  and needs its own CS-R spec change.
 - **No hard line wrap on anything posted externally** — issue bodies, PR
   bodies, PR/review comments. The host (GitHub) soft-wraps for display; a
   manually inserted `\n` mid-sentence survives rendering as a real line
   break and fragments the text. Paragraphs as single unbroken lines; only
   headings, list items, and code blocks get their own line.
+- **Spec text is never wrapped either** — `docs/specs/` and any
+  `spec-diff.md`: one requirement, one physical line, however long, so a
+  `grep` for an ID or phrase returns the whole requirement and
+  `extract-id.sh` can point at one line. **Commit messages are the
+  exception: do wrap** — subject ≤ 72 columns, body hard-wrapped at 72.
+  `git log` renders raw and never soft-wraps, so an unwrapped paragraph
+  becomes one unreadable line.
 <!-- CORE:END conventions -->
 
 <!-- CORE:BEGIN scope -->

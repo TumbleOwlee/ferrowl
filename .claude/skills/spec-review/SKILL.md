@@ -11,7 +11,7 @@ description: Independent second-developer review of an open PR against its ticke
 
 ## Gather inputs — no shared session, no artifacts dir
 
-- **Ticket** — `sh .claude/scripts/extract-section.sh '### Gate 1b — tracking issue. Orchestrator runs this itself. Stop for approval.' .claude/AGENTS.workflow.md` names this project's tracker and how to read it. The ticket is self-contained: full current normative text, including any updates the orchestrator landed via "Reconcile the spec" mid-implementation. This *is* the approved spec — don't look for `artifacts/<slug>/spec-diff.md`; it may not exist on this machine, or may already be gone (worktree/board cleanup on the original developer's side).
+- **Ticket** — `sh .claude/scripts/extract-section.sh '### Gate 1b — tracking issue. Stop for approval.' .claude/AGENTS.workflow.md` names this project's tracker and how to read it. The ticket is self-contained: full current normative text, including any updates the orchestrator landed via "Reconcile the spec" mid-implementation. This *is* the approved spec — don't look for `artifacts/<slug>/spec-diff.md`; it may not exist on this machine, or may already be gone (worktree/board cleanup on the original developer's side).
 - **Branch/PR** — from the ticket's linked PR, or ask the user for the PR number/branch if the ticket doesn't carry one.
 - **Base ref** — the PR's target branch (usually `main`).
 
@@ -19,11 +19,11 @@ description: Independent second-developer review of an open PR against its ticke
 
 Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: spec text from the ticket, `git diff <base>...<head>` scoped to the whole branch (gate 3, not a wave), every stage in scope. It reads its own rules (`.claude/AGENTS.core.md`) itself — give it nothing more, never the issue/PR number.
 
-Reviewing it yourself instead of spawning is fine — same three axes, same rigor. The requirement is an independent read, not necessarily a subagent.
+Give it an `artifacts/<slug>/` scratch dir for `review.md`; it answers with a status line only (`### Agent hand-off`). Reviewing it yourself instead of spawning is fine — same axes, same rigor. The requirement is an independent read, not necessarily a subagent.
 
 ## Output
 
-Same shape as gate 3: axis-grouped, severity-tagged, no praise. Findings needing a user decision are flagged, not resolved.
+`review.md`'s shape: axis-grouped, severity-tagged, no praise. Point the developer at the file; findings needing a user decision are flagged, not resolved.
 
 ## Stop condition
 
