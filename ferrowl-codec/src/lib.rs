@@ -28,7 +28,7 @@ pub use crate::format::{
 };
 pub use crate::kind::Kind;
 pub use crate::traits::{IntoVec, ParseFromU8};
-pub use crate::value::{NumericPrimitive, UnscaledValue, Value};
+pub use crate::value::{NumericPrimitive, Value};
 
 /// Description of a single logical register: location, access rights, and
 /// data format.

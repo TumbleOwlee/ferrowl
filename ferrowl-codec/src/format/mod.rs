@@ -15,11 +15,7 @@ macro_rules! display_by_variant {
 pub(crate) use display_by_variant;
 
 /// Declares a fieldless "kind" enum together with `ALL`, an array listing every
-/// variant in declaration order. `ALL` is generated from the same variant list
-/// the enum itself is declared from — a variant cannot exist without appearing
-/// in `ALL`, so the two can never drift apart. The array order is load-bearing
-/// wherever a consumer builds an ordered UI list from it (see `IntKind::ALL`,
-/// `FloatKind::ALL`), not just an implementation detail.
+/// variant in declaration order.
 macro_rules! kind_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident),+ $(,)? }) => {
         $(#[$meta])*
@@ -29,12 +25,10 @@ macro_rules! kind_enum {
         }
 
         impl $name {
-            /// Every variant, in declaration order — this is the order a consumer
-            /// building an ordered list from it (e.g. the register-edit dialog's
-            /// Format dropdown, `ferrowl`'s `dialog::widgets::format_options`)
-            /// presents, so it is load-bearing, not incidental. Generated
-            /// together with the enum above, so a variant cannot exist without
-            /// appearing here.
+            /// Every variant, in declaration order. Generated together with the
+            /// enum above, so a variant cannot exist without appearing here.
+            /// The order is load-bearing wherever a consumer builds an ordered
+            /// list from it (e.g. a format-picker dropdown), not incidental.
             pub const ALL: [$name; kind_enum!(@count $($variant),+)] = [
                 $($name::$variant),+
             ];

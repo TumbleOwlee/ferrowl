@@ -235,3 +235,10 @@ entirely.
 A `ReadOnly` holding register is therefore still writable by a remote master
 against a server module, even though the local UI can no longer be used to
 write it from a client module.
+
+### 6.11 Bit-field mask absent from the width error
+
+`BitFieldWidth`'s message names the format by its display text (MB-R-155),
+which carries the byte order but not the mask, so the offending mask value
+does not appear in the error. The user supplied that mask, and the
+alternative is dumping the whole format struct into a user-facing message.

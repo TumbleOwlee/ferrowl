@@ -202,10 +202,11 @@ pub(crate) fn format_index(format: &RegisterFormat) -> usize {
             .position(|k| *k == nf.kind)
             .expect("IntKind::ALL lists every IntKind"),
         RegisterFormat::Float(ff) => {
-            10 + FloatKind::ALL
-                .iter()
-                .position(|k| *k == ff.kind)
-                .expect("FloatKind::ALL lists every FloatKind")
+            IntKind::ALL.len()
+                + FloatKind::ALL
+                    .iter()
+                    .position(|k| *k == ff.kind)
+                    .expect("FloatKind::ALL lists every FloatKind")
         }
         RegisterFormat::Ascii(_, _) => 0,
     }
