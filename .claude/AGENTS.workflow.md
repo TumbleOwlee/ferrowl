@@ -40,10 +40,13 @@ do it. Size sets stage count, never gate existence.
   once gate 2 is approved (first thing to touch disk); removed after merge.
 - Plan is a contract. Wrong plan → implementer stops and reports, never
   improvises a different design.
-- **Sequential gate-2 choice → planning agent continues as implementer**,
-  same running agent resumed (not respawned) — exploration behind the plan
-  never re-derived. Parallel → fresh implementer per stage (concurrent,
-  separate worktrees, can't share a running context).
+- **The planner never implements.** Planning and implementing are different
+  jobs on different models — the plan is drafted by the stronger model, then
+  executed by a cheaper one that only has to follow it. Sequential → one
+  fresh `spec-implementer` for the whole run, stages in plan order. Parallel
+  → one fresh `spec-implementer` per stage (concurrent, separate worktrees).
+  Either way the implementer holds none of the planner's exploration, which
+  is why the plan's refs must be lossless.
 - **An agent's report of its own verification is not verification.** Re-run
   the tools.
 - **Every state change moves a task-board card.** State living only in
@@ -207,8 +210,8 @@ dependency, not a race to resolve later. Fully-sequential plan states so
 explicitly — normal outcome, not a decomposition failure.
 
 Approval also settles **how it's implemented** — unanswered = not approved:
-- **Sequential** — same planning agent continues as implementer, resumed not
-  respawned, keeps its exploration context.
+- **Sequential** — one fresh `spec-implementer` runs every stage in plan
+  order. The planner is done at gate 2 either way; it never implements.
 - **Parallel** — user gives max concurrent agents; fresh implementer per
   stage. Waves capped at that number.
 
@@ -228,9 +231,11 @@ Default sequential on no preference. Never infer concurrency from plan shape
 
 ### Implement, stage by stage
 
-Sequential: same planning agent, resumed with worktree path + stage cards —
-no re-reading `AGENTS.md`, no re-exploring. It reads the implementer rules
-itself, follows them per stage in plan order. Moves stage card
+Sequential: one fresh `spec-implementer`, spawned with the worktree path, the
+plan path and its stage cards — never the planner continued. It reads its own
+rules (`.claude/agents/spec-implementer.md`, `.claude/AGENTS.core.md`) and
+works the stages in plan order, pulling one plan section at a time. Moves
+stage card
 `open`→`inprogress` on start. On green, stage card → `inreview` and the
 orchestrator runs the per-stage review below. Only once that review is clean
 does it stop and wait for approval; only after approval does it commit the
@@ -256,10 +261,8 @@ scope creep that no single stage's diff reveals.
 Parallel: one worktree+branch per agent, branched off the feature branch at
 wave start —
 `git worktree add .claude/worktrees/<slug>-<n> -b <type>/<slug>-<n> <type>/<slug>`
-— **fresh** implementer, not a continuation (concurrent agents can't share a
-running context). Plan's inline refs must be self-sufficient because of this — these
-agents hold none of the planner's exploration. Never two agents, one
-worktree. Each wave:
+— one **fresh** implementer each; concurrent agents can't share a running
+context. Never two agents, one worktree. Each wave:
 
 1. Runnable stage cards (`blocked-by` all in `done/`) up to approved count.
    Wave-gate card → `inprogress/`.
@@ -379,10 +382,10 @@ Resume triggered by the user or `/spec-feature`, never automatic.
 No worktree recorded on the card → died during gate 1 dialog or gate 2
 planning, nothing on disk to reconcile — resume the conversation from
 `spec-diff.md`/`plan.md`'s last state. Past gate 2 → table below either way.
-**Any resumed implementation spawns a fresh agent** — the sequential
-continuation only lives inside a live orchestrator session, doesn't survive
-a crash. This is why plan refs must be lossless: a fresh implementer
-resuming mid-plan gets nothing but what the plan wrote down.
+**Any resumed implementation spawns a fresh agent** — same as a first run;
+no implementer context survives a crash. This is why plan refs must be
+lossless: an implementer resuming mid-plan gets nothing but what the plan
+wrote down.
 
 **Reconcile before acting.** Card = intent, git = fact:
 
