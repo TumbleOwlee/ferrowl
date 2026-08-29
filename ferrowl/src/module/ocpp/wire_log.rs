@@ -4,7 +4,7 @@
 //! command replies that become log entries). An encode failure there would otherwise silently
 //! degrade to `Value::Null` with no trace; these helpers log the failure to stderr — the crate's
 //! existing error-reporting channel (see `main.rs`/`headless.rs`) — before falling back to `Null`,
-//! so callers keep their "empty payload" degradation while the failure is no longer invisible
+//! so callers keep their "empty payload" degradation and the failure is reported
 //! (OC-R-101). They live here, outside either role's module, so both sides can reach them without
 //! one depending on the other's internals.
 
