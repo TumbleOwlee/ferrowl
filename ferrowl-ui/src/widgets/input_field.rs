@@ -311,6 +311,118 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::InputFieldStateBuilder;
+    use crate::traits::SetFocus;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::StatefulWidget;
+
+    /// A validator that reports `Success` rather than `None` on valid input, mirroring
+    /// `ConfigPath` — the setup dialogs' one validator that returns `Success` for ordinary valid
+    /// input. `u32` alone would leave the `Success` arms of the border match unexecuted.
+    #[derive(Clone, Default)]
+    struct NonEmptyLike;
+
+    impl Validate for NonEmptyLike {
+        fn validate(input: &str) -> ValidateResult {
+            if input.is_empty() {
+                ValidateResult::Error("must not be empty".to_string())
+            } else {
+                ValidateResult::Success
+            }
+        }
+    }
+
+    /// Render a bordered field of validator `V` holding `input` and return its top-left border
+    /// cell's foreground — the colour the border was painted in.
+    fn border_fg_of<V: Validate + Clone>(
+        input: &str,
+        focused: bool,
+        disabled: bool,
+    ) -> ratatui::style::Color
+    where
+        InputFieldBuilder<V>: Default,
+    {
+        let widget = InputFieldBuilder::<V>::default()
+            .border(Border::Full(Margin::default()))
+            .build()
+            .expect("input field builds");
+        let mut state = InputFieldStateBuilder::default()
+            .input(input.to_string())
+            .disabled(disabled)
+            .build()
+            .expect("state builds");
+        state.set_focused(focused);
+        // The render guard is `focused() && !disabled()`; assert the flag actually took, so a
+        // future `set_focused` that refused to focus a disabled field could not turn this helper
+        // into one that silently tests nothing.
+        assert_eq!(
+            state.focused(),
+            focused,
+            "focus flag must survive set_focused"
+        );
+
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        StatefulWidget::render(&widget, area, &mut buf, &mut state);
+        buf[(0, 0)].fg
+    }
+
+    /// `u32`, whose validator reports `None` on valid input.
+    fn border_fg(input: &str, focused: bool, disabled: bool) -> ratatui::style::Color {
+        border_fg_of::<u32>(input, focused, disabled)
+    }
+
+    /// UI-R-068 — validation decides the border before focus does: invalid text paints the error
+    /// style whether or not the field is focused, and only validating text lets focus choose
+    /// between the focused and normal border styles.
+    #[test]
+    fn ut_border_style_is_validation_first_focus_second() {
+        let style = InputFieldStyle::default();
+        let error = style.error().fg.expect("error style sets a foreground");
+        let focused = style.focused().fg.expect("focused style sets a foreground");
+        let normal = style.border().fg.expect("border style sets a foreground");
+        // If a theme ever collapsed two of these onto one colour the assertions below would still
+        // pass while no longer discriminating between the cases.
+        assert_ne!(focused, normal, "focused and normal borders must differ");
+        assert_ne!(error, focused, "error and focused borders must differ");
+        assert_ne!(error, normal, "error and normal borders must differ");
+
+        assert_eq!(border_fg("12", true, false), focused, "valid + focused");
+        assert_eq!(border_fg("12", false, false), normal, "valid + unfocused");
+        assert_eq!(border_fg("abc", true, false), error, "invalid + focused");
+        assert_eq!(border_fg("abc", false, false), error, "invalid + unfocused");
+
+        // The `Success` arms, which `u32` never reaches: a validator that actively approves its
+        // input styles the border exactly as one that has nothing to say about it.
+        assert_eq!(
+            border_fg_of::<NonEmptyLike>("name", true, false),
+            focused,
+            "Success + focused"
+        );
+        assert_eq!(
+            border_fg_of::<NonEmptyLike>("name", false, false),
+            normal,
+            "Success + unfocused"
+        );
+        assert_eq!(
+            border_fg_of::<NonEmptyLike>("", true, false),
+            error,
+            "Success validator, empty input, focused"
+        );
+    }
+
+    /// UI-R-068 — a disabled field never paints the focused style, even while its focus flag is
+    /// set; validation still governs, so disabled-and-invalid stays an error border.
+    #[test]
+    fn ut_disabled_field_never_paints_the_focused_border() {
+        let style = InputFieldStyle::default();
+        let error = style.error().fg.expect("error style sets a foreground");
+        let normal = style.border().fg.expect("border style sets a foreground");
+
+        assert_eq!(border_fg("12", true, true), normal, "valid + disabled");
+        assert_eq!(border_fg("abc", true, true), error, "invalid + disabled");
+    }
 
     #[test]
     /// UI-R-048 — the u32 field filter accepts digits and rejects other characters.

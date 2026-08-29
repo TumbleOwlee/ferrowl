@@ -297,6 +297,42 @@ mod tests {
             .collect()
     }
 
+    /// UI-R-068 — the code editor's border is styled from focus alone: no validation term, and
+    /// a disabled editor keeps the focused border, since a read-only viewer still holds focus for
+    /// scrolling. This is the deliberate exception to the single-line input's validation-first
+    /// rule, so it is pinned rather than left to the widget's own comment.
+    #[test]
+    fn ut_border_style_follows_focus_only_including_while_disabled() {
+        let style = InputFieldStyle::default();
+        let focused = style.focused().fg.expect("focused style sets a foreground");
+        let normal = style.border().fg.expect("border style sets a foreground");
+        assert_ne!(focused, normal, "focused and normal borders must differ");
+
+        let border_fg = |is_focused: bool, disabled: bool| {
+            let w = CodeInputFieldBuilder::default()
+                .border(full_border())
+                .build()
+                .unwrap();
+            let mut st = CodeInputFieldStateBuilder::default()
+                .disabled(disabled)
+                .build()
+                .unwrap();
+            crate::traits::SetFocus::set_focused(&mut st, is_focused);
+            let mut b = buffer(20, 4);
+            StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+            b[(0, 0)].fg
+        };
+
+        assert_eq!(border_fg(true, false), focused, "focused");
+        assert_eq!(border_fg(false, false), normal, "unfocused");
+        assert_eq!(
+            border_fg(true, true),
+            focused,
+            "focused + disabled keeps the focused border"
+        );
+        assert_eq!(border_fg(false, true), normal, "unfocused + disabled");
+    }
+
     #[test]
     /// UI-R-028 — a focused vim editor shows its current mode tag in the title.
     fn focused_vim_field_appends_mode_tag_to_title() {

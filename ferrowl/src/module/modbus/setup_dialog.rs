@@ -1100,6 +1100,184 @@ mod tests {
         assert!(text.contains("src"), "missing suggestion popup:\n{text}");
     }
 
+    /// UI-R-067 — the `:edit` open path establishes the same single-focus state as `create`.
+    /// Compared against the `Focus` derive's own normalisation rather than a hand-listed field
+    /// set, so a field added later is covered as soon as it renders.
+    #[test]
+    fn ut_edit_matches_the_derive_normalised_focus_state() {
+        let timing = Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        };
+        // Two fixtures, because no single one renders every conditional field: the serial fields
+        // are gated on an Rtu/Ascii transport, while the TLS section needs a TCP-family transport
+        // at mTLS. Buffer equality is blind to any field that is not painted, so a fixture that
+        // hides a field proves nothing about its focus flag.
+        let serial = Endpoint::Rtu {
+            path: "/dev/ttyS0".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: Some(8),
+            stop_bits: Some(1),
+        };
+        let tcp = Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        // The widest client-role shape: verifying, explicit-identity mTLS renders the CA-file
+        // input and the client cert/key pair, which SkipVerify/SelfSigned would hide.
+        let tls = ModbusTlsConfig {
+            client: ferrowl_util::tls::ClientTlsPolicy::MutualTls {
+                client_verification: ferrowl_util::tls::ClientVerification::Verify {
+                    ca_file: Some("ca.pem".to_string()),
+                },
+                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
+                    client_cert_file: "client.crt".to_string(),
+                    client_key_file: "client.key".to_string(),
+                },
+            },
+            ..ModbusTlsConfig::default()
+        };
+        let area = Rect::new(0, 0, 100, 60);
+
+        for (label, endpoint, tls) in [("serial", &serial, None), ("tcp+mtls", &tcp, Some(&tls))] {
+            let build = || {
+                SetupDialog::edit(
+                    "dev",
+                    "",
+                    ClientOrServer::Client,
+                    endpoint,
+                    timing,
+                    &ReadRanges::default(),
+                    tls,
+                )
+            };
+
+            let mut as_built = build();
+            assert!(
+                as_built.name.state.is_focused(),
+                "{label}: name must open focused"
+            );
+            assert!(
+                !as_built.tls.is_focused(),
+                "{label}: the nested TLS section must open unfocused"
+            );
+            let mut built = Buffer::empty(area);
+            as_built.render(area, &mut built);
+
+            let mut normalised = build();
+            normalised.set_focused(true);
+            let mut after = Buffer::empty(area);
+            normalised.render(area, &mut after);
+
+            assert_eq!(
+                built, after,
+                "{label}: edit-path focus state differs from the derive's normalised state"
+            );
+        }
+    }
+
+    /// UI-R-067 — a freshly created dialog focuses exactly one field (`name`, first in the Tab
+    /// cycle) and paints exactly one text cursor for it. The cursor rather than the border,
+    /// because `name` opens empty against `NonEmpty` and so paints its error border, not its
+    /// focused one — border color alone would not identify the focused field.
+    #[test]
+    fn ut_create_focuses_name_only_and_paints_one_cursor() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        assert!(dialog.name.state.is_focused(), "name must open focused");
+        assert_eq!(
+            dialog.focus,
+            SetupDialogFocus::Name,
+            "the focus cursor must name the field carrying the flag"
+        );
+        assert!(
+            !dialog.tls.is_focused(),
+            "the nested TLS section must open unfocused"
+        );
+
+        // `focus == Name` alone survives a reordering that moved `Name` out of first position;
+        // stepping back from it must wrap away, and forward from there must wrap to it.
+        let mut walked = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        walked.focus_previous();
+        assert_ne!(walked.focus, SetupDialogFocus::Name);
+        walked.focus_next();
+        assert_eq!(walked.focus, SetupDialogFocus::Name);
+        for (label, focused) in [
+            ("config_path", dialog.config_path.state.is_focused()),
+            ("transport", dialog.transport.state.is_focused()),
+            ("tls_level", dialog.tls_level.state.is_focused()),
+            ("role", dialog.role.state.is_focused()),
+            ("ip", dialog.ip.state.is_focused()),
+            ("port", dialog.port.state.is_focused()),
+            ("path", dialog.path.state.is_focused()),
+            ("baud", dialog.baud.state.is_focused()),
+            ("reconnect", dialog.reconnect.state.is_focused()),
+            ("parity", dialog.parity.state.is_focused()),
+            ("data_bits", dialog.data_bits.state.is_focused()),
+            ("stop_bits", dialog.stop_bits.state.is_focused()),
+            ("timeout", dialog.timeout.state.is_focused()),
+            ("delay", dialog.delay.state.is_focused()),
+            ("interval", dialog.interval.state.is_focused()),
+            ("holding_ranges", dialog.holding_ranges.state.is_focused()),
+            ("input_ranges", dialog.input_ranges.state.is_focused()),
+            ("coil_ranges", dialog.coil_ranges.state.is_focused()),
+            ("discrete_ranges", dialog.discrete_ranges.state.is_focused()),
+            ("tls.self_signed", dialog.tls.self_signed.state.is_focused()),
+            ("tls.cert_file", dialog.tls.cert_file.state.is_focused()),
+            ("tls.key_file", dialog.tls.key_file.state.is_focused()),
+            (
+                "tls.client_cert_file",
+                dialog.tls.client_cert_file.state.is_focused(),
+            ),
+            (
+                "tls.client_key_file",
+                dialog.tls.client_key_file.state.is_focused(),
+            ),
+            (
+                "tls.client_cert_skip_verify",
+                dialog.tls.client_cert_skip_verify.state.is_focused(),
+            ),
+            ("tls.skip_verify", dialog.tls.skip_verify.state.is_focused()),
+            ("tls.ca_file", dialog.tls.ca_file.state.is_focused()),
+            (
+                "tls.client_ca_files",
+                dialog.tls.client_ca_files.state.is_focused(),
+            ),
+            (
+                "tls.client_ca_add_button",
+                dialog.tls.client_ca_add_button.state.is_focused(),
+            ),
+            (
+                "tls.client_ca_delete_button",
+                dialog.tls.client_ca_delete_button.state.is_focused(),
+            ),
+        ] {
+            assert!(!focused, "{label} must open unfocused");
+        }
+
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        let cursor_bg = ferrowl_ui::style::InputFieldStyle::default().cursor().bg;
+        let cursors = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| Some(buf[(x, y)].bg) == cursor_bg)
+            .count();
+        assert_eq!(cursors, 1, "expected one cursor:\n{}", buffer_text(&buf));
+    }
+
     #[test]
     /// UI-R-024 — the setup dialog resolves a reconnect-off selection into the config value.
     fn ut_resolve_reconnect_off_maps_to_some_false() {
