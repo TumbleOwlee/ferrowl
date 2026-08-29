@@ -17,7 +17,7 @@ below is one `extract-section.sh` pull; never read this file whole.
   `docs/specs/` is already the PRD and design record.
 - Branch off `main`, never commit to `main`. `<type>/<slug>`, type ∈ {`feat`,
   `fix`, `docs`}. **Enforced, not just advisory:** the same `PreToolUse` hook
-  (`.claude/scripts/hook-guard-cat.sh`) denies `git commit` while the
+  (`.claude/scripts/hook-guard-shell.sh`) denies `git commit` while the
   checkout is on `main`, and `git push` targeting `main` — the safety net
   for an agent that missed the worktree step, not just a written rule.
 - **The orchestrator never changes spec or code and never reads either.**

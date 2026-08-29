@@ -73,7 +73,7 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   `sed -n '<start>,<end>p' <file>` instead of a full `cat`/Read. This applies
   equally whether the read happens via the Read tool or a Bash `cat` — both
   cost the same context. **Enforced, not just advisory:** a `PreToolUse` hook
-  (`.claude/scripts/hook-guard-cat.sh`) denies an unpiped Bash `cat` of a
+  (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a
   `.md` file, or of any file over 80 lines, with a message pointing at
   `extract-section.sh`/`sed -n`/the Read tool. A denial here means the
   convention was about to be bypassed, not a bug to route around — follow the
