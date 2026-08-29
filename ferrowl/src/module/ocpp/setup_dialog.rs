@@ -2257,4 +2257,213 @@ mod tests {
             "error must be surfaced without wiping the offending input:\n{text}"
         );
     }
+
+    /// UI-R-067 — a freshly opened dialog focuses exactly one field, the first in the Tab cycle.
+    /// `InputField` derives its cursor from the focus flag, and no production open path
+    /// normalises the flags after construction, so a second field built focused stays focused
+    /// until the first focus move — a state the existing focus-transition tests never assert,
+    /// since they all move focus before looking at it.
+    #[test]
+    fn ut_new_dialog_focuses_only_the_name_field() {
+        let dialog = OcppSetupDialog::new();
+        assert!(dialog.name.state.is_focused(), "name must open focused");
+        assert_eq!(
+            dialog.focus,
+            OcppSetupDialogFocus::Name,
+            "the focus cursor must name the field carrying the flag"
+        );
+        assert!(
+            !dialog.tls.is_focused(),
+            "the nested TLS section must open unfocused"
+        );
+
+        // `focus == Name` alone would survive a reordering that moved `Name` out of first
+        // position; stepping backwards from it must wrap to the last eligible field, which is
+        // only true if `Name` is genuinely the cycle's first.
+        let mut walked = OcppSetupDialog::new();
+        walked.focus_previous();
+        assert_ne!(
+            walked.focus,
+            OcppSetupDialogFocus::Name,
+            "focus_previous from the first field must wrap away from it"
+        );
+        walked.focus_next();
+        assert_eq!(
+            walked.focus,
+            OcppSetupDialogFocus::Name,
+            "focus_next from the last eligible field must wrap back to Name"
+        );
+        for (label, focused) in [
+            ("config_path", dialog.config_path.state.is_focused()),
+            ("version", dialog.version.state.is_focused()),
+            ("role", dialog.role.state.is_focused()),
+            ("reconnect", dialog.reconnect.state.is_focused()),
+            ("protocol", dialog.protocol.state.is_focused()),
+            ("ip", dialog.ip.state.is_focused()),
+            ("port", dialog.port.state.is_focused()),
+            ("path", dialog.path.state.is_focused()),
+            ("headers_table", dialog.headers_table.state.is_focused()),
+            (
+                "header_name_input",
+                dialog.header_name_input.state.is_focused(),
+            ),
+            (
+                "header_value_input",
+                dialog.header_value_input.state.is_focused(),
+            ),
+            ("security", dialog.security.state.is_focused()),
+            ("username", dialog.username.state.is_focused()),
+            ("password", dialog.password.state.is_focused()),
+            ("tls.self_signed", dialog.tls.self_signed.state.is_focused()),
+            ("tls.cert_file", dialog.tls.cert_file.state.is_focused()),
+            ("tls.key_file", dialog.tls.key_file.state.is_focused()),
+            (
+                "tls.client_cert_file",
+                dialog.tls.client_cert_file.state.is_focused(),
+            ),
+            (
+                "tls.client_key_file",
+                dialog.tls.client_key_file.state.is_focused(),
+            ),
+            (
+                "tls.client_cert_skip_verify",
+                dialog.tls.client_cert_skip_verify.state.is_focused(),
+            ),
+            ("tls.skip_verify", dialog.tls.skip_verify.state.is_focused()),
+            ("tls.ca_file", dialog.tls.ca_file.state.is_focused()),
+            (
+                "tls.client_ca_files",
+                dialog.tls.client_ca_files.state.is_focused(),
+            ),
+            (
+                "tls.client_ca_add_button",
+                dialog.tls.client_ca_add_button.state.is_focused(),
+            ),
+            (
+                "tls.client_ca_delete_button",
+                dialog.tls.client_ca_delete_button.state.is_focused(),
+            ),
+        ] {
+            assert!(!focused, "{label} must open unfocused");
+        }
+    }
+
+    /// UI-R-067 — the `:edit` open path establishes the same single-focus state as `new()`.
+    /// Worth its own test because `edit` does not merely fill fields in: it replaces
+    /// `headers_table` wholesale with a freshly built widget, which is exactly the shape of the
+    /// regression this coverage exists for — a constructor deciding a field's focus flag.
+    #[test]
+    fn ut_edit_dialog_matches_the_derive_normalised_focus_state() {
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            // `Wss` with an explicit-identity, verifying mTLS policy: the widest client-role
+            // shape, so the security level, the credentials and the CA-file and client cert/key
+            // inputs all render. A `SkipVerify`/`SelfSigned` policy would hide `ca_file` and the
+            // cert/key pair, and a `Ws` fixture would hide the section entirely — buffer equality
+            // is blind to any field that is not painted.
+            protocol: OcppProtocol::Wss,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: Some(false),
+            security: OcppSecurityConfig {
+                client: ClientTlsPolicy::MutualTls {
+                    client_verification: ClientVerification::Verify {
+                        ca_file: Some("ca.pem".to_string()),
+                    },
+                    client_identity: ClientCertSource::Explicit {
+                        client_cert_file: "client.crt".to_string(),
+                        client_key_file: "client.key".to_string(),
+                    },
+                },
+                ..OcppSecurityConfig::default()
+            },
+        };
+        let headers = [ferrowl_ocpp::HeaderDef {
+            name: "X-Token".into(),
+            value: "abc".into(),
+        }];
+        let area = Rect::new(0, 0, 100, 60);
+
+        let mut as_built = OcppSetupDialog::edit(&spec, "device.toml", &headers);
+        assert!(as_built.name.state.is_focused(), "name must open focused");
+        assert!(
+            !as_built.headers_table.state.is_focused(),
+            "the rebuilt headers table must open unfocused"
+        );
+        assert!(
+            !as_built.tls.is_focused(),
+            "the nested TLS section must open unfocused"
+        );
+        let mut built = Buffer::empty(area);
+        as_built.render(area, &mut built);
+
+        let mut normalised = OcppSetupDialog::edit(&spec, "device.toml", &headers);
+        normalised.set_focused(true);
+        let mut after = Buffer::empty(area);
+        normalised.render(area, &mut after);
+
+        assert_eq!(
+            built, after,
+            "edit-path focus state differs from the derive's normalised state"
+        );
+    }
+
+    /// UI-R-067 — the constructed focus state already equals the state `SetFocus::set_focused`
+    /// normalises to, so a constructor that set a second field's flag, or that disagreed with its
+    /// own focus cursor, renders differently from the normalised dialog. Needs no
+    /// hand-maintained field list, so a newly added `#[focus]` field is covered the moment it
+    /// renders. Three limits, the first load-bearing: a field whose `when` guard is false paints
+    /// nothing, so its flag is invisible here — and `new()` is the narrowest fixture there is
+    /// (`Ws`, no headers), so the security, credentials, headers-table and whole TLS-section
+    /// fields are all unpainted and covered by the hand list in
+    /// `ut_new_dialog_focuses_only_the_name_field` rather than by this oracle; a wrong cursor
+    /// that is nonetheless eligible normalises to itself; and the comparison assumes
+    /// `view_focused` is paint-neutral here, which it is.
+    #[test]
+    fn ut_new_dialog_matches_the_derive_normalised_focus_state() {
+        let area = Rect::new(0, 0, 100, 60);
+
+        let mut as_built = OcppSetupDialog::new();
+        let mut built = Buffer::empty(area);
+        as_built.render(area, &mut built);
+
+        let mut normalised = OcppSetupDialog::new();
+        normalised.set_focused(true);
+        let mut after = Buffer::empty(area);
+        normalised.render(area, &mut after);
+
+        assert_eq!(
+            built, after,
+            "constructed focus state differs from the derive's normalised state"
+        );
+    }
+
+    /// UI-R-067 — the focus flag reaches the paint. The cursor cell is the assertion because it is
+    /// the only focus-derived paint that survives validation styling: `name` opens empty against
+    /// `NonEmpty`, so the focused field paints its *error* border, not its focused one.
+    #[test]
+    fn ut_render_new_dialog_paints_one_cursor() {
+        let mut dialog = OcppSetupDialog::new();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        // Read the cursor colour from the style rather than restating its default, so a theme
+        // change moves both together.
+        let cursor_bg = ferrowl_ui::style::InputFieldStyle::default().cursor().bg;
+        let cursors: Vec<(u16, u16)> = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| Some(buf[(x, y)].bg) == cursor_bg)
+            .collect();
+        assert_eq!(
+            cursors.len(),
+            1,
+            "expected exactly one focused field cursor, found {cursors:?}:\n{}",
+            buffer_text(&buf)
+        );
+    }
 }

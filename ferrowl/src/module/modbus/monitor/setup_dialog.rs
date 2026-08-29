@@ -688,6 +688,7 @@ pub(crate) fn set_suggest_input<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_ui::traits::IsFocus;
 
     /// Regression — the monitor setup dialog must render as a centered floating popup, same as
     /// every other setup dialog (`module/modbus/setup_dialog.rs::SetupDialog`), not fill the
@@ -839,13 +840,90 @@ mod tests {
         assert_eq!(dialog.focus, MonitorSetupDialogFocus::StopBits);
     }
 
-    /// Regression — the name field must be focused (cursor visible) as soon as the dialog opens,
-    /// same as `module/modbus/setup_dialog.rs::SetupDialog`; previously every field, including
-    /// name, started unfocused, so no cursor showed until the user tabbed away and back.
+    /// UI-R-067 — the name field is focused, and so shows a cursor, as soon as the dialog opens,
+    /// same as `module/modbus/setup_dialog.rs::SetupDialog`; every other field opens unfocused.
     #[test]
     fn ut_create_focuses_the_name_field_by_default() {
         let dialog = MonitorSetupDialog::create();
-        assert!(dialog.name.state.focused());
+        assert!(dialog.name.state.is_focused(), "name must open focused");
+        assert_eq!(
+            dialog.focus,
+            MonitorSetupDialogFocus::Name,
+            "the focus cursor must name the field carrying the flag"
+        );
+
+        // `focus == Name` alone survives a reordering that moved `Name` out of first position;
+        // stepping back from it must wrap away, and forward from there must wrap to it.
+        let mut walked = MonitorSetupDialog::create();
+        walked.focus_previous();
+        assert_ne!(walked.focus, MonitorSetupDialogFocus::Name);
+        walked.focus_next();
+        assert_eq!(walked.focus, MonitorSetupDialogFocus::Name);
+        for (label, focused) in [
+            ("config_path", dialog.config_path.state.is_focused()),
+            ("transport", dialog.transport.state.is_focused()),
+            ("path", dialog.path.state.is_focused()),
+            ("baud", dialog.baud.state.is_focused()),
+            ("reconnect", dialog.reconnect.state.is_focused()),
+            ("parity", dialog.parity.state.is_focused()),
+            ("data_bits", dialog.data_bits.state.is_focused()),
+            ("stop_bits", dialog.stop_bits.state.is_focused()),
+        ] {
+            assert!(!focused, "{label} must open unfocused");
+        }
+    }
+
+    /// UI-R-067 — the `:edit` open path establishes the same single-focus state as `create`,
+    /// checked against the `Focus` derive's own normalisation rather than a hand-listed field set.
+    #[test]
+    fn ut_edit_matches_the_derive_normalised_focus_state() {
+        let spec = ModuleSpec {
+            name: "mon1".to_string(),
+            device: String::new(),
+            role: crate::config::Role::Monitor,
+            endpoint: Endpoint::Ascii {
+                path: "/dev/ttyS0".to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+        };
+        let device = MonitorDeviceConfig::default();
+        let area = Rect::new(0, 0, 100, 60);
+
+        let mut as_built = MonitorSetupDialog::edit("mon1", &spec, &device);
+        assert!(as_built.name.state.is_focused(), "name must open focused");
+        let mut built = Buffer::empty(area);
+        as_built.render(area, &mut built);
+
+        let mut normalised = MonitorSetupDialog::edit("mon1", &spec, &device);
+        normalised.set_focused(true);
+        let mut after = Buffer::empty(area);
+        normalised.render(area, &mut after);
+
+        assert_eq!(
+            built, after,
+            "edit-path focus state differs from the derive's normalised state"
+        );
+    }
+
+    /// UI-R-067 — a freshly created dialog paints exactly one text cursor, in the one focused
+    /// field. The cursor rather than the border, because `name` opens empty against `NonEmpty` and
+    /// so paints its error border, not its focused one.
+    #[test]
+    fn ut_create_paints_one_cursor() {
+        let mut dialog = MonitorSetupDialog::create();
+        let area = Rect::new(0, 0, 100, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+
+        let cursor_bg = ferrowl_ui::style::InputFieldStyle::default().cursor().bg;
+        let cursors = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| Some(buf[(x, y)].bg) == cursor_bg)
+            .count();
+        assert_eq!(cursors, 1, "expected one cursor:\n{}", buffer_text(&buf));
     }
 
     /// Regression — there must be a 1-cell margin between the dialog's border and its content
