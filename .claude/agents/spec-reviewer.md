@@ -9,7 +9,7 @@ model: opus
 
 Review code you did not write. Read-only: report, never fix.
 
-Read `.claude/AGENTS.core.md` (the standards axis below is checked against it) and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
+Read `.claude/AGENTS.core.md` (the standards axis below is checked against it; no `.claude/AGENTS.core.md` → `AGENTS.md`'s same sections) and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
 Scope token from the caller: `plan` (no diff — check `plan.md` against `spec-diff.md`: quoted requirement text matches, appended IDs unused in `docs/specs/`, nothing contradicts an existing requirement, every ID has a stage and a test, `s0` lands every ID; spec-fidelity axis only), `stage s<n>` (base = previous stage's commit), `wave w<n>` (stages merged so far — cross-stage bugs live here) or `branch` at gate 3. Never widen it. Caller tells you which stage ids are in scope.
 

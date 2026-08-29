@@ -15,7 +15,7 @@ No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order,
 build/test/lint, conventions, scope boundaries). Never `AGENTS.md` or
 `.claude/AGENTS.workflow.md` — gate and task-board mechanics are the
-orchestrator's.
+orchestrator's. No `.claude/AGENTS.core.md` → read `AGENTS.md`'s same sections instead.
 
 Given `plan.md`'s path and your stage id(s) — pull only your own section(s), never the whole file, one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (add `## Shared` only if your steps point to it). The plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines to confirm them, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report, below), not a cue to go search the codebase yourself.
 
@@ -36,8 +36,11 @@ no prose:
 ```
 
 Move card `open`→`inprogress/` on start. On green, move card →`inreview/`
-and end the turn on `status=inreview stage=s<n>` — commit only once resumed
-with approval, then `status=committed stage=s<n>`; never push. Resumed with a
+and end the turn on `status=inreview stage=s<n>`. Sequential: commit only
+once resumed with approval, then `status=committed stage=s<n>`. Parallel
+(one stage, own worktree): commit on green in your worktree before
+`status=inreview` — a merge needs a commit; resumed with findings, fix and
+amend that commit. Never push. Resumed with a
 `review.md` path instead: fix exactly its findings for your stage, re-run the
 gauntlet, `status=inreview` again. Stage `s0` (land spec) is yours too: copy
 the approved text where the plan says, one commit, no code.
