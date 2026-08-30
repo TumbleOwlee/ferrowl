@@ -54,6 +54,7 @@ Anything not listed below must carry a citing test. A listed requirement that ga
 | `NF-R-010` — no benchmarks asserted; hot path stays on `parking_lot` | design posture, dependency manifest |
 | `NF-R-040` — crates versioned in lockstep | workspace manifest |
 | `NF-R-041` — the testing conventions themselves | `AGENTS.md` conventions, lefthook reminder |
+| `NF-R-045` — dev-only fixture crate, `publish = false`, versioned in lockstep | workspace manifest, dev-dependency edges |
 | `UI-R-001` — alt-screen + raw-mode entry, terminal restore on normal/error/panic exit | terminal-platform fact: the restore path calls the real terminal (`enable_raw_mode`/`disable_raw_mode`), which errors or panics under `cargo test` without a controlling tty — why `App` renders through the `DrawSurface` seam. Seam exercised headlessly (`ut_app_draws_onto_mock_screen`); raw-mode/panic-hook control itself not observable by a `shall` test |
 
 **Kind 2 — cross-cutting restatements**
