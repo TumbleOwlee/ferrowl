@@ -1058,7 +1058,7 @@ mod tests {
     use crate::ServerCommand;
     use crate::SlaveKey;
     use ferrowl_codec::Kind as RegKind;
-    use ferrowl_store::CellKind as MemKind;
+    use ferrowl_store::CellKind;
     use rust_modbus::{
         Address, Ascii, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
         FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
@@ -1079,7 +1079,7 @@ mod tests {
         let mut mem = Memory::<Key<SlaveKey>>::default();
         mem.add_ranges(
             key.clone(),
-            &MemKind::ReadWrite(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         if !seed.is_empty() {
@@ -1263,7 +1263,7 @@ mod tests {
             };
             mem.add_ranges(
                 key.clone(),
-                &MemKind::ReadWrite(CellType::Register),
+                &CellKind::read_write(CellType::Register),
                 &[Range::new(0, 4)],
             );
             mem.write(key, &CellType::Register, &Range::new(0, 2), &[10, 20])
@@ -1464,7 +1464,11 @@ mod tests {
             },
         };
         let mut mem = Memory::<Key<SlaveKey>>::default();
-        mem.add_ranges(key.clone(), &MemKind::ReadWrite(ty), &[Range::new(0, len)]);
+        mem.add_ranges(
+            key.clone(),
+            &CellKind::read_write(ty),
+            &[Range::new(0, len)],
+        );
         if !seed.is_empty() {
             mem.write(key, &ty, &Range::new(0, seed.len()), seed)
                 .unwrap();
@@ -1952,7 +1956,7 @@ mod tests {
             };
             mem.add_ranges(
                 key.clone(),
-                &MemKind::ReadWrite(CellType::Register),
+                &CellKind::read_write(CellType::Register),
                 &[Range::new(0, 2)],
             );
             mem.write(
@@ -2308,7 +2312,7 @@ mod tests {
                     kind: RegKind::Coil,
                 },
             },
-            &MemKind::ReadWrite(CellType::Coil),
+            &CellKind::read_write(CellType::Coil),
             &[Range::new(0, 4)],
         );
         let mem = Arc::new(RwLock::new(mem));
@@ -2371,7 +2375,7 @@ mod tests {
                     kind: RegKind::Coil,
                 },
             },
-            &MemKind::ReadWrite(CellType::Coil),
+            &CellKind::read_write(CellType::Coil),
             &[Range::new(0, 4)],
         );
         let mem = Arc::new(RwLock::new(mem));
@@ -2409,7 +2413,7 @@ mod tests {
         };
         mem.add_ranges(
             key1.clone(),
-            &MemKind::ReadWrite(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(key1, &CellType::Register, &Range::new(0, 2), &[10, 20])
@@ -2456,7 +2460,7 @@ mod tests {
         };
         mem.add_ranges(
             key1.clone(),
-            &MemKind::ReadWrite(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         mem.write(key1, &CellType::Register, &Range::new(0, 2), &[10, 20])

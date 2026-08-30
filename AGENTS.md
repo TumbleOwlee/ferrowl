@@ -47,9 +47,11 @@ crates building one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure:
 ## Workflow
 
 Triggers on **behavior change, any size**: new public function, changed
-default, new error variant, any observable semantics. Not a behavior change:
-refactor, rename, perf-with-identical-semantics, tests, docs — no gates, just
-do it. Size sets stage count, never gate existence.
+default, new error variant, any observable semantics. Size sets stage count,
+never gate existence. Non-behavior change (refactor, rename,
+perf-with-identical-semantics, test-only, docs, tooling): gate 1 skipped,
+the rest still runs. Trivial edit (one file, no semantics, no test/CI/build
+effect — typo, comment, doc wording): no gates, branch + PR.
 
 Full gate/task-board mechanics (Gate 1 through Merge, Resume): read
 [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md) — split out
@@ -121,7 +123,7 @@ needed) or `cargo build --profile fastrel` for faster iterative builds
   `sed -n '<start>,<end>p' <file>` instead of a full `cat`/Read. This applies
   equally whether the read happens via the Read tool or a Bash `cat` — both
   cost the same context. **Enforced, not just advisory:** a `PreToolUse` hook
-  (`.claude/scripts/hook-guard-cat.sh`) denies an unpiped Bash `cat` of a
+  (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a
   `.md` file, or of any file over 80 lines, with a message pointing at
   `extract-section.sh`/`sed -n`/the Read tool. A denial here means the
   convention was about to be bypassed, not a bug to route around — follow the

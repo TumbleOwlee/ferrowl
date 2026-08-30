@@ -13,7 +13,7 @@
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge::{BridgeConfig, BridgeEndpointKind, BridgeEndpointSpec};
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, UnitId};
 use std::sync::Arc;
@@ -75,7 +75,7 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -134,7 +134,7 @@ async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -193,7 +193,7 @@ async fn it_bridge_run_wires_ascii_over_tcp_upstream_ascii_over_tcp_downstream()
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(

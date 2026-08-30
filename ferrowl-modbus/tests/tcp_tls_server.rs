@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey, UnitId};
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
@@ -37,7 +37,7 @@ fn memory() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     Arc::new(MemLock::new(mem))

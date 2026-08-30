@@ -13,7 +13,7 @@ use ferrowl_modbus::tcp;
 use ferrowl_modbus::{
     Address, Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId, Word,
 };
-use ferrowl_store::{CellKind as MemKind, CellType, Memory, Range};
+use ferrowl_store::{CellKind, CellType, Memory, Range};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -93,7 +93,7 @@ fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::Coil),
-        &MemKind::ReadWrite(CellType::Coil),
+        &CellKind::read_write(CellType::Coil),
         &[Range::new(0, 8)],
     );
     mem.write(
@@ -105,7 +105,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::DiscreteInput),
-        &MemKind::ReadWrite(CellType::Coil),
+        &CellKind::read_write(CellType::Coil),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -117,7 +117,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::InputRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.write(
@@ -129,7 +129,7 @@ fn server_mem() -> Mem {
     .unwrap();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 8)],
     );
     mem.write(
@@ -147,22 +147,22 @@ fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::Coil),
-        &MemKind::ReadWrite(CellType::Coil),
+        &CellKind::read_write(CellType::Coil),
         &[Range::new(0, 8)],
     );
     mem.add_ranges(
         key(RegKind::DiscreteInput),
-        &MemKind::ReadWrite(CellType::Coil),
+        &CellKind::read_write(CellType::Coil),
         &[Range::new(0, 4)],
     );
     mem.add_ranges(
         key(RegKind::InputRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     mem.add_ranges(
         key(RegKind::HoldingRegister),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 8)],
     );
     Arc::new(MemLock::new(mem))
@@ -862,7 +862,7 @@ async fn tcp_client_addresses_operation_slave_id() {
     let mut sm = Memory::<Key<SlaveKey>>::default();
     sm.add_ranges(
         k7(),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     sm.write(
@@ -889,7 +889,7 @@ async fn tcp_client_addresses_operation_slave_id() {
     let mut cm = Memory::<Key<SlaveKey>>::default();
     cm.add_ranges(
         k7(),
-        &MemKind::ReadWrite(CellType::Register),
+        &CellKind::read_write(CellType::Register),
         &[Range::new(0, 4)],
     );
     let cli_mem: Mem = Arc::new(MemLock::new(cm));
@@ -1086,7 +1086,7 @@ async fn tcp_client_success_resets_retry_counter() {
         let mut g = srv_mem.write();
         g.add_ranges(
             key(RegKind::HoldingRegister),
-            &MemKind::ReadWrite(CellType::Register),
+            &CellKind::read_write(CellType::Register),
             &[Range::new(0, 4)],
         );
         g.write(

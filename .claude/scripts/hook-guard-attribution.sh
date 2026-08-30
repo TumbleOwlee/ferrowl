@@ -7,7 +7,7 @@
 # read that prose first.
 #
 # Deliberately does NOT early-exit on a heredoc (`<<`) the way
-# hook-guard-cat.sh does: a heredoc is exactly how commit/PR bodies are
+# hook-guard-shell.sh does: a heredoc is exactly how commit/PR bodies are
 # usually passed, so the trailer text lives inside it.
 #
 # Reads a PreToolUse hook payload on stdin, writes a deny-decision JSON

@@ -10,97 +10,89 @@ pub enum CellType {
     Register,
 }
 
-/// A single memory cell: its [`CellType`], access direction, and current value.
-///
-/// The variant encodes which operations are permitted: `Read` cells reject
-/// checked writes, `Write` cells reject checked reads, and `ReadWrite`
-/// allows both.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Cell {
-    /// Read-only cell.
-    Read(CellType, u16),
-    /// Write-only cell.
-    Write(CellType, u16),
-    /// Readable and writable cell.
-    ReadWrite(CellType, u16),
+/// Access direction permitted on a memory cell or a declared region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    Read,
+    Write,
+    ReadWrite,
 }
 
-/// Access kind of a memory region: the [`CellType`] plus allowed direction,
-/// without a value. Used to declare ranges via [`Memory::add_ranges`](crate::Memory::add_ranges).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CellKind {
-    /// Read-only region.
-    Read(CellType),
-    /// Write-only region.
-    Write(CellType),
-    /// Readable and writable region.
-    ReadWrite(CellType),
+/// Access kind of a memory region: cell type plus allowed direction, without
+/// a value. Used to declare ranges via [`Memory::add_ranges`](crate::Memory::add_ranges).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellKind {
+    pub ty: CellType,
+    pub access: Access,
 }
 
 impl CellKind {
-    /// Returns the underlying register [`CellType`], ignoring the access direction.
-    pub fn cell_type(&self) -> CellType {
-        match self {
-            CellKind::Read(t) | CellKind::Write(t) | CellKind::ReadWrite(t) => *t,
+    /// `ty` with a fixed [`Access::Read`] direction.
+    pub fn read(ty: CellType) -> Self {
+        Self {
+            ty,
+            access: Access::Read,
+        }
+    }
+
+    /// `ty` with a fixed [`Access::Write`] direction.
+    pub fn write(ty: CellType) -> Self {
+        Self {
+            ty,
+            access: Access::Write,
+        }
+    }
+
+    /// `ty` with a fixed [`Access::ReadWrite`] direction.
+    pub fn read_write(ty: CellType) -> Self {
+        Self {
+            ty,
+            access: Access::ReadWrite,
         }
     }
 }
 
+/// A single memory cell: its kind and current value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cell {
+    pub(crate) kind: CellKind,
+    pub(crate) value: u16,
+}
+
 impl Cell {
     /// Creates a zero-initialized cell with the access rights of `kind`.
-    pub fn default(kind: &CellKind) -> Self {
+    pub fn zeroed(kind: &CellKind) -> Self {
         Self::from_u16(kind, 0)
     }
 
     /// Creates a cell with the access rights of `kind`, initialized to `init`.
     pub fn from_u16(kind: &CellKind, init: u16) -> Self {
-        match kind {
-            CellKind::Read(t) => Cell::Read(*t, init),
-            CellKind::Write(t) => Cell::Write(*t, init),
-            CellKind::ReadWrite(t) => Cell::ReadWrite(*t, init),
+        Self {
+            kind: *kind,
+            value: init,
         }
     }
 
     /// Returns `true` if this cell accepts checked writes of type `ty`.
     pub fn accepts_write(&self, ty: &CellType) -> bool {
-        matches!(self, Cell::Write(t, _) | Cell::ReadWrite(t, _) if t == ty)
+        self.kind.ty == *ty && matches!(self.kind.access, Access::Write | Access::ReadWrite)
     }
 
     /// Returns `true` if this cell accepts checked reads of type `ty`.
     pub fn accepts_read(&self, ty: &CellType) -> bool {
-        matches!(self, Cell::Read(t, _) | Cell::ReadWrite(t, _) if t == ty)
+        self.kind.ty == *ty && matches!(self.kind.access, Access::Read | Access::ReadWrite)
     }
 
-    /// Returns the stored value regardless of access rights.
-    pub fn value(&self) -> u16 {
-        match self {
-            Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v,
-        }
-    }
-
-    /// Sets the stored value regardless of access rights.
-    pub fn set_value(&mut self, val: u16) {
-        match self {
-            Cell::Read(_, v) | Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = val,
-        }
-    }
-
-    /// Sets the stored value if this cell accepts writes; leaves read-only
-    /// cells untouched.
+    /// Sets the stored value if this cell accepts writes; leaves read-only cells untouched.
     pub fn try_set_value(&mut self, val: u16) {
-        match self {
-            Cell::Write(_, v) | Cell::ReadWrite(_, v) => *v = val,
-            Cell::Read(_, _) => {}
+        if self.kind.access != Access::Read {
+            self.value = val;
         }
     }
 
-    /// Returns the stored value if this cell accepts reads, `None` for
-    /// write-only cells.
+    /// Returns the stored value if this cell accepts reads, `None` for write-only cells.
     pub fn try_value(&self) -> Option<u16> {
-        match self {
-            Cell::Read(_, v) | Cell::ReadWrite(_, v) => Some(*v),
-            Cell::Write(_, _) => None,
-        }
+        (self.kind.access != Access::Write).then_some(self.value)
     }
 }
 
@@ -123,12 +115,12 @@ impl<'a> ValueRange<'a> {
     }
 
     /// Returns the raw values.
-    pub fn get_values(&self) -> &'a [u16] {
+    pub fn values(&self) -> &'a [u16] {
         self.values
     }
 
     /// Returns the address range covered by the values.
-    pub fn get_range(&self) -> Range {
+    pub fn range(&self) -> Range {
         self.range.clone()
     }
 }
@@ -139,18 +131,27 @@ mod tests {
 
     #[test]
     /// MB-R-030 — a cell carries both a cell type and an access direction (read/write/read-write).
-    fn ut_value_default() {
+    fn ut_value_zeroed() {
         assert_eq!(
-            Cell::default(&CellKind::Read(CellType::Coil)),
-            Cell::Read(CellType::Coil, 0)
+            Cell::zeroed(&CellKind::read(CellType::Coil)),
+            Cell {
+                kind: CellKind::read(CellType::Coil),
+                value: 0
+            }
         );
         assert_eq!(
-            Cell::default(&CellKind::Write(CellType::Coil)),
-            Cell::Write(CellType::Coil, 0)
+            Cell::zeroed(&CellKind::write(CellType::Coil)),
+            Cell {
+                kind: CellKind::write(CellType::Coil),
+                value: 0
+            }
         );
         assert_eq!(
-            Cell::default(&CellKind::ReadWrite(CellType::Coil)),
-            Cell::ReadWrite(CellType::Coil, 0)
+            Cell::zeroed(&CellKind::read_write(CellType::Coil)),
+            Cell {
+                kind: CellKind::read_write(CellType::Coil),
+                value: 0
+            }
         );
     }
 
@@ -158,16 +159,25 @@ mod tests {
     /// MB-R-030 — a value-initialized cell preserves its cell type and access direction.
     fn ut_value_from_u16() {
         assert_eq!(
-            Cell::from_u16(&CellKind::Read(CellType::Coil), 1),
-            Cell::Read(CellType::Coil, 1)
+            Cell::from_u16(&CellKind::read(CellType::Coil), 1),
+            Cell {
+                kind: CellKind::read(CellType::Coil),
+                value: 1
+            }
         );
         assert_eq!(
-            Cell::from_u16(&CellKind::Write(CellType::Coil), 2),
-            Cell::Write(CellType::Coil, 2)
+            Cell::from_u16(&CellKind::write(CellType::Coil), 2),
+            Cell {
+                kind: CellKind::write(CellType::Coil),
+                value: 2
+            }
         );
         assert_eq!(
-            Cell::from_u16(&CellKind::ReadWrite(CellType::Coil), 3),
-            Cell::ReadWrite(CellType::Coil, 3)
+            Cell::from_u16(&CellKind::read_write(CellType::Coil), 3),
+            Cell {
+                kind: CellKind::read_write(CellType::Coil),
+                value: 3
+            }
         );
     }
 
@@ -183,22 +193,16 @@ mod tests {
     #[test]
     /// MB-R-030 — a region's declared kind exposes its underlying cell type independent of access direction.
     fn ut_kind_get_type() {
-        assert_eq!(CellKind::Read(CellType::Coil).cell_type(), CellType::Coil);
-        assert_eq!(
-            CellKind::Write(CellType::Register).cell_type(),
-            CellType::Register
-        );
-        assert_eq!(
-            CellKind::ReadWrite(CellType::Coil).cell_type(),
-            CellType::Coil
-        );
+        assert_eq!(CellKind::read(CellType::Coil).ty, CellType::Coil);
+        assert_eq!(CellKind::write(CellType::Register).ty, CellType::Register);
+        assert_eq!(CellKind::read_write(CellType::Coil).ty, CellType::Coil);
     }
 
     #[test]
     fn ut_value_range_accessors() {
         let values: Vec<u16> = vec![7, 8, 9];
         let range = ValueRange::new(50, &values);
-        assert_eq!(range.get_values(), &[7, 8, 9]);
-        assert_eq!(range.get_range(), crate::range::Range::new(50, 3));
+        assert_eq!(range.values(), &[7, 8, 9]);
+        assert_eq!(range.range(), crate::range::Range::new(50, 3));
     }
 }

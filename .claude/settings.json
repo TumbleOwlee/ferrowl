@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-cat.sh"
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-shell.sh"
           },
           {
             "type": "command",
