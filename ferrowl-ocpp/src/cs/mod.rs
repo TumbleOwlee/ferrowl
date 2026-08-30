@@ -58,7 +58,13 @@ async fn dial<V: Version>(config: &Config, cache: &SelfSignedCache) -> Result<Ws
                 .expect("HeaderDef::new already validated the value is printable ASCII"),
         );
     }
-    let connector = Some(build_connector(&config.tls, cache)?);
+    // OC-R-097: the scheme decides the transport, so a `ws://` endpoint's `tls` must be
+    // neither validated nor loaded.
+    let connector = if request.uri().scheme_str() == Some("wss") {
+        Some(build_connector(&config.tls, cache)?)
+    } else {
+        None
+    };
     let (ws, _response) = connect_async_tls_with_config(request, None, false, connector)
         .await
         .map_err(WsError::from)?;

@@ -1239,6 +1239,49 @@ mod tests {
     }
 
     #[test]
+    /// OC-R-127 — reopening a hand-written `ws://` instance whose own-role policy is not
+    /// `None` shows the derived selector at TLS/mTLS and the `wss://` display; confirming
+    /// unchanged promotes the inert pairing to a live `wss://` one (OC-R-127 working as
+    /// specified, not preserving the mismatch OC-R-042/OC-R-097 render inert).
+    fn ut_edit_of_ws_instance_with_inert_policy_promotes_to_wss() {
+        let policy = ClientTlsPolicy::Tls {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+        };
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: OcppSecurityConfig {
+                tls: crate::module::ocpp::config::device::OcppTlsConfig {
+                    client: policy.clone(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        };
+        let mut dialog = OcppSetupDialog::edit(&spec, "device.toml", &[]);
+        assert_eq!(dialog.tls_level.state.get_value(), TlsLevel::Tls);
+        // `protocol`'s stored selection is a derived display, refreshed by `sync_tls` at the top
+        // of `render` (never eagerly at construction) — drive one render pass to check the
+        // display through the same path a real dialog paint takes.
+        let area = Rect::new(0, 0, 80, 60);
+        let mut buf = Buffer::empty(area);
+        dialog.render(area, &mut buf);
+        assert_eq!(dialog.protocol.get_value(), OcppProtocol::Wss);
+        let resolved = dialog.resolve().expect("valid client config");
+        assert_eq!(resolved.protocol, OcppProtocol::Wss);
+        assert_eq!(resolved.security.tls.client, policy);
+    }
+
+    #[test]
     /// OC-R-128 — a one-of-two credential config (username without password, or vice versa)
     /// leaves Basic Authentication Off on reopen, matching ocpp/edge-cases.md's "field is inert"
     /// rule for a lone `username`/`password`.

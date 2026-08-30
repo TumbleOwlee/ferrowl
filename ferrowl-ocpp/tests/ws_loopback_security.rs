@@ -918,3 +918,107 @@ async fn it_wss_csms_without_tls_material_logs_the_fallback() {
 
     server.terminate().await.expect("server terminate failed");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-097 — a `ws://` CS endpoint carrying a `ClientTlsPolicy` that would fail validation
+/// (empty `CertVerification::CaFiles`) connects in plaintext regardless, because the scheme
+/// decides the transport and the material is inert; the same policy on a `wss://` endpoint,
+/// against a real TLS-terminating CSMS, still fails with the policy-validation error itself.
+async fn it_ws_endpoint_skips_client_tls_validation() {
+    let plain_server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+
+    let failing_policy = ClientTlsPolicy::Tls {
+        verification: CertVerification::CaFiles { ca_files: vec![] },
+    };
+
+    let url = format!("ws://{}/ocpp/CS001", bound_addr(&plain_server).await);
+    let client = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: failing_policy.clone(),
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok; the dial happens inside the task");
+
+    let resp = client
+        .call(boot_action())
+        .await
+        .expect("ws:// must connect and answer despite the inert, invalid tls policy");
+    assert!(matches!(resp, Response16::BootNotification(_)));
+    client.terminate().await.expect("client terminate failed");
+    plain_server
+        .terminate()
+        .await
+        .expect("server terminate failed");
+
+    // This CSMS terminates TLS, so only policy validation (not a handshake failure) can
+    // produce the error asserted below.
+    let tls_server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Ephemeral {},
+            },
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+
+    let wss_url = format!("wss://{}/ocpp/CS001", bound_addr(&tls_server).await);
+    let mut wss_client = cs::ClientBuilder::<V1_6>::new(
+        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url: wss_url,
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: failing_policy,
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), sink())
+    .await
+    .expect("spawn always returns Ok; the dial happens inside the task");
+    let err = wss_client
+        .join()
+        .await
+        .expect_err("wss:// must still validate and reject an empty CaFiles list");
+    assert!(
+        matches!(
+            err,
+            ferrowl_ocpp::Error::Tls(ferrowl_ocpp::TlsError::EmptyCaFiles)
+        ),
+        "expected the EmptyCaFiles policy-validation error, got {err:?}"
+    );
+
+    tls_server
+        .terminate()
+        .await
+        .expect("server terminate failed");
+}
