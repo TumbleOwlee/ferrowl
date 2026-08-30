@@ -466,7 +466,7 @@ impl ModbusModule {
         role: Role,
         timing: Timing,
         read_ranges: ReadRanges,
-        tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
+        tls: ferrowl_modbus::tcp::ModbusTlsConfig,
     ) -> Result<(), Error> {
         // Best-effort stop of any running instance; the caller is expected to `start()` afterwards.
         let _ = self.instance.stop().await;
@@ -623,7 +623,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(500),
             reconnect: None,
-            tls: None,
+            tls: Default::default(),
             log_file: Some(
                 std::env::temp_dir()
                     .join("ferrowl_module_test.log")
@@ -924,7 +924,7 @@ mod tests {
                 Role::Client,
                 timing,
                 ReadRanges::default(),
-                None,
+                Default::default(),
             )
             .await
             .expect("reconfigure");
@@ -996,7 +996,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(50),
             reconnect: None,
-            tls: None,
+            tls: Default::default(),
             log_file: None,
             read_ranges: ReadRanges {
                 holding: Some("0-10".into()),

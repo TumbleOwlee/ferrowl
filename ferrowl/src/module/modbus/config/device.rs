@@ -51,16 +51,18 @@ pub struct DeviceConfig {
     /// servers. See `ModbusModule::resolve_timing`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<bool>,
-    /// TLS settings for this device's TCP endpoint (MB-R-104). Ignored entirely when
-    /// the module's endpoint is RTU (MB-R-112). `None` (the default) keeps the
-    /// endpoint on plain TCP. `ModbusTlsConfig` (MB-R-105) carries a role-pure `server`
-    /// ([`ferrowl_util::tls::ServerTlsPolicy`]) and `client`
-    /// ([`ferrowl_util::tls::ClientTlsPolicy`]) policy as flattened wire siblings — only the
-    /// one matching this module's configured role (client or server) is ever consulted, but
-    /// both are always present on the wire so a config file can be edited in place when the
-    /// role toggles.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<ferrowl_modbus::tcp::ModbusTlsConfig>,
+    /// TLS settings for this device's TCP endpoint (MB-R-104). Ignored entirely when the
+    /// module's endpoint is RTU (MB-R-112). `ModbusTlsConfig` (MB-R-105) is a two-role
+    /// container holding a role-pure `server` ([`ferrowl_util::tls::ServerTlsPolicy`]) and
+    /// `client` ([`ferrowl_util::tls::ClientTlsPolicy`]) policy — only the one matching this
+    /// module's configured role (client or server) is ever consulted, but both are always
+    /// present on the wire so a config file can be edited in place when the role toggles.
+    /// Both policies `None` (the default) keeps the endpoint on plain TCP.
+    #[serde(
+        default,
+        skip_serializing_if = "ferrowl_modbus::tcp::ModbusTlsConfig::is_none"
+    )]
+    pub tls: ferrowl_modbus::tcp::ModbusTlsConfig,
     /// Base path for per-module log files (tab name appended as suffix). `None` disables.
     #[serde(skip)]
     pub log_file: Option<String>,
@@ -395,7 +397,7 @@ mod tests {
             delay_ms: None,
             interval_ms: Some(800),
             reconnect: Some(false),
-            tls: None,
+            tls: Default::default(),
             // `log_file` is `#[serde(skip)]` (runtime-only), so it never survives a
             // config roundtrip — leave it None to match the loaded value.
             log_file: None,
@@ -461,28 +463,25 @@ mod tests {
     /// deserializes to `None`.
     fn ut_device_config_tls_serde_roundtrip() {
         use ferrowl_modbus::tcp::ModbusTlsConfig;
-        use ferrowl_util::tls::{
-            ClientCertVerification, ClientTlsPolicy, ClientVerification, ServerCertSource,
-            ServerTlsPolicy,
-        };
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
         let mut cfg = sample();
-        cfg.tls = Some(ModbusTlsConfig {
-            server: ServerTlsPolicy::MutualTls {
-                server_cert: ServerCertSource::Explicit {
+        cfg.tls = ModbusTlsConfig {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
                     cert_file: "cert.pem".to_string(),
                     key_file: "key.pem".to_string(),
                 },
-                client_verification: ClientCertVerification::Verify {
+                verification: CertVerification::CaFiles {
                     ca_files: vec!["client-ca.pem".to_string()],
                 },
             },
             client: ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::Verify {
-                    ca_file: Some("ca.pem".to_string()),
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["ca.pem".to_string()],
                 },
             },
-        });
+        };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: DeviceConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(cfg, back);
@@ -491,7 +490,7 @@ mod tests {
         let path = path.to_str().unwrap();
         std::fs::write(path, "definitions = {}\n").unwrap();
         let loaded: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
-        assert_eq!(loaded.tls, None);
+        assert!(loaded.tls.is_none());
     }
 
     /// A device config file saved before `reconnect` existed (no such key at all) must still

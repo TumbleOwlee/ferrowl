@@ -24,10 +24,11 @@ pub struct Config {
     /// rejected with HTTP 401 unless the request presents a matching `Authorization` header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub basic_auth: Option<BasicAuth>,
-    /// TLS material for the listening socket (Security Profiles 2 and 3). When set, every
-    /// accepted connection is TLS-terminated before the OCPP-J handshake.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tls: Option<ServerTlsPolicy>,
+    /// TLS material for the listening socket (Security Profiles 2 and 3); `None` means every
+    /// accepted connection stays plain. When other than `None`, every accepted connection is
+    /// TLS-terminated before the OCPP-J handshake.
+    #[serde(default)]
+    pub tls: ServerTlsPolicy,
 }
 
 fn default_timeout_ms() -> u64 {

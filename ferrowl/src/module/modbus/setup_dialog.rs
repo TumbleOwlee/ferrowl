@@ -57,10 +57,10 @@ pub struct SetupValues {
     pub read_ranges: ReadRanges,
     /// The device config's `tls` setting (MB-R-104). `None` when the TLS section is hidden
     /// (RTU transport, MB-R-112) — a hidden section must never clobber a device config's
-    /// existing setting. `Some(None)` means shown-and-explicitly-off; `Some(Some(cfg))` means
-    /// shown at a level above Off. Mirrors `reconnect`'s hidden-vs-explicit shape one level
-    /// deeper (the value itself, not just whether to touch it, is optional).
-    pub tls: Option<Option<ModbusTlsConfig>>,
+    /// existing setting. `Some(cfg)` means shown, with `cfg` both-`None` when the level is Off
+    /// (MB-R-104's two-role container makes "off" a value of `ModbusTlsConfig` itself, not a
+    /// separate `Option` layer).
+    pub tls: Option<ModbusTlsConfig>,
 }
 
 /// The full validated dialog result. `device` is set in New mode: the config path (or
@@ -465,7 +465,7 @@ impl SetupDialog {
             CloseConfirmOutcome::Consumed => return EventResult::Consumed,
         }
 
-        if self.tls.client_ca_add_dialog.is_some() {
+        if self.tls.ca_add_dialog.is_some() {
             return self.tls.handle_events(modifiers, code);
         }
 
@@ -474,7 +474,7 @@ impl SetupDialog {
             && self.focus == SetupDialogFocus::Tls
             && matches!(
                 self.tls.focus(),
-                TlsSectionFocus::ClientCaAddButton | TlsSectionFocus::ClientCaDeleteButton
+                TlsSectionFocus::CaAddButton | TlsSectionFocus::CaDeleteButton
             )
         {
             return self.tls.handle_events(modifiers, code);
@@ -667,8 +667,8 @@ impl SetupDialog {
             Endpoint::Tcp { .. } | Endpoint::RtuOverTcp { .. } | Endpoint::AsciiOverTcp { .. }
         ) {
             let level = self.tls_level.state.get_value();
-            if level == TlsLevel::Off {
-                Some(None)
+            let mut cfg = if level == TlsLevel::Off {
+                ModbusTlsConfig::default()
             } else {
                 // MB-R-135/136/139: `build_config` resolves the active role's policy directly
                 // from the raw text together with the toggle widgets (self_signed/skip_verify/
@@ -679,34 +679,38 @@ impl SetupDialog {
                 // (those only gate which fields are focusable/visible, checked separately by
                 // `render`/`handle_events`), so no `sync` call is needed on this read-only path.
                 let extracted = self.tls.extract();
-                let mut cfg = level.build_config(
+                level.build_config(
                     role,
                     TlsInputs {
-                        ca_file: &extracted.ca_file,
                         cert_file: &extracted.cert_file,
                         key_file: &extracted.key_file,
                         client_cert_file: &extracted.client_cert_file,
                         client_key_file: &extracted.client_key_file,
-                        client_ca_files: &extracted.client_ca_files,
+                        ca_files: &extracted.ca_files,
                         self_signed: extracted.self_signed,
                         skip_verify: extracted.skip_verify,
                         client_cert_skip_verify: extracted.client_cert_skip_verify,
+                        root_store: extracted.root_store,
                     },
-                )?;
-                // Stitch the inactive role's half back in from the original config (if any), so
-                // a role toggle preserves the other role's previously-saved TLS settings instead
-                // of resetting them to `ModbusTlsConfig::default()`'s placeholder.
-                if let Some(orig) = &self.original_tls {
-                    match role {
-                        ClientOrServer::Server => cfg.client = orig.client.clone(),
-                        ClientOrServer::Client => cfg.server = orig.server.clone(),
-                    }
+                )?
+            };
+            // Stitch the inactive role's half back in from the original config (if any), so a
+            // role toggle preserves the other role's previously-saved TLS settings instead of
+            // resetting them to `ModbusTlsConfig::default()`'s placeholder. Applies at every
+            // level, `Off` included (MB-R-104's two-role container must survive a save at `Off`
+            // too), so both branches above hand back a bare `cfg` and share this one stitch.
+            if let Some(orig) = &self.original_tls {
+                match role {
+                    ClientOrServer::Server => cfg.client = orig.client.clone(),
+                    ClientOrServer::Client => cfg.server = orig.server.clone(),
                 }
+            }
+            if level != TlsLevel::Off {
                 validate_tls(&cfg, role, level, &|p| {
                     ferrowl_util::path::expand(p).exists()
                 })?;
-                Some(Some(cfg))
             }
+            Some(cfg)
         } else {
             None
         };
@@ -855,39 +859,42 @@ impl SetupDialog {
                 idx += 1;
             }
 
-            // Row 3: Skip Verify.
+            // Row 3: Skip Verify -- client role folds the Root Store toggle onto the same row
+            // (MB-R-156) rather than adding a fifth row to a 60-column dialog.
             if show_skip_verify_row {
                 if is_server {
                     render_field!(tls, client_cert_skip_verify, rows[idx], buf);
+                } else if tls.show_root_store_row() {
+                    render_row!(tls, rows[idx], buf;
+                        skip_verify => Constraint::Percentage(50),
+                        root_store => Constraint::Fill(1)
+                    );
                 } else {
                     render_field!(tls, skip_verify, rows[idx], buf);
                 }
                 idx += 1;
             }
 
-            // Row 4: peer-verification input.
+            // Row 4: peer-verification input -- the shared CA list, for both roles (MB-R-136/
+            // MB-R-156).
             if show_peer_verify_row {
-                if is_server {
-                    // No client-CA entries yet: give ADD the row's full remaining width and
-                    // skip DEL entirely rather than paint an empty, nothing-to-delete button.
-                    if tls.client_ca_files.state.values().is_empty() {
-                        // Hidden button shouldn't be focused.
-                        if tls.focus() == TlsSectionFocus::ClientCaDeleteButton {
-                            tls.focus_previous();
-                        }
-                        render_row!(tls, rows[idx], buf;
-                            client_ca_files => Constraint::Percentage(80),
-                            client_ca_add_button => Constraint::Fill(1)
-                        );
-                    } else {
-                        render_row!(tls, rows[idx], buf;
-                            client_ca_files => Constraint::Percentage(60),
-                            client_ca_add_button => Constraint::Percentage(20),
-                            client_ca_delete_button => Constraint::Fill(1)
-                        );
+                // No CA entries yet: give ADD the row's full remaining width and skip DEL
+                // entirely rather than paint an empty, nothing-to-delete button.
+                if tls.ca_files.state.values().is_empty() {
+                    // Hidden button shouldn't be focused.
+                    if tls.focus() == TlsSectionFocus::CaDeleteButton {
+                        tls.focus_previous();
                     }
+                    render_row!(tls, rows[idx], buf;
+                        ca_files => Constraint::Percentage(80),
+                        ca_add_button => Constraint::Fill(1)
+                    );
                 } else {
-                    render_field!(tls, ca_file, rows[idx], buf);
+                    render_row!(tls, rows[idx], buf;
+                        ca_files => Constraint::Percentage(60),
+                        ca_add_button => Constraint::Percentage(20),
+                        ca_delete_button => Constraint::Fill(1)
+                    );
                 }
                 idx += 1;
             }
@@ -934,9 +941,6 @@ impl SetupDialog {
             .render_overlay(area, buf, &mut self.path.state);
         {
             let tls = &mut self.tls;
-            tls.ca_file
-                .widget
-                .render_overlay(area, buf, &mut tls.ca_file.state);
             tls.cert_file
                 .widget
                 .render_overlay(area, buf, &mut tls.cert_file.state);
@@ -949,9 +953,9 @@ impl SetupDialog {
             tls.client_key_file
                 .widget
                 .render_overlay(area, buf, &mut tls.client_key_file.state);
-            // `client_ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
+            // `ca_files` is a `Selection`, not a `SuggestInput` — no completion overlay.
 
-            if let Some(d) = tls.client_ca_add_dialog.as_mut() {
+            if let Some(d) = tls.ca_add_dialog.as_mut() {
                 d.render(area, buf);
             }
         }
@@ -1129,13 +1133,13 @@ mod tests {
         // The widest client-role shape: verifying, explicit-identity mTLS renders the CA-file
         // input and the client cert/key pair, which SkipVerify/SelfSigned would hide.
         let tls = ModbusTlsConfig {
-            client: ferrowl_util::tls::ClientTlsPolicy::MutualTls {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: Some("ca.pem".to_string()),
+            client: ferrowl_util::tls::ClientTlsPolicy::Mutual {
+                verification: ferrowl_util::tls::CertVerification::RootStore {
+                    extra_ca_files: vec!["ca.pem".to_string()],
                 },
-                client_identity: ferrowl_util::tls::ClientCertSource::Explicit {
-                    client_cert_file: "client.crt".to_string(),
-                    client_key_file: "client.key".to_string(),
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: "client.crt".to_string(),
+                    key_file: "client.key".to_string(),
                 },
             },
             ..ModbusTlsConfig::default()
@@ -1250,18 +1254,15 @@ mod tests {
                 dialog.tls.client_cert_skip_verify.state.is_focused(),
             ),
             ("tls.skip_verify", dialog.tls.skip_verify.state.is_focused()),
-            ("tls.ca_file", dialog.tls.ca_file.state.is_focused()),
+            ("tls.root_store", dialog.tls.root_store.state.is_focused()),
+            ("tls.ca_files", dialog.tls.ca_files.state.is_focused()),
             (
-                "tls.client_ca_files",
-                dialog.tls.client_ca_files.state.is_focused(),
+                "tls.ca_add_button",
+                dialog.tls.ca_add_button.state.is_focused(),
             ),
             (
-                "tls.client_ca_add_button",
-                dialog.tls.client_ca_add_button.state.is_focused(),
-            ),
-            (
-                "tls.client_ca_delete_button",
-                dialog.tls.client_ca_delete_button.state.is_focused(),
+                "tls.ca_delete_button",
+                dialog.tls.ca_delete_button.state.is_focused(),
             ),
         ] {
             assert!(!focused, "{label} must open unfocused");
@@ -1437,7 +1438,7 @@ mod tests {
     /// internal layout (border height, DEL visibility, row order) is `TlsSection`'s own concern,
     /// covered directly against a bare `TlsSection`; this test is specifically about the outer
     /// dialog's row placement relative to a sibling non-TLS row (`Name`).
-    fn ut_client_ca_delete_button_hugs_right_edge() {
+    fn ut_ca_delete_button_hugs_right_edge() {
         let mut dialog = SetupDialog::create(default_timing());
         set_input(&mut dialog.name, "dev");
         dialog.role.state.set_selection(0); // Server
@@ -1447,7 +1448,7 @@ mod tests {
             .set_selection(TlsLevel::MutualTls.index());
         dialog
             .tls
-            .client_ca_files
+            .ca_files
             .state
             .set_values(vec!["ca1.pem".to_string()]);
         let area = Rect::new(0, 0, 80, 60);
@@ -1462,7 +1463,7 @@ mod tests {
         }
 
         let name_row = row_of(&buf, "Name");
-        let ca_row = row_of(&buf, "Client CA(s)");
+        let ca_row = row_of(&buf, "CA(s)");
         assert_eq!(
             rightmost_non_space(&buf, name_row),
             rightmost_non_space(&buf, ca_row),
@@ -1722,7 +1723,42 @@ mod tests {
         });
         set_input(&mut dialog.name, "dev");
         let outcome = dialog.resolve().unwrap();
-        assert_eq!(outcome.values.tls, Some(None));
+        assert_eq!(outcome.values.tls, Some(ModbusTlsConfig::default()));
+    }
+
+    #[test]
+    /// MB-R-104 — resolving an edited server-role dialog at TLS level Off preserves the
+    /// inactive (client) role's previously-saved policy, stitched from `original_tls`, instead
+    /// of resetting the whole two-role container to `ModbusTlsConfig::default()`.
+    fn ut_resolve_tls_off_preserves_inactive_role_policy() {
+        let original = ModbusTlsConfig {
+            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                verification: ferrowl_util::tls::CertVerification::Skip {},
+            },
+            ..Default::default()
+        };
+        let mut dialog = SetupDialog::edit(
+            "dev",
+            "device.toml",
+            ClientOrServer::Server,
+            &Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            Timing {
+                timeout_ms: 0,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+            },
+            &ReadRanges::default(),
+            Some(&original),
+        );
+        dialog.tls_level.state.set_selection(TlsLevel::Off.index());
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap();
+        assert_eq!(cfg.client, original.client);
+        assert_eq!(cfg.server, ferrowl_util::tls::ServerTlsPolicy::None {});
     }
 
     #[test]
@@ -1738,13 +1774,13 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
         dialog.tls.self_signed.state.set_selection(1); // On
-        *dialog.tls.client_ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
+        *dialog.tls.ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                identity: ferrowl_util::tls::CertSource::SelfSigned {}
             }
         );
     }
@@ -1766,11 +1802,11 @@ mod tests {
         dialog.tls.self_signed.state.set_selection(1); // On, after the text was typed
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned
+                identity: ferrowl_util::tls::CertSource::SelfSigned {}
             }
         );
         // The stored text survives the toggle -- only the resolved config excludes it.
@@ -1779,9 +1815,9 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Skip-Verify On excludes stale ca_file text from the resolved config,
-    /// even though the widget's stored text is untouched.
-    fn ut_resolve_skip_verify_excludes_stale_ca_file_text() {
+    /// MB-R-135 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
+    /// even though the widget's stored list is untouched.
+    fn ut_resolve_skip_verify_excludes_stale_ca_list() {
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,
             delay_ms: 0,
@@ -1791,18 +1827,18 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         dialog.role.state.set_selection(1); // Role::Server=0, Role::Client=1
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
-        set_suggest_input(&mut dialog.tls.ca_file, "ca.pem");
-        dialog.tls.skip_verify.state.set_selection(1); // On, after the text was typed
+        *dialog.tls.ca_files.state.values_mut() = vec!["ca.pem".to_string()];
+        dialog.tls.skip_verify.state.set_selection(1); // On, after the list was populated
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.client,
             ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify
+                verification: ferrowl_util::tls::CertVerification::Skip {}
             }
         );
-        assert_eq!(dialog.tls.ca_file.state.input(), "ca.pem");
+        assert_eq!(dialog.tls.ca_files.state.values(), &["ca.pem".to_string()]);
     }
 
     #[test]
@@ -1830,11 +1866,11 @@ mod tests {
         dialog.tls.self_signed.state.set_selection(0); // Off again
 
         let outcome = dialog.resolve().unwrap();
-        let cfg = outcome.values.tls.unwrap().unwrap();
+        let cfg = outcome.values.tls.unwrap();
         assert_eq!(
             cfg.server,
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
+                identity: ferrowl_util::tls::CertSource::Files {
                     cert_file: cert,
                     key_file: key,
                 }
@@ -1952,7 +1988,7 @@ mod tests {
             .set_selection(TlsLevel::MutualTls.index());
         dialog
             .tls
-            .client_ca_files
+            .ca_files
             .state
             .set_values(vec!["ca1.pem".to_string()]); // non-empty, so DEL is eligible
         let seq = tab_sequence_from_role(&mut dialog);
@@ -1964,9 +2000,9 @@ mod tests {
                 Stop::Tls(TlsSectionFocus::CertFile),
                 Stop::Tls(TlsSectionFocus::KeyFile),
                 Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
-                Stop::Tls(TlsSectionFocus::ClientCaFiles),
-                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
-                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
+                Stop::Tls(TlsSectionFocus::CaFiles),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
+                Stop::Tls(TlsSectionFocus::CaDeleteButton),
                 Stop::Outer(SetupDialogFocus::Ip),
             ]
         );
@@ -1977,9 +2013,9 @@ mod tests {
             back_seq,
             vec![
                 Stop::Outer(SetupDialogFocus::Ip),
-                Stop::Tls(TlsSectionFocus::ClientCaDeleteButton),
-                Stop::Tls(TlsSectionFocus::ClientCaAddButton),
-                Stop::Tls(TlsSectionFocus::ClientCaFiles),
+                Stop::Tls(TlsSectionFocus::CaDeleteButton),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
+                Stop::Tls(TlsSectionFocus::CaFiles),
                 Stop::Tls(TlsSectionFocus::ClientCertSkipVerify),
                 Stop::Tls(TlsSectionFocus::KeyFile),
                 Stop::Tls(TlsSectionFocus::CertFile),
@@ -1990,9 +2026,9 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136, UI-R-049 — the mTLS client-role Tab order: Role, Self-Signed, own cert/key,
-    /// Skip Verify, then the CA-file trust-anchor input, then IP (no ADD/DEL — client role never
-    /// shows the client-CA list).
+    /// MB-R-136/MB-R-156, UI-R-049 — the mTLS client-role Tab order: Role, Self-Signed, own
+    /// cert/key, Skip Verify, Root Store, then the shared CA list's ADD button (empty list, no
+    /// DEL), then IP.
     fn ut_tab_order_client_mtls() {
         let mut dialog = SetupDialog::create(default_timing());
         dialog.role.state.set_selection(1); // Client
@@ -2009,7 +2045,8 @@ mod tests {
                 Stop::Tls(TlsSectionFocus::ClientCertFile),
                 Stop::Tls(TlsSectionFocus::ClientKeyFile),
                 Stop::Tls(TlsSectionFocus::SkipVerify),
-                Stop::Tls(TlsSectionFocus::CaFile),
+                Stop::Tls(TlsSectionFocus::RootStore),
+                Stop::Tls(TlsSectionFocus::CaAddButton),
                 Stop::Outer(SetupDialogFocus::Ip),
             ]
         );
@@ -2069,28 +2106,25 @@ mod tests {
             .set_selection(TlsLevel::MutualTls.index());
         dialog.tls.client_cert_skip_verify.state.set_selection(0); // Off: client-CA row shows
         dialog.sync_tls();
-        focus_tls_until(&mut dialog, TlsSectionFocus::ClientCaAddButton);
+        focus_tls_until(&mut dialog, TlsSectionFocus::CaAddButton);
         dialog.focus = SetupDialogFocus::Tls;
 
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(dialog.tls.client_ca_add_dialog.is_some());
-        set_suggest_input(
-            &mut dialog.tls.client_ca_add_dialog.as_mut().unwrap().path,
-            &ca,
-        );
+        assert!(dialog.tls.ca_add_dialog.is_some());
+        set_suggest_input(&mut dialog.tls.ca_add_dialog.as_mut().unwrap().path, &ca);
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(dialog.tls.client_ca_add_dialog.is_none());
+        assert!(dialog.tls.ca_add_dialog.is_none());
         assert_eq!(
-            dialog.tls.client_ca_files.state.values(),
+            dialog.tls.ca_files.state.values(),
             std::slice::from_ref(&ca)
         );
 
-        focus_tls_until(&mut dialog, TlsSectionFocus::ClientCaDeleteButton);
+        focus_tls_until(&mut dialog, TlsSectionFocus::CaDeleteButton);
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Enter);
-        assert!(dialog.tls.client_ca_files.state.values().is_empty());
+        assert!(dialog.tls.ca_files.state.values().is_empty());
         assert_ne!(
             dialog.tls.focus(),
-            TlsSectionFocus::ClientCaDeleteButton,
+            TlsSectionFocus::CaDeleteButton,
             "draining the list must not strand focus on the now-hidden DEL button"
         );
 
@@ -2115,12 +2149,12 @@ mod tests {
         dialog.sync_tls();
         dialog
             .tls
-            .client_ca_files
+            .ca_files
             .state
             .values_mut()
             .push("placeholder".to_string());
-        focus_tls_until(&mut dialog, TlsSectionFocus::ClientCaDeleteButton);
-        dialog.tls.client_ca_files.state.values_mut().clear();
+        focus_tls_until(&mut dialog, TlsSectionFocus::CaDeleteButton);
+        dialog.tls.ca_files.state.values_mut().clear();
 
         let area = Rect::new(0, 0, 80, 60);
         let mut buf = Buffer::empty(area);
@@ -2129,7 +2163,7 @@ mod tests {
         assert!(!text.contains("DEL"), "empty list must hide DEL:\n{text}");
         assert_ne!(
             dialog.tls.focus(),
-            TlsSectionFocus::ClientCaDeleteButton,
+            TlsSectionFocus::CaDeleteButton,
             "render must move focus off the now-hidden DEL button"
         );
     }

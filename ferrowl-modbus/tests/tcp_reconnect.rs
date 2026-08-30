@@ -62,7 +62,7 @@ fn tcp_config(port: u16, reconnect: bool) -> ferrowl_modbus::tcp::Config {
         delay_ms: 0,
         interval_ms: 0,
         reconnect,
-        tls: None,
+        tls: Default::default(),
     }
 }
 

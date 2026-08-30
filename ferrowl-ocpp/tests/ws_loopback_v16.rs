@@ -91,7 +91,7 @@ async fn start_server() -> csms::Server<V1_6> {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -131,7 +131,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -239,7 +239,7 @@ async fn terminate_does_not_block_on_in_flight_handler() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -382,7 +382,7 @@ async fn handler_rejection_is_call_error_and_keeps_connection() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -482,7 +482,7 @@ async fn awaited_call_times_out() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -505,7 +505,7 @@ async fn awaited_call_times_out() {
             reconnect: true,
             timeout_ms: 150,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -539,7 +539,7 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -560,7 +560,7 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -646,7 +646,7 @@ async fn connection_ids_are_monotonic_and_identity_is_metadata() {
                 reconnect: true,
                 timeout_ms: 2000,
                 basic_auth: None,
-                tls: None,
+                tls: Default::default(),
             })),
             ferrowl_ocpp::new_self_signed_cache(),
         )
@@ -708,7 +708,7 @@ async fn csms_broadcast_and_disconnect() {
                 reconnect: true,
                 timeout_ms: 2000,
                 basic_auth: None,
-                tls: None,
+                tls: Default::default(),
             })),
             ferrowl_ocpp::new_self_signed_cache(),
         )
@@ -777,7 +777,7 @@ async fn command_to_unknown_connection_fails_alone() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -829,7 +829,7 @@ async fn terminated_csms_stops_accepting() {
             reconnect: false,
             timeout_ms: 1000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -865,7 +865,7 @@ async fn cs_stays_disconnected_when_reconnect_is_disabled() {
             reconnect: false,
             timeout_ms: 1000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -922,7 +922,7 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
             reconnect: true,
             timeout_ms: 1000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -967,8 +967,8 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-097 — a `ws://` CS endpoint connects in plaintext and ignores any configured TLS material (the scheme is authoritative).
 async fn ws_client_ignores_configured_tls_material() {
+    use ferrowl_util::tls::CertVerification;
     use ferrowl_util::tls::ClientTlsPolicy;
-    use ferrowl_util::tls::ClientVerification;
 
     let server = start_server().await; // plain ws:// CSMS
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
@@ -982,9 +982,9 @@ async fn ws_client_ignores_configured_tls_material() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: Some(ClientTlsPolicy::Tls {
-                client_verification: ClientVerification::SkipVerify,
-            }),
+            tls: ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
+            },
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )

@@ -286,50 +286,90 @@ field is defaulted.
 
 ## 9. Security config (`security`)
 
-One section, shared by both roles. A field irrelevant to the instance's role is
-simply left unset. All-unset (the default) is plain `ws://` with no auth.
+One section, shared by both roles. Basic Auth is role-shared; TLS is held per role in a `tls` sub-block (OC-R-126), of which an instance consults only its own role's — the other is inert. The default, no auth and both policies `none`, is plain `ws://`.
 
 | Field | Type | Default | Role | Meaning |
 |---|---|---|---|---|
 | `username` | optional string | unset | both | Basic Auth username (Profile 1). Client sends it; server requires it |
 | `password` | optional string | unset | both | Basic Auth password. Never logged |
-| `ca_file` | optional string | unset | client | extra PEM trust anchor, added on top of the webpki root store |
-| `cert_file` | optional string | unset | server | PEM certificate chain presented to clients |
-| `key_file` | optional string | unset | server | PEM private key matching `cert_file` |
-| `client_cert_file` | optional string | unset | client | PEM client certificate presented for mutual TLS (Profile 3) |
-| `client_key_file` | optional string | unset | client | PEM private key matching `client_cert_file` |
-| `client_ca_file` | optional string | unset | server | PEM CA used to verify client certificates |
-| `require_client_cert` | bool | `false` | server | reject clients without a certificate signed by `client_ca_file` (Profile 3) |
-| `self_signed` | bool | `false` | server | generate an ephemeral in-memory certificate instead of loading files |
-| `insecure_skip_verify` | bool | `false` | client | accept **any** server certificate without authenticating it. Test rigs only |
+| `tls.server` | `ServerTlsPolicy` | `none` | server | policy consulted when the instance runs as CSMS |
+| `tls.client` | `ClientTlsPolicy` | `none` | client | policy consulted when the instance runs as CS |
+
+`ServerTlsPolicy`, tagged `mode`:
+
+| `mode` | Payload | Meaning |
+|---|---|---|
+| `none` | — | plain listener |
+| `tls` | `identity: CertSource` | presents a server certificate, requests none |
+| `mutual` | `identity: CertSource`, `verification: CertVerification` | also requests and verifies a client certificate |
+
+`ClientTlsPolicy`, tagged `mode`:
+
+| `mode` | Payload | Meaning |
+|---|---|---|
+| `none` | — | plain connection |
+| `tls` | `verification: CertVerification` | verifies the server, presents no identity |
+| `mutual` | `verification: CertVerification`, `identity: CertSource` | also presents a client certificate |
+
+`CertSource`, tagged `source`:
+
+| `source` | Payload | Meaning |
+|---|---|---|
+| `ephemeral` | — | server only: no material configured, bind an ephemeral self-signed certificate and log the fallback (OC-R-095) |
+| `self-signed` | — | ephemeral self-signed pair, explicitly chosen, no fallback logged |
+| `files` | `cert_file`, `key_file` — both required | PEM chain and its matching private key |
+
+`CertVerification`, tagged `verify`:
+
+| `verify` | Payload | Meaning |
+|---|---|---|
+| `skip` | — | accept any peer certificate unauthenticated. Test rigs only |
+| `root-store` | `extra_ca_files` — list, may be empty | client only: the webpki root store plus these anchors |
+| `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the webpki root store |
 
 ### 9.1 Derivation rules
 
-- **Basic Auth is on** iff *both* `username` and `password` are set. Either alone
-  is inert.
-- **Client TLS is on** iff any of `ca_file`, `client_cert_file`,
-  `client_key_file`, `insecure_skip_verify` is set.
-- **Client mTLS** requires *both* `client_cert_file` and `client_key_file`; either
-  alone presents no client certificate.
-- `insecure_skip_verify` **ignores** `ca_file` rather than combining with it.
-- The **endpoint scheme gates TLS** in both roles. A `ws://` endpoint is always
-  plaintext, and any TLS material configured alongside it is inert. Only a `wss://`
-  endpoint uses the fields below. A URL never advertises a transport its peer does
-  not speak.
-- **A `wss://` server's TLS mode** is: PEM files when *both* `cert_file` and
-  `key_file` are set (explicit files always win); otherwise ephemeral self-signed
-  when `self_signed` is set.
-- **A `wss://` server endpoint with none of the above** falls back to an ephemeral
-  self-signed certificate rather than binding plain TCP, and reports the fallback
-  in the module log.
+- **Basic Auth is on** iff *both* `username` and `password` are set. Either alone is inert.
+- **TLS is on** for an instance iff its own role's policy is other than `none`. Nothing is derived from field presence any more: the variant *is* the state, and the policy for the other role never affects it.
+- **mTLS is on** iff that policy's `mode` is `mutual`. A `mutual` client always carries an identity and a `mutual` server always carries a verification, both required by the variant.
+- The **endpoint scheme gates TLS** in both roles (OC-R-042). A `ws://` endpoint is always plaintext and any policy configured alongside it is inert. A URL never advertises a transport its peer does not speak.
+- **A `wss://` server's TLS material** follows its `identity` variant directly (OC-R-096); the old "explicit files always win" precedence is unrepresentable and gone.
+- **A `wss://` server whose identity is `ephemeral`** binds an ephemeral self-signed certificate rather than plain TCP, and reports the fallback in the module log (OC-R-095).
+- Two role-only rejections, at construction: `verify = "root-store"` under `tls.server`, and `source = "ephemeral"` as a `tls.client` identity.
+- The **setup dialog does not expose `protocol` as an input** (OC-R-127): it displays a scheme derived from its TLS selector, `wss://` at TLS/mTLS and `ws://` at Off, and writes the matching `protocol` value. The field itself (§7) is unchanged, and a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
 
 ### 9.2 Security profiles
 
 | Profile | Configuration |
 |---|---|
 | 1 — Basic Auth over `ws://` | `username` + `password`, `protocol = ws` |
-| 2 — TLS, server cert only | `protocol = wss` + server `cert_file`/`key_file` (or `self_signed`); optionally combined with Basic Auth |
-| 3 — mutual TLS | Profile 2, plus server `client_ca_file` + `require_client_cert`, and client `client_cert_file` + `client_key_file` |
+| 2 — TLS, server cert only | `protocol = wss`; CSMS `tls.server.mode = "tls"` with any `identity`; CS `tls.client.mode = "tls"` with a `verification`. Optionally combined with Basic Auth |
+| 3 — mutual TLS | Profile 2 with `mode = "mutual"` on both ends: the CSMS adds `verification` (`ca-files`), the CS adds `identity` |
+
+```toml
+# One OCPP device config, both roles present; the instance's role picks one
+[security]
+username = "cs001"
+password = "hunter2"
+
+# used when this device runs as CSMS: require client certs from a private CA
+[security.tls.server]
+mode = "mutual"
+[security.tls.server.identity]
+source = "files"
+cert_file = "/etc/ferrowl/csms.crt"
+key_file  = "/etc/ferrowl/csms.key"
+[security.tls.server.verification]
+verify = "ca-files"
+ca_files = ["/etc/ferrowl/fleet-ca.pem"]
+
+# used when it runs as CS: platform roots plus one private CA, no identity
+[security.tls.client]
+mode = "tls"
+[security.tls.client.verification]
+verify = "root-store"
+extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
+```
 
 ---
 

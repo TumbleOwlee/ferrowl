@@ -996,10 +996,10 @@ mod tests {
             ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(c));
         }
 
-        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
-        // Port, Path, then HeaderNameInput — 9 hops (ws/client dialog, headers table hidden
-        // while empty).
-        for _ in 0..9 {
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Ip, Port,
+        // Path, then HeaderNameInput — 8 hops (ws/client dialog, headers table hidden while
+        // empty; Protocol is a derived read-only display, not in the focus cycle, OC-R-127).
+        for _ in 0..8 {
             ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
         }
         for c in "X-Tenant".chars() {

@@ -44,7 +44,8 @@ same device type on different ports).
   serialization error.
 - **Unknown fields:** ignored on load. No schema uses strict/`deny_unknown_fields`
   handling, so a field the loader does not recognize is silently dropped rather than
-  rejected.
+  rejected — except the TLS subtree (§8) and the OCPP `security` table that encloses
+  one, which reject a field they do not define (CS-R-055).
 
 ---
 
@@ -158,3 +159,17 @@ not **live state**:
 A saved session reloaded reproduces the same instance list, scripts, and interval.
 It does not reproduce any runtime data a running module had accumulated, and it does
 not re-serialize the device configs the instances reference.
+
+---
+
+## 8. TLS configuration shape
+
+A device config's TLS material is a tagged-enum tree (MB-R-105) held in a
+two-role container (MB-R-104/OC-R-126): Modbus serializes it as `[tls.server]`/
+`[tls.client]`, OCPP one level deeper as `[security.tls.server]`/
+`[security.tls.client]`. Each role block carries `mode` (the policy's tag), an
+`identity` sub-table carrying `source` (the certificate-source tag) when the mode
+calls for one, and a `verification` sub-table carrying `verify` (the
+peer-verification tag) when the mode calls for one. Both container fields default
+independently to their own `mode = "none"` variant, so an absent `tls`/`security.tls`
+block, an empty one, and one whose two policies are both `none` are the same state.

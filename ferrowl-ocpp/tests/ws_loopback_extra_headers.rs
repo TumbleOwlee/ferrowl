@@ -62,7 +62,7 @@ async fn extra_headers_are_sent_on_upgrade_request() {
         url: format!("ws://{addr}/ocpp/CS001"),
         timeout_ms: 1000,
         basic_auth: None,
-        tls: None,
+        tls: Default::default(),
         extra_headers: vec![
             HeaderDef::new("X-Tenant", "acme-1").unwrap(),
             HeaderDef::new("X-Trace-Id", "abc123").unwrap(),

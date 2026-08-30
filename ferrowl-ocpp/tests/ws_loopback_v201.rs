@@ -89,7 +89,7 @@ async fn start_server() -> csms::Server<V2_0_1> {
             timeout_ms: 2000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -124,7 +124,7 @@ async fn cs_calls_csms_and_csms_calls_cs() {
             reconnect: true,
             timeout_ms: 2000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )

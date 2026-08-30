@@ -65,7 +65,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
         timeout_ms: 1000,
         reconnect: true,
         basic_auth: None,
-        tls: None,
+        tls: Default::default(),
     }, ferrowl_ocpp::new_self_signed_cache())
     .spawn(TestCsms, sink())
     .await
@@ -94,7 +94,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
             reconnect: false,
             timeout_ms: 1000,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         })),
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -129,7 +129,7 @@ async fn csms_terminate_while_backing_off_ends_task_ok() {
             timeout_ms: 1000,
             reconnect: true,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )
@@ -165,7 +165,7 @@ async fn csms_bind_failure_reconnect_false_ends_task() {
             timeout_ms: 1000,
             reconnect: false,
             basic_auth: None,
-            tls: None,
+            tls: Default::default(),
         },
         ferrowl_ocpp::new_self_signed_cache(),
     )

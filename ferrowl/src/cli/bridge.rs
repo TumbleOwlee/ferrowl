@@ -9,6 +9,7 @@ use std::io::Write as _;
 use std::time::{Duration, Instant};
 
 use crate::cli::{BridgeArgs, parse_bridge_descriptor};
+use crate::config::ClientOrServer;
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
@@ -25,14 +26,14 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         eprintln!("Error: --upstream and --downstream are both required");
         return 1;
     };
-    let upstream = match parse_bridge_descriptor(upstream) {
+    let upstream = match parse_bridge_descriptor(upstream, ClientOrServer::Server) {
         Ok(spec) => spec,
         Err(e) => {
             eprintln!("Error: invalid --upstream: {e}");
             return 1;
         }
     };
-    let downstream = match parse_bridge_descriptor(downstream) {
+    let downstream = match parse_bridge_descriptor(downstream, ClientOrServer::Client) {
         Ok(spec) => spec,
         Err(e) => {
             eprintln!("Error: invalid --downstream: {e}");
@@ -144,6 +145,20 @@ mod tests {
         assert_eq!(run(&args).await, 1);
     }
 
+    /// BR-R-013 — an `--upstream` descriptor naming `tls.verification.verify=root-store`
+    /// (client-only, rejected on a server role) returns exit code 1.
+    #[tokio::test]
+    async fn ut_bridge_run_invalid_tls_key_returns_one() {
+        let mut args = base_args();
+        args.upstream = Some(
+            "transport=tcp,ip=127.0.0.1,port=1,tls.mode=mutual,\
+             tls.identity.source=self-signed,tls.verification.verify=root-store"
+                .to_string(),
+        );
+        args.downstream = Some("transport=tcp,ip=127.0.0.1,port=1".to_string());
+        assert_eq!(run(&args).await, 1);
+    }
+
     // `ferrowl` is bin-only (no lib target `ferrowl/tests/` integration tests could call
     // `cli::bridge::run` from), same constraint `cli::headless::run` already lives under —
     // its own richer end-to-end/log-file/exit-on-error scenarios live here too, in-process,
@@ -191,7 +206,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 0,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         };
         // The sender must be returned alongside the handle and kept alive by the caller for as
         // long as the server should keep running: the shared server core treats the command
@@ -242,7 +257,7 @@ mod tests {
             delay_ms: 0,
             interval_ms: 50,
             reconnect: true,
-            tls: None,
+            tls: Default::default(),
         };
         let operations = std::sync::Arc::new(tokio::sync::RwLock::new(vec![Operation {
             slave_id: UnitId(1),

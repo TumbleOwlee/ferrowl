@@ -440,7 +440,7 @@ impl ModuleView for ModbusModuleView {
                 if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code)
                     && let Ok(resolved) = setup.resolve()
                 {
-                    self.pending = Some(PendingAction::ApplySetup(resolved.values));
+                    self.pending = Some(PendingAction::ApplySetup(Box::new(resolved.values)));
                     self.overlay.close();
                 }
             }
@@ -477,7 +477,7 @@ impl ModuleView for ModbusModuleView {
                         original_name,
                     } => self.apply_edit(edited, idx, original_name).await,
                     PendingAction::Delete(name) => self.delete_register_by_name(name).await,
-                    PendingAction::ApplySetup(values) => self.apply_setup(values).await,
+                    PendingAction::ApplySetup(values) => self.apply_setup(*values).await,
                 }
             }
 
@@ -646,7 +646,7 @@ impl ModuleView for ModbusModuleView {
                     &self.spec.endpoint,
                     timing,
                     &self.device.read_ranges,
-                    self.device.tls.as_ref(),
+                    Some(&self.device.tls),
                 );
                 self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
@@ -1045,7 +1045,7 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            tls: None,
+            tls: Default::default(),
             log_file: None,
             read_ranges: Default::default(),
             definitions: Default::default(),
@@ -1724,7 +1724,7 @@ mod tests {
             interval_ms: None,
             reconnect: None,
             read_ranges: Default::default(),
-            tls: None,
+            tls: Default::default(),
         };
         view.apply_setup(values).await;
         assert_eq!(view.device.reconnect, Some(false));

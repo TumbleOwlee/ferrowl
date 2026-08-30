@@ -807,7 +807,7 @@ where
             );
             let policy = guard.server_tls_policy();
             match &policy {
-                ferrowl_util::tls::ServerTlsPolicy::NoTls => {
+                ferrowl_util::tls::ServerTlsPolicy::None {} => {
                     drop(guard);
                     match TcpListener::bind(addr).await {
                         Err(e) => AttemptOutcome::Failed {
@@ -859,10 +859,10 @@ where
                             reconnect: false,
                             reset: false,
                         },
-                        // `NoTls` was already handled above, so this arm only ever runs for
-                        // `Tls`/`MutualTls`, both of which always build `Some((..))`.
+                        // `None {}` was already handled above, so this arm only ever runs
+                        // for `Tls`/`Mutual`, both of which always build `Some((..))`.
                         Ok(None) => unreachable!(
-                            "build_server_tls_config returns None only for NoTls, already handled"
+                            "build_server_tls_config returns None only for None (mode), already handled"
                         ),
                         Ok(Some((tls_config, used_fallback))) => {
                             if used_fallback {

@@ -12,11 +12,31 @@ pub use crate::config::script::ScriptDef;
 
 use super::session::{OcppRole, OcppSpec, OcppVersion};
 
+/// The two-role TLS container for an OCPP device config (OC-R-126), the same shape as
+/// `ferrowl_modbus::tcp::ModbusTlsConfig` one level deeper: serialized `[security.tls.server]`/
+/// `[security.tls.client]`. Each policy independently defaults to its own `None` variant, so an
+/// absent `tls` block, an empty one, and one whose two policies are both `mode = "none"` denote
+/// the same state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct OcppTlsConfig {
+    pub server: ferrowl_util::tls::ServerTlsPolicy,
+    pub client: ferrowl_util::tls::ClientTlsPolicy,
+}
+
+impl OcppTlsConfig {
+    pub fn is_none(&self) -> bool {
+        matches!(self.server, ferrowl_util::tls::ServerTlsPolicy::None {})
+            && matches!(self.client, ferrowl_util::tls::ClientTlsPolicy::None {})
+    }
+}
+
 /// Optional websocket transport security for an OCPP instance: HTTP Basic Auth (Security Profile
-/// one) and TLS/mTLS (Security Profiles two and three). Fields are named by which role uses them;
-/// a field irrelevant to the instance's [`OcppRole`] is simply left `None` (same convention as
-/// the role-specific fields elsewhere in [`OcppDeviceConfig`]).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// one) and TLS/mTLS (Security Profiles two and three, held per role in `tls`, OC-R-126). A role
+/// irrelevant to the instance's [`OcppRole`] is simply inert (same convention as the role-specific
+/// fields elsewhere in [`OcppDeviceConfig`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct OcppSecurityConfig {
     /// Basic Auth username. Client role: sent on connect. Server role: required to accept a
     /// connection (together with `password`).
@@ -25,43 +45,10 @@ pub struct OcppSecurityConfig {
     /// Basic Auth password. Never logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
-    /// Server-role TLS policy (OC-R-096/OC-R-039/OC-R-113). Only consulted when this instance is
-    /// a CSMS; always present on the wire regardless of role (see `ModbusTlsConfig`'s doc
-    /// comment for why) so a role toggle doesn't lose the other role's settings.
-    #[serde(flatten)]
-    pub server: ferrowl_util::tls::ServerTlsPolicy,
-    /// Client-role TLS policy (OC-R-036/OC-R-115/OC-R-116). Only consulted when this instance is
-    /// a charging station.
-    #[serde(flatten)]
-    pub client: ferrowl_util::tls::ClientTlsPolicy,
-}
-
-/// The "nothing configured" state for each policy — `ServerTlsPolicy`/`ClientTlsPolicy` have no
-/// `NoTls`-shaped `Default` of their own (deserializing a *present* flattened block never
-/// produces `NoTls`, see `ferrowl_util::tls`'s doc comment), so `OcppSecurityConfig::default()`
-/// and `cs_tls`/`csms_tls`'s "was anything actually set" check both compare against this
-/// literal "unset source, plain verify with no CA" baseline instead.
-fn default_server_tls() -> ferrowl_util::tls::ServerTlsPolicy {
-    ferrowl_util::tls::ServerTlsPolicy::Tls {
-        server_cert: ferrowl_util::tls::ServerCertSource::Unset,
-    }
-}
-
-fn default_client_tls() -> ferrowl_util::tls::ClientTlsPolicy {
-    ferrowl_util::tls::ClientTlsPolicy::Tls {
-        client_verification: ferrowl_util::tls::ClientVerification::Verify { ca_file: None },
-    }
-}
-
-impl Default for OcppSecurityConfig {
-    fn default() -> Self {
-        OcppSecurityConfig {
-            username: None,
-            password: None,
-            server: default_server_tls(),
-            client: default_client_tls(),
-        }
-    }
+    /// The two-role TLS container (OC-R-126). Always present on the wire, both policies
+    /// defaulting to `None`, so a role toggle doesn't lose the other role's settings.
+    #[serde(default, skip_serializing_if = "OcppTlsConfig::is_none")]
+    pub tls: OcppTlsConfig,
 }
 
 impl OcppSecurityConfig {
@@ -80,15 +67,15 @@ impl OcppSecurityConfig {
         }
     }
 
-    /// CS-side TLS policy, if any TLS field was set at all (i.e. `self.client` differs from the
-    /// "nothing configured" baseline).
-    pub fn cs_tls(&self) -> Option<ferrowl_util::tls::ClientTlsPolicy> {
-        (self.client != default_client_tls()).then(|| self.client.clone())
+    /// CS-side TLS policy (OC-R-126): a CS decides whether TLS is configured by matching its own
+    /// role's policy variant, never by comparing the whole security block against a baseline.
+    pub fn cs_tls(&self) -> ferrowl_util::tls::ClientTlsPolicy {
+        self.tls.client.clone()
     }
 
-    /// CSMS-side TLS policy, if any TLS field was set at all.
-    pub fn csms_tls(&self) -> Option<ferrowl_util::tls::ServerTlsPolicy> {
-        (self.server != default_server_tls()).then(|| self.server.clone())
+    /// CSMS-side TLS policy (OC-R-126).
+    pub fn csms_tls(&self) -> ferrowl_util::tls::ServerTlsPolicy {
+        self.tls.server.clone()
     }
 }
 
@@ -338,12 +325,14 @@ mod tests {
             security: OcppSecurityConfig {
                 username: Some("cp001".into()),
                 password: Some("s3cret".into()),
-                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
-                    client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                        ca_file: Some("/tmp/ca.pem".into()),
+                tls: OcppTlsConfig {
+                    client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                        verification: ferrowl_util::tls::CertVerification::RootStore {
+                            extra_ca_files: vec!["/tmp/ca.pem".into()],
+                        },
                     },
+                    ..Default::default()
                 },
-                ..Default::default()
             },
         };
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
@@ -369,47 +358,111 @@ mod tests {
         let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
         assert_eq!(cfg.security, OcppSecurityConfig::default());
         assert!(cfg.security.basic_auth().is_none());
-        assert!(cfg.security.cs_tls().is_none());
-        assert!(cfg.security.csms_tls().is_none());
+        assert!(matches!(
+            cfg.security.cs_tls(),
+            ferrowl_util::tls::ClientTlsPolicy::None {}
+        ));
+        assert!(matches!(
+            cfg.security.csms_tls(),
+            ferrowl_util::tls::ServerTlsPolicy::None {}
+        ));
     }
 
     #[test]
-    /// struct/type rework — `OcppSecurityConfig`'s TLS-shaped defaults match
-    /// `ServerCertSource`/`ClientVerification`'s own defaults.
+    /// OC-R-126 — `OcppSecurityConfig`'s TLS container defaults to both policies `None`, and an
+    /// absent `[security.tls]` block is exactly that state.
     fn ut_ocpp_security_config_defaults() {
         let cfg = OcppSecurityConfig::default();
-        assert_eq!(
-            cfg.server,
-            ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Unset,
-            }
-        );
-        assert_eq!(
-            cfg.client,
-            ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::Verify {
-                    ca_file: None
-                },
-            }
-        );
+        assert!(cfg.tls.is_none());
     }
 
     #[test]
-    /// OC-R-112 — `cert_file` set alone (no `key_file`, no `self_signed`) fails to deserialize an
-    /// `OcppSecurityConfig`: this is where OC-R-112 actually bites, since (unlike a bare
-    /// `CsmsTlsMode`) `OcppSecurityConfig` has a legal "unset" state via `ServerCertSource::Unset`.
+    /// OC-R-126 — the two-role container serializes at `[security.tls.server]`/
+    /// `[security.tls.client]` and round-trips both roles together through TOML.
+    fn ut_security_tls_block_roundtrips_both_roles() {
+        let cfg = OcppSecurityConfig {
+            username: Some("cs001".into()),
+            password: Some("hunter2".into()),
+            tls: OcppTlsConfig {
+                server: ferrowl_util::tls::ServerTlsPolicy::Mutual {
+                    identity: ferrowl_util::tls::CertSource::Files {
+                        cert_file: "csms.crt".into(),
+                        key_file: "csms.key".into(),
+                    },
+                    verification: ferrowl_util::tls::CertVerification::CaFiles {
+                        ca_files: vec!["fleet-ca.pem".into()],
+                    },
+                },
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    verification: ferrowl_util::tls::CertVerification::RootStore {
+                        extra_ca_files: vec!["private-ca.pem".into()],
+                    },
+                },
+            },
+        };
+        let path = std::env::temp_dir().join("ferrowl_ocpp_security_both_roles_test.toml");
+        let path = path.to_str().unwrap();
+        Converter::save(&cfg, path, FileType::Toml).expect("save");
+        let raw = std::fs::read_to_string(path).unwrap();
+        assert!(
+            raw.contains("[tls.server]") && raw.contains("[tls.client]"),
+            "expected [security.tls.server]/[security.tls.client] key paths, got:\n{raw}"
+        );
+        let back: OcppSecurityConfig = Converter::load(path, FileType::Toml).expect("load");
+        assert_eq!(cfg, back);
+    }
+
+    #[test]
+    /// OC-R-126 — a CS decides whether TLS is configured by matching only its own role's
+    /// policy variant: a non-`None` server policy does not affect `cs_tls()`, and vice versa.
+    fn ut_cs_tls_reads_only_the_client_half() {
+        let cfg = OcppSecurityConfig {
+            tls: OcppTlsConfig {
+                server: ferrowl_util::tls::ServerTlsPolicy::Mutual {
+                    identity: ferrowl_util::tls::CertSource::SelfSigned {},
+                    verification: ferrowl_util::tls::CertVerification::CaFiles {
+                        ca_files: vec!["fleet-ca.pem".into()],
+                    },
+                },
+                client: ferrowl_util::tls::ClientTlsPolicy::None {},
+            },
+            ..Default::default()
+        };
+        assert!(matches!(
+            cfg.cs_tls(),
+            ferrowl_util::tls::ClientTlsPolicy::None {}
+        ));
+        assert!(!matches!(
+            cfg.csms_tls(),
+            ferrowl_util::tls::ServerTlsPolicy::None {}
+        ));
+    }
+
+    #[test]
+    /// OC-R-112 — `cert_file` set alone (no `key_file`) inside a `[tls.server.identity]` block
+    /// fails to deserialize an `OcppSecurityConfig`: `CertSource::Files` requires both fields.
     fn ut_device_config_cert_file_alone_fails_to_load() {
-        let json = serde_json::json!({"cert_file": "s.crt"});
+        let json = serde_json::json!({
+            "tls": {
+                "server": {
+                    "mode": "tls",
+                    "identity": {"source": "files", "cert_file": "s.crt"}
+                }
+            }
+        });
         let result: Result<OcppSecurityConfig, _> = serde_json::from_value(json);
         assert!(result.is_err());
     }
 
     #[test]
-    /// struct/type rework — `csms_tls()` returns `None` when `server_cert` is `Unset`, distinct
-    /// from `CsmsTlsMode`'s own fallible (never-`Unset`) conversion.
-    fn ut_csms_tls_unset_returns_none() {
+    /// OC-R-126 — `csms_tls()` returns `ServerTlsPolicy::None {}` when the container's server
+    /// policy is `None`.
+    fn ut_csms_tls_none_by_default() {
         let cfg = OcppSecurityConfig::default();
-        assert!(cfg.csms_tls().is_none());
+        assert!(matches!(
+            cfg.csms_tls(),
+            ferrowl_util::tls::ServerTlsPolicy::None {}
+        ));
     }
 
     // An old-format device config file (predating `script_interval`) must still load, with
@@ -466,11 +519,13 @@ mod tests {
     /// CS-R-004 — new security fields round-trip through TOML and JSON.
     fn ut_security_config_new_fields_round_trip() {
         let cfg = OcppSecurityConfig {
-            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
-            },
-            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            tls: OcppTlsConfig {
+                server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                    identity: ferrowl_util::tls::CertSource::SelfSigned {},
+                },
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    verification: ferrowl_util::tls::CertVerification::Skip {},
+                },
             },
             ..Default::default()
         };
@@ -487,58 +542,61 @@ mod tests {
     /// OC-R-096 — a wss CSMS with no server cert/key files uses `self_signed` for its TLS material.
     fn ut_csms_tls_self_signed_without_cert_files() {
         let cfg = OcppSecurityConfig {
-            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+            tls: OcppTlsConfig {
+                server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                    identity: ferrowl_util::tls::CertSource::SelfSigned {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };
-        let tls = cfg.csms_tls().expect("self_signed enables TLS");
         assert!(matches!(
-            tls,
+            cfg.csms_tls(),
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::SelfSigned,
+                identity: ferrowl_util::tls::CertSource::SelfSigned {},
             }
         ));
     }
 
     #[test]
-    /// OC-R-096 — `ServerCertSource::Explicit` is carried through for a wss CSMS (embed/reuse
-    /// `ServerCertSource`'s own precedence, not re-resolved here).
+    /// OC-R-096 — `CertSource::Files` is carried through for a wss CSMS unchanged.
     fn ut_csms_tls_explicit_maps_to_files() {
         let cfg = OcppSecurityConfig {
-            server: ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Explicit {
-                    cert_file: "s.crt".into(),
-                    key_file: "s.key".into(),
+            tls: OcppTlsConfig {
+                server: ferrowl_util::tls::ServerTlsPolicy::Tls {
+                    identity: ferrowl_util::tls::CertSource::Files {
+                        cert_file: "s.crt".into(),
+                        key_file: "s.key".into(),
+                    },
                 },
+                ..Default::default()
             },
             ..Default::default()
         };
-        let tls = cfg.csms_tls().expect("cert/key enable TLS");
         assert!(matches!(
-            tls,
+            cfg.csms_tls(),
             ferrowl_util::tls::ServerTlsPolicy::Tls {
-                server_cert: ferrowl_util::tls::ServerCertSource::Explicit { .. },
+                identity: ferrowl_util::tls::CertSource::Files { .. },
             }
         ));
     }
 
     #[test]
-    /// OC-R-036 — a CS TLS configuration carries `ClientVerification::SkipVerify`.
-    fn ut_cs_tls_carries_insecure_skip_verify() {
+    /// OC-R-036 — a CS TLS configuration carries `CertVerification::Skip`.
+    fn ut_cs_tls_carries_skip_verify() {
         let cfg = OcppSecurityConfig {
-            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+            tls: OcppTlsConfig {
+                client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                    verification: ferrowl_util::tls::CertVerification::Skip {},
+                },
+                ..Default::default()
             },
             ..Default::default()
         };
-        let tls = cfg
-            .cs_tls()
-            .expect("SkipVerify does not gate cs_tls presence");
         assert_eq!(
-            tls,
+            cfg.cs_tls(),
             ferrowl_util::tls::ClientTlsPolicy::Tls {
-                client_verification: ferrowl_util::tls::ClientVerification::SkipVerify,
+                verification: ferrowl_util::tls::CertVerification::Skip {},
             }
         );
     }
@@ -611,5 +669,39 @@ mod tests {
         });
         let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("old-style config parses");
         assert_eq!(cfg.extra_headers, Vec::new());
+    }
+
+    /// CS-R-055 — a retired flat field beside the `security` table's defined members
+    /// (`username`, `password`, `tls`) fails the load rather than being silently ignored.
+    #[test]
+    fn ut_security_table_rejects_unknown_field() {
+        let json = serde_json::json!({
+            "username": "cp001",
+            "password": "s3cret",
+            "require_client_cert": true,
+        });
+        let err = serde_json::from_value::<OcppSecurityConfig>(json).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown field `require_client_cert`"),
+            "got: {err}"
+        );
+    }
+
+    /// CS-R-055 — `username`/`password` remain defined members of `security` and are unaffected
+    /// by the strictness that governs the rest of the table.
+    #[test]
+    fn ut_security_table_accepts_username_password_beside_tls() {
+        let json = serde_json::json!({
+            "username": "cp001",
+            "password": "s3cret",
+            "tls": {
+                "server": {"mode": "none"},
+                "client": {"mode": "none"},
+            },
+        });
+        let cfg: OcppSecurityConfig = serde_json::from_value(json).expect("defined fields load");
+        assert_eq!(cfg.username, Some("cp001".into()));
+        assert_eq!(cfg.password, Some("s3cret".into()));
     }
 }

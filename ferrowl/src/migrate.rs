@@ -376,7 +376,7 @@ fn convert(legacy: LegacyConfig) -> (DeviceConfig, Vec<String>) {
         interval_ms: legacy.interval_ms.map(|v| v as usize),
         // The legacy format predates auto-reconnect; `None` falls back to `DEFAULT_RECONNECT`.
         reconnect: None,
-        tls: None,
+        tls: Default::default(),
         log_file: None,
         read_ranges,
         definitions,

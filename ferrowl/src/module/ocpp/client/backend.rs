@@ -920,7 +920,7 @@ mod tests {
                 timeout_ms: 2000,
                 reconnect: true,
                 basic_auth: None,
-                tls: None,
+                tls: Default::default(),
             },
             ferrowl_ocpp::new_self_signed_cache(),
         )
