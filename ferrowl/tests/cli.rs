@@ -16,6 +16,7 @@ fn evse_device() -> &'static str {
 
 /// Bit 2 (value 2) of `/proc/<pid>/status`'s `SigCgt:` mask is SIGINT; its presence means the
 /// process has installed a handler for it (tokio's `ctrl_c()`) rather than left it default.
+#[cfg(target_os = "linux")]
 fn has_installed_sigint_handler(pid: u32) -> bool {
     let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
         return false;
@@ -25,6 +26,14 @@ fn has_installed_sigint_handler(pid: u32) -> bool {
         .find_map(|line| line.strip_prefix("SigCgt:"))
         .and_then(|mask| u64::from_str_radix(mask.trim(), 16).ok())
         .is_some_and(|mask| mask & 0x2 != 0)
+}
+
+/// `/proc` exists only on Linux (NF-R-002); elsewhere readiness is approximated by a fixed short
+/// settle instead, since there is no equivalent introspection point to poll.
+#[cfg(not(target_os = "linux"))]
+fn has_installed_sigint_handler(_pid: u32) -> bool {
+    std::thread::sleep(Duration::from_millis(50));
+    true
 }
 
 fn send_sigint(pid: u32) {

@@ -71,8 +71,8 @@ where
     /// [`Server::local_addr`] is `None` until the first successful bind.
     ///
     /// A TLS-configuration *build* failure is a different kind of error: it is deterministic
-    /// given the config (e.g. `require_client_cert` combined with a self-signed certificate,
-    /// OC-R-040) and retrying it can never succeed, unlike a transient bind failure — so it is
+    /// given the config (e.g. a `ServerTlsPolicy::Mutual` whose `verification` cannot be
+    /// built, OC-R-039) and retrying it can never succeed, unlike a transient bind failure — so it is
     /// still checked once, synchronously, here, and fails `spawn` immediately rather than
     /// silently retrying forever.
     pub async fn spawn<H, L>(self, handler: H, log: L) -> Result<Server<V>, Error>

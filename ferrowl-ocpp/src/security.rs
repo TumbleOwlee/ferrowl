@@ -898,8 +898,8 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-039 — a CSMS requiring client certificates with a configured client CA builds a server config carrying a client-cert verifier.
-    fn ut_require_client_cert_with_ca_builds_verifier() {
+    /// OC-R-039 — a CSMS with mutual TLS and a configured client CA builds a server config carrying a client-cert verifier.
+    fn ut_mutual_with_ca_builds_verifier() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let (ca_pem, _ca_key) = cert_and_key_pem();
         let cache = new_self_signed_cache();
@@ -997,10 +997,10 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-040 — a self-signed CSMS requiring client certificates succeeds when a
-    /// `CertVerification::CaFiles` list is configured, in either verification mode: the server's own self-signed
-    /// identity and the CA trusted for verifying client certificates are independent.
-    fn ut_require_client_cert_self_signed_with_any_verification_mode_succeeds() {
+    /// OC-R-040 — a self-signed CSMS with mutual TLS succeeds under either `CaFiles` or
+    /// `Skip` verification: the server's own self-signed identity and the CA trusted for
+    /// verifying client certificates are independent.
+    fn ut_mutual_self_signed_with_any_verification_mode_succeeds() {
         let (ca_pem, _ca_key) = cert_and_key_pem();
         let cache = new_self_signed_cache();
 
