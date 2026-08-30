@@ -1,15 +1,8 @@
 # Config & Session — Data Contract
 
-The **envelope schema**: the top-level shape of a session file and of a
-device-config file, the fields that are envelope-level (not protocol-specific), the
-`version` field, how a session instance references a device config, and the
-encoding rules that relate TOML and JSON.
+The **envelope schema**: top-level shape of a session file and a device-config file, envelope-level fields, `version`, how a session instance references a device config, TOML/JSON encoding rules.
 
-This document deliberately does **not** list protocol-specific field blocks. For
-the Modbus module-spec endpoint and device-config fields, see
-[`../modbus/api-contract.md`](../modbus/api-contract.md) §5–6. For the OCPP
-module-spec endpoint and device-config (version, role, timeout, security,
-config-keys) fields, see [`../ocpp/api-contract.md`](../ocpp/api-contract.md) §7–9.
+Protocol-specific field blocks are not listed here: Modbus module-spec endpoint and device-config fields → [`../modbus/api-contract.md`](../modbus/api-contract.md) §5–6; OCPP module-spec endpoint and device-config (version, role, timeout, security, config-keys) → [`../ocpp/api-contract.md`](../ocpp/api-contract.md) §7–9.
 
 ---
 
@@ -17,35 +10,21 @@ config-keys) fields, see [`../ocpp/api-contract.md`](../ocpp/api-contract.md) §
 
 | File | Contains | Cardinality |
 |---|---|---|
-| **Session file** | A list of module instances + session-level scripts + a sim interval | One per launch config; loaded via `--session` and written by `:write` |
-| **Device-config file** | The configuration of one device type (registers/variables, timing, scripts, security) | One file = one device type; referenced by any number of instances |
+| **Session file** | module instances + session-level scripts + sim interval | one per launch config; loaded via `--session`, written by `:write` |
+| **Device-config file** | one device type (registers/variables, timing, scripts, security) | one file = one device type; referenced by any number of instances |
 
-A session instance does **not** embed a device config; it references one **by path**.
-The same device-config file can back several instances (e.g. two TCP servers of the
-same device type on different ports).
+A session instance does **not** embed a device config; it references one **by path**. One device-config file can back several instances (e.g. two TCP servers of the same type on different ports).
 
 ---
 
 ## 2. Encoding rules
 
-- A file is TOML or JSON, chosen by extension: `.toml` → TOML, `.json` → JSON,
-  matched case-insensitively. No other extension is accepted, and content is never
-  sniffed.
-- Both encodings carry the same data model; either encoding round-trips to the
-  other with no field loss.
-- **Field omission:** a field that is unset/empty and marked omittable is left out
-  of the serialized output entirely, and takes its default on load. This keeps the
-  informational `version` (when unset), an empty `scripts` list, and unset optional
-  endpoint sub-fields out of written files.
-- **Numbers in TOML:** emitted as plain TOML integers/floats. A `u64` above the
-  signed-64-bit range is written as a float rather than wrapping.
-- **Null:** TOML has no null. An absent value is an omitted key, never an explicit
-  null; a null with no key to omit (top level or inside an array) is a
-  serialization error.
-- **Unknown fields:** ignored on load. No schema uses strict/`deny_unknown_fields`
-  handling, so a field the loader does not recognize is silently dropped rather than
-  rejected — except the TLS subtree (§8) and the OCPP `security` table that encloses
-  one, which reject a field they do not define (CS-R-055).
+- TOML or JSON by extension: `.toml` → TOML, `.json` → JSON, case-insensitive. No other extension; content never sniffed.
+- Both encodings carry the same data model; either round-trips to the other with no field loss.
+- **Field omission:** an unset/empty omittable field is left out of output and takes its default on load. Keeps the informational `version` (when unset), an empty `scripts` list, and unset optional endpoint sub-fields out of written files.
+- **Numbers in TOML:** plain integers/floats. A `u64` above the signed-64-bit range is written as a float rather than wrapping.
+- **Null:** TOML has no null. An absent value is an omitted key, never an explicit null; a null with no key to omit (top level or inside an array) is a serialization error.
+- **Unknown fields:** ignored on load. No schema uses `deny_unknown_fields`, so an unrecognized field is dropped — except the TLS subtree (§8) and the OCPP `security` table enclosing one, which reject a field they do not define (CS-R-055).
 
 ---
 
@@ -62,114 +41,83 @@ Session {
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `version` | optional string | unset | Writing build's version, stamped on save. Omitted from output when unset. Purely informational (§6). |
-| `modules` | list of objects | empty | Each object is a module-instance spec plus a `"type"` tag (§4). Stored opaquely so both module types share one list. |
-| `scripts` | list of `ScriptDef` | empty | Session-level Lua scripts; run in one Lua state with `C_Module` access to every instance. Semantics in [`../scripting/`](../scripting/). Omitted when empty. |
-| `interval` | float | `1.0` | Session sim-cycle seconds. Non-finite/zero/negative → `1.0`; otherwise used verbatim (no floor). |
+| `version` | optional string | unset | writing build's version, stamped on save. Omitted when unset. Informational (§6) |
+| `modules` | list of objects | empty | each a module-instance spec plus a `"type"` tag (§4). Stored opaquely so both types share one list |
+| `scripts` | list of `ScriptDef` | empty | session-level Lua scripts; one Lua state with `C_Module` access to every instance. Semantics [`../scripting/`](../scripting/). Omitted when empty |
+| `interval` | float | `1.0` | session sim-cycle seconds. Non-finite/zero/negative → `1.0`; otherwise verbatim (no floor) |
 
 ### 3.1 `ScriptDef` (shared envelope type)
 
-Session scripts and device-config scripts use the same entry shape.
+Session scripts and device-config scripts share this shape.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | — (required) | Script name. |
-| `code` | string | empty | Lua source. |
-| `enabled` | bool | `true` | Whether it runs in the sim loop. A flag-less entry is active. |
+| `name` | string | — (required) | script name |
+| `code` | string | empty | Lua source |
+| `enabled` | bool | `true` | runs in the sim loop. A flag-less entry is active |
 
 ---
 
 ## 4. Module-instance entry — the `"type"` tag and the reference
 
-Every entry in `modules` is an object with:
+Every `modules` entry is an object with:
 
-- a **`"type"`** discriminator — `"modbus"` or `"ocpp"` — used by the loader to
-  pick the deserializer. An entry **without** `"type"` is treated as `"modbus"`
-  (back-compat with pre-multi-type files). Any other value is a hard error.
-- a **`name`** — the tab title and `C_Module` registry key. Duplicate names across
-  the whole session (both types together) are de-duplicated by appending
-  ` (2)`, ` (3)`, … in creation order.
-- a **`device`** — the path to the device-config file this instance is an instance
-  of.
-- the **per-instance endpoint** fields, which are protocol-specific:
+- **`"type"`** — `"modbus"` or `"ocpp"`, selects the deserializer. Absent → `"modbus"` (back-compat). Any other value → hard error.
+- **`name`** — tab title and `C_Module` registry key. Duplicates across the whole session (both types) de-duplicated by appending ` (2)`, ` (3)`, … in creation order.
+- **`device`** — path to the device-config file.
+- **per-instance endpoint** fields, protocol-specific:
 
 | `"type"` | Endpoint / instance fields specified in |
 |---|---|
 | `"modbus"` | [`../modbus/api-contract.md`](../modbus/api-contract.md) §5 (`role`, `endpoint` = `tcp`/`rtu`) |
 | `"ocpp"` | [`../ocpp/api-contract.md`](../ocpp/api-contract.md) §7 (`protocol`, `ip`, `port`, `path`) |
 
-The envelope guarantees only that each entry carries `type`, `name`, and `device`
-plus whatever its protocol area defines. Timing, registers/variables, scripts,
-TLS/security, and OCPP version/role are **not** in the instance entry — they are in
-the referenced device config.
+The envelope guarantees only `type`, `name`, `device` plus whatever the protocol area defines. Timing, registers/variables, scripts, TLS/security, OCPP version/role are **not** in the entry — they are in the referenced device config.
 
 ---
 
 ## 5. Device-config file — envelope-level fields
 
-The full device-config field sets are protocol-owned (see the modbus/ and ocpp/
-data/api contracts). Only these fields are envelope-level and common in intent:
+Full field sets are protocol-owned. Envelope-level:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `version` | optional string | unset | Stamped on save; informational only (§6). Omitted from output when unset. |
-| `scripts` | list of `ScriptDef` | empty | Device-type Lua sim scripts (§3.1). Omitted when empty. |
+| `version` | optional string | unset | stamped on save; informational (§6). Omitted when unset |
+| `scripts` | list of `ScriptDef` | empty | device-type Lua sim scripts (§3.1). Omitted when empty |
 
-Everything else in a device config — Modbus `definitions`/`read_ranges`/timing,
-OCPP role/version/timeout/security/config-keys — is specified in its protocol area
-and is not re-listed here.
+Everything else — Modbus `definitions`/`read_ranges`/timing, OCPP role/version/timeout/security/config-keys — is specified in its protocol area.
 
-A device config additionally loads with **every** unknown field ignored and every
-recognized-but-absent field defaulted, so a file written by an older build still
-loads (CS-R-023).
+A device config loads with **every** unknown field ignored and every recognized-but-absent field defaulted, so a file from an older build still loads (CS-R-023).
 
 ---
 
 ## 6. The `version` field — informational only
 
-Both the session file and the device-config file carry an optional `version`
-string. Its full contract:
+Both file kinds carry an optional `version` string:
 
-- On **save**, it is overwritten with the writing build's version; the value that
-  was in the loaded file does not survive a save.
-- On **load**, it is **never read by any branch**. No migration, compatibility
-  shim, or format-selection logic keys off it. (A source comment describes it as
-  enabling "future compatibility shims" — that capability does not exist today; the
-  field is inert.)
-- Its absence changes nothing about how a file loads.
+- On **save**, overwritten with the writing build's version; the loaded value does not survive.
+- On **load**, **never read by any branch**. No migration, compatibility shim, or format selection keys off it. (A source comment describes it as enabling "future compatibility shims" — none exists; inert.)
+- Absence changes nothing.
 
-It is retained purely as a human-readable provenance stamp. See
-[`edge-cases.md`](./edge-cases.md) for this as a stated known limitation.
+Retained as a human-readable provenance stamp. [`edge-cases.md`](./edge-cases.md) lists it as a known limitation.
 
 ---
 
 ## 7. What round-trips through `:write`
 
-A `:write` serializes the session envelope — the instance list, the session
-scripts, the interval, and a fresh `version` stamp. It captures **configuration**,
-not **live state**:
+`:write` serializes the envelope — instance list, session scripts, interval, fresh `version` stamp. **Configuration**, not **live state**:
 
 | Round-trips (persisted) | Does NOT round-trip (dropped) |
 |---|---|
-| Instance name, type, device path, endpoint | Live register/coil values, in-flight Modbus transactions |
-| Session scripts + enabled flags | CSMS observed station/connector topology |
-| Session interval | OCPP runtime config-key/variable mutations |
-| Stamped `version` | The device-config files themselves (saved separately) |
+| instance name, type, device path, endpoint | live register/coil values, in-flight Modbus transactions |
+| session scripts + enabled flags | CSMS observed station/connector topology |
+| session interval | OCPP runtime config-key/variable mutations |
+| stamped `version` | the device-config files themselves (saved separately) |
 
-A saved session reloaded reproduces the same instance list, scripts, and interval.
-It does not reproduce any runtime data a running module had accumulated, and it does
-not re-serialize the device configs the instances reference.
+A reloaded session reproduces the same instance list, scripts, interval; not any runtime data, and not the referenced device configs.
 
 ---
 
 ## 8. TLS configuration shape
 
-A device config's TLS material is a tagged-enum tree (MB-R-105) held in a
-two-role container (MB-R-104/OC-R-126): Modbus serializes it as `[tls.server]`/
-`[tls.client]`, OCPP one level deeper as `[security.tls.server]`/
-`[security.tls.client]`. Each role block carries `mode` (the policy's tag), an
-`identity` sub-table carrying `source` (the certificate-source tag) when the mode
-calls for one, and a `verification` sub-table carrying `verify` (the
-peer-verification tag) when the mode calls for one. Both container fields default
-independently to their own `mode = "none"` variant, so an absent `tls`/`security.tls`
-block, an empty one, and one whose two policies are both `none` are the same state.
+A device config's TLS material is a tagged-enum tree (MB-R-105) in a two-role container (MB-R-104/OC-R-126): Modbus `[tls.server]`/`[tls.client]`, OCPP one level deeper `[security.tls.server]`/`[security.tls.client]`. Each role block carries `mode` (policy tag), an `identity` sub-table with `source` (certificate-source tag) when the mode calls for one, and a `verification` sub-table with `verify` (peer-verification tag) when the mode calls for one. Both container fields default independently to `mode = "none"`, so an absent `tls`/`security.tls` block, an empty one, and one whose two policies are both `none` are the same state.

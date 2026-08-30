@@ -1,22 +1,10 @@
 # TUI — API Contract
 
-The stable operator-facing surface owned by the TUI area: the exhaustive `:`
-command list, every keybinding table by context/mode, and the code-editor
-mode/command set. These names, aliases, argument shapes, and key mappings are the
-contract operators rely on and shall not change without a spec change.
+Operator-facing surface: exhaustive `:` command list, every keybinding table by context/mode, code-editor mode/command set. Names, aliases, argument shapes, key mappings are contract and shall not change without a spec change.
 
-**Generic vs protocol-specific.** Commands are split into two classes:
+**Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (§1); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (§2); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
 
-- **Generic (app-level)** commands are parsed and executed by the application
-  itself (§1). Their behavior is owned entirely by this area.
-- **Module (protocol-specific)** commands are forwarded verbatim to the active
-  view (§2). This document lists their name and general syntax; the effect on
-  protocol state is specified in the owning protocol area (`modbus/`, `ocpp/`).
-  Where a cell says "→ modbus" / "→ ocpp", read that area for semantics.
-
-The application dispatches a command by matching its first token against the
-generic set; a first token not in that set is forwarded to the active view. So a
-generic name always wins over a same-named module command.
+Dispatch: first token matched against the generic set; not in the set → forwarded to the active view. A generic name always wins over a same-named module command.
 
 ---
 
@@ -24,31 +12,23 @@ generic name always wins over a same-named module command.
 
 | Command | Aliases | Arguments | Effect (owned here) |
 |---|---|---|---|
-| `:quit` | `:q`, `:q!` | — | Stop and close the active tab; quit the app if it was the last tab |
-| `:qall` | `:qa`, `:qa!` | — | Quit the whole app immediately, all tabs |
+| `:quit` | `:q`, `:q!` | — | Stop and close the active tab; quit the app if it was the last |
+| `:qall` | `:qa`, `:qa!` | — | Quit the whole app immediately |
 | `:new` | `:n` | — | Open the new-module type selector |
-| `:load [path]` | `:l` | optional device-config path | Open the Modbus create dialog, pre-filling the config-path field with `path` |
-| `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format inferred from the path extension (`.toml`/`.json`) |
-| `:swap <i> <j>` | — | two tab indices | Swap the positions of tabs `i` and `j` (no-op if equal or out of range); a non-numeric argument is rejected |
+| `:load [path]` | `:l` | optional device-config path | Open the Modbus create dialog, config-path field pre-filled with `path` |
+| `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format from extension (`.toml`/`.json`) |
+| `:swap <i> <j>` | — | two tab indices | Swap tabs `i` and `j` (no-op if equal or out of range); non-numeric rejected |
 | `:session` | — | — | Open the session-level Lua scripts + sim-interval dialog |
-| `:script copy <idx>` | — | source tab index | Replace the active tab's Lua script list with tab `idx`'s; errors if `idx` is missing, out of range, equals the active tab, or either tab lacks script support |
+| `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support |
 | `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring |
 
-Notes:
-
-- `:log` with **any argument other than `clear`** (including a file path), and
-  **bare `:log`**, are *not* generic — they are forwarded to the active view as a
-  module command (§2), where `:log <file>` sets/clears the module's file sink.
-- Bare `:script` (without `copy`) is *not* generic — it is forwarded to the active
-  view; the Modbus view opens its script dialog on it.
-- Any unrecognized first token is forwarded to the active view; if the view also
-  does not recognize it, the app logs `Unknown command ':<input>'` (Warning).
+- `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (§2), where `:log <file>` sets/clears the module's file sink.
+- Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog.
+- Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning).
 
 ## 2. Module (protocol-specific) `:` commands
 
-Forwarded to the active view. Listed here for completeness; **semantics are owned
-by the protocol area**. Each view advertises exactly its own list in the
-command-help popup.
+Forwarded to the active view; **semantics owned by the protocol area**. Each view advertises exactly its own list in the command-help popup.
 
 ### 2.1 Modbus module
 
@@ -59,13 +39,13 @@ command-help popup.
 | `:start` | — | Start the module (connect/bind) |
 | `:stop` | — | Stop the module |
 | `:restart` | — | Stop then start |
-| `:reload` | — | Reload the device config from disk and restart the module |
+| `:reload` | — | Reload the device config from disk and restart |
 | `:compact` | — | Toggle compact table rows |
-| `:set <register> <value>` | register name, value (name may be `"quoted"` to allow spaces) | Write a value into a register → **modbus** owns type/range/codec semantics and the store-vs-wire behavior |
+| `:set <register> <value>` | register name, value (name may be `"quoted"` to allow spaces) | Write a value into a register → **modbus** owns type/range/codec semantics and store-vs-wire behavior |
 | `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file |
 | `:log <file>` | file base path | Set the module's log-file sink base |
 | `:script` | — | Open the Lua script manager dialog |
-| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears the sort |
+| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears |
 
 Modbus monitor module (`role = monitor`, MB-R-140–145):
 
@@ -76,14 +56,13 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 | `:start` | — | Start the module (open the serial port receive-only) |
 | `:stop` | — | Stop the module |
 | `:restart` | — | Stop then start |
-| `:reload` | — | Reload the device config from disk and restart the module |
+| `:reload` | — | Reload the device config from disk and restart |
 | `:compact` | — | Toggle compact table rows |
 | `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file |
 | `:log <file>` | file base path | Set the module's log-file sink base |
-| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table by column; bare `:order` clears the sort |
+| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table; bare `:order` clears |
 
-`:set` (nothing to write) and `:script` (no Lua surface) are omitted entirely for this role — both
-are unrecognized commands on a monitor view rather than erroring.
+`:set` (nothing to write) and `:script` (no Lua surface) are omitted for this role — unrecognized commands on a monitor view, not errors.
 
 ### 2.2 OCPP client module
 
@@ -95,39 +74,35 @@ are unrecognized commands on a monitor view rather than erroring.
 | `:restart` | — | Reconnect |
 | `:compact` | — | Toggle compact rows |
 | `:write-device` / `:wd` `[path]` | optional path | Save the device config |
-| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables file logging |
+| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables |
 
 ### 2.3 OCPP server (CSMS) module
 
 | Command | Arguments | Purpose (→ ocpp) |
 |---|---|---|
 | `:start` | — | Bind the CSMS listener |
-| `:stop` | — | Unbind the listener (clears connected-station entries) |
+| `:stop` | — | Unbind (clears connected-station entries) |
 | `:restart` | — | Rebind (clears entries) |
 | `:edit` / `:e` | — | Open the module setup dialog |
 | `:write-device` / `:wd` `[path]` | optional path | Save the device config |
 | `:compact` | — | Toggle compact rows |
-| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables file logging |
-| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints the current list |
+| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables |
+| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints it |
 
-**OCPP action send is not a `:` command.** Composing and sending an OCPP action
-(request) is done through the action dialog opened by `Enter` on the message
-table / action control, not through the command line. The action set and payload
-semantics are owned by `ocpp/`.
+**OCPP action send is not a `:` command.** Composing and sending an action goes through the action dialog opened by `Enter` on the message table / action control. Action set and payload semantics: `ocpp/`.
 
 ## 3. Global keybindings
 
 | Key | Context | Action |
 |---|---|---|
-| `:` | content focused, no view overlay open | Enter command mode |
-| `?` | content focused, no view overlay open | Open the keybind-help dialog |
-| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content focused | Toggle focus between the tab's content view and log pane |
+| `:` | content focused, no view overlay | Enter command mode |
+| `?` | content focused, no view overlay | Open the keybind-help dialog |
+| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content focused | Toggle focus between content view and log pane |
 | `Ctrl+t` then `l` | content focused | Next tab (wraps) |
 | `Ctrl+t` then `h` | content focused | Previous tab (wraps) |
-| `Ctrl+t` then digit(s) | content focused | Jump to tab by index; waits up to 800 ms for a 2nd digit if one could form a valid 2-digit index (see requirements UI-R-011) |
+| `Ctrl+t` then digit(s) | content focused | Jump to tab by index; waits up to 800 ms for a 2nd digit if one could form a valid 2-digit index (UI-R-011) |
 
-`:` and `?` are suppressed while the active view has an overlay open, so they type
-into that overlay instead of triggering the global action.
+`:` and `?` are suppressed while the active view has an overlay open; they type into it instead.
 
 ## 4. Context keybinding tables
 
@@ -137,18 +112,18 @@ into that overlay instead of triggering the global action.
 |---|---|
 | `Esc` | Cancel (discard buffer) |
 | `Enter` | Run the command |
-| printable / `Left`/`Right` / `Home`/`End` / `Backspace`/`Delete` | Edit the command buffer |
+| printable / `Left`/`Right` / `Home`/`End` / `Backspace`/`Delete` | Edit the buffer |
 
 ### 4.2 Dialogs (generic)
 
 | Key | Action |
 |---|---|
-| `Tab` | Next field (skips disabled fields) |
+| `Tab` | Next field (skips disabled) |
 | `Shift+Tab` / `BackTab` | Previous field |
-| `Enter` | Confirm the dialog |
-| `Esc` | Request close (opens the close-confirm popup if edits may be lost) |
+| `Enter` | Confirm |
+| `Esc` | Request close (close-confirm popup if edits may be lost) |
 
-Applied only when the focused widget did not itself consume the key.
+Applied only when the focused widget did not consume the key.
 
 ### 4.3 Close-confirm / yes-no popup
 
@@ -156,10 +131,9 @@ Applied only when the focused widget did not itself consume the key.
 |---|---|
 | `Enter` / `Space` | Confirm (close / delete) |
 | `Esc` | Dismiss (back to editing) |
-| `Tab` / `Shift+Tab` | Move between the confirm/cancel choices (delete confirm) |
+| `Tab` / `Shift+Tab` | Move between confirm/cancel (delete confirm) |
 
-Focus defaults to the safe (cancel) choice; confirming requires that choice to be
-focused.
+Focus defaults to the safe (cancel) choice; confirming requires that choice focused.
 
 ### 4.4 Tables and selection lists (when focused)
 
@@ -174,15 +148,15 @@ focused.
 | `0` / `Home` | First column |
 | `$` / `End` | Last column |
 
-Selection clamps at the ends (tables do not wrap).
+Selection clamps at the ends (no wrap).
 
 ### 4.5 Suggestion-completion popup (open)
 
 | Key | Action |
 |---|---|
-| `Up` / `Down` | Move highlighted suggestion |
-| `Enter` / `Tab` | Accept highlighted suggestion (partial → keep open and re-query; else close) |
-| `Esc` | Dismiss the popup |
+| `Up` / `Down` | Move highlight |
+| `Enter` / `Tab` | Accept highlight (partial → keep open and re-query; else close) |
+| `Esc` | Dismiss |
 
 ### 4.6 Single-line text input (focused)
 
@@ -193,7 +167,7 @@ Selection clamps at the ends (tables do not wrap).
 | `Home` / `End` | Line start / end |
 | `Backspace` / `Delete` | Delete before / at cursor |
 | `Ctrl+F` | Autofill from placeholder (only when empty) |
-| `Ctrl+D` | Clear the field |
+| `Ctrl+D` | Clear |
 
 ### 4.7 Keybind-help dialog (`?`)
 
@@ -207,21 +181,19 @@ Selection clamps at the ends (tables do not wrap).
 
 ### 4.8 Lua-bindings help overlay (`?` in a script editor, Normal mode)
 
-Same navigation as §4.7 (`Esc`/`q`/`?` close, `j`/`k`/Up/Down scroll, `g`/`G`
-top/bottom). It is only reachable from the code editor while in Normal mode; in
-Insert/Visual mode `?` is literal text.
+Same navigation as §4.7. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
 
 ### 4.9 Script-manager dialog
 
 | Key | Context | Action |
 |---|---|---|
-| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); the code editor is skipped while no script is selected |
+| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); code editor skipped while no script selected |
 | `Esc` | dialog | Open close-confirm |
 | `t` | script table focused | Toggle the selected script's enabled flag |
 | `d` | script table focused | Delete the selected script (opens confirm) |
 | `c` | script table focused | Toggle compact rows |
 | `e` | script table focused | Execute the selected script once (current editor content, enabled or not) |
-| `Enter` | script table focused | Open the rename prompt for the selected script |
+| `Enter` | script table focused | Open the rename prompt |
 | `Enter` | name input focused | Create a new script with the typed name |
 | `Enter` / `Space` | Templates button focused | Open the template-browser overlay |
 | `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) |
@@ -231,22 +203,21 @@ Insert/Visual mode `?` is literal text.
 
 | Key | Context | Action |
 |---|---|---|
-| `j` / `k` / `Up` / `Down` | template list | Move the selection; the preview follows |
-| `Tab` / `Shift+Tab` | overlay | Cycle focus between the template list and the (read-only) preview |
-| `Enter` | overlay | Insert the selected template as a new enabled script and close the overlay |
+| `j` / `k` / `Up` / `Down` | template list | Move selection; preview follows |
+| `Tab` / `Shift+Tab` | overlay | Cycle focus between list and (read-only) preview |
+| `Enter` | overlay | Insert the selected template as a new enabled script, close |
 | `Esc` / `q` | overlay | Close, changing nothing |
 
 ### 4.11 Script rename prompt (`Enter` on the script table)
 
 | Key | Context | Action |
 |---|---|---|
-| `Enter` | prompt | Commit the new name; an empty or duplicate name is refused and the prompt stays open |
-| `Esc` | prompt | Cancel, leaving the name unchanged |
+| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open |
+| `Esc` | prompt | Cancel, name unchanged |
 
 ## 5. Code editor — modes and commands
 
-The vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`,
-`INSERT`, `VISUAL` (charwise), `V-LINE` (linewise).
+Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`, `VISUAL` (charwise), `V-LINE` (linewise).
 
 ### 5.1 Mode transitions
 
@@ -271,7 +242,7 @@ The vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`,
 |---|---|
 | `h` / `l` | Left / right one char (no line wrap) |
 | `j` / `k` | Down / up one line |
-| `Left`/`Right`/`Up`/`Down` | Arrow-key move (wraps to adjacent line) |
+| `Left`/`Right`/`Up`/`Down` | Arrow move (wraps to adjacent line) |
 | `0` | First column |
 | `$` | Last column |
 | `w` | Start of next word (crosses lines; punctuation runs are their own word) |
@@ -289,7 +260,7 @@ The vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`,
 | `yy` | Yank current line (to register, linewise) |
 | `p` | Paste register after cursor / below line |
 | `P` | Paste register before cursor / above line |
-| `u` | Undo last change (press again to redo) |
+| `u` | Undo last change (again to redo) |
 
 ### 5.4 Edits (Visual)
 
@@ -308,11 +279,6 @@ The vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`,
 
 ### 5.6 Plain (non-vim) editor
 
-Printable keys insert, `Enter` splits with auto-indent (when a language is set),
-`Backspace`/`Delete` edit, arrows navigate with line wrap, `Home`/`End` and
-character-based editing as in §4.6. Two space presses at the same position within
-~300 ms expand to a four-space indent (an intervening key cancels it).
+Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as §4.6. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
 
-Yank/delete additionally copy to the system clipboard via OSC 52. A `language`
-setting drives syntax highlighting and format-on-blur (JSON may decline to
-reformat invalid input; Lua always reformats).
+Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats).

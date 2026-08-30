@@ -7,24 +7,24 @@ description: Independent second-developer review of an open PR against its ticke
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks (spec fidelity, standards, TDD honesty) and how (`spec-reviewer` agent, never the implementer). This skill only supplies gate 3's *inputs* for a reviewer who wasn't in the implementing session — it does not restate the criteria. Conflict between this file and `.claude/AGENTS.workflow.md` → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks (spec fidelity, standards, TDD honesty) and how (`spec-reviewer` agent, never the implementer). This skill supplies gate 3's *inputs* for a reviewer outside the implementing session; it restates no criteria. Conflict → `.claude/AGENTS.workflow.md` wins.
 
 ## Gather inputs — no shared session, no artifacts dir
 
-- **Ticket** — `sh .claude/scripts/extract-section.sh '### Gate 1b — tracking issue. Stop for approval.' .claude/AGENTS.workflow.md` names this project's tracker and how to read it. The ticket is self-contained: full current normative text, including any updates the orchestrator landed via "Reconcile the spec" mid-implementation. This *is* the approved spec — don't look for `artifacts/<slug>/spec-diff.md`; it may not exist on this machine, or may already be gone (worktree/board cleanup on the original developer's side).
-- **Branch/PR** — from the ticket's linked PR, or ask the user for the PR number/branch if the ticket doesn't carry one.
-- **Base ref** — the PR's target branch (usually `main`).
+- **Ticket** — `sh .claude/scripts/extract-section.sh '### Gate 1b — tracking issue. Stop for approval.' .claude/AGENTS.workflow.md` names the tracker and how to read it. Ticket is self-contained: full current normative text, including updates landed via "Reconcile the spec". This *is* the approved spec — `artifacts/<slug>/spec-diff.md` may not exist on this machine or may be gone.
+- **Branch/PR** — from the ticket's linked PR, or ask the user for PR number/branch.
+- **Base ref** — PR's target branch (usually `main`).
 
 ## Run the review
 
-Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: spec text from the ticket, `git diff <base>...<head>` scoped to the whole branch (gate 3, not a wave), every stage in scope. It reads its own rules (`.claude/AGENTS.core.md`) itself — give it nothing more, never the issue/PR number.
+Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: spec text from the ticket, `git diff <base>...<head>` scoped to the whole branch (gate 3, not a wave), every stage in scope. It reads its own rules (`.claude/AGENTS.core.md`); give it nothing more, never the issue/PR number.
 
-Give it an `artifacts/<slug>/` scratch dir for `review.md`; it answers with a status line only (`### Agent hand-off`). Reviewing it yourself instead of spawning is fine — same axes, same rigor. The requirement is an independent read, not necessarily a subagent.
+Give it a scratch `artifacts/<slug>/` for `review.md`; it answers with a status line only (`### Agent hand-off`). Reviewing yourself instead of spawning is fine — same axes, same rigor. Requirement is an independent read, not necessarily a subagent.
 
 ## Output
 
-`review.md`'s shape: axis-grouped, severity-tagged, no praise. Point the developer at the file; findings needing a user decision are flagged, not resolved.
+`review.md`: axis-grouped, severity-tagged, no praise. Point the developer at the file; findings needing a user decision are flagged, not resolved.
 
 ## Stop condition
 
-Report and stop. Approving this review is the developer's own gate before manual QA and merge — outside this skill's scope: no PR edits, no merge, no board.
+Report and stop. Approving is the developer's own gate before manual QA and merge — no PR edits, no merge, no board.

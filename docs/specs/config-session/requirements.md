@@ -1,111 +1,103 @@
 # Config & Session — Requirements
 
-Testable requirements for the **configuration envelope**: the TOML/JSON file
-format, the session file (module instances + session scripts), the device-config
-file and how the two compose, save/load round-trip, and the `migrate` subcommand.
+The **configuration envelope**: TOML/JSON format, session file (module instances + session scripts), device-config file and how the two compose, save/load round-trip, `migrate` subcommand.
 
-Per the ownership rule in [`../README.md`](../README.md), this area owns only the
-*envelope*. Protocol-specific config fields (Modbus register/timing/endpoint
-fields, OCPP version/role/security/config-key fields) are specified in
-[`../modbus/`](../modbus/) and [`../ocpp/`](../ocpp/), not here. The `:write`
-command mechanism itself belongs to [`../tui/`](../tui/); the `migrate`/`run` CLI
-flag surface belongs to [`../cli-headless/`](../cli-headless/). This file specifies
-what those surfaces read and write.
+Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *envelope*. Protocol-specific fields (Modbus register/timing/endpoint, OCPP version/role/security/config-key) are [`../modbus/`](../modbus/) and [`../ocpp/`](../ocpp/). The `:write` mechanism is [`../tui/`](../tui/); the `migrate`/`run` CLI surface is [`../cli-headless/`](../cli-headless/). This file specifies what those surfaces read and write.
 
 ---
 
 ## File format & encoding
 
-**CS-R-001** — Every configuration file (session file or device-config file) shall be encoded as either TOML or JSON. No other encoding shall be accepted; there is no YAML support.
+**CS-R-001** — Every configuration file (session or device-config) is TOML or JSON. No other encoding; no YAML.
 
-**CS-R-002** — The encoding shall be selected solely from the file-path extension: `.toml` is TOML and `.json` is JSON, matched case-insensitively. The file's content shall never be sniffed to guess a format.
+**CS-R-002** — Encoding is selected solely from the path extension: `.toml` TOML, `.json` JSON, case-insensitive. Content is never sniffed.
 
-**CS-R-003** — A path whose extension is neither `.toml` nor `.json` (including a path with no extension) shall fail with an unknown-format error on both load and save, before any read or write of the file's contents is attempted.
+**CS-R-003** — A path whose extension is neither `.toml` nor `.json` (including no extension) fails with an unknown-format error on load and save, before any read or write of contents.
 
-**CS-R-004** — The two encodings shall describe the same data model: a value serialized to one encoding and re-serialized to the other (via the conversion helper) shall deserialize back to an equal value, with no field loss.
+**CS-R-004** — The two encodings describe the same data model: a value serialized to one and re-serialized to the other (via the conversion helper) deserializes back to an equal value, no field loss.
 
-**CS-R-005** — On TOML serialization, a numeric value shall be emitted as a plain TOML integer or float, never as an internal arbitrary-precision wrapper table. A `u64` that exceeds the signed 64-bit range shall be emitted as a TOML float rather than silently wrapping.
+**CS-R-005** — On TOML serialization a numeric value is emitted as a plain TOML integer or float, never an internal arbitrary-precision wrapper table. A `u64` exceeding the signed 64-bit range is emitted as a TOML float rather than wrapping.
 
-**CS-R-006** — TOML has no null type. A field with no value shall be omitted from the serialized output, not written as an explicit null. A JSON null that would appear at the top level or inside a TOML array (where there is no key to omit) is not representable and shall fail serialization.
+**CS-R-006** — TOML has no null. A field with no value is omitted, not written as null. A JSON null at the top level or inside a TOML array (no key to omit) is not representable and fails serialization.
 
 ---
 
 ## Session model
 
-**CS-R-010** — A session file shall consist of exactly four envelope-level fields: an optional `version` string, a `modules` list of module-instance entries, a `scripts` list of session-level Lua scripts, and an `interval` sim-cycle period in seconds.
+**CS-R-010** — A session file consists of exactly four envelope-level fields: optional `version` string, `modules` list of module-instance entries, `scripts` list of session-level Lua scripts, `interval` sim-cycle period in seconds.
 
-**CS-R-011** — Each entry in `modules` shall be a self-describing object carrying a `"type"` tag that names its module kind (`"modbus"` or `"ocpp"`). The loader shall dispatch on this tag to select the deserializer for that entry.
+**CS-R-011** — Each `modules` entry is a self-describing object carrying a `"type"` tag naming its kind (`"modbus"` or `"ocpp"`). The loader dispatches on this tag to select the deserializer.
 
-**CS-R-012** — A module entry with no `"type"` tag shall be treated as `"modbus"`, so that session files written before multiple module types existed still load.
+**CS-R-012** — An entry with no `"type"` tag is treated as `"modbus"`, so session files predating multiple module types still load.
 
-**CS-R-013** — A module entry with a `"type"` tag other than `"modbus"` or `"ocpp"` shall be rejected with a hard error that aborts session resolution.
+**CS-R-013** — An entry with a `"type"` other than `"modbus"` or `"ocpp"` is rejected with a hard error aborting session resolution.
 
-**CS-R-014** — Each module instance shall carry a `name` that serves as its tab title and its `C_Module` registry key. When a session yields two instances with the same name, the second and later occurrences shall be renamed by appending ` (2)`, ` (3)`, … in creation order, skipping any suffix already taken, so every instance receives a distinct name.
+**CS-R-014** — Each module instance carries a `name`: its tab title and `C_Module` registry key. When a session yields two instances with the same name, the second and later are renamed by appending ` (2)`, ` (3)`, … in creation order, skipping any suffix already taken, so every instance is distinct.
 
-**CS-R-015** — Each module instance shall reference its device type by a `device` field holding the path to a device-config file, plus the per-instance endpoint fields defined by its protocol area. The instance entry shall carry no register table, no timing, no TLS/security, and no OCPP version/role — those live in the referenced device config.
+**CS-R-015** — Each instance references its device type by a `device` field holding the device-config file path, plus the per-instance endpoint fields its protocol area defines. The entry carries no register table, timing, TLS/security, or OCPP version/role — those live in the referenced device config.
 
-**CS-R-016** — The session `scripts` list shall hold session-level Lua scripts that run in their own Lua state with access to every module in the session; their execution semantics are specified in [`../scripting/`](../scripting/). A session file lacking a `scripts` field shall load with an empty list.
+**CS-R-016** — The session `scripts` list holds session-level Lua scripts running in their own Lua state with access to every module; execution semantics in [`../scripting/`](../scripting/). A file lacking `scripts` loads with an empty list.
 
-**CS-R-017** — The session `interval` shall be a sim-cycle period in seconds, defaulting to `1.0` when the field is absent. A non-finite, zero, or negative `interval` shall fall back to `1.0` rather than panicking or busy-looping; a valid positive value shall be used as-is (no minimum floor is applied to the session interval).
+**CS-R-017** — The session `interval` is a sim-cycle period in seconds, default `1.0` when absent. Non-finite, zero, or negative falls back to `1.0` rather than panicking or busy-looping; a valid positive value is used as-is (no minimum floor).
 
-**CS-R-018** — The session `version` field shall be informational only: it is stamped with the writing build's version on save and is never consulted by any load-time or migration branch. Absence of the field shall not change loading behavior.
+**CS-R-018** — The session `version` field is informational only: stamped with the writing build's version on save, never consulted by any load-time or migration branch. Absence changes nothing.
 
 ---
 
 ## Device config composition
 
-**CS-R-020** — The configuration model shall distinguish two file kinds: a **session file** (a list of module instances plus session scripts) and a **device-config file** (the configuration of exactly one device type). One device-config file describes one device type and may be referenced by any number of session instances.
+**CS-R-020** — The configuration model distinguishes two file kinds: a **session file** (module instances plus session scripts) and a **device-config file** (exactly one device type). One device-config file may be referenced by any number of session instances.
 
-**CS-R-021** — The split between the two files shall be: per-instance wire addressing (name, role, endpoint) lives in the session entry; everything that describes the device type — register/variable model, timing, scripts, security — lives in the device-config file. The device-config field sets are specified in the Modbus and OCPP areas, not here.
+**CS-R-021** — The split: per-instance wire addressing (name, role, endpoint) lives in the session entry; everything describing the device type — register/variable model, timing, scripts, security — lives in the device-config file. Device-config field sets are specified in the Modbus and OCPP areas.
 
-*Coverage note: CS-R-020 and CS-R-021 are structural/definitional — the split is a Rust-type-level fact (`Session` vs. `DeviceConfig` are distinct structs with disjoint field sets) rather than an independently testable runtime behavior. Their content is exercised by CS-R-004's cross-encoding device round-trip, CS-R-033's session round-trip, and CS-R-015's instance-vs-device field-split assertions; no dedicated test is added for the umbrella statement itself.*
+*Coverage note: CS-R-020 and CS-R-021 are structural — the split is a Rust-type-level fact (`Session` vs `DeviceConfig` are distinct structs with disjoint fields), not an independently testable runtime behavior. Exercised by CS-R-004's cross-encoding device round-trip, CS-R-033's session round-trip, and CS-R-015's instance-vs-device field-split assertions; no dedicated test for the umbrella.*
 
-**CS-R-022** — A device-config file shall also carry an optional, informational `version` string with the same semantics as CS-R-018: stamped on save, never branched on.
+**CS-R-022** — A device-config file also carries an optional, informational `version` string with CS-R-018's semantics: stamped on save, never branched on.
 
-**CS-R-023** — A device-config file shall load even when it predates fields added in later releases: every field the loader recognizes shall have a default so that an older file's missing fields take their defaults rather than failing the load.
+**CS-R-023** — A device-config file loads even when it predates fields added later: every recognized field has a default, so an older file's missing fields take defaults rather than failing.
 
 ---
 
 ## Save / load & round-trip
 
-**CS-R-030** — The running TUI shall save the current module instances as a session file on the `:write` command. When no path is given, the target shall default to `session.toml`. The file's encoding shall be chosen from the target extension per CS-R-002.
+**CS-R-030** — The running TUI saves the current module instances as a session file on `:write`. No path given → `session.toml`. Encoding from the target extension per CS-R-002.
 
-**CS-R-031** — A save shall persist **configuration only**: the module instance specs, the session scripts, the session interval, and a freshly stamped `version`. It shall not persist live runtime state — current register/coil values, in-flight Modbus transactions, the CSMS's observed station topology, or runtime mutations to an OCPP config-key/variable store are not written to the session file.
+**CS-R-031** — A save persists **configuration only**: module instance specs, session scripts, session interval, freshly stamped `version`. Not live runtime state — current register/coil values, in-flight Modbus transactions, the CSMS's observed station topology, runtime mutations to an OCPP config-key/variable store are not written.
 
-**CS-R-032** — A `:write` of the session file shall not write any device-config file. Device-config files are saved through their own separate command surface (specified in [`../tui/`](../tui/) and the protocol areas); edits made to a device config in the TUI are not captured by a session `:write`.
+**CS-R-032** — A session `:write` writes no device-config file. Device configs are saved through their own command surface ([`../tui/`](../tui/) and the protocol areas); TUI edits to a device config are not captured by a session `:write`.
 
-**CS-R-033** — A session file saved by the TUI and then loaded again shall reproduce the same list of module instances (same names, types, device paths, and endpoints), the same session scripts, and the same interval — i.e. the envelope round-trips exactly.
+**CS-R-033** — A session file saved by the TUI and loaded again reproduces the same instance list (names, types, device paths, endpoints), the same session scripts, and the same interval — the envelope round-trips exactly.
 
-**CS-R-034** — Serialization shall omit fields that carry their default/empty value where the schema declares them omittable (the informational `version` when unset, an empty `scripts` list, unset optional endpoint sub-fields). A file so written shall reload to an equal value because each omitted field's load-time default matches what was omitted.
+**CS-R-034** — Serialization omits fields carrying their default/empty value where the schema declares them omittable (informational `version` when unset, empty `scripts`, unset optional endpoint sub-fields). A file so written reloads to an equal value because each omitted field's load-time default matches.
 
 ---
 
 ## Migration
 
-**CS-R-040** — The `migrate` subcommand shall convert a pre-rewrite (`modbus-cli-rs`, ≤ v0.3.9) configuration file into a current device-config file. Its CLI invocation (`--input` / `--output`) is specified in [`../cli-headless/`](../cli-headless/); this area specifies the transformation.
+**CS-R-040** — The `migrate` subcommand converts a pre-rewrite (`modbus-cli-rs`, ≤ v0.3.9) configuration file into a current device-config file. CLI invocation (`--input` / `--output`) is [`../cli-headless/`](../cli-headless/); this area specifies the transformation.
 
-**CS-R-041** — Migration shall apply the legacy-to-current transformation contract: swap the holding/input read codes, split a trailing `le` type suffix into an explicit little-endian byte order, fold each legacy per-register `on_update` Lua snippet into a named entry of the global `scripts` list, merge `[[contiguous_memory]]` ranges into `read_ranges` grouped by function code, and rename `delay_after_connect_ms` to the current delay field.
+**CS-R-041** — Migration applies the legacy-to-current transformation: swap the holding/input read codes, split a trailing `le` type suffix into an explicit little-endian byte order, fold each legacy per-register `on_update` Lua snippet into a named entry of the global `scripts` list, merge `[[contiguous_memory]]` ranges into `read_ranges` grouped by function code, rename `delay_after_connect_ms` to the current delay field.
 
-**CS-R-042** — Migration shall drop legacy fields that have no current equivalent (e.g. `history_length`, per-register `reverse`, per-range `slave_id`, UTF-8 string subtypes) and shall emit a warning for each dropped field rather than failing silently.
+**CS-R-042** — Migration drops legacy fields with no current equivalent (e.g. `history_length`, per-register `reverse`, per-range `slave_id`, UTF-8 string subtypes) and emits a warning for each, never failing silently.
 
-**CS-R-043** — Migration shall stamp the output device config with the current build's `version`. Input and output encodings shall each be chosen independently from their own file extension, so any TOML/JSON source may be migrated to a TOML or JSON destination.
+**CS-R-043** — Migration stamps the output with the current build's `version`. Input and output encodings are each chosen from their own extension, so any TOML/JSON source may migrate to a TOML or JSON destination.
 
-**CS-R-044** — A per-register conversion error (e.g. an unknown read code, an address exceeding the 16-bit range) shall skip only that register with a warning and allow the rest of the migration to complete. An unrecognized input/output extension or a load/save failure shall abort the migration with a non-zero exit code and a diagnostic on standard error.
+**CS-R-044** — A per-register conversion error (unknown read code, address exceeding 16-bit) skips only that register with a warning and lets the rest complete. An unrecognized input/output extension or a load/save failure aborts with a non-zero exit code and a diagnostic on stderr.
 
-**CS-R-045** — The `migrate` subcommand shall convert device-config files only. It shall not convert or produce session files.
+**CS-R-045** — `migrate` converts device-config files only. It does not convert or produce session files.
 
 ---
 
 ## Error handling
 
-**CS-R-050** — A file whose contents are malformed TOML or JSON shall fail to load with a deserialize error. No partial or best-effort object shall be constructed from a malformed file.
+**CS-R-050** — Malformed TOML or JSON fails to load with a deserialize error. No partial or best-effort object.
 
-**CS-R-051** — A file that parses as valid TOML/JSON but omits a field the schema marks required (e.g. a module instance with no `name` or no endpoint) shall fail to load with a deserialize error.
+**CS-R-051** — Valid TOML/JSON omitting a required field (e.g. a module instance with no `name` or no endpoint) fails to load with a deserialize error.
 
-**CS-R-052** — A field present in a file but not present in the schema shall be ignored silently on load. Unknown fields shall not cause a load failure, except within a TLS block, which is governed by CS-R-055.
+**CS-R-052** — A field present in a file but not in the schema is ignored silently on load, except within a TLS block, governed by CS-R-055.
 
-**CS-R-053** — When a session references a device-config file that is missing or unreadable, startup shall not abort. The instance shall be skipped with a warning naming it and the failed path — identically for Modbus and OCPP; neither type shall silently fall back to a default device config. A **blank** device path is not a failure: it is a quick-start with no device file, and the instance shall be built on the default device config rather than skipped.
+**CS-R-053** — When a session references a missing or unreadable device-config file, startup does not abort. The instance is skipped with a warning naming it and the failed path — identically for Modbus and OCPP; neither silently falls back to a default device config. A **blank** device path is not a failure: a quick-start with no device file, built on the default device config rather than skipped.
 
-**CS-R-054** — Loading a device config shall self-heal a legacy per-register `update` snippet on **every** load — not only through the `migrate` subcommand — by folding it into the global `scripts` list and clearing the per-register field, so a subsequent save writes only the global list.
+**CS-R-054** — Loading a device config self-heals a legacy per-register `update` snippet on **every** load — not only via `migrate` — folding it into the global `scripts` list and clearing the per-register field, so a subsequent save writes only the global list.
 
-**CS-R-055** — Strict field checking shall apply throughout a TLS subtree — the `tls` container, each of its `server`/`client` policy blocks, and each policy's `identity`/`verification` payload — and additionally to the OCPP `security` table that encloses one, so a field the enclosing variant or table does not define shall fail the load rather than be ignored under CS-R-052; `username` and `password` remain defined members of `security` and are unaffected. A table in that subtree naming a pre-merge field — `require_client_cert`, `client_ca_files`, `client_ca_file`, `client_cert_skip_verify`, `insecure_skip_verify`, `client_cert_file`, `client_key_file`, `client_self_signed`, `ca_file`, or a bare `self_signed`/`cert_file`/`key_file` outside an `identity` block — shall fail the load with an error naming the retired fields found and pointing at the current block shape. No value shall be migrated: this is a rejection, not a conversion. This is the sole exception to CS-R-052's silent-ignore rule, and exists because silently ignoring a retired TLS field can weaken an endpoint's security posture rather than merely lose a setting.
+**CS-R-055** — Strict field checking applies throughout a TLS subtree — the `tls` container, each `server`/`client` policy block, each policy's `identity`/`verification` payload — and to the OCPP `security` table enclosing one, so a field the enclosing variant or table does not define fails the load rather than being ignored under CS-R-052; `username` and `password` remain defined members of `security`, unaffected. A table in that subtree naming a pre-merge field — `require_client_cert`, `client_ca_files`, `client_ca_file`, `client_cert_skip_verify`, `insecure_skip_verify`, `client_cert_file`, `client_key_file`, `client_self_signed`, `ca_file`, or a bare `self_signed`/`cert_file`/`key_file` outside an `identity` block — fails the load with an error naming the retired fields found and pointing at the current block shape. No value migrated: rejection, not conversion. The sole exception to CS-R-052's silent-ignore rule, because silently ignoring a retired TLS field can weaken an endpoint's security posture rather than merely lose a setting.
