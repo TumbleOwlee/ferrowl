@@ -45,3 +45,4 @@ point-to-point upstream link.
   therefore unreachable through a descriptor; bridge mode is a CLI-only relay
   (BR-R-002) with no config file to fall back on, and the alternative — a repeated
   key — would break BR-R-004's one-key-one-value grammar for every other key too.
+- **`tls.*` on an `rtu` descriptor** — rejected outright (exit 1) rather than ignored, even `tls.mode=none`, which would be a no-op if honoured. A serial link has no TLS layer to configure, so the only thing such a key can express is a mistake about which of the two descriptors is being written; failing at setup says so at the one moment it is cheap to fix, where silent acceptance would leave the operator believing a plaintext bus was protected (BR-R-011).
