@@ -1,23 +1,26 @@
-//! Transport-agnostic Modbus client loop shared by the TCP and RTU clients.
+//! Transport-agnostic Modbus client loop shared by every Modbus client transport.
 //!
-//! The two transports differ only in the stream and framing they instantiate this with (a
-//! socket under `Tcp`, a serial port under `Rtu`) and in how that connection is *established*.
-//! Everything after that — the read/run loop and command execution — is identical and lives
-//! here, generic over both.
+//! Holds the framing-generic connect helpers for both transport families (`connect_serial` for
+//! `Rtu`/`Ascii` over a serial port, `connect_tcp_family` for `Tcp`/`RtuOverTcp`/`Ascii` over a
+//! socket) plus the read/run loop and command execution that follow a successful connect,
+//! identical across every transport once a `ClientCore` exists.
 
 use crate::common::serial_config_from;
+use crate::tcp::tls::{ClientStream, SelfSignedCache, build_client_tls_config};
 use crate::{
     Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, PathConflictCell, RunConfig,
-    SerialError,
+    SerialError, TcpError,
 };
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address, Client, ClientFraming, ClientTransport, ExceptionCode, FrameTransport, Framing,
-    FunctionCode, Quantity, RegisterValue, SerialStream, UnitId, open_serial,
+    FunctionCode, Quantity, RegisterValue, SerialStream, TcpConfig, UnitId, connect_tcp_framed,
+    connect_tls_framed, open_serial,
 };
 use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -119,6 +122,45 @@ where
             client: Client::new(transport),
         }),
         Err(e) => Err(SerialError::Error(e).into()),
+    }
+}
+
+/// Opens a TCP connection to `config.ip:config.port`, bounded by the configured timeout. Plain
+/// TCP unless the endpoint's client TLS policy is set (MB-R-104/MB-R-115/MB-R-127), in which case
+/// the same timeout bounds the TCP connect and the TLS handshake together. `F` selects the on-wire
+/// framing; establishing the socket does not differ by framing, only what is read off it does.
+pub(crate) async fn connect_tcp_family<F>(
+    config: &crate::tcp::Config,
+    cache: &SelfSignedCache,
+) -> Result<ClientCore<FrameTransport<ClientStream, F>, F>, Error>
+where
+    F: Framing + ClientFraming,
+{
+    let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
+        .parse()
+        .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
+    let tls_config = build_client_tls_config(&config.client_tls_policy(), cache)?;
+    let attempt = async {
+        match tls_config {
+            None => connect_tcp_framed::<F>(addr, TcpConfig::default())
+                .await
+                .map(|t| ClientStream::Plain(t.into_inner())),
+            Some(tls) => connect_tls_framed::<F>(addr, TcpConfig::default(), tls)
+                .await
+                .map(|t| ClientStream::Tls(Box::new(t.into_inner()))),
+        }
+    };
+    match tokio::time::timeout(
+        std::time::Duration::from_millis(config.timeout_ms as u64),
+        attempt,
+    )
+    .await
+    {
+        Ok(Ok(stream)) => Ok(ClientCore {
+            client: Client::<_, _>::new(FrameTransport::new(stream)),
+        }),
+        Ok(Err(e)) => Err(TcpError::Error(e).into()),
+        Err(e) => Err(TcpError::Timeout(e).into()),
     }
 }
 
