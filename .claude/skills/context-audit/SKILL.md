@@ -7,15 +7,15 @@ description: Analyze Claude Code session transcripts for repeated full-file read
 
 **Concise, compact, facts only.**
 
-Read-only analysis. Never write a script itself — recommends, user decides scope (a new script is a maintenance commitment, same "ask before" spirit as AGENTS.md's scope boundaries).
+Read-only. Never write a script — recommend, user decides (a script is a maintenance commitment; same "ask before" spirit as AGENTS.md's scope boundaries).
 
 ## 1. Find the transcripts
 
-Session logs: `~/.claude/projects/<project-slug>/*.jsonl`, one file per session, JSON Lines. `<project-slug>` = cwd path with `/` → `-`. Ask the user for scope — this session only, last N sessions, or all — default last 5 (recent behavior matters more than a year-old habit).
+`~/.claude/projects/<project-slug>/*.jsonl`, one per session, JSON Lines. `<project-slug>` = cwd with `/` → `-`. Ask scope — this session, last N, all — default last 5.
 
 ## 2. Tally tool usage
 
-Per session, extract every `Read` tool_use `input.file_path`, every `Bash` `input.command`, every `Grep` `input.pattern`/`input.path`. `jq`, no other dependency assumed:
+Per session: every `Read` `input.file_path`, `Bash` `input.command`, `Grep` `input.pattern`/`input.path`. `jq` only:
 
 ```sh
 jq -r 'select(.message.content != null) | .message.content[]?
@@ -23,11 +23,11 @@ jq -r 'select(.message.content != null) | .message.content[]?
   ~/.claude/projects/<slug>/*.jsonl | sort | uniq -c | sort -rn
 ```
 
-Same shape for `Bash` (`.input.command`) and `Grep` (`.input.pattern`).
+Same for `Bash` (`.input.command`) and `Grep` (`.input.pattern`).
 
 ## 2b. Rank cost by tool
 
-Which tool's *results* eat the most context, not just which is called most — a `Bash` call piping raw `gh`/`git` JSON back verbatim costs far more per call than a `Grep`. Join each `tool_result` to its `tool_use` by id, sum result size per tool name, sort descending:
+Which tool's *results* eat most context, not which is called most. Join each `tool_result` to its `tool_use` by id, sum result size per tool, sort descending:
 
 ```sh
 jq -s '
@@ -39,25 +39,25 @@ jq -s '
 ' ~/.claude/projects/<slug>/*.jsonl
 ```
 
-`chars/4` is a rough tokens estimate, not exact — good enough for ranking. A `Bash` entry near the top is the signal to drill into *which* commands (section 2's tally) are driving it — that's the candidate list for section 3's script check.
+`chars/4` is rough, good enough for ranking. `Bash` near the top → drill into which commands (section 2) drive it; that's section 3's script-candidate list.
 
 ## 3. Flag waste patterns
 
-- **Full-file re-read, same file, ≥3 times in one session, no `Edit` in between two of them** — file didn't change, content was re-fetched anyway. Check the file's own structure (headings, JSON keys, log sections) against what the agent quoted right after each Read — if only one part was ever used, that's an `extract-section.sh` candidate (or a JSON/log equivalent: `jq`, `awk` slice). `.claude/scripts/token-rank.sh <file>...` (if the project has it) gives a quick rough cost per file to prioritize which repeat offenders are worth fixing first.
-- **Large file (`wc -l` it) read whole when the same heading/keyword recurs across sessions** — same pattern, seen over time instead of in one session.
-- **Repeated identical `Bash` command** — deterministic, cacheable output (`git log`, a version check) re-run instead of reasoned from a prior result already in context. Not a script problem — note separately, the fix is behavioral, don't recommend a script for it.
-- **`Grep` with a large match count, re-run later in the same session with an added `-l`/path filter** — the first call's output was too big to use directly; narrowing came a call too late.
-- **`Bash` tool dominates section 2b's ranking** — check which commands (section 2's tally) drive it. A raw `gh`/`git`/`curl`/API command whose full JSON or log gets dumped into context, when only a few fields ever get used, is a script candidate the same shape as `.claude/scripts/failed-workflow.sh`/`issue-view.sh` (compact, pre-filtered output instead of raw dump). Repeated across sessions, not just once, before recommending.
+- **Full-file re-read, same file, ≥3 times in one session, no `Edit` between two of them.** Check the file's structure (headings, JSON keys, log sections) against what was quoted after each Read — only one part ever used = `extract-section.sh` candidate (or `jq`/`awk` slice for JSON/log). `.claude/scripts/token-rank.sh <file>...` (if present) ranks repeat offenders by cost.
+- **Large file (`wc -l`) read whole when the same heading/keyword recurs across sessions** — same pattern over time.
+- **Repeated identical `Bash` command** — deterministic output (`git log`, version check) re-run instead of reasoned from context. Behavioral fix, not a script; note separately.
+- **`Grep` with a large match count, re-run later with `-l`/path filter** — narrowing came a call too late.
+- **`Bash` dominates section 2b** — a raw `gh`/`git`/`curl`/API command dumping full JSON/log when only a few fields get used is a script candidate shaped like `.claude/scripts/failed-workflow.sh`/`issue-view.sh` (compact, pre-filtered). Require repetition across sessions before recommending.
 
 ## 4. Report
 
-Ranked table: file/pattern, count, rough cost (`lines × occurrences` for Reads), proposed fix. One line each — no praise, no summary paragraph. Precede it with section 2b's per-tool ranking, unabridged — it's the map of where cost concentrates before the fix-level detail. `.claude/scripts/extract-section.sh` (if the project has it) already covers markdown-heading slicing — recommend *extending its use*, never a duplicate script, when the pattern already fits it. Only propose a new script when the data shape doesn't (JSON, log tail, CSV column, etc).
+Ranked table: file/pattern, count, rough cost (`lines × occurrences` for Reads), proposed fix. One line each, no praise, no summary. Precede with section 2b's per-tool ranking, unabridged. `.claude/scripts/extract-section.sh` (if present) already covers markdown-heading slicing — recommend *extending its use*, never a duplicate. New script only when the data shape doesn't fit (JSON, log tail, CSV column).
 
 ## 5. Propose enforcement when the pattern is a bypassed convention
 
-A waste pattern that keeps recurring even though `AGENTS.md`/`AGENTS.core.md`'s Conventions already say not to do it (e.g. a raw Bash `cat` of a whole `.md`/large file when `extract-section.sh`/`sed -n`/Read already exist for it) is not a missing-script problem — the fix already exists and is being routed around. For each such pattern, propose as a numbered list, most-costly first:
+A recurring waste pattern that `AGENTS.md`/`AGENTS.core.md` Conventions already forbid (e.g. raw Bash `cat` of a whole `.md`/large file when `extract-section.sh`/`sed -n`/Read exist) is not a missing script — the fix exists and is routed around. For each, propose as a numbered list, most costly first:
 
-- **A `PreToolUse` hook** that detects the exact bypass shape at the tool-call boundary and denies it with a message pointing at the convention's intended path — same shape as `.claude/scripts/hook-guard-shell.sh` if the project has it (checked with `ls .claude/scripts/hook-guard-*.sh`; extend an existing guard script before adding a new one covering an overlapping shape). State the matcher (tool name), the detection condition, and the redirect message.
-- **A convention-wording gap**, if the bypass happened because the existing bullet didn't cover the observed shape (wrong tool, wrong file type, ambiguous wording) — quote the current bullet and the proposed edit.
+- **A `PreToolUse` hook** detecting the exact bypass shape at the tool-call boundary and denying with a message pointing at the intended path — shape of `.claude/scripts/hook-guard-shell.sh` if present (`ls .claude/scripts/hook-guard-*.sh`; extend an existing guard covering an overlapping shape before adding one). State matcher (tool name), detection condition, redirect message.
+- **A convention-wording gap**, if the bypass happened because the bullet didn't cover the observed shape (wrong tool, file type, ambiguous wording) — quote current bullet and proposed edit.
 
-One line each: pattern → proposed fix → which file changes (`.claude/settings.json` + a new/edited `.claude/scripts/hook-guard-*.sh`, or the Conventions bullet). Do not create or edit anything in this skill — list the proposal, let the user approve which to build, same as section 4's script proposals.
+One line each: pattern → proposed fix → which file changes (`.claude/settings.json` + new/edited `.claude/scripts/hook-guard-*.sh`, or the Conventions bullet). Create or edit nothing; list, let the user approve.

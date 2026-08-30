@@ -1,11 +1,6 @@
 # Modbus — API Contract
 
-The stable public surface owned by the Modbus area: the Modbus function codes
-supported per role, and the Modbus device/endpoint configuration fields.
-
-Per the ownership rule in [`../README.md`](../README.md), the Modbus config fields
-are specified here, not in `config-session/`. `config-session/` owns only the file
-envelope (format, `version`, the session→module list, save/load, `migrate`).
+Function codes per role, Modbus device/endpoint config fields. Per [`../README.md`](../README.md)'s ownership rule, Modbus config fields live here, not `config-session/` (which owns only the envelope: format, `version`, session→module list, save/load, `migrate`).
 
 ---
 
@@ -24,12 +19,7 @@ envelope (format, `version`, the session→module list, save/load, `migrate`).
 | 15 | Write Multiple Coils | write command |
 | 16 | Write Multiple Registers | write command |
 
-The client's poll loop issues **only** the four read codes. Writes are only ever
-issued in response to an explicit write command (from the TUI, a `:` command, a
-Lua script, or a headless run) — the client never writes on its own initiative.
-
-The client does **not** implement function code 23 (Read/Write Multiple
-Registers), nor any other code.
+Poll loop issues **only** the four read codes. Writes only on an explicit write command (TUI, `:` command, Lua script, headless run) — never on the client's own initiative. Client does **not** implement code 23 (Read/Write Multiple Registers) or any other.
 
 ### 1.2 Server (responder)
 
@@ -45,52 +35,42 @@ Registers), nor any other code.
 | 16 | Write Multiple Registers | applied to the store |
 | 23 | Read/Write Multiple Registers | applied to the store, atomically (server-only) |
 
-Every other code — that is, everything outside 1, 2, 3, 4, 5, 6, 15, 16 and 23 —
-is **rejected** with exception `IllegalFunction` (`0x01`). Among them:
-
-- Report Server Id (17)
-- Mask Write Register (22)
-- Read Device Identification (43 / MEI)
-- Diagnostics (8), Get Comm Event Counter (11), Get Comm Event Log (12)
-- Read File Record (20), Write File Record (21), Read FIFO Queue (24)
-- any custom/user-defined function code
+Every other code — everything outside 1, 2, 3, 4, 5, 6, 15, 16, 23 — is **rejected** with `IllegalFunction` (`0x01`). Among them: Report Server Id (17), Mask Write Register (22), Read Device Identification (43 / MEI), Diagnostics (8), Get Comm Event Counter (11), Get Comm Event Log (12), Read File Record (20), Write File Record (21), Read FIFO Queue (24), any custom code.
 
 ### 1.3 Exception codes emitted by the server
 
 | Exception | When |
 |---|---|
-| `IllegalFunction` (1) | the function code itself is unsupported — and only then |
-| `IllegalDataAddress` (2) | any addressing or access failure on a supported code: the range is not fully covered by declared regions, the cells reject the requested direction, or the cell type does not match |
+| `IllegalFunction` (1) | function code unsupported — and only then |
+| `IllegalDataAddress` (2) | any addressing or access failure on a supported code: range not fully covered, cells reject the direction, or cell type mismatch |
 
-No other exception code is ever produced by the server.
+No other exception code is produced by the server.
 
 ---
 
 ## 2. Transports
 
-Exactly six transports are supported: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over a TCP socket), **UDP** (Modbus TCP/MBAP framing over a UDP datagram), **Ascii** (ASCII framing over a serial line), and **AsciiOverTcp** (ASCII framing over a TCP socket).
+Exactly six: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over TCP), **UDP** (MBAP framing over UDP datagram), **Ascii** (ASCII framing over serial), **AsciiOverTcp** (ASCII framing over TCP).
 
 ---
 
 ## 3. Modbus TCP connection config
 
-Fields of the TCP transport config, shared by the client and server roles.
+Shared by client and server roles.
 
 | Field | Type | Default | Valid range | Role |
 |---|---|---|---|---|
-| `ip` | string | `127.0.0.1` | any address that parses as an IPv4/IPv6 socket address together with `port` | client: address to connect to; server: interface to bind |
+| `ip` | string | `127.0.0.1` | parses as an IPv4/IPv6 socket address together with `port` | client: address to connect to; server: interface to bind |
 | `port` | u16 | `502` | 0–65535 | client: target port; server: listen port |
 | `timeout_ms` | usize | `3000` | ≥ 0 | per-operation and connect timeout |
-| `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
-| `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
-| `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry a listener bind, serial-port open, or mid-serve failure with the same backoff instead of ending the server task (MB-R-130–134) |
-| `tls` | `ModbusTlsConfig` | both policies `None` | client+server | two-role container, `[tls.server]`/`[tls.client]`; see requirements.md MB-R-104ff |
+| `delay_ms` | usize | `0` | ≥ 0 | wait before first operation after connect |
+| `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between operations |
+| `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry bind, serial-open, or mid-serve failure with the same backoff (MB-R-130–134) |
+| `tls` | `ModbusTlsConfig` | both policies `None` | client+server | two-role container, `[tls.server]`/`[tls.client]`; requirements.md MB-R-104ff |
 
-When these fields are absent from a serialized config, `reconnect` defaults to
-`true`; the remaining fields have no serde defaults and must be present.
+Absent from a serialized config: `reconnect` defaults `true`; the rest have no serde defaults and must be present.
 
-Example TLS configuration, server side presenting a private-CA-issued identity
-under mTLS, client side trusting the platform root store plus one private CA:
+Example — server presenting a private-CA identity under mTLS, client trusting platform roots plus one private CA:
 
 ```toml
 [tls.server]
@@ -110,15 +90,7 @@ verify = "root-store"
 extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
 ```
 
-The `RtuOverTcp` transport (tag value `rtu_over_tcp`) uses this exact same
-field table — no additions or removals.
-
-The `Udp` transport (tag value `udp`) uses this same field table minus `tls`,
-which it does not carry (MB-R-116): the upstream UDP transport performs no
-handshake and offers no TLS/DTLS option to configure.
-
-The `AsciiOverTcp` transport (tag value `ascii_over_tcp`) uses this exact
-same field table — no additions or removals (MB-R-125).
+`RtuOverTcp` (tag `rtu_over_tcp`) uses this exact field table. `Udp` (tag `udp`) uses it minus `tls` (MB-R-116: no handshake, no TLS/DTLS). `AsciiOverTcp` (tag `ascii_over_tcp`) uses this exact table (MB-R-125).
 
 ---
 
@@ -126,45 +98,41 @@ same field table — no additions or removals (MB-R-125).
 
 | Field | Type | Default | Valid range | Role |
 |---|---|---|---|---|
-| `path` | string | — (required) | an openable serial device path | serial device |
-| `baud_rate` | u32 | `115200` | any rate the serial device accepts | line speed |
-| `slave` | u8 | `1` | 0–255 | slave id the client's context is initially attached to (see [`edge-cases.md`](./edge-cases.md)) |
+| `path` | string | — (required) | openable serial device path | serial device |
+| `baud_rate` | u32 | `115200` | any rate the device accepts | line speed |
+| `slave` | u8 | `1` | 0–255 | slave id the client's context is initially attached to (inert — [`edge-cases.md`](./edge-cases.md) §6.3) |
 | `parity` | optional string | unset (serial default) | `even`, `odd`, `none` (case-insensitive) | parity bit |
 | `data_bits` | optional u8 | unset (serial default) | `5`, `6`, `7`, `8` | data bits |
 | `stop_bits` | optional u8 | unset (serial default) | `1`, `2` | stop bits |
 | `timeout_ms` | usize | `3000` | ≥ 0 | per-operation timeout |
-| `delay_ms` | usize | `0` | ≥ 0 | wait before the first operation after connect |
-| `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between successive operations |
-| `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry a listener bind, serial-port open, or mid-serve failure with the same backoff instead of ending the server task (MB-R-130–134) |
+| `delay_ms` | usize | `0` | ≥ 0 | wait before first operation after connect |
+| `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between operations |
+| `reconnect` | bool | `true` | — | as in §3 |
 
-An out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial
-configuration error **before** the port is opened.
+Out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial configuration error **before** the port opens.
 
-The `Ascii` transport (tag value `ascii`) uses this exact same field table —
-no additions or removals (MB-R-121).
+`Ascii` (tag `ascii`) uses this exact field table (MB-R-121).
 
 ---
 
 ## 5. Module instance spec (session / `--module`)
 
-One Modbus module instance. This is the per-instance, on-the-wire endpoint; all
-*timing* lives in the device config (§6), never here.
+One Modbus instance: the per-instance on-the-wire endpoint. All *timing* lives in the device config (§6), never here.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `name` | string | — (required) | tab / instance name |
-| `device` | string | — (required) | path to the device config file |
+| `device` | string | — (required) | device config file path |
 | `role` | `client` \| `server` \| `monitor` | `server` | |
-| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, or `ascii_over_tcp` |
+| `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, `ascii_over_tcp` |
 
-`role = monitor` is valid only with `transport = rtu` or `transport = ascii` (MB-R-140); resolving
-it against any other transport fails configuration resolution.
+`role = monitor` valid only with `transport = rtu` or `ascii` (MB-R-140); any other transport fails configuration resolution.
 
 ### `endpoint` with `transport = "tcp"`
 
 | Field | Type | Default |
 |---|---|---|
-| `ip` | string | — (required in the session file; `127.0.0.1` when built from `--module`) |
+| `ip` | string | — (required in the session file; `127.0.0.1` from `--module`) |
 | `port` | u16 | — (required) |
 
 ### `endpoint` with `transport = "rtu"`
@@ -177,39 +145,34 @@ it against any other transport fails configuration resolution.
 | `data_bits` | optional u8 | unset | 5–8 |
 | `stop_bits` | optional u8 | unset | 1, 2 |
 
-Note the RTU baud default here (`19200`) differs from the transport-level default
-(`115200`); the module spec's value is the one that reaches the wire. The module
-spec carries **no** `slave` field — a client addresses each request with the slave
-id of the register being polled or written.
+The RTU baud default here (`19200`) differs from the transport-level default (`115200`); the module spec's value reaches the wire. The module spec carries **no** `slave` field — a client addresses each request with the slave id of the register polled or written.
 
 ### endpoint with `transport = "rtu_over_tcp"`
 
-Takes the same fields as `transport = "tcp"` (§3), by reference.
+Same fields as `transport = "tcp"` (§3).
 
 ### endpoint with `transport = "udp"`
 
-Takes the same fields as `transport = "tcp"` (§3), by reference.
+Same fields as `transport = "tcp"` (§3).
 
 ### endpoint with `transport = "ascii"`
 
-Takes the same fields as `transport = "rtu"` (above), by reference.
+Same fields as `transport = "rtu"` (above).
 
 ### endpoint with `transport = "ascii_over_tcp"`
 
-Takes the same fields as `transport = "tcp"` (§3), by reference.
+Same fields as `transport = "tcp"` (§3).
 
 ### `--module` key/value form
 
 `--module name=…,device=…,transport=…,…` accepts the same keys, with:
 
-- `type` as an alias for `device`
-- `baud` as an alias for `baud_rate`
-- `transport` defaulting to `tcp`
-- `role` defaulting to `server`
-- `ip` defaulting to `127.0.0.1`
-- `port` **required** for `transport=tcp`, `transport=rtu_over_tcp`,
-  `transport=udp`, or `transport=ascii_over_tcp`; `path` **required** for
-  `transport=rtu` or `transport=ascii`
+- `type` alias for `device`
+- `baud` alias for `baud_rate`
+- `transport` default `tcp`
+- `role` default `server`
+- `ip` default `127.0.0.1`
+- `port` **required** for `transport=tcp`, `rtu_over_tcp`, `udp`, `ascii_over_tcp`; `path` **required** for `transport=rtu` or `ascii`
 
 ---
 
@@ -223,22 +186,13 @@ Takes the same fields as `transport = "tcp"` (§3), by reference.
 | `interval_ms` | optional usize | `1000` | poll interval |
 | `reconnect` | optional bool | `true` | client: auto-reconnect (MB-R-050–055); server: bind/serial-open/mid-serve retry (MB-R-130–134) |
 | `read_ranges` | `ReadRanges` | empty | explicit batched read windows (§6.1) |
-| `definitions` | map of name → `RegisterDef` | — (required) | the register table (§6.2) |
-| `scripts` | list | empty | Lua sim scripts — see `scripting/` |
-| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 fall back to `1.0` |
+| `definitions` | map name → `RegisterDef` | — (required) | register table (§6.2) |
+| `scripts` | list | empty | Lua sim scripts — `scripting/` |
+| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` |
 
-The device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are
-what an application-built module actually uses; they deliberately differ from the
-transport-level defaults of `0`.
+Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what an application-built module uses; they deliberately differ from the transport-level `0`.
 
-For `role = monitor`, the device config carries only `version`, `reconnect` (now also gating
-MB-R-141's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, §6.3 — each
-entry carries its own `name`, since two interpretations on different `slave_id`s may share a
-name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would silently
-collapse same-named entries across slave ids).
-`timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, and `script_interval` are
-dropped for this role: a monitor never initiates a transaction, has no poll loop, and (being
-display-only) has no Lua sim surface.
+`role = monitor`: device config carries only `version`, `reconnect` (also gating MB-R-141's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, §6.3 — each entry carries its own `name`, since two interpretations on different `slave_id`s may share a name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would collapse same-named entries across slave ids). `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, `script_interval` dropped: a monitor never initiates a transaction, has no poll loop, and (display-only) no Lua sim surface.
 
 ### 6.1 `read_ranges`
 
@@ -249,9 +203,7 @@ display-only) has no Lua sim surface.
 | `coils` | optional string | coils |
 | `discrete` | optional string | discrete inputs |
 
-Each value is a comma-separated list of **inclusive** address ranges, e.g.
-`"0-100,140-160"`. A bare number (`"5"`) is the single address 5. Malformed or
-reversed entries are skipped silently.
+Each value: comma-separated **inclusive** address ranges, e.g. `"0-100,140-160"`. Bare number (`"5"`) = single address 5. Malformed or reversed entries skipped silently.
 
 ### 6.2 `RegisterDef`
 
@@ -260,48 +212,42 @@ reversed entries are skipped silently.
 | `slave_id` | u8 | `1` | 0–255 |
 | `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
 | `address` | optional u16 | unset ⇒ virtual | 0–65535 |
-| `virtual` | bool | `false` | `true` forces virtual even with an `address` set |
+| `virtual` | bool | `false` | `true` forces virtual even with `address` set |
 | `access` | enum | `ReadWrite` | `ReadOnly`, `WriteOnly`, `ReadWrite` |
 | `type` | enum | — (required) | `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`, `Ascii` |
 | `endian` | enum | `Big` | `Big`, `Little` |
-| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric types only) |
+| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric only) |
 | `resolution` | f64 | `1.0` | display scale (`displayed = raw × resolution`) |
 | `bitmask` | optional string | unset ⇒ full mask | `0x`-prefixed hex or decimal; integer types only |
-| `length` | usize | `1` | ASCII width in registers (ignored for numeric types) |
+| `length` | usize | `1` | ASCII width in registers (ignored for numeric) |
 | `alignment` | enum | `Left` | `Left`, `Right` (ASCII only) |
 | `values` | list of `{name, value}` | empty | named/enum-style values for selection registers |
 | `description` | string | empty | |
 | `default` | optional scalar | unset | int, float, or string; written to memory on load |
-| `update` | optional string | unset | **legacy**: per-register Lua snippet; migrated into `scripts` on load and never written back |
+| `update` | optional string | unset | **legacy**: per-register Lua snippet; migrated into `scripts` on load, never written back |
 
-`value`/`default` scalars are untagged: `10` is an integer, `1.5` a float, `"idle"`
-text.
+`value`/`default` scalars are untagged: `10` integer, `1.5` float, `"idle"` text.
 
 ### 6.3 `MonitorRegisterDef`
 
-MB-R-145 — a display-only register interpretation against a monitor's observed-value
-table (§6): identical to `RegisterDef` (§6.2) except it drops `access` (the table is
-observed, not owned by the monitor — there is no write/read direction to declare) and
-`update` (no store cell exists to script against).
+MB-R-145 — display-only interpretation against a monitor's observed-value table (§6): identical to `RegisterDef` (§6.2) minus `access` (table is observed, not owned — no direction to declare) and `update` (no store cell to script against).
 
 | Field | Type | Default | Valid values |
 |---|---|---|---|
-| `name` | string | — (required) | the interpretation's display name; unique within its own `slave_id`, not across `slave_id`s (MB-R-148) |
+| `name` | string | — (required) | display name; unique within its own `slave_id`, not across (MB-R-148) |
 | `slave_id` | u8 | `0` | 0–255 |
 | `kind` | enum | `InputRegister` | `Coil`, `DiscreteInput`, `HoldingRegister`, `InputRegister` |
 | `address` | optional u16 | unset ⇒ virtual | 0–65535 |
-| `virtual` | bool | `false` | `true` forces virtual even with an `address` set |
+| `virtual` | bool | `false` | `true` forces virtual even with `address` set |
 | `type` | enum | — (required) | `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`, `Ascii` |
 | `endian` | enum | `Big` | `Big`, `Little` |
-| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric types only) |
+| `word_order` | enum | `Normal` | `Normal`, `Reversed` (register order, numeric only) |
 | `resolution` | f64 | `1.0` | display scale (`displayed = raw × resolution`) |
 | `bitmask` | optional string | unset ⇒ full mask | `0x`-prefixed hex or decimal; integer types only |
-| `length` | usize | `1` | ASCII width in registers (ignored for numeric types) |
+| `length` | usize | `1` | ASCII width in registers (ignored for numeric) |
 | `alignment` | enum | `Left` | `Left`, `Right` (ASCII only) |
 | `values` | list of `{name, value}` | empty | named/enum-style values for selection registers |
 | `description` | string | empty | |
-| `default` | optional scalar | unset | int, float, or string; a monitor has no memory store to write into, so this field is accepted but has no effect — kept only so a `RegisterDef`-shaped fragment pasted in still deserializes |
+| `default` | optional scalar | unset | int, float, or string; no memory store to write into, so accepted but no effect — kept so a `RegisterDef`-shaped fragment still deserializes |
 
-A hand-edited or pasted-in fragment carrying `access` and/or `update` deserializes
-cleanly by ignoring both unknown fields (same tolerance §6/§6.1 already document for
-other role-conditional shapes).
+A pasted-in fragment carrying `access` and/or `update` deserializes cleanly, both ignored as unknown fields (same tolerance §6/§6.1 document for other role-conditional shapes).

@@ -1,63 +1,38 @@
 # AGENTS.md
 
-Router for AI coding agents working in this repo. Read this first; it points to
-everything else.
+Router for AI coding agents. Read first; points to everything else.
 
 ## Repo
 
-Ferrowl — a Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP
-(Charging Station/CSMS, versions 1.6/2.0.1/2.1) devices. A Cargo workspace of 13
-crates building one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure:
-[`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Charging Station/CSMS, 1.6/2.0.1/2.1). Cargo workspace, 13 crates, one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-<!-- CORE:BEGIN spec-driven -->
 ## Spec-driven
 
 - `docs/specs/` authoritative. Code conforms to spec, never reverse.
-- Read area's `requirements.md` + `edge-cases.md` before editing that area.
-  `edge-cases.md` = deliberate ugliness; check before "fixing."
+- Read area's `requirements.md` + `edge-cases.md` before editing that area. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
-- `main` never holds unfinished spec: a requirement on `main` describes code
-  that exists and is tested. A branch may hold a spec commit ahead of its
-  code; squash merge keeps that off `main`.
-- Pre-existing spec/code disagreement outside your task: stop, raise
-  separately. Folding it in widens approved work, skips its own review.
+- `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
+- Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement IDs stable, append-only. Cite in commits and PRs.
-- One requirement, one physical line, never wrapped — find any by `grep -rn <ID or keyword> docs/specs/`, or with the exact file:line to edit: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch every ID needed into one call). Read one section of a large spec file instead of the whole thing: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
-<!-- CORE:END spec-driven -->
+- One requirement, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
 
-<!-- CORE:BEGIN tdd -->
 ## TDD — fixed order, every stage
 
 1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
-2. Run it, watch it fail for the right reason, report the failure. Wrong
-   assertion / test-side compile error / premature pass proves nothing.
+2. Run it, watch it fail for the right reason, report the failure. Wrong assertion / test-side compile error / premature pass proves nothing.
 3. Minimum implementation that passes.
 4. Refactor green.
 
-- Implementation without a preceding failing test: not done. Test written
-  after the fact to fit code: not done.
-- Expected values from the authoritative source (standard/protocol/upstream
-  API) — never a debug print of your own implementation.
-- Coverage floor 80% of lines, CI-gated. A floor, not a target — never
-  inflate it with tests that execute code without asserting.
-<!-- CORE:END tdd -->
+- Implementation without a preceding failing test: not done. Test written after the fact to fit code: not done.
+- Expected values from the authoritative source (standard/protocol/upstream API), never a debug print of your own implementation.
+- Coverage floor 80% of lines, CI-gated. A floor, not a target: never inflate with tests that execute code without asserting.
 
 ## Workflow
 
-Triggers on **behavior change, any size**: new public function, changed
-default, new error variant, any observable semantics. Size sets stage count,
-never gate existence. Non-behavior change (refactor, rename,
-perf-with-identical-semantics, test-only, docs, tooling): gate 1 skipped,
-the rest still runs. Trivial edit (one file, no semantics, no test/CI/build
-effect — typo, comment, doc wording): no gates, branch + PR.
+Triggers on **behavior change, any size**: new public function, changed default, new error variant, any observable semantics. Size sets stage count, never gate existence. Non-behavior change (refactor, rename, perf with identical semantics, test-only, docs, tooling): gate 1 skipped, rest runs. Trivial edit (one file, no semantics, no test/CI/build effect — typo, comment, doc wording): no gates, branch + PR.
 
-Full gate/task-board mechanics (Gate 1 through Merge, Resume): read
-[`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md) — split out
-because it's the bulk of what used to be this file and most sessions never
-touch a gate. Pull one section at a time with `extract-section.sh` rather
-than reading it whole, same as any other spec-driven doc.
+Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md). Pull one section at a time with `extract-section.sh`.
 
 ## Where to look for task X
 
@@ -74,10 +49,8 @@ than reading it whole, same as any other spec-driven doc.
 | Crate graph, data flow, concurrency model | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | — |
 | Contribution workflow, conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | — |
 
-Each area's `edge-cases.md` records its **known limitations** — behavior that
-is ugly but intentional. Check it before "fixing" something that looks wrong.
+Each area's `edge-cases.md` records **known limitations** — ugly but intentional. Check before "fixing".
 
-<!-- CORE:BEGIN build -->
 ## Build / test / lint
 
 ```sh
@@ -88,11 +61,7 @@ cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
 ```
 
-Narrow the loop while iterating — don't run the whole workspace for one test.
-This still applies once a test name is on the command line: `cargo test
---workspace <name>` still builds and runs every crate's test binary (each
-prints its own `test result: ok. 0 passed` for the ones that don't match),
-even though only one crate's tests can match:
+Narrow the loop while iterating. `cargo test --workspace <name>` still builds and runs every crate's test binary (each prints `test result: ok. 0 passed`), even though only one crate can match:
 
 ```sh
 cargo test -p ferrowl-modbus              # one crate
@@ -102,127 +71,34 @@ cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
 ```
 
-Full set before done. `lefthook` enforces `fmt --check` and `clippy -D
-warnings` pre-commit; CI runs the full set (plus `cargo deny check`) on every
-push **and every pull request**.
+Full set before done. `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request**.
 
-Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config
-needed) or `cargo build --profile fastrel` for faster iterative builds
-(opt-level 1).
-<!-- CORE:END build -->
+Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `cargo build --profile fastrel` (opt-level 1, faster iterative builds).
 
-<!-- CORE:BEGIN conventions -->
 ## Conventions — reading
 
-- **Never read a whole file when only part of it is needed.** For any
-  markdown file (not just `docs/specs/` — skill `SKILL.md`s, other repos'
-  docs, anything `.md`), use `sh .claude/scripts/extract-section.sh '<heading>'
-  ['<heading>' ...] <file>` (unknown heading text: `sh
-  .claude/scripts/list-sections.sh <file>` first) instead of `cat`/Read on the
-  whole file. For any other large file where only a line range is needed, use
-  `sed -n '<start>,<end>p' <file>` instead of a full `cat`/Read. This applies
-  equally whether the read happens via the Read tool or a Bash `cat` — both
-  cost the same context. **Enforced, not just advisory:** a `PreToolUse` hook
-  (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a
-  `.md` file, or of any file over 80 lines, with a message pointing at
-  `extract-section.sh`/`sed -n`/the Read tool. A denial here means the
-  convention was about to be bypassed, not a bug to route around — follow the
-  message's redirect rather than retrying the same `cat` differently.
-- **Filter shell output before it lands in context, not after.** `find`,
-  `git show`, `git diff`, `cargo test`, `cargo llvm-cov` and similar can
-  produce far more than is needed. Narrow at the shell — `find` with
-  `-name`/`-path`, `git show --stat` (or a path filter) before full content,
-  `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output — rather
-  than dumping everything and reading past what's unneeded.
-- **Don't re-run a read-only command for output already in context this
-  session.** `git diff`, `git log`, `git show` etc. against the same
-  refs/paths already shown once — scroll back instead of re-running.
+- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. Applies to Read tool and Bash `cat` alike — same context cost. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. A denial = convention about to be bypassed; follow the redirect, don't retry the `cat` differently.
+- **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
+- **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
+
 ## Conventions — code
 
-- Unit tests live in `#[cfg(test)] mod tests` at the bottom of the file under
-  test, function names prefixed `ut_`. Integration tests belong in each
-  crate's `tests/`, function names prefixed `it_` (notably in `ferrowl-ui`
-  and much of `ferrowl`).
-- **Tests bind ephemeral ports only.** Any test that starts a network
-  listener (Modbus TCP, OCPP WebSocket, a raw occupier socket) binds port 0
-  and reads the assigned port back — never a fixed port number. A fixed port
-  makes the test fail whenever anything else on the machine holds it (a
-  running `ferrowl --demo`, a parallel checkout's tests); ephemeral binding
-  removes the collision class entirely. Fixed ports in specs that are never
-  `start()`ed are inert, but prefer port 0 there too so the intent stays
-  obvious. Deliberately *occupying* a port to test bind-failure handling
-  still binds the occupier ephemerally first, then points the server at that
-  port (see `tcp_loopback.rs`).
-- All 13 workspace crates are versioned in lockstep. Don't bump one
-  independently.
-- Config files are TOML or JSON only (extension-driven), never YAML.
+- Unit tests: `#[cfg(test)] mod tests` at the bottom of the file under test, names `ut_*`. Integration tests: crate's `tests/`, names `it_*` (notably `ferrowl-ui` and much of `ferrowl`).
+- **Tests bind ephemeral ports only.** Any test starting a listener (Modbus TCP, OCPP WebSocket, raw occupier socket) binds port 0 and reads the assigned port back. Fixed ports collide with anything else holding them (running `ferrowl --demo`, parallel checkout's tests). Fixed ports in specs never `start()`ed are inert; still prefer port 0. To test bind failure, bind the occupier ephemerally first, then point the server at that port (see `tcp_loopback.rs`).
+- All 13 crates versioned in lockstep; never bump one alone.
+- Config files TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
-- **Never split a source file just because it is large.** A split must earn
-  its keep — it separates genuinely distinct responsibilities, improves
-  navigability, or cuts coupling. A long file that covers one cohesive
-  concern, or is flat generated data (e.g. a spec table), stays whole. Treat
-  a line count as a prompt to *review* the file, not a mandate to divide it;
-  an arbitrary boundary drawn to hit a number makes the code harder to
-  follow, not easier.
-- **A comment says what the code cannot.** No restating the adjacent
-  statement, field, or function name; no step narration (`// Create app
-  state`); no decorative banners or import-group headers; no paragraph where a
-  sentence does. **Never cite this workflow** — a plan, a stage id (`s7`), a
-  gate (`Gate3#2`), a task item, `(Shared)`, "sanctioned change": those rot
-  the moment the plan is deleted and mean nothing to a later reader. Keep the
-  technical content, drop the citation. Requirement IDs are the only
-  sanctioned cross-reference. An `#[allow(...)]` justification names the
-  condition that lifts it, never the stage that will. Applies to `//` and
-  `///` alike.
-- **Prefer typed handling over generic JSON.** Read request fields and build
-  responses from the strongly-typed `rust_ocpp` structs and enums
-  (`req.evse_id`, `Response201::Reset(...)`), never by indexing or
-  hand-crafting a `serde_json::Value` where a typed path exists — the
-  compiler must catch a wrong field name, missing field, or bad enum, not the
-  wire. This holds **even when it forces duplication**: if two OCPP versions
-  (1.6 / 2.0.1 / 2.1) have distinct-but-similar types, duplicate the typed
-  code per version rather than collapse it onto a shared untyped `Value`.
-  The duplication is the accepted price of compile-time typing. The **only**
-  sanctioned untyped JSON is the manual payload a user types into the action
-  dialog, and version-independent *plumbing* that must inspect an arbitrary
-  encoded action (e.g. a scope/EVSE guard spanning all actions) where no
-  typed accessor exists.
-- **Model states as enums, never a flag plus dependent optionals.** A struct
-  whose fields are meaningful only under some combination of its own booleans
-  pushes validation into a resolve function and lets the wire carry states the
-  code must then reject. Give each state its own variant holding exactly the
-  fields that state needs, so the invalid combinations cannot be constructed
-  or deserialized at all. A tagged enum (`#[serde(tag = "…")]`) extends this
-  to the wire and replaces hand-written `Serialize`/`Deserialize` shadow
-  structs. Where a check genuinely cannot be expressed in a type — a `Vec`
-  that must be non-empty — keep it as one condition on one variant, never a
-  rule spanning fields. This applies to config and session schemas as much as
-  to in-memory types; changing a wire shape is a breaking configuration change
-  and needs its own CS-R spec change.
+- **Never split a source file just because it is large.** A split must separate distinct responsibilities, improve navigability, or cut coupling. One cohesive concern or flat generated data (spec table) stays whole. Line count = prompt to review, not mandate to divide; arbitrary boundaries make code harder to follow.
+- **A comment says what the code cannot.** No restating the adjacent statement/field/function name; no step narration (`// Create app state`); no banners or import-group headers; no paragraph where a sentence does. **Never cite this workflow** — plan, stage id (`s7`), gate (`Gate3#2`), task item, `(Shared)`, "sanctioned change": rots when the plan is deleted, meaningless to a later reader. Keep the technical content, drop the citation. Requirement IDs are the only sanctioned cross-reference. An `#[allow(...)]` justification names the condition that lifts it, never the stage that will. Applies to `//` and `///`.
+- **Typed handling over generic JSON.** Read request fields and build responses from the typed `rust_ocpp` structs/enums (`req.evse_id`, `Response201::Reset(...)`), never by indexing or hand-crafting `serde_json::Value` where a typed path exists — compiler catches a wrong field/missing field/bad enum, not the wire. Holds **even when it forces duplication**: distinct-but-similar types across 1.6/2.0.1/2.1 get duplicated typed code per version, never a shared untyped `Value`. **Only** sanctioned untyped JSON: the manual payload a user types into the action dialog, and version-independent plumbing that must inspect an arbitrary encoded action (e.g. a scope/EVSE guard spanning all actions) where no typed accessor exists.
+- **Model states as enums, never a flag plus dependent optionals.** Fields meaningful only under some combination of booleans push validation into a resolve function and let the wire carry states the code must reject. One variant per state, holding exactly that state's fields, so invalid combinations cannot be constructed or deserialized. A tagged enum (`#[serde(tag = "…")]`) extends this to the wire and replaces hand-written `Serialize`/`Deserialize` shadow structs. A check no type can express (non-empty `Vec`) stays one condition on one variant, never a rule spanning fields. Applies to config/session schemas as much as in-memory types; a wire-shape change is a breaking configuration change and needs its own CS-R spec change.
+
 ## Conventions — text
 
-- **No hard line wrap on anything posted externally** — issue bodies, PR
-  bodies, PR/review comments. The host (GitHub) soft-wraps for display; a
-  manually inserted `\n` mid-sentence survives rendering as a real line
-  break and fragments the text. Paragraphs as single unbroken lines; only
-  headings, list items, and code blocks get their own line.
-- **Spec text is never wrapped either** — `docs/specs/` and any
-  `spec-diff.md`: one requirement, one physical line, however long, so a
-  `grep` for an ID or phrase returns the whole requirement and
-  `extract-id.sh` can point at one line. **Commit messages are the
-  exception: do wrap** — subject ≤ 72 columns, body hard-wrapped at 72.
-  `git log` renders raw and never soft-wraps, so an unwrapped paragraph
-  becomes one unreadable line.
-<!-- CORE:END conventions -->
+- **No hard line wrap on anything posted externally** — issue bodies, PR bodies, PR/review comments. GitHub soft-wraps; an inserted `\n` mid-sentence renders as a real line break. Paragraphs as single lines; only headings, list items, code blocks get their own line.
+- **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep` returns the whole requirement and `extract-id.sh` points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
 
-<!-- CORE:BEGIN scope -->
 ## Scope boundaries — check with the user before
 
-- **Expanding the Lua `C_*` API.** The surface (`C_Register`, `C_OCPP`,
-  `C_Time`, `C_Log`, `C_Test`, `C_Module`, `C_Statics`) is deliberately small
-  and fixed. Adding a module or method is a design decision, not a
-  mechanical addition.
-- **Bridging Modbus and OCPP.** They are architecturally separate — no
-  shared lifecycle abstraction spans both. Don't assume a fix/pattern in one
-  applies to the other without checking both specs.
-<!-- CORE:END scope -->
+- **Expanding the Lua `C_*` API.** Surface (`C_Register`, `C_OCPP`, `C_Time`, `C_Log`, `C_Test`, `C_Module`, `C_Statics`) deliberately small and fixed. A new module or method is a design decision.
+- **Bridging Modbus and OCPP.** Architecturally separate; no shared lifecycle abstraction. A fix/pattern in one does not transfer without checking both specs.
