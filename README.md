@@ -138,7 +138,15 @@ ferrowl bridge --upstream transport=rtu_over_tcp,ip=0.0.0.0,port=1502 \
 Both `--upstream` and `--downstream` are required and use the same `key=val,...` mini-language as
 `--module`. `transport` selects the interface's transport — `tcp` (default), `rtu`,
 `rtu_over_tcp`, or `ascii_over_tcp`; `tcp`/`rtu_over_tcp`/`ascii_over_tcp` take `ip`, `port`, and
-the same opt-in TLS keys as an ordinary TCP module (`self_signed`, `cert_file`/`key_file`, etc.);
+the TLS block form's fields flattened to dotted descriptor keys — `tls.mode`, `tls.identity.source`,
+`tls.identity.cert_file`/`tls.identity.key_file`, `tls.verification.verify`,
+`tls.verification.ca_files`/`tls.verification.extra_ca_files`, the latter two taking `;` rather
+than `,` between multiple files since `,` already separates descriptor keys (e.g., on an
+`--upstream` (server) descriptor,
+`tls.mode=mutual,tls.verification.verify=ca-files,tls.verification.ca_files=ca1.pem;ca2.pem`; a
+`--downstream` (client) descriptor at `tls.mode=mutual` additionally needs
+`tls.identity.source=files,tls.identity.cert_file=...,tls.identity.key_file=...`, since an
+unset `tls.identity.source` there defaults to `ephemeral`, which a client identity rejects);
 `rtu` takes `path`, `baud`, `parity`, `data_bits`, `stop_bits`. Every transport also accepts
 `timeout_ms` and `reconnect`. `--upstream` additionally accepts `unit_ids` (e.g. `unit_ids=1,3,5-8`)
 to restrict which slave ids the bridge answers for — a request for any other unit id is ignored
@@ -377,23 +385,51 @@ ip = "127.0.0.1"
 port = 5020
 ```
 
-`tcp`, `rtu_over_tcp` and `ascii_over_tcp` endpoints additionally accept an optional `tls` table.
-Unset means plain TCP; set, the client connects (and the server listens) over TLS instead. With
-neither `cert_file`/`key_file` nor `self_signed` given, the server falls back to an ephemeral
-self-signed certificate:
+`tcp`, `rtu_over_tcp` and `ascii_over_tcp` endpoints additionally accept an optional `tls` table
+holding a `server` policy and a `client` policy, each independently defaulting to `mode = "none"`
+(plain TCP); an absent `tls` table, an empty one, and one with both policies `mode = "none"` are
+the same state. Only the policy matching the endpoint's own role (client or server, chosen per
+instance in the session) is consulted; the other is inert. Setting a role's `mode` to `tls` or
+`mutual` makes that role connect (client) or listen (server) over TLS instead:
 
 ```toml
-[modules.endpoint.tls]
-cert_file = "certs/server.pem"     # server: certificate chain (paired with key_file)
-key_file = "certs/server.key"      # server: private key
-self_signed = true                 # server: ephemeral self-signed cert when cert_file/key_file are unset
-ca_file = "certs/ca.pem"           # client: extra trust anchor, alongside the native root store
-client_cert_file = "certs/client.pem"  # client: mutual-TLS client certificate (paired with client_key_file)
-client_key_file = "certs/client.key"   # client: mutual-TLS client private key
-client_ca_file = "certs/ca.pem"    # server: CA that client certs must chain to (with require_client_cert)
-require_client_cert = false        # server: reject connections without a valid client cert
-insecure_skip_verify = false       # client: accept any server certificate unauthenticated (testing only)
+[modules.endpoint.tls.server]
+mode = "mutual"                     # "none" (default) | "tls" | "mutual"
+
+[modules.endpoint.tls.server.identity]
+source = "files"                    # "ephemeral" | "self-signed" | "files"
+cert_file = "certs/server.pem"      # files: certificate chain (paired with key_file)
+key_file = "certs/server.key"       # files: private key
+
+[modules.endpoint.tls.server.verification]  # required when server mode = "mutual"
+verify = "ca-files"                 # "skip" | "root-store" | "ca-files"
+ca_files = ["certs/ca.pem"]         # ca-files: CA that client certs must chain to
+
+[modules.endpoint.tls.client]
+mode = "mutual"                     # "none" (default) | "tls" | "mutual"
+
+[modules.endpoint.tls.client.verification]
+verify = "root-store"               # "skip" | "root-store" | "ca-files"
+extra_ca_files = ["certs/ca.pem"]   # root-store: extra trust anchors, alongside the native root store
+
+[modules.endpoint.tls.client.identity]      # required when client mode = "mutual"
+source = "files"
+cert_file = "certs/client.pem"      # files: mutual-TLS client certificate (paired with key_file)
+key_file = "certs/client.key"       # files: mutual-TLS client private key
 ```
+
+An `identity` (and, under `mode = "mutual"`, a `verification`) is mandatory wherever `mode` is
+`tls` or `mutual` — there is no block-form default for either, and an omitted one fails the load.
+`source = "ephemeral"` makes the server generate an ephemeral self-signed certificate and log the
+fallback; `source = "self-signed"` generates the same kind of certificate but is a deliberate
+choice, not a fallback, and is not logged as one. (The bridge's dotted descriptor keys are the
+exception: there, an unset `tls.identity.source`/`tls.verification.verify` under a set `tls.mode`
+does default to `ephemeral`/`root-store` — see the bridge section above.) `verify = "skip"`
+accepts any peer certificate unauthenticated (testing only). `verify = "root-store"` is rejected
+as a server's own `verification` (there is nothing native to trust client certificates against);
+`source = "ephemeral"` is rejected as a client's `identity`; `verify = "ca-files"` requires a
+non-empty `ca_files`. See [Breaking changes](#breaking-changes) below for the retired flat fields
+this block form replaces.
 
 An **OCPP** module session entry is tagged `type = "ocpp"` and carries only the name, the
 device-config path and the websocket endpoint (`protocol` is `ws` or `wss`); the OCPP version,
@@ -547,27 +583,59 @@ code = "C_OCPP:Set(\"Power\", C_OCPP:Get(\"Power\") + 100)"
 [security]
 username = "cp001"            # profile 1: HTTP Basic Auth on the upgrade request
 password = "secret"           #   (CS sends; a CSMS with credentials rejects mismatches with 401)
-ca_file = "certs/ca.pem"      # profile 2, CS: extra trust anchor for a self-signed CSMS cert
-cert_file = "certs/csms.pem"  # profile 2, CSMS: TLS listener certificate chain
-key_file = "certs/csms.key"   # profile 2, CSMS: TLS private key
-client_cert_file = "certs/cs.pem"  # profile 3, CS: client certificate for mutual TLS
-client_key_file = "certs/cs.key"   # profile 3, CS: matching private key
-client_ca_file = "certs/ca.pem"    # profile 3, CSMS: CA that client certs must chain to
-require_client_cert = false        # profile 3, CSMS: reject connections without a valid client cert
-self_signed = true            # server: ephemeral self-signed TLS below the TLS level
-insecure_skip_verify = true   # client: accept any server certificate (testing only)
+
+[security.tls.server]                      # profile 2/3, CSMS role
+mode = "mutual"                            # "none" (default) | "tls" | "mutual"
+
+[security.tls.server.identity]
+source = "files"                           # "ephemeral" | "self-signed" | "files"
+cert_file = "certs/csms.pem"               # files: TLS listener certificate chain
+key_file = "certs/csms.key"                # files: TLS private key
+
+[security.tls.server.verification]         # required when server mode = "mutual"
+verify = "ca-files"                        # "skip" | "root-store" | "ca-files"
+ca_files = ["certs/ca.pem"]                # ca-files: CA that client certs must chain to
+
+[security.tls.client]                      # profile 2/3, CS role
+mode = "mutual"                            # "none" (default) | "tls" | "mutual"
+
+[security.tls.client.verification]
+verify = "root-store"                      # "skip" | "root-store" | "ca-files"
+extra_ca_files = ["certs/ca.pem"]          # root-store: extra trust anchor for a self-signed CSMS cert
+
+[security.tls.client.identity]             # required when client mode = "mutual"
+source = "files"
+cert_file = "certs/cs.pem"                 # files: client certificate for mutual TLS
+key_file = "certs/cs.key"                  # files: matching private key
 ```
 
-Use `protocol = "wss"` in the session entry together with the TLS fields. A CSMS (server role)
-`wss` instance below the TLS level (`None`/Basic Auth) does *not* fall back to plain TCP: it
-generates an **ephemeral self-signed certificate in memory at each start** (never written to
-disk) and terminates TLS with it — set `self_signed = true`, or just pick anything below TLS in
-the `:new`/`:edit` setup dialog, which sets it for you. Because the identity changes on every
-start, a connecting CS cannot pin it via `ca_file` in advance; either supply real `cert_file`/
-`key_file` (the TLS/mTLS levels) or have the CS set `insecure_skip_verify = true`, which accepts
-any server certificate without authenticating it. The connection is still TLS-encrypted, but the
-peer's identity is not checked at all — **this is a test-rig convenience only; never enable it
-against a production CSMS**, since it makes the connection vulnerable to a man-in-the-middle.
+Use `protocol = "wss"` in the session entry together with `[security.tls]`. A CSMS (server role)
+`wss` instance whose `server` policy is `mode = "none"` does *not* fall back to plain TCP: it
+resolves to `identity.source = "ephemeral"`, generating an **ephemeral self-signed certificate in
+memory at each start** (never written to disk) and terminating TLS with it, and logging the
+fallback — leaving `[security.tls.server]` out entirely under `wss`, or picking anything below
+TLS in the `:new`/`:edit` setup dialog, does this for you. Because the identity changes on every
+start, a connecting CS cannot pin it via `ca_files`/`extra_ca_files` in advance; either set
+`mode = "tls"` with a real `[security.tls.server.identity]` at `source = "files"`, or have the CS
+set `verify = "skip"` under `[security.tls.client.verification]`, which accepts any server
+certificate without authenticating it. The connection is still TLS-encrypted, but the peer's
+identity is not checked at all — **this is a test-rig convenience only; never enable it against a
+production CSMS**, since it makes the connection vulnerable to a man-in-the-middle.
+
+### Breaking changes
+
+The flat TLS fields formerly sitting beside `username`/`password` in `[security]`, and their
+Modbus TCP counterparts under a flat `[modules.endpoint.tls]`, are retired with no migration
+path: `ca_file`, `client_cert_file`, `client_key_file`, `client_ca_file`, `client_ca_files`,
+`client_cert_skip_verify`, `client_self_signed`, `require_client_cert`,
+`insecure_skip_verify` — and a bare `self_signed`, `cert_file`, or `key_file` outside an
+`identity` block (inside one, they are the current `CertSource::Files`/`SelfSigned` fields).
+A saved config naming any of them
+fails to load with an error naming the retired fields found and pointing at the `[tls.server]`/
+`[tls.client]` (Modbus) or `[security.tls.server]`/`[security.tls.client]` (OCPP) block shape
+above; no value is carried over automatically. The same strict checking applies to every field
+inside a `tls`/`identity`/`verification` block itself — an unrecognized key there fails the load
+rather than being silently ignored.
 
 ## Lua Support
 
