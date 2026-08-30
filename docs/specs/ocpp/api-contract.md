@@ -336,6 +336,7 @@ One section, shared by both roles. Basic Auth is role-shared; TLS is held per ro
 - **A `wss://` server's TLS material** follows its `identity` variant directly (OC-R-096); the old "explicit files always win" precedence is unrepresentable and gone.
 - **A `wss://` server whose identity is `ephemeral`** binds an ephemeral self-signed certificate rather than plain TCP, and reports the fallback in the module log (OC-R-095).
 - Two role-only rejections, at construction: `verify = "root-store"` under `tls.server`, and `source = "ephemeral"` as a `tls.client` identity.
+- The **setup dialog does not expose `protocol` as an input** (OC-R-127): it displays a scheme derived from its TLS selector, `wss://` at TLS/mTLS and `ws://` at Off, and writes the matching `protocol` value. The field itself (§7) is unchanged, and a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
 
 ### 9.2 Security profiles
 
