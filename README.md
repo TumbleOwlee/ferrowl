@@ -613,9 +613,14 @@ Use `protocol = "wss"` in the session entry together with `[security.tls]`. A CS
 `wss` instance whose `server` policy is `mode = "none"` does *not* fall back to plain TCP: it
 resolves to `identity.source = "ephemeral"`, generating an **ephemeral self-signed certificate in
 memory at each start** (never written to disk) and terminating TLS with it, and logging the
-fallback — leaving `[security.tls.server]` out entirely under `wss`, or picking anything below
-TLS in the `:new`/`:edit` setup dialog, does this for you. Because the identity changes on every
-start, a connecting CS cannot pin it via `ca_files`/`extra_ca_files` in advance; either set
+fallback. That fallback is reached by a config that pairs a `wss://` endpoint with `mode = "none"`
+— a hand-written file, an `--ocpp` flag, or a pre-existing session — since the `:new`/`:edit` setup
+dialog derives its endpoint scheme from its own TLS selector (Off / TLS / mTLS) and so cannot
+produce that pairing itself: the selector maps one-to-one onto `mode` (`Off` → `none`, `TLS` →
+`tls`, `mTLS` → `mutual`), Protocol is a display-only field showing `ws://` at Off and `wss://`
+otherwise, and Basic Authentication is a separate On/Off selection carrying `username`/`password`,
+valid with or without TLS (Profile 1). Because the identity changes on every start, a connecting
+CS cannot pin it via `ca_files`/`extra_ca_files` in advance; either set
 `mode = "tls"` with a real `[security.tls.server.identity]` at `source = "files"`, or have the CS
 set `verify = "skip"` under `[security.tls.client.verification]`, which accepts any server
 certificate without authenticating it. The connection is still TLS-encrypted, but the peer's
