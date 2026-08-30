@@ -667,8 +667,8 @@ impl SetupDialog {
             Endpoint::Tcp { .. } | Endpoint::RtuOverTcp { .. } | Endpoint::AsciiOverTcp { .. }
         ) {
             let level = self.tls_level.state.get_value();
-            if level == TlsLevel::Off {
-                Some(ModbusTlsConfig::default())
+            let mut cfg = if level == TlsLevel::Off {
+                ModbusTlsConfig::default()
             } else {
                 // MB-R-135/136/139: `build_config` resolves the active role's policy directly
                 // from the raw text together with the toggle widgets (self_signed/skip_verify/
@@ -679,7 +679,7 @@ impl SetupDialog {
                 // (those only gate which fields are focusable/visible, checked separately by
                 // `render`/`handle_events`), so no `sync` call is needed on this read-only path.
                 let extracted = self.tls.extract();
-                let mut cfg = level.build_config(
+                level.build_config(
                     role,
                     TlsInputs {
                         cert_file: &extracted.cert_file,
@@ -692,21 +692,25 @@ impl SetupDialog {
                         client_cert_skip_verify: extracted.client_cert_skip_verify,
                         root_store: extracted.root_store,
                     },
-                )?;
-                // Stitch the inactive role's half back in from the original config (if any), so
-                // a role toggle preserves the other role's previously-saved TLS settings instead
-                // of resetting them to `ModbusTlsConfig::default()`'s placeholder.
-                if let Some(orig) = &self.original_tls {
-                    match role {
-                        ClientOrServer::Server => cfg.client = orig.client.clone(),
-                        ClientOrServer::Client => cfg.server = orig.server.clone(),
-                    }
+                )?
+            };
+            // Stitch the inactive role's half back in from the original config (if any), so a
+            // role toggle preserves the other role's previously-saved TLS settings instead of
+            // resetting them to `ModbusTlsConfig::default()`'s placeholder. Applies at every
+            // level, `Off` included (MB-R-104's two-role container must survive a save at `Off`
+            // too), so both branches above hand back a bare `cfg` and share this one stitch.
+            if let Some(orig) = &self.original_tls {
+                match role {
+                    ClientOrServer::Server => cfg.client = orig.client.clone(),
+                    ClientOrServer::Client => cfg.server = orig.server.clone(),
                 }
+            }
+            if level != TlsLevel::Off {
                 validate_tls(&cfg, role, level, &|p| {
                     ferrowl_util::path::expand(p).exists()
                 })?;
-                Some(cfg)
             }
+            Some(cfg)
         } else {
             None
         };
@@ -1720,6 +1724,41 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.tls, Some(ModbusTlsConfig::default()));
+    }
+
+    #[test]
+    /// MB-R-104 — resolving an edited server-role dialog at TLS level Off preserves the
+    /// inactive (client) role's previously-saved policy, stitched from `original_tls`, instead
+    /// of resetting the whole two-role container to `ModbusTlsConfig::default()`.
+    fn ut_resolve_tls_off_preserves_inactive_role_policy() {
+        let original = ModbusTlsConfig {
+            client: ferrowl_util::tls::ClientTlsPolicy::Tls {
+                verification: ferrowl_util::tls::CertVerification::Skip {},
+            },
+            ..Default::default()
+        };
+        let mut dialog = SetupDialog::edit(
+            "dev",
+            "device.toml",
+            ClientOrServer::Server,
+            &Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            Timing {
+                timeout_ms: 0,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+            },
+            &ReadRanges::default(),
+            Some(&original),
+        );
+        dialog.tls_level.state.set_selection(TlsLevel::Off.index());
+        let outcome = dialog.resolve().unwrap();
+        let cfg = outcome.values.tls.unwrap();
+        assert_eq!(cfg.client, original.client);
+        assert_eq!(cfg.server, ferrowl_util::tls::ServerTlsPolicy::None {});
     }
 
     #[test]
