@@ -147,7 +147,7 @@ than `,` between multiple files since `,` already separates descriptor keys (e.g
 `--downstream` (client) descriptor at `tls.mode=mutual` additionally needs
 `tls.identity.source=files,tls.identity.cert_file=...,tls.identity.key_file=...`, since an
 unset `tls.identity.source` there defaults to `ephemeral`, which a client identity rejects);
-`rtu` takes `path`, `baud`, `parity`, `data_bits`, `stop_bits`. Every transport also accepts
+`rtu` takes `path`, `baud`, `parity`, `data_bits`, `stop_bits`; a `tls.*` key on an `rtu` descriptor is a setup failure (exit 1) naming the offending key, even `tls.mode=none`, since TLS is scoped to the TCP-socket transports above. Every transport also accepts
 `timeout_ms` and `reconnect`. `--upstream` additionally accepts `unit_ids` (e.g. `unit_ids=1,3,5-8`)
 to restrict which slave ids the bridge answers for — a request for any other unit id is ignored
 entirely, letting another device share the same upstream link.

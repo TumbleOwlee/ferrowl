@@ -501,19 +501,29 @@ pub fn parse_bridge_descriptor(
                 tls,
             })
         }
-        "rtu" => ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(ferrowl_modbus::rtu::Config {
-            path: get("path").ok_or("rtu descriptor requires 'path'")?,
-            baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
-                .unwrap_or(19200),
-            slave: 1, // BR-R-004/edge-cases.md — inert for bridge, same as an ordinary RTU server.
-            parity: get("parity"),
-            data_bits: parse_opt(get("data_bits"), "data_bits")?,
-            stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
-            timeout_ms,
-            delay_ms: 0,
-            interval_ms: 0,
-            reconnect,
-        }),
+        "rtu" => {
+            // BR-R-011 — TLS is scoped to TCP-socket interfaces; a `tls.*` key here can only be
+            // a mistake about which descriptor is being configured, so it is rejected outright
+            // (including `tls.mode=none`, which would otherwise be a silent no-op).
+            if let Some(key) = map.keys().find(|k| k.starts_with("tls.")) {
+                return Err(format!(
+                    "unrecognized descriptor key '{key}' (TLS is only available on tcp, rtu_over_tcp and ascii_over_tcp)"
+                ));
+            }
+            ferrowl_modbus::bridge::BridgeEndpointKind::Rtu(ferrowl_modbus::rtu::Config {
+                path: get("path").ok_or("rtu descriptor requires 'path'")?,
+                baud_rate: parse_opt(get("baud").or_else(|| get("baud_rate")), "baud")?
+                    .unwrap_or(19200),
+                slave: 1, // BR-R-004/edge-cases.md — inert for bridge, same as an ordinary RTU server.
+                parity: get("parity"),
+                data_bits: parse_opt(get("data_bits"), "data_bits")?,
+                stop_bits: parse_opt(get("stop_bits"), "stop_bits")?,
+                timeout_ms,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect,
+            })
+        }
         other => {
             return Err(format!(
                 "invalid transport '{other}' (expected tcp|rtu|rtu_over_tcp|ascii_over_tcp)"
@@ -712,7 +722,7 @@ mod tests {
     /// CL-R-002 — a --module TCP descriptor parses into a module instance.
     fn ut_parse_tcp_module() {
         let spec = parse_module_spec(
-            "name=evse-1,device=configs/evse.toml,transport=tcp,ip=10.0.0.5,port=502,role=server",
+            "name=evse-1,device=configs/evse.toml,transport=tcp,ip=10.0.0.5,port=0,role=server",
         )
         .unwrap();
         assert_eq!(spec.name, "evse-1");
@@ -722,7 +732,7 @@ mod tests {
             spec.endpoint,
             Endpoint::Tcp {
                 ip: "10.0.0.5".into(),
-                port: 502
+                port: 0
             }
         );
     }
@@ -767,7 +777,7 @@ mod tests {
     /// keys), tagged `rtu_over_tcp`.
     fn ut_parse_rtu_over_tcp_module() {
         let spec = parse_module_spec(
-            "name=m,device=d.toml,transport=rtu_over_tcp,ip=10.0.0.5,port=502,role=client",
+            "name=m,device=d.toml,transport=rtu_over_tcp,ip=10.0.0.5,port=0,role=client",
         )
         .unwrap();
         assert_eq!(spec.role, Role::Client);
@@ -775,7 +785,7 @@ mod tests {
             spec.endpoint,
             Endpoint::RtuOverTcp {
                 ip: "10.0.0.5".into(),
-                port: 502
+                port: 0
             }
         );
     }
@@ -813,7 +823,7 @@ mod tests {
     /// tagged `ascii_over_tcp`.
     fn ut_parse_ascii_over_tcp_module() {
         let spec = parse_module_spec(
-            "name=m,device=d.toml,transport=ascii_over_tcp,ip=10.0.0.5,port=502,role=client",
+            "name=m,device=d.toml,transport=ascii_over_tcp,ip=10.0.0.5,port=0,role=client",
         )
         .unwrap();
         assert_eq!(spec.role, Role::Client);
@@ -821,7 +831,7 @@ mod tests {
             spec.endpoint,
             Endpoint::AsciiOverTcp {
                 ip: "10.0.0.5".into(),
-                port: 502
+                port: 0
             }
         );
     }
@@ -830,19 +840,18 @@ mod tests {
     /// MB-R-116 — `transport=udp` parses for either role (no restriction this run).
     fn ut_parse_module_spec_udp_ok() {
         let spec =
-            parse_module_spec("name=m,device=d.toml,transport=udp,ip=127.0.0.1,port=502").unwrap();
+            parse_module_spec("name=m,device=d.toml,transport=udp,ip=127.0.0.1,port=0").unwrap();
         assert_eq!(
             spec.endpoint,
             Endpoint::Udp {
                 ip: "127.0.0.1".into(),
-                port: 502
+                port: 0
             }
         );
 
-        let client_spec = parse_module_spec(
-            "name=m,device=d.toml,role=client,transport=udp,ip=127.0.0.1,port=502",
-        )
-        .unwrap();
+        let client_spec =
+            parse_module_spec("name=m,device=d.toml,role=client,transport=udp,ip=127.0.0.1,port=0")
+                .unwrap();
         assert_eq!(client_spec.role, Role::Client);
         assert!(matches!(client_spec.endpoint, Endpoint::Udp { .. }));
     }
@@ -866,7 +875,7 @@ mod tests {
     #[test]
     /// CL-R-002 — a --module descriptor missing its name is a parse error.
     fn ut_missing_name_errors() {
-        assert!(parse_module_spec("device=d.toml,port=502").is_err());
+        assert!(parse_module_spec("device=d.toml,port=0").is_err());
     }
 
     #[test]
@@ -1258,9 +1267,9 @@ mod tests {
             "ferrowl",
             "bridge",
             "--upstream",
-            "transport=tcp,ip=0.0.0.0,port=502",
+            "transport=tcp,ip=0.0.0.0,port=0",
             "--downstream",
-            "transport=tcp,ip=10.0.0.5,port=502",
+            "transport=tcp,ip=10.0.0.5,port=0",
             "--duration",
             "5",
         ]);
@@ -1268,11 +1277,11 @@ mod tests {
             Some(SubCommand::Bridge(bridge)) => {
                 assert_eq!(
                     bridge.upstream.as_deref(),
-                    Some("transport=tcp,ip=0.0.0.0,port=502")
+                    Some("transport=tcp,ip=0.0.0.0,port=0")
                 );
                 assert_eq!(
                     bridge.downstream.as_deref(),
-                    Some("transport=tcp,ip=10.0.0.5,port=502")
+                    Some("transport=tcp,ip=10.0.0.5,port=0")
                 );
                 assert_eq!(bridge.duration, Some(5));
             }
@@ -1288,15 +1297,15 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-004 — a bare `port=502` descriptor defaults transport/ip/timeout/reconnect/tls/
+    /// BR-R-004 — a bare `port=0` descriptor defaults transport/ip/timeout/reconnect/tls/
     /// unit_ids.
     fn ut_parse_bridge_descriptor_tcp_defaults() {
-        let spec = parse_bridge_descriptor("port=502", ClientOrServer::Server).unwrap();
+        let spec = parse_bridge_descriptor("port=0", ClientOrServer::Server).unwrap();
         assert!(spec.unit_ids.is_none());
         match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 assert_eq!(cfg.ip, "127.0.0.1");
-                assert_eq!(cfg.port, 502);
+                assert_eq!(cfg.port, 0);
                 assert_eq!(cfg.timeout_ms, 3000);
                 assert!(cfg.reconnect);
                 assert!(cfg.tls.is_none());
@@ -1366,7 +1375,7 @@ mod tests {
         for transport in ["rtu_over_tcp", "ascii_over_tcp"] {
             let spec = parse_bridge_descriptor(
                 &format!(
-                    "transport={transport},port=502,tls.mode=tls,tls.identity.source=self-signed"
+                    "transport={transport},port=0,tls.mode=tls,tls.identity.source=self-signed"
                 ),
                 ClientOrServer::Server,
             )
@@ -1410,7 +1419,7 @@ mod tests {
     #[test]
     /// BR-R-011 — absent `tls.mode` defaults to `none`, leaving `tls` both-`None`.
     fn ut_bridge_descriptor_absent_tls_mode_defaults_to_none() {
-        let spec = parse_bridge_descriptor("port=502", ClientOrServer::Server).unwrap();
+        let spec = parse_bridge_descriptor("port=0", ClientOrServer::Server).unwrap();
         match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => assert!(cfg.tls.is_none()),
             _ => unreachable!(),
@@ -1422,7 +1431,7 @@ mod tests {
     /// leaving `client` at its `None {}` default.
     fn ut_bridge_descriptor_upstream_server_policy_from_dotted_keys() {
         let spec = parse_bridge_descriptor(
-            "port=502,tls.mode=mutual,tls.identity.source=files,\
+            "port=0,tls.mode=mutual,tls.identity.source=files,\
              tls.identity.cert_file=s.crt,tls.identity.key_file=s.key,\
              tls.verification.verify=ca-files,tls.verification.ca_files=ca.pem",
             ClientOrServer::Server,
@@ -1453,7 +1462,7 @@ mod tests {
     /// leaving `server` at its `None {}` default.
     fn ut_bridge_descriptor_downstream_client_policy_from_dotted_keys() {
         let spec = parse_bridge_descriptor(
-            "port=502,tls.mode=tls,tls.verification.verify=skip",
+            "port=0,tls.mode=tls,tls.verification.verify=skip",
             ClientOrServer::Client,
         )
         .unwrap();
@@ -1475,7 +1484,7 @@ mod tests {
     /// BR-R-011 — `tls.verification.extra_ca_files` (under `verify=root-store`) splits on `;`.
     fn ut_bridge_descriptor_ca_files_split_on_semicolon() {
         let spec = parse_bridge_descriptor(
-            "port=502,tls.mode=tls,tls.verification.verify=root-store,\
+            "port=0,tls.mode=tls,tls.verification.verify=root-store,\
              tls.verification.extra_ca_files=a.pem;b.pem",
             ClientOrServer::Client,
         )
@@ -1499,7 +1508,7 @@ mod tests {
     /// BR-R-011 — `tls.verification.ca_files` (under `verify=ca-files`) also splits on `;`.
     fn ut_bridge_descriptor_ca_files_under_verify_ca_files_split_on_semicolon() {
         let spec = parse_bridge_descriptor(
-            "port=502,tls.mode=tls,tls.verification.verify=ca-files,\
+            "port=0,tls.mode=tls,tls.verification.verify=ca-files,\
              tls.verification.ca_files=a.pem;b.pem",
             ClientOrServer::Client,
         )
@@ -1525,7 +1534,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_ca_files_under_verify_root_store() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.verification.verify=root-store,\
+                "port=0,tls.mode=tls,tls.verification.verify=root-store,\
                  tls.verification.ca_files=ca.pem",
                 ClientOrServer::Client
             )
@@ -1540,14 +1549,14 @@ mod tests {
     fn ut_bridge_descriptor_rejects_key_outside_selected_variant() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.identity.source=self-signed",
+                "port=0,tls.identity.source=self-signed",
                 ClientOrServer::Server
             )
             .is_err()
         );
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.identity.source=self-signed,\
+                "port=0,tls.mode=tls,tls.identity.source=self-signed,\
                  tls.verification.verify=skip",
                 ClientOrServer::Server
             )
@@ -1562,14 +1571,14 @@ mod tests {
     fn ut_bridge_descriptor_rejects_unrecognized_tls_key() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.identiy.source=self-signed",
+                "port=0,tls.mode=tls,tls.identiy.source=self-signed",
                 ClientOrServer::Server
             )
             .is_err()
         );
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.verify=skip",
+                "port=0,tls.mode=tls,tls.verify=skip",
                 ClientOrServer::Client
             )
             .is_err()
@@ -1580,19 +1589,17 @@ mod tests {
     /// BR-R-011 — an unrecognized value on `tls.mode`, `tls.identity.source`, or
     /// `tls.verification.verify` is a setup failure.
     fn ut_bridge_descriptor_rejects_unknown_enum_values() {
-        assert!(
-            parse_bridge_descriptor("port=502,tls.mode=bogus", ClientOrServer::Server).is_err()
-        );
+        assert!(parse_bridge_descriptor("port=0,tls.mode=bogus", ClientOrServer::Server).is_err());
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.identity.source=bogus",
+                "port=0,tls.mode=tls,tls.identity.source=bogus",
                 ClientOrServer::Server
             )
             .is_err()
         );
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.verification.verify=bogus",
+                "port=0,tls.mode=tls,tls.verification.verify=bogus",
                 ClientOrServer::Client
             )
             .is_err()
@@ -1605,7 +1612,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_files_identity_with_only_cert_file() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.identity.source=files,tls.identity.cert_file=s.crt",
+                "port=0,tls.mode=tls,tls.identity.source=files,tls.identity.cert_file=s.crt",
                 ClientOrServer::Server
             )
             .is_err()
@@ -1618,7 +1625,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_root_store_upstream() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=mutual,tls.identity.source=self-signed,\
+                "port=0,tls.mode=mutual,tls.identity.source=self-signed,\
                  tls.verification.verify=root-store",
                 ClientOrServer::Server
             )
@@ -1632,7 +1639,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_ephemeral_downstream() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=mutual,tls.verification.verify=skip,\
+                "port=0,tls.mode=mutual,tls.verification.verify=skip,\
                  tls.identity.source=ephemeral",
                 ClientOrServer::Client
             )
@@ -1644,8 +1651,7 @@ mod tests {
     /// BR-R-011 — a bare upstream `tls.mode=tls` (no `tls.identity.source`) accepts the
     /// defaulted `ephemeral` identity.
     fn ut_bridge_descriptor_upstream_bare_tls_mode_defaults_to_ephemeral_identity() {
-        let spec =
-            parse_bridge_descriptor("port=502,tls.mode=tls", ClientOrServer::Server).unwrap();
+        let spec = parse_bridge_descriptor("port=0,tls.mode=tls", ClientOrServer::Server).unwrap();
         match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 assert_eq!(
@@ -1663,8 +1669,7 @@ mod tests {
     /// BR-R-011 — a bare downstream `tls.mode=tls` (no `tls.verification.verify`) accepts the
     /// defaulted `root-store` verification with an empty `extra_ca_files`.
     fn ut_bridge_descriptor_downstream_bare_tls_mode_defaults_to_root_store_verification() {
-        let spec =
-            parse_bridge_descriptor("port=502,tls.mode=tls", ClientOrServer::Client).unwrap();
+        let spec = parse_bridge_descriptor("port=0,tls.mode=tls", ClientOrServer::Client).unwrap();
         match spec.kind {
             ferrowl_modbus::bridge::BridgeEndpointKind::Tcp(cfg) => {
                 assert_eq!(
@@ -1687,7 +1692,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_upstream_mutual_with_defaulted_root_store() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=mutual,tls.identity.source=self-signed",
+                "port=0,tls.mode=mutual,tls.identity.source=self-signed",
                 ClientOrServer::Server
             )
             .is_err()
@@ -1701,7 +1706,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_downstream_mutual_with_defaulted_ephemeral() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=mutual,tls.verification.verify=skip",
+                "port=0,tls.mode=mutual,tls.verification.verify=skip",
                 ClientOrServer::Client
             )
             .is_err()
@@ -1714,7 +1719,7 @@ mod tests {
     fn ut_bridge_descriptor_rejects_empty_ca_files() {
         assert!(
             parse_bridge_descriptor(
-                "port=502,tls.mode=tls,tls.verification.verify=ca-files",
+                "port=0,tls.mode=tls,tls.verification.verify=ca-files",
                 ClientOrServer::Client
             )
             .is_err()
@@ -1722,10 +1727,45 @@ mod tests {
     }
 
     #[test]
+    /// BR-R-011 — any `tls.*` key on a `transport=rtu` descriptor is a setup failure naming the
+    /// key, including `tls.mode=none`, for both roles; the same descriptor without the key
+    /// parses.
+    fn ut_bridge_descriptor_rtu_rejects_tls_keys() {
+        let upstream = match parse_bridge_descriptor(
+            "transport=rtu,path=/dev/ttyUSB0,tls.mode=none",
+            ClientOrServer::Server,
+        ) {
+            Ok(_) => panic!("a tls.* key on an rtu descriptor must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            upstream.contains("unrecognized descriptor key 'tls.mode'"),
+            "{upstream}"
+        );
+
+        let downstream = match parse_bridge_descriptor(
+            "transport=rtu,path=/dev/ttyUSB0,tls.mode=tls",
+            ClientOrServer::Client,
+        ) {
+            Ok(_) => panic!("a tls.* key on an rtu descriptor must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            downstream.contains("unrecognized descriptor key 'tls.mode'"),
+            "{downstream}"
+        );
+
+        assert!(
+            parse_bridge_descriptor("transport=rtu,path=/dev/ttyUSB0", ClientOrServer::Server)
+                .is_ok()
+        );
+    }
+
+    #[test]
     /// BR-R-004 — an unknown transport, a tcp descriptor missing `port`, and an rtu descriptor
     /// missing `path` all error.
     fn ut_parse_bridge_descriptor_rejects_invalid_transport_and_missing_required() {
-        assert!(parse_bridge_descriptor("transport=usb,port=502", ClientOrServer::Server).is_err());
+        assert!(parse_bridge_descriptor("transport=usb,port=0", ClientOrServer::Server).is_err());
         assert!(parse_bridge_descriptor("transport=tcp", ClientOrServer::Server).is_err());
         assert!(parse_bridge_descriptor("transport=rtu", ClientOrServer::Server).is_err());
     }
@@ -1733,8 +1773,6 @@ mod tests {
     #[test]
     /// BR-R-004 — an invalid `reconnect` value errors.
     fn ut_parse_bridge_descriptor_rejects_bad_reconnect_value() {
-        assert!(
-            parse_bridge_descriptor("port=502,reconnect=maybe", ClientOrServer::Server).is_err()
-        );
+        assert!(parse_bridge_descriptor("port=0,reconnect=maybe", ClientOrServer::Server).is_err());
     }
 }
