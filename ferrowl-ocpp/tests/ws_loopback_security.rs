@@ -23,6 +23,23 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// A log sink that records every invocation, for asserting the OC-R-095 fallback is actually
+/// logged rather than only flagged.
+fn capturing_sink() -> (
+    impl ferrowl_ocpp::LogFn + Clone,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = {
+        let lines = lines.clone();
+        move |s: String| {
+            lines.lock().expect("not poisoned").push(s);
+            async move {}
+        }
+    };
+    (sink, lines)
+}
+
 /// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
 /// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
 /// successful bind lands.
@@ -865,4 +882,39 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
         .terminate()
         .await
         .expect("server terminate failed");
+}
+
+#[tokio::test]
+/// OC-R-095 — a `wss://` CSMS bound with no TLS material configured logs the ephemeral-identity
+/// fallback, not merely flags it internally.
+async fn it_wss_csms_without_tls_material_logs_the_fallback() {
+    let (sink, lines) = capturing_sink();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Ephemeral {},
+            },
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink)
+    .await
+    .expect("server failed to bind");
+
+    {
+        let captured = lines.lock().expect("not poisoned");
+        assert!(
+            captured
+                .iter()
+                .any(|l| l.contains("No cert_file/key_file/self_signed configured")),
+            "fallback was not logged: {captured:?}"
+        );
+    }
+
+    server.terminate().await.expect("server terminate failed");
 }

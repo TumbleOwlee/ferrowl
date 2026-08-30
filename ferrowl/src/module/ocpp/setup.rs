@@ -251,12 +251,13 @@ mod tests {
             sv.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
         }
 
-        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Protocol, Ip,
-        // Port, Path, then HeaderNameInput — 9 hops (fresh dialog defaults to ws/client, headers
-        // table hidden while empty). `SetupView` routes Tab via `focus_next`, not through
+        // Tab from Name to HeaderNameInput: ConfigPath, Version, Role, Reconnect, Ip, Port,
+        // Path, then HeaderNameInput — 8 hops (fresh dialog defaults to ws/client, headers
+        // table hidden while empty; Protocol is a derived read-only display, not in the focus
+        // cycle, OC-R-127). `SetupView` routes Tab via `focus_next`, not through
         // `handle_events` (the app shell calls it directly on a Tab key — see `close_requested`'s
         // sibling methods on this trait), so drive focus that way here too.
-        for _ in 0..9 {
+        for _ in 0..8 {
             sv.focus_next();
         }
         for c in "X-Tenant".chars() {

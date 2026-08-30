@@ -1,9 +1,9 @@
-//! Security-profile domain for the OCPP setup dialog: the websocket security level and the
-//! skip-verify choice, plus the mapping between raw field text and an [`OcppSecurityConfig`]
+//! Security domain for the OCPP setup dialog: the TLS selector and the independent Basic
+//! Authentication choice, plus the mapping between raw field text and an [`OcppSecurityConfig`]
 //! (`from_config` infers a level, `build_config` resolves one, `validate_security` checks files).
-//! Mirrors `ferrowl::module::modbus::setup_dialog::tls` exactly, plus a Basic Auth level (OCPP's
-//! websocket security has a credential level; Modbus/TCP TLS does not) — see `OC-R-037`,
-//! `OC-R-039`, `OC-R-040`, `OC-R-096`, `OC-R-111`, `OC-R-113`, `OC-R-115`, `OC-R-116`.
+//! Mirrors `ferrowl::module::modbus::setup_dialog::tls`'s `TlsLevel` exactly — see `OC-R-037`,
+//! `OC-R-039`, `OC-R-040`, `OC-R-096`, `OC-R-110`, `OC-R-111`, `OC-R-113`, `OC-R-115`, `OC-R-116`,
+//! `OC-R-127`, `OC-R-128`.
 
 use ferrowl_ui::traits::ToLabel;
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
@@ -12,39 +12,50 @@ use crate::dialog::tls_section::EffectiveTlsLevel;
 use crate::module::ocpp::config::device::OcppSecurityConfig;
 use crate::module::ocpp::config::session::OcppRole;
 
-/// Websocket transport security level, offered only when the protocol is `wss://`. Cumulative:
-/// each level's fields are a superset of the one below it (`BasicAuth` fields are also shown, and
-/// still apply, at `Tls` and `MutualTls`).
+/// TLS selector (OC-R-127), shown for both roles: maps one-to-one onto the role's policy
+/// variant, `Off` to `None`, `Tls` to `Tls`, `MutualTls` to `Mutual`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SecurityLevel {
-    None,
-    BasicAuth,
+pub enum TlsLevel {
+    Off,
     Tls,
     MutualTls,
 }
 
-impl ToLabel for SecurityLevel {
+impl ToLabel for TlsLevel {
     fn to_label(&self) -> String {
         match self {
-            SecurityLevel::None => "None",
-            SecurityLevel::BasicAuth => "Basic Auth",
-            SecurityLevel::Tls => "TLS",
-            SecurityLevel::MutualTls => "mTLS",
+            TlsLevel::Off => "Off",
+            TlsLevel::Tls => "TLS",
+            TlsLevel::MutualTls => "mTLS",
         }
         .to_string()
     }
 }
 
-/// `None`/`BasicAuth` both collapse to `Off` — neither carries a transport-security guarantee,
-/// and the shared widget's own gates never distinguish a credential-only connection from an
-/// unauthenticated one (that distinction, `show_credentials`, stays on `OcppSetupDialog` itself).
-impl From<SecurityLevel> for EffectiveTlsLevel {
-    fn from(level: SecurityLevel) -> Self {
+impl From<TlsLevel> for EffectiveTlsLevel {
+    fn from(level: TlsLevel) -> Self {
         match level {
-            SecurityLevel::None | SecurityLevel::BasicAuth => EffectiveTlsLevel::Off,
-            SecurityLevel::Tls => EffectiveTlsLevel::Tls,
-            SecurityLevel::MutualTls => EffectiveTlsLevel::MutualTls,
+            TlsLevel::Off => EffectiveTlsLevel::Off,
+            TlsLevel::Tls => EffectiveTlsLevel::Tls,
+            TlsLevel::MutualTls => EffectiveTlsLevel::MutualTls,
         }
+    }
+}
+
+/// Basic Authentication toggle (OC-R-128), independent of [`TlsLevel`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BasicAuthChoice {
+    Off,
+    On,
+}
+
+impl ToLabel for BasicAuthChoice {
+    fn to_label(&self) -> String {
+        match self {
+            BasicAuthChoice::Off => "Off",
+            BasicAuthChoice::On => "On",
+        }
+        .to_string()
     }
 }
 
@@ -55,6 +66,7 @@ impl From<SecurityLevel> for EffectiveTlsLevel {
 pub struct SecurityInputs<'a> {
     pub username: &'a str,
     pub password: &'a str,
+    pub basic_auth: bool,
     pub cert_file: &'a str,
     pub key_file: &'a str,
     pub client_cert_file: &'a str,
@@ -72,34 +84,29 @@ pub struct SecurityInputs<'a> {
     pub root_store: bool,
 }
 
-impl SecurityLevel {
+impl TlsLevel {
     /// Infer the level an existing [`OcppSecurityConfig`] represents, by role, from that role's
     /// own nested policy (`cfg.tls.server`/`cfg.tls.client` — the other role's half is always
     /// present on the wire too, per `device.rs`'s doc comment, but never consulted here).
-    pub fn from_config(cfg: &OcppSecurityConfig, role: OcppRole) -> SecurityLevel {
+    pub fn from_config(cfg: &OcppSecurityConfig, role: OcppRole) -> TlsLevel {
         // OC-R-126: the level is decided by matching the role's own policy variant directly,
         // never by comparing against an all-unset field-presence baseline -- the variant *is*
         // the state (api-contract.md §9.1). `Ephemeral` (OC-R-095's "nothing configured, fall
         // back and log" identity) still resolves to `Tls` here, same as `SelfSigned`/`Files`:
         // it is distinguished from `None {}` by the outer `mode`, not by which identity a `Tls`
         // policy carries.
-        let tls_level = match role {
+        match role {
             OcppRole::Client => match &cfg.tls.client {
-                ClientTlsPolicy::Mutual { .. } => Some(SecurityLevel::MutualTls),
-                ClientTlsPolicy::Tls { .. } => Some(SecurityLevel::Tls),
-                ClientTlsPolicy::None {} => None,
+                ClientTlsPolicy::Mutual { .. } => TlsLevel::MutualTls,
+                ClientTlsPolicy::Tls { .. } => TlsLevel::Tls,
+                ClientTlsPolicy::None {} => TlsLevel::Off,
             },
             OcppRole::Server => match &cfg.tls.server {
-                ServerTlsPolicy::Mutual { .. } => Some(SecurityLevel::MutualTls),
-                ServerTlsPolicy::Tls { .. } => Some(SecurityLevel::Tls),
-                ServerTlsPolicy::None {} => None,
+                ServerTlsPolicy::Mutual { .. } => TlsLevel::MutualTls,
+                ServerTlsPolicy::Tls { .. } => TlsLevel::Tls,
+                ServerTlsPolicy::None {} => TlsLevel::Off,
             },
-        };
-        tls_level.unwrap_or(if cfg.username.is_some() {
-            SecurityLevel::BasicAuth
-        } else {
-            SecurityLevel::None
-        })
+        }
     }
 
     /// Build the active role's resolved policy from raw field text and toggle state (OC-R-111/
@@ -107,7 +114,8 @@ impl SecurityLevel {
     /// is left at [`OcppSecurityConfig::default`]'s placeholder — the caller
     /// (`OcppSetupDialog::resolve`) overwrites that half from the original config, if any, so a
     /// role toggle preserves the other role's previously-saved settings. Basic Auth fields
-    /// (`username`/`password`) are role-independent and always set at `BasicAuth` level or above.
+    /// (`username`/`password`) are role-independent and gated on `basic_auth` alone (OC-R-128),
+    /// never on `self`.
     pub fn build_config(
         self,
         role: OcppRole,
@@ -116,6 +124,7 @@ impl SecurityLevel {
         let SecurityInputs {
             username,
             password,
+            basic_auth,
             cert_file,
             key_file,
             client_cert_file,
@@ -130,31 +139,24 @@ impl SecurityLevel {
             let t = s.trim();
             (!t.is_empty()).then(|| t.to_string())
         };
-        let basic = self >= SecurityLevel::BasicAuth;
-        let tls = self >= SecurityLevel::Tls;
-        let mtls = self == SecurityLevel::MutualTls;
+        let mtls = self == TlsLevel::MutualTls;
 
         let mut cfg = OcppSecurityConfig {
-            username: if basic { opt(username) } else { None },
-            password: if basic { opt(password) } else { None },
+            username: if basic_auth { opt(username) } else { None },
+            password: if basic_auth { opt(password) } else { None },
             ..OcppSecurityConfig::default()
         };
 
         match role {
             OcppRole::Server => {
-                // Below `Tls`, `cert_file`/`key_file` are not a visible field for this level (a
-                // `BasicAuth`-only server still resolves *some* `ServerTlsPolicy`, per
-                // `OcppSecurityConfig`'s always-present-on-the-wire shape, but never from stale
-                // text a lower level never showed).
-                let (cert_file, key_file) = if tls {
-                    (opt(cert_file), opt(key_file))
-                } else {
-                    (None, None)
-                };
+                if self == TlsLevel::Off {
+                    cfg.tls.server = ServerTlsPolicy::None {};
+                    return Ok(cfg);
+                }
                 let identity = if self_signed {
                     CertSource::SelfSigned {}
                 } else {
-                    match (cert_file, key_file) {
+                    match (opt(cert_file), opt(key_file)) {
                         (Some(c), Some(k)) => CertSource::Files {
                             cert_file: c,
                             key_file: k,
@@ -189,6 +191,10 @@ impl SecurityLevel {
                 };
             }
             OcppRole::Client => {
+                if self == TlsLevel::Off {
+                    cfg.tls.client = ClientTlsPolicy::None {};
+                    return Ok(cfg);
+                }
                 let verification = if skip_verify {
                     CertVerification::Skip {}
                 } else if root_store {
@@ -234,26 +240,25 @@ impl SecurityLevel {
         Ok(cfg)
     }
 
-    /// Index into the `security` selection's value list (declaration order above).
+    /// Index into the `tls_level` selection's value list (declaration order above).
     pub(super) fn index(self) -> usize {
         match self {
-            SecurityLevel::None => 0,
-            SecurityLevel::BasicAuth => 1,
-            SecurityLevel::Tls => 2,
-            SecurityLevel::MutualTls => 3,
+            TlsLevel::Off => 0,
+            TlsLevel::Tls => 1,
+            TlsLevel::MutualTls => 2,
         }
     }
 }
 
 /// Check every required credential/certificate file is present and exists on disk. `level` has
-/// already been checked `>= Tls` for the server role by the caller. `cfg` is assumed
+/// already been checked `!= Off` for the server role by the caller. `cfg` is assumed
 /// already-resolved (the "CA list required" and "cert/key required unless self-signed" *shape*
-/// errors are raised by [`SecurityLevel::build_config`] itself, since only it has the raw toggle
+/// errors are raised by [`TlsLevel::build_config`] itself, since only it has the raw toggle
 /// state needed to phrase them helpfully) — this only adds the file-existence check on top.
 pub(super) fn validate_security(
     cfg: &OcppSecurityConfig,
     role: OcppRole,
-    level: SecurityLevel,
+    level: TlsLevel,
     file_exists: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
     let exists = |label: &str, path: &str| -> Result<(), String> {
@@ -272,7 +277,7 @@ pub(super) fn validate_security(
                 ServerTlsPolicy::None {} => &CertSource::Ephemeral {},
             };
             // OC-R-110: Self-Signed needs no cert/key files.
-            if level >= SecurityLevel::Tls && !matches!(identity, CertSource::SelfSigned {}) {
+            if level != TlsLevel::Off && !matches!(identity, CertSource::SelfSigned {}) {
                 match identity {
                     CertSource::Files {
                         cert_file,
@@ -287,7 +292,7 @@ pub(super) fn validate_security(
                     CertSource::SelfSigned {} => unreachable!("excluded by the outer !matches!"),
                 }
             }
-            if level == SecurityLevel::MutualTls
+            if level == TlsLevel::MutualTls
                 && let ServerTlsPolicy::Mutual { verification, .. } = &cfg.tls.server
             {
                 match verification {
@@ -318,7 +323,7 @@ pub(super) fn validate_security(
                     exists("CA file", ca)?;
                 }
             }
-            if level == SecurityLevel::MutualTls
+            if level == TlsLevel::MutualTls
                 && let ClientTlsPolicy::Mutual { identity, .. } = &cfg.tls.client
                 && let CertSource::Files {
                     cert_file,
@@ -339,24 +344,19 @@ mod tests {
     use crate::module::ocpp::config::device::OcppTlsConfig;
 
     #[test]
-    /// UI-R-049 — `SecurityLevel::BasicAuth` collapses to `EffectiveTlsLevel::Off` alongside
-    /// `None`: every predicate the shared widget owns only ever tests `>= Tls`/`== MutualTls`,
-    /// never distinguishing `None` from `BasicAuth`.
-    fn ut_effective_tls_level_from_security_level() {
+    /// UI-R-049 — `TlsLevel` maps 1:1 onto `EffectiveTlsLevel`, shared with the Modbus dialog's
+    /// TLS section.
+    fn ut_effective_tls_level_from_tls_level() {
         assert_eq!(
-            EffectiveTlsLevel::from(SecurityLevel::None),
+            EffectiveTlsLevel::from(TlsLevel::Off),
             EffectiveTlsLevel::Off
         );
         assert_eq!(
-            EffectiveTlsLevel::from(SecurityLevel::BasicAuth),
-            EffectiveTlsLevel::Off
-        );
-        assert_eq!(
-            EffectiveTlsLevel::from(SecurityLevel::Tls),
+            EffectiveTlsLevel::from(TlsLevel::Tls),
             EffectiveTlsLevel::Tls
         );
         assert_eq!(
-            EffectiveTlsLevel::from(SecurityLevel::MutualTls),
+            EffectiveTlsLevel::from(TlsLevel::MutualTls),
             EffectiveTlsLevel::MutualTls
         );
     }
@@ -374,6 +374,7 @@ mod tests {
         SecurityInputs {
             username,
             password,
+            basic_auth: true,
             cert_file,
             key_file,
             client_cert_file,
@@ -386,38 +387,14 @@ mod tests {
         }
     }
 
-    // --- SecurityLevel::from_config -----------------------------------------------------------
+    // --- TlsLevel::from_config -----------------------------------------------------------
 
     #[test]
-    /// UI-R-024 — the security fields load from a no-security config for both roles.
+    /// UI-R-024 — the TLS fields load `Off` from a no-TLS config for both roles.
     fn ut_from_config_none_both_roles() {
         let cfg = OcppSecurityConfig::default();
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Client),
-            SecurityLevel::None
-        );
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::None
-        );
-    }
-
-    #[test]
-    /// UI-R-024 — the security fields load from a basic-auth config for both roles.
-    fn ut_from_config_basic_auth_both_roles() {
-        let cfg = OcppSecurityConfig {
-            username: Some("u".into()),
-            password: Some("p".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Client),
-            SecurityLevel::BasicAuth
-        );
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::BasicAuth
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Client), TlsLevel::Off);
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Server), TlsLevel::Off);
     }
 
     #[test]
@@ -434,10 +411,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Client),
-            SecurityLevel::Tls
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Client), TlsLevel::Tls);
     }
 
     #[test]
@@ -455,10 +429,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::Tls
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Server), TlsLevel::Tls);
     }
 
     #[test]
@@ -477,15 +448,12 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Client),
-            SecurityLevel::Tls
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Client), TlsLevel::Tls);
     }
 
     #[test]
     /// OC-R-126 — a server `Tls` policy with a `SelfSigned` identity is still `Tls`, never
-    /// falling through to `None`/`BasicAuth`: the variant is the state, distinguishable from the
+    /// falling through to `Off`: the variant is the state, distinguishable from the
     /// OC-R-095 `Ephemeral` fallback by construction rather than by a "was anything configured"
     /// comparison.
     fn ut_from_config_tls_server_self_signed_is_still_tls() {
@@ -498,10 +466,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::Tls
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Server), TlsLevel::Tls);
     }
 
     #[test]
@@ -519,10 +484,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::Tls
-        );
+        assert_eq!(TlsLevel::from_config(&cfg, OcppRole::Server), TlsLevel::Tls);
     }
 
     #[test]
@@ -544,8 +506,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Client),
-            SecurityLevel::MutualTls
+            TlsLevel::from_config(&cfg, OcppRole::Client),
+            TlsLevel::MutualTls
         );
     }
 
@@ -565,17 +527,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            SecurityLevel::from_config(&cfg, OcppRole::Server),
-            SecurityLevel::MutualTls
+            TlsLevel::from_config(&cfg, OcppRole::Server),
+            TlsLevel::MutualTls
         );
     }
 
-    // --- SecurityLevel::build_config -----------------------------------------------------------
+    // --- TlsLevel::build_config -----------------------------------------------------------
 
     #[test]
-    /// UI-R-024 — building the config drops fields not visible at the chosen security level.
-    fn ut_build_config_drops_fields_not_visible_at_level() {
-        let cfg = SecurityLevel::BasicAuth
+    /// OC-R-127 — selector `Off` resolves the server role's policy to `None {}`, reading no
+    /// cert/key text at all even if present.
+    fn ut_selector_off_resolves_none_policy_server() {
+        let cfg = TlsLevel::Off
             .build_config(
                 OcppRole::Server,
                 inputs(
@@ -590,20 +553,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cfg.username.as_deref(), Some("u"));
-        assert_eq!(cfg.password.as_deref(), Some("p"));
-        assert_eq!(
-            cfg.tls.server,
-            ServerTlsPolicy::Tls {
-                identity: CertSource::Ephemeral {}
-            }
-        );
+        assert_eq!(cfg.tls.server, ServerTlsPolicy::None {});
+    }
+
+    #[test]
+    /// OC-R-127 — selector `Off` resolves the client role's policy to `None {}`.
+    fn ut_selector_off_resolves_none_policy_client() {
+        let cfg = TlsLevel::Off
+            .build_config(OcppRole::Client, inputs("", "", "", "", "", "", &[]))
+            .unwrap();
+        assert_eq!(cfg.tls.client, ClientTlsPolicy::None {});
     }
 
     #[test]
     /// OC-R-113 — a mutual-TLS server build parses the comma-separated CA list and sets a
     /// `Mutual` policy with `CaFiles{ca_files}`.
     fn ut_build_config_mutual_tls_server_parses_ca_list() {
-        let cfg = SecurityLevel::MutualTls
+        let cfg = TlsLevel::MutualTls
             .build_config(
                 OcppRole::Server,
                 inputs(
@@ -630,7 +596,7 @@ mod tests {
     /// OC-R-113 — a mutual-TLS server build with an empty CA list and skip-verify off is a
     /// validation error.
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
-        let err = SecurityLevel::MutualTls
+        let err = TlsLevel::MutualTls
             .build_config(OcppRole::Server, inputs("", "", "cert", "key", "", "", &[]))
             .unwrap_err();
         assert!(err.contains("Client CA list is required"));
@@ -642,7 +608,7 @@ mod tests {
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
         let mut i = inputs("", "", "", "", "stale.crt", "stale.key", &[]);
         i.self_signed = true;
-        let cfg = SecurityLevel::MutualTls
+        let cfg = TlsLevel::MutualTls
             .build_config(OcppRole::Client, i)
             .unwrap();
         assert_eq!(
@@ -660,7 +626,7 @@ mod tests {
     /// UI-R-024 — a mutual-TLS client build keeps the client cert/key (and any trust-anchor CA
     /// file text set alongside it — the two are independent axes, both legal under mTLS).
     fn ut_build_config_mutual_tls_client_keeps_client_cert_key() {
-        let cfg = SecurityLevel::MutualTls
+        let cfg = TlsLevel::MutualTls
             .build_config(
                 OcppRole::Client,
                 inputs("", "", "", "", "ccert", "ckey", &["ca".to_string()]),
@@ -687,9 +653,7 @@ mod tests {
         let list = ["ca1.pem".to_string()];
         let mut i = inputs("", "", "", "", "", "", &list);
         i.root_store = true;
-        let cfg = SecurityLevel::Tls
-            .build_config(OcppRole::Client, i)
-            .unwrap();
+        let cfg = TlsLevel::Tls.build_config(OcppRole::Client, i).unwrap();
         assert_eq!(
             cfg.tls.client,
             ClientTlsPolicy::Tls {
@@ -706,10 +670,23 @@ mod tests {
     fn ut_cs_root_store_off_empty_list_is_validation_error() {
         let mut i = inputs("", "", "", "", "", "", &[]);
         i.root_store = false;
-        let err = SecurityLevel::Tls
-            .build_config(OcppRole::Client, i)
-            .unwrap_err();
+        let err = TlsLevel::Tls.build_config(OcppRole::Client, i).unwrap_err();
         assert!(err.contains("Root Store is Off"));
+    }
+
+    #[test]
+    /// OC-R-128 — Basic Auth Off leaves `username`/`password` both unset even with non-empty
+    /// text present, regardless of the TLS selector (the On case is covered at
+    /// setup_dialog.rs's `ut_basic_auth_on_resolves_credentials`). Uses `Tls`, not `Off`, so the
+    /// gate is proven to be `basic_auth` alone, not the level: an `Off` fixture cannot
+    /// distinguish the two, since the old level-derived rule and the independent toggle happen
+    /// to agree there.
+    fn ut_basic_auth_off_unsets_credentials_regardless_of_text() {
+        let mut i = inputs("u", "p", "", "", "", "", &[]);
+        i.basic_auth = false;
+        let cfg = TlsLevel::Tls.build_config(OcppRole::Client, i).unwrap();
+        assert_eq!(cfg.username, None);
+        assert_eq!(cfg.password, None);
     }
 
     // --- validate_security -----------------------------------------------------------------------
@@ -726,7 +703,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_security(&cfg, OcppRole::Server, SecurityLevel::Tls, &|_| false).is_ok());
+        assert!(validate_security(&cfg, OcppRole::Server, TlsLevel::Tls, &|_| false).is_ok());
     }
 
     #[test]
@@ -744,12 +721,9 @@ mod tests {
             },
             ..Default::default()
         };
+        assert!(validate_security(&cfg, OcppRole::Server, TlsLevel::MutualTls, &|_| true).is_ok());
         assert!(
-            validate_security(&cfg, OcppRole::Server, SecurityLevel::MutualTls, &|_| true).is_ok()
-        );
-        assert!(
-            validate_security(&cfg, OcppRole::Server, SecurityLevel::MutualTls, &|_| false)
-                .is_err()
+            validate_security(&cfg, OcppRole::Server, TlsLevel::MutualTls, &|_| false).is_err()
         );
     }
 
@@ -766,9 +740,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(
-            validate_security(&cfg, OcppRole::Server, SecurityLevel::MutualTls, &|_| false).is_ok()
-        );
+        assert!(validate_security(&cfg, OcppRole::Server, TlsLevel::MutualTls, &|_| false).is_ok());
     }
 
     #[test]
@@ -785,8 +757,8 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(validate_security(&cfg, OcppRole::Client, SecurityLevel::Tls, &|_| true).is_ok());
-        assert!(validate_security(&cfg, OcppRole::Client, SecurityLevel::Tls, &|_| false).is_err());
+        assert!(validate_security(&cfg, OcppRole::Client, TlsLevel::Tls, &|_| true).is_ok());
+        assert!(validate_security(&cfg, OcppRole::Client, TlsLevel::Tls, &|_| false).is_err());
     }
 
     #[test]
@@ -807,12 +779,9 @@ mod tests {
             },
             ..Default::default()
         };
+        assert!(validate_security(&cfg, OcppRole::Client, TlsLevel::MutualTls, &|_| true).is_ok());
         assert!(
-            validate_security(&cfg, OcppRole::Client, SecurityLevel::MutualTls, &|_| true).is_ok()
-        );
-        assert!(
-            validate_security(&cfg, OcppRole::Client, SecurityLevel::MutualTls, &|_| false)
-                .is_err()
+            validate_security(&cfg, OcppRole::Client, TlsLevel::MutualTls, &|_| false).is_err()
         );
     }
 
@@ -831,8 +800,6 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(
-            validate_security(&cfg, OcppRole::Client, SecurityLevel::MutualTls, &|_| false).is_ok()
-        );
+        assert!(validate_security(&cfg, OcppRole::Client, TlsLevel::MutualTls, &|_| false).is_ok());
     }
 }

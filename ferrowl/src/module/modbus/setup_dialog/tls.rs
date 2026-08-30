@@ -30,8 +30,9 @@ impl ToLabel for TlsLevel {
     }
 }
 
-/// Modbus's TLS level has no credential tier (unlike OCPP's `SecurityLevel::BasicAuth`), so this
-/// mapping is a plain 1:1 rename rather than a collapse.
+/// Modbus's TLS level has no credential tier (OCPP's Basic Authentication is a separate,
+/// independent selection, not a level of its own `TlsLevel`), so this mapping is a plain 1:1
+/// rename rather than a collapse.
 impl From<TlsLevel> for EffectiveTlsLevel {
     fn from(level: TlsLevel) -> Self {
         match level {
@@ -298,7 +299,8 @@ mod tests {
 
     #[test]
     /// UI-R-049 — `TlsLevel` collapses 1:1 into the shared widget's level type, since Modbus's
-    /// own level has no credential tier to fold away (unlike OCPP's `SecurityLevel`).
+    /// own level has no credential tier to fold away (OCPP's Basic Authentication is a separate
+    /// selection, independent of its own `TlsLevel`).
     fn ut_effective_tls_level_from_tls_level() {
         assert_eq!(
             EffectiveTlsLevel::from(TlsLevel::Off),

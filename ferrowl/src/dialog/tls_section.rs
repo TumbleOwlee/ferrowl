@@ -36,12 +36,12 @@ use crate::dialog::path_suggest::FsPathProvider;
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use std::fmt::Debug;
 
-/// TLS/mTLS level, collapsed from either dialog's own richer level type. `Off` covers both "no
-/// TLS at all" (transport doesn't carry TLS / protocol isn't wss) and, for OCPP specifically,
-/// `SecurityLevel::None`/`SecurityLevel::BasicAuth` (every predicate this widget owns tests only
-/// `>= Tls` or `== MutualTls`, never distinguishing `None` from `BasicAuth` — `show_credentials`,
-/// the one OCPP predicate that does distinguish them, stays on `OcppSetupDialog` itself, never
-/// becomes a `TlsSection` concern).
+/// TLS/mTLS level, collapsed from either dialog's own richer level type (Modbus's and OCPP's
+/// `TlsLevel` enums are both distinct types of the same name, one per dialog's private `tls`/
+/// `security` module, each mapping onto this one 1:1). `Off` covers "no TLS at all" (transport
+/// doesn't carry TLS / protocol isn't wss); OCPP's independent Basic Authentication axis never
+/// factors in here — `show_credentials`, the one OCPP predicate that reads it, stays on
+/// `OcppSetupDialog` itself, never becomes a `TlsSection` concern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum EffectiveTlsLevel {
     #[default]
@@ -50,13 +50,13 @@ pub enum EffectiveTlsLevel {
     MutualTls,
 }
 
-// `impl From<TlsLevel> for EffectiveTlsLevel` / `impl From<SecurityLevel> for EffectiveTlsLevel`
+// The two `impl From<TlsLevel> for EffectiveTlsLevel` impls (one per dialog's own `TlsLevel`)
 // are *not* defined here: `crate::module::modbus::setup_dialog::tls` and
 // `crate::module::ocpp::setup_dialog::security` are both declared as a private `mod` (not `pub
-// mod`) on their owning dialogs, so `TlsLevel`/`SecurityLevel` (themselves `pub enum`s) are
-// unreachable from this file — the enums' own visibility doesn't help when the module path to
-// them is private. These `From` impls belong next to `TlsLevel` in `setup_dialog/tls.rs` and next
-// to `SecurityLevel` in `setup_dialog/security.rs` instead, the only files that can reach them.
+// mod`) on their owning dialogs, so each `TlsLevel` (itself a `pub enum`) is unreachable from
+// this file — the enum's own visibility doesn't help when the module path to it is private.
+// These `From` impls belong next to their own `TlsLevel`, in `setup_dialog/tls.rs` (Modbus) and
+// `setup_dialog/security.rs` (OCPP) respectively, the only files that can reach them.
 
 /// "Generate an ephemeral self-signed certificate/identity" toggle, offered whenever `Tls`/
 /// `MutualTls` is selected. The *same* widget field is reused for both roles (they are never
@@ -772,7 +772,7 @@ mod tests {
     /// MB-R-104..112 — a server TLS section at `Tls` with Self-Signed toggled On extracts
     /// `self_signed: true`, regardless of whatever the (mTLS-only) client-CA list holds.
     /// Resolving this flag into `ServerTlsPolicy::Tls { identity: CertSource::SelfSigned {} }`
-    /// is `TlsLevel::build_config`'s/`SecurityLevel::build_config`'s job (see their own tests);
+    /// is each dialog's own `TlsLevel::build_config`'s job (see their own tests);
     /// this layer only extracts the raw toggle state uniformly.
     fn ut_extract_self_signed_flag_set_regardless_of_client_ca_list() {
         let mut section = TlsSection::new();
@@ -797,7 +797,7 @@ mod tests {
         assert!(extracted.self_signed);
         // The stored text survives the toggle -- extract still reports it, since excluding it
         // from the resolved identity is the outer dialog's `build_config`'s job, not `extract`'s
-        // (see `TlsLevel`/`SecurityLevel`'s own `build_config` tests for that resolution).
+        // (see each dialog's own `TlsLevel::build_config` tests for that resolution).
         assert_eq!(extracted.cert_file, "s.crt");
         assert_eq!(extracted.key_file, "s.key");
     }
@@ -806,7 +806,7 @@ mod tests {
     /// MB-R-135/OC-R-111 — toggling Skip-Verify On hides the Root Store toggle and the shared
     /// CA list (`show_root_store_row`/`show_peer_verify_row` both false), while the extracted
     /// list/toggle state is preserved on the widgets (only excluded downstream, by
-    /// `TlsLevel`/`SecurityLevel`'s own `build_config`).
+    /// each dialog's own `TlsLevel::build_config`).
     fn ut_client_skip_verify_hides_root_store_and_list() {
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
