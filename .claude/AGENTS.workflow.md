@@ -10,7 +10,7 @@ Trigger: `AGENTS.md`'s `## Workflow`. Every heading below is one `extract-sectio
 
 - Replaces any generic workflow skill (`/workflow`); `docs/specs/` is already the PRD and design record.
 - Branch off `main`, never commit to `main`. `<type>/<slug>`, type ∈ {`feat`, `fix`, `docs`}. **Enforced:** `.claude/scripts/hook-guard-shell.sh` denies `git commit` on `main` and `git push` targeting `main`.
-- **Orchestrator never changes spec or code and never reads either.** It spawns agents, relays one question at a time between agent and user, runs git/`gh` plumbing (worktree add/remove, merge, push, `gh … --body-file`), runs `.claude/scripts/gauntlet.sh`, moves cards. Every other output — spec text, issue body, plan, code, review, PR body — is a file an agent wrote under `artifacts/<slug>/` or in a worktree. Orchestrator hands paths around, never contents; a user wanting detail is pointed at the path. See *Agent hand-off*.
+- **Orchestrator never changes spec or code and never reads either.** It spawns agents, relays one question at a time between agent and user, runs git/`gh` plumbing (worktree add/remove, merge, push, `gh … --body-file`), runs `.claude/scripts/gauntlet.sh`, moves cards. Every other output — spec text, issue body, plan, code, review, PR body — is a file an agent wrote under `artifacts/<slug>/` or in a worktree. Orchestrator hands paths around, never contents; a file needing user approval is opened with `.claude/scripts/show-file.sh`, never pasted. See *Agent hand-off*.
 - **Gate 1 is a dialog with the user, drafted by `spec-author`.** Existing spec + goal, nothing about current code. No worktree/branch until gate 2 approved.
 - **No spec effect (docs-only, non-functional, no observable-behavior change) → skip gate 1**, go to gate 2. No `spec-diff.md`, no `gate1` on the parent card. Gate 2 planning finds a spec gap → stop, run gate 1, continue.
 - Gate 2 onward delegates to agents. **All agents Sonnet or better** — weaker models stop mid-plan, commit stubs as "green", report hanging tests as verified.
@@ -96,7 +96,7 @@ status=<token> file=<path> [stage=s<n>] [question=<one line>] [reason=<one line>
 | spec-implementer | `inreview` · `committed` · `blocked` · `spec-gap` | stage card (`stage=`) |
 | spec-reviewer | `clean` · `findings` (`count=` blockers, `stage=` list) | `artifacts/<slug>/review.md` |
 
-`question` = one decision for the user, carried verbatim in `question=`; orchestrator relays the answer to the **same** agent (`SendMessage`), never respawns. An agent returning more than the status line is told to move the rest into its file and answer again. User reads a file via its path (`extract-section.sh` for one heading); orchestrator never pastes file content.
+`question` = one decision for the user, carried verbatim in `question=`; orchestrator relays the answer to the **same** agent (`SendMessage`), never respawns. An agent returning more than the status line is told to move the rest into its file and answer again. When a status line names a file the user must approve (`spec-diff.md`, `issue.md`, `plan.md`, `review.md`, `pr.md`), orchestrator runs `sh .claude/scripts/show-file.sh <path>` before asking — opens the file in a viewer outside the context (tmux+glow, wslview, tmux+less, or a manual hint), prints one line, never the content. User pulls one heading with `extract-section.sh` when they want it in the conversation; orchestrator never pastes file content.
 
 Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gate 3).
 
