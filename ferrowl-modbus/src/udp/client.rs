@@ -1,4 +1,4 @@
-use crate::client_core::{ClientCore, ConnectAttempt};
+use crate::client_core::{BoxedConnect, ClientCore, spawn_client_task};
 use crate::udp::Config;
 use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, TcpError};
 
@@ -52,38 +52,17 @@ impl<T: KeyParams> ClientBuilder<T> {
         L: LogFn + Clone,
         S: LogFn + Clone,
     {
-        let config = self.config.clone();
-        let operations = self.operations.clone();
-        let memory = self.memory.clone();
-        let connected = ConnectedCell::default();
-        let connected_for_task = connected.clone();
-        let handle = tokio::task::spawn(async move {
-            ClientCore::run_reconnect_loop(
-                receiver,
-                log,
-                status,
-                operations,
-                memory,
-                move || {
-                    let config = config.clone();
-                    async move {
-                        let guard = config.read().await;
-                        let attempt = ConnectAttempt {
-                            reconnect: guard.reconnect,
-                            timeout_ms: guard.timeout_ms,
-                            delay_ms: guard.delay_ms,
-                            interval_ms: guard.interval_ms,
-                            client: Client::connect(&guard).await.map(|client| client.core),
-                        };
-                        drop(guard);
-                        attempt
-                    }
-                },
-                connected_for_task,
-            )
-            .await
-        });
-        Ok((handle, connected))
+        Ok(spawn_client_task(
+            self.config.clone(),
+            self.operations.clone(),
+            self.memory.clone(),
+            receiver,
+            log,
+            status,
+            move |cfg: &Config| -> BoxedConnect<'_, UdpTransport<rust_modbus::Tcp>, rust_modbus::Tcp> {
+                Box::pin(async move { Client::connect(cfg).await.map(|client| client.core) })
+            },
+        ))
     }
 }
 

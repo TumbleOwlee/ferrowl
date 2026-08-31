@@ -2,7 +2,8 @@
 //!
 //! Holds the framing-generic connect helpers for both transport families (`connect_serial` for
 //! `Rtu`/`Ascii` over a serial port, `connect_tcp_family` for `Tcp`/`RtuOverTcp`/`Ascii` over a
-//! socket) plus the read/run loop and command execution that follow a successful connect,
+//! socket), the `spawn_client_task`/`ClientTiming` pair every transport's `ClientBuilder::spawn`
+//! delegates to, and the read/run loop and command execution that follow a successful connect,
 //! identical across every transport once a `ClientCore` exists.
 
 use crate::common::serial_config_from;
@@ -21,11 +22,13 @@ use rust_modbus::{
 };
 use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 /// Outcome of one connection attempt, as reported by a transport's `connect` closure passed to
@@ -164,6 +167,120 @@ where
         Ok(Err(e)) => Err(TcpError::Error(e).into()),
         Err(e) => Err(TcpError::Timeout(e).into()),
     }
+}
+
+/// The four connect-loop timings every client config carries; the only fields
+/// `spawn_client_task` needs to read out of a transport-specific `Config`.
+pub(crate) trait ClientTiming {
+    fn reconnect(&self) -> bool;
+    fn timeout_ms(&self) -> usize;
+    fn delay_ms(&self) -> usize;
+    fn interval_ms(&self) -> usize;
+}
+
+impl ClientTiming for crate::rtu::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+impl ClientTiming for crate::tcp::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+impl ClientTiming for crate::udp::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+/// The connect callback's return type: a boxed future borrowing only the config guard.
+pub(crate) type BoxedConnect<'a, S, F> =
+    Pin<Box<dyn Future<Output = Result<ClientCore<S, F>, Error>> + Send + 'a>>;
+
+/// Spawns a client's reconnect loop as a tokio task and hands back its handle and
+/// [`ConnectedCell`]. `connect` is the only per-transport part: it receives the config under the
+/// read guard held for the whole attempt and yields a connected [`ClientCore`], exactly as each
+/// transport's `Client::connect` does.
+pub(crate) fn spawn_client_task<T, Cfg, L, St, C, S, F>(
+    config: Arc<RwLock<Cfg>>,
+    operations: Arc<RwLock<Vec<Operation>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
+    receiver: Receiver<Command>,
+    log: L,
+    status: St,
+    connect: C,
+) -> (JoinHandle<Result<(), Error>>, crate::ConnectedCell)
+where
+    T: KeyParams,
+    Cfg: ClientTiming + Send + Sync + 'static,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+    S: ClientTransport<F> + Send + 'static,
+    F: ClientFraming + Send + 'static,
+    F::Header: Send,
+    C: for<'a> Fn(&'a Cfg) -> BoxedConnect<'a, S, F> + Send + Sync + 'static,
+{
+    let connected = crate::ConnectedCell::default();
+    let connected_for_task = connected.clone();
+    let connect = Arc::new(connect);
+    let handle = tokio::task::spawn(async move {
+        ClientCore::run_reconnect_loop(
+            receiver,
+            log,
+            status,
+            operations,
+            memory,
+            move || {
+                let config = config.clone();
+                let connect = connect.clone();
+                async move {
+                    let guard = config.read().await;
+                    let attempt = ConnectAttempt {
+                        reconnect: guard.reconnect(),
+                        timeout_ms: guard.timeout_ms(),
+                        delay_ms: guard.delay_ms(),
+                        interval_ms: guard.interval_ms(),
+                        client: connect(&guard).await,
+                    };
+                    drop(guard);
+                    attempt
+                }
+            },
+            connected_for_task,
+        )
+        .await
+    });
+    (handle, connected)
 }
 
 impl<S, F> ClientCore<S, F>
