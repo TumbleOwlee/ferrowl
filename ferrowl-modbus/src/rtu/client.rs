@@ -1,4 +1,4 @@
-use crate::client_core::{ClientCore, ConnectAttempt, connect_serial};
+use crate::client_core::{BoxedConnect, ClientCore, connect_serial, spawn_client_task};
 use crate::rtu::Config;
 use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, PathConflictCell};
 
@@ -59,42 +59,23 @@ impl<T: KeyParams> ClientBuilder<T> {
         L: LogFn + Clone,
         S: LogFn + Clone,
     {
-        let config = self.config.clone();
-        let operations = self.operations.clone();
-        let memory = self.memory.clone();
         let path_conflict = self.path_conflict.clone();
-        let connected = ConnectedCell::default();
-        let connected_for_task = connected.clone();
-        let handle = tokio::task::spawn(async move {
-            ClientCore::run_reconnect_loop(
-                receiver,
-                log,
-                status,
-                operations,
-                memory,
-                move || {
-                    let config = config.clone();
-                    let path_conflict = path_conflict.clone();
-                    async move {
-                        let guard = config.read().await;
-                        let attempt = ConnectAttempt {
-                            reconnect: guard.reconnect,
-                            timeout_ms: guard.timeout_ms,
-                            delay_ms: guard.delay_ms,
-                            interval_ms: guard.interval_ms,
-                            client: Client::connect(&guard, &path_conflict)
-                                .await
-                                .map(|client| client.core),
-                        };
-                        drop(guard);
-                        attempt
-                    }
-                },
-                connected_for_task,
-            )
-            .await
-        });
-        Ok((handle, connected))
+        Ok(spawn_client_task(
+            self.config.clone(),
+            self.operations.clone(),
+            self.memory.clone(),
+            receiver,
+            log,
+            status,
+            move |cfg: &Config| -> BoxedConnect<'_, FrameTransport<SerialStream, Rtu>, Rtu> {
+                let path_conflict = path_conflict.clone();
+                Box::pin(async move {
+                    Client::connect(cfg, &path_conflict)
+                        .await
+                        .map(|client| client.core)
+                })
+            },
+        ))
     }
 }
 
