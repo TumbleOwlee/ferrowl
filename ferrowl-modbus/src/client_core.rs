@@ -101,7 +101,8 @@ pub(crate) fn connect_serial<F>(
     path_conflict: &PathConflictCell,
 ) -> Result<ClientCore<FrameTransport<SerialStream, F>, F>, Error>
 where
-    F: Framing + ClientFraming,
+    F: Framing + ClientFraming + Send,
+    F::Header: Sync,
 {
     let serial = serial_config_from(
         config.baud_rate,
@@ -134,7 +135,8 @@ pub(crate) async fn connect_tcp_family<F>(
     cache: &SelfSignedCache,
 ) -> Result<ClientCore<FrameTransport<ClientStream, F>, F>, Error>
 where
-    F: Framing + ClientFraming,
+    F: Framing + ClientFraming + Send,
+    F::Header: Sync,
 {
     let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
         .parse()

@@ -65,6 +65,7 @@ pub struct TcpFamilyDownstream<F>(DownstreamHandle<FrameTransport<ClientStream, 
 impl<F> TcpFamilyDownstream<F>
 where
     F: ClientFraming + Send + 'static,
+    F::Header: Sync,
 {
     /// BR-R-007 — forward one decoded upstream request to the downstream connection.
     pub async fn forward(
@@ -88,6 +89,7 @@ where
 pub fn spawn<F>(config: tcp::Config, log: impl LogFn + Clone + 'static) -> TcpFamilyDownstream<F>
 where
     F: FamilyConnect + Send + 'static,
+    F::Header: Sync,
 {
     let reconnect = config.reconnect;
     // One cache for this downstream's whole lifetime (reused across reconnect attempts,
