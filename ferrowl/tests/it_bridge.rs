@@ -14,21 +14,13 @@ fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ferrowl"))
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 #[test]
 /// BR-R-001..BR-R-006, BR-R-013 — a bridge with no downstream listening still starts (BR-R-013's
 /// setup-failure list does not include a downstream connect failure)
 /// and, on its `--duration` deadline, exits 0.
 fn it_bridge_starts_with_unreachable_downstream_and_exits_clean_on_deadline() {
-    let upstream_port = free_port();
-    let downstream_port = free_port();
+    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
     let output = bin()
         .args([
             "bridge",
@@ -54,7 +46,7 @@ fn it_bridge_starts_with_unreachable_downstream_and_exits_clean_on_deadline() {
 #[test]
 /// BR-R-003, BR-R-013 — missing `--downstream` makes the bridge exit 1 without starting.
 fn it_bridge_fails_hard_on_a_missing_downstream_flag() {
-    let upstream_port = free_port();
+    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
     let output = bin()
         .args([
             "bridge",

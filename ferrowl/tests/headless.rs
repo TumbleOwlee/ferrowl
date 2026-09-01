@@ -64,10 +64,11 @@ fn write_monitor_device(path: &std::path::Path) {
 /// with a monitor module on a non-existent serial path still starts and reaches its
 /// `--duration` deadline cleanly.
 fn it_headless_run_starts_monitor_module() {
-    let device_path = std::env::temp_dir().join("ferrowl_it_headless_monitor_device.toml");
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_it_headless_monitor");
+    let device_path = dir.join("device.toml");
     write_monitor_device(&device_path);
 
-    let session_path = std::env::temp_dir().join("ferrowl_it_headless_monitor_session.toml");
+    let session_path = dir.join("session.toml");
     std::fs::write(
         &session_path,
         format!(
@@ -120,8 +121,8 @@ baud_rate = 9600
 /// resolvable via `--session` (typed `ModuleSpec`) — the `--module key=val` flag's parser
 /// deliberately only accepts `client`/`server` (CL-R territory, out of this plan's scope).
 fn it_headless_fails_on_monitor_module_with_bad_device_path() {
-    let session_path =
-        std::env::temp_dir().join("ferrowl_it_headless_monitor_bad_device_session.toml");
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_it_headless_monitor_bad");
+    let session_path = dir.join("bad_device_session.toml");
     std::fs::write(
         &session_path,
         r#"

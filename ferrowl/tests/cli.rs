@@ -102,16 +102,16 @@ fn it_sigint_is_a_clean_shutdown() {
 /// CL-R-012 — migrate is dispatched directly, exiting with its own code without starting the TUI
 /// or a headless run.
 fn it_migrate_exit_codes() {
-    let dir = std::env::temp_dir();
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_migrate");
 
     // Failure: an input path whose extension is neither .toml nor .json.
     let bad = bin()
         .args([
             "migrate",
             "-i",
-            "/tmp/ferrowl_migrate_input.bin",
+            dir.join("input.bin").to_str().unwrap(),
             "-o",
-            dir.join("ferrowl_migrate_bad_out.toml").to_str().unwrap(),
+            dir.join("bad_out.toml").to_str().unwrap(),
         ])
         .output()
         .expect("run migrate");
@@ -124,9 +124,9 @@ fn it_migrate_exit_codes() {
     );
 
     // Success: a default (empty) legacy config converts and is written out.
-    let input = dir.join("ferrowl_migrate_input.toml");
+    let input = dir.join("input.toml");
     std::fs::write(&input, "").unwrap();
-    let output = dir.join("ferrowl_migrate_out.toml");
+    let output = dir.join("out.toml");
     let ok = bin()
         .args([
             "migrate",
@@ -151,7 +151,7 @@ fn it_migrate_exit_codes() {
 /// so a JSON source migrates to a TOML destination (and vice-versa), version-stamped either way.
 /// CS-R-045 — migration produces a device config only, never a session file.
 fn it_migrate_cross_encoding_produces_device_config() {
-    let dir = std::env::temp_dir();
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_migrate_cross");
 
     // A minimal pre-rewrite config with one holding register and a contiguous range.
     let legacy_json = r#"{
@@ -162,9 +162,9 @@ fn it_migrate_cross_encoding_produces_device_config() {
     }"#;
 
     // JSON source → TOML destination: the two encodings are chosen independently.
-    let input = dir.join("ferrowl_migrate_cross_in.json");
+    let input = dir.join("in.json");
     std::fs::write(&input, legacy_json).unwrap();
-    let output = dir.join("ferrowl_migrate_cross_out.toml");
+    let output = dir.join("out.toml");
     let ok = bin()
         .args([
             "migrate",
@@ -199,9 +199,9 @@ fn it_migrate_cross_encoding_produces_device_config() {
     );
 
     // TOML source → JSON destination: the reverse direction is equally independent.
-    let input2 = dir.join("ferrowl_migrate_cross_in.toml");
+    let input2 = dir.join("in2.toml");
     std::fs::write(&input2, "").unwrap();
-    let output2 = dir.join("ferrowl_migrate_cross_out.json");
+    let output2 = dir.join("out2.json");
     let ok2 = bin()
         .args([
             "migrate",
