@@ -14,12 +14,12 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement IDs stable, append-only. Cite in commits and PRs.
-- One requirement, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only. Cite in commits and PRs.
+- One requirement or edge-case entry, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
 
 ## TDD — fixed order, every stage
 
-1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
+1. Write the test. Doc comment cites a requirement or edge-case ID (`/// MB-R-012 — …`).
 2. Run it, watch it fail for the right reason, report the failure. Wrong assertion / test-side compile error / premature pass proves nothing.
 3. Minimum implementation that passes.
 4. Refactor green.
@@ -38,13 +38,13 @@ Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workf
 
 | Task touches | Read | ID prefix |
 |---|---|---|
-| Modbus register codec, store, client/server (TCP/RTU) | [`docs/specs/modbus/`](./docs/specs/modbus/) | `MB-R-*` |
-| OCPP actions, CS/CSMS engine, versions 1.6/2.0.1/2.1, TLS/auth | [`docs/specs/ocpp/`](./docs/specs/ocpp/) | `OC-R-*` |
-| Lua scripting (`C_*` API, sim threads, sandbox) | [`docs/specs/scripting/`](./docs/specs/scripting/) | `SC-R-*` |
-| TUI widgets, dialogs, `:` commands, keybindings, code editor | [`docs/specs/tui/`](./docs/specs/tui/) | `UI-R-*` |
-| Config/session file format, save/load, `migrate` | [`docs/specs/config-session/`](./docs/specs/config-session/) | `CS-R-*` |
-| CLI flags, `ferrowl run` headless, exit codes | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) | `CL-R-*` |
-| Bridge mode: downstream/upstream Modbus relay (TCP/RTU) | [`docs/specs/bridge/`](./docs/specs/bridge/) | `BR-R-*` |
+| Modbus register codec, store, client/server (TCP/RTU) | [`docs/specs/modbus/`](./docs/specs/modbus/) | `MB-R-*`, `MB-E-*` |
+| OCPP actions, CS/CSMS engine, versions 1.6/2.0.1/2.1, TLS/auth | [`docs/specs/ocpp/`](./docs/specs/ocpp/) | `OC-R-*`, `OC-E-*` |
+| Lua scripting (`C_*` API, sim threads, sandbox) | [`docs/specs/scripting/`](./docs/specs/scripting/) | `SC-R-*`, `SC-E-*` |
+| TUI widgets, dialogs, `:` commands, keybindings, code editor | [`docs/specs/tui/`](./docs/specs/tui/) | `UI-R-*`, `UI-E-*` |
+| Config/session file format, save/load, `migrate` | [`docs/specs/config-session/`](./docs/specs/config-session/) | `CS-R-*`, `CS-E-*` |
+| CLI flags, `ferrowl run` headless, exit codes | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) | `CL-R-*`, `CL-E-*` |
+| Bridge mode: downstream/upstream Modbus relay (TCP/RTU) | [`docs/specs/bridge/`](./docs/specs/bridge/) | `BR-R-*`, `BR-E-*` |
 | Platforms, performance, security, versioning, testing conventions | [`docs/specs/non-functional-requirements.md`](./docs/specs/non-functional-requirements.md) | `NF-R-*` |
 | Crate graph, data flow, concurrency model | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | — |
 | Contribution workflow, conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | — |

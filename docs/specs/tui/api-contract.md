@@ -2,7 +2,7 @@
 
 Operator-facing surface: exhaustive `:` command list, every keybinding table by context/mode, code-editor mode/command set. Names, aliases, argument shapes, key mappings are contract and shall not change without a spec change.
 
-**Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (§1); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (§2); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
+**Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (``## 1. Generic `:` commands (app-level)``); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (``## 2. Module (protocol-specific) `:` commands``); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
 
 Dispatch: first token matched against the generic set; not in the set → forwarded to the active view. A generic name always wins over a same-named module command.
 
@@ -10,21 +10,21 @@ Dispatch: first token matched against the generic set; not in the set → forwar
 
 ## 1. Generic `:` commands (app-level)
 
-| Command | Aliases | Arguments | Effect (owned here) |
-|---|---|---|---|
-| `:quit` | `:q`, `:q!` | — | Stop and close the active tab; quit the app if it was the last |
-| `:qall` | `:qa`, `:qa!` | — | Quit the whole app immediately |
-| `:new` | `:n` | — | Open the new-module type selector |
-| `:load [path]` | `:l` | optional device-config path | Open the Modbus create dialog, config-path field pre-filled with `path` |
-| `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format from extension (`.toml`/`.json`) |
-| `:swap <i> <j>` | — | two tab indices | Swap tabs `i` and `j` (no-op if equal or out of range); non-numeric rejected |
-| `:session` | — | — | Open the session-level Lua scripts + sim-interval dialog |
-| `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support |
-| `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring |
+| Command | Aliases | Arguments | Effect (owned here) | Req |
+|---|---|---|---|---|
+| `:quit` | `:q`, `:q!` | — | Stop and close the active tab; quit the app if it was the last | UI-R-019 |
+| `:qall` | `:qa`, `:qa!` | — | Quit the whole app immediately | UI-R-019 |
+| `:new` | `:n` | — | Open the new-module type selector | UI-R-008, UI-R-024 |
+| `:load [path]` | `:l` | optional device-config path | Open the Modbus create dialog, config-path field pre-filled with `path` | UI-R-017 |
+| `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format from extension (`.toml`/`.json`) | UI-R-017 |
+| `:swap <i> <j>` | — | two tab indices | Swap tabs `i` and `j` (no-op if equal or out of range); non-numeric rejected | UI-R-017 |
+| `:session` | — | — | Open the session-level Lua scripts + sim-interval dialog | UI-R-017 |
+| `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support | UI-R-017 |
+| `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring | UI-R-017, UI-R-045 |
 
-- `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (§2), where `:log <file>` sets/clears the module's file sink.
-- Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog.
-- Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning).
+- `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (``## 2. Module (protocol-specific) `:` commands``), where `:log <file>` sets/clears the module's file sink.
+- Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog (UI-R-018).
+- Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning) (UI-R-018).
 
 ## 2. Module (protocol-specific) `:` commands
 
@@ -32,75 +32,75 @@ Forwarded to the active view; **semantics owned by the protocol area**. Each vie
 
 ### 2.1 Modbus module
 
-| Command | Arguments | Purpose (→ modbus) |
-|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog |
-| `:add` / `:a` | — | Open the add-register dialog |
-| `:start` | — | Start the module (connect/bind) |
-| `:stop` | — | Stop the module |
-| `:restart` | — | Stop then start |
-| `:reload` | — | Reload the device config from disk and restart |
-| `:compact` | — | Toggle compact table rows |
-| `:set <register> <value>` | register name, value (name may be `"quoted"` to allow spaces) | Write a value into a register → **modbus** owns type/range/codec semantics and store-vs-wire behavior |
-| `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file |
-| `:log <file>` | file base path | Set the module's log-file sink base |
-| `:script` | — | Open the Lua script manager dialog |
-| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears |
+| Command | Arguments | Purpose (→ modbus) | Req |
+|---|---|---|---|
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:add` / `:a` | — | Open the add-register dialog | UI-R-018, UI-R-024 |
+| `:start` | — | Start the module (connect/bind) | UI-R-018 |
+| `:stop` | — | Stop the module | UI-R-018 |
+| `:restart` | — | Stop then start | UI-R-018 |
+| `:reload` | — | Reload the device config from disk and restart | UI-R-018 |
+| `:compact` | — | Toggle compact table rows | UI-R-018 |
+| `:set <register> <value>` | register name, value (name may be `"quoted"` to allow spaces) | Write a value into a register → **modbus** owns type/range/codec semantics and store-vs-wire behavior | UI-R-018 |
+| `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file | UI-R-018 |
+| `:log <file>` | file base path | Set the module's log-file sink base | UI-R-018 |
+| `:script` | — | Open the Lua script manager dialog | UI-R-018 |
+| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears | UI-R-018 |
 
 Modbus monitor module (`role = monitor`, MB-R-140–145):
 
-| Command | Arguments | Purpose (→ modbus) |
-|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog |
-| `:add` / `:a` | — | Open the add-register-interpretation dialog (UI-R-061) |
-| `:start` | — | Start the module (open the serial port receive-only) |
-| `:stop` | — | Stop the module |
-| `:restart` | — | Stop then start |
-| `:reload` | — | Reload the device config from disk and restart |
-| `:compact` | — | Toggle compact table rows |
-| `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file |
-| `:log <file>` | file base path | Set the module's log-file sink base |
-| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table; bare `:order` clears |
+| Command | Arguments | Purpose (→ modbus) | Req |
+|---|---|---|---|
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:add` / `:a` | — | Open the add-register-interpretation dialog (UI-R-061) | UI-R-018, UI-R-061 |
+| `:start` | — | Start the module (open the serial port receive-only) | UI-R-018 |
+| `:stop` | — | Stop the module | UI-R-018 |
+| `:restart` | — | Stop then start | UI-R-018 |
+| `:reload` | — | Reload the device config from disk and restart | UI-R-018 |
+| `:compact` | — | Toggle compact table rows | UI-R-018 |
+| `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file | UI-R-018 |
+| `:log <file>` | file base path | Set the module's log-file sink base | UI-R-018 |
+| `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table; bare `:order` clears | UI-R-018 |
 
 `:set` (nothing to write) and `:script` (no Lua surface) are omitted for this role — unrecognized commands on a monitor view, not errors.
 
 ### 2.2 OCPP client module
 
-| Command | Arguments | Purpose (→ ocpp) |
-|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog |
-| `:start` | — | Connect to the CSMS |
-| `:stop` | — | Disconnect |
-| `:restart` | — | Reconnect |
-| `:compact` | — | Toggle compact rows |
-| `:write-device` / `:wd` `[path]` | optional path | Save the device config |
-| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables |
+| Command | Arguments | Purpose (→ ocpp) | Req |
+|---|---|---|---|
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:start` | — | Connect to the CSMS | UI-R-018 |
+| `:stop` | — | Disconnect | UI-R-018 |
+| `:restart` | — | Reconnect | UI-R-018 |
+| `:compact` | — | Toggle compact rows | UI-R-018 |
+| `:write-device` / `:wd` `[path]` | optional path | Save the device config | UI-R-018 |
+| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables | UI-R-018 |
 
 ### 2.3 OCPP server (CSMS) module
 
-| Command | Arguments | Purpose (→ ocpp) |
-|---|---|---|
-| `:start` | — | Bind the CSMS listener |
-| `:stop` | — | Unbind (clears connected-station entries) |
-| `:restart` | — | Rebind (clears entries) |
-| `:edit` / `:e` | — | Open the module setup dialog |
-| `:write-device` / `:wd` `[path]` | optional path | Save the device config |
-| `:compact` | — | Toggle compact rows |
-| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables |
-| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints it |
+| Command | Arguments | Purpose (→ ocpp) | Req |
+|---|---|---|---|
+| `:start` | — | Bind the CSMS listener | UI-R-018 |
+| `:stop` | — | Unbind (clears connected-station entries) | UI-R-018 |
+| `:restart` | — | Rebind (clears entries) | UI-R-018 |
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:write-device` / `:wd` `[path]` | optional path | Save the device config | UI-R-018 |
+| `:compact` | — | Toggle compact rows | UI-R-018 |
+| `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables | UI-R-018 |
+| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints it | UI-R-018, OC-R-074, OC-R-075 |
 
 **OCPP action send is not a `:` command.** Composing and sending an action goes through the action dialog opened by `Enter` on the message table / action control. Action set and payload semantics: `ocpp/`.
 
 ## 3. Global keybindings
 
-| Key | Context | Action |
-|---|---|---|
-| `:` | content focused, no view overlay | Enter command mode |
-| `?` | content focused, no view overlay | Open the keybind-help dialog |
-| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content focused | Toggle focus between content view and log pane |
-| `Ctrl+t` then `l` | content focused | Next tab (wraps) |
-| `Ctrl+t` then `h` | content focused | Previous tab (wraps) |
-| `Ctrl+t` then digit(s) | content focused | Jump to tab by index; waits up to 800 ms for a 2nd digit if one could form a valid 2-digit index (UI-R-011) |
+| Key | Context | Action | Req |
+|---|---|---|---|
+| `:` | content focused, no view overlay | Enter command mode | UI-R-014 |
+| `?` | content focused, no view overlay | Open the keybind-help dialog | UI-R-005 |
+| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content focused | Toggle focus between content view and log pane | UI-R-009 |
+| `Ctrl+t` then `l` | content focused | Next tab (wraps) | UI-R-010 |
+| `Ctrl+t` then `h` | content focused | Previous tab (wraps) | UI-R-010 |
+| `Ctrl+t` then digit(s) | content focused | Jump to tab by index; waits up to 800 ms for a 2nd digit if one could form a valid 2-digit index (UI-R-011) | UI-R-011 |
 
 `:` and `?` are suppressed while the active view has an overlay open; they type into it instead.
 
@@ -108,112 +108,112 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 
 ### 4.1 Command mode
 
-| Key | Action |
-|---|---|
-| `Esc` | Cancel (discard buffer) |
-| `Enter` | Run the command |
-| printable / `Left`/`Right` / `Home`/`End` / `Backspace`/`Delete` | Edit the buffer |
+| Key | Action | Req |
+|---|---|---|
+| `Esc` | Cancel (discard buffer) | UI-R-015 |
+| `Enter` | Run the command | UI-R-015 |
+| printable / `Left`/`Right` / `Home`/`End` / `Backspace`/`Delete` | Edit the buffer | UI-R-015 |
 
 ### 4.2 Dialogs (generic)
 
-| Key | Action |
-|---|---|
-| `Tab` | Next field (skips disabled) |
-| `Shift+Tab` / `BackTab` | Previous field |
-| `Enter` | Confirm |
-| `Esc` | Request close (close-confirm popup if edits may be lost) |
+| Key | Action | Req |
+|---|---|---|
+| `Tab` | Next field (skips disabled) | UI-R-022 |
+| `Shift+Tab` / `BackTab` | Previous field | UI-R-022 |
+| `Enter` | Confirm | UI-R-022 |
+| `Esc` | Request close (close-confirm popup if edits may be lost) | UI-R-023 |
 
 Applied only when the focused widget did not consume the key.
 
 ### 4.3 Close-confirm / yes-no popup
 
-| Key | Action |
-|---|---|
-| `Enter` / `Space` | Confirm (close / delete) |
-| `Esc` | Dismiss (back to editing) |
-| `Tab` / `Shift+Tab` | Move between confirm/cancel (delete confirm) |
+| Key | Action | Req |
+|---|---|---|
+| `Enter` / `Space` | Confirm (close / delete) | UI-R-023 |
+| `Esc` | Dismiss (back to editing) | UI-R-023 |
+| `Tab` / `Shift+Tab` | Move between confirm/cancel (delete confirm) | UI-R-023 |
 
 Focus defaults to the safe (cancel) choice; confirming requires that choice focused.
 
 ### 4.4 Tables and selection lists (when focused)
 
-| Key | Action |
-|---|---|
-| `j` / `Down` | Row down |
-| `k` / `Up` | Row up |
-| `h` / `Left` | Column left (or previous item) |
-| `l` / `Right` | Column right (or next item) |
-| `g` | First row |
-| `G` | Last row |
-| `0` / `Home` | First column |
-| `$` / `End` | Last column |
+| Key | Action | Req |
+|---|---|---|
+| `j` / `Down` | Row down | UI-R-013 |
+| `k` / `Up` | Row up | UI-R-013 |
+| `h` / `Left` | Column left (or previous item) | UI-R-013 |
+| `l` / `Right` | Column right (or next item) | UI-R-013 |
+| `g` | First row | UI-R-013 |
+| `G` | Last row | UI-R-013 |
+| `0` / `Home` | First column | UI-R-013 |
+| `$` / `End` | Last column | UI-R-013 |
 
 Selection clamps at the ends (no wrap).
 
 ### 4.5 Suggestion-completion popup (open)
 
-| Key | Action |
-|---|---|
-| `Up` / `Down` | Move highlight |
-| `Enter` / `Tab` | Accept highlight (partial → keep open and re-query; else close) |
-| `Esc` | Dismiss |
+| Key | Action | Req |
+|---|---|---|
+| `Up` / `Down` | Move highlight | UI-R-026 |
+| `Enter` / `Tab` | Accept highlight (partial → keep open and re-query; else close) | UI-R-026 |
+| `Esc` | Dismiss | UI-R-026 |
 
 ### 4.6 Single-line text input (focused)
 
-| Key | Action |
-|---|---|
-| printable (with `Shift`) | Insert character (rejected chars still consumed) |
-| `Left` / `Right` | Move cursor |
-| `Home` / `End` | Line start / end |
-| `Backspace` / `Delete` | Delete before / at cursor |
-| `Ctrl+F` | Autofill from placeholder (only when empty) |
-| `Ctrl+D` | Clear |
+| Key | Action | Req |
+|---|---|---|
+| printable (with `Shift`) | Insert character (rejected chars still consumed) | UI-R-048 |
+| `Left` / `Right` | Move cursor | UI-R-048 |
+| `Home` / `End` | Line start / end | UI-R-048 |
+| `Backspace` / `Delete` | Delete before / at cursor | UI-R-048 |
+| `Ctrl+F` | Autofill from placeholder (only when empty) | UI-R-048 |
+| `Ctrl+D` | Clear | UI-R-048 |
 
 ### 4.7 Keybind-help dialog (`?`)
 
-| Key | Action |
-|---|---|
-| `Esc` / `q` / `?` | Close |
-| `j` / `Down` | Scroll down |
-| `k` / `Up` | Scroll up |
-| `g` | Top |
-| `G` | Bottom |
+| Key | Action | Req |
+|---|---|---|
+| `Esc` / `q` / `?` | Close | UI-R-005 |
+| `j` / `Down` | Scroll down | UI-R-005 |
+| `k` / `Up` | Scroll up | UI-R-005 |
+| `g` | Top | UI-R-005 |
+| `G` | Bottom | UI-R-005 |
 
 ### 4.8 Lua-bindings help overlay (`?` in a script editor, Normal mode)
 
-Same navigation as §4.7. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
+Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
 
 ### 4.9 Script-manager dialog
 
-| Key | Context | Action |
-|---|---|---|
-| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); code editor skipped while no script selected |
-| `Esc` | dialog | Open close-confirm |
-| `t` | script table focused | Toggle the selected script's enabled flag |
-| `d` | script table focused | Delete the selected script (opens confirm) |
-| `c` | script table focused | Toggle compact rows |
-| `e` | script table focused | Execute the selected script once (current editor content, enabled or not) |
-| `Enter` | script table focused | Open the rename prompt |
-| `Enter` | name input focused | Create a new script with the typed name |
-| `Enter` / `Space` | Templates button focused | Open the template-browser overlay |
-| `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) |
-| `?` | code editor, Normal mode | Open the Lua-bindings help overlay |
+| Key | Context | Action | Req |
+|---|---|---|---|
+| `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); code editor skipped while no script selected | UI-R-058 |
+| `Esc` | dialog | Open close-confirm | UI-R-023 |
+| `t` | script table focused | Toggle the selected script's enabled flag | UI-R-058 |
+| `d` | script table focused | Delete the selected script (opens confirm) | UI-R-058 |
+| `c` | script table focused | Toggle compact rows | UI-R-058 |
+| `e` | script table focused | Execute the selected script once (current editor content, enabled or not) | UI-R-051 |
+| `Enter` | script table focused | Open the rename prompt | UI-R-055 |
+| `Enter` | name input focused | Create a new script with the typed name | UI-R-058 |
+| `Enter` / `Space` | Templates button focused | Open the template-browser overlay | UI-R-052 |
+| `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) | UI-R-056 |
+| `?` | code editor, Normal mode | Open the Lua-bindings help overlay | UI-R-056 |
 
 ### 4.10 Template-browser overlay (Templates button in the script-manager dialog)
 
-| Key | Context | Action |
-|---|---|---|
-| `j` / `k` / `Up` / `Down` | template list | Move selection; preview follows |
-| `Tab` / `Shift+Tab` | overlay | Cycle focus between list and (read-only) preview |
-| `Enter` | overlay | Insert the selected template as a new enabled script, close |
-| `Esc` / `q` | overlay | Close, changing nothing |
+| Key | Context | Action | Req |
+|---|---|---|---|
+| `j` / `k` / `Up` / `Down` | template list | Move selection; preview follows | UI-R-053 |
+| `Tab` / `Shift+Tab` | overlay | Cycle focus between list and (read-only) preview | UI-R-053 |
+| `Enter` | overlay | Insert the selected template as a new enabled script, close | UI-R-054 |
+| `Esc` / `q` | overlay | Close, changing nothing | UI-R-053 |
 
 ### 4.11 Script rename prompt (`Enter` on the script table)
 
-| Key | Context | Action |
-|---|---|---|
-| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open |
-| `Esc` | prompt | Cancel, name unchanged |
+| Key | Context | Action | Req |
+|---|---|---|---|
+| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055 |
+| `Esc` | prompt | Cancel, name unchanged | UI-R-055 |
 
 ## 5. Code editor — modes and commands
 
@@ -221,64 +221,64 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 
 ### 5.1 Mode transitions
 
-| Key | From | Action |
-|---|---|---|
-| `i` | Normal | Insert at cursor |
-| `a` | Normal | Insert after cursor |
-| `I` | Normal | Insert at first non-blank |
-| `A` | Normal | Insert at end of line |
-| `o` | Normal | Open (auto-indented) line below, Insert |
-| `O` | Normal | Open line above (copying indent), Insert |
-| `v` | Normal | Charwise Visual |
-| `V` | Normal | Linewise Visual |
-| `Esc` | Insert / Visual | Back to Normal (Insert also steps cursor back one, vim-style) |
-| `Esc` | Normal | Left unhandled → reaches dialog (opens close-confirm) |
-| `v` | Visual | Back to Normal |
-| `V` | Visual (charwise) | Switch to linewise Visual |
+| Key | From | Action | Req |
+|---|---|---|---|
+| `i` | Normal | Insert at cursor | UI-R-028 |
+| `a` | Normal | Insert after cursor | UI-R-028 |
+| `I` | Normal | Insert at first non-blank | UI-R-028 |
+| `A` | Normal | Insert at end of line | UI-R-028 |
+| `o` | Normal | Open (auto-indented) line below, Insert | UI-R-028 |
+| `O` | Normal | Open line above (copying indent), Insert | UI-R-028 |
+| `v` | Normal | Charwise Visual | UI-R-028 |
+| `V` | Normal | Linewise Visual | UI-R-028 |
+| `Esc` | Insert / Visual | Back to Normal (Insert also steps cursor back one, vim-style) | UI-R-029, UI-R-028 |
+| `Esc` | Normal | Left unhandled → reaches dialog (opens close-confirm) | UI-R-028 |
+| `v` | Visual | Back to Normal | UI-R-028 |
+| `V` | Visual (charwise) | Switch to linewise Visual | UI-R-028 |
 
 ### 5.2 Motions (Normal and Visual)
 
-| Key | Motion |
-|---|---|
-| `h` / `l` | Left / right one char (no line wrap) |
-| `j` / `k` | Down / up one line |
-| `Left`/`Right`/`Up`/`Down` | Arrow move (wraps to adjacent line) |
-| `0` | First column |
-| `$` | Last column |
-| `w` | Start of next word (crosses lines; punctuation runs are their own word) |
-| `b` | Start of previous word |
-| `e` | End of current/next word |
-| `gg` | First line, first column |
-| `G` | Last line |
+| Key | Motion | Req |
+|---|---|---|
+| `h` / `l` | Left / right one char (no line wrap) | UI-R-029 |
+| `j` / `k` | Down / up one line | UI-R-028 |
+| `Left`/`Right`/`Up`/`Down` | Arrow move (wraps to adjacent line) | UI-R-029 |
+| `0` | First column | UI-R-028 |
+| `$` | Last column | UI-R-028 |
+| `w` | Start of next word (crosses lines; punctuation runs are their own word) | UI-R-028 |
+| `b` | Start of previous word | UI-R-028 |
+| `e` | End of current/next word | UI-R-028 |
+| `gg` | First line, first column | UI-R-028 |
+| `G` | Last line | UI-R-028 |
 
 ### 5.3 Edits (Normal)
 
-| Key | Action |
-|---|---|
-| `x` | Delete char under cursor (to register, charwise) |
-| `dd` | Delete current line (to register, linewise) |
-| `yy` | Yank current line (to register, linewise) |
-| `p` | Paste register after cursor / below line |
-| `P` | Paste register before cursor / above line |
-| `u` | Undo last change (again to redo) |
+| Key | Action | Req |
+|---|---|---|
+| `x` | Delete char under cursor (to register, charwise) | UI-R-030 |
+| `dd` | Delete current line (to register, linewise) | UI-R-030 |
+| `yy` | Yank current line (to register, linewise) | UI-R-030 |
+| `p` | Paste register after cursor / below line | UI-R-030 |
+| `P` | Paste register before cursor / above line | UI-R-030 |
+| `u` | Undo last change (again to redo) | UI-R-031 |
 
 ### 5.4 Edits (Visual)
 
-| Key | Action |
-|---|---|
-| `y` | Yank selection, return to Normal at selection start |
-| `d` / `x` | Delete selection, return to Normal |
+| Key | Action | Req |
+|---|---|---|
+| `y` | Yank selection, return to Normal at selection start | UI-R-030 |
+| `d` / `x` | Delete selection, return to Normal | UI-R-030 |
 
 ### 5.5 Insert-mode keys
 
-| Key | Action |
-|---|---|
-| printable / `Enter` / `Backspace` / `Delete` / arrows | Standard editing (auto-indent on `Enter` when a language is set) |
-| `Tab` | Insert four spaces |
-| `Shift+Tab` / `BackTab` | Remove up to four leading spaces |
+| Key | Action | Req |
+|---|---|---|
+| printable / `Enter` / `Backspace` / `Delete` / arrows | Standard editing (auto-indent on `Enter` when a language is set) | UI-R-032, UI-R-035 |
+| `Tab` | Insert four spaces | UI-R-034 |
+| `Shift+Tab` / `BackTab` | Remove up to four leading spaces | UI-R-034 |
 
 ### 5.6 Plain (non-vim) editor
 
-Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as §4.6. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
+Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as `### 4.6 Single-line text input (focused)`. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
 
 Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats).
