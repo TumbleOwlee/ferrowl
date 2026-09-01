@@ -109,7 +109,7 @@ Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gat
 - Output is the normative text: "shall" statements + appended IDs, plus `edge-cases.md` entries. Ready to land, not prose about intent. Observable design is spec: public signatures, error enum, feature gating, config keys.
 - `status=ready` → point user at `spec-diff.md`. Change requested → relay to the same agent. Approved → record `gate1` on parent card; agent stays alive for gate 1b.
 - **Board:** create `open/<slug>.md` + `artifacts/<slug>/` before spawning — no worktree yet.
-- **`spec-diff.md` shape:** one `## <ID>` heading per new/changed requirement (full normative text under it, old → new if changed), then `## Other spec changes` for `edge-cases.md`/`api-contract.md`/`data-contract.md` entries with no single ID. `.claude/scripts/extract-section.sh '## <ID>' artifacts/<slug>/spec-diff.md` lets a wave-scoped reviewer pull only its IDs.
+- **`spec-diff.md` shape:** one `## <ID>` heading per new/changed requirement (full normative text under it, old → new if changed), then `## Other spec changes` for `api-contract.md`/`data-contract.md` changes with no single owning ID (every `edge-cases.md` entry carries its own `-E` ID and gets its own `## <ID>` heading like a requirement). `.claude/scripts/extract-section.sh '## <ID>' artifacts/<slug>/spec-diff.md` lets a wave-scoped reviewer pull only its IDs.
 
 ### Gate 1b — tracking issue. Stop for approval.
 

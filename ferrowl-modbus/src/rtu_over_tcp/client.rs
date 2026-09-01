@@ -1,16 +1,13 @@
-use crate::client_core::{ClientCore, ConnectAttempt};
+use crate::client_core::{BoxedConnect, ClientCore, connect_tcp_family, spawn_client_task};
 use crate::tcp::Config;
-use crate::tcp::tls::{ClientStream, SelfSignedCache, build_client_tls_config};
-use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation, TcpError};
+use crate::tcp::tls::{ClientStream, SelfSignedCache};
+use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation};
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
-use rust_modbus::{
-    Client as ModbusClient, FrameTransport, TcpConfig, connect_tcp_framed, connect_tls_framed,
-};
+use rust_modbus::FrameTransport;
 use tokio::task::JoinHandle;
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
@@ -58,42 +55,25 @@ impl<T: KeyParams> ClientBuilder<T> {
         L: LogFn + Clone,
         S: LogFn + Clone,
     {
-        let config = self.config.clone();
-        let operations = self.operations.clone();
-        let memory = self.memory.clone();
         let cache = self.cache.clone();
-        let connected = ConnectedCell::default();
-        let connected_for_task = connected.clone();
-        let handle = tokio::task::spawn(async move {
-            ClientCore::run_reconnect_loop(
-                receiver,
-                log,
-                status,
-                operations,
-                memory,
-                move || {
-                    let config = config.clone();
-                    let cache = cache.clone();
-                    async move {
-                        let guard = config.read().await;
-                        let attempt = ConnectAttempt {
-                            reconnect: guard.reconnect,
-                            timeout_ms: guard.timeout_ms,
-                            delay_ms: guard.delay_ms,
-                            interval_ms: guard.interval_ms,
-                            client: Client::connect(&guard, &cache)
-                                .await
-                                .map(|client| client.core),
-                        };
-                        drop(guard);
-                        attempt
-                    }
-                },
-                connected_for_task,
-            )
-            .await
-        });
-        Ok((handle, connected))
+        Ok(spawn_client_task(
+            self.config.clone(),
+            self.operations.clone(),
+            self.memory.clone(),
+            receiver,
+            log,
+            status,
+            move |cfg: &Config| -> BoxedConnect<
+                '_,
+                FrameTransport<ClientStream, rust_modbus::RtuOverTcp>,
+                rust_modbus::RtuOverTcp,
+            > {
+                let cache = cache.clone();
+                Box::pin(
+                    async move { Client::connect(cfg, &cache).await.map(|client| client.core) },
+                )
+            },
+        ))
     }
 }
 
@@ -109,35 +89,8 @@ impl Client {
     /// configured timeout. Plain TCP unless `config.tls` is set (MB-R-115), in which
     /// case the same timeout bounds the TCP connect and the TLS handshake together.
     pub async fn connect(config: &Config, cache: &SelfSignedCache) -> Result<Self, Error> {
-        let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
-            .parse()
-            .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
-        let tls_config = build_client_tls_config(&config.client_tls_policy(), cache)?;
-        let attempt = async {
-            match tls_config {
-                None => connect_tcp_framed::<rust_modbus::RtuOverTcp>(addr, TcpConfig::default())
-                    .await
-                    .map(|t| ClientStream::Plain(t.into_inner())),
-                Some(tls) => {
-                    connect_tls_framed::<rust_modbus::RtuOverTcp>(addr, TcpConfig::default(), tls)
-                        .await
-                        .map(|t| ClientStream::Tls(Box::new(t.into_inner())))
-                }
-            }
-        };
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(config.timeout_ms as u64),
-            attempt,
-        )
-        .await
-        {
-            Ok(Ok(stream)) => Ok(Self {
-                core: ClientCore {
-                    client: ModbusClient::<_, _>::new(FrameTransport::new(stream)),
-                },
-            }),
-            Ok(Err(e)) => Err(TcpError::Error(e).into()),
-            Err(e) => Err(TcpError::Timeout(e).into()),
-        }
+        connect_tcp_family::<rust_modbus::RtuOverTcp>(config, cache)
+            .await
+            .map(|core| Self { core })
     }
 }

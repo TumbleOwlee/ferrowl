@@ -1,7 +1,8 @@
 #!/bin/sh
-# Find one or more spec requirements by ID and print each as `file:line:text`
-# — exact spot to edit, no guessing which file an ID lives in. Batch every ID
-# needed into one call instead of one invocation per ID.
+# Find one or more spec entries — requirements (-R-) and edge cases (-E-) —
+# by ID and print each as `file:line:text` — exact spot to edit, no guessing
+# which file an ID lives in. Batch every ID needed into one call instead of
+# one invocation per ID; a batch may mix -R and -E IDs.
 #
 # Usage: sh .claude/scripts/extract-id.sh [spec-dir] <ID> [<ID> ...]
 #   spec-dir defaults to docs/specs (autodetected relative to cwd)
@@ -39,6 +40,6 @@ for id in "$@"; do
 done
 
 if [ -n "$missing" ]; then
-  echo "No requirement found for ID(s):$missing (searched $dir)" >&2
+  echo "No spec entry found for ID(s):$missing (searched $dir)" >&2
   exit 1
 fi

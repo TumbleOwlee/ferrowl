@@ -15,18 +15,18 @@ ferrowl <SUBCOMMAND> ...
 
 Default action (no subcommand): start the TUI with the resolved module set.
 
-| Flag | Value | Default | Repeatable | Purpose |
-|---|---|---|---|---|
-| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (§3) |
-| `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module` |
-| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control |
-| `--demo` | (flag) | off | no | eight built-in demo tabs + an example session script; config flags ignored for tab building |
-| `--version` | (flag) | — | no | print version, exit 0 |
-| `--help` | (flag) | — | no | print usage, exit 0 |
+| Flag | Value | Default | Repeatable | Purpose | Req |
+|---|---|---|---|---|---|
+| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-002 |
+| `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module` | CL-R-003 |
+| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control | CL-R-004 |
+| `--demo` | (flag) | off | no | eight built-in demo tabs + an example session script; config flags ignored for tab building | CL-R-005, CL-R-006 |
+| `--version` | (flag) | — | no | print version, exit 0 | CL-R-001 |
+| `--help` | (flag) | — | no | print usage, exit 0 | CL-R-001 |
 
-- Top-level has **no** `--ocpp` and **no** `--exit-on-error`. OCPP modules come only from `--session` here.
-- Resolution order: `--session` instances, then `--module`, then `--device`. Names de-duplicated across all sources and both module types (later duplicates get ` (2)`, ` (3)`, …).
-- `--demo` produces `Modbus Server`, `Modbus Client`, and `CSMS`/`CS` pairs for OCPP `v1.6` (port 9000), `v2.0.1` (9001), `v2.1` (9002).
+- Top-level has **no** `--ocpp` and **no** `--exit-on-error`. OCPP modules come only from `--session` here (CL-R-014, CL-R-015).
+- Resolution order: `--session` instances, then `--module`, then `--device`. Names de-duplicated across all sources and both module types (later duplicates get ` (2)`, ` (3)`, …) (CL-R-007).
+- `--demo` produces `Modbus Server`, `Modbus Client`, and `CSMS`/`CS` pairs for OCPP `v1.6` (port 9000), `v2.0.1` (9001), `v2.1` (9002) (CL-R-006).
 
 ---
 
@@ -39,12 +39,12 @@ ferrowl migrate --input FILE --output FILE
 ferrowl migrate -i FILE -o FILE
 ```
 
-| Flag | Short | Value | Required | Purpose |
-|---|---|---|---|---|
-| `--input` | `-i` | `FILE` (.toml/.json) | yes | legacy (≤ v0.3.9 `modbus-cli-rs`) config to read |
-| `--output` | `-o` | `FILE` (.toml/.json) | yes | destination for the converted device config |
+| Flag | Short | Value | Required | Purpose | Req |
+|---|---|---|---|---|---|
+| `--input` | `-i` | `FILE` (.toml/.json) | yes | legacy (≤ v0.3.9 `modbus-cli-rs`) config to read | CL-R-011 |
+| `--output` | `-o` | `FILE` (.toml/.json) | yes | destination for the converted device config | CL-R-011 |
 
-Dispatched before any async runtime; converts a legacy device config to the current format; warnings for dropped/approximated fields and the success line go to **stderr**. Exits directly (0 success, 1 failure). Input and output encodings each from their own extension. Transformation contract CS-R-040…CS-R-045. Device-config files only — never session files.
+Dispatched before any async runtime; converts a legacy device config to the current format; warnings for dropped/approximated fields and the success line go to **stderr**. Exits directly (0 success, 1 failure) (CL-R-012). Input and output encodings each from their own extension. Transformation contract CS-R-040…CS-R-045. Device-config files only — never session files.
 
 ### `ferrowl run` (headless / CI)
 
@@ -53,17 +53,17 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
             [--duration SECS] [--log-file FILE] [--exit-on-error]
 ```
 
-| Flag | Value | Default | Repeatable | Purpose |
-|---|---|---|---|---|
-| `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts |
-| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (§3) |
-| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (§4) |
-| `--duration` | `SECS` (integer) | none | no | run this many seconds then exit 0. Omit → until Ctrl-C |
-| `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout |
-| `--exit-on-error` | (flag) | off | no | exit 3 (after stopping all modules) when a drained line has level Error |
+| Flag | Value | Default | Repeatable | Purpose | Req |
+|---|---|---|---|---|---|
+| `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts | CL-R-013 |
+| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-013 |
+| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## 4. `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014 |
+| `--duration` | `SECS` (integer) | none | no | run this many seconds then exit 0. Omit → until Ctrl-C | CL-R-024 |
+| `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout | CL-R-041 |
+| `--exit-on-error` | (flag) | off | no | exit 3 (after stopping all modules) when a drained line has level Error | CL-R-015, CL-R-031 |
 
-- `--device` **not** available on `run`; use `--module`.
-- `--exit-on-error` exists **only** on `run`.
+- `--device` **not** available on `run`; use `--module` (CL-R-014).
+- `--exit-on-error` exists **only** on `run` (CL-R-015).
 
 ---
 
@@ -71,25 +71,25 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 
 Comma-separated `key=value` pairs. Whitespace around keys and values trimmed; empty comma segment skipped. Segment without `=` is an error. Later duplicate keys overwrite earlier.
 
-| Key | Required | Default | Meaning |
-|---|---|---|---|
-| `name` | yes | — | instance/tab name and `C_Module` registry key |
-| `device` | yes* | — | device-config file path |
-| `type` | — | — | **alias for `device`**: used only if `device` absent |
-| `role` | — | `server` | `client` or `server`. Other → error |
-| `transport` | — | `tcp` | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, `ascii_over_tcp`. Other → error |
-| `ip` | — | `127.0.0.1` | TCP/UDP only: peer/bind IP |
-| `port` | yes (tcp) | — | TCP/UDP only. Required for `transport=tcp`, `rtu_over_tcp`, `udp`, `ascii_over_tcp`; numeric |
-| `path` | yes (rtu) | — | RTU only: serial device path. Required for `transport=rtu` or `ascii` |
-| `baud` / `baud_rate` | — | `19200` | RTU only: baud rate (aliases) |
-| `parity` | — | unset | RTU only: parity string (passed through) |
-| `data_bits` | — | unset | RTU only: data bits (numeric) |
-| `stop_bits` | — | unset | RTU only: stop bits (numeric) |
+| Key | Required | Default | Meaning | Req |
+|---|---|---|---|---|
+| `name` | yes | — | instance/tab name and `C_Module` registry key | CL-R-002 |
+| `device` | yes* | — | device-config file path | CL-R-002 |
+| `type` | — | — | **alias for `device`**: used only if `device` absent | CL-R-002 |
+| `role` | — | `server` | `client` or `server`. Other → error | CL-R-002 |
+| `transport` | — | `tcp` | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, `ascii_over_tcp`. Other → error | CL-R-002 |
+| `ip` | — | `127.0.0.1` | TCP/UDP only: peer/bind IP | CL-R-002 |
+| `port` | yes (tcp) | — | TCP/UDP only. Required for `transport=tcp`, `rtu_over_tcp`, `udp`, `ascii_over_tcp`; numeric | CL-R-002 |
+| `path` | yes (rtu) | — | RTU only: serial device path. Required for `transport=rtu` or `ascii` | CL-R-002 |
+| `baud` / `baud_rate` | — | `19200` | RTU only: baud rate (aliases) | CL-R-002 |
+| `parity` | — | unset | RTU only: parity string (passed through) | CL-R-002 |
+| `data_bits` | — | unset | RTU only: data bits (numeric) | CL-R-002 |
+| `stop_bits` | — | unset | RTU only: stop bits (numeric) | CL-R-002 |
 
-\* `device` required, but `type` may supply it. At least one of `device`/`type` must be present.
+\* `device` required, but `type` may supply it. At least one of `device`/`type` must be present (CL-R-002).
 
-- **Default role `server`** for `--module` (contrast `--device`, always a client).
-- `port` required for TCP, **no** default; `path` required for RTU.
+- **Default role `server`** for `--module` (contrast `--device`, always a client) (CL-R-002, CL-R-004).
+- `port` required for TCP, **no** default; `path` required for RTU (CL-R-002).
 - RTU keys here (`baud`, `parity`, `data_bits`, `stop_bits`, …) are this mini-language's own keys, not clap short flags — [`edge-cases.md`](./edge-cases.md) RTU/clap collision.
 
 Example:
@@ -102,16 +102,16 @@ Example:
 
 ## 4. `--ocpp` descriptor mini-language (OCPP)
 
-Same grammar as §3. Role/version/timeout/security/scripts are **not** on the command line — they come from the device file.
+Same grammar as ``## 3. `--module` descriptor mini-language (Modbus)``. Role/version/timeout/security/scripts are **not** on the command line — they come from the device file.
 
-| Key | Required | Default | Meaning |
-|---|---|---|---|
-| `name` | yes | — | instance name / registry key |
-| `device` | yes | — | OCPP device-config file path |
-| `protocol` | — | `ws` | `ws` or `wss`. Other → error |
-| `ip` | — | `127.0.0.1` | peer/bind IP |
-| `port` | yes | — | port; numeric |
-| `path` | — | empty string | WebSocket path (e.g. `/ocpp/cp001`) |
+| Key | Required | Default | Meaning | Req |
+|---|---|---|---|---|
+| `name` | yes | — | instance name / registry key | CL-R-014 |
+| `device` | yes | — | OCPP device-config file path | CL-R-014 |
+| `protocol` | — | `ws` | `ws` or `wss`. Other → error | CL-R-014 |
+| `ip` | — | `127.0.0.1` | peer/bind IP | CL-R-014 |
+| `port` | yes | — | port; numeric | CL-R-014 |
+| `path` | — | empty string | WebSocket path (e.g. `/ocpp/cp001`) | CL-R-014 |
 
 Example:
 
@@ -125,31 +125,31 @@ Example:
 
 ### `ferrowl run`
 
-| Code | Meaning |
-|---|---|
-| `0` | ran to completion: `--duration` reached, or Ctrl-C (SIGINT). No error condition fired |
-| `1` | setup failure: device config failed to load, `start` reported an error, `--session` failed to load/parse, or `--log-file` could not be opened. `Error: …` on stderr; started modules stopped first |
-| `2` | argument-parser usage error (e.g. unknown flag) — emitted before the run |
-| `3` | `--exit-on-error` set **and** a drained line had level Error. All modules stopped, then exit 3 |
+| Code | Meaning | Req |
+|---|---|---|
+| `0` | ran to completion: `--duration` reached, or Ctrl-C (SIGINT). No error condition fired | CL-R-032 |
+| `1` | setup failure: device config failed to load, `start` reported an error, `--session` failed to load/parse, or `--log-file` could not be opened. `Error: …` on stderr; started modules stopped first | CL-R-030 |
+| `2` | argument-parser usage error (e.g. unknown flag) — emitted before the run | CL-R-035 |
+| `3` | `--exit-on-error` set **and** a drained line had level Error. All modules stopped, then exit 3 | CL-R-031 |
 
 ### `ferrowl migrate`
 
-| Code | Meaning |
-|---|---|
-| `0` | conversion succeeded; output written |
-| `1` | failure: unrecognized input/output extension, input parse failure, or output write failure. `error: …` on stderr |
+| Code | Meaning | Req |
+|---|---|---|
+| `0` | conversion succeeded; output written | CL-R-033 |
+| `1` | failure: unrecognized input/output extension, input parse failure, or output write failure. `error: …` on stderr | CL-R-033 |
 
 ### Top-level / parser (all commands)
 
-| Code | Meaning |
-|---|---|
-| `0` | `--help` or `--version` displayed |
-| `2` | argument-parser usage error (unknown flag, missing required option) |
+| Code | Meaning | Req |
+|---|---|---|
+| `0` | `--help` or `--version` displayed | CL-R-001 |
+| `2` | argument-parser usage error (unknown flag, missing required option) | CL-R-035 |
 
 ---
 
 ## 6. Headless output format
 
-- **stdout** carries the drained log stream, one line per entry: `[<timestamp>] <source> | <message>`. `<source>` = module's deduped name, or `session` for session-sim lines.
-- **stderr** carries setup/fatal diagnostics only (`Error:`/`error:`, the TUI's module-skip warnings), so stdout stays parseable.
-- With `--log-file FILE`, every stdout line is also appended to `FILE` (create-and-append).
+- **stdout** carries the drained log stream, one line per entry: `[<timestamp>] <source> | <message>`. `<source>` = module's deduped name, or `session` for session-sim lines (CL-R-040).
+- **stderr** carries setup/fatal diagnostics only (`Error:`/`error:`, the TUI's module-skip warnings), so stdout stays parseable (CL-R-042).
+- With `--log-file FILE`, every stdout line is also appended to `FILE` (create-and-append) (CL-R-041).

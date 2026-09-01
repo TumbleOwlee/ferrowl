@@ -1,28 +1,34 @@
-//! Transport-agnostic Modbus client loop shared by the TCP and RTU clients.
+//! Transport-agnostic Modbus client loop shared by every Modbus client transport.
 //!
-//! The two transports differ only in the stream and framing they instantiate this with (a
-//! socket under `Tcp`, a serial port under `Rtu`) and in how that connection is *established*.
-//! Everything after that — the read/run loop and command execution — is identical and lives
-//! here, generic over both.
+//! Holds the framing-generic connect helpers for both transport families (`connect_serial` for
+//! `Rtu`/`Ascii` over a serial port, `connect_tcp_family` for `Tcp`/`RtuOverTcp`/`Ascii` over a
+//! socket), the `spawn_client_task`/`ClientTiming` pair every transport's `ClientBuilder::spawn`
+//! delegates to, and the read/run loop and command execution that follow a successful connect,
+//! identical across every transport once a `ClientCore` exists.
 
 use crate::common::serial_config_from;
+use crate::tcp::tls::{ClientStream, SelfSignedCache, build_client_tls_config};
 use crate::{
     Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, PathConflictCell, RunConfig,
-    SerialError,
+    SerialError, TcpError,
 };
 
 use ferrowl_store::Memory;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address, Client, ClientFraming, ClientTransport, ExceptionCode, FrameTransport, Framing,
-    FunctionCode, Quantity, RegisterValue, SerialStream, UnitId, open_serial,
+    FunctionCode, Quantity, RegisterValue, SerialStream, TcpConfig, UnitId, connect_tcp_framed,
+    connect_tls_framed, open_serial,
 };
 use std::future::Future;
+use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 /// Outcome of one connection attempt, as reported by a transport's `connect` closure passed to
@@ -98,7 +104,8 @@ pub(crate) fn connect_serial<F>(
     path_conflict: &PathConflictCell,
 ) -> Result<ClientCore<FrameTransport<SerialStream, F>, F>, Error>
 where
-    F: Framing + ClientFraming,
+    F: Framing + ClientFraming + Send,
+    F::Header: Sync,
 {
     let serial = serial_config_from(
         config.baud_rate,
@@ -120,6 +127,160 @@ where
         }),
         Err(e) => Err(SerialError::Error(e).into()),
     }
+}
+
+/// Opens a TCP connection to `config.ip:config.port`, bounded by the configured timeout. Plain
+/// TCP unless the endpoint's client TLS policy is set (MB-R-104/MB-R-115/MB-R-127), in which case
+/// the same timeout bounds the TCP connect and the TLS handshake together. `F` selects the on-wire
+/// framing; establishing the socket does not differ by framing, only what is read off it does.
+pub(crate) async fn connect_tcp_family<F>(
+    config: &crate::tcp::Config,
+    cache: &SelfSignedCache,
+) -> Result<ClientCore<FrameTransport<ClientStream, F>, F>, Error>
+where
+    F: Framing + ClientFraming + Send,
+    F::Header: Sync,
+{
+    let addr: SocketAddr = format!("{}:{}", config.ip, config.port)
+        .parse()
+        .map_err(|e| Error::Tcp(TcpError::Address(e)))?;
+    let tls_config = build_client_tls_config(&config.client_tls_policy(), cache)?;
+    let attempt = async {
+        match tls_config {
+            None => connect_tcp_framed::<F>(addr, TcpConfig::default())
+                .await
+                .map(|t| ClientStream::Plain(t.into_inner())),
+            Some(tls) => connect_tls_framed::<F>(addr, TcpConfig::default(), tls)
+                .await
+                .map(|t| ClientStream::Tls(Box::new(t.into_inner()))),
+        }
+    };
+    match tokio::time::timeout(
+        std::time::Duration::from_millis(config.timeout_ms as u64),
+        attempt,
+    )
+    .await
+    {
+        Ok(Ok(stream)) => Ok(ClientCore {
+            client: Client::<_, _>::new(FrameTransport::new(stream)),
+        }),
+        Ok(Err(e)) => Err(TcpError::Error(e).into()),
+        Err(e) => Err(TcpError::Timeout(e).into()),
+    }
+}
+
+/// The four connect-loop timings every client config carries; the only fields
+/// `spawn_client_task` needs to read out of a transport-specific `Config`.
+pub(crate) trait ClientTiming {
+    fn reconnect(&self) -> bool;
+    fn timeout_ms(&self) -> usize;
+    fn delay_ms(&self) -> usize;
+    fn interval_ms(&self) -> usize;
+}
+
+impl ClientTiming for crate::rtu::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+impl ClientTiming for crate::tcp::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+impl ClientTiming for crate::udp::Config {
+    fn reconnect(&self) -> bool {
+        self.reconnect
+    }
+    fn timeout_ms(&self) -> usize {
+        self.timeout_ms
+    }
+    fn delay_ms(&self) -> usize {
+        self.delay_ms
+    }
+    fn interval_ms(&self) -> usize {
+        self.interval_ms
+    }
+}
+
+/// The connect callback's return type: a boxed future borrowing only the config guard.
+pub(crate) type BoxedConnect<'a, S, F> =
+    Pin<Box<dyn Future<Output = Result<ClientCore<S, F>, Error>> + Send + 'a>>;
+
+/// Spawns a client's reconnect loop as a tokio task and hands back its handle and
+/// [`ConnectedCell`]. `connect` is the only per-transport part: it receives the config under the
+/// read guard held for the whole attempt and yields a connected [`ClientCore`], exactly as each
+/// transport's `Client::connect` does.
+pub(crate) fn spawn_client_task<T, Cfg, L, St, C, S, F>(
+    config: Arc<RwLock<Cfg>>,
+    operations: Arc<RwLock<Vec<Operation>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
+    receiver: Receiver<Command>,
+    log: L,
+    status: St,
+    connect: C,
+) -> (JoinHandle<Result<(), Error>>, crate::ConnectedCell)
+where
+    T: KeyParams,
+    Cfg: ClientTiming + Send + Sync + 'static,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+    S: ClientTransport<F> + Send + 'static,
+    F: ClientFraming + Send + 'static,
+    F::Header: Send,
+    C: for<'a> Fn(&'a Cfg) -> BoxedConnect<'a, S, F> + Send + Sync + 'static,
+{
+    let connected = crate::ConnectedCell::default();
+    let connected_for_task = connected.clone();
+    let connect = Arc::new(connect);
+    let handle = tokio::task::spawn(async move {
+        ClientCore::run_reconnect_loop(
+            receiver,
+            log,
+            status,
+            operations,
+            memory,
+            move || {
+                let config = config.clone();
+                let connect = connect.clone();
+                async move {
+                    let guard = config.read().await;
+                    let attempt = ConnectAttempt {
+                        reconnect: guard.reconnect(),
+                        timeout_ms: guard.timeout_ms(),
+                        delay_ms: guard.delay_ms(),
+                        interval_ms: guard.interval_ms(),
+                        client: connect(&guard).await,
+                    };
+                    drop(guard);
+                    attempt
+                }
+            },
+            connected_for_task,
+        )
+        .await
+    });
+    (handle, connected)
 }
 
 impl<S, F> ClientCore<S, F>
