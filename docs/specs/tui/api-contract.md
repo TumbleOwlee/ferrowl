@@ -23,8 +23,8 @@ Dispatch: first token matched against the generic set; not in the set → forwar
 | `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring | UI-R-017, UI-R-045 |
 
 - `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (``## 2. Module (protocol-specific) `:` commands``), where `:log <file>` sets/clears the module's file sink.
-- Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog.
-- Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning).
+- Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog (UI-R-018).
+- Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning) (UI-R-018).
 
 ## 2. Module (protocol-specific) `:` commands
 
@@ -87,7 +87,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 | `:write-device` / `:wd` `[path]` | optional path | Save the device config | UI-R-018 |
 | `:compact` | — | Toggle compact rows | UI-R-018 |
 | `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables | UI-R-018 |
-| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints it | UI-R-018 |
+| `:rfid [add\|del <tag> \| clear]` | subcommand + tag | Manage the CSMS RFID accept-list; bare `:rfid` prints it | UI-R-018, OC-R-074, OC-R-075 |
 
 **OCPP action send is not a `:` command.** Composing and sending an action goes through the action dialog opened by `Enter` on the message table / action control. Action set and payload semantics: `ocpp/`.
 

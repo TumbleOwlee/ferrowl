@@ -10,7 +10,7 @@ OCPP-J over a single WebSocket. The only transport — no OCPP-SOAP, no MQTT, no
 
 - Scheme `ws://` (plain) or `wss://` (TLS) (OC-R-042, OC-R-097).
 - Subprotocol token fixed by version: `ocpp1.6`, `ocpp2.0.1`, `ocpp2.1`. CS advertises on upgrade; CSMS requires it and echoes it back (OC-R-004, OC-R-032).
-- Every envelope travels in a WebSocket **text** frame. Binary, ping, pong are not OCPP-J and are ignored.
+- Every envelope travels in a WebSocket **text** frame. Binary, ping, pong are not OCPP-J and are ignored (OC-R-013).
 - Full-duplex: both peers originate Calls on the same socket concurrently (OC-R-014).
 
 ---
@@ -42,11 +42,11 @@ Arity exact: 4 for Call, 3 for CallResult, 5 for CallError. Any other count is a
 ## 3. Message-id semantics
 
 - The unique id is the **only** correlation key. A reply carries no action name; the originating Call's action selects the response type (OC-R-017, OC-R-018).
-- Every **outbound** Call generates a fresh UUID v4.
-- An **inbound** Call's id is whatever the peer chose — no format assumed — echoed back verbatim on the CallResult or CallError.
+- Every **outbound** Call generates a fresh UUID v4 (OC-R-011).
+- An **inbound** Call's id is whatever the peer chose — no format assumed — echoed back verbatim on the CallResult or CallError (OC-R-011).
 - An inbound CallResult/CallError matching no in-flight outbound Call is discarded silently (OC-R-019).
 - A fire-and-forget Call registers no entry; any reply is discarded by the rule above (OC-R-021).
-- Unique ids are not reused, not sequenced, carry no ordering meaning.
+- Unique ids are not reused, not sequenced, carry no ordering meaning (OC-R-011).
 
 ---
 
@@ -54,9 +54,9 @@ Arity exact: 4 for Call, 3 for CallResult, 5 for CallError. Any other count is a
 
 An action's request and response payloads are exactly the OCPP schema types for that action and version — carried through untouched, not remapped (OC-R-006). Deliberately **no** version-neutral semantic layer: the surface is the per-version action set, so every action is listable and every raw JSON inspectable.
 
-- A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings.
-- 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target.
-- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`).
+- A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings (OC-R-006).
+- 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target (OC-R-063).
+- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`, OC-R-073).
 
 ---
 
@@ -144,8 +144,8 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 
 - 1.6: connector id `0` = the charge point. 2.x: absent EVSE target (or EVSE id `0`) = the charging station (OC-R-063).
 - An inbound Call with a top-level connector/EVSE id the station lacks is rejected; `0` and absent always valid (OC-R-063).
-- 2.x auto-`MeterValues` transmit only once the CSMS has **confirmed** the transaction start, so a failed start never leaks meter readings. 1.6 transmits as soon as a transaction id exists.
-- Ending a transaction clears the transaction-scoped limit only; default and maximum persist.
+- 2.x auto-`MeterValues` transmit only once the CSMS has **confirmed** the transaction start, so a failed start never leaks meter readings. 1.6 transmits as soon as a transaction id exists (OC-R-061, OC-R-070).
+- Ending a transaction clears the transaction-scoped limit only; default and maximum persist (OC-R-070).
 
 ---
 
@@ -196,4 +196,4 @@ Every request/response pair in either direction is recorded as a message with mo
 
 - In-memory buffer holds the most recent **200**, evicting oldest first (OC-R-087).
 - Messages teed to the persistent log file (when configured) by sequence number, so eviction never loses a line (OC-R-088).
-- Displayed log filtered to the selected connector/charge-point scope; persistent log carries every scope.
+- Displayed log filtered to the selected connector/charge-point scope; persistent log carries every scope (OC-R-078).

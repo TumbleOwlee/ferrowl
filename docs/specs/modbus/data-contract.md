@@ -98,7 +98,7 @@ Every integer format carries a bit-field selector: a single mask.
 - Decode: `field = (raw & mask) >> shift` (MB-R-015).
 - Encode: `raw = (value << shift) & mask`, bits outside the mask **zero**.
 - Default mask all-ones (no-op), narrowed to the format's width when applied.
-- A mask setting any bit **at or above the format's integer width** is invalid, rejected on decode and encode (e.g. `0x1FF` on `U8`). All-ones default always valid.
+- A mask setting any bit **at or above the format's integer width** is invalid, rejected on decode and encode (e.g. `0x1FF` on `U8`) (MB-R-016). All-ones default always valid.
 - Float and ASCII formats have no bit-field; theirs behaves as the no-op default.
 
 ### 3.1 Aliasing registers and the write mask
@@ -145,7 +145,7 @@ A definition is virtual when it has no `address`, or when `virtual = true` (wins
 
 - Ranges **half-open**: `[start, end)`, `length = end - start` (MB-R-028).
 - `end < start` rejected on deserialization.
-- A region must be **declared before use**. Reads and writes succeed only on fully covered addresses; a partially covered range fails as a whole, no partial result.
+- A region must be **declared before use**. Reads and writes succeed only on fully covered addresses; a partially covered range fails as a whole, no partial result (MB-R-029).
 - Declared regions per key are non-overlapping, ordered by start; a read/write spanning adjacent regions walks them in order and succeeds only if they cover the range completely.
 - Declaring a range overlapping an existing region of the **same cell type** merges into it. A read region overlapping a write cell (or vice versa) widens it to read/write. An incompatible cell type or access combination fails the whole call, key's memory unchanged even with several ranges in the call.
 
@@ -182,6 +182,6 @@ Client poll operations are `(slave id, read function code, [start, end))` triple
 
 - **Without** `read_ranges` for that code: each register its own request. Contiguous registers **not** merged (MB-R-082).
 - **With** `read_ranges`: every register inside one configured range is read by a single request bridging their gaps, trimmed to the first and last register's extent — leading/trailing empty space not read. Registers outside every range get their own requests (MB-R-083).
-- Gap addresses inside a configured range backed by no register are declared **read-only** cells, so the batched read can be stored.
-- Per-request limits: **125 registers**, or **2000 bits** for coils/discrete inputs. Longer batches split.
-- A split landing inside a register moves back to that register's start; a register is never read in half.
+- Gap addresses inside a configured range backed by no register are declared **read-only** cells, so the batched read can be stored (MB-R-084).
+- Per-request limits: **125 registers**, or **2000 bits** for coils/discrete inputs. Longer batches split (MB-R-085).
+- A split landing inside a register moves back to that register's start; a register is never read in half (MB-R-086).

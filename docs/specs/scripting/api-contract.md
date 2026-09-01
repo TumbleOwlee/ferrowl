@@ -78,8 +78,8 @@ Bare `Get`/`Set`/`<Action>` address the charge-point (CS) level. Additionally:
 
 | Method | Signature | Returns | Req |
 |---|---|---|---|
-| `Connector` | `Connector(id)` | `Accessor` scoped to connector `id`, with its own `Get`/`Set`/`<Action>` | SC-R-019 |
-| `GetConnectors` | `GetConnectors()` | array of connector ids (`number`) | SC-R-019 |
+| `Connector` | `Connector(id)` | `Accessor` scoped to connector `id`, with its own `Get`/`Set`/`<Action>` | — |
+| `GetConnectors` | `GetConnectors()` | array of connector ids (`number`) | — |
 
 An action on a connector `Accessor` is enqueued at that connector's scope; on the bare module at CS scope.
 
@@ -89,10 +89,10 @@ Access keyed by station identity.
 
 | Method | Signature | Returns | Req |
 |---|---|---|---|
-| `GetChargingStations` | `GetChargingStations()` | sorted array of station identity strings | SC-R-019 |
-| `GetConnectors` | `GetConnectors(cs)` | sorted array of connector ids for station `cs` (empty if unknown) | SC-R-019 |
-| `ChargingStation` | `ChargingStation(cs)` | CS-level `Accessor` for `cs`, or `nil` if unknown | SC-R-019 |
-| `Connector` | `Connector(cs, id)` | connector `Accessor` for `(cs, id)`, or `nil` if unknown | SC-R-019 |
+| `GetChargingStations` | `GetChargingStations()` | sorted array of station identity strings | — |
+| `GetConnectors` | `GetConnectors(cs)` | sorted array of connector ids for station `cs` (empty if unknown) | — |
+| `ChargingStation` | `ChargingStation(cs)` | CS-level `Accessor` for `cs`, or `nil` if unknown | — |
+| `Connector` | `Connector(cs, id)` | connector `Accessor` for `(cs, id)`, or `nil` if unknown | — |
 
 Unknown stations/connectors resolve to `nil` (not an error); indexing that `nil` is the script's own error (SC-R-019).
 
@@ -142,10 +142,10 @@ The accessor from `Register()` / `OCPP()` behaves exactly as ``## 3. `C_Register
 
 | Method | Signature | Returns | Req |
 |---|---|---|---|
-| `Get` | `Get()` | whole seconds since the sim context was built (`number`) | SC-R-018 |
-| `GetMs` | `GetMs()` | whole milliseconds since the sim context was built (`number`) | SC-R-018 |
+| `Get` | `Get()` | whole seconds since the sim context was built (`number`) | SC-R-017 |
+| `GetMs` | `GetMs()` | whole milliseconds since the sim context was built (`number`) | SC-R-017 |
 
-Origin = the sim thread's context construction; a sim restart (script/interval edit) resets to zero. No sleep, no wall-clock, no date (SC-R-018).
+Origin = the sim thread's context construction; a sim restart (script/interval edit) resets to zero. No sleep, no wall-clock, no date (SC-R-017).
 
 ---
 
@@ -153,8 +153,8 @@ Origin = the sim thread's context construction; a sim restart (script/interval e
 
 | Method | Signature | Behavior | Req |
 |---|---|---|---|
-| `Assert` | `Assert(cond, msg)` | raises `assertion failed: <msg>` when `cond` is Lua-falsy (`nil` or `false`); otherwise returns nothing. Every non-`nil`, non-`false` value (including `0` and `""`) passes | SC-R-032 |
-| `Fail` | `Fail(msg)` | always raises `assertion failed: <msg>` | SC-R-032 |
+| `Assert` | `Assert(cond, msg)` | raises `assertion failed: <msg>` when `cond` is Lua-falsy (`nil` or `false`); otherwise returns nothing. Every non-`nil`, non-`false` value (including `0` and `""`) passes | SC-R-038 |
+| `Fail` | `Fail(msg)` | always raises `assertion failed: <msg>` | SC-R-038 |
 
 Both surface as ordinary runtime errors (SC-R-032): logged, cycle continues. The headless `ferrowl run --exit-on-error` exit-code contract keyed off these is `cli-headless/`.
 

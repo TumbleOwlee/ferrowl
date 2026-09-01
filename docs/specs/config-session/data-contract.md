@@ -52,9 +52,9 @@ Session scripts and device-config scripts share this shape.
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
-| `name` | string | — (required) | script name | CS-R-016 |
-| `code` | string | empty | Lua source | CS-R-016 |
-| `enabled` | bool | `true` | runs in the sim loop. A flag-less entry is active | CS-R-016 |
+| `name` | string | — (required) | script name | — |
+| `code` | string | empty | Lua source | — |
+| `enabled` | bool | `true` | runs in the sim loop. A flag-less entry is active | — |
 
 ---
 
@@ -83,7 +83,7 @@ Full field sets are protocol-owned. Envelope-level:
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
 | `version` | optional string | unset | stamped on save; informational (``## 6. The `version` field — informational only``). Omitted when unset | CS-R-022 |
-| `scripts` | list of `ScriptDef` | empty | device-type Lua sim scripts (``### 3.1 `ScriptDef` (shared envelope type)``). Omitted when empty | CS-R-016 |
+| `scripts` | list of `ScriptDef` | empty | device-type Lua sim scripts (``### 3.1 `ScriptDef` (shared envelope type)``). Omitted when empty | — |
 
 Everything else — Modbus `definitions`/`read_ranges`/timing, OCPP role/version/timeout/security/config-keys — is specified in its protocol area (CS-R-021).
 
@@ -105,14 +105,14 @@ Retained as a human-readable provenance stamp. [`edge-cases.md`](./edge-cases.md
 
 ## 7. What round-trips through `:write`
 
-`:write` serializes the envelope — instance list, session scripts, interval, fresh `version` stamp (CS-R-030). **Configuration**, not **live state**:
+`:write` serializes the envelope — instance list, session scripts, interval, fresh `version` stamp (CS-R-030). **Configuration**, not **live state** — the whole persisted/dropped split below is CS-R-031's:
 
 | Round-trips (persisted) | Does NOT round-trip (dropped) | Req |
 |---|---|---|
-| instance name, type, device path, endpoint | live register/coil values, in-flight Modbus transactions | CS-R-031, CS-R-033 |
-| session scripts + enabled flags | CSMS observed station/connector topology | CS-R-031, CS-R-033 |
-| session interval | OCPP runtime config-key/variable mutations | CS-R-031, CS-R-033 |
-| stamped `version` | the device-config files themselves (saved separately) | CS-R-031, CS-R-032 |
+| instance name, type, device path, endpoint | live register/coil values, in-flight Modbus transactions | CS-R-031 |
+| session scripts + enabled flags | CSMS observed station/connector topology | CS-R-031 |
+| session interval | OCPP runtime config-key/variable mutations | CS-R-031 |
+| stamped `version` | the device-config files themselves (saved separately, CS-R-032) | CS-R-031 |
 
 A reloaded session reproduces the same instance list, scripts, interval; not any runtime data, and not the referenced device configs (CS-R-033).
 
@@ -120,4 +120,4 @@ A reloaded session reproduces the same instance list, scripts, interval; not any
 
 ## 8. TLS configuration shape
 
-A device config's TLS material is a tagged-enum tree (MB-R-105) in a two-role container (MB-R-104/OC-R-126): Modbus `[tls.server]`/`[tls.client]`, OCPP one level deeper `[security.tls.server]`/`[security.tls.client]`. Each role block carries `mode` (policy tag), an `identity` sub-table with `source` (certificate-source tag) when the mode calls for one, and a `verification` sub-table with `verify` (peer-verification tag) when the mode calls for one. Both container fields default independently to `mode = "none"`, so an absent `tls`/`security.tls` block, an empty one, and one whose two policies are both `none` are the same state (CS-R-055).
+A device config's TLS material is a tagged-enum tree (MB-R-105) in a two-role container (MB-R-104/OC-R-126): Modbus `[tls.server]`/`[tls.client]`, OCPP one level deeper `[security.tls.server]`/`[security.tls.client]`. Each role block carries `mode` (policy tag), an `identity` sub-table with `source` (certificate-source tag) when the mode calls for one, and a `verification` sub-table with `verify` (peer-verification tag) when the mode calls for one. Both container fields default independently to `mode = "none"`, so an absent `tls`/`security.tls` block, an empty one, and one whose two policies are both `none` are the same state.

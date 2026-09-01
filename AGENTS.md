@@ -19,7 +19,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 
 ## TDD — fixed order, every stage
 
-1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
+1. Write the test. Doc comment cites a requirement or edge-case ID (`/// MB-R-012 — …`).
 2. Run it, watch it fail for the right reason, report the failure. Wrong assertion / test-side compile error / premature pass proves nothing.
 3. Minimum implementation that passes.
 4. Refactor green.

@@ -113,20 +113,20 @@ All 64 of `## 3. OCPP 2.0.1 — 64 actions` plus the 26 below. **No shared actio
 
 | Action | Scope | Req |
 |---|---|---|
-| `AFRRSignal` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `AdjustPeriodicEventStream` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `ChangeTransactionTariff` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `ClearDERControl` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `ClearTariffs` | Optional | OC-R-002, OC-R-003, OC-R-005 |
-| `GetDERControl` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `GetPeriodicEventStream` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `GetTariffs` | Required | OC-R-002, OC-R-003, OC-R-005 |
-| `NotifyAllowedEnergyTransfer` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `RequestBatterySwap` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `SetDERControl` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `SetDefaultTariff` | Required | OC-R-002, OC-R-003, OC-R-005 |
-| `UpdateDynamicSchedule` | None | OC-R-002, OC-R-003, OC-R-005 |
-| `UsePriorityCharging` | None | OC-R-002, OC-R-003, OC-R-005 |
+| `AFRRSignal` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `AdjustPeriodicEventStream` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `ChangeTransactionTariff` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `ClearDERControl` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `ClearTariffs` | Optional | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `GetDERControl` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `GetPeriodicEventStream` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `GetTariffs` | Required | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `NotifyAllowedEnergyTransfer` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `RequestBatterySwap` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `SetDERControl` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `SetDefaultTariff` | Required | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `UpdateDynamicSchedule` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
+| `UsePriorityCharging` | None | OC-R-002, OC-R-003, OC-R-005, OC-R-007 |
 
 Totals: 25 + 12 = **37** CS→CSMS; 39 + 14 = **53** CSMS→CS; **90**.
 
@@ -218,14 +218,14 @@ A device config written before any of these fields existed still loads: every fi
 
 | Field | Type | Notes | Req |
 |---|---|---|---|
-| `evse` | optional i64 | `None` for 1.6 (connector-only addressing); `Some` for 2.0.1/2.1 | OC-R-058, OC-R-077 |
+| `evse` | optional i64 | `None` for 1.6 (connector-only addressing); `Some` for 2.0.1/2.1 | — |
 | `connector` | i64 | connector id | OC-R-058, OC-R-077 |
 
 ### 8.2 `ConnectorRfids`
 
 | Field | Type | Notes | Req |
 |---|---|---|---|
-| `evse` | optional i64 | as above | OC-R-058, OC-R-077 |
+| `evse` | optional i64 | as above | — |
 | `connector` | optional i64 | as above | OC-R-058, OC-R-077 |
 | `rfids` | list of string | tags accepted for that connector, **in addition to** the charge-point-wide list | OC-R-074, OC-R-075 |
 

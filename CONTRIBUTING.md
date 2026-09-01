@@ -49,7 +49,9 @@ cites the requirement ID, directly beside the test declaration:
 fn ut_checksum_excludes_trailer() { /* … */ }
 ```
 
-A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position and form; the at-most-one-ID-per-test rule is unchanged.
+A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position
+and form; `docs/specs/README.md` rule 8's at-most-one-ID-per-test still
+applies.
 
 Line coverage must stay at or above **80%**, enforced in CI. Coverage is a
 floor, not a goal — never pad it with tests that execute code without
