@@ -8,11 +8,11 @@ Excerpt of AGENTS.md — spec-driven core, TDD order, build/test/lint, conventio
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement IDs stable, append-only. Cite in commits and PRs.
-- One requirement, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only. Cite in commits and PRs.
+- One requirement or edge-case entry, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
 ## TDD — fixed order, every stage
 
-1. Write the test. Doc comment cites requirement ID (`/// MB-R-012 — …`).
+1. Write the test. Doc comment cites a requirement or edge-case ID (`/// MB-R-012 — …`).
 2. Run it, watch it fail for the right reason, report the failure. Wrong assertion / test-side compile error / premature pass proves nothing.
 3. Minimum implementation that passes.
 4. Refactor green.
