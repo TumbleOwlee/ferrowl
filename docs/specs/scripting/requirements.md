@@ -46,13 +46,13 @@ IDs stable, append-only (`SC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **SC-R-014** — A per-module Modbus sim and the session-level sim run **every** enabled script on **every** cycle. A per-module OCPP sim runs each enabled script at most once per cycle interval, skipping any that ran more recently than the interval. In all cases the observable cadence of a script is approximately one execution per cycle interval.
 
-**SC-R-015** — Execution within a cycle is sequential on the sim thread (no script in a context runs concurrently with another in the same context). Relative order within a cycle is unspecified ([`edge-cases.md`](./edge-cases.md) §5.3).
+**SC-R-015** — Execution within a cycle is sequential on the sim thread (no script in a context runs concurrently with another in the same context). Relative order within a cycle is unspecified ([`edge-cases.md`](./edge-cases.md) SC-E-034).
 
 **SC-R-016** — The cycle interval resolves from the owner's configured interval in seconds, sanitized so non-finite or non-positive falls back to 1.0 s. A per-module (Modbus or OCPP) interval is additionally floored to 0.05 s; the session-level interval has no floor.
 
 **SC-R-017** — Time observed through `C_Time` is measured from the moment the sim thread's context is built. Rebuilding the context (SC-R-024) resets the origin to zero.
 
-**SC-R-035** — An owner supports executing a single script **once, on demand** (script-manager dialog, UI-R-051). Such a run builds its own context on its own short-lived thread, registers the same `C_*` modules its owner's sim would (SC-R-018), loads only that script, calls it exactly once, logs any error to the owner's script log, exits. It requires no running sim thread, shares no Lua state with one ([`edge-cases.md`](./edge-cases.md) §5.8), and ignores the enabled flag. Its errors are logged under a `[run]` prefix, distinct from the `[sim]` prefix marking sim diagnostics (SC-R-032): `ferrowl run --exit-on-error` keys exit code 2 off `[sim]` (CL-R-031), so an interactive test run must not be mistakable for a sim failure.
+**SC-R-035** — An owner supports executing a single script **once, on demand** (script-manager dialog, UI-R-051). Such a run builds its own context on its own short-lived thread, registers the same `C_*` modules its owner's sim would (SC-R-018), loads only that script, calls it exactly once, logs any error to the owner's script log, exits. It requires no running sim thread, shares no Lua state with one ([`edge-cases.md`](./edge-cases.md) SC-E-039), and ignores the enabled flag. Its errors are logged under a `[run]` prefix, distinct from the `[sim]` prefix marking sim diagnostics (SC-R-032): `ferrowl run --exit-on-error` keys exit code 2 off `[sim]` (CL-R-031), so an interactive test run must not be mistakable for a sim failure.
 
 ---
 
@@ -100,9 +100,9 @@ IDs stable, append-only (`SC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## State access semantics
 
-**SC-R-027** — A value read from a register or OCPP state field returns to Lua as its natural type (number for numeric, string, boolean). A value written from Lua applies to host state per the API contract, type/range mismatches failing rather than coercing ([`api-contract.md`](./api-contract.md), [`edge-cases.md`](./edge-cases.md) §2).
+**SC-R-027** — A value read from a register or OCPP state field returns to Lua as its natural type (number for numeric, string, boolean). A value written from Lua applies to host state per the API contract, type/range mismatches failing rather than coercing ([`api-contract.md`](./api-contract.md), [`edge-cases.md`](./edge-cases.md) `## 2. State access and type coercion`).
 
-**SC-R-028** — A register or OCPP state write from Lua applies to the module's in-memory/observed state only. A Modbus Lua write never emits a Modbus write command (unlike interactive `:set`); a written value on a client is therefore transient and may be overwritten by the next poll ([`edge-cases.md`](./edge-cases.md) §5.2).
+**SC-R-028** — A register or OCPP state write from Lua applies to the module's in-memory/observed state only. A Modbus Lua write never emits a Modbus write command (unlike interactive `:set`); a written value on a client is therefore transient and may be overwritten by the next poll ([`edge-cases.md`](./edge-cases.md) SC-E-033).
 
 **SC-R-029** — Host state reached from Lua is guarded by the same locks the network task uses, so each `Get`/`Set`/action call is atomic against concurrent host access. No cross-call transaction: a read-then-write may interleave with a concurrent host update between the calls.
 
@@ -118,6 +118,6 @@ IDs stable, append-only (`SC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **SC-R-033** — If building the context itself fails — a Lua **syntax** error in any script, or a duplicate name (SC-R-005) — the sim thread logs a single "failed to build Lua context" error and does not loop; **no** script in that context runs. Load-time failure is all-or-nothing per context; run-time failure (SC-R-032) is isolated per script.
 
-**SC-R-034** — Every Lua context — sim thread (SC-R-010) and on-demand run (SC-R-035) alike — installs an execution hook via mlua's `every_nth_instruction`, firing every 1,000 instructions. On each firing: (a) sim-thread context: check the stop flag and, if set, raise a Lua error to unwind the executing script; (b) unconditionally check elapsed wall-clock since the current cycle (or, for an on-demand run, the single execution) began, raising a Lua error past a fixed 1,000 ms cap. Both constants fixed; neither exposed as config key or CLI flag. No memory ceiling. [`edge-cases.md`](./edge-cases.md) §5.1.
+**SC-R-034** — Every Lua context — sim thread (SC-R-010) and on-demand run (SC-R-035) alike — installs an execution hook via mlua's `every_nth_instruction`, firing every 1,000 instructions. On each firing: (a) sim-thread context: check the stop flag and, if set, raise a Lua error to unwind the executing script; (b) unconditionally check elapsed wall-clock since the current cycle (or, for an on-demand run, the single execution) began, raising a Lua error past a fixed 1,000 ms cap. Both constants fixed; neither exposed as config key or CLI flag. No memory ceiling. [`edge-cases.md`](./edge-cases.md) SC-E-032.
 
 **SC-R-039** — An error raised by the hook (stop-flag or wall-clock) flows through the same per-script path as any runtime error: SC-R-032's isolation and `[sim]` logging for a sim thread, SC-R-035's `[run]` logging for an on-demand run. It does not crash the sim thread, and, for a sim thread, other scripts still run that cycle. A hook-raised stop lets a pending stop-and-join complete promptly instead of blocking on the join.
