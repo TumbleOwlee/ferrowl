@@ -10,8 +10,6 @@
 #![allow(clippy::unwrap_used)]
 #![cfg(feature = "v1_6")]
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, BasicAuth, CallError, CallErrorCode, Response16, V1_6};
@@ -95,15 +93,8 @@ fn boot_action() -> Action16 {
     )
 }
 
-/// Write `pem` to a fresh file under the OS temp dir; returns its path. Left in place -- the temp
-/// dir is ephemeral and there's no shared teardown hook to hang cleanup off.
-fn write_pem(label: &str, pem: &str) -> String {
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "ferrowl-ocpp-test-{}-{label}-{n}.pem",
-        std::process::id()
-    ));
+fn write_pem(dir: &std::path::Path, label: &str, pem: &str) -> String {
+    let path = dir.join(format!("{label}.pem"));
     std::fs::write(&path, pem).expect("failed to write test PEM file");
     path.to_string_lossy().into_owned()
 }
@@ -259,8 +250,9 @@ async fn tls_loopback_over_self_signed_cert() {
         .expect("cert params")
         .self_signed(&key_pair)
         .expect("self-signed cert");
-    let cert_file = write_pem("server-cert", &cert.pem());
-    let key_file = write_pem("server-key", &key_pair.serialize_pem());
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_ws_security");
+    let cert_file = write_pem(dir.path(), "server-cert", &cert.pem());
+    let key_file = write_pem(dir.path(), "server-key", &key_pair.serialize_pem());
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -317,8 +309,13 @@ async fn tls_loopback_rejects_untrusted_cert() {
         .expect("cert params")
         .self_signed(&key_pair)
         .expect("self-signed cert");
-    let cert_file = write_pem("server-cert-untrusted", &cert.pem());
-    let key_file = write_pem("server-key-untrusted", &key_pair.serialize_pem());
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_ws_security");
+    let cert_file = write_pem(dir.path(), "server-cert-untrusted", &cert.pem());
+    let key_file = write_pem(
+        dir.path(),
+        "server-key-untrusted",
+        &key_pair.serialize_pem(),
+    );
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -555,7 +552,8 @@ async fn it_csms_self_signed_mutual_with_ca_files_accepts_connection() {
     let ca_params =
         rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca".to_owned()]).expect("ca params");
     let ca_cert = ca_params.self_signed(&ca_key).expect("self-signed ca cert");
-    let ca_file = write_pem("mtls-ca", &ca_cert.pem());
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_ws_security");
+    let ca_file = write_pem(dir.path(), "mtls-ca", &ca_cert.pem());
 
     let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
     let client_key = rcgen::KeyPair::generate().expect("client keypair generation failed");
@@ -563,8 +561,8 @@ async fn it_csms_self_signed_mutual_with_ca_files_accepts_connection() {
         .expect("client params")
         .signed_by(&client_key, &issuer)
         .expect("ca-signed client cert");
-    let client_cert_file = write_pem("mtls-client-cert", &client_cert.pem());
-    let client_key_file = write_pem("mtls-client-key", &client_key.serialize_pem());
+    let client_cert_file = write_pem(dir.path(), "mtls-client-cert", &client_cert.pem());
+    let client_key_file = write_pem(dir.path(), "mtls-client-key", &client_key.serialize_pem());
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -623,7 +621,9 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
     let ca1_key = rcgen::KeyPair::generate().expect("ca1 keypair");
     let ca1_params = rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca1".to_owned()])
         .expect("ca1 params");
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_ws_security");
     let ca1_file = write_pem(
+        dir.path(),
         "multi-ca-1",
         &ca1_params
             .clone()
@@ -639,7 +639,7 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
         .clone()
         .self_signed(&ca2_key)
         .expect("self-signed ca2");
-    let ca2_file = write_pem("multi-ca-2", &ca2_cert.pem());
+    let ca2_file = write_pem(dir.path(), "multi-ca-2", &ca2_cert.pem());
 
     // The client certificate is signed by CA2 only -- CA1 is present in the trust store but
     // irrelevant to this handshake.
@@ -649,8 +649,12 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
         .expect("client params")
         .signed_by(&client_key, &issuer)
         .expect("ca2-signed client cert");
-    let client_cert_file = write_pem("multi-ca-client-cert", &client_cert.pem());
-    let client_key_file = write_pem("multi-ca-client-key", &client_key.serialize_pem());
+    let client_cert_file = write_pem(dir.path(), "multi-ca-client-cert", &client_cert.pem());
+    let client_key_file = write_pem(
+        dir.path(),
+        "multi-ca-client-key",
+        &client_key.serialize_pem(),
+    );
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -762,7 +766,8 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
     let ca_params =
         rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca".to_owned()]).expect("ca params");
     let ca_cert = ca_params.self_signed(&ca_key).expect("self-signed ca cert");
-    let ca_file = write_pem("cafiles-ca", &ca_cert.pem());
+    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_ws_security");
+    let ca_file = write_pem(dir.path(), "cafiles-ca", &ca_cert.pem());
 
     let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
     let server_key = rcgen::KeyPair::generate().expect("server keypair generation failed");
@@ -770,8 +775,12 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
         .expect("server params")
         .signed_by(&server_key, &issuer)
         .expect("ca-signed server cert");
-    let server_cert_file = write_pem("cafiles-server-cert", &server_cert.pem());
-    let server_key_file = write_pem("cafiles-server-key", &server_key.serialize_pem());
+    let server_cert_file = write_pem(dir.path(), "cafiles-server-cert", &server_cert.pem());
+    let server_key_file = write_pem(
+        dir.path(),
+        "cafiles-server-key",
+        &server_key.serialize_pem(),
+    );
 
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -825,8 +834,8 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
         .expect("cert params")
         .self_signed(&key_pair)
         .expect("self-signed cert");
-    let other_cert_file = write_pem("cafiles-other-cert", &other_cert.pem());
-    let other_key_file = write_pem("cafiles-other-key", &key_pair.serialize_pem());
+    let other_cert_file = write_pem(dir.path(), "cafiles-other-cert", &other_cert.pem());
+    let other_key_file = write_pem(dir.path(), "cafiles-other-key", &key_pair.serialize_pem());
     let other_server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
             host: "127.0.0.1".to_owned(),
@@ -848,6 +857,7 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
     .expect("server failed to bind");
 
     let other_ca_file = write_pem(
+        dir.path(),
         "cafiles-ca-2",
         &rcgen::CertificateParams::new(vec!["ferrowl-ocpp-test-ca-2".to_owned()])
             .expect("ca params")

@@ -187,22 +187,6 @@ mod tests {
         b: String,
     }
 
-    /// Unique scratch path in the temp dir (process id + monotonic counter avoids collisions
-    /// across parallel test threads).
-    fn tmp_path(ext: &str) -> String {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir()
-            .join(format!(
-                "ferrowl_convert_{}_{}.{}",
-                std::process::id(),
-                n,
-                ext
-            ))
-            .to_string_lossy()
-            .into_owned()
-    }
-
     #[test]
     /// CS-R-002 — the encoding is selected from the file-path extension.
     fn ut_filetype_from_path() {
@@ -218,15 +202,16 @@ mod tests {
     #[test]
     /// CS-R-004 — a value saves and loads through TOML to an equal value.
     fn ut_toml_save_load_round_trip() {
-        let path = tmp_path("toml");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let path = dir.join("sample.toml");
+        let path = path.to_str().unwrap();
         let value = Sample {
             a: 7,
             b: "hello".into(),
         };
-        Converter::save(&value, &path, FileType::Toml).unwrap();
-        let loaded: Sample = Converter::load(&path, FileType::Toml).unwrap();
+        Converter::save(&value, path, FileType::Toml).unwrap();
+        let loaded: Sample = Converter::load(path, FileType::Toml).unwrap();
         assert_eq!(loaded, value);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -242,72 +227,77 @@ mod tests {
         let value = Wrap {
             blob: serde_json::json!({ "ip": "127.0.0.1", "port": 9000 }),
         };
-        let path = tmp_path("toml");
-        Converter::save(&value, &path, FileType::Toml).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let path = dir.join("sample.toml");
+        let path = path.to_str().unwrap();
+        Converter::save(&value, path, FileType::Toml).unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
         assert!(text.contains("port = 9000"), "got:\n{text}");
         assert!(!text.contains("private::Number"), "got:\n{text}");
-        let loaded: Wrap = Converter::load(&path, FileType::Toml).unwrap();
+        let loaded: Wrap = Converter::load(path, FileType::Toml).unwrap();
         assert_eq!(loaded, value);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     /// CS-R-004 — a value saves and loads through JSON to an equal value.
     fn ut_json_save_load_round_trip() {
-        let path = tmp_path("json");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let path = dir.join("sample.json");
+        let path = path.to_str().unwrap();
         let value = Sample {
             a: 42,
             b: "world".into(),
         };
-        Converter::save(&value, &path, FileType::Json).unwrap();
-        let loaded: Sample = Converter::load(&path, FileType::Json).unwrap();
+        Converter::save(&value, path, FileType::Json).unwrap();
+        let loaded: Sample = Converter::load(path, FileType::Json).unwrap();
         assert_eq!(loaded, value);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     /// CS-R-004 — converting TOML to JSON preserves the data model.
     fn ut_convert_toml_to_json_preserves_data() {
-        let src = tmp_path("toml");
-        let dst = tmp_path("json");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let src = dir.join("src.toml");
+        let src = src.to_str().unwrap();
+        let dst = dir.join("dst.json");
+        let dst = dst.to_str().unwrap();
         let value = Sample {
             a: 3,
             b: "x".into(),
         };
-        Converter::save(&value, &src, FileType::Toml).unwrap();
-        Converter::convert::<Sample>(&src, FileType::Toml, &dst, FileType::Json).unwrap();
-        let loaded: Sample = Converter::load(&dst, FileType::Json).unwrap();
+        Converter::save(&value, src, FileType::Toml).unwrap();
+        Converter::convert::<Sample>(src, FileType::Toml, dst, FileType::Json).unwrap();
+        let loaded: Sample = Converter::load(dst, FileType::Json).unwrap();
         assert_eq!(loaded, value);
-        let _ = std::fs::remove_file(&src);
-        let _ = std::fs::remove_file(&dst);
     }
 
     #[test]
     /// CS-R-004 — converting JSON to TOML preserves the data model.
     fn ut_convert_json_to_toml_preserves_data() {
         // Exercises the JSON-source read path and the TOML-destination write path.
-        let src = tmp_path("json");
-        let dst = tmp_path("toml");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let src = dir.join("src.json");
+        let src = src.to_str().unwrap();
+        let dst = dir.join("dst.toml");
+        let dst = dst.to_str().unwrap();
         let value = Sample {
             a: 11,
             b: "y".into(),
         };
-        Converter::save(&value, &src, FileType::Json).unwrap();
-        Converter::convert::<Sample>(&src, FileType::Json, &dst, FileType::Toml).unwrap();
-        let loaded: Sample = Converter::load(&dst, FileType::Toml).unwrap();
+        Converter::save(&value, src, FileType::Json).unwrap();
+        Converter::convert::<Sample>(src, FileType::Json, dst, FileType::Toml).unwrap();
+        let loaded: Sample = Converter::load(dst, FileType::Toml).unwrap();
         assert_eq!(loaded, value);
-        let _ = std::fs::remove_file(&src);
-        let _ = std::fs::remove_file(&dst);
     }
 
     #[test]
     fn ut_convert_json_source_open_error() {
-        let dst = tmp_path("toml");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dst = dir.join("dst.toml");
         let r = Converter::convert::<Sample>(
             "/no/such/ferrowl/src.json",
             FileType::Json,
-            &dst,
+            dst.to_str().unwrap(),
             FileType::Toml,
         );
         assert!(matches!(r, Err(Error::Serialize(_))));
@@ -316,57 +306,64 @@ mod tests {
     #[test]
     /// CS-R-050 — a malformed source fails to convert with a deserialize error.
     fn ut_convert_json_source_malformed_error() {
-        let src = tmp_path("json");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let src = dir.join("src.json");
         std::fs::write(&src, "{ not valid json ").unwrap();
-        let dst = tmp_path("toml");
-        let r = Converter::convert::<Sample>(&src, FileType::Json, &dst, FileType::Toml);
+        let dst = dir.join("dst.toml");
+        let r = Converter::convert::<Sample>(
+            src.to_str().unwrap(),
+            FileType::Json,
+            dst.to_str().unwrap(),
+            FileType::Toml,
+        );
         assert!(matches!(r, Err(Error::Serialize(_))));
-        let _ = std::fs::remove_file(&src);
     }
 
     #[test]
     fn ut_convert_toml_dest_create_error() {
         // Valid source, but the destination directory does not exist -> create fails.
-        let src = tmp_path("toml");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let src = dir.join("src.toml");
+        let src = src.to_str().unwrap();
         Converter::save(
             &Sample {
                 a: 1,
                 b: "z".into(),
             },
-            &src,
+            src,
             FileType::Toml,
         )
         .unwrap();
         let r = Converter::convert::<Sample>(
-            &src,
+            src,
             FileType::Toml,
             "/no/such/ferrowl/dir/out.toml",
             FileType::Toml,
         );
         assert!(matches!(r, Err(Error::Serialize(_))));
-        let _ = std::fs::remove_file(&src);
     }
 
     #[test]
     fn ut_convert_json_dest_create_error() {
-        let src = tmp_path("toml");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let src = dir.join("src.toml");
+        let src = src.to_str().unwrap();
         Converter::save(
             &Sample {
                 a: 1,
                 b: "z".into(),
             },
-            &src,
+            src,
             FileType::Toml,
         )
         .unwrap();
         let r = Converter::convert::<Sample>(
-            &src,
+            src,
             FileType::Toml,
             "/no/such/ferrowl/dir/out.json",
             FileType::Json,
         );
         assert!(matches!(r, Err(Error::Serialize(_))));
-        let _ = std::fs::remove_file(&src);
     }
 
     #[test]
@@ -430,16 +427,16 @@ mod tests {
     #[test]
     /// CS-R-050 — malformed file content fails to load with a deserialize error.
     fn ut_load_malformed_content_errors() {
-        let path = tmp_path("json");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let path = dir.join("sample.json");
         std::fs::write(&path, "{ not valid json ").unwrap();
-        let r = Converter::load::<Sample>(&path, FileType::Json);
+        let r = Converter::load::<Sample>(path.to_str().unwrap(), FileType::Json);
         assert!(matches!(r, Err(Error::Deserialize(_))));
-        let _ = std::fs::remove_file(&path);
     }
 
     /// A unique `~/<name>` string plus the real, joined `PathBuf` it should expand to, for
-    /// exercising NF-R-042 tilde expansion. Rooted under the real home directory rather than
-    /// `std::env::temp_dir()` (unlike [`tmp_path`]) since that's the whole point under test.
+    /// exercising NF-R-042 tilde expansion. Rooted under the real home directory, not under the
+    /// temp root, because tilde expansion is what is under test.
     fn home_tilde_path(ext: &str) -> (String, std::path::PathBuf) {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
