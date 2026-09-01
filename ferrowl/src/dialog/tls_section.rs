@@ -672,8 +672,8 @@ mod tests {
         layout::{Constraint, Rect},
     };
 
-    fn tmp_file(name: &str) -> String {
-        let path = std::env::temp_dir().join(format!("ferrowl_tls_section_test_{name}"));
+    fn tmp_file(dir: &ferrowl_test_support::TempDirGuard, name: &str) -> String {
+        let path = dir.join(name);
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
     }
@@ -849,8 +849,9 @@ mod tests {
     /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
     /// (nothing was cleared, only excluded while On).
     fn ut_extract_toggle_self_signed_back_off_restores_cert_key() {
-        let cert = tmp_file("s.crt");
-        let key = tmp_file("s.key");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_tls_section");
+        let cert = tmp_file(&dir, "s.crt");
+        let key = tmp_file(&dir, "s.key");
 
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
@@ -985,8 +986,9 @@ mod tests {
     /// whichever entry is currently selected — not a comma-separated text field.
     #[test]
     fn ut_ca_files_add_remove_edit() {
-        let ca1 = tmp_file("mca1.pem");
-        let ca2 = tmp_file("mca2.pem");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_tls_section");
+        let ca1 = tmp_file(&dir, "mca1.pem");
+        let ca2 = tmp_file(&dir, "mca2.pem");
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1); // server cert self-signed, no file needed
@@ -1074,7 +1076,8 @@ mod tests {
     /// to the server-role sequence above.
     #[test]
     fn ut_ca_list_shared_by_both_roles_add_remove_edit() {
-        let ca = tmp_file("cca1.pem");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_tls_section");
+        let ca = tmp_file(&dir, "cca1.pem");
         let mut section = TlsSection::new();
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
         section.root_store.state.set_selection(1); // Off, so the list is required/shown
@@ -1119,7 +1122,8 @@ mod tests {
         );
         assert!(section.ca_files.state.values().is_empty());
 
-        let bad = tmp_file("wrong-ext.txt");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_tls_section");
+        let bad = tmp_file(&dir, "wrong-ext.txt");
         type_into(
             &mut section.ca_add_dialog.as_mut().unwrap().path.state,
             &bad,

@@ -126,15 +126,8 @@ impl SuggestionProvider for FsPathProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use std::fs;
-
-    fn tmp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(name)
-    }
-
-    fn cleanup(dir: &Path) {
-        let _ = fs::remove_dir_all(dir);
-    }
 
     /// Build a temp dir tree:
     ///   <root>/configs/          (dir)
@@ -144,9 +137,8 @@ mod tests {
     ///   <root>/.hidden.toml      (file)
     ///   <root>/.hiddendir/       (dir)
     ///   <root>/sub/configs/      (dir)
-    fn setup(root_name: &str) -> PathBuf {
-        let root = tmp(root_name);
-        cleanup(&root);
+    fn setup(tag: &str) -> TempDirGuard {
+        let root = reserve_temp_dir(tag);
         fs::create_dir_all(root.join("configs")).unwrap();
         fs::create_dir_all(root.join("sub/configs")).unwrap();
         fs::create_dir_all(root.join(".hiddendir")).unwrap();
@@ -161,7 +153,7 @@ mod tests {
     /// UI-R-026 — path completion filters candidates by the typed prefix.
     fn ut_prefix_filtering() {
         let root = setup("ferrowl_pathsuggest_prefix");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let input = format!("{dir_prefix}conf");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
@@ -169,52 +161,48 @@ mod tests {
         assert!(names.contains(&format!("{dir_prefix}config.toml").as_str()));
         assert!(names.contains(&format!("{dir_prefix}config.json").as_str()));
         assert!(!names.iter().any(|n| n.ends_with("notes.txt")));
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — directory completions carry a trailing slash (partial suggestions).
     fn ut_trailing_slash_on_dirs() {
         let root = setup("ferrowl_pathsuggest_slash");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let input = format!("{dir_prefix}configs");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, format!("{dir_prefix}configs/"));
         assert!(results[0].1);
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — hidden entries are excluded from completions by default.
     fn ut_hidden_excluded_by_default() {
         let root = setup("ferrowl_pathsuggest_hidden_excl");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let input = dir_prefix.clone();
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
         assert!(!names.iter().any(|n| n.contains(".hidden")));
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — hidden entries appear once a dot prefix is typed.
     fn ut_hidden_included_when_typed() {
         let root = setup("ferrowl_pathsuggest_hidden_incl");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let input = format!("{dir_prefix}.");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
         assert!(names.contains(&format!("{dir_prefix}.hiddendir/").as_str()));
         assert!(names.contains(&format!("{dir_prefix}.hidden.toml").as_str()));
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — an extension filter keeps directories reachable for descent.
     fn ut_extension_filter_keeps_dirs() {
         let root = setup("ferrowl_pathsuggest_ext");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let input = dir_prefix.clone();
         let results = complete_path(&input, Some(&["toml"]), MAX_SUGGESTIONS);
         let names: Vec<&str> = results.iter().map(|(p, _)| p.as_str()).collect();
@@ -225,7 +213,6 @@ mod tests {
         assert!(names.contains(&format!("{dir_prefix}config.toml").as_str()));
         assert!(!names.iter().any(|n| n.ends_with("config.json")));
         assert!(!names.iter().any(|n| n.ends_with("notes.txt")));
-        cleanup(&root);
     }
 
     #[test]
@@ -243,13 +230,13 @@ mod tests {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let dirname = format!("ferrowl_pathsuggest_tilde_real_{}", std::process::id());
         let root = home.join(&dirname);
-        cleanup(&root);
+        let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("probe.toml"), "").unwrap();
 
         let input = format!("~/{dirname}/");
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
-        cleanup(&root);
+        let _ = fs::remove_dir_all(&root);
 
         assert!(
             results.contains(&(format!("~/{dirname}/probe.toml"), false)),
@@ -260,16 +247,13 @@ mod tests {
     #[test]
     /// UI-R-026 — the completion list is capped in length.
     fn ut_result_cap() {
-        let root = tmp("ferrowl_pathsuggest_cap");
-        cleanup(&root);
-        fs::create_dir_all(&root).unwrap();
+        let root = reserve_temp_dir("ferrowl_pathsuggest_cap");
         for i in 0..20 {
             fs::write(root.join(format!("file{i:02}.txt")), "").unwrap();
         }
-        let input = format!("{}/", root.to_string_lossy());
+        let input = format!("{}/", root.path().to_string_lossy());
         let results = complete_path(&input, None, MAX_SUGGESTIONS);
         assert_eq!(results.len(), MAX_SUGGESTIONS);
-        cleanup(&root);
     }
 
     // Guards tests that temporarily change the process cwd, so they don't race each other
@@ -282,11 +266,10 @@ mod tests {
         let _guard = CWD_LOCK.lock().unwrap();
         let original_cwd = std::env::current_dir().unwrap();
 
-        let root = tmp("ferrowl_pathsuggest_empty_input");
-        cleanup(&root);
+        let root = reserve_temp_dir("ferrowl_pathsuggest_empty_input");
         fs::create_dir_all(root.join("marker_dir")).unwrap();
 
-        std::env::set_current_dir(&root).unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
         let result = std::panic::catch_unwind(|| {
             // With empty dir part, results should not be prefixed with "./".
             let results = complete_path("marker", None, MAX_SUGGESTIONS);
@@ -295,7 +278,6 @@ mod tests {
             assert!(!names.iter().any(|n| n.starts_with("./")));
         });
         std::env::set_current_dir(&original_cwd).unwrap();
-        cleanup(&root);
 
         result.unwrap();
     }
@@ -304,7 +286,7 @@ mod tests {
     /// UI-R-026 — a directory suggestion is marked partial with a trailing-slash label.
     fn ut_provider_dir_partial_and_trailing_slash_label() {
         let root = setup("ferrowl_pathsuggest_provider_dir");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let provider = FsPathProvider::default();
         let input = format!("{dir_prefix}sub/conf");
         let results = provider.suggest(&input);
@@ -314,14 +296,13 @@ mod tests {
             .expect("expected sub/configs/ suggestion");
         assert_eq!(hit.label, "configs/");
         assert!(hit.partial);
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — a file suggestion's label is its last path component.
     fn ut_provider_file_label_is_last_component() {
         let root = setup("ferrowl_pathsuggest_provider_file");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let provider = FsPathProvider::default();
         let input = format!("{dir_prefix}config.toml");
         let results = provider.suggest(&input);
@@ -331,21 +312,19 @@ mod tests {
             .expect("expected config.toml suggestion");
         assert_eq!(hit.label, "config.toml");
         assert!(!hit.partial);
-        cleanup(&root);
     }
 
     #[test]
     /// UI-R-026 — the provider honors the configured extension filter.
     fn ut_provider_extension_filter_honored() {
         let root = setup("ferrowl_pathsuggest_provider_ext");
-        let dir_prefix = format!("{}/", root.to_string_lossy());
+        let dir_prefix = format!("{}/", root.path().to_string_lossy());
         let provider = FsPathProvider::with_extensions(&["toml"]);
         let results = provider.suggest(&dir_prefix);
         let values: Vec<&str> = results.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&format!("{dir_prefix}config.toml").as_str()));
         assert!(!values.iter().any(|v| v.ends_with("config.json")));
         assert!(!values.iter().any(|v| v.ends_with("notes.txt")));
-        cleanup(&root);
     }
 
     #[test]

@@ -694,12 +694,11 @@ mod tests {
     #[test]
     /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     fn log_ring_persists_lines_to_file_sink() {
-        let dir = std::env::temp_dir();
-        let base = dir.join(format!("ferrowl_logring_test_{}.log", std::process::id()));
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_logring");
+        let base = dir.join("test.log");
         let base = base.to_str().unwrap();
         let name = "csms";
         let path = crate::view::log::module_log_path(base, name);
-        let _ = std::fs::remove_file(&path);
 
         let mut ring = LogRing::init();
         ring.set_log_file(Some(base), name);
@@ -725,7 +724,6 @@ mod tests {
         assert!(contents.contains("second line"));
         // Lines are timestamped.
         assert!(contents.trim_start().starts_with('['));
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

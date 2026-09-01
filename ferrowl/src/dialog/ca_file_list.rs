@@ -231,8 +231,8 @@ mod tests {
         }
     }
 
-    fn tmp_file(name: &str) -> String {
-        let path = std::env::temp_dir().join(format!("ferrowl_ca_file_list_test_{name}"));
+    fn tmp_file(dir: &ferrowl_test_support::TempDirGuard, name: &str) -> String {
+        let path = dir.join(name);
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
     }
@@ -257,7 +257,8 @@ mod tests {
     #[test]
     fn ut_apply_requires_non_empty_path() {
         assert!(AddCaFileDialog::new().apply().is_err());
-        let ca = tmp_file("nonempty.pem");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let ca = tmp_file(&dir, "nonempty.pem");
         let mut d = AddCaFileDialog::new();
         type_into(&mut d.path.state, &format!("  {ca}  "));
         // The input field itself doesn't trim as typed; `apply` trims on read.
@@ -279,7 +280,8 @@ mod tests {
     #[test]
     fn ut_apply_rejects_directory() {
         let mut d = AddCaFileDialog::new();
-        type_into(&mut d.path.state, &std::env::temp_dir().to_string_lossy());
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list_dir");
+        type_into(&mut d.path.state, &dir.path().to_string_lossy());
         let err = d.apply().expect_err("a directory must not apply");
         assert!(err.contains("directory"), "unexpected error: {err}");
     }
@@ -289,7 +291,8 @@ mod tests {
     #[test]
     fn ut_apply_rejects_wrong_extension() {
         let mut d = AddCaFileDialog::new();
-        let bad = tmp_file("ca.txt");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let bad = tmp_file(&dir, "ca.txt");
         type_into(&mut d.path.state, &bad);
         let err = d.apply().expect_err("a .txt file must not apply");
         assert!(err.contains("extension"), "unexpected error: {err}");
@@ -300,7 +303,8 @@ mod tests {
     #[test]
     fn ut_apply_accepts_uppercase_extension() {
         let mut d = AddCaFileDialog::new();
-        let ca = tmp_file("uppercase.PEM");
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let ca = tmp_file(&dir, "uppercase.PEM");
         type_into(&mut d.path.state, &ca);
         assert_eq!(d.apply().unwrap(), ca);
     }

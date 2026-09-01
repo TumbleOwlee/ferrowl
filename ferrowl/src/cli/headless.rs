@@ -365,6 +365,7 @@ pub async fn run(args: &RunArgs) -> i32 {
 mod tests {
     use super::*;
     use crate::app::LogRing;
+    use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -519,8 +520,9 @@ mod tests {
             }],
             interval: 9.0,
         };
-        let p1 = std::env::temp_dir().join("ferrowl_headless_session1.toml");
-        let p2 = std::env::temp_dir().join("ferrowl_headless_session2.toml");
+        let dir = reserve_temp_dir("ferrowl_headless");
+        let p1 = dir.join("session1.toml");
+        let p2 = dir.join("session2.toml");
         Converter::save(&s1, p1.to_str().unwrap(), FileType::Toml).unwrap();
         Converter::save(&s2, p2.to_str().unwrap(), FileType::Toml).unwrap();
 
@@ -574,13 +576,14 @@ mod tests {
     }
 
     /// Writes a temp device config + a session file with one modbus module and one session
-    /// script, returns a [`RunArgs`] pointing at it. `script_enabled` toggles whether the
-    /// session script is enabled, so both the "sim runs" and "zero enabled scripts spawns
-    /// nothing" cases share one fixture.
-    fn session_run_args(tag: &str, script_enabled: bool) -> RunArgs {
+    /// script, returns a [`RunArgs`] pointing at it plus the guard keeping its temp dir alive.
+    /// `script_enabled` toggles whether the session script is enabled, so both the "sim runs"
+    /// and "zero enabled scripts spawns nothing" cases share one fixture.
+    fn session_run_args(tag: &str, script_enabled: bool) -> (RunArgs, TempDirGuard) {
         use ferrowl_util::convert::{Converter, FileType};
 
-        let device_path = std::env::temp_dir().join(format!("ferrowl_headless_{tag}_device.toml"));
+        let dir = reserve_temp_dir(&format!("ferrowl_headless_{tag}"));
+        let device_path = dir.join("device.toml");
         Converter::save(
             &holding_device_config(),
             device_path.to_str().unwrap(),
@@ -614,30 +617,24 @@ mod tests {
             }],
             interval: 0.05,
         };
-        let session_path =
-            std::env::temp_dir().join(format!("ferrowl_headless_{tag}_session.toml"));
+        let session_path = dir.join("session.toml");
         Converter::save(&session, session_path.to_str().unwrap(), FileType::Toml).unwrap();
 
-        RunArgs {
+        let args = RunArgs {
             sessions: vec![session_path.to_str().unwrap().to_string()],
             modules: vec![],
             ocpp: vec![],
             duration: Some(1),
-            log_file: Some(
-                std::env::temp_dir()
-                    .join(format!("ferrowl_headless_{tag}.log"))
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-            ),
+            log_file: Some(dir.join("run.log").to_str().unwrap().to_string()),
             exit_on_error: false,
-        }
+        };
+        (args, dir)
     }
 
     #[tokio::test]
     /// CL-R-023 — the runner wires the session sim and drains its log under `session`.
     async fn ut_run_wires_session_sim_and_drains_its_log() {
-        let args = session_run_args("enabled", true);
+        let (args, _dir) = session_run_args("enabled", true);
         let log_file = args.log_file.clone().unwrap();
 
         let exit_code = run(&args).await;
@@ -656,7 +653,7 @@ mod tests {
         // Own tag ("tilde"), not "enabled" — sharing a tag with `ut_run_wires_session_sim_and_
         // drains_its_log` would race both tests over the same temp device/session files under
         // parallel execution.
-        let mut args = session_run_args("tilde", true);
+        let (mut args, _dir) = session_run_args("tilde", true);
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let filename = format!("ferrowl_headless_tilde_{}.log", std::process::id());
         args.log_file = Some(format!("~/{filename}"));
@@ -677,7 +674,7 @@ mod tests {
     #[tokio::test]
     /// CL-R-023 — with no enabled session script, no session sim is spawned.
     async fn ut_run_with_zero_enabled_scripts_spawns_no_session_sim() {
-        let args = session_run_args("disabled", false);
+        let (args, _dir) = session_run_args("disabled", false);
         let log_file = args.log_file.clone().unwrap();
 
         let exit_code = run(&args).await;
@@ -692,10 +689,10 @@ mod tests {
 
     // --- Run lifecycle, exit codes, and the output contract ----------------------------------
 
-    /// A device config on disk for a headless module fixture.
-    fn write_device(tag: &str) -> String {
+    /// A device config on disk for a headless module fixture, under `dir`.
+    fn write_device(dir: &TempDirGuard) -> String {
         use ferrowl_util::convert::{Converter, FileType};
-        let p = std::env::temp_dir().join(format!("ferrowl_cl_{tag}_device.toml"));
+        let p = dir.join("device.toml");
         Converter::save(
             &holding_device_config(),
             p.to_str().unwrap(),
@@ -706,8 +703,8 @@ mod tests {
     }
 
     /// A `RunArgs` starting one modbus TCP server module on `port` for `duration` seconds.
-    fn modbus_run_args(tag: &str, port: u16, duration: u64) -> RunArgs {
-        let device = write_device(tag);
+    fn modbus_run_args(dir: &TempDirGuard, port: u16, duration: u64) -> RunArgs {
+        let device = write_device(dir);
         RunArgs {
             sessions: vec![],
             modules: vec![format!(
@@ -720,20 +717,12 @@ mod tests {
         }
     }
 
-    /// Grab an ephemeral port and release it, so a fixture can bind it deterministically.
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     #[tokio::test]
     /// CL-R-021 — the headless runner treats a module's device-config load failure as fatal to
     /// startup, rather than skipping the module like the TUI.
     async fn ut_build_modules_fails_hard_on_bad_device() {
-        let mut args = modbus_run_args("badbuild", free_port(), 1);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let mut args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
         args.modules = vec![
             "name=m,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=0,role=server"
                 .into(),
@@ -747,13 +736,9 @@ mod tests {
     /// on the same nonexistent path see each other as a conflict instead of silently racing the
     /// OS for it.
     async fn ut_run_attaches_shared_serial_paths_registry_across_rtu_modules() {
-        let device = write_device("serialpaths");
-        let log_file = std::env::temp_dir()
-            .join("ferrowl_cl_serial_paths.log")
-            .to_str()
-            .unwrap()
-            .to_string();
-        let _ = std::fs::remove_file(&log_file);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let device = write_device(&dir);
+        let log_file = dir.join("serial_paths.log").to_str().unwrap().to_string();
         let args = RunArgs {
             sessions: vec![],
             modules: vec![
@@ -781,7 +766,8 @@ mod tests {
     #[tokio::test]
     /// CL-R-030 — a setup failure (a module's device config fails to load) makes the run exit 1.
     async fn ut_run_returns_one_on_setup_failure() {
-        let mut args = modbus_run_args("setupfail", free_port(), 1);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let mut args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
         args.modules = vec![
             "name=m,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=0,role=server"
                 .into(),
@@ -795,13 +781,9 @@ mod tests {
     /// CL-R-022 — the loop refreshes every module each tick and drains its newly appended log
     /// lines to the output.
     async fn ut_run_starts_modules_and_drains_output() {
-        let mut args = modbus_run_args("starts", free_port(), 1);
-        let log_file = std::env::temp_dir()
-            .join("ferrowl_cl_starts.log")
-            .to_str()
-            .unwrap()
-            .to_string();
-        let _ = std::fs::remove_file(&log_file);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let mut args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
+        let log_file = dir.join("starts.log").to_str().unwrap().to_string();
         args.log_file = Some(log_file.clone());
 
         assert_eq!(run(&args).await, 0);
@@ -816,7 +798,8 @@ mod tests {
     /// CL-R-024 — a --duration run exits cleanly once the deadline is reached.
     /// CL-R-032 — such a run, with no exit-code-2 condition, returns exit code 0.
     async fn ut_run_duration_deadline_exits_zero() {
-        let args = modbus_run_args("deadline", free_port(), 1);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
         assert_eq!(run(&args).await, 0);
     }
 
@@ -824,10 +807,11 @@ mod tests {
     /// CL-R-026 — on loop exit the runner stops every module: a second run rebinds the same port,
     /// which only succeeds if the first run released it.
     async fn ut_run_stops_modules_on_exit() {
-        let port = free_port();
-        assert_eq!(run(&modbus_run_args("stop1", port, 1)).await, 0);
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let port = reserve_tcp_port().release();
+        assert_eq!(run(&modbus_run_args(&dir, port, 1)).await, 0);
         // If the first run had not stopped its listener, this bind (inside start) would fail.
-        assert_eq!(run(&modbus_run_args("stop2", port, 1)).await, 0);
+        assert_eq!(run(&modbus_run_args(&dir, port, 1)).await, 0);
     }
 
     #[tokio::test]
@@ -844,7 +828,8 @@ mod tests {
             }],
             interval: 0.05,
         };
-        let path = std::env::temp_dir().join("ferrowl_cl_exit_on_error_session.toml");
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let path = dir.join("exit_on_error_session.toml");
         Converter::save(&session, path.to_str().unwrap(), FileType::Toml).unwrap();
         let args = RunArgs {
             sessions: vec![path.to_str().unwrap().to_string()],
@@ -861,14 +846,11 @@ mod tests {
     /// CL-R-041 — --log-file is opened create-and-append: an existing file is appended to, not
     /// truncated.
     async fn ut_log_file_is_appended_not_truncated() {
-        let log_file = std::env::temp_dir()
-            .join("ferrowl_cl_append.log")
-            .to_str()
-            .unwrap()
-            .to_string();
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let log_file = dir.join("append.log").to_str().unwrap().to_string();
         std::fs::write(&log_file, "PREEXISTING\n").unwrap();
 
-        let mut args = modbus_run_args("append", free_port(), 1);
+        let mut args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
         args.log_file = Some(log_file.clone());
         assert_eq!(run(&args).await, 0);
 

@@ -444,18 +444,13 @@ mod tests {
         }
     }
 
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
-    fn save_session(tag: &str, session: &Session) -> String {
-        let path = std::env::temp_dir().join(format!("ferrowl_main_{tag}.toml"));
+    /// Saves `session` under a fresh temp dir, returning its path and the guard keeping the
+    /// dir alive for the rest of the test.
+    fn save_session(tag: &str, session: &Session) -> (String, ferrowl_test_support::TempDirGuard) {
+        let dir = ferrowl_test_support::reserve_temp_dir(&format!("ferrowl_main_{tag}"));
+        let path = dir.join("session.toml");
         Converter::save(session, path.to_str().unwrap(), FileType::Toml).unwrap();
-        path.to_str().unwrap().to_string()
+        (path.to_str().unwrap().to_string(), dir)
     }
 
     // The demo session script must at least parse and run cleanly against an empty module
@@ -521,10 +516,11 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
+        let (session_path, _session_dir) = save_session("skip", &session);
         let args = CliArgs {
             command: None,
             modules: vec![],
-            sessions: vec![save_session("skip", &session)],
+            sessions: vec![session_path],
             devices: vec![],
             demo: false,
         };
@@ -540,7 +536,7 @@ mod tests {
             device: String::new(),
             protocol: config::ocpp::OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
-            port: free_port(),
+            port: ferrowl_test_support::reserve_tcp_port().release(),
             path: String::new(),
         })
         .unwrap();
@@ -554,10 +550,11 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
+        let (session_path, _session_dir) = save_session("blank", &session);
         let args = CliArgs {
             command: None,
             modules: vec![],
-            sessions: vec![save_session("blank", &session)],
+            sessions: vec![session_path],
             devices: vec![],
             demo: false,
         };
@@ -578,7 +575,8 @@ mod tests {
     async fn ut_session_with_monitor_module_loads_and_starts() {
         use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig, Role};
 
-        let device_path = std::env::temp_dir().join("ferrowl_main_monitor_device.toml");
+        let device_dir = ferrowl_test_support::reserve_temp_dir("ferrowl_main_monitor");
+        let device_path = device_dir.join("device.toml");
         Converter::save(
             &MonitorDeviceConfig::default(),
             device_path.to_str().unwrap(),
@@ -609,10 +607,11 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
+        let (session_path, _session_dir) = save_session("monitor-ok", &session);
         let args = CliArgs {
             command: None,
             modules: vec![],
-            sessions: vec![save_session("monitor-ok", &session)],
+            sessions: vec![session_path],
             devices: vec![],
             demo: false,
         };
@@ -652,10 +651,11 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
+        let (session_path, _session_dir) = save_session("monitor-bad-device", &session);
         let args = CliArgs {
             command: None,
             modules: vec![],
-            sessions: vec![save_session("monitor-bad-device", &session)],
+            sessions: vec![session_path],
             devices: vec![],
             demo: false,
         };

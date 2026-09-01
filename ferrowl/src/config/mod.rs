@@ -251,23 +251,18 @@ pub fn load_session(path: &str) -> Result<Session, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_util::convert::{Converter, FileType};
-
-    fn tmp(name: &str) -> String {
-        std::env::temp_dir()
-            .join(name)
-            .to_string_lossy()
-            .into_owned()
-    }
 
     #[test]
     /// CS-R-033 — a saved device/session file reloads to an equal value (envelope round-trips).
     fn ut_load_device_and_session_roundtrip() {
-        let dpath = tmp("ferrowl_cfgmod_device.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let dpath = dir.join("device.toml").to_string_lossy().into_owned();
         Converter::save(&DeviceConfig::default(), &dpath, FileType::Toml).unwrap();
         assert_eq!(load_device(&dpath).unwrap(), DeviceConfig::default());
 
-        let spath = tmp("ferrowl_cfgmod_session.json");
+        let spath = dir.join("session.json").to_string_lossy().into_owned();
         Converter::save(&Session::default(), &spath, FileType::Json).unwrap();
         assert_eq!(load_session(&spath).unwrap(), Session::default());
     }
@@ -275,7 +270,11 @@ mod tests {
     #[test]
     /// api-contract.md §6 — a saved monitor device config file reloads to an equal value.
     fn ut_load_monitor_device_roundtrip() {
-        let path = tmp("ferrowl_cfgmod_monitor_device.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("monitor_device.toml")
+            .to_string_lossy()
+            .into_owned();
         Converter::save(&MonitorDeviceConfig::default(), &path, FileType::Toml).unwrap();
         assert_eq!(
             load_monitor_device(&path).unwrap(),
@@ -286,7 +285,11 @@ mod tests {
     #[test]
     /// CS-R-054 — loading a device config self-heals a legacy per-register `update` snippet on every load.
     fn ut_load_device_migrates_update_scripts() {
-        let path = tmp("ferrowl_cfgmod_legacy_update.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("legacy_update.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[definitions.reg]\ntype = \"U16\"\nupdate = \"C_Time:Sleep(1)\"\n",
@@ -316,7 +319,11 @@ mod tests {
     #[test]
     /// CS-R-052 — a field present in a file but absent from the schema is ignored on load.
     fn ut_load_ignores_unknown_field() {
-        let path = tmp("ferrowl_cfgmod_unknown_field.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("unknown_field.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "bogus_unknown_field = 42\n[definitions.reg]\ntype = \"U16\"\n",
@@ -330,7 +337,11 @@ mod tests {
     /// unknown-field error.
     #[test]
     fn ut_load_device_rejects_retired_require_client_cert() {
-        let path = tmp("ferrowl_cfgmod_retired_require_client_cert.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_require_client_cert.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[definitions.reg]\ntype = \"U16\"\n[tls.server]\nmode = \"none\"\nrequire_client_cert = true\n",
@@ -354,7 +365,11 @@ mod tests {
     /// the load, naming the retired field.
     #[test]
     fn ut_load_ocpp_device_rejects_retired_ca_file_in_security() {
-        let path = tmp("ferrowl_cfgmod_retired_ca_file.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_ca_file.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[security]\nusername = \"cp001\"\nca_file = \"/etc/ca.pem\"\n",
@@ -376,7 +391,11 @@ mod tests {
     /// first.
     #[test]
     fn ut_retired_field_error_names_every_offender() {
-        let path = tmp("ferrowl_cfgmod_retired_multiple.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_multiple.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[definitions.reg]\ntype = \"U16\"\n[tls.server]\nmode = \"none\"\nrequire_client_cert = true\nclient_ca_files = [\"a.pem\"]\n",
@@ -400,7 +419,11 @@ mod tests {
     /// loads silently, even though a retired-field scan now exists for TLS.
     #[test]
     fn ut_unknown_field_outside_tls_still_ignored() {
-        let path = tmp("ferrowl_cfgmod_unknown_outside_tls.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("unknown_outside_tls.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "require_client_cert = true\n[definitions.reg]\ntype = \"U16\"\n",
@@ -415,7 +438,11 @@ mod tests {
     /// rejected (docs/specs/modbus/edge-cases.md).
     #[test]
     fn ut_rtu_config_with_stray_tls_key_still_loads() {
-        let path = tmp("ferrowl_cfgmod_rtu_stray_tls.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("rtu_stray_tls.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             r#"
@@ -442,7 +469,11 @@ self_signed = true
     /// container's shape.
     #[test]
     fn ut_retired_tls_error_names_ocpp_security_block_shape() {
-        let path = tmp("ferrowl_cfgmod_retired_ocpp_block_shape.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_ocpp_block_shape.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[security]\nusername = \"cp001\"\n[security.tls]\n[security.tls.server]\nrequire_client_cert = true\n",
@@ -461,7 +492,11 @@ self_signed = true
     /// stays in the Modbus group; it does not flip the group to the OCPP container.
     #[test]
     fn ut_security_key_nested_inside_modbus_tls_stays_modbus() {
-        let path = tmp("ferrowl_cfgmod_nested_security_key_stays_modbus.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("nested_security_key_stays_modbus.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[definitions.reg]\ntype = \"U16\"\n[tls.server]\nmode = \"mutual\"\n[tls.server.security]\nrequire_client_cert = true\n",
@@ -486,7 +521,11 @@ self_signed = true
     /// shape, rather than collapsing all of them onto one.
     #[test]
     fn ut_mixed_modbus_and_ocpp_retired_fields_are_grouped_per_container() {
-        let path = tmp("ferrowl_cfgmod_retired_mixed_containers.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_mixed_containers.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[definitions.reg]\ntype = \"U16\"\n[tls.server]\nmode = \"none\"\nrequire_client_cert = true\n\n[security]\nca_file = \"/etc/ca.pem\"\n",
@@ -520,7 +559,11 @@ self_signed = true
     /// `identity` sub-table) is a retired flat field and is rejected.
     #[test]
     fn ut_bare_cert_file_outside_identity_is_retired() {
-        let path = tmp("ferrowl_cfgmod_bare_cert_file.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("bare_cert_file.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[tls.server]\nmode = \"tls\"\ncert_file = \"s.crt\"\n",
@@ -543,7 +586,11 @@ self_signed = true
     /// (an invalid `mode`) must not be replaced by a `RetiredTlsFields` error over them.
     #[test]
     fn ut_cert_file_inside_identity_block_is_not_retired() {
-        let path = tmp("ferrowl_cfgmod_identity_cert_file_valid.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("identity_cert_file_valid.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[tls.server]\nmode = \"bogus_mode\"\n[tls.server.identity]\nsource = \"files\"\ncert_file = \"s.crt\"\nkey_file = \"s.key\"\n",
@@ -560,7 +607,11 @@ self_signed = true
     /// (`[tls.server.verification]`), not only a direct child.
     #[test]
     fn ut_retired_field_found_under_verification_nesting() {
-        let path = tmp("ferrowl_cfgmod_retired_under_verification.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_under_verification.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[tls.server]\nmode = \"mutual\"\n[tls.server.verification]\nclient_ca_files = [\"a.pem\"]\n",
@@ -582,7 +633,11 @@ self_signed = true
     /// table (`[security.tls.client]`), matching the container's own extra nesting level.
     #[test]
     fn ut_retired_field_found_under_security_tls_client_nesting() {
-        let path = tmp("ferrowl_cfgmod_retired_under_security_tls_client.toml");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_under_security_tls_client.toml")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             "[security]\n[security.tls]\n[security.tls.client]\ninsecure_skip_verify = true\n",
@@ -605,7 +660,11 @@ self_signed = true
     /// CS-R-055 — the retired-field scan runs identically over a JSON config file.
     #[test]
     fn ut_load_device_rejects_retired_field_in_json() {
-        let path = tmp("ferrowl_cfgmod_retired_field.json");
+        let dir = reserve_temp_dir("ferrowl_cfgmod");
+        let path = dir
+            .join("retired_field.json")
+            .to_string_lossy()
+            .into_owned();
         std::fs::write(
             &path,
             r#"{"definitions":{"reg":{"type":"U16"}},"tls":{"server":{"mode":"none","require_client_cert":true}}}"#,
