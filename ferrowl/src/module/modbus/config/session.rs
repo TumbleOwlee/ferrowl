@@ -269,6 +269,7 @@ fn default_baud() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_util::convert::{Converter, FileType};
     use std::time::Duration;
 
@@ -336,8 +337,9 @@ mod tests {
     /// (no register table, timing, TLS, or OCPP version/role field exists on the type to lose).
     fn ut_session_roundtrip() {
         let original = sample();
+        let dir = reserve_temp_dir("ferrowl_modbus_session");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
-            let path = std::env::temp_dir().join(format!("ferrowl_session_test.{ext}"));
+            let path = dir.join(format!("session.{ext}"));
             let path = path.to_str().unwrap();
             Converter::save(&original, path, ty).expect("save");
             let back: Session = Converter::load(path, ty).expect("load");
@@ -398,16 +400,15 @@ mod tests {
                 stop_bits: None,
             },
         };
+        let dir = reserve_temp_dir("ferrowl_modbus_session");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
-            let session_path =
-                std::env::temp_dir().join(format!("ferrowl_session_omit_defaults.{ext}"));
+            let session_path = dir.join(format!("session-omit-defaults.{ext}"));
             let session_path = session_path.to_str().unwrap();
             Converter::save(&session, session_path, ty).expect("save session");
             let session_back: Session = Converter::load(session_path, ty).expect("load session");
             assert_eq!(session, session_back);
 
-            let spec_path =
-                std::env::temp_dir().join(format!("ferrowl_modulespec_omit_defaults.{ext}"));
+            let spec_path = dir.join(format!("modulespec-omit-defaults.{ext}"));
             let spec_path = spec_path.to_str().unwrap();
             Converter::save(&spec, spec_path, ty).expect("save spec");
             let spec_back: ModuleSpec = Converter::load(spec_path, ty).expect("load spec");

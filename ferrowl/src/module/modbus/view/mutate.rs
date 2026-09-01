@@ -430,6 +430,7 @@ mod tests {
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
     use ferrowl_modbus::UnitId;
+    use ferrowl_test_support::reserve_temp_dir;
 
     fn spec(role: Role) -> ModuleSpec {
         ModuleSpec {
@@ -604,12 +605,11 @@ mod tests {
     #[test]
     fn ut_save_device_to_writes_toml() {
         let v = view(Role::Server);
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("ferrowl-mutate-{}.toml", std::process::id()));
+        let dir = reserve_temp_dir("ferrowl_modbus_mutate");
+        let path = dir.join("mutate.toml");
         let p = path.to_str().unwrap();
         assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
         assert!(path.exists());
-        let _ = std::fs::remove_file(&path);
     }
 
     fn device_with_gap() -> DeviceConfig {

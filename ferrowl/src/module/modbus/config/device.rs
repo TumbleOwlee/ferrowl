@@ -328,6 +328,7 @@ mod tests {
     use super::*;
     use ferrowl_codec::Access;
     use ferrowl_codec::format::{Alignment, Endian};
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_util::convert::{Converter, FileType};
 
     fn sample() -> DeviceConfig {
@@ -439,7 +440,8 @@ mod tests {
 
     fn roundtrip(ty: FileType, ext: &str) {
         let original = sample();
-        let path = std::env::temp_dir().join(format!("ferrowl_device_test.{ext}"));
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let path = dir.join(format!("device.{ext}"));
         let path = path.to_str().unwrap();
         Converter::save(&original, path, ty).expect("save");
         let back: DeviceConfig = Converter::load(path, ty).expect("load");
@@ -486,7 +488,8 @@ mod tests {
         let back: DeviceConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(cfg, back);
 
-        let path = std::env::temp_dir().join("ferrowl_device_no_tls.toml");
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let path = dir.join("no-tls.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "definitions = {}\n").unwrap();
         let loaded: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
@@ -499,7 +502,8 @@ mod tests {
     #[test]
     /// CS-R-023 — a device config predating the reconnect field loads with its default.
     fn ut_device_config_loads_without_reconnect_field() {
-        let path = std::env::temp_dir().join("ferrowl_device_no_reconnect.toml");
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let path = dir.join("no-reconnect.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "definitions = {}\n").unwrap();
         let cfg: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
@@ -512,14 +516,15 @@ mod tests {
     /// non-version fields — the field is never consulted by the load path (same semantics
     /// as CS-R-018's session-level `version`).
     fn ut_device_config_version_field_not_consulted_on_load() {
-        let with_path = std::env::temp_dir().join("ferrowl_device_stale_version.toml");
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let with_path = dir.join("stale-version.toml");
         let with_path = with_path.to_str().unwrap();
         std::fs::write(
             with_path,
             "version = \"0.0.1-does-not-exist\"\ntimeout_ms = 2000\ndefinitions = {}\n",
         )
         .unwrap();
-        let without_path = std::env::temp_dir().join("ferrowl_device_no_version.toml");
+        let without_path = dir.join("no-version.toml");
         let without_path = without_path.to_str().unwrap();
         std::fs::write(without_path, "timeout_ms = 2000\ndefinitions = {}\n").unwrap();
 
@@ -538,7 +543,8 @@ mod tests {
     #[test]
     /// SC-R-016 — an absent script_interval resolves to the 1.0s default.
     fn ut_device_config_loads_without_script_interval_field() {
-        let path = std::env::temp_dir().join("ferrowl_device_no_script_interval.toml");
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let path = dir.join("no-script-interval.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "definitions = {}\n").unwrap();
         let cfg: DeviceConfig = Converter::load(path, FileType::Toml).unwrap();
@@ -786,7 +792,8 @@ mod tests {
     /// MB-R-097 — a register definition with no `kind` defaults to holding register (resolution 1.0, length 1).
     fn ut_register_def_serde_defaults() {
         // A minimal definition omitting kind/resolution/length triggers the default fns.
-        let path = std::env::temp_dir().join("ferrowl_codecdef_min.toml");
+        let dir = reserve_temp_dir("ferrowl_modbus_device");
+        let path = dir.join("codecdef-min.toml");
         let path = path.to_str().unwrap();
         std::fs::write(path, "type = \"U16\"\n").unwrap();
         let def: RegisterDef = Converter::load(path, FileType::Toml).unwrap();
