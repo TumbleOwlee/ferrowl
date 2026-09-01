@@ -54,8 +54,8 @@ Arity exact: 4 for Call, 3 for CallResult, 5 for CallError. Any other count is a
 
 An action's request and response payloads are exactly the OCPP schema types for that action and version — carried through untouched, not remapped (OC-R-006). Deliberately **no** version-neutral semantic layer: the surface is the per-version action set, so every action is listable and every raw JSON inspectable.
 
-- A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings (OC-R-006).
-- 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target (OC-R-063).
+- A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings (—).
+- 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target (—).
 - Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`, OC-R-073).
 
 ---

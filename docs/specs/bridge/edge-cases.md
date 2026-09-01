@@ -8,7 +8,7 @@ Boundary behavior, error semantics, intentional constraints. Working as implemen
 
 | ID | Condition | Behavior |
 |---|---|---|
-| **BR-E-001** | Upstream RTU serial link lost | ends the bridge task with an error; no upstream reconnect (mirrors `modbus/edge-cases.md` MB-E-076 — no server-side reconnect exists anywhere today) |
+| **BR-E-001** | Upstream RTU serial link lost | ends the bridge task with an error; no upstream reconnect — unlike an ordinary Modbus server's backoff retry (`modbus/edge-cases.md` MB-E-076), bridge holds no store and no session to keep serving from with the other leg still up, so a lost upstream link ends the whole relay |
 | **BR-E-002** | Downstream connection/link lost or unavailable | existing 1s–30s backoff reconnect while upstream keeps accepting/serving; a request arriving during downstream backoff gets the `BR-R-010` exception rather than blocking |
 | **BR-E-003** | Downstream connect fails at startup | not a setup failure — process starts normally, every forwarded request answered `GatewayPathUnavailable` until downstream connects (`BR-R-010`) |
 | **BR-E-004** | Downstream `reconnect` unset (`false`) and a connect/exchange failure occurs | never retries; every subsequent forwarded request answers `GatewayPathUnavailable` indefinitely (`BR-R-006`, `BR-R-010`) |
