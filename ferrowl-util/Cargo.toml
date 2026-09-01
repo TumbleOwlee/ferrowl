@@ -21,6 +21,8 @@ tokio = { workspace = true, features = ["rt", "sync", "time"] }
 toml = { workspace = true }
 
 [dev-dependencies]
+# Held-port and per-run temp-dir guards for tests (NF-R-043/044).
+ferrowl-test-support = { path = "../ferrowl-test-support" }
 # The `#[tokio::main]` doctests in `tokio.rs` need the macro + multi-thread runtime, which the
 # library itself does not depend on. Declared here so `cargo test -p ferrowl-util` is self-contained
 # (previously these passed only via workspace-wide feature unification).
