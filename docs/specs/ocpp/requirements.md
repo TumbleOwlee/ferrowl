@@ -150,7 +150,7 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-119** — `extra_headers` is a client-only device config field, not exposed through the `--ocpp` key=value CLI form — device config file only — consistent with the other list-shaped client-only fields (`connectors`, `config`).
 
-**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected", emitted whenever its connection task ends) go to the module log, not the message log — the message log records only request/response pairs (§9).
+**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected", emitted whenever its connection task ends) go to the module log, not the message log — the message log records only request/response pairs (data-contract.md `## 9. Message log`).
 
 ---
 
@@ -284,7 +284,7 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-087** — Each module keeps a bounded in-memory message log of the most recent 200 messages, evicting oldest first; complete history only in the configured log file.
 
-**OC-R-088** — With file logging enabled, each message is written to the log file at most once, tracked by sequence number, so eviction from memory neither duplicates nor skips a message ([`edge-cases.md`](./edge-cases.md) §6.10 for the burst bound).
+**OC-R-088** — With file logging enabled, each message is written to the log file at most once, tracked by sequence number, so eviction from memory neither duplicates nor skips a message ([`edge-cases.md`](./edge-cases.md) OC-E-093 for the burst bound).
 
 **OC-R-101** — Encoding an action or response to JSON for the message log never discards an encode failure silently: the failure is logged to the module's error channel before the payload degrades to JSON `null`.
 
