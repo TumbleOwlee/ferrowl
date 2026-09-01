@@ -606,16 +606,6 @@ mod tests {
         Arc::new(RwLock::new(crate::app::LogRing::init()))
     }
 
-    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — nothing
-    /// answers on it afterward, standing in for a refused dial.
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     fn spec_with_reconnect(reconnect: Option<bool>) -> OcppSpec {
         OcppSpec {
             name: "cs".to_owned(),
@@ -623,7 +613,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: free_port(),
+            port: ferrowl_test_support::reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect,
@@ -683,7 +673,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: free_port(),
+            port: ferrowl_test_support::reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: None,
@@ -727,7 +717,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: free_port(),
+            port: ferrowl_test_support::reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: None, // defaults to true (OC-R-048)
@@ -790,7 +780,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: free_port(),
+            port: ferrowl_test_support::reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: Some(false),
