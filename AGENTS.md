@@ -4,7 +4,7 @@ Router for AI coding agents. Read first; points to everything else.
 
 ## Repo
 
-Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Charging Station/CSMS, 1.6/2.0.1/2.1). Cargo workspace, 13 crates, one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Charging Station/CSMS, 1.6/2.0.1/2.1). Cargo workspace, 14 crates, one `ferrowl` binary. Product: [`PRD.md`](./PRD.md). Structure: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Spec-driven
 
@@ -84,8 +84,8 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 ## Conventions — code
 
 - Unit tests: `#[cfg(test)] mod tests` at the bottom of the file under test, names `ut_*`. Integration tests: crate's `tests/`, names `it_*` (notably `ferrowl-ui` and much of `ferrowl`).
-- **Tests bind ephemeral ports only.** Any test starting a listener (Modbus TCP, OCPP WebSocket, raw occupier socket) binds port 0 and reads the assigned port back. Fixed ports collide with anything else holding them (running `ferrowl --demo`, parallel checkout's tests). Fixed ports in specs never `start()`ed are inert; still prefer port 0. To test bind failure, bind the occupier ephemerally first, then point the server at that port (see `tcp_loopback.rs`).
-- All 13 crates versioned in lockstep; never bump one alone.
+- **Tests get ports from `ferrowl-test-support`, never a bare probe.** `reserve_tcp_port()`/`reserve_udp_port()` bind `127.0.0.1:0` and hold the binding; the guard's socket is handed to the server via `into_listener()`/`into_socket()` where the server accepts a bound socket, and `release()` is used only where the server can bind by number alone — a bare `free_port()`-style probe-and-drop is forbidden. The port-occupier pattern (bind ephemerally, keep the binding alive, point the server at the same port so the collision is the assertion) stays exempt. Scratch files come from `reserve_temp_dir()`, never straight from `std::env::temp_dir()`.
+- All 14 crates versioned in lockstep; never bump one alone.
 - Config files TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
 - **Never split a source file just because it is large.** A split must separate distinct responsibilities, improve navigability, or cut coupling. One cohesive concern or flat generated data (spec table) stays whole. Line count = prompt to review, not mandate to divide; arbitrary boundaries make code harder to follow.
