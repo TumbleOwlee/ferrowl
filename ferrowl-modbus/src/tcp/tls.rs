@@ -322,15 +322,9 @@ pub(crate) fn build_server_tls_config(
 #[cfg(test)]
 mod tests {
     use super::{ModbusTlsConfig, SelfSignedCache, new_self_signed_cache};
-    use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn write_pem(label: &str, pem: &str) -> String {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "ferrowl-modbus-client-tls-ut-{}-{label}-{n}.pem",
-            std::process::id()
-        ));
+    fn write_pem(dir: &ferrowl_test_support::TempDirGuard, label: &str, pem: &str) -> String {
+        let path = dir.join(format!("{label}.pem"));
         std::fs::write(&path, pem).expect("write test pem");
         path.to_string_lossy().into_owned()
     }
@@ -373,11 +367,12 @@ mod tests {
     fn ut_build_client_tls_config_identity_only_under_mutual() {
         use super::build_client_tls_config;
         use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls");
 
         let cache = new_self_signed_cache();
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cert_file = write_pem("cert", &cert_pem);
-        let key_file = write_pem("key", &key_pem);
+        let cert_file = write_pem(&dir, "cert", &cert_pem);
+        let key_file = write_pem(&dir, "key", &key_pem);
 
         let mtls = ClientTlsPolicy::Mutual {
             verification: CertVerification::RootStore {
@@ -410,11 +405,12 @@ mod tests {
     fn ut_build_client_tls_config_mutual_files_presents_pair() {
         use super::build_client_tls_config;
         use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls");
 
         let cache = new_self_signed_cache();
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cert_file = write_pem("cert2", &cert_pem);
-        let key_file = write_pem("key2", &key_pem);
+        let cert_file = write_pem(&dir, "cert2", &cert_pem);
+        let key_file = write_pem(&dir, "key2", &key_pem);
         let policy = ClientTlsPolicy::Mutual {
             verification: CertVerification::Skip {},
             identity: CertSource::Files {
@@ -509,11 +505,12 @@ mod tests {
     fn ut_resolve_server_identity_files() {
         use super::resolve_server_identity;
         use ferrowl_util::tls::CertSource;
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls");
 
         let cache = new_self_signed_cache();
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cert_file = write_pem("srv-cert", &cert_pem);
-        let key_file = write_pem("srv-key", &key_pem);
+        let cert_file = write_pem(&dir, "srv-cert", &cert_pem);
+        let key_file = write_pem(&dir, "srv-key", &key_pem);
 
         let source = CertSource::Files {
             cert_file,
@@ -563,6 +560,7 @@ mod tests {
     fn ut_resolve_server_identity_files_then_self_signed_regenerates() {
         use super::resolve_server_identity;
         use ferrowl_util::tls::CertSource;
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls");
 
         let cache = new_self_signed_cache();
         let (chain1, _key1, _) =
@@ -570,8 +568,8 @@ mod tests {
                 .expect("builds");
 
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cert_file = write_pem("explicit-cert", &cert_pem);
-        let key_file = write_pem("explicit-key", &key_pem);
+        let cert_file = write_pem(&dir, "explicit-cert", &cert_pem);
+        let key_file = write_pem(&dir, "explicit-key", &key_pem);
         let _ = resolve_server_identity(
             &CertSource::Files {
                 cert_file,
@@ -630,12 +628,13 @@ mod tests {
         use super::build_server_tls_config;
         use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
         use rust_modbus::ClientCertPolicy;
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls");
 
         let cache = new_self_signed_cache();
         let (ca1_pem, _) = cert_and_key_pem();
         let (ca2_pem, _) = cert_and_key_pem();
-        let ca1 = write_pem("ca1", &ca1_pem);
-        let ca2 = write_pem("ca2", &ca2_pem);
+        let ca1 = write_pem(&dir, "ca1", &ca1_pem);
+        let ca2 = write_pem(&dir, "ca2", &ca2_pem);
 
         let policy = ServerTlsPolicy::Mutual {
             identity: CertSource::SelfSigned {},

@@ -34,16 +34,6 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
-/// An OS-assigned free UDP port (bind to :0, read the port, drop the socket).
-async fn free_udp_port() -> u16 {
-    tokio::net::UdpSocket::bind("127.0.0.1:0")
-        .await
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn config(port: u16) -> udp::Config {
     udp::Config {
         ip: "127.0.0.1".to_string(),
@@ -91,7 +81,7 @@ fn server_mem() -> Mem {
 /// transport.
 async fn it_udp_server_answers_a_request() {
     let mem = server_mem();
-    let port = free_udp_port().await;
+    let port = ferrowl_test_support::reserve_udp_port().release();
     let cfg = config(port);
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let (server, _bound_addr) =
@@ -127,7 +117,7 @@ async fn it_udp_server_answers_a_request() {
 /// Udp — Udp carries MBAP/`Tcp` framing, whose `is_broadcast` is always false).
 async fn it_udp_server_answers_slave_zero() {
     let mem = server_mem();
-    let port = free_udp_port().await;
+    let port = ferrowl_test_support::reserve_udp_port().release();
     let cfg = config(port);
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
     let (server, _bound_addr) =
@@ -180,7 +170,7 @@ fn client_mem() -> Mem {
 /// already prove for their transports, now for `Udp`. MB-R-118 — slave id 0 is ordinary for
 /// Udp: an operation addressed to it is polled and answered exactly like slave 1, not skipped.
 async fn it_udp_client_polls_server_and_executes_commands() {
-    let port = free_udp_port().await;
+    let port = ferrowl_test_support::reserve_udp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 

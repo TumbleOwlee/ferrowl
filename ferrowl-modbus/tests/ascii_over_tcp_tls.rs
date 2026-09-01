@@ -29,14 +29,6 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
@@ -81,7 +73,7 @@ fn config(port: u16, tls: tcp::ModbusTlsConfig) -> tcp::Config {
 /// handshake and exchange Modbus ASCII-framed traffic over it, exactly as plain TCP/RtuOverTcp
 /// does.
 async fn ascii_over_tcp_client_server_tls_roundtrip() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 

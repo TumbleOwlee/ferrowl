@@ -40,15 +40,6 @@ async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::So
     panic!("listener did not bind within 1s");
 }
 
-/// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn config(port: u16) -> tcp::Config {
     tcp::Config {
         ip: "127.0.0.1".to_string(),
@@ -65,7 +56,7 @@ fn config(port: u16) -> tcp::Config {
 /// forwards a request/response pair unmodified.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_tcp_downstream_connects_and_forwards() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
 
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
@@ -120,11 +111,11 @@ async fn it_tcp_downstream_connects_and_forwards() {
 /// response times out and reports `GatewayTargetDeviceFailedToRespond`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_tcp_downstream_connect_refused_then_reconnects_once_listener_appears() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
+    let guard = ferrowl_test_support::reserve_tcp_port();
+    let port = guard.port();
     // Bound but never accept()ed: the TCP connect succeeds instantly, nothing ever answers
     // the Modbus exchange.
-    std::mem::forget(listener);
+    std::mem::forget(guard.into_listener());
 
     let downstream = bridge::spawn_tcp_downstream(config(port), sink());
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;

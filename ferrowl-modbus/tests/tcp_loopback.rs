@@ -60,15 +60,6 @@ fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Arc<Mutex<Vec<String>>>) 
     (f, log)
 }
 
-/// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn config(port: u16) -> tcp::Config {
     tcp::Config {
         ip: "127.0.0.1".to_string(),
@@ -175,7 +166,7 @@ fn client_mem() -> Mem {
 /// MB-R-039 — `interval_ms` of 0 (this config) is treated as a fast tick rather than rejected.
 /// MB-R-041 — the poll loop issues exactly the four read function codes (coils, discrete inputs, input registers, holding registers).
 async fn tcp_client_polls_server_and_executes_commands() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -324,7 +315,7 @@ async fn tcp_client_polls_server_and_executes_commands() {
 /// MB-R-043 — Modbus exceptions do not disconnect the client; it retries then skips the operation
 /// (and rejected write commands are logged without disconnecting, MB-R-047).
 async fn tcp_client_handles_server_rejections() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     // Server with no registered regions: every request for slave 1 is rejected.
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
@@ -428,7 +419,7 @@ async fn tcp_unparseable_address_is_error() {
 /// MB-R-070 — a TCP server accepts connections in a loop, serving multiple concurrent clients
 /// against the same shared store.
 async fn tcp_server_serves_concurrent_clients() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
@@ -499,7 +490,7 @@ async fn tcp_server_serves_concurrent_clients() {
 /// MB-R-068 — a TCP client connect attempt to a port with no listener fails.
 async fn tcp_client_connect_refused_is_error() {
     // Nothing is listening on this port, so the connect fails.
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     assert!(
         tcp::Client::connect(&config(port), &tcp::new_self_signed_cache())
             .await
@@ -512,7 +503,7 @@ async fn tcp_client_connect_refused_is_error() {
 async fn tcp_client_reconnect_false_dies_on_refused_connect() {
     // No listener; with reconnect off the spawned task's join result carries the connect error
     // instead of retrying forever.
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let operations = Arc::new(RwLock::new(vec![Operation {
         slave_id: UnitId(1),
         fn_code: FunctionCode::ReadHoldingRegisters,
@@ -542,7 +533,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     // Nothing is listening yet: the client's first connect attempt fails. With reconnect on it
     // keeps retrying in the background; once a server starts on the port, it should connect and
     // start reading.
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -606,7 +597,7 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
 async fn tcp_client_terminate_during_backoff_exits_promptly() {
     // No listener, so the client sits in its reconnect backoff (up to 1s initially). Sending
     // Terminate must abort that wait immediately rather than sleeping it out.
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let operations = Arc::new(RwLock::new(vec![]));
     let (tx, rx) = mpsc::channel::<Command>(16);
     let (client, _connected) = tcp::ClientBuilder::new(
@@ -636,7 +627,7 @@ async fn tcp_client_terminate_during_backoff_exits_promptly() {
 /// MB-R-036 — the operation list is shared and mutable at runtime; an operation added after the
 /// client is polling is picked up on a later poll cycle without any reconnect.
 async fn tcp_client_operation_list_mutated_at_runtime() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -711,8 +702,8 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
 /// MB-R-056 — the connection settings (here the endpoint) are re-read from the shared config on
 /// every connection attempt, so an edit takes effect on the next reconnect.
 async fn tcp_client_rereads_config_on_reconnect() {
-    let good_port = free_port();
-    let bad_port = free_port();
+    let good_port = ferrowl_test_support::reserve_tcp_port().release();
+    let bad_port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -772,7 +763,7 @@ async fn tcp_client_rereads_config_on_reconnect() {
 /// MB-R-052 — the backoff resets to 1 s after a connection run that got at least one read through,
 /// so the reconnect logged after a successful run is "1s" even though the backoff had already grown.
 async fn tcp_client_backoff_resets_after_successful_run() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -850,7 +841,7 @@ async fn tcp_client_backoff_resets_after_successful_run() {
 /// MB-R-048 — each read addresses the slave id carried by the operation, independent of any slave
 /// id configured on the transport (the TCP transport configures none).
 async fn tcp_client_addresses_operation_slave_id() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
 
     // Server memory declared only under slave id 7. A request for any other slave finds no region.
     let k7 = || {
@@ -928,7 +919,7 @@ async fn tcp_client_addresses_operation_slave_id() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// MB-R-038 — the client waits `delay_ms` before its first poll on a connection.
 async fn tcp_client_delays_before_first_poll() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -1046,7 +1037,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
 /// MB-R-044 — a successful read resets the retry counter, so an operation that was failing and then
 /// recovers keeps polling successfully instead of staying skipped.
 async fn tcp_client_success_resets_retry_counter() {
-    let port = free_port();
+    let port = ferrowl_test_support::reserve_tcp_port().release();
     // Server starts with no region declared: every read for slave 1 is rejected (exceptions).
     let cli_mem = client_mem();
     let srv_mem: Mem = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));

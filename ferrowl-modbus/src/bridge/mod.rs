@@ -159,14 +159,6 @@ mod tests {
         panic!("listener did not bind within 1s");
     }
 
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     fn tcp_config(port: u16) -> crate::tcp::Config {
         crate::tcp::Config {
             ip: "127.0.0.1".to_string(),
@@ -240,7 +232,7 @@ mod tests {
         let downstream = duplex_downstream(RegisterValue(11), sink());
         let service = BridgeService::new(downstream, None, sink());
 
-        let upstream_port = free_port();
+        let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
         let _upstream = upstream_tcp::run(&tcp_config(upstream_port), service, sink())
             .await
             .expect("upstream failed to start");
@@ -264,7 +256,7 @@ mod tests {
     /// for serial, served directly via `serve_link` as `upstream_rtu::run` itself would).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_bridge_run_wires_rtu_upstream_tcp_downstream() {
-        let downstream_port = free_port();
+        let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
         let mut mem = Memory::<crate::Key<crate::SlaveKey>>::default();
         mem.add_ranges(
             key(RegKind::HoldingRegister),

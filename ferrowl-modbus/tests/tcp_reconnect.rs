@@ -28,15 +28,6 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
-/// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 fn server_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
@@ -72,8 +63,8 @@ fn tcp_config(port: u16, reconnect: bool) -> ferrowl_modbus::tcp::Config {
 /// retrying the bind, and once the occupier drops, the very next attempt succeeds and a real
 /// client can connect.
 async fn tcp_server_bind_failure_retries_then_succeeds() {
-    let port = free_port();
-    let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupier = ferrowl_test_support::reserve_tcp_port();
+    let port = occupier.port();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
@@ -122,8 +113,8 @@ async fn tcp_server_bind_failure_retries_then_succeeds() {
 /// error: `spawn()` itself still returns `Ok(handle)`, but awaiting `handle` resolves to
 /// `Err(Error::Server(_))`.
 async fn tcp_server_bind_failure_reconnect_false_ends_task() {
-    let port = free_port();
-    let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupier = ferrowl_test_support::reserve_tcp_port();
+    let port = occupier.port();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
@@ -148,8 +139,8 @@ async fn tcp_server_bind_failure_reconnect_false_ends_task() {
 /// MB-R-133 — `ServerCommand::Terminate`, sent while the server is backing off after a bind
 /// failure, ends the task promptly with `Ok(())` rather than waiting out the whole backoff.
 async fn tcp_server_terminate_while_backing_off_ends_task_ok() {
-    let port = free_port();
-    let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupier = ferrowl_test_support::reserve_tcp_port();
+    let port = occupier.port();
 
     let (sender, receiver) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
@@ -179,8 +170,8 @@ async fn tcp_server_terminate_while_backing_off_ends_task_ok() {
 /// MB-R-114 — an RtuOverTcp server (reuses `tcp::Config`, MB-R-113) retries a bind-failure the
 /// same way TCP does.
 async fn rtu_over_tcp_server_bind_failure_retries_then_succeeds() {
-    let port = free_port();
-    let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupier = ferrowl_test_support::reserve_tcp_port();
+    let port = occupier.port();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::rtu_over_tcp::ServerBuilder::new(
@@ -226,8 +217,8 @@ async fn rtu_over_tcp_server_bind_failure_retries_then_succeeds() {
 /// MB-R-126 — an AsciiOverTcp server (reuses `tcp::Config`, MB-R-113) retries a bind-failure the
 /// same way TCP does.
 async fn ascii_over_tcp_server_bind_failure_retries_then_succeeds() {
-    let port = free_port();
-    let occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupier = ferrowl_test_support::reserve_tcp_port();
+    let port = occupier.port();
 
     let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = ferrowl_modbus::ascii_over_tcp::ServerBuilder::new(
