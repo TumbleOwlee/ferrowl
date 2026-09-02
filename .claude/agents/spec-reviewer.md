@@ -27,7 +27,7 @@ Scope token from caller: `plan` (no diff — check `plan.md` against `spec-diff.
 
 **Spec fidelity** — every approved requirement implemented as written (quote requirement + satisfying code path); nothing beyond approval (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); spec text in branch matches approved (drift reopens gate 1).
 
-**Standards** — `AGENTS.md` conventions (typed errors, typed domain values, no panics on external input, file-splitting rule, dependency policy); test naming and ID citation placement; unflagged semver-relevant public surface changes; comment hygiene.
+**Standards** — `.claude/AGENTS.core.md` `## Conventions — code` (typed errors, typed domain values, no panics on external input, file-splitting rule, dependency policy); test naming and ID citation placement; unflagged semver-relevant public surface changes; comment hygiene.
 
 **Comment hygiene** (part of Standards, `//` and `///` alike) — a comment must say something the code does not. Minor: restating the adjacent statement/field/function name; step narration (`// Create app state`); banners and import-group headers; a paragraph where a sentence does. Major (rots on contact): citing this workflow — plan, stage id (`s7`), gate (`Gate3#2`), task item, `(Shared)`, "sanctioned change", "manual-exercise fix". Keep the technical content, drop the citation. Requirement IDs are the only sanctioned cross-reference. An `#[allow(...)]` justification states the condition that lifts it, never the stage that will.
 

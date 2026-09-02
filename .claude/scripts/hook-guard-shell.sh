@@ -54,13 +54,13 @@ for seg in $segments; do
         case "$tok" in
           *.md)
             offender="$tok"
-            reason="Whole-file cat of a .md file bypasses this repo's extract-section.sh convention (AGENTS.md Conventions). Run: sh .claude/scripts/list-sections.sh $tok to see headings, then sh .claude/scripts/extract-section.sh '<heading>' $tok for just what's needed. Genuinely need the whole document (rewrite/restructure)? Use the Read tool instead of Bash cat."
+            reason="Whole-file cat of a .md file bypasses this repo's extract-section.sh convention (AGENTS.md Conventions — reading). Run: sh .claude/scripts/list-sections.sh $tok to see headings, then sh .claude/scripts/extract-section.sh '<heading>' $tok for just what's needed. Genuinely need the whole document (rewrite/restructure)? Use the Read tool instead of Bash cat."
             ;;
           *)
             lines=$(wc -l < "$tok" 2>/dev/null || echo 0)
             if [ "$lines" -gt "$LARGE_LINES" ]; then
               offender="$tok"
-              reason="Whole-file cat of a $lines-line file bypasses this repo's Conventions (AGENTS.md: filter shell output, use Read/sed -n for a range instead of a full Bash cat). Use the Read tool (with offset/limit if only part is needed) or 'sed -n START,ENDp' $tok."
+              reason="Whole-file cat of a $lines-line file bypasses this repo's Conventions (AGENTS.md Conventions — reading: filter shell output, use Read/sed -n for a range instead of a full Bash cat). Use the Read tool (with offset/limit if only part is needed) or 'sed -n START,ENDp' $tok."
             fi
             ;;
         esac
@@ -77,7 +77,7 @@ for seg in $segments; do
         *:*) ;;        # git show <ref>:<path> blob form
         *)
           offender="$seg"
-          reason="Unfiltered 'git show'/'git diff' bypasses this repo's Conventions (AGENTS.md: filter shell output before it lands in context). Add --stat first, or scope with a pathspec ('-- <path>'), or pipe through head/grep — rather than dumping the full diff/show."
+          reason="Unfiltered 'git show'/'git diff' bypasses this repo's Conventions (AGENTS.md Conventions — reading: filter shell output before it lands in context). Add --stat first, or scope with a pathspec ('-- <path>'), or pipe through head/grep — rather than dumping the full diff/show."
           ;;
       esac
       ;;
@@ -90,7 +90,7 @@ for seg in $segments; do
         *-name*|*-path*|*-iname*|*-regex*) ;;  # already narrowed
         *)
           offender="$seg"
-          reason="Unfiltered 'find -type f/d' bypasses this repo's Conventions (AGENTS.md: filter shell output before it lands in context). Narrow with -name/-path/-iname/-regex, or pipe through head/grep — rather than listing every match."
+          reason="Unfiltered 'find -type f/d' bypasses this repo's Conventions (AGENTS.md Conventions — reading: filter shell output before it lands in context). Narrow with -name/-path/-iname/-regex, or pipe through head/grep — rather than listing every match."
           ;;
       esac
       ;;

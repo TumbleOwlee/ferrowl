@@ -110,7 +110,7 @@ Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gat
 
 - **No implementation detail.** No code reading, no code-vs-spec check. `status=no-diff` (spec already covers it) → agent's file names the violated requirement; continue to gate 2.
 - Agent surfaces every silent decision (scope, defaults, naming, in/out) one at a time as `status=question` with a recommendation; orchestrator relays question and answer without comment.
-- Output is the normative text: "shall" statements + appended IDs, plus `edge-cases.md` entries. Ready to land, not prose about intent. Observable design is spec: public signatures, error enum, feature gating, config keys.
+- Output is the normative text: indicative statements per `docs/specs/README.md` rule 4 + appended IDs, plus `edge-cases.md` entries. Ready to land, not prose about intent. Observable design is spec: public signatures, error enum, feature gating, config keys.
 - `status=ready` → point user at `spec-diff.md`. Change requested → relay to the same agent. Approved → record `gate1` on parent card; agent stays alive for gate 1b.
 - **Board:** create `open/<slug>.md` + `artifacts/<slug>/` before spawning — no worktree yet.
 - **`spec-diff.md` shape:** one `## <ID>` heading per new/changed requirement (full normative text under it, old → new if changed), then `## Other spec changes` for `api-contract.md`/`data-contract.md` changes with no single owning ID (every `edge-cases.md` entry carries its own `-E` ID and gets its own `## <ID>` heading like a requirement). `.claude/scripts/extract-section.sh '## <ID>' artifacts/<slug>/spec-diff.md` lets a wave-scoped reviewer pull only its IDs.
@@ -178,7 +178,7 @@ Gates unchanged under parallelism — verification, review, spec reconcile happe
 - **Never add `Co-Authored-By`, "Generated with", or any tool attribution trailer** to a commit, PR body, issue, or comment — pure `git log` noise, forever. Every agent, every gate, squash message and PR body included; `hook-guard-attribution.sh` denies it anyway.
 - Every new/changed requirement ships ≥1 ID-citing test.
 - Every existing test pinning observable behavior cites its requirement. Pure internal/helper-detail tests may stay untagged. Behavior no requirement states = requirement missing — add it (gate 1), never attach a loose ID.
-- Citation directly beside the test declaration, above the function body. ≤1 ID per test.
+- Citation directly beside the test declaration, above the function body, listing every ID the test pins (`docs/specs/README.md` rule 8).
 - Not done until the Verification method has run and its outcome is reported. Waiving it requires asking.
 
 ### Reconcile the spec

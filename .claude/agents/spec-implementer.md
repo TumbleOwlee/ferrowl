@@ -41,7 +41,7 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 
 ## Stage completion
 
-Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `AGENTS.md`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stop and wait for approval; commit only after. Push, PR, merge are the orchestrator's. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
+Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `.claude/AGENTS.core.md`'s `## Build / test / lint`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stop and wait for approval; commit only after. Push, PR, merge are the orchestrator's. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
 
 ## Stop and report — never improvise
 
