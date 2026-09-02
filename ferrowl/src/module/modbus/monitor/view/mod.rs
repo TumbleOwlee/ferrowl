@@ -2209,8 +2209,8 @@ mod tests {
 
     /// MB-R-148 — once "Add predefined" opens the named-value sub-popup, keyboard input (typed
     /// characters, Tab/BackTab) reaches the sub-popup's own fields, not the parent
-    /// `EditInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog` sub-dialog
-    /// routing, `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
+    /// `EditInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog`
+    /// sub-dialog routing via its `overlay.has_sub_dialog()` gate).
     #[tokio::test]
     async fn ut_add_predefined_popup_receives_keyboard_focus() {
         let mut v = view();
