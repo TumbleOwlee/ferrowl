@@ -4,7 +4,7 @@ OCPP-JSON wire format: three envelopes, message-id semantics, payload shapes, ty
 
 ---
 
-## 1. Transport
+## Transport
 
 OCPP-J over a single WebSocket. The only transport — no OCPP-SOAP, no MQTT, no binary framing.
 
@@ -15,7 +15,7 @@ OCPP-J over a single WebSocket. The only transport — no OCPP-SOAP, no MQTT, no
 
 ---
 
-## 2. Envelope shapes
+## Envelope shapes
 
 JSON array, first element = message-type id.
 
@@ -39,7 +39,7 @@ Arity exact: 4 for Call, 3 for CallResult, 5 for CallError. Any other count is a
 
 ---
 
-## 3. Message-id semantics
+## Message-id semantics
 
 - The unique id is the **only** correlation key. A reply carries no action name; the originating Call's action selects the response type (OC-R-017, OC-R-018).
 - Every **outbound** Call generates a fresh UUID v4 (OC-R-011).
@@ -50,21 +50,21 @@ Arity exact: 4 for Call, 3 for CallResult, 5 for CallError. Any other count is a
 
 ---
 
-## 4. Payload shapes
+## Payload shapes
 
 An action's request and response payloads are exactly the OCPP schema types for that action and version — carried through untouched, not remapped (OC-R-006). Deliberately **no** version-neutral semantic layer: the surface is the per-version action set, so every action is listable and every raw JSON inspectable.
 
 - A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings (—).
 - 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target (—).
-- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`, OC-R-137).
+- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## Simulated responses`, OC-R-137).
 
 ---
 
-## 5. Typed dialog vs raw JSON
+## Typed dialog vs raw JSON
 
 Every action reachable through a send dialog is **exactly one** of *typed* or *raw JSON*.
 
-### 5.1 The rule
+### The rule
 
 An action gets a **typed** dialog unless its request's required fields include a nested object, or a repeated list with no optional escape hatch — shapes the flat property table cannot represent; those stay on the raw JSON editor (OC-R-089, OC-R-090).
 
@@ -82,12 +82,12 @@ Each row also carries a prefill source — an observed state field, a freshly ge
 
 A typed dialog **always** also offers a raw-JSON mode, prefilled from the current rows (OC-R-092). A raw-JSON action has no typed mode.
 
-### 5.2 Assemblers
+### Assemblers
 
 - **Flat** — rows assemble directly into a flat JSON object (OC-R-094).
 - **Nested** — a few flat rows folded into a full nested request by a custom assembler (OC-R-093). Used where a nested required shape is driven by a handful of scalars (installing a charging profile from connector id, limit, purpose, stack level, rate unit; pushing a local auth list from version, update type, one id tag).
 
-### 5.3 State-driven actions
+### State-driven actions
 
 Built entirely from observed state, sent without a dialog:
 
@@ -98,7 +98,7 @@ Built entirely from observed state, sent without a dialog:
 
 2.x has no `StartTransaction`/`StopTransaction`; transaction start/stop are shortcuts building a `TransactionEvent` for the targeted connector.
 
-### 5.4 Raw-JSON actions
+### Raw-JSON actions
 
 | Version | Raw-JSON actions | Req |
 |---|---|---|
@@ -112,11 +112,11 @@ Everything else — including all 26 of 2.1's new actions not listed — has a t
 
 ---
 
-## 6. Charging Station state model (client role)
+## Charging Station state model (client role)
 
 State split by level, shared between the view, the inbound handler, and the Lua sim thread.
 
-### 6.1 Charge-point level
+### Charge-point level
 
 | Field | Notes | Req |
 |---|---|---|
@@ -127,7 +127,7 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 | reservation | id tag + reservation id of a charge-point-wide reservation | OC-R-057 |
 | connectors | one or more connector states | OC-R-057 |
 
-### 6.2 Connector level
+### Connector level
 
 | Field | Notes | Req |
 |---|---|---|
@@ -140,7 +140,7 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 | charging limits | one per charging-profile purpose (transaction, default, maximum, and — 2.x only — external constraints), each with its own rate unit | OC-R-058 |
 | reservation | id tag + reservation id of a connector-level reservation | OC-R-058 |
 
-### 6.3 Level semantics
+### Level semantics
 
 - 1.6: connector id `0` = the charge point. 2.x: absent EVSE target (or EVSE id `0`) = the charging station (OC-R-063).
 - An inbound Call with a top-level connector/EVSE id the station lacks is rejected; `0` and absent always valid (OC-R-063).
@@ -149,7 +149,7 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 
 ---
 
-## 7. CSMS state model (server role)
+## CSMS state model (server role)
 
 The CSMS is not configured with a station topology; it **observes** one.
 
@@ -164,7 +164,7 @@ The CSMS is not configured with a station topology; it **observes** one.
 
 Observed state is transient: discarded on `:stop` and `:restart`, never persisted to the device config (only RFID accept-lists are) (OC-R-084).
 
-### 7.1 RFID accept-list semantics
+### RFID accept-list semantics
 
 Effective set = own list ∪ charge-point-wide list.
 
@@ -175,7 +175,7 @@ Effective set = own list ∪ charge-point-wide list.
 
 ---
 
-## 8. Simulated responses
+## Simulated responses
 
 The CSMS answers CS-originated Calls with the `Default`-derived response, except four it crafts:
 
@@ -190,7 +190,7 @@ The CS answers CSMS-originated Calls from its own state where modelled (configur
 
 ---
 
-## 9. Message log
+## Message log
 
 Every request/response pair in either direction is recorded as a message with monotonic sequence number, timestamp, direction, action name, raw payload, success/error/neutral outcome, context string, and charge-point/connector scope (OC-R-078).
 

@@ -6,7 +6,7 @@ Exhaustive command-line surface a CI script or operator writes against: every fl
 
 ---
 
-## 1. Top-level command
+## Top-level command
 
 ```
 ferrowl [OPTIONS]
@@ -17,7 +17,7 @@ Default action (no subcommand): start the TUI with the resolved module set.
 
 | Flag | Value | Default | Repeatable | Purpose | Req |
 |---|---|---|---|---|---|
-| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-002 |
+| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``) | CL-R-002 |
 | `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module` | CL-R-003 |
 | `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control | CL-R-004, CL-R-044, CL-R-045 |
 | `--demo` | (flag) | off | no | eight built-in demo tabs + an example session script; config flags ignored for tab building | CL-R-005, CL-R-006 |
@@ -30,7 +30,7 @@ Default action (no subcommand): start the TUI with the resolved module set.
 
 ---
 
-## 2. Subcommands
+## Subcommands
 
 ### `ferrowl migrate`
 
@@ -56,8 +56,8 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 | Flag | Value | Default | Repeatable | Purpose | Req |
 |---|---|---|---|---|---|
 | `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts | CL-R-013 |
-| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-013 |
-| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## 4. `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014, CL-R-046 |
+| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``) | CL-R-013 |
+| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014, CL-R-046 |
 | `--duration` | `SECS` (integer) | none | no | run this many seconds then exit 0. Omit → until Ctrl-C | CL-R-024 |
 | `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout | CL-R-041 |
 | `--exit-on-error` | (flag) | off | no | exit 3 (after stopping all modules) when a drained line has level Error | CL-R-015, CL-R-031 |
@@ -67,7 +67,7 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 
 ---
 
-## 3. `--module` descriptor mini-language (Modbus)
+## `--module` descriptor mini-language (Modbus)
 
 Comma-separated `key=value` pairs. Whitespace around keys and values trimmed; empty comma segment skipped. Segment without `=` is an error. Later duplicate keys overwrite earlier.
 
@@ -100,9 +100,9 @@ Example:
 
 ---
 
-## 4. `--ocpp` descriptor mini-language (OCPP)
+## `--ocpp` descriptor mini-language (OCPP)
 
-Same grammar as ``## 3. `--module` descriptor mini-language (Modbus)``. Role/version/timeout/security/scripts are **not** on the command line — they come from the device file.
+Same grammar as ``## `--module` descriptor mini-language (Modbus)``. Role/version/timeout/security/scripts are **not** on the command line — they come from the device file.
 
 | Key | Required | Default | Meaning | Req |
 |---|---|---|---|---|
@@ -121,7 +121,7 @@ Example:
 
 ---
 
-## 5. Exit-code table
+## Exit-code table
 
 ### `ferrowl run`
 
@@ -132,7 +132,7 @@ Example:
 | `2` | argument-parser usage error (e.g. unknown flag) — emitted before the run | CL-R-035 |
 | `3` | `--exit-on-error` set **and** a drained line had level Error. All modules stopped, then exit 3 | CL-R-031 |
 
-### `ferrowl migrate`
+### `ferrowl migrate` exit codes
 
 | Code | Meaning | Req |
 |---|---|---|
@@ -148,7 +148,7 @@ Example:
 
 ---
 
-## 6. Headless output format
+## Headless output format
 
 - **stdout** carries the drained log stream, one line per entry: `[<timestamp>] <source> | <message>`. `<source>` = module's deduped name, or `session` for session-sim lines (CL-R-040).
 - **stderr** carries setup/fatal diagnostics only (`Error:`/`error:`, the TUI's module-skip warnings), so stdout stays parseable (CL-R-042).

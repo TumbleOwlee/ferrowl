@@ -444,7 +444,7 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-197** — A matched pair with an exception code, and an unmatched request, write no value into the monitor's observed-value table (MB-R-144), but every slave id reaching an MB-R-143 entry is marked seen, so any slave with recorded traffic appears in the unit id listing (UI-R-060) before its first value.
 
-**MB-R-145** — A monitor lets the user author display-only register definitions against its observed-value table: (slave id, table kind, address, format), the same format machinery as a `RegisterDef` (data-contract.md `## 6. Address ranges in the store`) with no access-direction field.
+**MB-R-145** — A monitor lets the user author display-only register definitions against its observed-value table: (slave id, table kind, address, format), the same format machinery as a `RegisterDef` (data-contract.md `## Address ranges in the store`) with no access-direction field.
 
 **MB-R-198** — Applying a monitor interpretation (MB-R-145) decodes the observed-value table's current raw words at that address as a store cell would be decoded; an address with no value observed yet renders as not-yet-observed, never decoding zeroed memory as a value.
 

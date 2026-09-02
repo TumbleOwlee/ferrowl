@@ -1,10 +1,10 @@
 # TUI — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints. The known-limitations section below (`## 6. Known limitations and stated constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional or known constraints. The known-limitations section below (`## Known limitations and stated constraints`) is working as implemented; recorded so it is not "fixed".
 
 ---
 
-## 1. Command line
+## Command line
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -21,7 +21,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-011** | `:log` bare, or `:log <path>` (path ≠ `clear`) | not app-level; forwarded to the view as a module command |
 | **UI-E-012** | Generic name shadows a module name | generic always wins; module commands reached only for unrecognized tokens |
 
-## 2. Navigation and tab jumps
+## Navigation and tab jumps
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -33,7 +33,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-018** | Jump to out-of-range or already-active index | silent no-op |
 | **UI-E-019** | Tab switch with 0 or 1 tabs | safe no-op |
 
-## 3. Dialogs and overlays
+## Dialogs and overlays
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -53,7 +53,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-033** | `Esc` while the rename prompt is open | cancels the prompt; does not reach the dialog's close-confirm |
 | **UI-E-034** | A rename is an edit | restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
 
-## 4. Code editor
+## Code editor
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -69,7 +69,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-044** | `gg`/`dd`/`yy` first press | held pending; any non-matching key cancels the chord before doing its own action |
 | **UI-E-045** | Yank/delete with no clipboard-capable terminal | OSC 52 best-effort; failure ignored; internal register still holds the text |
 
-## 5. Rendering and terminal size
+## Rendering and terminal size
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -80,40 +80,40 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-050** | Tabs overflow the bar width | tab bar scrolls horizontally to keep the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
 
-## 6. Known limitations and stated constraints
+## Known limitations and stated constraints
 
-### 6.1 Single compile-time color scheme
+### Single compile-time color scheme
 
 **UI-E-052** — Build-time feature-selected constant; no runtime theme switch. Changing themes requires rebuilding. Intentional.
 
-### 6.2 Single-level undo only
+### Single-level undo only
 
 **UI-E-053** — Exactly one undo snapshot: `u` toggles between the current buffer and the last pre-edit state. No multi-step history, no separate redo stack.
 
-### 6.3 Editor consumes unmapped Normal-mode keys
+### Editor consumes unmapped Normal-mode keys
 
 **UI-E-054** — In Normal mode any printable key that is not a recognized motion/operator is consumed and discarded. Keeps stray keystrokes from leaking into the enclosing dialog, at the cost of silently swallowing them.
 
-### 6.4 No minimum terminal size
+### No minimum terminal size
 
 **UI-E-055** — No refusal or "terminal too small" message; lays out as best it can and lets content clip. Rendering stays panic-safe (zero-sized popups skipped); usability on a tiny terminal not guaranteed.
 
-### 6.5 Protocol-command results depend on the view
+### Protocol-command results depend on the view
 
 **UI-E-056** — A forwarded `:` command produces whatever `(level, message)` the view chooses; the TUI area does not standardize per-module result text or severities beyond requiring the level be chosen explicitly (never derived from text). The forwarded commands a view accepts are that module's contract, listed in its command-help popup.
 
-### 6.6 OSC 52 clipboard is best-effort
+### OSC 52 clipboard is best-effort
 
 **UI-E-057** — Yank/delete emit an OSC 52 escape. Terminals without OSC 52 (or with it disabled) do not receive the copy; failure silent; in-app register still works for `p`/`P`. No fallback clipboard.
 
-### 6.7 Command help lists a fixed generic set
+### Command help lists a fixed generic set
 
 **UI-E-058** — The command-help popup lists a fixed generic set plus the active view's list. Generic aliases beyond those shown (`:q!`, `:save`, `:write`) are still accepted by the parser though the popup shows one spelling.
 
-### 6.8 Module commands match on the exact first token
+### Module commands match on the exact first token
 
 **UI-E-059** — A forwarded command is recognized by its exact first whitespace-delimited token: `:setfoo` is unknown, not a malformed `:set`. Argument validation applies only after the token matches (`:set` alone still reports the usage warning).
 
-### 6.9 Terminal-restore paths are not unit-tested
+### Terminal-restore paths are not unit-tested
 
 **UI-E-060** — UI-R-001 requires terminal restore on normal exit, error exit, and from a panic hook. None of the three — `AlternateScreen`'s `Drop` impl (`ferrowl-ui/src/screen.rs`), `AlternateScreen::release()` from the error-exit branch (`ferrowl/src/main.rs`, after `app.run()` returns `Err`), or the same `release()` in the panic hook (`main.rs`, before `runtime.block_on`) — is exercised by an automated test. All three mutate the real terminal's raw-mode/alternate-screen state; doing so inside the test harness's process would corrupt its terminal (the panic-hook path also requires actually panicking), so this is left to manual verification (`cargo run -- --demo`, then exit normally, force an error exit, trigger a panic, checking the prompt is intact each time).

@@ -1,10 +1,10 @@
 # OCPP — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## 6. Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
 
 ---
 
-## 1. Framing boundaries
+## Framing boundaries
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -22,7 +22,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 2. Call and reply boundaries
+## Call and reply boundaries
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -44,7 +44,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 3. Connection-drop boundaries
+## Connection-drop boundaries
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -58,7 +58,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 4. Security boundaries
+## Security boundaries
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -96,7 +96,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 5. Simulator boundaries
+## Simulator boundaries
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -122,57 +122,57 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 6. Known limitations — intentional constraints
+## Known limitations — intentional constraints
 
-### 6.1 CS reconnect resets on handshake, not on message exchange
+### CS reconnect resets on handshake, not on message exchange
 
 **OC-E-084** — A CS reconnects on a failed dial or dropped connection with the shared bounded-exponential-backoff driver (MB-R-051; OC-R-048, OC-R-105–107), governed by `reconnect` (default enabled). A non-terminate command sent while backing off is dropped, not queued (MB-R-054).
 
 Nuance: backoff resets to 1 s as soon as the WebSocket handshake completes, before any OCPP message (OC-R-105). A peer that accepts the socket and immediately drops it, every time, sees the backoff reset on every attempt — retrying near 1 s — rather than growing as it would if reset required a message exchange.
 
-### 6.2 CSMS bind retry
+### CSMS bind retry
 
 **OC-E-085** — A CSMS whose bind fails retries with the shared backoff driver (OC-R-139, OC-R-108–109). A server still binds **automatically on creation** (OC-R-138). Governed by the same `reconnect` field as the CS role (default enabled); disabled, a failed bind ends the module task (MB-R-130–134).
 
-### 6.3 Unbounded connections and no idle timeout
+### Unbounded connections and no idle timeout
 
 **OC-E-086** — A CSMS serves any number of concurrent connections, no cap, no idle timeout. A station that connects and goes silent holds its connection and registry entry indefinitely.
 
-### 6.4 No version-neutral semantic layer
+### No version-neutral semantic layer
 
 **OC-E-087** — Deliberately no neutral abstraction over the three versions. The surface is the per-version action set, so every action can be listed and every raw payload inspected; sharing between 2.0.1 and 2.1 is plain shared functions.
 
 Consequence: adding a version means adding its action table, inbound handlers, and action-spec module. No single seam makes it free.
 
-### 6.5 `NotifyPeriodicEventStream` is not an action
+### `NotifyPeriodicEventStream` is not an action
 
 **OC-E-088** — OCPP 2.1's `NotifyPeriodicEventStream` is a one-way streaming datagram with no request/response pair, so it cannot be an action-table entry. Absent from the 90-action set; can be neither sent nor received.
 
-### 6.6 The RFID accept-list is the only CSMS authorization model
+### The RFID accept-list is the only CSMS authorization model
 
 **OC-E-089** — The simulated CSMS accepts or rejects a tag purely by list membership. No local auth list, auth cache, expiry, parent id tag, or group-id handling; those actions are default-accepted, changing no CSMS state.
 
-### 6.7 Server-side configuration is transient
+### Server-side configuration is transient
 
 **OC-E-090** — A CSMS's observed state (station entries, connectors, per-station configuration) is discarded on `:stop` and `:restart`, never written to the device config. Only RFID accept-lists persist. The client role persists its connector table and configuration-key store.
 
-### 6.8 Connector count is unbounded
+### Connector count is unbounded
 
 **OC-E-091** — Nothing caps the connectors a client-role device config declares or that may be added at runtime.
 
-### 6.9 A stale reply is silently dropped
+### A stale reply is silently dropped
 
 **OC-E-092** — A reply arriving after its Call timed out finds no entry and is discarded with no log line. Caller's side: the Call failed; wire's side: the peer answered.
 
-### 6.10 A message burst larger than the buffer can lose log lines
+### A message burst larger than the buffer can lose log lines
 
 **OC-E-093** — Messages are teed from memory into the log file once per refresh tick (~100 ms), by sequence number. A message both created **and** evicted between two ticks (more than 200 messages in one tick) never reaches the file. Unreachable at any realistic OCPP rate.
 
-### 6.11 A cancelled inbound Call handler's side effects may have partially applied
+### A cancelled inbound Call handler's side effects may have partially applied
 
 **OC-E-094** — Teardown (OC-R-121) aborts an in-flight handler rather than waiting. A side effect already begun is not rolled back; only the reply is guaranteed never sent.
 
-### 6.12 The CS and CSMS connection drivers stay separate
+### The CS and CSMS connection drivers stay separate
 
 **OC-E-095** — `cs::core::run` and `csms::core::run_connection` share a skeleton (build dispatch, start connection, `on_connected`, `select!` loop over commands, `shutdown`, `on_disconnected`) and are deliberately not unified.
 

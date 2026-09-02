@@ -4,7 +4,7 @@ Exhaustive action table per version, direction per action, OCPP-J error codes, O
 
 ---
 
-## 1. Versions and subprotocols
+## Versions and subprotocols
 
 | Version | Subprotocol token | Actions | CS→CSMS | CSMS→CS | Req |
 |---|---|---|---|---|---|
@@ -18,13 +18,13 @@ Exhaustive action table per version, direction per action, OCPP-J error codes, O
 
 ---
 
-## 2. OCPP 1.6 — 28 actions
+## OCPP 1.6 — 28 actions
 
-### 2.1 CS→CSMS (10)
+### CS→CSMS (10)
 
 `Authorize`, `BootNotification`, `DataTransfer`, `DiagnosticsStatusNotification`, `FirmwareStatusNotification`, `Heartbeat`, `MeterValues`, `StartTransaction`, `StatusNotification`, `StopTransaction` (OC-R-002, OC-R-003).
 
-### 2.2 CSMS→CS (18)
+### CSMS→CS (18)
 
 | Action | Scope | Req |
 |---|---|---|
@@ -49,13 +49,13 @@ Exhaustive action table per version, direction per action, OCPP-J error codes, O
 
 ---
 
-## 3. OCPP 2.0.1 — 64 actions
+## OCPP 2.0.1 — 64 actions
 
-### 3.1 CS→CSMS (25)
+### CS→CSMS (25)
 
 `Authorize`, `BootNotification`, `ClearedChargingLimit`, `DataTransfer`, `FirmwareStatusNotification`, `Get15118EVCertificate`, `GetCertificateStatus`, `Heartbeat`, `LogStatusNotification`, `MeterValues`, `NotifyChargingLimit`, `NotifyCustomerInformation`, `NotifyDisplayMessages`, `NotifyEVChargingNeeds`, `NotifyEVChargingSchedule`, `NotifyEvent`, `NotifyMonitoringReport`, `NotifyReport`, `PublishFirmwareStatusNotification`, `ReportChargingProfiles`, `ReservationStatusUpdate`, `SecurityEventNotification`, `SignCertificate`, `StatusNotification`, `TransactionEvent` (OC-R-002, OC-R-003).
 
-### 3.2 CSMS→CS (39)
+### CSMS→CS (39)
 
 | Action | Scope | Req |
 |---|---|---|
@@ -101,15 +101,15 @@ Exhaustive action table per version, direction per action, OCPP-J error codes, O
 
 ---
 
-## 4. OCPP 2.1 — 90 actions
+## OCPP 2.1 — 90 actions
 
-All 64 of `## 3. OCPP 2.0.1 — 64 actions` plus the 26 below. **No shared action changes direction or scope in 2.1.** 2.1's additions to shared payload types are all optional fields, so shared actions remain decode-compatible.
+All 64 of `## OCPP 2.0.1 — 64 actions` plus the 26 below. **No shared action changes direction or scope in 2.1.** 2.1's additions to shared payload types are all optional fields, so shared actions remain decode-compatible.
 
-### 4.1 New in 2.1, CS→CSMS (12)
+### New in 2.1, CS→CSMS (12)
 
 `BatterySwap`, `GetCertificateChainStatus`, `NotifyDERAlarm`, `NotifyDERStartStop`, `NotifyPriorityCharging`, `NotifySettlement`, `NotifyWebPaymentStarted`, `OpenPeriodicEventStream`, `ClosePeriodicEventStream`, `PullDynamicScheduleUpdate`, `ReportDERControl`, `VatNumberValidation` (OC-R-002, OC-R-003, OC-R-007).
 
-### 4.2 New in 2.1, CSMS→CS (14)
+### New in 2.1, CSMS→CS (14)
 
 | Action | Scope | Req |
 |---|---|---|
@@ -132,7 +132,7 @@ Totals: 25 + 12 = **37** CS→CSMS; 39 + 14 = **53** CSMS→CS; **90**.
 
 ---
 
-## 5. OCPP-J CallError codes
+## OCPP-J CallError codes
 
 Fixed set, spelled as on the wire:
 
@@ -153,9 +153,9 @@ An `errorCode` matching none of the ten is accepted and read as `GenericError` (
 
 ---
 
-## 6. Module instance spec (session / `--ocpp`)
+## Module instance spec (session / `--ocpp`)
 
-One OCPP instance: the per-instance on-the-wire endpoint. Version, role, timeout, security, scripts, connectors, configuration keys, (client role) CS boot identity live in the device config (`## 8. Device config (one file = one device type)`), never here.
+One OCPP instance: the per-instance on-the-wire endpoint. Version, role, timeout, security, scripts, connectors, configuration keys, (client role) CS boot identity live in the device config (`## Device config (one file = one device type)`), never here.
 
 | Field | Type | Default | Valid values | Req |
 |---|---|---|---|---|
@@ -174,7 +174,7 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 
 ---
 
-## 7. Endpoint enums
+## Endpoint enums
 
 | Enum | Values | Serialized as | Req |
 |---|---|---|---|
@@ -186,13 +186,13 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 
 ---
 
-## 8. Device config (one file = one device type)
+## Device config (one file = one device type)
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
 | `version` | optional string | unset | ferrowl version, stamped on save | CS-R-022 |
-| `ocpp_version` | enum | `1.6` | `## 7. Endpoint enums`. Version-locks the file: scripts call version-specific actions | OC-R-001, OC-R-080 |
-| `role` | enum | `client` | `## 7. Endpoint enums` | OC-R-079 |
+| `ocpp_version` | enum | `1.6` | `## Endpoint enums`. Version-locks the file: scripts call version-specific actions | OC-R-001, OC-R-080 |
+| `role` | enum | `client` | `## Endpoint enums` | OC-R-079 |
 | `timeout_ms` | optional u64 | `30000` when unset | awaited-reply timeout, both roles | OC-R-020 |
 | `scripts` | list of script defs | empty | Lua sim scripts — `scripting/`. Client role only | SC-R-022 |
 | `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
@@ -210,18 +210,18 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 | `imsi` | optional string | unset | **client only, 1.6 only**: SIM IMSI | OC-R-104 |
 | `meter_serial_number` | optional string | unset | **client only, 1.6 only**: installed meter's serial number | OC-R-104 |
 | `meter_type` | optional string | unset | **client only, 1.6 only**: installed meter's type/model | OC-R-104 |
-| `security` | `OcppSecurityConfig` | all-unset | ``## 9. Security config (`security`)`` | OC-R-126 |
+| `security` | `OcppSecurityConfig` | all-unset | ``## Security config (`security`)`` | OC-R-126 |
 
 A device config written before any of these fields existed still loads: every field defaulted.
 
-### 8.1 `ConnectorRef`
+### `ConnectorRef`
 
 | Field | Type | Notes | Req |
 |---|---|---|---|
 | `evse` | optional i64 | `None` for 1.6 (connector-only addressing); `Some` for 2.0.1/2.1 | — |
 | `connector` | i64 | connector id | OC-R-058, OC-R-077 |
 
-### 8.2 `ConnectorRfids`
+### `ConnectorRfids`
 
 | Field | Type | Notes | Req |
 |---|---|---|---|
@@ -229,7 +229,7 @@ A device config written before any of these fields existed still loads: every fi
 | `connector` | optional i64 | as above | OC-R-058, OC-R-077 |
 | `rfids` | list of string | tags accepted for that connector, **in addition to** the charge-point-wide list | OC-R-074, OC-R-075 |
 
-### 8.3 `ConfigKeyDef`
+### `ConfigKeyDef`
 
 | Field | Type | Default | Req |
 |---|---|---|---|
@@ -237,7 +237,7 @@ A device config written before any of these fields existed still loads: every fi
 | `value` | string | empty | OC-R-057, OC-R-066 |
 | `readonly` | bool | `false` | OC-R-066 |
 
-### 8.4 `HeaderDef`
+### `HeaderDef`
 
 | Field | Type | Default | Req |
 |---|---|---|---|
@@ -246,7 +246,7 @@ A device config written before any of these fields existed still loads: every fi
 
 ---
 
-## 9. Security config (`security`)
+## Security config (`security`)
 
 One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in a `tls` sub-block (OC-R-126, OC-R-158), of which an instance consults only its own role's — the other inert. Default (no auth, both policies `none`) = plain `ws://`.
 
@@ -289,7 +289,7 @@ One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in
 | `root-store` | `extra_ca_files` — list, may be empty | client only: webpki root store plus these anchors | OC-R-034, OC-R-129 |
 | `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the root store | OC-R-034, OC-R-130, OC-R-039 |
 
-### 9.1 Derivation rules
+### Derivation rules
 
 - **Basic Auth on** iff *both* `username` and `password` set. Either alone inert (OC-R-164).
 - **TLS on** for an instance iff its own role's policy is other than `none`. The variant *is* the state; the other role's policy never affects it (OC-R-158).
@@ -298,9 +298,9 @@ One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in
 - **A `wss://` server's TLS material** follows its `identity` directly (OC-R-096); the old "explicit files always win" precedence is unrepresentable.
 - **A `wss://` server with identity `ephemeral`** binds an ephemeral self-signed certificate, not plain TCP, and logs the fallback (OC-R-095).
 - Two role-only rejections at construction: `verify = "root-store"` under `tls.server`; `source = "ephemeral"` as a `tls.client` identity (OC-R-133, OC-R-035).
-- **The setup dialog does not expose `protocol` as an input** (OC-R-161): it displays a scheme derived from the TLS selector — `wss://` at TLS/mTLS, `ws://` at Off — and writes the matching `protocol`. The field (`## 7. Endpoint enums`) is unchanged; a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
+- **The setup dialog does not expose `protocol` as an input** (OC-R-161): it displays a scheme derived from the TLS selector — `wss://` at TLS/mTLS, `ws://` at Off — and writes the matching `protocol`. The field (`## Endpoint enums`) is unchanged; a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
 
-### 9.2 Security profiles
+### Security profiles
 
 | Profile | Configuration | Req |
 |---|---|---|
@@ -335,11 +335,11 @@ extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
 
 ---
 
-## 10. `:` commands
+## `:` commands
 
 Protocol-specific commands owned here (mechanism owned by `tui/`).
 
-### 10.1 Client (CS) view
+### Client (CS) view
 
 | Command | Effect | Req |
 |---|---|---|
@@ -351,7 +351,7 @@ Protocol-specific commands owned here (mechanism owned by `tui/`).
 | `:compact` | toggle compact table rows | — |
 | `:log [file]` | set (no argument: clear) the persistent log file | OC-R-087, OC-R-088 |
 
-### 10.2 Server (CSMS) view
+### Server (CSMS) view
 
 | Command | Effect | Req |
 |---|---|---|

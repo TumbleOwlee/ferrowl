@@ -160,7 +160,7 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-119** — `extra_headers` is a client-only device config field, not exposed through the `--ocpp` key=value CLI form, consistent with the other list-shaped client-only fields (`connectors`, `config`).
 
-**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected") go to the module log, not the message log, which records only request/response pairs (data-contract.md `## 9. Message log`).
+**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected") go to the module log, not the message log, which records only request/response pairs (data-contract.md `## Message log`).
 
 ---
 

@@ -4,9 +4,9 @@ Function codes per role, Modbus device/endpoint config fields. Per [`../README.m
 
 ---
 
-## 1. Modbus function codes
+## Modbus function codes
 
-### 1.1 Client (initiator)
+### Client (initiator)
 
 | Code | Function | Issued by | Req |
 |---|---|---|---|
@@ -21,7 +21,7 @@ Function codes per role, Modbus device/endpoint config fields. Per [`../README.m
 
 Poll loop issues **only** the four read codes. Writes only on an explicit write command (TUI, `:` command, Lua script, headless run) — never on the client's own initiative. Client does **not** implement code 23 (Read/Write Multiple Registers) or any other.
 
-### 1.2 Server (responder)
+### Server (responder)
 
 | Code | Function | Behavior | Req |
 |---|---|---|---|
@@ -37,7 +37,7 @@ Poll loop issues **only** the four read codes. Writes only on an explicit write 
 
 Every other code — everything outside 1, 2, 3, 4, 5, 6, 15, 16, 23 — is **rejected** with `IllegalFunction` (`0x01`). Among them: Report Server Id (17), Mask Write Register (22), Read Device Identification (43 / MEI), Diagnostics (8), Get Comm Event Counter (11), Get Comm Event Log (12), Read File Record (20), Write File Record (21), Read FIFO Queue (24), any custom code.
 
-### 1.3 Exception codes emitted by the server
+### Exception codes emitted by the server
 
 | Exception | When | Req |
 |---|---|---|
@@ -48,13 +48,13 @@ No other exception code is produced by the server.
 
 ---
 
-## 2. Transports
+## Transports
 
 Exactly six: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over TCP), **UDP** (MBAP framing over UDP datagram), **Ascii** (ASCII framing over serial), **AsciiOverTcp** (ASCII framing over TCP).
 
 ---
 
-## 3. Modbus TCP connection config
+## Modbus TCP connection config
 
 Shared by client and server roles.
 
@@ -94,7 +94,7 @@ extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
 
 ---
 
-## 4. Modbus RTU connection config
+## Modbus RTU connection config
 
 | Field | Type | Default | Valid range | Role | Req |
 |---|---|---|---|---|---|
@@ -107,7 +107,7 @@ extra_ca_files = ["/etc/ferrowl/private-ca.pem"]
 | `timeout_ms` | usize | `3000` | ≥ 0 | per-operation timeout | MB-R-040 |
 | `delay_ms` | usize | `0` | ≥ 0 | wait before first operation after connect | MB-R-038 |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between operations | MB-R-039 |
-| `reconnect` | bool | `true` | — | as in `## 3. Modbus TCP connection config` | MB-R-075, MB-R-130 |
+| `reconnect` | bool | `true` | — | as in `## Modbus TCP connection config` | MB-R-075, MB-R-130 |
 
 Out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial configuration error **before** the port opens.
 
@@ -115,9 +115,9 @@ Out-of-range `parity`, `data_bits`, or `stop_bits` fails with a serial configura
 
 ---
 
-## 5. Module instance spec (session / `--module`)
+## Module instance spec (session / `--module`)
 
-One Modbus instance: the per-instance on-the-wire endpoint. All *timing* lives in the device config (`## 6. Device config (one file = one device type)`), never here.
+One Modbus instance: the per-instance on-the-wire endpoint. All *timing* lives in the device config (`## Device config (one file = one device type)`), never here.
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
@@ -149,11 +149,11 @@ The RTU baud default here (`19200`) differs from the transport-level default (`1
 
 ### endpoint with `transport = "rtu_over_tcp"`
 
-Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
+Same fields as `transport = "tcp"` (`## Modbus TCP connection config`).
 
 ### endpoint with `transport = "udp"`
 
-Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
+Same fields as `transport = "tcp"` (`## Modbus TCP connection config`).
 
 ### endpoint with `transport = "ascii"`
 
@@ -161,7 +161,7 @@ Same fields as `transport = "rtu"` (above).
 
 ### endpoint with `transport = "ascii_over_tcp"`
 
-Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
+Same fields as `transport = "tcp"` (`## Modbus TCP connection config`).
 
 ### `--module` key/value form
 
@@ -176,7 +176,7 @@ Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
 
 ---
 
-## 6. Device config (one file = one device type)
+## Device config (one file = one device type)
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
@@ -185,16 +185,16 @@ Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
 | `delay_ms` | optional usize | `1000` | delay before first operation after connect | MB-R-038, MB-R-087 |
 | `interval_ms` | optional usize | `1000` | poll interval | MB-R-039, MB-R-087 |
 | `reconnect` | optional bool | `true` | client: auto-reconnect (MB-R-050–055); server: bind/serial-open/mid-serve retry (MB-R-130–134) | MB-R-050, MB-R-130, MB-R-087 |
-| `read_ranges` | `ReadRanges` | empty | explicit batched read windows (``### 6.1 `read_ranges` ``) | MB-R-082, MB-R-083 |
-| `definitions` | map name → `RegisterDef` | — (required) | register table (``### 6.2 `RegisterDef` ``) | MB-R-077 |
+| `read_ranges` | `ReadRanges` | empty | explicit batched read windows (``### `read_ranges` ``) | MB-R-082, MB-R-083 |
+| `definitions` | map name → `RegisterDef` | — (required) | register table (``### `RegisterDef` ``) | MB-R-077 |
 | `scripts` | list | empty | Lua sim scripts — `scripting/` | SC-R-022 |
 | `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
 
 Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what an application-built module uses; they deliberately differ from the transport-level `0`.
 
-`role = monitor`: device config carries only `version`, `reconnect` (also gating MB-R-192's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, ``### 6.3 `MonitorRegisterDef` `` — each entry carries its own `name`, since two interpretations on different `slave_id`s may share a name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would collapse same-named entries across slave ids). `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, `script_interval` dropped: a monitor never initiates a transaction, has no poll loop, and (display-only) no Lua sim surface.
+`role = monitor`: device config carries only `version`, `reconnect` (also gating MB-R-192's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, ``### `MonitorRegisterDef` `` — each entry carries its own `name`, since two interpretations on different `slave_id`s may share a name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would collapse same-named entries across slave ids). `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, `script_interval` dropped: a monitor never initiates a transaction, has no poll loop, and (display-only) no Lua sim surface.
 
-### 6.1 `read_ranges`
+### `read_ranges`
 
 | Field | Type | Applies to | Req |
 |---|---|---|---|
@@ -205,7 +205,7 @@ Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what
 
 Each value: comma-separated **inclusive** address ranges, e.g. `"0-100,140-160"`. Bare number (`"5"`) = single address 5. Malformed or reversed entries skipped silently.
 
-### 6.2 `RegisterDef`
+### `RegisterDef`
 
 | Field | Type | Default | Valid values | Req |
 |---|---|---|---|---|
@@ -228,9 +228,9 @@ Each value: comma-separated **inclusive** address ranges, e.g. `"0-100,140-160"`
 
 `value`/`default` scalars are untagged: `10` integer, `1.5` float, `"idle"` text.
 
-### 6.3 `MonitorRegisterDef`
+### `MonitorRegisterDef`
 
-MB-R-145 — display-only interpretation against a monitor's observed-value table (`## 6. Device config (one file = one device type)`): identical to `RegisterDef` (``### 6.2 `RegisterDef` ``) minus `access` (table is observed, not owned — no direction to declare) and `update` (no store cell to script against).
+MB-R-145 — display-only interpretation against a monitor's observed-value table (`## Device config (one file = one device type)`): identical to `RegisterDef` (``### `RegisterDef` ``) minus `access` (table is observed, not owned — no direction to declare) and `update` (no store cell to script against).
 
 | Field | Type | Default | Valid values | Req |
 |---|---|---|---|---|
@@ -250,4 +250,4 @@ MB-R-145 — display-only interpretation against a monitor's observed-value tabl
 | `description` | string | empty | | — |
 | `default` | optional scalar | unset | int, float, or string; no memory store to write into, so accepted but no effect — kept so a `RegisterDef`-shaped fragment still deserializes | — |
 
-A pasted-in fragment carrying `access` and/or `update` deserializes cleanly, both ignored as unknown fields (same tolerance `## 6. Device config (one file = one device type)`/``### 6.1 `read_ranges` `` document for other role-conditional shapes).
+A pasted-in fragment carrying `access` and/or `update` deserializes cleanly, both ignored as unknown fields (same tolerance `## Device config (one file = one device type)`/``### `read_ranges` `` document for other role-conditional shapes).

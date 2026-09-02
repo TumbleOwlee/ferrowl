@@ -4,7 +4,7 @@ Boundary behavior, error semantics, intentional constraints. Working as implemen
 
 ---
 
-## 1. Link loss and reconnect
+## Link loss and reconnect
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -13,7 +13,7 @@ Boundary behavior, error semantics, intentional constraints. Working as implemen
 | **BR-E-003** | Downstream connect fails at startup | not a setup failure: process starts normally, every forwarded request answered `GatewayPathUnavailable` until downstream connects (BR-R-010) |
 | **BR-E-004** | Downstream `reconnect` unset (`false`) and a connect/exchange failure occurs | never retries; every subsequent forwarded request answers `GatewayPathUnavailable` indefinitely (BR-R-006, BR-R-010) |
 
-## 2. Pass-through and filtering
+## Pass-through and filtering
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -21,11 +21,11 @@ Boundary behavior, error semantics, intentional constraints. Working as implemen
 | **BR-E-006** | RTU descriptor's `slave` key, if given | inert, as for an ordinary RTU server (MB-E-075): bridge answers whichever slave ids arrive |
 | **BR-E-007** | Downstream descriptor's `unit_ids` key, if given | parsed but never consulted; `unit_ids` filtering (BR-R-015) is upstream-only |
 
-## 3. Multidrop bus safety
+## Multidrop bus safety
 
 On a shared/multidrop RTU upstream bus, `unit_ids` (`BR-R-015`) keeps the bridge from colliding with other devices on the wire: an unfiltered bridge would forward a request meant for another device downstream, get it rejected/timed out, and answer upstream with a failure colliding on the bus with the real device's own correct answer — omitting `unit_ids` is safe only on a dedicated point-to-point upstream link.
 
-## 4. Exit codes
+## Exit codes
 
 `--exit-on-error` uses exit 3, distinct from the clap usage-error code 2, mirroring `run` (`cli-headless/edge-cases.md` CL-E-003).
 

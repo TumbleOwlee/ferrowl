@@ -4,7 +4,7 @@ Register model: four tables, thirteen formats, bit-fields, display scaling, virt
 
 ---
 
-## 1. The four register tables
+## The four register tables
 
 | Table | Element | Width | Direction on the wire | Read code | Write codes | Req |
 |---|---|---|---|---|---|---|
@@ -21,7 +21,7 @@ Storage is bit-oriented only in intent: a coil is one 16-bit cell of type "coil"
 
 ---
 
-## 2. Data formats
+## Data formats
 
 Thirteen formats, each with a fixed width in 16-bit registers.
 
@@ -41,11 +41,11 @@ Thirteen formats, each with a fixed width in 16-bit registers.
 | `F64` | 4 | 8 | IEEE 754 | yes | no | yes | `F64 (<Endian>)` | MB-R-010, MB-R-011, MB-R-017, MB-R-018 |
 | `Ascii` | configured `length` | 2 × length | n/a | no | no | no | `ASCII (<Alignment>)` | MB-R-010, MB-R-011, MB-R-019 |
 
-### 2.1 `U8` / `I8`
+### `U8` / `I8`
 
 An 8-bit format occupies a **whole 16-bit register**. The byte sits in the **low** byte under `Big`, **high** byte under `Little`.
 
-### 2.2 Byte order
+### Byte order
 
 `Endian` (`Big` or `Little`) describes the byte order of the value's whole byte stream across its registers.
 
@@ -55,11 +55,11 @@ An 8-bit format occupies a **whole 16-bit register**. The byte sits in the **low
 
 `U32` with wire words `0xAABB 0xCCDD`: `Big` → `0xAABBCCDD`, `Little` → `0xDDCCBBAA`.
 
-### 2.2a Register order
+### Register order
 
 Independent of byte order, every integer and float format carries a **register order** `Normal` or `Reversed`, reordering the format's 16-bit *words*: `Normal` natural; `Reversed` whole sequence reversed (`U64` `[w0,w1,w2,w3]` → `[w3,w2,w1,w0]`).
 
-Composes with byte order as a separate axis: on decode words are reordered **first**, then `### 2.2 Byte order`'s byte-order rule; on encode byte-order first, reorder last. Exact inverses. Default `Normal` = byte-order rule alone.
+Composes with byte order as a separate axis: on decode words are reordered **first**, then `### Byte order`'s byte-order rule; on encode byte-order first, reorder last. Exact inverses. Default `Normal` = byte-order rule alone.
 
 Four layouts for a `U32` with wire words `0xAABB 0xCCDD`:
 
@@ -72,11 +72,11 @@ Four layouts for a `U32` with wire words `0xAABB 0xCCDD`:
 
 Width-1 formats (`U8`/`I8`/`U16`/`I16`): register order is a no-op. `Ascii` has no register order, as it has no byte order.
 
-### 2.3 Floats
+### Floats
 
 `F32`/`F64` are the raw IEEE 754 bit pattern, subject to the same byte-order rule. No bit-field.
 
-### 2.4 ASCII
+### ASCII
 
 - Two characters per register; block is exactly `2 × length` bytes (MB-R-019).
 - `Alignment` `Left` or `Right` governs **padding and truncation on encode**: `Left` writes from the first byte, zero-pads right, over-long input keeps the **first** `2 × length` bytes; `Right` zero-pads left, keeps the **last** `2 × length` bytes (MB-R-020).
@@ -84,13 +84,13 @@ Width-1 formats (`U8`/`I8`/`U16`/`I16`): register order is a no-op. `Ascii` has 
 - Decoding does **not** trim: the raw byte block including zero padding, as UTF-8. A `Right`-aligned value decodes with leading zero bytes intact.
 - No byte order, no bit-field.
 
-### 2.5 Odd byte counts
+### Odd byte counts
 
 A byte stream of odd length packed into registers: the trailing byte becomes the **high** byte of the final register, low byte zero.
 
 ---
 
-## 3. Bit-fields
+## Bit-fields
 
 Every integer format carries a bit-field selector: a single mask.
 
@@ -101,7 +101,7 @@ Every integer format carries a bit-field selector: a single mask.
 - A mask setting any bit **at or above the format's integer width** is invalid, rejected on decode and encode (e.g. `0x1FF` on `U8`) (MB-R-016). All-ones default always valid.
 - Float and ASCII formats have no bit-field; theirs behaves as the no-op default.
 
-### 3.1 Aliasing registers and the write mask
+### Aliasing registers and the write mask
 
 Several registers may share one address, each owning a disjoint bit slice. To keep a write to one from clobbering siblings, a register exposes:
 
@@ -112,7 +112,7 @@ Every write to a fixed-address register — server-side store write or client-si
 
 ---
 
-## 4. Display scaling (resolution)
+## Display scaling (resolution)
 
 Every numeric format carries a `Resolution` scale factor (default `1.0`).
 
@@ -123,7 +123,7 @@ Every numeric format carries a `Resolution` scale factor (default `1.0`).
 
 ---
 
-## 5. Addresses and virtual registers
+## Addresses and virtual registers
 
 A register's address is either:
 
@@ -141,7 +141,7 @@ A definition is virtual when it has no `address`, or when `virtual = true` (wins
 
 ---
 
-## 6. Address ranges in the store
+## Address ranges in the store
 
 - Ranges **half-open**: `[start, end)`, `length = end - start` (MB-R-028).
 - `end < start` rejected on deserialization.
@@ -176,7 +176,7 @@ Cells are declared by **kind**, not `access`:
 
 ---
 
-## 7. Batched read planning
+## Batched read planning
 
 Client poll operations are `(slave id, read function code, [start, end))` triples, grouped by (slave id, function code).
 
