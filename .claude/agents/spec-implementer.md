@@ -18,7 +18,7 @@ Given `plan.md`'s path and your stage id(s): pull only your section(s), one batc
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
-Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per step, no prose:
+Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose — no command output, no narration of how you staged or stashed, no test-name lists (the commit message holds those):
 
 ```
 2026-01-02T14:02 spawn agent=impl
@@ -41,7 +41,7 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 
 ## Stage completion
 
-Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `AGENTS.md`, quote the relevant excerpt (failure text, summary/pass line — never a full log). Stop and wait for approval; commit only after. Push, PR, merge are the orchestrator's. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
+Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `AGENTS.md`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stop and wait for approval; commit only after. Push, PR, merge are the orchestrator's. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
 
 ## Stop and report — never improvise
 
