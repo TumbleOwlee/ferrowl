@@ -86,7 +86,7 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ---
 
-## Security
+## Security — transport
 
 **OC-R-029** — Three security profiles: Profile 1 (HTTP Basic Auth over plain `ws://`), Profile 2 (TLS, server certificate only), Profile 3 (mutual TLS).
 
@@ -136,6 +136,36 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-096** — A `wss://` server's TLS material follows its `identity`: `SelfSigned` presents an ephemeral self-signed certificate; `Files` presents the named certificate + key; `Ephemeral` presents OC-R-095's logged fallback. Self-signed pair cadence per OC-R-037.
 
+**OC-R-112** — A half-configured certificate pair is not representable in a config file: `CertSource::Files` carries `cert_file` and `key_file` as required fields, so naming one without the other fails to deserialize. The rule survives only in the dialog, whose inputs are independently editable: error border on a blank cert/key input while shown; refuses to close on submit while either of a role's pair is blank, CSMS identity and CS mTLS identity alike (MB-R-171).
+
+**OC-R-115** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a CS presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per OC-R-037, never written to disk.
+
+**OC-R-126** — The OCPP device security config carries its TLS material as a `tls` sub-block holding one `ServerTlsPolicy` under `server` and one `ClientTlsPolicy` under `client`, serialized `[security.tls.server]`/`[security.tls.client]`.
+
+**OC-R-156** — `username` and `password` remain flat members of `security` (OC-R-126), shared by both roles.
+
+**OC-R-157** — Each policy in the `tls` sub-block (OC-R-126) independently defaults to `None`, so an absent `[security.tls]` block is exactly both policies `None`.
+
+**OC-R-158** — A CS or CSMS decides whether TLS is configured by matching its own role's policy variant in the `tls` sub-block (OC-R-126); the other role's policy is inert, never validated against this role's rules.
+
+**OC-R-159** — The endpoint scheme remains authoritative over the `tls` sub-block's policy (OC-R-126, OC-R-042).
+
+**OC-R-117** — A CS device config may declare `extra_headers`, an ordered list of `HeaderDef { name, value }`.
+
+**OC-R-152** — Every configured `extra_headers` header (OC-R-117) is sent on the WebSocket upgrade in addition to any header the client sets itself (OC-R-030's `Authorization`, OC-R-004's subprotocol token).
+
+**OC-R-153** — Construction rejects an `extra_headers` `HeaderDef` (OC-R-117) whose `name` case-insensitively matches a client-controlled header (`Authorization`, `Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version`, `Sec-WebSocket-Protocol`, `Sec-WebSocket-Extensions`), naming it in the error.
+
+**OC-R-118** — `HeaderDef.name` matches the HTTP token grammar (visible ASCII, no separators or whitespace); `HeaderDef.value` contains only printable ASCII (0x20–0x7E), excluding CR/LF and other controls. Construction rejects any violation, naming the offending header and field.
+
+**OC-R-119** — `extra_headers` is a client-only device config field, not exposed through the `--ocpp` key=value CLI form, consistent with the other list-shaped client-only fields (`connectors`, `config`).
+
+**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected") go to the module log, not the message log, which records only request/response pairs (data-contract.md `## 9. Message log`).
+
+---
+
+## Security — setup dialog
+
 **OC-R-110** — The OCPP setup dialog offers a server-role Self-Signed toggle, shown whenever the TLS selector (OC-R-127) is TLS or mTLS.
 
 **OC-R-143** — With the server-role Self-Signed toggle (OC-R-110) On, the server `cert_file`/`key_file` inputs are hidden and the resolved identity is `CertSource::SelfSigned` regardless of text; validation does not require those files. The toggle has no effect on the client-CA list or the selector's mTLS position.
@@ -148,8 +178,6 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-146** — The client-role Skip-Verify toggle (OC-R-111) leaves the hidden Root Store toggle's and server-CA list's stored state unmodified, so Off restores what was entered.
 
-**OC-R-112** — A half-configured certificate pair is not representable in a config file: `CertSource::Files` carries `cert_file` and `key_file` as required fields, so naming one without the other fails to deserialize. The rule survives only in the dialog, whose inputs are independently editable: error border on a blank cert/key input while shown; refuses to close on submit while either of a role's pair is blank, CSMS identity and CS mTLS identity alike (MB-R-171).
-
 **OC-R-113** — The dialog presents CA file paths through one shared list widget (server (CSMS) role: client-CA list, shown whenever mTLS is selected; client (CS) role: server-CA list, OC-R-125), mirroring MB-R-136: zero or more paths added, edited, or removed individually.
 
 **OC-R-149** — An add-entry confirm on the shared CA list widget (OC-R-113) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
@@ -157,8 +185,6 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-150** — Server role: mTLS with a non-empty shared CA list (OC-R-113) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error.
 
 **OC-R-151** — The dialog also offers a server-role Skip Verify toggle, shown whenever mTLS is selected: On hides the client-CA list (OC-R-113) and resolves verification to `CertVerification::Skip` regardless of entries, list preserved for Off.
-
-**OC-R-115** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a CS presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per OC-R-037, never written to disk.
 
 **OC-R-116** — The dialog offers a CS (client) role Self Signed toggle, shown whenever mTLS is selected.
 
@@ -171,16 +197,6 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-154** — With the client-role Root Store toggle (OC-R-125) Off, an empty shared CA list is a validation error refusing to close the dialog (OC-R-150).
 
 **OC-R-155** — Skip-Verify On hides both the client-role Root Store toggle and the shared CA list (OC-R-125) per OC-R-111.
-
-**OC-R-126** — The OCPP device security config carries its TLS material as a `tls` sub-block holding one `ServerTlsPolicy` under `server` and one `ClientTlsPolicy` under `client`, serialized `[security.tls.server]`/`[security.tls.client]`.
-
-**OC-R-156** — `username` and `password` remain flat members of `security` (OC-R-126), shared by both roles.
-
-**OC-R-157** — Each policy in the `tls` sub-block (OC-R-126) independently defaults to `None`, so an absent `[security.tls]` block is exactly both policies `None`.
-
-**OC-R-158** — A CS or CSMS decides whether TLS is configured by matching its own role's policy variant in the `tls` sub-block (OC-R-126); the other role's policy is inert, never validated against this role's rules.
-
-**OC-R-159** — The endpoint scheme remains authoritative over the `tls` sub-block's policy (OC-R-126, OC-R-042).
 
 **OC-R-127** — The dialog presents TLS through a single three-way selector, Off / TLS / mTLS, shown for both roles and applying to the instance's own role, with no "security level" or profile selection. The selector maps one-to-one onto the role's policy variant (Off → `None`, TLS → `Tls`, mTLS → `Mutual`), each variant contributing exactly its payload (OC-R-110, OC-R-111, OC-R-113, OC-R-116, OC-R-125).
 
@@ -197,18 +213,6 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-164** — With Basic Authentication (OC-R-128) On and both inputs non-empty, `username`/`password` are set in `security`; Off → both unset regardless of text, stored text left unmodified.
 
 **OC-R-165** — Basic Authentication (OC-R-128) On with TLS Off is valid (Profile 1, OC-R-029), as is On with TLS or mTLS.
-
-**OC-R-117** — A CS device config may declare `extra_headers`, an ordered list of `HeaderDef { name, value }`.
-
-**OC-R-152** — Every configured `extra_headers` header (OC-R-117) is sent on the WebSocket upgrade in addition to any header the client sets itself (OC-R-030's `Authorization`, OC-R-004's subprotocol token).
-
-**OC-R-153** — Construction rejects an `extra_headers` `HeaderDef` (OC-R-117) whose `name` case-insensitively matches a client-controlled header (`Authorization`, `Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version`, `Sec-WebSocket-Protocol`, `Sec-WebSocket-Extensions`), naming it in the error.
-
-**OC-R-118** — `HeaderDef.name` matches the HTTP token grammar (visible ASCII, no separators or whitespace); `HeaderDef.value` contains only printable ASCII (0x20–0x7E), excluding CR/LF and other controls. Construction rejects any violation, naming the offending header and field.
-
-**OC-R-119** — `extra_headers` is a client-only device config field, not exposed through the `--ocpp` key=value CLI form, consistent with the other list-shaped client-only fields (`connectors`, `config`).
-
-**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected") go to the module log, not the message log, which records only request/response pairs (data-contract.md `## 9. Message log`).
 
 ---
 

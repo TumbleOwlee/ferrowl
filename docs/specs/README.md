@@ -4,22 +4,22 @@ Authoritative spec of `ferrowl` behavior, by capability area. **Normative**: cod
 
 ## Areas
 
-| Area | Covers |
-|---|---|
-| [`modbus/`](./modbus/) | Modbus client & server, TCP + RTU, register model, formats, codec, reconnect |
-| [`ocpp/`](./ocpp/) | OCPP Charging Station & CSMS, versions 1.6/2.0.1/2.1, actions, TLS/auth |
-| [`scripting/`](./scripting/) | Lua sim model, `C_*` API contract, execution & error semantics |
-| [`tui/`](./tui/) | Tabs, dialogs, `:` commands, keybindings, editor |
-| [`config-session/`](./config-session/) | Device/session file envelope, TOML/JSON, save/load, `migrate` |
-| [`cli-headless/`](./cli-headless/) | `ferrowl run`, CLI flags, exit codes, CI usage |
-| [`bridge/`](./bridge/) | `ferrowl bridge`, headless upstream/downstream Modbus relay (TCP/RTU) |
+| Area | Prefix | Covers |
+|---|---|---|
+| [`modbus/`](./modbus/) | `MB` | Modbus client & server, TCP + RTU, register model, formats, codec, reconnect |
+| [`ocpp/`](./ocpp/) | `OC` | OCPP Charging Station & CSMS, versions 1.6/2.0.1/2.1, actions, TLS/auth |
+| [`scripting/`](./scripting/) | `SC` | Lua sim model, `C_*` API contract, execution & error semantics |
+| [`tui/`](./tui/) | `UI` | Tabs, dialogs, `:` commands, keybindings, editor |
+| [`config-session/`](./config-session/) | `CS` | Device/session file envelope, TOML/JSON, save/load, `migrate` |
+| [`cli-headless/`](./cli-headless/) | `CL` | `ferrowl run`, CLI flags, exit codes, CI usage |
+| [`bridge/`](./bridge/) | `BR` | `ferrowl bridge`, headless upstream/downstream Modbus relay (TCP/RTU) |
 
 Cross-cutting: [`non-functional-requirements.md`](./non-functional-requirements.md) (`NF-R-nnn`).
 
 ## Rules for writing specs
 
 1. **No code pointers.** Never cite file:line, function/type names, crate-internal identifiers — specs state *what must be true*, not where (pointers rot on refactor). Exception: public, user-facing surface (config keys, `:` commands, Lua `C_*` API, CLI flags, OCPP action names, exported signatures, error variants, feature flags) IS spec → area's `api-contract.md`.
-2. **Requirement and edge-case IDs stable, append-only.** ID = area prefix + number: `MB-R-nnn` modbus, `OC-R-nnn` ocpp, `SC-R-nnn` scripting, `UI-R-nnn` tui, `CS-R-nnn` config-session, `CL-R-nnn` cli-headless, `BR-R-nnn` bridge, `NF-R-nnn` non-functional. Never renumber, never reuse a retired ID. Reference by ID in commits/PRs/tests/agent instructions. Edge-case IDs are a second, independent series over `edge-cases.md` entries: `MB-E-nnn`, `OC-E-nnn`, `SC-E-nnn`, `UI-E-nnn`, `CS-E-nnn`, `CL-E-nnn`, `BR-E-nnn`, numbered independently per area, same stability rules (never renumber, never reuse a retired ID); no `NF-E` series (`non-functional-requirements.md` has no `edge-cases.md`). An edge-case entry derived from a requirement cites that `-R` ID in its own text and still carries its own `-E` ID: the `-E` ID identifies the entry, the `-R` ID names the requirement it follows from. Tests may cite an `-E` ID exactly as they cite an `-R` ID; rule 8 below governs how many IDs one test cites.
+2. **IDs stable, append-only.** `<PREFIX>-R-nnn` for a requirement, `<PREFIX>-E-nnn` for an `edge-cases.md` entry; prefix per area from the `## Areas` table (`NF` has no `-E` series). The two series are numbered independently per area; never renumber, never reuse a retired ID. Reference by ID in commits/PRs/tests/agent instructions. An `-E` entry derived from a requirement cites that `-R` ID in its text and still carries its own `-E` ID. Tests cite `-E` IDs exactly as `-R` IDs (rule 8).
 3. **Owner = the behavior, not the surface.** A Modbus RTU config field is specified in `modbus/`, not `config-session/` (one change → one file). `config-session/` owns only the *envelope*: file format, `version`, session→module list, save/load, `migrate`. `tui/` owns the command mechanism and generic commands; protocol-specific commands live in their protocol's area. Shared behavior → owning area, stated once.
 4. **Requirements are testable.** Normative indicative statements, observable outcomes. Good: "The client retries with exponential backoff bounded to 1s–30s." Bad: "The client is robust." Format requirements name exact bytes where possible.
 5. **Known gaps are specified, not hidden.** Intentional-but-ugly behavior (no Lua execution ceiling, no OCPP auto-reconnect) → area's `edge-cases.md` as a stated constraint, so it isn't "fixed".
@@ -46,7 +46,7 @@ Most requirements are pinned by a test citing the ID. This list records the deli
 1. **Design-posture/platform/toolchain/versioning statements** — facts about build/design, not runtime behavior a `shall` test observes. Each names its enforcement point (CI job, manifest field, lint config).
 2. **Cross-cutting restatements asserted under the owning area** — the test lives with the per-area requirement, cited by *that* ID.
 3. **Structural/shape requirements collectively exercised by one round-trip or property test** — a group describing a data structure's shape (fields, optionality, default omission), covered by one save→load→compare; behavioral requirements around them tested on their own.
-4. **Stated known limitations (`-E` entries)** — an `-E` entry that records a known limitation or an observed constraint rather than an asserted behavior is exempt as a class, with no enumeration of IDs. An `-E` entry that does assert behavior (most boundary-table rows) is outside the exemption and wants a citing test. This obligation binds `-E` entries added after the backfill that introduced the `-E` series; every entry minted by that backfill is grandfathered, and an asserting entry acquires its citing test when its area is next touched for behavior.
+4. **Stated known limitations (`-E` entries)** — class-wide exemption, rules under Kind 4 below.
 
 Anything not listed below, and no `-E` entry outside kind 4, must carry a citing test. A listed requirement that gains observable behavior: remove from the list, add the test.
 
@@ -59,7 +59,7 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 | `NF-R-040` — crates versioned in lockstep | workspace manifest |
 | `NF-R-041`, `NF-R-055`, `NF-R-056` — the testing conventions, CI steps, lefthook | `AGENTS.md` conventions, lefthook reminder |
 | `NF-R-045` — dev-only fixture crate, `publish = false`, versioned in lockstep | workspace manifest, dev-dependency edges |
-| `UI-R-001` — alt-screen + raw-mode entry, terminal restore on normal/error/panic exit | terminal-platform fact: the restore path calls the real terminal (`enable_raw_mode`/`disable_raw_mode`), which errors or panics under `cargo test` without a controlling tty — why `App` renders through the `DrawSurface` seam. Seam exercised headlessly (`ut_app_draws_onto_mock_screen`); raw-mode/panic-hook control itself not observable by a `shall` test |
+| `UI-R-001` — alt-screen + raw-mode entry, terminal restore on normal/error/panic exit | raw-mode calls need a controlling tty, absent under `cargo test`; `App` renders through the `DrawSurface` seam, exercised by `ut_app_draws_onto_mock_screen` |
 
 **Kind 2 — cross-cutting restatements**
 

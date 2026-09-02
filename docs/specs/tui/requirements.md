@@ -106,6 +106,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-082** — Accepting a field-completion popup suggestion (UI-R-026) marked *partial* keeps the popup open and re-queries (e.g. descending a directory); accepting a non-partial one closes it.
 
+## Script-manager dialog
+
 **UI-R-051** — In the script-manager dialog, while the script table is focused, `e` executes the selected script exactly once, using the script's current editor content (including unapplied edits) regardless of its enabled flag. No selection → no-op. Execution semantics: SC-R-035.
 
 **UI-R-088** — An on-demand script run (UI-R-051) leaves the script-manager dialog open; the run's `print`/`C_Log` output and any error appear in the dialog's log pane.
@@ -133,6 +135,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-093** — In the script-manager dialog, while the script table is focused, `c` toggles compact/normal rows.
 
 **UI-R-094** — Script-table edits (UI-R-058, UI-R-091, UI-R-092) change the working list only and take effect on the owner when the dialog is applied (SC-R-024); UI-R-058, UI-R-091, UI-R-092 and UI-R-093 are the bindings advertised by UI-R-056.
+
+## OCPP setup dialog
 
 **UI-R-059** — In the OCPP setup dialog, a client-role instance shows two always-visible new-header inputs (name, value) backing `extra_headers`, plus the headers table once the list is non-empty; both hidden for the server role (the `#[focus(when = …)]` role-conditional pattern).
 

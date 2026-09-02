@@ -1,6 +1,6 @@
 # Modbus — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## 6. Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## 7. Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
 
 ---
 
@@ -22,19 +22,6 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **MB-E-012** | Malformed or reversed entry in a `read_ranges` string | silently skipped; no error, no warning |
 | **MB-E-013** | `word_order = Reversed` on a width-1 format (`U8`/`I8`/`U16`/`I16`) | inert no-op |
 | **MB-E-014** | `word_order` on `Ascii` | ignored; ASCII carries no register order |
-
----
-
-## Monitor boundaries
-
-| ID | Condition | Behavior |
-|---|---|---|
-| **MB-E-015** | Frame fails CRC (RTU) or LRC (Ascii), or otherwise malformed | logged at Warning level and discarded. Expected on a live multi-drop bus (noise, a device's retry, monitor attaching mid-frame) |
-| **MB-E-016** | Completed pairing's operation (MB-R-146) is `ReadWriteMultipleRegisters` (two addresses, two quantities) | Address renders `read_address/write_address`; Quantity `read_quantity/write_quantity`; Values/Payload shows the read response's registers only. The write's values are visible in Memory layout once applied |
-| **MB-E-017** | No traffic at all for a table kind on the selected unit id | that kind's hex-editor block (UI-R-063) omitted from Memory layout, not shown empty (MB-R-144) |
-| **MB-E-018** | Retransmitted `WriteSingleRegister`/`WriteSingleCoil` request arrives while awaiting that request's response | decodes as the response to itself (byte-identical on the wire): false `Ok` record and phantom observed-table write. `WriteMultiple*` and reads unaffected |
-| **MB-E-019** | Two configured instances share the same Rtu/Ascii path | MB-R-150 catches it before the OS-level open, reports a distinct conflict status, recovers once one instance stops or moves |
-| **MB-E-020** | Serial path held by something outside the session (external process, bridge-mode leg) | MB-R-150 sees only same-session instances; external holder surfaces as an ordinary OS-level open failure/retry |
 
 ---
 
@@ -118,9 +105,22 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## 6. Known limitations — intentional constraints
+## 6. Monitor boundaries
 
-### 6.1 No max-registers-per-request bound at the protocol layer
+| ID | Condition | Behavior |
+|---|---|---|
+| **MB-E-015** | Frame fails CRC (RTU) or LRC (Ascii), or otherwise malformed | logged at Warning level and discarded. Expected on a live multi-drop bus (noise, a device's retry, monitor attaching mid-frame) |
+| **MB-E-016** | Completed pairing's operation (MB-R-146) is `ReadWriteMultipleRegisters` (two addresses, two quantities) | Address renders `read_address/write_address`; Quantity `read_quantity/write_quantity`; Values/Payload shows the read response's registers only. The write's values are visible in Memory layout once applied |
+| **MB-E-017** | No traffic at all for a table kind on the selected unit id | that kind's hex-editor block (UI-R-063) omitted from Memory layout, not shown empty (MB-R-144) |
+| **MB-E-018** | Retransmitted `WriteSingleRegister`/`WriteSingleCoil` request arrives while awaiting that request's response | decodes as the response to itself (byte-identical on the wire): false `Ok` record and phantom observed-table write. `WriteMultiple*` and reads unaffected |
+| **MB-E-019** | Two configured instances share the same Rtu/Ascii path | MB-R-150 catches it before the OS-level open, reports a distinct conflict status, recovers once one instance stops or moves |
+| **MB-E-020** | Serial path held by something outside the session (external process, bridge-mode leg) | MB-R-150 sees only same-session instances; external holder surfaces as an ordinary OS-level open failure/retry |
+
+---
+
+## 7. Known limitations — intentional constraints
+
+### 7.1 No max-registers-per-request bound at the protocol layer
 
 **MB-E-073** — Neither client core nor server core enforces the Modbus per-request limits (125 registers / 2000 bits). The **only** enforcement is the application-level read-operation planner, which splits generated poll batches at those limits.
 
@@ -128,54 +128,54 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 - The **server** answers any count the peer sends, limited only by the `u16` count field and declared addresses. It does not reject an over-long request with `IllegalDataValue`.
 - A write command is never split: a register wider than the limit would go as one write. Unreachable — widest format is 8 registers.
 
-### 6.2 The RTU `Config` cannot be flattened into a `clap` command
+### 7.2 The RTU `Config` cannot be flattened into a `clap` command
 
 **MB-E-074** — The RTU connection config doubles as a `clap` argument group whose short flags collide: `-s` claimed by `slave` and `stop_bits`, `-d` by `data_bits` and `delay_ms`. Flattening it into a `clap::Parser` command panics at parse time via clap's debug assertions.
 
-The config is reached only through serde (session and device config files, `--module` key/value form), which is unaffected. No Modbus RTU flag is a top-level CLI flag.
+The config is reached only through serde (session and device config files, `--module` key/value form), which is unaffected.
 
-### 6.3 The RTU `slave` config field is inert
+### 7.3 The RTU `slave` config field is inert
 
 **MB-E-075** — The RTU config carries `slave` (default 1), read by no code path: the client carries a slave id on every request and never attaches the link to one slave. Kept so existing config files keep parsing.
 
 An RTU **server** ignores it entirely: it answers whichever slave ids have declared regions.
 
-### 6.4 Server-side reconnect retries only after the current serve loop ends
+### 7.4 Server-side reconnect retries only after the current serve loop ends
 
 **MB-E-076** — Every server transport (TCP, RTU, `RtuOverTcp`, `Udp`, `Ascii`, `AsciiOverTcp`) honors `reconnect` — bind failure, serial-open failure, or mid-serve failure retries with the shared backoff driver (MB-R-051, MB-R-071, MB-R-075, MB-R-120, MB-R-124, MB-R-130–134).
 
 Nuance: a mid-serve failure does not retry immediately. The server waits for the *current* serve loop to end on its own before the backoff wait — an in-flight connection is never torn down early to reach a retry sooner.
 
-### 6.5 Unbounded TCP server connections
+### 7.5 Unbounded TCP server connections
 
 **MB-E-077** — A TCP server spawns one task per accepted connection, no cap, no idle timeout.
 
-### 6.6 Only six transports
+### 7.6 Only six transports
 
 **MB-E-078** — `RtuOverTcp` reuses the TCP config verbatim; only wire framing differs. `Udp` reuses the TCP config minus `tls` (no handshake, no DTLS). `Udp` does not inherit the RTU-family broadcast slave id 0 handling (MB-R-101–MB-R-103); on `Udp`, slave id 0 is ordinary.
 
 `Ascii` reuses the RTU config verbatim; only framing differs — LRC checksum and `:`/CR LF delimiters instead of CRC and silence-delimited binary. `AsciiOverTcp` reuses the TCP config verbatim, same framing swap as `RtuOverTcp`. Both `Ascii` and `AsciiOverTcp` inherit the RTU-family broadcast handling (MB-R-101–MB-R-103), unlike `Udp`.
 
-### 6.7 Display resolution is one-way
+### 7.7 Display resolution is one-way
 
 **MB-E-079** — `resolution` scales for *display only*. Encoding does not divide by it, so input is raw. Entering `10` with `resolution = 0.5` stores raw word `10` and displays `5`; the typed string is not the string read back.
 
-### 6.8 Declaration failures are warned, not silent
+### 7.8 Declaration failures are warned, not silent
 
 **MB-E-080** — A rejected `Memory::add_ranges` declaration leaves the register or gap cell without backing memory, so runtime reads/writes against it still fail. Every module-construction, module-reconfiguration, and runtime register-edit call site logs a Warning (MB-R-129/MB-R-184) naming the register (or, for a gap cell, slave id and register kind) and the rejected range at rejection time, so the eventual runtime failure is traceable.
 
 Reachable case: a register added at runtime at an address a `read_ranges` gap already declared read-only. Overlap (existing `Read` cell, requested `ReadWrite` region) is not a widening combination, so the declaration is rejected and dropped — with a Warning naming register and range.
 
-### 6.9 Client writes are fire-and-forget
+### 7.9 Client writes are fire-and-forget
 
 **MB-E-081** — A client-side write is dispatched to the client task's command channel; the caller is told "sent" once queued. The Modbus response (including an exception) is logged by the client task but not reported back, and the store is not updated from it. The polled value eventually reflects the truth, except write-only registers, whose written value is mirrored into the store locally.
 
-### 6.10 The register's `access` does not gate store access
+### 7.10 The register's `access` does not gate store access
 
 **MB-E-082** — A register's `access` does **not** determine its cells' direction; its *kind* does (coils and holding registers read/write, discrete inputs and input registers read-only). `access` governs whether the register is polled (write-only excluded), whether a client-side write is mirrored into the store, and (MB-R-159/MB-R-151) whether the client attempts a write at all: a `ReadOnly` register on a **client** rejects `:set`/dialog writes locally; on a **server** MB-R-090 bypasses cell access checks.
 
 A `ReadOnly` holding register is therefore still writable by a remote master against a server module, even though the local UI cannot write it from a client module.
 
-### 6.11 Bit-field mask absent from the width error
+### 7.11 Bit-field mask absent from the width error
 
 **MB-E-083** — `BitFieldWidth`'s message names the format by display text (MB-R-155), which carries byte order but not the mask, so the offending mask does not appear; the user supplied it, and the alternative is dumping the whole format struct.

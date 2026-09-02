@@ -282,6 +282,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-127** — TLS (MB-R-104–MB-R-111, MB-R-161–MB-R-178) applies to `AsciiOverTcp` exactly as to Modbus-TCP or `RtuOverTcp`: same `tls` field, certificate resolution, self-signed fallback, mTLS rules, handshake-failure logging; only post-handshake framing differs.
 
+## TLS setup dialog
+
 **MB-R-135** — The Modbus TCP setup dialog (`Tcp`, `RtuOverTcp` per MB-R-115, `AsciiOverTcp` per MB-R-127) resolves its transport config to the variant its toggles select, contributing only that variant's fields: Self-Signed On → identity `CertSource::SelfSigned`, no cert/key paths; Skip-Verify On → verification `CertVerification::Skip`, no Root Store selection and no CA entry.
 
 **MB-R-186** — The Modbus TCP setup dialog leaves hidden widgets' stored state (input text, toggle position, list entries) unmodified when resolving per MB-R-135, so toggling back Off restores what was entered.
@@ -352,6 +354,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-098** — When a Modbus module view stops its instance for `:restart` or `:reload`, a stop failure other than "not running" is reported in the module message log at Error level, not discarded.
 
+## TLS policy
+
 **MB-R-104** — The Modbus TCP connection config carries a `tls` field of type `ModbusTlsConfig`, present unconditionally, holding one `ServerTlsPolicy` under `server` and one `ClientTlsPolicy` under `client`, serialized `[tls.server]`/`[tls.client]`.
 
 **MB-R-161** — Both role policies of the `tls` field (MB-R-104) are kept because a device config records no role, so a dialog's role toggle discards neither.
@@ -405,6 +409,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 **MB-R-178** — A server logs a TLS handshake failure (MB-R-111) at Error level with the peer's socket address, its offered certificate identity where the handshake exposed one, and the error description.
 
 **MB-R-112** — The RTU connection config carries no `tls` field; TLS applies to TCP transports only.
+
+## Region-declaration diagnostics
 
 **MB-R-129** — When `Memory::add_ranges` returns `false` at a module-construction, module-reconfiguration, or runtime register-edit call site, the module logs the rejection to its message log at Warning level.
 

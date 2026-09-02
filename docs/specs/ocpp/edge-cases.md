@@ -130,8 +130,6 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 Nuance: backoff resets to 1 s as soon as the WebSocket handshake completes, before any OCPP message (OC-R-105). A peer that accepts the socket and immediately drops it, every time, sees the backoff reset on every attempt — retrying near 1 s — rather than growing as it would if reset required a message exchange.
 
-Consequence: a dropped CS module recovers on its own; auto-Heartbeat and auto-MeterValues resume once reconnected.
-
 ### 6.2 CSMS bind retry
 
 **OC-E-085** — A CSMS whose bind fails retries with the shared backoff driver (OC-R-139, OC-R-108–109). A server still binds **automatically on creation** (OC-R-138). Governed by the same `reconnect` field as the CS role (default enabled); disabled, a failed bind ends the module task (MB-R-130–134).
