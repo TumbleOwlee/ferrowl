@@ -8,9 +8,10 @@
 # if any segment could alter the repo, the working tree, or the filesystem —
 # mutating git subcommands, file-changing coreutils, in-place editors,
 # interpreters (a script can write anything), mutating cargo/gh subcommands,
-# and any output redirection. The one sanctioned write is an append (`>>` or
-# `tee -a`) to `.claude/tasks/artifacts/<slug>/review.md`; everything else the
-# reviewer wanted to try belongs in the review as a finding for the
+# and any output redirection. The sanctioned writes are an append (`>>` or
+# `tee -a`) to `.claude/tasks/artifacts/<slug>/review.md` and a rewrite (`>`
+# or `tee`) of `.claude/tasks/artifacts/<slug>/review.verdict.md`; everything
+# else the reviewer wanted to try belongs in the review as a finding for the
 # implementer.
 #
 # Reads a PreToolUse hook payload on stdin, writes a deny-decision JSON
@@ -51,13 +52,22 @@ segments=$(printf '%s\n' "$cmd" \
 
 offender=""
 
+is_verdict_file() {
+  t=$1
+  case "$t" in /*) ;; *) t="$cwd/$t" ;; esac
+  case "$t" in
+    */.claude/tasks/artifacts/*/review.verdict.md) return 0 ;;
+  esac
+  return 1
+}
+
 is_review_append() {
   t=$1
   case "$t" in /*) ;; *) t="$cwd/$t" ;; esac
   case "$t" in
     */.claude/tasks/artifacts/*/review.md) return 0 ;;
   esac
-  return 1
+  is_verdict_file "$t"
 }
 
 # Sets `sub` to the first non-option word after the command name, skipping
@@ -121,10 +131,10 @@ for seg in $segments; do
         case "$t" in
           -a|--append) append=1 ;;
           -*) ;;
-          *) is_review_append "$t" || offender=$seg ;;
+          *) if [ "$append" = 1 ]; then is_review_append "$t" || offender=$seg
+             else is_verdict_file "$t" || offender=$seg; fi ;;
         esac
-      done
-      [ "$append" = 1 ] || offender=$seg ;;
+      done ;;
     git)
       subcommand "$@"
       case "$sub" in
@@ -159,21 +169,21 @@ for seg in $segments; do
       esac ;;
   esac
 
-  # Output redirection: only an append onto review.md is allowed.
+  # Output redirection: an append onto review.md, or a rewrite of review.verdict.md.
   if [ -z "$offender" ]; then
     want=""
     for t in $seg; do
       if [ -n "$want" ]; then
         case "$want" in
           '>>') is_review_append "$t" || offender=$seg ;;
-          *)    [ "$t" = /dev/null ] || offender=$seg ;;
+          *)    [ "$t" = /dev/null ] || is_verdict_file "$t" || offender=$seg ;;
         esac
         want=""
         continue
       fi
       case "$t" in
         *'>>'*) rest=${t#*>>}; if [ -z "$rest" ]; then want='>>'; else is_review_append "$rest" || offender=$seg; fi ;;
-        *'>'*)  rest=${t#*>};  if [ -z "$rest" ]; then want='>';  else [ "$rest" = /dev/null ] || offender=$seg; fi ;;
+        *'>'*)  rest=${t#*>};  if [ -z "$rest" ]; then want='>';  else [ "$rest" = /dev/null ] || is_verdict_file "$rest" || offender=$seg; fi ;;
       esac
       [ -z "$offender" ] || break
     done
@@ -187,7 +197,7 @@ done
 IFS=$old_ifs
 
 if [ -n "$offender" ]; then
-  reason="spec-reviewer is read-only (hook-enforced): '$offender' would alter the repo, the working tree, or the filesystem. The only sanctioned write is an append ('>>' or 'tee -a') onto .claude/tasks/artifacts/<slug>/review.md. Never run git checkout/stash/reset or anything that touches the worktree — record what you needed to probe as a finding for the implementer instead."
+  reason="spec-reviewer is read-only (hook-enforced): '$offender' would alter the repo, the working tree, or the filesystem. The only sanctioned writes are an append ('>>' or 'tee -a') onto .claude/tasks/artifacts/<slug>/review.md and a rewrite ('>' or 'tee') of .claude/tasks/artifacts/<slug>/review.verdict.md. Never run git checkout/stash/reset or anything that touches the worktree — record what you needed to probe as a finding for the implementer instead."
   jq -n --arg reason "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
 fi
 exit 0
