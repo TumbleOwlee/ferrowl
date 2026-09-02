@@ -2309,6 +2309,93 @@ mod tests {
         );
     }
 
+    /// Characterization — `Esc` closes the `:add` interpretation overlay outright, discarding
+    /// any unsaved edits without a close-confirm prompt.
+    #[tokio::test]
+    async fn ut_esc_closes_add_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        assert!(matches!(v.overlay, MonitorOverlay::Add(_)));
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "Esc must close the :add interpretation overlay"
+        );
+    }
+
+    /// Characterization — `Esc` closes the edit/delete interpretation overlay outright,
+    /// discarding any unsaved edits without a close-confirm prompt.
+    #[tokio::test]
+    async fn ut_esc_closes_edit_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+        v.open_edit_interpretation();
+        assert!(matches!(v.overlay, MonitorOverlay::EditInterpretation(..)));
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "Esc must close the edit/delete interpretation overlay"
+        );
+    }
+
+    /// UI-R-022 — within the `:add` interpretation dialog, `Tab` advances focus to the next
+    /// field and `BackTab` retreats, cycling.
+    #[tokio::test]
+    async fn ut_tab_cycles_focus_inside_add_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        assert!(overlay.label.state.focused());
+        assert!(!overlay.description.state.focused());
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert!(!overlay.label.state.focused());
+        assert!(overlay.description.state.focused());
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::BackTab);
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert!(overlay.label.state.focused());
+        assert!(!overlay.description.state.focused());
+    }
+
+    /// UI-R-061 — while the "Add predefined" sub-popup is open, `Esc` dismisses only the popup;
+    /// the `:add` interpretation dialog behind it stays open.
+    #[tokio::test]
+    async fn ut_esc_in_add_predefined_popup_closes_only_the_popup() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        overlay.open_add_dialog();
+        assert!(overlay.add_dialog.is_some());
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("Esc in the sub-popup must not close the add dialog");
+        };
+        assert!(overlay.add_dialog.is_none());
+    }
+
     /// UI-R-061 — with no unit id discovered yet, `:add` is rejected (Warning) instead of
     /// opening the dialog: there is no unit id to scope a new interpretation to.
     #[tokio::test]
