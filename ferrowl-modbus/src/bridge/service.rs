@@ -299,7 +299,7 @@ mod tests {
         let _ = serving.await;
     }
 
-    /// BR-R-015 — with no filter set, every unit id is forwarded (the no-filter default).
+    /// BR-R-027 — with no filter set, every unit id is forwarded (the no-filter default).
     #[tokio::test]
     async fn ut_service_no_filter_forwards_every_unit_id() {
         let expected = ResponsePdu::ReadHoldingRegisters {

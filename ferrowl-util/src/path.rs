@@ -52,7 +52,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `~otheruser/...` is not supported (no portable std API resolves another
+    /// NF-R-052 — `~otheruser/...` is not supported (no portable std API resolves another
     /// user's home directory) and passes through unchanged.
     fn ut_expand_otheruser_tilde_passes_through() {
         let home = PathBuf::from("/home/x");
@@ -63,7 +63,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — an absolute path not starting with `~` passes through unchanged.
+    /// NF-R-052 — an absolute path not starting with `~` passes through unchanged.
     fn ut_expand_non_tilde_path_passes_through_unchanged() {
         let home = PathBuf::from("/home/x");
         assert_eq!(
@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — a relative path not starting with `~` passes through unchanged.
+    /// NF-R-052 — a relative path not starting with `~` passes through unchanged.
     fn ut_expand_relative_non_tilde_path_passes_through_unchanged() {
         let home = PathBuf::from("/home/x");
         assert_eq!(
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — if the home directory can't be determined, a `~`-prefixed path passes through
+    /// NF-R-052 — if the home directory can't be determined, a `~`-prefixed path passes through
     /// unchanged rather than erroring.
     fn ut_expand_tilde_with_no_home_passes_through_unchanged() {
         assert_eq!(expand_with_home("~/conf", None), PathBuf::from("~/conf"));

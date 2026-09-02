@@ -567,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-041 — a trailing `le` type suffix splits into an explicit little-endian byte order.
+    /// CS-R-062 — a trailing `le` type suffix splits into an explicit little-endian byte order.
     fn ut_parse_le_type() {
         let (vt, endian) = parse_type("F32le").unwrap();
         assert_eq!(vt, ValueType::F32);

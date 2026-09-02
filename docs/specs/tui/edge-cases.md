@@ -19,7 +19,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-009** | `:script copy <idx>` where source or active tab lacks script support | warning logged: `... has no script support` |
 | **UI-E-010** | `:quit` on the last tab | quits the application |
 | **UI-E-011** | `:log` bare, or `:log <path>` (path ≠ `clear`) | not app-level; forwarded to the view as a module command |
-| **UI-E-012** | Generic name shadows a module name | generic always wins (module commands reached only for unrecognized tokens) |
+| **UI-E-012** | Generic name shadows a module name | generic always wins; module commands reached only for unrecognized tokens |
 
 ## 2. Navigation and tab jumps
 
@@ -39,11 +39,11 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 |---|---|---|
 | **UI-E-020** | `Esc` on a dialog with edits | close-confirm popup; `Enter`/`Space` confirms close, `Esc` returns to editing |
 | **UI-E-021** | Creating a tab whose name collides | refused; Warning to the active tab's log; setup dialog stays open |
-| **UI-E-022** | Startup new-module selector cancelled before any tab exists | application exits — zero tabs with no dialog is not a resting state (UI-R-057) |
+| **UI-E-022** | Startup new-module selector cancelled before any tab exists | application exits (UI-R-057) |
 | **UI-E-023** | Rename/session-load produces a duplicate tab name | later duplicate auto-suffixed; Warning into the renamed tab's log |
 | **UI-E-024** | Focus cycle reaches a field whose enabling condition is false | skipped in `Tab`/`Shift+Tab` |
 | **UI-E-025** | `:` or `?` pressed while a view overlay is open | not global; delivered to the overlay (`?` types into a Lua editor, `:` into a text field) |
-| **UI-E-026** | Key with no binding in the current dialog/field | left unhandled; generic defaults (`Enter`/`Esc`/`Tab`) apply only if no widget consumed it, otherwise nothing |
+| **UI-E-026** | Key with no binding in the current dialog/field | left unhandled; generic defaults (`Enter`/`Esc`/`Tab`) apply only if no widget consumed it |
 | **UI-E-027** | Suggestion popup closed, `Up`/`Down`/`Enter`/`Tab`/`Esc` pressed | passed through to the dialog |
 | **UI-E-028** | Inserting a template whose name is already used | inserted as `<name>-2` (then `-3`, …); never refused |
 | **UI-E-029** | Template browser preview pane | a disabled code editor: vim motions and visual-yank work, edits do not |
@@ -51,14 +51,14 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-031** | Renaming a script to an empty or duplicate name | refused silently; prompt stays open (same rule as creating) |
 | **UI-E-032** | Renaming a script to its current name | accepted; no-op |
 | **UI-E-033** | `Esc` while the rename prompt is open | cancels the prompt; does not reach the dialog's close-confirm |
-| **UI-E-034** | A rename is an edit | like any script edit, restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
+| **UI-E-034** | A rename is an edit | restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
 
 ## 4. Code editor
 
 | ID | Condition | Behavior |
 |---|---|---|
-| **UI-E-035** | `Esc` in Normal mode | left unhandled → reaches the dialog, opens close-confirm (two `Esc` from Insert exit: first to Normal, second toward closing) |
-| **UI-E-036** | Unrecognized printable key in Normal mode (e.g. `z`, `q`) | consumed and ignored (no typing, no fall-through) |
+| **UI-E-035** | `Esc` in Normal mode | left unhandled, reaches the dialog, opens close-confirm (two `Esc` from Insert: first to Normal, second toward closing) |
+| **UI-E-036** | Unrecognized printable key in Normal mode (e.g. `z`, `q`) | consumed and ignored |
 | **UI-E-037** | `?` in Insert or Visual mode | literal text; the Lua-bindings overlay opens only from Normal |
 | **UI-E-038** | Disabled editor | mutating keys ignored and reported unhandled; navigation works; never reformats on blur |
 | **UI-E-039** | Format-on-blur with invalid JSON | formatter declines; buffer left as typed |

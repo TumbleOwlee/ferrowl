@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-111 (server logging half) — a TLS handshake failure line classifies as
+    /// MB-R-178 (server logging half) — a TLS handshake failure line classifies as
     /// `Level::Error`, matching the peer/failure-detail format `on_tls_handshake_failed`
     /// logs (`"TLS handshake with {peer} failed: {detail}."`).
     fn ut_network_log_level_classifies_tls_handshake_failure_as_error() {

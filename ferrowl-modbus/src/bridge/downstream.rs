@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(result, Ok(Some(expected)));
     }
 
-    /// BR-R-010, BR-R-006 — a downstream timeout answers `GatewayTargetDeviceFailedToRespond`
+    /// BR-R-018, BR-R-006 — a downstream timeout answers `GatewayTargetDeviceFailedToRespond`
     /// and wakes the reconnector for a second connect attempt (mirrors MB-R-050–056's
     /// backoff-driven reconnect); a subsequent connect failure logs a `[bridge]`-prefixed
     /// failure line (`forward` itself carries no `log`, only the reconnector does — see

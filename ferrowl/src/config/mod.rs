@@ -51,7 +51,7 @@ pub enum ConfigError {
     UnknownFormat(String),
     #[error("{0}")]
     Io(String),
-    /// CS-R-055 — one or more retired, pre-merge flat TLS fields were found inside a `tls`
+    /// CS-R-068 — one or more retired, pre-merge flat TLS fields were found inside a `tls`
     /// subtree or an OCPP `security` table. `groups` carries the offenders split by the
     /// container they were found in, so each offender's message clause points at its own
     /// container's current block shape; no value is migrated.
@@ -62,7 +62,7 @@ pub enum ConfigError {
     },
 }
 
-/// CS-R-055 — the retired fields found within one [`TlsContainer`], one group per container so
+/// CS-R-068 — the retired fields found within one [`TlsContainer`], one group per container so
 /// the error can phrase one clause per container.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetiredTlsGroup {
@@ -70,7 +70,7 @@ pub struct RetiredTlsGroup {
     pub fields: Vec<&'static str>,
 }
 
-/// CS-R-055 — which TLS container a retired field was found in, so the error can point at that
+/// CS-R-068 — which TLS container a retired field was found in, so the error can point at that
 /// container's own current block shape rather than a fixed one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TlsContainer {
@@ -96,7 +96,7 @@ impl std::fmt::Display for TlsContainer {
     }
 }
 
-/// CS-R-055 — renders one clause per [`TlsContainer`] group, each naming its own offenders and
+/// CS-R-068 — renders one clause per [`TlsContainer`] group, each naming its own offenders and
 /// pointing at its own current block shape.
 fn render_retired_message(path: &str, groups: &[RetiredTlsGroup]) -> String {
     let clauses = groups
@@ -113,7 +113,7 @@ fn render_retired_message(path: &str, groups: &[RetiredTlsGroup]) -> String {
     format!("retired TLS fields in {path}: {clauses}; no value is migrated")
 }
 
-/// CS-R-055 — pre-merge flat TLS field names that a `tls` subtree or an OCPP `security` table
+/// CS-R-068 — pre-merge flat TLS field names that a `tls` subtree or an OCPP `security` table
 /// must reject rather than silently ignore under CS-R-052.
 const RETIRED_TLS_FIELDS: &[&str] = &[
     "require_client_cert",
@@ -126,11 +126,11 @@ const RETIRED_TLS_FIELDS: &[&str] = &[
     "client_self_signed",
     "ca_file",
 ];
-/// CS-R-055 — additionally retired when they appear outside an `identity` sub-table (inside one,
+/// CS-R-068 — additionally retired when they appear outside an `identity` sub-table (inside one,
 /// they are the current `CertSource::Files`/`SelfSigned` fields).
 const RETIRED_OUTSIDE_IDENTITY: &[&str] = &["self_signed", "cert_file", "key_file"];
 
-/// CS-R-055 — walks a generically-parsed document for retired TLS fields inside any `tls`
+/// CS-R-068 — walks a generically-parsed document for retired TLS fields inside any `tls`
 /// subtree or OCPP `security` table, tracking which container (if any) the current map sits
 /// inside and whether it sits directly under a key named `identity` (where the three
 /// outside-only names in [`RETIRED_OUTSIDE_IDENTITY`] are current, not retired). Descends into
@@ -181,7 +181,7 @@ fn scan_retired_tls_fields(
     }
 }
 
-/// CS-R-055 — re-parses `path` generically (after the typed load above has already failed, via
+/// CS-R-068 — re-parses `path` generically (after the typed load above has already failed, via
 /// the same [`Converter`] both formats already share) and looks for retired TLS fields, grouped
 /// per [`TlsContainer`]. Returns `Some` with the phrased error only when at least one is found;
 /// otherwise the original typed-load error should propagate unchanged.
@@ -332,7 +332,7 @@ mod tests {
         let device = load_device(&path).unwrap();
         assert!(device.definitions.contains_key("reg"));
     }
-    /// CS-R-055 — a retired flat TLS field (`require_client_cert`) inside a device config's
+    /// CS-R-068 — a retired flat TLS field (`require_client_cert`) inside a device config's
     /// `tls` subtree fails the load, naming the retired field rather than a generic
     /// unknown-field error.
     #[test]
@@ -361,7 +361,7 @@ mod tests {
         }
     }
 
-    /// CS-R-055 — a retired flat TLS field (`ca_file`) inside the OCPP `security` table fails
+    /// CS-R-068 — a retired flat TLS field (`ca_file`) inside the OCPP `security` table fails
     /// the load, naming the retired field.
     #[test]
     fn ut_load_ocpp_device_rejects_retired_ca_file_in_security() {
@@ -387,7 +387,7 @@ mod tests {
         }
     }
 
-    /// CS-R-055 — an error naming retired fields names every offender found, not just the
+    /// CS-R-068 — an error naming retired fields names every offender found, not just the
     /// first.
     #[test]
     fn ut_retired_field_error_names_every_offender() {
@@ -464,7 +464,7 @@ self_signed = true
         assert_eq!(session.modules.len(), 1);
     }
 
-    /// CS-R-055 — the retired-field error for the OCPP `security` table points at its current
+    /// CS-R-068 — the retired-field error for the OCPP `security` table points at its current
     /// block shape (`[security.tls.server]`/`[security.tls.client]`), not the Modbus `tls`
     /// container's shape.
     #[test]
@@ -488,7 +488,7 @@ self_signed = true
         assert!(!msg.contains("[tls.server]/[tls.client]"), "got: {msg}");
     }
 
-    /// CS-R-055 — a key named `security` nested inside an already-scoped Modbus `tls` container
+    /// CS-R-068 — a key named `security` nested inside an already-scoped Modbus `tls` container
     /// stays in the Modbus group; it does not flip the group to the OCPP container.
     #[test]
     fn ut_security_key_nested_inside_modbus_tls_stays_modbus() {
@@ -516,7 +516,7 @@ self_signed = true
         }
     }
 
-    /// CS-R-055 — a document holding both a Modbus `tls` container and an OCPP `security` table
+    /// CS-R-068 — a document holding both a Modbus `tls` container and an OCPP `security` table
     /// with retired fields in each reports every offender under its own container's block
     /// shape, rather than collapsing all of them onto one.
     #[test]
@@ -555,7 +555,7 @@ self_signed = true
         }
     }
 
-    /// CS-R-055 — a bare `cert_file` directly inside a `[tls.server]` block (not under its
+    /// CS-R-068 — a bare `cert_file` directly inside a `[tls.server]` block (not under its
     /// `identity` sub-table) is a retired flat field and is rejected.
     #[test]
     fn ut_bare_cert_file_outside_identity_is_retired() {
@@ -581,7 +581,7 @@ self_signed = true
         }
     }
 
-    /// CS-R-055 — `cert_file`/`key_file` inside a `[tls.server.identity]` block are the current
+    /// CS-R-068 — `cert_file`/`key_file` inside a `[tls.server.identity]` block are the current
     /// `CertSource::Files` fields, not retired ones: a load failing for an unrelated reason
     /// (an invalid `mode`) must not be replaced by a `RetiredTlsFields` error over them.
     #[test]
@@ -603,7 +603,7 @@ self_signed = true
         );
     }
 
-    /// CS-R-055 — the scan reaches a retired field nested two levels below `tls`/`security`
+    /// CS-R-068 — the scan reaches a retired field nested two levels below `tls`/`security`
     /// (`[tls.server.verification]`), not only a direct child.
     #[test]
     fn ut_retired_field_found_under_verification_nesting() {
@@ -629,7 +629,7 @@ self_signed = true
         }
     }
 
-    /// CS-R-055 — the scan reaches a retired field nested two levels below the OCPP `security`
+    /// CS-R-068 — the scan reaches a retired field nested two levels below the OCPP `security`
     /// table (`[security.tls.client]`), matching the container's own extra nesting level.
     #[test]
     fn ut_retired_field_found_under_security_tls_client_nesting() {
@@ -657,7 +657,7 @@ self_signed = true
         }
     }
 
-    /// CS-R-055 — the retired-field scan runs identically over a JSON config file.
+    /// CS-R-068 — the retired-field scan runs identically over a JSON config file.
     #[test]
     fn ut_load_device_rejects_retired_field_in_json() {
         let dir = reserve_temp_dir("ferrowl_cfgmod");

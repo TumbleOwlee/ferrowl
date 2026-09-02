@@ -242,19 +242,19 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-011 — a first digit waits for a second when a valid two-digit index could start with it.
+    /// UI-R-074 — a first digit waits for a second when a valid two-digit index could start with it.
     fn first_digit_waits_when_it_could_start_a_two_digit_index() {
         assert_eq!(digit_outcome(None, 1, 25), DigitOutcome::Wait(1));
     }
 
     #[test]
-    /// UI-R-011 — a valid two-digit combination jumps to that index.
+    /// UI-R-074 — a valid two-digit combination jumps to that index.
     fn valid_two_digit_combo_jumps() {
         assert_eq!(digit_outcome(Some(1), 2, 25), DigitOutcome::Jump(12));
     }
 
     #[test]
-    /// UI-R-011 — an out-of-range two-digit combination falls back to the first-digit jump.
+    /// UI-R-075 — an out-of-range two-digit combination falls back to the first-digit jump.
     fn invalid_combo_falls_back_to_first_digit() {
         assert_eq!(digit_outcome(Some(1), 9, 15), DigitOutcome::Jump(1));
     }

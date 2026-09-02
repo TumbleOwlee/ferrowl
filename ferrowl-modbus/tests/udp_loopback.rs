@@ -113,7 +113,7 @@ async fn it_udp_server_answers_a_request() {
 }
 
 #[tokio::test]
-/// MB-R-119 — slave id 0 on Udp is an ordinary slave id: a request addressed to it is answered
+/// MB-R-182 — slave id 0 on Udp is an ordinary slave id: a request addressed to it is answered
 /// like any other (unlike RTU/RtuOverTcp's MB-R-103 no-response rule, which does not extend to
 /// Udp — Udp carries MBAP/`Tcp` framing, whose `is_broadcast` is always false).
 async fn it_udp_server_answers_slave_zero() {
@@ -240,7 +240,7 @@ async fn it_udp_client_polls_server_and_executes_commands() {
 }
 
 #[tokio::test]
-/// MB-R-117 — an `ip`/`port` pair that does not parse as a socket address fails the same way
+/// MB-R-179 — an `ip`/`port` pair that does not parse as a socket address fails the same way
 /// TCP does (MB-R-069): `Error::Tcp(TcpError::Address(_))`.
 async fn it_udp_client_bad_address_fails_like_tcp() {
     let mut bad = config(502);

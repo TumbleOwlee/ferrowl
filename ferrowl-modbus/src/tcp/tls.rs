@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `read_pem` expands a leading `~` in the cert/key/CA path.
+    /// NF-R-054 — `read_pem` expands a leading `~` in the cert/key/CA path.
     fn ut_read_pem_expands_tilde() {
         use super::read_pem;
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
@@ -354,7 +354,7 @@ mod tests {
         (cert.pem(), key.serialize_pem())
     }
 
-    /// MB-R-104 — `ModbusTlsConfig`'s default is both policies `None`, and `is_none()` holds for
+    /// MB-R-162 — `ModbusTlsConfig`'s default is both policies `None`, and `is_none()` holds for
     /// it.
     #[test]
     fn ut_modbus_tls_config_defaults_to_both_none() {
@@ -400,7 +400,7 @@ mod tests {
         assert!(built.client_identity.is_none());
     }
 
-    /// MB-R-110 — `Mutual` with `CertSource::Files` presents a non-empty chain as the client
+    /// MB-R-175 — `Mutual` with `CertSource::Files` presents a non-empty chain as the client
     /// identity.
     #[test]
     fn ut_build_client_tls_config_mutual_files_presents_pair() {
@@ -426,7 +426,7 @@ mod tests {
         assert!(!identity.cert_chain.is_empty());
     }
 
-    /// MB-R-104 — `None {}` builds nothing at all: the caller runs plain TCP.
+    /// MB-R-162 — `None {}` builds nothing at all: the caller runs plain TCP.
     #[test]
     fn ut_build_client_tls_config_none_builds_none() {
         use super::build_client_tls_config;
@@ -537,7 +537,7 @@ mod tests {
         assert!(used_fallback);
     }
 
-    /// MB-R-106 (cache reuse) — a `SelfSigned` identity reuses the cached pair across repeat
+    /// MB-R-169 (cache reuse) — a `SelfSigned` identity reuses the cached pair across repeat
     /// calls sharing the same cache, rather than regenerating a fresh key pair each time.
     #[test]
     fn ut_resolve_server_identity_self_signed_reuses_cached_pair_across_calls() {
@@ -554,7 +554,7 @@ mod tests {
         assert_eq!(chain1, chain2, "cache hit reuses the same certificate");
     }
 
-    /// MB-R-106 (cache regen) — resolving `Files` clears the cache, so a later reversion to
+    /// MB-R-170 (cache regen) — resolving `Files` clears the cache, so a later reversion to
     /// `SelfSigned` regenerates fresh material rather than reusing anything from before the
     /// explicit interlude.
     #[test]
@@ -590,7 +590,7 @@ mod tests {
         );
     }
 
-    /// MB-R-104 — `None {}` builds nothing at all: the caller binds a plain `TcpListener`.
+    /// MB-R-162 — `None {}` builds nothing at all: the caller binds a plain `TcpListener`.
     #[test]
     fn ut_build_server_tls_config_none_builds_none() {
         use super::build_server_tls_config;
@@ -602,7 +602,7 @@ mod tests {
         assert!(built.is_none());
     }
 
-    /// MB-R-108 — a bare `Tls` policy never requests a client certificate at all
+    /// MB-R-174 — a bare `Tls` policy never requests a client certificate at all
     /// (`ClientCertPolicy::None`), regardless of how verification would otherwise be configured.
     #[test]
     fn ut_build_server_tls_config_tls_never_requests_client_cert() {
@@ -649,7 +649,7 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::Require(_)));
     }
 
-    /// MB-R-108 — server-role `Skip` maps to `ClientCertPolicy::AllowAny`: a client certificate
+    /// MB-R-173 — server-role `Skip` maps to `ClientCertPolicy::AllowAny`: a client certificate
     /// is still required (unlike `Tls`'s `ClientCertPolicy::None`), but no chain/identity
     /// validation is performed against any root store. The actual handshake behavior this
     /// produces (a presented-but-untrusted cert is accepted, no cert at all is rejected) is
@@ -671,7 +671,7 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::AllowAny));
     }
 
-    /// MB-R-108 — `RootStore` verification is rejected on a server before either builder runs.
+    /// MB-R-172 — `RootStore` verification is rejected on a server before either builder runs.
     #[test]
     fn ut_server_policy_rejects_root_store_verification() {
         use super::build_server_tls_config;

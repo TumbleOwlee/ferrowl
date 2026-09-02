@@ -126,7 +126,7 @@ One Modbus instance: the per-instance on-the-wire endpoint. All *timing* lives i
 | `role` | `client` \| `server` \| `monitor` | `server` | | MB-R-076 |
 | `endpoint` | tagged union, tag `transport` | — (required) | `tcp`, `rtu`, `rtu_over_tcp`, `udp`, `ascii`, `ascii_over_tcp` | MB-R-076 |
 
-`role = monitor` valid only with `transport = rtu` or `ascii` (MB-R-140); any other transport fails configuration resolution.
+`role = monitor` valid only with `transport = rtu` or `ascii` (MB-R-140); any other transport fails configuration resolution (MB-R-191).
 
 ### `endpoint` with `transport = "tcp"`
 
@@ -188,11 +188,11 @@ Same fields as `transport = "tcp"` (`## 3. Modbus TCP connection config`).
 | `read_ranges` | `ReadRanges` | empty | explicit batched read windows (``### 6.1 `read_ranges` ``) | MB-R-082, MB-R-083 |
 | `definitions` | map name → `RegisterDef` | — (required) | register table (``### 6.2 `RegisterDef` ``) | MB-R-077 |
 | `scripts` | list | empty | Lua sim scripts — `scripting/` | SC-R-022 |
-| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016 |
+| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
 
 Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what an application-built module uses; they deliberately differ from the transport-level `0`.
 
-`role = monitor`: device config carries only `version`, `reconnect` (also gating MB-R-141's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, ``### 6.3 `MonitorRegisterDef` `` — each entry carries its own `name`, since two interpretations on different `slave_id`s may share a name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would collapse same-named entries across slave ids). `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, `script_interval` dropped: a monitor never initiates a transaction, has no poll loop, and (display-only) no Lua sim surface.
+`role = monitor`: device config carries only `version`, `reconnect` (also gating MB-R-192's serial-open retry), and `definitions` (list of `MonitorRegisterDef`, ``### 6.3 `MonitorRegisterDef` `` — each entry carries its own `name`, since two interpretations on different `slave_id`s may share a name; MB-R-148 scopes edit/remove to one slave id's set, and a name-keyed map would collapse same-named entries across slave ids). `timeout_ms`, `delay_ms`, `interval_ms`, `read_ranges`, `scripts`, `script_interval` dropped: a monitor never initiates a transaction, has no poll loop, and (display-only) no Lua sim surface.
 
 ### 6.1 `read_ranges`
 

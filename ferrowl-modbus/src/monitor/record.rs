@@ -151,7 +151,7 @@ mod tests {
         }
     }
 
-    /// MB-R-146 — the ring caps at 200, evicting the oldest first, independent per slave id.
+    /// MB-R-199 — the ring caps at 200, evicting the oldest first, independent per slave id.
     #[test]
     fn ut_record_ring_caps_at_200_evicts_oldest_first() {
         let mut log = RecordLog::default();

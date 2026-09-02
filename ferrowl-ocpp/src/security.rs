@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `load_certs`/`load_private_key` expand a leading `~` to the home directory.
+    /// NF-R-054 — `load_certs`/`load_private_key` expand a leading `~` to the home directory.
     fn ut_load_certs_and_key_expand_tilde() {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let (cert_tilde, cert_actual) = home_pem("cert", &cert_pem);
@@ -847,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-039 — `build_server_config` rejects a `Mutual` policy whose verification is
+    /// OC-R-133 — `build_server_config` rejects a `Mutual` policy whose verification is
     /// `RootStore`, mapping `PolicyError::RootStoreOnServer` onto the matching typed `TlsError`
     /// variant.
     fn ut_build_server_config_rejects_root_store_verification() {
@@ -933,7 +933,7 @@ mod tests {
         assert!(!used_fallback, "self-signed was explicitly requested");
     }
 
-    /// OC-R-037 (cache reuse) — a `SelfSigned` server_cert reuses the cached pair across repeat
+    /// OC-R-131 (cache reuse) — a `SelfSigned` server_cert reuses the cached pair across repeat
     /// calls sharing the same cache, rather than regenerating a fresh key pair each time.
     #[test]
     fn ut_build_server_config_self_signed_reuses_cached_pair() {
@@ -953,7 +953,7 @@ mod tests {
         assert_eq!(chain1, chain2, "cache hit reuses the same certificate");
     }
 
-    /// OC-R-037 (cache regen) — resolving `CertSource::Files` clears the cache, so a later reversion to
+    /// OC-R-132 (cache regen) — resolving `CertSource::Files` clears the cache, so a later reversion to
     /// `SelfSigned` regenerates fresh material rather than reusing anything from before the
     /// explicit interlude.
     #[test]
@@ -1051,7 +1051,7 @@ mod tests {
         assert!(used_fallback);
     }
 
-    /// OC-R-039 — server-role `CertVerification::Skip` still requires a client certificate be presented (the
+    /// OC-R-134 — server-role `CertVerification::Skip` still requires a client certificate be presented (the
     /// config resolves and builds); the actual "no cert at all is rejected, an untrusted one is
     /// accepted" handshake behavior is proven end-to-end by the loopback integration test in
     /// `tests/ws_loopback_security.rs`.
@@ -1087,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117 — a `HeaderDef` name colliding case-insensitively with a client-controlled
+    /// OC-R-153 — a `HeaderDef` name colliding case-insensitively with a client-controlled
     /// header is rejected, naming the offending header in the error.
     fn ut_header_def_rejects_reserved_name_case_insensitive() {
         let err = HeaderDef::new("AUTHORIZATION", "x").unwrap_err();
@@ -1102,7 +1102,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117 — an ordinary, non-reserved header name is accepted.
+    /// OC-R-153 — an ordinary, non-reserved header name is accepted.
     fn ut_header_def_accepts_ordinary_name() {
         assert!(HeaderDef::new("X-Custom", "v").is_ok());
     }

@@ -654,7 +654,7 @@ mod tests {
 
     // Without a selected script the code editor is disabled and both rotations skip it.
     #[test]
-    /// UI-R-022 — the focus cycle skips a disabled field (the code editor).
+    /// UI-R-078 — the focus cycle skips a disabled field (the code editor).
     fn ut_rotation_skips_disabled_code_editor() {
         let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-055 — an empty or duplicate name is refused and the prompt stays open.
+    /// UI-R-089 — an empty or duplicate name is refused and the prompt stays open.
     fn ut_rename_refuses_empty_and_duplicate() {
         let mut d = ScriptDialog::new(
             &[

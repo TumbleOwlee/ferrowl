@@ -572,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
+    /// SC-R-045 — a per-module script_interval is floored to 0.05s.
     fn ut_device_config_script_interval_duration_floored() {
         let mut cfg = sample();
         cfg.script_interval = 0.0001;

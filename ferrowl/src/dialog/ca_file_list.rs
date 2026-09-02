@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — a valid `~/...` path validates the same way it will later load.
+    /// NF-R-054 — a valid `~/...` path validates the same way it will later load.
     fn ut_validate_tilde_path_that_exists_succeeds() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!("ferrowl_ca_file_list_test_tilde_{}.pem", std::process::id());
@@ -253,7 +253,7 @@ mod tests {
         result.expect("a valid ~/-prefixed .pem path must validate");
     }
 
-    /// MB-R-136/OC-R-113 — an empty path fails validation; a non-empty, existing one is trimmed
+    /// MB-R-136/OC-R-149 — an empty path fails validation; a non-empty, existing one is trimmed
     /// and returned.
     #[test]
     fn ut_apply_requires_non_empty_path() {
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(d.apply().unwrap(), ca.trim());
     }
 
-    /// MB-R-136/OC-R-113 — a path that doesn't exist on disk fails validation, so it can't be
+    /// MB-R-136/OC-R-149 — a path that doesn't exist on disk fails validation, so it can't be
     /// confirmed into the client-CA list.
     #[test]
     fn ut_apply_rejects_nonexistent_path() {
@@ -276,7 +276,7 @@ mod tests {
         assert!(err.contains("not found"), "unexpected error: {err}");
     }
 
-    /// MB-R-136/OC-R-113 — a directory can't be confirmed as a client-CA file, even though it
+    /// MB-R-136/OC-R-149 — a directory can't be confirmed as a client-CA file, even though it
     /// exists on disk.
     #[test]
     fn ut_apply_rejects_directory() {
@@ -287,7 +287,7 @@ mod tests {
         assert!(err.contains("directory"), "unexpected error: {err}");
     }
 
-    /// MB-R-136/OC-R-113 — a file with an extension outside pem/crt/key is rejected, even though
+    /// MB-R-136/OC-R-149 — a file with an extension outside pem/crt/key is rejected, even though
     /// it exists on disk and isn't a directory.
     #[test]
     fn ut_apply_rejects_wrong_extension() {
@@ -299,7 +299,7 @@ mod tests {
         assert!(err.contains("extension"), "unexpected error: {err}");
     }
 
-    /// MB-R-136/OC-R-113 — the extension check is case-insensitive, matching `FsPathProvider`'s
+    /// MB-R-136/OC-R-149 — the extension check is case-insensitive, matching `FsPathProvider`'s
     /// own completion-suggestion matching.
     #[test]
     fn ut_apply_accepts_uppercase_extension() {
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(d.apply().unwrap(), ca);
     }
 
-    /// MB-R-136/OC-R-113 — the add-CA sub-dialog renders its title and an inline error while
+    /// MB-R-136/OC-R-149 — the add-CA sub-dialog renders its title and an inline error while
     /// empty.
     #[test]
     fn ut_render_shows_title_and_inline_error() {

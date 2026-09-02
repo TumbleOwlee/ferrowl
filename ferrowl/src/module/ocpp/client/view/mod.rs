@@ -1128,7 +1128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-059 — an edited header list survives an in-place setup confirm: `refresh_impl`
+    /// UI-R-099 — an edited header list survives an in-place setup confirm: `refresh_impl`
     /// must apply the dialog's `extra_headers` onto the reconfigured device, not just the
     /// role/version/endpoint fields carried in the `OcppSpec`.
     async fn ut_edit_confirm_carries_dialog_extra_headers_onto_device() {

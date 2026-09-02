@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-129 — `declare_or_reject_msg` returns `Ok(())` and leaves `Memory::add_ranges`'s
+    /// MB-R-185 — `declare_or_reject_msg` returns `Ok(())` and leaves `Memory::add_ranges`'s
     /// acceptance unaffected when the range is compatible.
     fn ut_declare_or_reject_msg_ok_on_accepted_range() {
         let mut memory = Memory::<Key<SlaveKey>>::default();
@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-129 — a read-range gap cell's rejection subject identifies it by slave id and
+    /// MB-R-184 — a read-range gap cell's rejection subject identifies it by slave id and
     /// register kind, since it has no single register name.
     fn ut_gap_cell_subject_names_slave_and_kind() {
         let key = Key {

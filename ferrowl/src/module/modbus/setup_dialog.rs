@@ -994,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — a `~/...` config path validates the same way `resolve()` will later load it.
+    /// NF-R-054 — a `~/...` config path validates the same way `resolve()` will later load it.
     fn ut_config_path_validate_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!("ferrowl_modbus_setup_tilde_cfg_{}.toml", std::process::id());
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `resolve()`'s config-path existence gate expands a leading `~`.
+    /// NF-R-054 — `resolve()`'s config-path existence gate expands a leading `~`.
     fn ut_resolve_config_path_tilde_loads_device() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!(
@@ -1052,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `validate_tls`'s existence check (wired via `resolve()`) expands a leading `~`
+    /// NF-R-054 — `validate_tls`'s existence check (wired via `resolve()`) expands a leading `~`
     /// in cert/key paths, so a valid `~/...` path validates the same way TLS material loading
     /// will.
     fn ut_resolve_tls_cert_key_tilde_paths_validate() {
@@ -1728,7 +1728,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-104 — resolving an edited server-role dialog at TLS level Off preserves the
+    /// MB-R-161 — resolving an edited server-role dialog at TLS level Off preserves the
     /// inactive (client) role's previously-saved policy, stitched from `original_tls`, instead
     /// of resetting the whole two-role container to `ModbusTlsConfig::default()`.
     fn ut_resolve_tls_off_preserves_inactive_role_policy() {
@@ -1843,7 +1843,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
+    /// MB-R-186 — toggling Self-Signed back Off restores the previously entered cert/key paths
     /// (nothing was cleared, only excluded while On).
     fn ut_resolve_toggle_self_signed_back_off_restores_cert_key() {
         let dir = reserve_temp_dir("ferrowl_modbus_setup");
@@ -2054,7 +2054,7 @@ mod tests {
         );
     }
 
-    /// MB-R-107 — with `self_signed` off, a blank `cert_file`/`key_file` refuses to resolve
+    /// MB-R-171 — with `self_signed` off, a blank `cert_file`/`key_file` refuses to resolve
     /// (submission-blocking), distinct from MB-R-106's own resolve-time self-signed fallback for
     /// a config file loaded outside the dialog.
     #[test]

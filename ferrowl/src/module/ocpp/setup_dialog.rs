@@ -929,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — a `~/...` config path validates the same way it will later load.
+    /// NF-R-054 — a `~/...` config path validates the same way it will later load.
     fn ut_config_path_validate_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!("ferrowl_ocpp_setup_tilde_cfg_{}.toml", std::process::id());
@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `path_exists` (wired via `resolve()`'s `validate_security`) expands a leading
+    /// NF-R-054 — `path_exists` (wired via `resolve()`'s `validate_security`) expands a leading
     /// `~` in cert/key paths, so a valid `~/...` path validates the same way TLS material
     /// loading will.
     fn ut_resolve_tls_cert_key_tilde_paths_validate() {
@@ -1124,7 +1124,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-127 — the Protocol field is not in the focus cycle, and its rendered text follows
+    /// OC-R-161 — the Protocol field is not in the focus cycle, and its rendered text follows
     /// the selector alone.
     fn ut_protocol_is_not_in_the_focus_cycle_and_follows_the_selector() {
         let mut d = OcppSetupDialog::new();
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-127 — moving the selector Off after cert paths, toggle positions, and CA entries
+    /// OC-R-163 — moving the selector Off after cert paths, toggle positions, and CA entries
     /// were entered, then back to mTLS, restores every widget's prior state.
     fn ut_selector_off_then_back_to_mtls_restores_widget_state() {
         let mut d = dialog_with(1); // Server
@@ -1169,7 +1169,7 @@ mod tests {
     // --- OC-R-128: Basic Authentication ---------------------------------------------------------
 
     #[test]
-    /// OC-R-128 — Basic Authentication On with both credentials set resolves `username`/
+    /// OC-R-164 — Basic Authentication On with both credentials set resolves `username`/
     /// `password`.
     fn ut_basic_auth_on_resolves_credentials() {
         let mut d = dialog_with(0); // Client
@@ -1182,7 +1182,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-128 — Basic Authentication Off resolves both `username`/`password` unset,
+    /// OC-R-164 — Basic Authentication Off resolves both `username`/`password` unset,
     /// preserving the inputs' stored text.
     fn ut_basic_auth_off_unsets_credentials_and_keeps_input_text() {
         // TLS selector at `Tls`, not `Off`: proves the gate is Basic Auth alone, not the level
@@ -1203,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-128 — Basic Authentication On together with the TLS selector Off is accepted
+    /// OC-R-165 — Basic Authentication On together with the TLS selector Off is accepted
     /// (Profile 1) and produces a `ws://` endpoint carrying the credentials.
     fn ut_basic_auth_on_with_tls_off_is_accepted_over_ws() {
         let mut d = dialog_with(0); // Client, selector Off by default
@@ -1241,7 +1241,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-127 — reopening a hand-written `ws://` instance whose own-role policy is not
+    /// OC-R-161 — reopening a hand-written `ws://` instance whose own-role policy is not
     /// `None` shows the derived selector at TLS/mTLS and the `wss://` display; confirming
     /// unchanged promotes the inert pairing to a live `wss://` one (OC-R-127 working as
     /// specified, not preserving the mismatch OC-R-042/OC-R-097 render inert).
@@ -1327,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-110 — toggling Self-Signed On hides the server cert/key row.
+    /// OC-R-143 — toggling Self-Signed On hides the server cert/key row.
     fn ut_self_signed_hides_server_cert_row() {
         let mut d = dialog_with(1); // Server
         d.tls_level.state.set_selection(TlsLevel::Tls.index());
@@ -1363,7 +1363,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-110 — Self-Signed On at TLS level needs no cert/key files to resolve successfully
+    /// OC-R-143 — Self-Signed On at TLS level needs no cert/key files to resolve successfully
     /// — the cert/key requirement at Tls+ applies only while Self-Signed is Off.
     fn ut_validate_security_self_signed_needs_no_cert_files() {
         let mut d = dialog_with(1); // Server
@@ -1427,7 +1427,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-111 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
+    /// OC-R-145 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
     /// even though the widget's stored list is untouched.
     fn ut_resolve_skip_verify_excludes_stale_ca_list() {
         let mut d = dialog_with(0); // Client
@@ -1656,7 +1656,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-113 — the server-role client-cert-skip-verify toggle is shown only at MutualTls and
+    /// OC-R-151 — the server-role client-cert-skip-verify toggle is shown only at MutualTls and
     /// hides the client-CA list row when on.
     fn ut_server_client_cert_skip_verify_shown_only_at_mutual_tls_hides_ca_list() {
         let mut d = dialog_with(1); // Server
@@ -1794,7 +1794,7 @@ mod tests {
     // --- render height -----------------------------------------------------------------------
 
     #[test]
-    /// OC-R-127 — the dialog renders no certificate-generation hint row at any selector
+    /// OC-R-162 — the dialog renders no certificate-generation hint row at any selector
     /// position, for the server role in particular: the condition it warned of (a `wss` scheme
     /// below TLS) is unreachable once the scheme follows the selector.
     fn ut_no_hint_row_at_any_selector_position() {
@@ -2351,7 +2351,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `Enter` on the selected header row opens an edit prompt prefilled from it.
+    /// UI-R-096 — `Enter` on the selected header row opens an edit prompt prefilled from it.
     fn ut_enter_on_selected_header_row_opens_edit_prompt_prefilled() {
         let mut d = client_dialog();
         d.extra_headers = vec![header("X-A", "1")];
@@ -2364,7 +2364,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `Enter` on an empty (unselected) header table is a no-op: no prompt opens.
+    /// UI-R-096 — `Enter` on an empty (unselected) header table is a no-op: no prompt opens.
     fn ut_enter_on_unselected_header_table_is_noop() {
         let mut d = client_dialog();
         d.focus = OcppSetupDialogFocus::HeadersTable;
@@ -2373,7 +2373,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `d` on the selected header row opens a delete-confirm popup; confirming
+    /// UI-R-097 — `d` on the selected header row opens a delete-confirm popup; confirming
     /// removes the row from `extra_headers`.
     fn ut_d_on_selected_header_row_opens_delete_confirm_then_removes_on_yes() {
         let mut d = client_dialog();
@@ -2392,7 +2392,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `d` on an empty (unselected) header table is a no-op: no confirm popup opens.
+    /// UI-R-097 — `d` on an empty (unselected) header table is a no-op: no confirm popup opens.
     fn ut_d_on_unselected_header_table_is_noop() {
         let mut d = client_dialog();
         d.focus = OcppSetupDialogFocus::HeadersTable;

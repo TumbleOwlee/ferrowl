@@ -1103,7 +1103,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-111 (server logging half) — a TLS handshake failure logs the peer address
+    /// MB-R-178 (server logging half) — a TLS handshake failure logs the peer address
     /// and the underlying failure, including the rejected client certificate's size
     /// when one was offered (the crate only exposes the raw DER, no parsed subject).
     async fn ut_on_tls_handshake_failed_logs_peer_and_error() {

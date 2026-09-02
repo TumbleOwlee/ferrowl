@@ -62,11 +62,11 @@ In an OCPP module's sim, and via `C_Module:Get(name):OCPP()` from the session-le
 |---|---|---|---|---|
 | `Get` | `Get(name)` | state field as `number`/`string`/`boolean` | unknown field for this scope | SC-R-019, SC-R-027 |
 | `Set` | `Set(name, value)` | nothing | field not settable for this scope | SC-R-019, SC-R-027, SC-R-028 |
-| `<Action>` | `<Action>(overrides?)` | `boolean` — `true` if enqueued | malformed override table (non-string key or non-scalar value) raises | SC-R-009 |
+| `<Action>` | `<Action>(overrides?)` | `boolean` — `true` if enqueued | malformed override table (non-string key or non-scalar value) raises | SC-R-042 |
 
 One `<Action>` method per action name the host module exposes for its version; the set is version-specific, defined by the OCPP area (`ocpp/api-contract.md`). Calling an action **enqueues** it on the module's action queue for the owning view (or headless runner) to send; the Lua call does not perform the request and returns once queued (SC-R-009).
 
-`overrides` is an optional flat table of `name = scalar` pairs merged over the action's default payload. Missing table = no overrides. Nested tables or non-scalar values raise (SC-R-009).
+`overrides` is an optional flat table of `name = scalar` pairs merged over the action's default payload. Missing table = no overrides. Nested tables or non-scalar values raise (SC-R-042).
 
 ### 4.2 Flat shape
 
@@ -154,7 +154,7 @@ Origin = the sim thread's context construction; a sim restart (script/interval e
 | Method | Signature | Behavior | Req |
 |---|---|---|---|
 | `Assert` | `Assert(cond, msg)` | raises `assertion failed: <msg>` when `cond` is Lua-falsy (`nil` or `false`); otherwise returns nothing. Every non-`nil`, non-`false` value (including `0` and `""`) passes | SC-R-038 |
-| `Fail` | `Fail(msg)` | always raises `assertion failed: <msg>` | SC-R-038 |
+| `Fail` | `Fail(msg)` | always raises `assertion failed: <msg>` | SC-R-050 |
 
 Both surface as ordinary runtime errors (SC-R-032): logged, cycle continues. The headless `ferrowl run --exit-on-error` exit-code contract keyed off these is `cli-headless/`.
 

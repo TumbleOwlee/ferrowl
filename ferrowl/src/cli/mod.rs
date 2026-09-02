@@ -858,7 +858,7 @@ mod tests {
     }
 
     #[test]
-    /// CL-R-004 — a --device occurrence auto-builds a TCP client with the fixed endpoint and default name.
+    /// CL-R-044 — a --device occurrence auto-builds a TCP client with the fixed endpoint and default name.
     fn ut_device_spec_defaults() {
         let spec = create_module_spec_by_device("Device 0".to_string(), "d.toml".to_string());
         assert_eq!(spec.name, "Device 0");
@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    /// CL-R-013 — run resolves modbus from --session/--module and ocpp from --session/--ocpp.
+    /// CL-R-046 — run resolves modbus from --session/--module and ocpp from --session/--ocpp.
     fn ut_run_args_resolve_module_and_ocpp_specs() {
         let run = RunArgs {
             sessions: vec![],
@@ -1319,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-004 — every rtu_over_tcp descriptor key round-trips, reusing the same field set
+    /// BR-R-017 — every rtu_over_tcp descriptor key round-trips, reusing the same field set
     /// (and defaults) as plain tcp.
     fn ut_parse_bridge_descriptor_rtu_over_tcp_full() {
         let spec = parse_bridge_descriptor(
@@ -1339,13 +1339,13 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-004 — a rtu_over_tcp descriptor missing `port` errors, same as plain tcp.
+    /// BR-R-017 — a rtu_over_tcp descriptor missing `port` errors, same as plain tcp.
     fn ut_parse_bridge_descriptor_rtu_over_tcp_requires_port() {
         assert!(parse_bridge_descriptor("transport=rtu_over_tcp", ClientOrServer::Server).is_err());
     }
 
     #[test]
-    /// BR-R-004 — every ascii_over_tcp descriptor key round-trips, reusing the same field set
+    /// BR-R-017 — every ascii_over_tcp descriptor key round-trips, reusing the same field set
     /// (and defaults) as plain tcp.
     fn ut_parse_bridge_descriptor_ascii_over_tcp_full() {
         let spec = parse_bridge_descriptor(
@@ -1365,7 +1365,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-004 — an ascii_over_tcp descriptor missing `port` errors, same as plain tcp.
+    /// BR-R-017 — an ascii_over_tcp descriptor missing `port` errors, same as plain tcp.
     fn ut_parse_bridge_descriptor_ascii_over_tcp_requires_port() {
         assert!(
             parse_bridge_descriptor("transport=ascii_over_tcp", ClientOrServer::Server).is_err()
@@ -1421,7 +1421,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — absent `tls.mode` defaults to `none`, leaving `tls` both-`None`.
+    /// BR-R-020 — absent `tls.mode` defaults to `none`, leaving `tls` both-`None`.
     fn ut_bridge_descriptor_absent_tls_mode_defaults_to_none() {
         let spec = parse_bridge_descriptor("port=0", ClientOrServer::Server).unwrap();
         match spec.kind {
@@ -1485,7 +1485,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.verification.extra_ca_files` (under `verify=root-store`) splits on `;`.
+    /// BR-R-020 — `tls.verification.extra_ca_files` (under `verify=root-store`) splits on `;`.
     fn ut_bridge_descriptor_ca_files_split_on_semicolon() {
         let spec = parse_bridge_descriptor(
             "port=0,tls.mode=tls,tls.verification.verify=root-store,\
@@ -1509,7 +1509,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.verification.ca_files` (under `verify=ca-files`) also splits on `;`.
+    /// BR-R-020 — `tls.verification.ca_files` (under `verify=ca-files`) also splits on `;`.
     fn ut_bridge_descriptor_ca_files_under_verify_ca_files_split_on_semicolon() {
         let spec = parse_bridge_descriptor(
             "port=0,tls.mode=tls,tls.verification.verify=ca-files,\
@@ -1533,7 +1533,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.verification.ca_files` under `verify=root-store` (the ca-files key
+    /// BR-R-020 — `tls.verification.ca_files` under `verify=root-store` (the ca-files key
     /// belongs to `verify=ca-files`, not `root-store`) is a setup failure.
     fn ut_bridge_descriptor_rejects_ca_files_under_verify_root_store() {
         assert!(
@@ -1547,7 +1547,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — a `tls.*` key outside the selected variant is a setup failure: `tls.identity.*`
+    /// BR-R-020 — a `tls.*` key outside the selected variant is a setup failure: `tls.identity.*`
     /// under `tls.mode=none`, and `tls.verification.*` under a server's `tls.mode=tls` (a server's
     /// `Tls` variant has no `verification` field — `Mutual` is the sole trigger).
     fn ut_bridge_descriptor_rejects_key_outside_selected_variant() {
@@ -1569,7 +1569,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — a `tls.*` key not among `tls.mode` or the selected variant's own keys (a
+    /// BR-R-020 — a `tls.*` key not among `tls.mode` or the selected variant's own keys (a
     /// misspelling like `tls.identiy.source`, or an invented one like `tls.verify`) is a setup
     /// failure rather than being silently ignored.
     fn ut_bridge_descriptor_rejects_unrecognized_tls_key() {
@@ -1590,7 +1590,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — an unrecognized value on `tls.mode`, `tls.identity.source`, or
+    /// BR-R-020 — an unrecognized value on `tls.mode`, `tls.identity.source`, or
     /// `tls.verification.verify` is a setup failure.
     fn ut_bridge_descriptor_rejects_unknown_enum_values() {
         assert!(parse_bridge_descriptor("port=0,tls.mode=bogus", ClientOrServer::Server).is_err());
@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011/MB-R-107 — `tls.identity.source=files` with only `tls.identity.cert_file` set
+    /// BR-R-024/MB-R-107 — `tls.identity.source=files` with only `tls.identity.cert_file` set
     /// (no `tls.identity.key_file`) is a setup failure.
     fn ut_bridge_descriptor_rejects_files_identity_with_only_cert_file() {
         assert!(
@@ -1624,7 +1624,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.verification.verify=root-store` on an upstream (`Server`) descriptor is
+    /// BR-R-022 — `tls.verification.verify=root-store` on an upstream (`Server`) descriptor is
     /// rejected: `RootStore` is client-only, never a server's client-certificate verification.
     fn ut_bridge_descriptor_rejects_root_store_upstream() {
         assert!(
@@ -1638,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.identity.source=ephemeral` on a downstream (`Client`) descriptor is
+    /// BR-R-022 — `tls.identity.source=ephemeral` on a downstream (`Client`) descriptor is
     /// rejected: "nothing configured, fall back and log" is a server-side behavior.
     fn ut_bridge_descriptor_rejects_ephemeral_downstream() {
         assert!(
@@ -1652,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — a bare upstream `tls.mode=tls` (no `tls.identity.source`) accepts the
+    /// BR-R-021 — a bare upstream `tls.mode=tls` (no `tls.identity.source`) accepts the
     /// defaulted `ephemeral` identity.
     fn ut_bridge_descriptor_upstream_bare_tls_mode_defaults_to_ephemeral_identity() {
         let spec = parse_bridge_descriptor("port=0,tls.mode=tls", ClientOrServer::Server).unwrap();
@@ -1670,7 +1670,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — a bare downstream `tls.mode=tls` (no `tls.verification.verify`) accepts the
+    /// BR-R-021 — a bare downstream `tls.mode=tls` (no `tls.verification.verify`) accepts the
     /// defaulted `root-store` verification with an empty `extra_ca_files`.
     fn ut_bridge_descriptor_downstream_bare_tls_mode_defaults_to_root_store_verification() {
         let spec = parse_bridge_descriptor("port=0,tls.mode=tls", ClientOrServer::Client).unwrap();
@@ -1690,7 +1690,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — an upstream `tls.mode=mutual` with no `tls.verification.verify` defaults the
+    /// BR-R-022 — an upstream `tls.mode=mutual` with no `tls.verification.verify` defaults the
     /// verification to `root-store`, which is a setup failure on a server exactly as if it had
     /// been written explicitly.
     fn ut_bridge_descriptor_rejects_upstream_mutual_with_defaulted_root_store() {
@@ -1704,7 +1704,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — a downstream `tls.mode=mutual` with no `tls.identity.source` defaults the
+    /// BR-R-022 — a downstream `tls.mode=mutual` with no `tls.identity.source` defaults the
     /// identity to `ephemeral`, which is a setup failure on a client exactly as if it had been
     /// written explicitly.
     fn ut_bridge_descriptor_rejects_downstream_mutual_with_defaulted_ephemeral() {
@@ -1718,7 +1718,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — `tls.verification.verify=ca-files` with an empty `tls.verification.ca_files`
+    /// BR-R-024 — `tls.verification.verify=ca-files` with an empty `tls.verification.ca_files`
     /// is rejected.
     fn ut_bridge_descriptor_rejects_empty_ca_files() {
         assert!(
@@ -1731,7 +1731,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-011 — any `tls.*` key on a `transport=rtu` descriptor is a setup failure naming the
+    /// BR-R-023 — any `tls.*` key on a `transport=rtu` descriptor is a setup failure naming the
     /// key, including `tls.mode=none`, for both roles; the same descriptor without the key
     /// parses.
     fn ut_bridge_descriptor_rtu_rejects_tls_keys() {
@@ -1775,7 +1775,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-004 — an invalid `reconnect` value errors.
+    /// BR-R-016 — an invalid `reconnect` value errors.
     fn ut_parse_bridge_descriptor_rejects_bad_reconnect_value() {
         assert!(parse_bridge_descriptor("port=0,reconnect=maybe", ClientOrServer::Server).is_err());
     }

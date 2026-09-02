@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CS-R-053 — a blank device path is a quick-start on the default device, built not skipped.
+    /// CS-R-067 — a blank device path is a quick-start on the default device, built not skipped.
     async fn ut_blank_device_builds_on_default() {
         let mut module = serde_json::to_value(OcppModuleSpec {
             name: "cs".into(),

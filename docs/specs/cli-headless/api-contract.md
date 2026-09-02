@@ -19,7 +19,7 @@ Default action (no subcommand): start the TUI with the resolved module set.
 |---|---|---|---|---|---|
 | `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-002 |
 | `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module` | CL-R-003 |
-| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control | CL-R-004 |
+| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control | CL-R-004, CL-R-044, CL-R-045 |
 | `--demo` | (flag) | off | no | eight built-in demo tabs + an example session script; config flags ignored for tab building | CL-R-005, CL-R-006 |
 | `--version` | (flag) | — | no | print version, exit 0 | CL-R-001 |
 | `--help` | (flag) | — | no | print usage, exit 0 | CL-R-001 |
@@ -57,12 +57,12 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 |---|---|---|---|---|---|
 | `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts | CL-R-013 |
 | `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## 3. `--module` descriptor mini-language (Modbus)``) | CL-R-013 |
-| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## 4. `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014 |
+| `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## 4. `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014, CL-R-046 |
 | `--duration` | `SECS` (integer) | none | no | run this many seconds then exit 0. Omit → until Ctrl-C | CL-R-024 |
 | `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout | CL-R-041 |
 | `--exit-on-error` | (flag) | off | no | exit 3 (after stopping all modules) when a drained line has level Error | CL-R-015, CL-R-031 |
 
-- `--device` **not** available on `run`; use `--module` (CL-R-014).
+- `--device` **not** available on `run`; use `--module` (CL-R-047).
 - `--exit-on-error` exists **only** on `run` (CL-R-015).
 
 ---
@@ -88,7 +88,7 @@ Comma-separated `key=value` pairs. Whitespace around keys and values trimmed; em
 
 \* `device` required, but `type` may supply it. At least one of `device`/`type` must be present (CL-R-002).
 
-- **Default role `server`** for `--module` (contrast `--device`, always a client) (CL-R-002, CL-R-004).
+- **Default role `server`** for `--module` (contrast `--device`, always a client) (CL-R-002, CL-R-044).
 - `port` required for TCP, **no** default; `path` required for RTU (CL-R-002).
 - RTU keys here (`baud`, `parity`, `data_bits`, `stop_bits`, …) are this mini-language's own keys, not clap short flags — [`edge-cases.md`](./edge-cases.md) RTU/clap collision.
 
@@ -128,7 +128,7 @@ Example:
 | Code | Meaning | Req |
 |---|---|---|
 | `0` | ran to completion: `--duration` reached, or Ctrl-C (SIGINT). No error condition fired | CL-R-032 |
-| `1` | setup failure: device config failed to load, `start` reported an error, `--session` failed to load/parse, or `--log-file` could not be opened. `Error: …` on stderr; started modules stopped first | CL-R-030 |
+| `1` | setup failure: device config failed to load, `start` reported an error, `--session` failed to load/parse, or `--log-file` could not be opened. `Error: …` on stderr; started modules stopped first | CL-R-030, CL-R-049, CL-R-050 |
 | `2` | argument-parser usage error (e.g. unknown flag) — emitted before the run | CL-R-035 |
 | `3` | `--exit-on-error` set **and** a drained line had level Error. All modules stopped, then exit 3 | CL-R-031 |
 

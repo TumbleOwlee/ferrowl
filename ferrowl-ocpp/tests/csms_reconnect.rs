@@ -50,7 +50,7 @@ impl CsActionHandler<V1_6> for TestCs {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-083 — a CSMS listener whose bind fails retries with backoff instead of failing
+/// OC-R-139 — a CSMS listener whose bind fails retries with backoff instead of failing
 /// `spawn` synchronously; once the occupying socket is freed, the next attempt lands.
 async fn csms_bind_failure_retries_then_succeeds() {
     // Occupy an ephemeral port ourselves first, then point the CSMS at that exact port.
@@ -149,7 +149,7 @@ async fn csms_terminate_while_backing_off_ends_task_ok() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-083 — with `reconnect` disabled, a CSMS listener bind failure ends the module
+/// OC-R-139 — with `reconnect` disabled, a CSMS listener bind failure ends the module
 /// task with that error instead of retrying, mirroring `ferrowl_modbus::tcp`'s
 /// `tcp_server_bind_failure_reconnect_false_ends_task` (MB-R-134).
 async fn csms_bind_failure_reconnect_false_ends_task() {

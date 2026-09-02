@@ -297,7 +297,7 @@ mod tests {
             .collect()
     }
 
-    /// UI-R-068 — the code editor's border is styled from focus alone: no validation term, and
+    /// UI-R-110 — the code editor's border is styled from focus alone: no validation term, and
     /// a disabled editor keeps the focused border, since a read-only viewer still holds focus for
     /// scrolling. This is the deliberate exception to the single-line input's validation-first
     /// rule, so it is pinned rather than left to the widget's own comment.

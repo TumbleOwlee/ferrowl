@@ -410,7 +410,7 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-036 — with `CertVerification::RootStore` (not `Skip`), a CS rejects an untrusted self-signed CSMS certificate.
+/// OC-R-129 — with `CertVerification::RootStore` (not `Skip`), a CS rejects an untrusted self-signed CSMS certificate.
 async fn self_signed_csms_without_skip_verify_client_rejects() {
     let server = csms::ServerBuilder::<V1_6>::new(
         csms::Config {
@@ -699,7 +699,7 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-039 — server-role `SkipVerify` still requires a client certificate be presented (a
+/// OC-R-134 — server-role `SkipVerify` still requires a client certificate be presented (a
 /// handshake with none fails, same as `Verify`), but performs no chain/identity validation: a
 /// client presenting a self-signed identity trusted by nobody the server knows about is still
 /// accepted. OC-R-115 — the client's self-signed identity is generated via the same
@@ -750,7 +750,7 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-034/OC-R-036 — `CertVerification::CaFiles` trusts only the named CA, never the webpki
+/// OC-R-034/OC-R-130 — `CertVerification::CaFiles` trusts only the named CA, never the webpki
 /// root store: a CSMS presenting a certificate signed by the named CA is trusted, and the same
 /// policy against a differently self-signed CSMS (not signed by that CA, and not a publicly
 /// trusted root either) is rejected.

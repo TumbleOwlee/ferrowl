@@ -47,7 +47,7 @@ Forwarded to the active view; **semantics owned by the protocol area**. Each vie
 | `:script` | — | Open the Lua script manager dialog | UI-R-018 |
 | `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears | UI-R-018 |
 
-Modbus monitor module (`role = monitor`, MB-R-140–145):
+Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 
 | Command | Arguments | Purpose (→ modbus) | Req |
 |---|---|---|---|
@@ -118,9 +118,9 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 
 | Key | Action | Req |
 |---|---|---|
-| `Tab` | Next field (skips disabled) | UI-R-022 |
+| `Tab` | Next field (skips disabled) | UI-R-022, UI-R-078 |
 | `Shift+Tab` / `BackTab` | Previous field | UI-R-022 |
-| `Enter` | Confirm | UI-R-022 |
+| `Enter` | Confirm | UI-R-079 |
 | `Esc` | Request close (close-confirm popup if edits may be lost) | UI-R-023 |
 
 Applied only when the focused widget did not consume the key.
@@ -155,14 +155,15 @@ Selection clamps at the ends (no wrap).
 | Key | Action | Req |
 |---|---|---|
 | `Up` / `Down` | Move highlight | UI-R-026 |
-| `Enter` / `Tab` | Accept highlight (partial → keep open and re-query; else close) | UI-R-026 |
+| `Enter` | Accept highlight (partial → keep open and re-query; else close) | UI-R-026, UI-R-082 |
+| `Tab` | Never consumed by the popup, even open; moves focus to the dialog's next field | UI-R-081 |
 | `Esc` | Dismiss | UI-R-026 |
 
 ### 4.6 Single-line text input (focused)
 
 | Key | Action | Req |
 |---|---|---|
-| printable (with `Shift`) | Insert character (rejected chars still consumed) | UI-R-048 |
+| printable (with `Shift`) | Insert character (rejected chars still consumed) | UI-R-048, UI-R-086 |
 | `Left` / `Right` | Move cursor | UI-R-048 |
 | `Home` / `End` | Line start / end | UI-R-048 |
 | `Backspace` / `Delete` | Delete before / at cursor | UI-R-048 |
@@ -189,9 +190,9 @@ Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from th
 |---|---|---|---|
 | `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); code editor skipped while no script selected | UI-R-058 |
 | `Esc` | dialog | Open close-confirm | UI-R-023 |
-| `t` | script table focused | Toggle the selected script's enabled flag | UI-R-058 |
-| `d` | script table focused | Delete the selected script (opens confirm) | UI-R-058 |
-| `c` | script table focused | Toggle compact rows | UI-R-058 |
+| `t` | script table focused | Toggle the selected script's enabled flag | UI-R-091 |
+| `d` | script table focused | Delete the selected script (opens confirm) | UI-R-092 |
+| `c` | script table focused | Toggle compact rows | UI-R-093 |
 | `e` | script table focused | Execute the selected script once (current editor content, enabled or not) | UI-R-051 |
 | `Enter` | script table focused | Open the rename prompt | UI-R-055 |
 | `Enter` | name input focused | Create a new script with the typed name | UI-R-058 |
@@ -212,7 +213,7 @@ Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from th
 
 | Key | Context | Action | Req |
 |---|---|---|---|
-| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055 |
+| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055, UI-R-089 |
 | `Esc` | prompt | Cancel, name unchanged | UI-R-055 |
 
 ## 5. Code editor — modes and commands

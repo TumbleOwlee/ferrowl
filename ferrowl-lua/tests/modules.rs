@@ -126,7 +126,7 @@ fn ut_call_all_ok_when_no_script_errors() {
 }
 
 #[test]
-/// SC-R-014 — refresh_all runs each script once per interval, skipping any that ran within the window.
+/// SC-R-044 — refresh_all runs each script once per interval, skipping any that ran within the window.
 fn ut_refresh_all_runs_then_throttles() {
     let mut ctx = build_context();
     // First pass with a zero window runs everything successfully.

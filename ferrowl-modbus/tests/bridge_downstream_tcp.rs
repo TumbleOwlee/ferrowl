@@ -108,7 +108,7 @@ async fn it_tcp_downstream_connects_and_forwards() {
     );
 }
 
-/// BR-R-010 — a downstream whose TCP connect succeeds but whose Modbus exchange never gets a
+/// BR-R-018 — a downstream whose TCP connect succeeds but whose Modbus exchange never gets a
 /// response times out and reports `GatewayTargetDeviceFailedToRespond`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_tcp_downstream_connect_refused_then_reconnects_once_listener_appears() {

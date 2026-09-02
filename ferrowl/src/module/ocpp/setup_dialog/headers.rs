@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — opening the edit prompt with no row selected is a no-op.
+    /// UI-R-096 — opening the edit prompt with no row selected is a no-op.
     fn ut_open_edit_prompt_none_when_unselected() {
         let mut headers = Vec::new();
         let mut table = header_table(rows(&headers));
@@ -510,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — deleting the selected row removes it and moves the selection up.
+    /// UI-R-097 — deleting the selected row removes it and moves the selection up.
     fn ut_delete_selected_removes_row() {
         let mut headers = vec![header("X-A", "1")];
         let mut table = header_table(rows(&headers));
@@ -539,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `Esc` cancels the edit prompt without applying any change.
+    /// UI-R-096 — `Esc` cancels the edit prompt without applying any change.
     fn ut_header_edit_prompt_esc_cancels() {
         let mut prompt = HeaderEditPrompt::new("X-A", "1");
         assert_eq!(
@@ -549,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — `Enter` on the value field commits the trimmed name/value pair.
+    /// UI-R-096 — `Enter` on the value field commits the trimmed name/value pair.
     fn ut_header_edit_prompt_enter_on_value_commits() {
         let mut prompt = HeaderEditPrompt::new("X-A", "1");
         prompt.switch_active(); // move to the value field

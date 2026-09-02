@@ -56,7 +56,7 @@ An action's request and response payloads are exactly the OCPP schema types for 
 
 - A field's name, nesting, and casing are the OCPP spec's, per version. A 1.6 `connectorId` and a 2.x `evse.id` are different fields, not two spellings (—).
 - 2.x actions target a connector through a nested `evse.id` object or, for a few (e.g. `TransactionEvent`), a flat top-level `evseId`. Both recognized as the EVSE target (—).
-- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`, OC-R-073).
+- Response payloads are produced by the peer; the simulator's own responses are the schema's `Default`-derived value unless explicitly modelled (`## 8. Simulated responses`, OC-R-137).
 
 ---
 
@@ -121,7 +121,7 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 | Field | Notes | Req |
 |---|---|---|
 | model, vendor, firmware version, serial number | boot identity, sent in `BootNotification` | OC-R-057, OC-R-103 |
-| ICCID, IMSI, meter serial number, meter type (1.6 only) | optional identity, sent in `BootNotification` only when non-empty; no 2.x equivalent | OC-R-104 |
+| ICCID, IMSI, meter serial number, meter type (1.6 only) | optional identity, sent in `BootNotification` only when non-empty; no 2.x equivalent | OC-R-104, OC-R-142 |
 | configuration / variable store | list of `(key, value, readonly)`; answers `GetConfiguration` (1.6) / `GetVariables` (2.x), mutated by `ChangeConfiguration` / `SetVariables`. Seeded from the device config, or the version's built-in defaults when empty | OC-R-057, OC-R-066 |
 | heartbeat interval | seconds, from the CSMS's `BootNotification` response. Unset until a boot round-trips | OC-R-057 |
 | reservation | id tag + reservation id of a charge-point-wide reservation | OC-R-057 |
@@ -145,7 +145,7 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 - 1.6: connector id `0` = the charge point. 2.x: absent EVSE target (or EVSE id `0`) = the charging station (OC-R-063).
 - An inbound Call with a top-level connector/EVSE id the station lacks is rejected; `0` and absent always valid (OC-R-063).
 - 2.x auto-`MeterValues` transmit only once the CSMS has **confirmed** the transaction start, so a failed start never leaks meter readings. 1.6 transmits as soon as a transaction id exists (OC-R-061, OC-R-070).
-- Ending a transaction clears the transaction-scoped limit only; default and maximum persist (OC-R-070).
+- Ending a transaction clears the transaction-scoped limit only; default and maximum persist (OC-R-136).
 
 ---
 

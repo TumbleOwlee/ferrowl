@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-035 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
+    /// SC-R-049 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
     /// keys its exit code off `[sim]` (CL-R-031) and must not see an interactive test run.
     fn ut_run_script_once_error_logged_with_run_prefix() {
         let log = script_log();

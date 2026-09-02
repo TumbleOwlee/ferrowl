@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-134 (server)/OC-R-048 (CS) — `reconnect: false` ends the loop with the failure,
+    /// MB-R-134 (server)/OC-R-135 (CS) — `reconnect: false` ends the loop with the failure,
     /// without ever waiting out a backoff.
     async fn ut_run_with_backoff_stops_when_reconnect_disabled() {
         let attempt = || async {

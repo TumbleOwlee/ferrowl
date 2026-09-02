@@ -316,7 +316,7 @@ async fn require_client_cert_enforced() {
 }
 
 #[tokio::test]
-/// MB-R-108 — server-role `Skip` still requires a client certificate be presented (a
+/// MB-R-173 — server-role `Skip` still requires a client certificate be presented (a
 /// handshake with none fails, same as `CaFiles`), but performs no chain/identity validation
 /// against any root store: a client presenting a certificate signed by nobody the server
 /// trusts (a bare self-signed cert, not chained to any configured CA — here there is no CA
@@ -381,7 +381,7 @@ async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
 }
 
 #[tokio::test]
-/// MB-R-111 (server connection-scoping half) — a rejected mTLS handshake (missing
+/// MB-R-177 (server connection-scoping half) — a rejected mTLS handshake (missing
 /// or wrong-CA client certificate) never takes down the accept loop: a subsequent
 /// well-behaved client still connects.
 async fn require_client_cert_rejection_does_not_kill_accept_loop() {
@@ -446,7 +446,7 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
 }
 
 #[tokio::test]
-/// MB-R-111 (server logging half) — a rejected mTLS handshake (no client
+/// MB-R-178 (server logging half) — a rejected mTLS handshake (no client
 /// certificate presented) is logged with the peer address and a failure reason.
 async fn require_client_cert_rejection_is_logged() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
@@ -519,7 +519,7 @@ async fn require_client_cert_rejection_is_logged() {
 }
 
 #[tokio::test]
-/// MB-R-108 — `Tls` never requests a client certificate at all: a client presenting none is
+/// MB-R-174 — `Tls` never requests a client certificate at all: a client presenting none is
 /// still accepted, regardless of what verification `Mutual` would otherwise apply.
 async fn it_tls_policy_never_requests_a_client_certificate() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");

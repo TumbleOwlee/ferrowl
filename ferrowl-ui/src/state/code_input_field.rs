@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-034 — in the plain editor two spaces at the same position within the bound expand to a four-space indent.
+    /// UI-R-084 — in the plain editor two spaces at the same position within the bound expand to a four-space indent.
     fn double_space_expands_to_four_within_threshold() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1143,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-034 — an intervening key cancels the pending double-space expansion.
+    /// UI-R-084 — an intervening key cancels the pending double-space expansion.
     fn intervening_key_between_spaces_cancels_expansion() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1159,7 +1159,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-034 — with space-indent off, two spaces insert plain spaces.
+    /// UI-R-084 — with space-indent off, two spaces insert plain spaces.
     fn space_indent_disabled_inserts_plain_spaces() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1173,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-034 — the double-space expansion also works mid-line.
+    /// UI-R-084 — the double-space expansion also works mid-line.
     fn double_space_expansion_mid_line() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)
@@ -1189,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-034 — four rapid spaces expand to two four-space indents.
+    /// UI-R-084 — four rapid spaces expand to two four-space indents.
     fn four_rapid_space_presses_yield_eight_spaces() {
         let mut s = CodeInputFieldStateBuilder::default()
             .vim(false)

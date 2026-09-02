@@ -1009,7 +1009,7 @@ mod tests {
         );
     }
 
-    /// MB-R-140 — `resolve()` still rejects a non-serial endpoint even when the picker itself
+    /// MB-R-191 — `resolve()` still rejects a non-serial endpoint even when the picker itself
     /// is bypassed by constructing the dialog's internal state directly, proving the check isn't
     /// solely enforced by the picker's restriction.
     #[test]

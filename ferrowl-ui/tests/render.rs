@@ -729,7 +729,7 @@ fn table_show_selection_marker_false_collapses_marker_column() {
 }
 
 #[test]
-/// UI-R-066 — without the bar glyph, the selected row's own background is the only remaining
+/// UI-R-109 — without the bar glyph, the selected row's own background is the only remaining
 /// selection cue, so it must stay clearly visible even while the table itself isn't the
 /// currently focused panel: `show_selection_marker(false)` always uses the strong `focused`
 /// style, never the subtler alternating-row style a marker-on unfocused table falls back to

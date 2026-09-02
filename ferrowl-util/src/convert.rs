@@ -388,14 +388,14 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-006 — a top-level JSON null is not representable in TOML and fails serialization.
+    /// CS-R-057 — a top-level JSON null is not representable in TOML and fails serialization.
     fn ut_json_to_toml_null_top_level_errors() {
         let r = json_to_toml(&serde_json::Value::Null);
         assert!(matches!(r, Err(Error::Serialize(_))));
     }
 
     #[test]
-    /// CS-R-006 — a JSON null inside an array is not representable in TOML and fails.
+    /// CS-R-057 — a JSON null inside an array is not representable in TOML and fails.
     fn ut_json_to_toml_null_in_array_errors() {
         let r = json_to_toml(&serde_json::json!([1, null, 3]));
         assert!(matches!(r, Err(Error::Serialize(_))));
@@ -411,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-005 — a u64 exceeding the signed-64 range serializes as a TOML float.
+    /// CS-R-056 — a u64 exceeding the signed-64 range serializes as a TOML float.
     fn ut_json_to_toml_u64_overflow_falls_back_to_float() {
         let big = u64::MAX;
         let v = json_to_toml(&serde_json::json!(big)).unwrap();
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `Converter::load` expands a leading `~` in `path`.
+    /// NF-R-054 — `Converter::load` expands a leading `~` in `path`.
     fn ut_load_expands_tilde() {
         let (tilde, actual) = home_tilde_path("toml");
         let value = Sample {
@@ -468,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `Converter::save` expands a leading `~` in `path`.
+    /// NF-R-054 — `Converter::save` expands a leading `~` in `path`.
     fn ut_save_expands_tilde() {
         let (tilde, actual) = home_tilde_path("toml");
         let value = Sample {
@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `Converter::convert` expands a leading `~` on both `src` and `dest`.
+    /// NF-R-054 — `Converter::convert` expands a leading `~` on both `src` and `dest`.
     fn ut_convert_expands_tilde_both_sides() {
         let (src_tilde, src_actual) = home_tilde_path("json");
         let (dst_tilde, dst_actual) = home_tilde_path("toml");

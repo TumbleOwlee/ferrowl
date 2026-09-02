@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-026 — accepting a partial suggestion re-queries and keeps the popup open.
+    /// UI-R-082 — accepting a partial suggestion re-queries and keeps the popup open.
     fn accepting_partial_suggestion_requeries_and_stays_open() {
         let mut s = state();
         type_str(&mut s, "d");
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-026 — Tab is never consumed by the popup, even while it's open, so it always moves
+    /// UI-R-081 — Tab is never consumed by the popup, even while it's open, so it always moves
     /// focus to the surrounding dialog's next field instead of accepting a suggestion.
     fn tab_unhandled_while_popup_open() {
         let mut s = state();

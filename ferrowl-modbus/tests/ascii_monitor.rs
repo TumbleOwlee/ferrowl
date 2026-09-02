@@ -46,7 +46,7 @@ fn bad_config(reconnect: bool) -> ferrowl_modbus::rtu::Config {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-141 — with `reconnect` enabled (the default), a serial-open failure does not fail an
+/// MB-R-192 — with `reconnect` enabled (the default), a serial-open failure does not fail an
 /// ASCII monitor's start: `spawn()` returns `Ok(handle)`, and the task keeps retrying the open
 /// on the shared backoff policy instead of ending.
 async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
@@ -68,7 +68,7 @@ async fn ut_monitor_open_failure_retries_while_reconnect_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-141 — with `reconnect` disabled, a serial-open failure ends the monitor: `spawn()`
+/// MB-R-192 — with `reconnect` disabled, a serial-open failure ends the monitor: `spawn()`
 /// still returns `Ok(handle)`, but the joined task carries the serial error.
 async fn ut_monitor_open_failure_reconnect_false_ends_task() {
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);

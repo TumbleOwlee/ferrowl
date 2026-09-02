@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-055 — a new script name that is empty or duplicates another is refused.
+    /// UI-R-089 — a new script name that is empty or duplicates another is refused.
     fn ut_create_script_rejects_empty_and_duplicate_names() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-055 — renaming a script to its own current name is accepted.
+    /// UI-R-089 — renaming a script to its own current name is accepted.
     fn ut_rename_to_own_name_is_accepted() {
         let mut scripts = vec![ScriptDef {
             name: "boot".into(),
@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-058 — `c` toggles the script table between compact and normal rows.
+    /// UI-R-093 — `c` toggles the script table between compact and normal rows.
     fn ut_toggle_compact_flips_row_margin() {
         let mut scripts: Vec<ScriptDef> = Vec::new();
         let mut table = script_table(rows(&scripts));

@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Skip-Verify back Off restores the previously entered Root Store
+    /// MB-R-186 — toggling Skip-Verify back Off restores the previously entered Root Store
     /// selection and CA list, since hiding never clears them.
     fn ut_toggle_skip_verify_back_off_restores_list_and_toggle() {
         let mut section = TlsSection::new();
@@ -847,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
+    /// MB-R-186 — toggling Self-Signed back Off restores the previously entered cert/key paths
     /// (nothing was cleared, only excluded while On).
     fn ut_extract_toggle_self_signed_back_off_restores_cert_key() {
         let dir = reserve_temp_dir("ferrowl_tls_section");
@@ -1095,7 +1095,7 @@ mod tests {
         assert!(section.ca_files.state.values().is_empty());
     }
 
-    /// MB-R-136 — an empty path and a path with an extension outside pem/crt/key are both
+    /// MB-R-187 — an empty path and a path with an extension outside pem/crt/key are both
     /// rejected by the shared sub-dialog: it stays open with an inline error and nothing is
     /// appended to the list.
     #[test]

@@ -72,7 +72,7 @@ mod tests {
     use super::Config;
     use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
-    /// MB-R-104 — a `tcp::Config` with no `tls` key deserializes both policies to `None`.
+    /// MB-R-162 — a `tcp::Config` with no `tls` key deserializes both policies to `None`.
     #[test]
     fn ut_tcp_config_tls_absent_deserializes_to_default() {
         let json = r#"{

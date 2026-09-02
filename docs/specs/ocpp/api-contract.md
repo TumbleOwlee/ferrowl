@@ -195,18 +195,18 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 | `role` | enum | `client` | `## 7. Endpoint enums` | OC-R-079 |
 | `timeout_ms` | optional u64 | `30000` when unset | awaited-reply timeout, both roles | OC-R-020 |
 | `scripts` | list of script defs | empty | Lua sim scripts — `scripting/`. Client role only | SC-R-022 |
-| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016 |
+| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
 | `log_file` | optional string | unset | persistent log-file base, also set by `:log <file>` | OC-R-087, OC-R-088 |
 | `rfids` | list of string | empty | **server only**: charge-point-wide RFID accept-list | OC-R-074, OC-R-075 |
 | `connector_rfids` | list of `ConnectorRfids` | empty | **server only**: per-connector accept-lists | OC-R-074, OC-R-075 |
 | `connectors` | list of `ConnectorRef` | empty | **client only**: connector-table seed. Empty = CS-level only. Unbounded | OC-R-057, OC-R-081 |
 | `config` | list of `ConfigKeyDef` | empty | **client only**: persisted configuration/variable key store. Empty = built-in defaults | OC-R-057, OC-R-081 |
-| `extra_headers` | list of `HeaderDef` | empty | **client only**: extra HTTP headers on the WebSocket upgrade, in addition to the client's own. OC-R-117–119 | OC-R-117, OC-R-118, OC-R-119 |
-| `model` | optional string | unset | **client only**: CS boot identity model, seeded/written like `connectors`/`config` | OC-R-103 |
+| `extra_headers` | list of `HeaderDef` | empty | **client only**: extra HTTP headers on the WebSocket upgrade, in addition to the client's own. OC-R-117–119 | OC-R-117, OC-R-152, OC-R-153, OC-R-118, OC-R-119 |
+| `model` | optional string | unset | **client only**: CS boot identity model, seeded/written like `connectors`/`config` | OC-R-103, OC-R-140 |
 | `vendor` | optional string | unset | **client only**: CS boot identity vendor | OC-R-103 |
 | `firmware_version` | optional string | unset | **client only**: CS boot identity firmware version | OC-R-103 |
 | `serial_number` | optional string | unset | **client only**: CS boot identity serial number | OC-R-103 |
-| `iccid` | optional string | unset | **client only, 1.6 only**: SIM ICCID, seeded/written like `model`/`vendor`. Inert for 2.0.1/2.1 | OC-R-104 |
+| `iccid` | optional string | unset | **client only, 1.6 only**: SIM ICCID, seeded/written like `model`/`vendor`. Inert for 2.0.1/2.1 | OC-R-104, OC-R-141 |
 | `imsi` | optional string | unset | **client only, 1.6 only**: SIM IMSI | OC-R-104 |
 | `meter_serial_number` | optional string | unset | **client only, 1.6 only**: installed meter's serial number | OC-R-104 |
 | `meter_type` | optional string | unset | **client only, 1.6 only**: installed meter's type/model | OC-R-104 |
@@ -248,12 +248,12 @@ A device config written before any of these fields existed still loads: every fi
 
 ## 9. Security config (`security`)
 
-One section, both roles. Basic Auth role-shared; TLS held per role in a `tls` sub-block (OC-R-126), of which an instance consults only its own role's — the other inert. Default (no auth, both policies `none`) = plain `ws://`.
+One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in a `tls` sub-block (OC-R-126, OC-R-158), of which an instance consults only its own role's — the other inert. Default (no auth, both policies `none`) = plain `ws://`.
 
 | Field | Type | Default | Role | Meaning | Req |
 |---|---|---|---|---|---|
-| `username` | optional string | unset | both | Basic Auth username (Profile 1). Client sends; server requires | OC-R-030, OC-R-031, OC-R-128 |
-| `password` | optional string | unset | both | Basic Auth password. Never logged | OC-R-030, OC-R-031, OC-R-033, OC-R-128 |
+| `username` | optional string | unset | both | Basic Auth username (Profile 1). Client sends; server requires | OC-R-030, OC-R-031, OC-R-128, OC-R-156 |
+| `password` | optional string | unset | both | Basic Auth password. Never logged | OC-R-030, OC-R-031, OC-R-033, OC-R-128, OC-R-156 |
 | `tls.server` | `ServerTlsPolicy` | `none` | server | consulted when the instance runs as CSMS | OC-R-126, OC-R-037 |
 | `tls.client` | `ClientTlsPolicy` | `none` | client | consulted when the instance runs as CS | OC-R-126, OC-R-035 |
 
@@ -285,20 +285,20 @@ One section, both roles. Basic Auth role-shared; TLS held per role in a `tls` su
 
 | `verify` | Payload | Meaning | Req |
 |---|---|---|---|
-| `skip` | — | accept any peer certificate unauthenticated. Test rigs only | OC-R-036, OC-R-039 |
-| `root-store` | `extra_ca_files` — list, may be empty | client only: webpki root store plus these anchors | OC-R-034 |
-| `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the root store | OC-R-034, OC-R-039 |
+| `skip` | — | accept any peer certificate unauthenticated. Test rigs only | OC-R-036, OC-R-134 |
+| `root-store` | `extra_ca_files` — list, may be empty | client only: webpki root store plus these anchors | OC-R-034, OC-R-129 |
+| `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the root store | OC-R-034, OC-R-130, OC-R-039 |
 
 ### 9.1 Derivation rules
 
-- **Basic Auth on** iff *both* `username` and `password` set. Either alone inert (OC-R-128).
-- **TLS on** for an instance iff its own role's policy is other than `none`. The variant *is* the state; the other role's policy never affects it (OC-R-126).
+- **Basic Auth on** iff *both* `username` and `password` set. Either alone inert (OC-R-164).
+- **TLS on** for an instance iff its own role's policy is other than `none`. The variant *is* the state; the other role's policy never affects it (OC-R-158).
 - **mTLS on** iff that policy's `mode` is `mutual`. A `mutual` client always carries an identity, a `mutual` server always a verification — required by the variant (OC-R-035, OC-R-039).
 - **Endpoint scheme gates TLS** in both roles (OC-R-042). `ws://` always plaintext; any policy alongside inert. A URL never advertises a transport its peer does not speak.
 - **A `wss://` server's TLS material** follows its `identity` directly (OC-R-096); the old "explicit files always win" precedence is unrepresentable.
 - **A `wss://` server with identity `ephemeral`** binds an ephemeral self-signed certificate, not plain TCP, and logs the fallback (OC-R-095).
-- Two role-only rejections at construction: `verify = "root-store"` under `tls.server`; `source = "ephemeral"` as a `tls.client` identity (OC-R-039, OC-R-035).
-- **The setup dialog does not expose `protocol` as an input** (OC-R-127): it displays a scheme derived from the TLS selector — `wss://` at TLS/mTLS, `ws://` at Off — and writes the matching `protocol`. The field (`## 7. Endpoint enums`) is unchanged; a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
+- Two role-only rejections at construction: `verify = "root-store"` under `tls.server`; `source = "ephemeral"` as a `tls.client` identity (OC-R-133, OC-R-035).
+- **The setup dialog does not expose `protocol` as an input** (OC-R-161): it displays a scheme derived from the TLS selector — `wss://` at TLS/mTLS, `ws://` at Off — and writes the matching `protocol`. The field (`## 7. Endpoint enums`) is unchanged; a hand-written config may still pair any scheme with any policy, subject to OC-R-042/OC-R-097.
 
 ### 9.2 Security profiles
 
@@ -355,7 +355,7 @@ Protocol-specific commands owned here (mechanism owned by `tui/`).
 
 | Command | Effect | Req |
 |---|---|---|
-| `:start` | bind the listener | OC-R-083 |
+| `:start` | bind the listener | OC-R-138 |
 | `:stop` | unbind the listener, discard every observed station entry | OC-R-084 |
 | `:restart` | rebind the listener; discards every observed station entry | OC-R-084 |
 | `:e` / `:edit` | open the module setup dialog | — |
@@ -363,4 +363,4 @@ Protocol-specific commands owned here (mechanism owned by `tui/`).
 | `:compact` | toggle compact table rows | — |
 | `:log [file]` | set (or clear) the persistent log file | OC-R-087, OC-R-088 |
 
-A client does **not** connect on creation — `:start` required. A server binds automatically on creation (OC-R-083).
+A client does **not** connect on creation — `:start` required. A server binds automatically on creation (OC-R-083, OC-R-138).

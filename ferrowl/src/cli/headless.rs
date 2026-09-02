@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-043 — a ring overflow between ticks is reported with a synthetic dropped-lines line.
+    /// CL-R-052 — a ring overflow between ticks is reported with a synthetic dropped-lines line.
     async fn ut_drain_log_reports_dropped_lines_on_ring_overflow() {
         let log = new_log();
         let overflow_by = 5;
@@ -648,7 +648,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// NF-R-042 — `--log-file` expands a leading `~` to the home directory.
+    /// NF-R-054 — `--log-file` expands a leading `~` to the home directory.
     async fn ut_run_log_file_expands_tilde() {
         // Own tag ("tilde"), not "enabled" — sharing a tag with `ut_run_wires_session_sim_and_
         // drains_its_log` would race both tests over the same temp device/session files under
@@ -778,7 +778,7 @@ mod tests {
     #[tokio::test]
     /// CL-R-020 — the runner builds and starts each module (without touching the terminal) and
     /// drains its log to the output stream.
-    /// CL-R-022 — the loop refreshes every module each tick and drains its newly appended log
+    /// CL-R-048 — the loop refreshes every module each tick and drains its newly appended log
     /// lines to the output.
     async fn ut_run_starts_modules_and_drains_output() {
         let dir = reserve_temp_dir("ferrowl_cl");

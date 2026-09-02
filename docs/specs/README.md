@@ -21,11 +21,12 @@ Cross-cutting: [`non-functional-requirements.md`](./non-functional-requirements.
 1. **No code pointers.** Never cite file:line, function/type names, crate-internal identifiers — specs state *what must be true*, not where (pointers rot on refactor). Exception: public, user-facing surface (config keys, `:` commands, Lua `C_*` API, CLI flags, OCPP action names, exported signatures, error variants, feature flags) IS spec → area's `api-contract.md`.
 2. **Requirement and edge-case IDs stable, append-only.** ID = area prefix + number: `MB-R-nnn` modbus, `OC-R-nnn` ocpp, `SC-R-nnn` scripting, `UI-R-nnn` tui, `CS-R-nnn` config-session, `CL-R-nnn` cli-headless, `BR-R-nnn` bridge, `NF-R-nnn` non-functional. Never renumber, never reuse a retired ID. Reference by ID in commits/PRs/tests/agent instructions. Edge-case IDs are a second, independent series over `edge-cases.md` entries: `MB-E-nnn`, `OC-E-nnn`, `SC-E-nnn`, `UI-E-nnn`, `CS-E-nnn`, `CL-E-nnn`, `BR-E-nnn`, numbered independently per area, same stability rules (never renumber, never reuse a retired ID); no `NF-E` series (`non-functional-requirements.md` has no `edge-cases.md`). An edge-case entry derived from a requirement cites that `-R` ID in its own text and still carries its own `-E` ID: the `-E` ID identifies the entry, the `-R` ID names the requirement it follows from. Tests may cite an `-E` ID exactly as they cite an `-R` ID; the "At most one ID per test" rule below still applies.
 3. **Owner = the behavior, not the surface.** A Modbus RTU config field is specified in `modbus/`, not `config-session/` (one change → one file). `config-session/` owns only the *envelope*: file format, `version`, session→module list, save/load, `migrate`. `tui/` owns the command mechanism and generic commands; protocol-specific commands live in their protocol's area. Shared behavior → owning area, stated once.
-4. **Requirements are testable.** "Shall" statements, observable outcomes. Good: "The client shall retry with exponential backoff bounded to 1s–30s." Bad: "The client is robust." Format requirements name exact bytes where possible.
+4. **Requirements are testable.** Normative indicative statements, observable outcomes. Good: "The client retries with exponential backoff bounded to 1s–30s." Bad: "The client is robust." Format requirements name exact bytes where possible.
 5. **Known gaps are specified, not hidden.** Intentional-but-ugly behavior (no Lua execution ceiling, no OCPP auto-reconnect) → area's `edge-cases.md` as a stated constraint, so it isn't "fixed".
 6. **One requirement or edge-case entry, one physical line.** No line break inside a `**<PREFIX>-R-nnn** — ...` or `**<PREFIX>-E-nnn** — ...` statement, however long, table rows included — `grep -rn <ID> docs/specs/` (or any keyword) must return the whole entry in one match. Exact file:line by ID: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section: `sh .claude/scripts/extract-section.sh '## <heading>' docs/specs/<area>/requirements.md`.
 7. **Contract-file citations.** `api-contract.md`/`data-contract.md` carry no ID series of their own; every table row carries a `Req` column naming the owning requirement ID(s), prose entries cite inline. IDs are always enumerated, never given as a range. A row with no owning requirement is marked `—` and raised as a missing requirement, never given an invented ID. Cross-references between spec files use an `-R`/`-E` ID when the target has one, and the target's exact heading text (the string `extract-section.sh` accepts) otherwise — section numbers (`§n.m`) are not used.
 8. **At most one ID per test.** A test's doc comment cites exactly one requirement or edge-case ID, the one it most directly pins; a test touching several requirements cites the primary one and lets the others stay implicit or get their own dedicated test.
+9. **One entry, one rule.** A requirement states exactly one observable rule: one subject, one condition, one outcome. A statement that needs "and also", "additionally", a second sentence introducing a different subject, or an enumeration of independent behaviors is several requirements and gets one ID each, cross-citing where one depends on another. Test: can a single test pin the whole entry, and can the entry be falsified by one counterexample? If not, split before landing. A large entry is a review prompt, never a stylistic choice.
 
 ## Per-area files
 
@@ -33,7 +34,7 @@ Add/drop per need.
 
 | File | Contains |
 |---|---|
-| `requirements.md` | Numbered, testable "shall" statements. Every area has one. |
+| `requirements.md` | Numbered, testable normative statements, one rule each (rule 9). Every area has one. |
 | `api-contract.md` | Stable public surface: OCPP actions, Lua `C_*` methods, `:` commands, keybindings, CLI flags, config fields, error variants, feature flags. No ID series of its own; each table row's `Req` column names the owning requirement ID(s). |
 | `data-contract.md` | Formats: register model and data formats, payload shapes, config schema, field widths, ordering, ranges. No ID series of its own; each table row's `Req` column names the owning requirement ID(s). |
 | `edge-cases.md` | Boundary behavior, error semantics, stated known limitations. Entries carry their own `-E-nnn` IDs. |
@@ -56,7 +57,7 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 | `NF-R-001`, `NF-R-002`, `NF-R-003` — platforms/toolchain CI builds | CI job matrix |
 | `NF-R-010` — no benchmarks asserted; hot path stays on `parking_lot` | design posture, dependency manifest |
 | `NF-R-040` — crates versioned in lockstep | workspace manifest |
-| `NF-R-041` — the testing conventions themselves | `AGENTS.md` conventions, lefthook reminder |
+| `NF-R-041`, `NF-R-055`, `NF-R-056` — the testing conventions, CI steps, lefthook | `AGENTS.md` conventions, lefthook reminder |
 | `NF-R-045` — dev-only fixture crate, `publish = false`, versioned in lockstep | workspace manifest, dev-dependency edges |
 | `UI-R-001` — alt-screen + raw-mode entry, terminal restore on normal/error/panic exit | terminal-platform fact: the restore path calls the real terminal (`enable_raw_mode`/`disable_raw_mode`), which errors or panics under `cargo test` without a controlling tty — why `App` renders through the `DrawSurface` seam. Seam exercised headlessly (`ut_app_draws_onto_mock_screen`); raw-mode/panic-hook control itself not observable by a `shall` test |
 
@@ -66,10 +67,10 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 |---|---|
 | `NF-R-011` — Lua sim on its own OS thread | `scripting/` sim tests |
 | `NF-R-020` — Modbus reconnect backoff | `MB-R-050`/`MB-R-051`/`MB-R-052` |
-| `NF-R-021` — OCPP no auto-reconnect | `OC-R-048` |
+| `NF-R-021`, `NF-R-047` — OCPP reconnect and CSMS bind retry | `OC-R-048`, `OC-R-139` |
 | `NF-R-022` — a Lua error never crashes its host | `SC-R-032` |
-| `NF-R-030` — OCPP TLS / Basic Auth | OCPP security tests (`OC-R-029`–`041`) |
-| `NF-R-031` — Lua sandbox | `SC-R-006`/`SC-R-007` |
+| `NF-R-030`, `NF-R-048`, `NF-R-049` — OCPP TLS / Basic Auth, Modbus TCP TLS, RTU none | OCPP security tests (`OC-R-029`–`041`), `MB-R-104`–`MB-R-111` |
+| `NF-R-031`, `NF-R-050`, `NF-R-051` — Lua sandbox, wall-clock cap, no memory ceiling | `SC-R-006`/`SC-R-007`/`SC-R-040`, `SC-R-047`, `SC-R-048` |
 
 **Kind 3 — structural/shape (collectively exercised)**
 

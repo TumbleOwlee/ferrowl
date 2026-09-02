@@ -624,7 +624,7 @@ mod tests {
         assert!(!module.is_running(), "not running once stop() completes");
     }
 
-    /// MB-R-140 — a monitor's start() rejects a non-serial endpoint with the role/transport
+    /// MB-R-191 — a monitor's start() rejects a non-serial endpoint with the role/transport
     /// compatibility error, the enforcement point nothing can bypass (a hand-edited session
     /// file skips the setup dialog's own check).
     #[tokio::test]
@@ -641,7 +641,7 @@ mod tests {
         assert!(matches!(err, Error::Transport(_)));
     }
 
-    /// MB-R-141 — `reconnect: true` against a bad serial path keeps the task retrying (still
+    /// MB-R-192 — `reconnect: true` against a bad serial path keeps the task retrying (still
     /// running after a short wait); `reconnect: false` ends the task promptly.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_monitor_module_start_stop_lifecycle() {

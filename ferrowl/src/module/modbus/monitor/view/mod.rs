@@ -3139,7 +3139,7 @@ mod tests {
         assert_eq!(message_row_styles(&unmatched_row)[1], None);
     }
 
-    /// UI-R-062 — a register-shaped record's Values/Payload renders 4-digit lowercase hex per
+    /// UI-R-102 — a register-shaped record's Values/Payload renders 4-digit lowercase hex per
     /// word.
     #[tokio::test]
     async fn ut_messages_table_formats_register_payload_as_hex_words() {
@@ -3170,7 +3170,7 @@ mod tests {
         assert_eq!(rows[0].values()[6], "[00ab 1234]");
     }
 
-    /// UI-R-062 — a coil-shaped record's Values/Payload renders one digit per bit.
+    /// UI-R-102 — a coil-shaped record's Values/Payload renders one digit per bit.
     #[tokio::test]
     async fn ut_messages_table_formats_coil_payload_as_bit_digits() {
         let mut v = view();
@@ -3535,7 +3535,7 @@ mod tests {
         assert_eq!(row.values()[1], "IllegalDataAddress");
     }
 
-    /// UI-R-062 — a record whose operation isn't one of the 9 table-shaping ops renders empty
+    /// UI-R-102 — a record whose operation isn't one of the 9 table-shaping ops renders empty
     /// Address/Quantity/Values-Payload columns.
     #[tokio::test]
     async fn ut_messages_table_non_table_shaping_operation_has_empty_shape_columns() {
@@ -3594,7 +3594,7 @@ mod tests {
         assert_eq!(rows[0].values()[5], "2/2");
     }
 
-    /// UI-R-062 (horizontal-overflow scrolling reuses `TableState::handle_events` unchanged)
+    /// UI-R-103 (horizontal-overflow scrolling reuses `TableState::handle_events` unchanged)
     /// — `Left`/`Right` reach the Messages table's own scroll handling when it's the
     /// panel-focused one, not the view's own unhandled fallback.
     #[test]
@@ -3605,7 +3605,7 @@ mod tests {
         assert!(matches!(result, EventResult::Consumed));
     }
 
-    /// UI-R-063 — two far-apart observed addresses produce only their own two lines, not every
+    /// UI-R-105 — two far-apart observed addresses produce only their own two lines, not every
     /// unobserved line in between.
     #[test]
     fn ut_memory_layout_omits_unobserved_lines_renders_observed_ones() {
@@ -3615,7 +3615,7 @@ mod tests {
         assert_eq!(lines[1].0, 16); // address 20's line starts at cell 16 (8 words/line)
     }
 
-    /// UI-R-063 — within an otherwise-observed line, a cell with no observed constituent
+    /// UI-R-105 — within an otherwise-observed line, a cell with no observed constituent
     /// bit/word renders unobserved, not a silent zero.
     #[test]
     fn ut_memory_layout_unobserved_cell_renders_as_dim_placeholder_not_zero() {
@@ -3631,7 +3631,7 @@ mod tests {
         );
     }
 
-    /// UI-R-063 — value-class coloring: unobserved/observed-zero is neutral, observed
+    /// UI-R-106 — value-class coloring: unobserved/observed-zero is neutral, observed
     /// printable-ASCII is normal text, any other observed non-zero value is flagged.
     #[test]
     fn ut_memory_layout_value_class_coloring_zero_ascii_other() {
@@ -3661,7 +3661,7 @@ mod tests {
         assert_eq!(memory_cell_value_style(&other), COLOR_SCHEME.warning);
     }
 
-    /// UI-R-063 — the Memory table has exactly 4 columns, Kind/Address/Hex/Ascii, in order.
+    /// UI-R-104 — the Memory table has exactly 4 columns, Kind/Address/Hex/Ascii, in order.
     #[test]
     fn ut_memory_table_has_exactly_4_columns_kind_address_hex_ascii() {
         assert_eq!(
@@ -3675,7 +3675,7 @@ mod tests {
         );
     }
 
-    /// UI-R-063 — a real line's Kind cell renders the line's table kind with the same `Kind`
+    /// UI-R-104 — a real line's Kind cell renders the line's table kind with the same `Kind`
     /// `Display` naming the modbus module's own register table uses.
     #[test]
     fn ut_memory_table_kind_column_shows_line_kind() {
@@ -3758,7 +3758,7 @@ mod tests {
         assert_ne!(rows[1].address, "");
     }
 
-    /// UI-R-063 — true per-cell granularity via `TableEntry::cell_spans`: two adjacent cells on
+    /// UI-R-106 — true per-cell granularity via `TableEntry::cell_spans`: two adjacent cells on
     /// the same line with different value classes (printable-ASCII `text` vs. non-printable
     /// `warning`) render as two separately-colored spans within the Hex column's single cell, not
     /// a single line-wide color.

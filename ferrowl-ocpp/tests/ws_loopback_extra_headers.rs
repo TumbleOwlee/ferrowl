@@ -31,7 +31,7 @@ impl CsActionHandler<V1_6> for TestCs {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-117 — extra_headers are sent on the WebSocket upgrade request alongside the client's own
+/// OC-R-152 — extra_headers are sent on the WebSocket upgrade request alongside the client's own
 /// headers.
 async fn extra_headers_are_sent_on_upgrade_request() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

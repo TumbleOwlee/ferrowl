@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-014 — refresh runs a script at most once per interval, skipping one that ran more recently.
+    /// SC-R-044 — refresh runs a script at most once per interval, skipping one that ran more recently.
     fn ut_refresh_skips_recently_executed_script() {
         let mut ctx = Context::<String>::default();
         // A failing script that would error if executed.

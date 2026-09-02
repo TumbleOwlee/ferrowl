@@ -113,7 +113,7 @@ mod tests {
         }
     }
 
-    /// MB-R-150 — a path-conflict checker attached to the cell short-circuits `Client::connect`
+    /// MB-R-200 — a path-conflict checker attached to the cell short-circuits `Client::connect`
     /// with `Error::PathConflict` before any OS-level `open_serial` attempt.
     #[tokio::test]
     async fn ut_client_connect_reports_path_conflict_before_open_attempt() {
