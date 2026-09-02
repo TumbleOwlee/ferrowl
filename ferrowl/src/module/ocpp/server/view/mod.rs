@@ -625,6 +625,7 @@ mod tests {
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
     use crate::module::ocpp::server::backend::ServerEvent;
     use ferrowl_ocpp::V1_6;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
 
     #[test]
     fn ut_rfid_store_device_roundtrip() {
@@ -1004,10 +1005,8 @@ mod tests {
     async fn write_device_alias_saves_like_wd() {
         use crate::module::view::CommandResult;
         let mut v = server_view();
-        let path = std::env::temp_dir().join(format!(
-            "ferrowl-ocpp-server-write-device-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_ocpp_server_view");
+        let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some((_, msg))) =
             v.handle_command_impl(&format!("write-device {p}")).await
@@ -1016,7 +1015,6 @@ mod tests {
         };
         assert!(msg.contains("Saved device config"), "unexpected: {msg}");
         assert!(path.exists());
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
@@ -1085,11 +1083,10 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let occupier = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = occupier.local_addr().unwrap().port();
+        let occupier = reserve_tcp_port();
 
         let mut v = server_view();
-        v.spec.port = port;
+        v.spec.port = occupier.port();
         v.spec.timeout_ms = Some(200);
         v.spec.reconnect = Some(true);
         v.refresh_impl().await;

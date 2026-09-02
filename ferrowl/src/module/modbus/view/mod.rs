@@ -1032,6 +1032,7 @@ mod tests {
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
     use ferrowl_ui::EventResult;
     use ratatui::Frame;
     use ratatui::buffer::Buffer;
@@ -1556,16 +1557,6 @@ mod tests {
         );
     }
 
-    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — mirrors
-    /// `instance/mod.rs`'s own `free_port()` fixture.
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     #[tokio::test]
     /// MB-R-137 — a client view against an unreachable TCP peer shows RECONNECTING (not
     /// DISCONNECTED) once its task starts backing off, distinguishing "task is running but not
@@ -1580,7 +1571,7 @@ mod tests {
             role: Role::Client,
             endpoint: Endpoint::Tcp {
                 ip: "127.0.0.1".into(),
-                port: free_port(),
+                port: reserve_tcp_port().release(),
             },
         };
         let module = super::super::ModbusModule::new(&spec, &device);
@@ -1614,8 +1605,8 @@ mod tests {
     /// DISCONNECTED) while its task backs off retrying the bind, per the occupier idiom
     /// established in `instance/mod.rs`'s `it_server_stop_on_backing_off_task_ends_promptly`.
     async fn it_modbus_server_view_shows_reconnecting_while_bind_backs_off() {
-        let port = free_port();
-        let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
 
         let mut device = empty_device();
         device.timeout_ms = Some(200);
@@ -1769,8 +1760,8 @@ mod tests {
     /// the device config the same way.
     async fn ut_write_device_alias_saves_like_wd() {
         let mut view = new_view();
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("ferrowl-write-device-{}.toml", std::process::id()));
+        let dir = reserve_temp_dir("ferrowl_modbus_view");
+        let path = dir.join("write-device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let result = view.handle_command(&format!("write-device {p}")).await;
         match result {
@@ -1780,7 +1771,6 @@ mod tests {
             _ => panic!(":write-device should be handled with a save message"),
         }
         assert!(path.exists());
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
@@ -1791,11 +1781,8 @@ mod tests {
         use crate::config::{Endpoint, ModuleSpec, Role};
         use crate::module::modbus::SerialPathRegistry;
 
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "ferrowl-reload-serial-paths-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_modbus_view");
+        let path = dir.join("reload-serial-paths.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
 
         // Produce a loadable device config file via the already-tested :write-device path.
@@ -1837,7 +1824,6 @@ mod tests {
         );
 
         let _ = view.handle_command("stop").await;
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]

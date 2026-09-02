@@ -907,6 +907,7 @@ mod tests {
     use super::*;
     use crate::dialog::tls_section::SkipVerifyChoice;
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use ferrowl_ui::traits::{IsFocus, SetFocus};
     use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 
@@ -921,8 +922,8 @@ mod tests {
         out
     }
 
-    fn tmp_file(name: &str) -> String {
-        let path = std::env::temp_dir().join(format!("ferrowl_ocpp_setup_test_{name}"));
+    fn tmp_file(dir: &TempDirGuard, name: &str) -> String {
+        let path = dir.join(name);
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
     }
@@ -1098,8 +1099,9 @@ mod tests {
     /// OC-R-127 — selector TLS and mTLS resolve to `Tls`/`Mutual` per role, with the resolved
     /// scheme `wss://`.
     fn ut_selector_tls_and_mtls_resolve_policy_and_wss_scheme() {
-        let cert = tmp_file("selector_cert.crt");
-        let key = tmp_file("selector_key.key");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "selector_cert.crt");
+        let key = tmp_file(&dir, "selector_key.key");
         let mut d = dialog_with(1); // Server
         d.tls_level.state.set_selection(TlsLevel::Tls.index());
         set_suggest_input(&mut d.tls.cert_file, &cert);
@@ -1477,7 +1479,8 @@ mod tests {
     /// OC-R-112 — `cert_file` set alone (not both), while `self_signed` is off, fails resolution
     /// rather than silently falling through to an inert listener.
     fn ut_server_tls_cert_file_alone_is_rejected() {
-        let cert = tmp_file("cert_alone.crt");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "cert_alone.crt");
         let mut d = dialog_with(1);
         d.tls_level.state.set_selection(TlsLevel::Tls.index());
         set_suggest_input(&mut d.tls.cert_file, &cert);
@@ -1499,8 +1502,9 @@ mod tests {
     #[test]
     /// UI-R-024 — a server TLS setup with valid files passes validation.
     fn ut_server_tls_valid_files_pass() {
-        let cert = tmp_file("cert.crt");
-        let key = tmp_file("key.key");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "cert.crt");
+        let key = tmp_file(&dir, "key.key");
         let mut d = dialog_with(1);
         d.tls_level.state.set_selection(TlsLevel::Tls.index());
         set_suggest_input(&mut d.tls.cert_file, &cert);
@@ -1511,8 +1515,9 @@ mod tests {
     #[test]
     /// UI-R-024 — a mutual-TLS server missing its client CA fails validation.
     fn ut_server_mutual_tls_missing_client_ca_is_rejected() {
-        let cert = tmp_file("cert2.crt");
-        let key = tmp_file("key2.key");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "cert2.crt");
+        let key = tmp_file(&dir, "key2.key");
         let mut d = dialog_with(1);
         d.tls_level.state.set_selection(TlsLevel::MutualTls.index());
         set_suggest_input(&mut d.tls.cert_file, &cert);
@@ -1541,7 +1546,8 @@ mod tests {
     /// the sub-dialog with nothing appended; a confirmed path is appended; DEL removes the
     /// selected entry, and draining to empty falls focus back to ADD.
     fn ut_client_ca_add_delete_lifecycle_via_outer_dialog() {
-        let ca = tmp_file("ocpp_outer_ca.pem");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let ca = tmp_file(&dir, "ocpp_outer_ca.pem");
         let mut d = dialog_with(1); // Server
         d.tls_level.state.set_selection(TlsLevel::MutualTls.index());
         d.tls.client_cert_skip_verify.state.set_selection(0); // Off: client-CA row shows
@@ -1577,8 +1583,6 @@ mod tests {
             TlsSectionFocus::CaDeleteButton,
             "draining the list must not strand focus on the now-hidden DEL button"
         );
-
-        let _ = std::fs::remove_file(&ca);
     }
 
     /// UI-R-026 — the client-CA add sub-dialog's path field, sharing `TlsSection`'s routing,
@@ -1715,9 +1719,10 @@ mod tests {
     #[test]
     /// UI-R-024 — Edit mode round-trips a mutual-TLS server config through the dialog.
     fn ut_edit_resolve_roundtrip_mutual_tls_server() {
-        let cert = tmp_file("rt_cert.crt");
-        let key = tmp_file("rt_key.key");
-        let cca = tmp_file("rt_cca.pem");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "rt_cert.crt");
+        let key = tmp_file(&dir, "rt_key.key");
+        let cca = tmp_file(&dir, "rt_cca.pem");
         let spec = OcppSpec {
             name: "csms-1".into(),
             version: OcppVersion::V2_0_1,
@@ -1807,8 +1812,9 @@ mod tests {
         off.render(area, &mut buf);
         assert!(!buffer_text(&buf).contains(needle));
 
-        let cert = tmp_file("hint_cert.crt");
-        let key = tmp_file("hint_key.key");
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup");
+        let cert = tmp_file(&dir, "hint_cert.crt");
+        let key = tmp_file(&dir, "hint_key.key");
         let mut tls = dialog_with(1);
         tls.tls_level.state.set_selection(TlsLevel::Tls.index());
         set_suggest_input(&mut tls.tls.cert_file, &cert);

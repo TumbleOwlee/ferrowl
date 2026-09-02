@@ -15,6 +15,7 @@ use ferrowl_modbus::{
     Address, Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId, Word,
 };
 use ferrowl_store::{CellKind, CellType, Memory, Range};
+use ferrowl_test_support::reserve_tcp_port;
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -44,15 +45,6 @@ async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::So
         sleep(Duration::from_millis(20)).await;
     }
     panic!("listener did not bind within 1s");
-}
-
-/// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn config(port: u16) -> tcp::Config {
@@ -152,7 +144,7 @@ fn client_mem() -> Mem {
 /// every read operation into the shared store, MB-R-035, executing write commands, MB-R-046,
 /// and terminating gracefully, MB-R-049), differing only in on-wire framing.
 async fn ascii_over_tcp_client_polls_server_and_executes_commands() {
-    let port = free_port();
+    let port = reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 
@@ -338,7 +330,7 @@ async fn ascii_over_tcp_unparseable_address_is_error() {
 /// mechanism is framing-generic (`F::is_broadcast`), so this proves the wiring carries the
 /// broadcast behavior over the AsciiOverTcp transport end-to-end.
 async fn ascii_over_tcp_client_skips_broadcast_poll_without_disconnect() {
-    let port = free_port();
+    let port = reserve_tcp_port().release();
     let srv_mem = server_mem();
 
     let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
@@ -388,7 +380,7 @@ async fn ascii_over_tcp_client_skips_broadcast_poll_without_disconnect() {
 /// transmitted fire-and-forget: the server applies it (MB-R-103) without the client waiting for
 /// (or the server sending) a response.
 async fn ascii_over_tcp_client_fire_and_forget_broadcast_write() {
-    let port = free_port();
+    let port = reserve_tcp_port().release();
     let mut srv_mem_raw = Memory::<Key<SlaveKey>>::default();
     let broadcast_key = Key::new(SlaveKey {
         slave_id: UnitId(0),
@@ -465,7 +457,7 @@ async fn ascii_over_tcp_server_sends_no_response_frame_for_broadcast_write() {
     };
     use tokio::io::AsyncReadExt;
 
-    let port = free_port();
+    let port = reserve_tcp_port().release();
     let mut srv_mem_raw = Memory::<Key<SlaveKey>>::default();
     let broadcast_key = Key::new(SlaveKey {
         slave_id: UnitId(0),

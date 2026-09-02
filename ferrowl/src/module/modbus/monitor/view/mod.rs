@@ -1797,6 +1797,7 @@ mod tests {
     use super::*;
     use crate::config::{Endpoint, Role};
     use ferrowl_modbus::UnitId;
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_ui::widgets::TableEntry as TableEntryTrait;
 
     fn spec() -> ModuleSpec {
@@ -2458,11 +2459,8 @@ mod tests {
         use crate::module::modbus::dialog::set_input;
         use ferrowl_util::convert::{Converter, FileType};
 
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "ferrowl-monitor-write-test-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_modbus_monitor_view");
+        let path = dir.join("write-test.toml");
         let path_str = path.to_str().unwrap().to_string();
 
         let mut v = view();
@@ -2482,7 +2480,6 @@ mod tests {
 
         let loaded: MonitorDeviceConfig =
             Converter::load(&path_str, FileType::Toml).expect("save must succeed");
-        let _ = std::fs::remove_file(&path);
         assert!(
             loaded.definitions.iter().any(|d| d.name == "power"),
             "an interpretation added purely at runtime must be persisted by :write"
@@ -2496,11 +2493,8 @@ mod tests {
     async fn ut_reload_carries_serial_paths_registry_to_new_module() {
         use crate::module::modbus::SerialPathRegistry;
 
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!(
-            "ferrowl-monitor-reload-serial-paths-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_modbus_monitor_view");
+        let path = dir.join("reload-serial-paths.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
 
         // Produce a loadable device config file via the already-tested :write-device path.
@@ -2535,7 +2529,6 @@ mod tests {
         );
 
         let _ = v.handle_command("stop").await;
-        let _ = std::fs::remove_file(&path);
     }
 
     /// MB-R-150 — the Edit-confirm reconfigure path (`confirm_edit`) also rebuilds `self.module`

@@ -809,6 +809,7 @@ mod tests {
     use super::*;
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
     use ferrowl_ocpp::{V1_6, V2_0_1};
+    use ferrowl_test_support::reserve_temp_dir;
 
     fn client_view<V: ClientVersion>(version: OcppVersion) -> ClientView<V> {
         let spec = OcppSpec {
@@ -1207,10 +1208,8 @@ mod tests {
     async fn write_device_alias_saves_like_wd() {
         use crate::module::view::CommandResult;
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
-        let path = std::env::temp_dir().join(format!(
-            "ferrowl-ocpp-client-write-device-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
+        let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some((_, msg))) =
             v.handle_command_impl(&format!("write-device {p}")).await
@@ -1219,7 +1218,6 @@ mod tests {
         };
         assert!(msg.contains("Saved device config"), "unexpected: {msg}");
         assert!(path.exists());
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
@@ -1236,10 +1234,8 @@ mod tests {
             s.cs_set("Model", ValueType::String("Acme-EVSE".into()));
         });
 
-        let path = std::env::temp_dir().join(format!(
-            "ferrowl-ocpp-client-boot-identity-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
+        let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await
         else {
@@ -1256,8 +1252,6 @@ mod tests {
             assert!(matches!(s.cs_get("Vendor"), Some(ValueType::String(v)) if v == "Acme"));
             assert!(matches!(s.cs_get("Model"), Some(ValueType::String(v)) if v == "Acme-EVSE"));
         });
-
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
@@ -1276,10 +1270,8 @@ mod tests {
             s.cs_set("MeterType", ValueType::String("MT-X".into()));
         });
 
-        let path = std::env::temp_dir().join(format!(
-            "ferrowl-ocpp-client-meter-identity-{}.toml",
-            std::process::id()
-        ));
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
+        let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await
         else {
@@ -1302,7 +1294,5 @@ mod tests {
             );
             assert!(matches!(s.cs_get("MeterType"), Some(ValueType::String(v)) if v == "MT-X"));
         });
-
-        let _ = std::fs::remove_file(&path);
     }
 }

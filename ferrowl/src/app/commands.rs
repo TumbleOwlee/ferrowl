@@ -194,20 +194,8 @@ mod tests {
     use crate::app::Focus;
     use crate::app::testkit::{MockView, build_app};
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_test_support::reserve_temp_dir;
     use serde_json::json;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    /// A fresh, empty temp directory unique to this test run (so a `:write` there can be checked
-    /// for exactly the files it produced).
-    fn fresh_dir(tag: &str) -> PathBuf {
-        static SEQ: AtomicU64 = AtomicU64::new(0);
-        let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("ferrowl_{tag}_{}_{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
 
     #[tokio::test]
     /// UI-R-015 — in command mode `Esc` cancels (discards the buffer, restores content focus),
@@ -290,7 +278,7 @@ mod tests {
     /// CS-R-030 — `:write` saves the current instances as a session file, defaulting the target to
     /// `session.toml` and choosing the encoding from the path extension.
     async fn ut_write_defaults_to_session_toml_and_encodes_by_extension() {
-        let dir = fresh_dir("cs030");
+        let dir = reserve_temp_dir("ferrowl_cs030");
 
         // Default target is session.toml, resolved relative to the working directory.
         let toml_path = dir.join("session.toml");
@@ -318,15 +306,13 @@ mod tests {
             text.trim_start().starts_with('{'),
             "JSON encoding from .json"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     /// CS-R-031 — a save persists configuration only, never live runtime state: the written
     /// modules are exactly each view's config spec.
     async fn ut_write_persists_config_not_runtime_state() {
-        let dir = fresh_dir("cs031");
+        let dir = reserve_temp_dir("ferrowl_cs031");
         let spec = json!({"type": "mock", "addr": "127.0.0.1:5020"});
         let (v, _h) = MockView::pair("m");
         let mut app = build_app(vec![v.with_session_spec(spec.clone()).boxed()]);
@@ -340,22 +326,20 @@ mod tests {
             vec![spec],
             "saved modules are the view's config spec with no runtime fields added"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     /// CS-R-032 — a `:write` writes the session file and nothing else: no device-config file is
     /// emitted alongside it.
     async fn ut_write_emits_only_the_session_file() {
-        let dir = fresh_dir("cs032");
+        let dir = reserve_temp_dir("ferrowl_cs032");
         let (v, _h) = MockView::pair("m");
         let mut app = build_app(vec![v.with_session_spec(json!({"type": "mock"})).boxed()]);
         let path = dir.join("only.toml");
         app.run_command(&format!("write {}", path.to_str().unwrap()))
             .await;
 
-        let files: Vec<String> = std::fs::read_dir(&dir)
+        let files: Vec<String> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
@@ -364,7 +348,5 @@ mod tests {
             vec!["only.toml".to_string()],
             "only the session file"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

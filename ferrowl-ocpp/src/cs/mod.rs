@@ -427,19 +427,12 @@ mod tests {
         }
     }
 
-    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener) — nothing
-    /// answers on it afterward, standing in for a refused dial.
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     fn config(reconnect: bool) -> Arc<RwLock<Config>> {
         Arc::new(RwLock::new(Config {
-            url: format!("ws://127.0.0.1:{}/CS001", free_port()),
+            url: format!(
+                "ws://127.0.0.1:{}/CS001",
+                ferrowl_test_support::reserve_tcp_port().release()
+            ),
             timeout_ms: 1_000,
             basic_auth: None,
             tls: Default::default(),

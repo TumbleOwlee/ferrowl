@@ -28,6 +28,8 @@ rcgen = { workspace = true }
 ring = { workspace = true }
 
 [dev-dependencies]
+# Held-port and per-run temp-dir guards for tests (NF-R-043/044).
+ferrowl-test-support = { path = "../ferrowl-test-support" }
 # Async test harness for the `handle_request` server logic (the crate's own tokio dep is
 # `time`-only since the library never spins up a runtime itself). `rt-multi-thread` lets the TCP
 # loopback integration test run its client and server tasks as true background work while the

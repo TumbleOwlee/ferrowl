@@ -12,6 +12,7 @@ use std::time::Duration;
 use ferrowl_modbus::udp;
 use ferrowl_modbus::{Error, ServerCommand, SlaveKey};
 use ferrowl_store::Memory;
+use ferrowl_test_support::reserve_udp_port;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address as RmAddress, Client as RmClient, Quantity as RmQuantity, UdpConfig, connect_udp,
@@ -23,16 +24,6 @@ type Mem = Arc<MemLock<Memory<ferrowl_modbus::Key<SlaveKey>>>>;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// An OS-assigned free UDP port (bind to :0, read the port, drop the socket).
-async fn free_udp_port() -> u16 {
-    tokio::net::UdpSocket::bind("127.0.0.1:0")
-        .await
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn empty_mem() -> Mem {
@@ -55,10 +46,8 @@ fn config(port: u16, reconnect: bool) -> udp::Config {
 /// does not fail the server's start: `spawn()` returns `Ok(handle)`, the task keeps retrying
 /// the bind on the shared backoff policy, and once the port frees up a real request round-trips.
 async fn udp_server_bind_failure_retries_then_succeeds() {
-    let port = free_udp_port().await;
-    let occupier = tokio::net::UdpSocket::bind(("127.0.0.1", port))
-        .await
-        .unwrap();
+    let occupier = reserve_udp_port();
+    let port = occupier.port();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) =
@@ -99,10 +88,8 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
 /// MB-R-120, MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
 /// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the bind error.
 async fn udp_server_bind_failure_reconnect_false_ends_task() {
-    let port = free_udp_port().await;
-    let _occupier = tokio::net::UdpSocket::bind(("127.0.0.1", port))
-        .await
-        .unwrap();
+    let occupier = reserve_udp_port();
+    let port = occupier.port();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) = udp::ServerBuilder::<SlaveKey>::new(
@@ -124,10 +111,8 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
 /// MB-R-133 — a `ServerCommand::Terminate` sent while the Udp server is backing off from a bind
 /// failure ends the task gracefully (`Ok(())`), not with the bind error.
 async fn udp_server_terminate_while_backing_off_ends_task_ok() {
-    let port = free_udp_port().await;
-    let _occupier = tokio::net::UdpSocket::bind(("127.0.0.1", port))
-        .await
-        .unwrap();
+    let occupier = reserve_udp_port();
+    let port = occupier.port();
 
     let (tx, rx) = mpsc::channel::<ServerCommand>(1);
     let (handle, _bound_addr) =

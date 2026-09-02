@@ -383,6 +383,7 @@ pub(crate) fn network_log_level(s: &str) -> crate::app::Level {
 mod tests {
     use super::*;
     use crate::config::Role;
+    use ferrowl_test_support::reserve_temp_dir;
 
     fn spec(endpoint: Endpoint) -> ModuleSpec {
         ModuleSpec {
@@ -901,8 +902,9 @@ mod tests {
             log_file: None,
             definitions: module.definitions(),
         };
-        let path = std::env::temp_dir()
-            .join("ferrowl_monitor_same_name_roundtrip.toml")
+        let dir = reserve_temp_dir("ferrowl_modbus_monitor_module");
+        let path = dir
+            .join("same-name-roundtrip.toml")
             .to_string_lossy()
             .into_owned();
         ferrowl_util::convert::Converter::save(

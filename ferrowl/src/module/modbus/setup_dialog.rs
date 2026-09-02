@@ -979,6 +979,7 @@ fn select_u8(state: &mut SelectionState<U8Choice>, current: Option<u8>) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_ui::traits::{IsFocus, SetFocus};
 
     fn buffer_text(buf: &Buffer) -> String {
@@ -1845,8 +1846,9 @@ mod tests {
     /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
     /// (nothing was cleared, only excluded while On).
     fn ut_resolve_toggle_self_signed_back_off_restores_cert_key() {
-        let cert = std::env::temp_dir().join("ferrowl_modbus_setup_test_s.crt");
-        let key = std::env::temp_dir().join("ferrowl_modbus_setup_test_s.key");
+        let dir = reserve_temp_dir("ferrowl_modbus_setup");
+        let cert = dir.join("s.crt");
+        let key = dir.join("s.key");
         std::fs::write(&cert, b"").unwrap();
         std::fs::write(&key, b"").unwrap();
         let cert = cert.to_str().unwrap().to_string();
@@ -2090,11 +2092,9 @@ mod tests {
     /// empty falls focus back to ADD.
     #[test]
     fn ut_client_ca_add_delete_lifecycle_via_outer_dialog() {
+        let dir = reserve_temp_dir("ferrowl_modbus_setup");
         let ca = {
-            let path = std::env::temp_dir().join(format!(
-                "ferrowl_modbus_setup_ca_{}.pem",
-                std::process::id()
-            ));
+            let path = dir.join("ca.pem");
             std::fs::write(&path, b"").unwrap();
             path.to_str().unwrap().to_string()
         };
@@ -2127,8 +2127,6 @@ mod tests {
             TlsSectionFocus::CaDeleteButton,
             "draining the list must not strand focus on the now-hidden DEL button"
         );
-
-        let _ = std::fs::remove_file(&ca);
     }
 
     /// MB-R-136 — an empty client-CA list hides the DEL button (ADD alone takes the full row)

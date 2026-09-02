@@ -49,3 +49,5 @@ futures-util = { workspace = true }
 mlua = { workspace = true }
 
 [dev-dependencies]
+# Held-port and per-run temp-dir guards for tests (NF-R-043/044).
+ferrowl-test-support = { path = "../ferrowl-test-support" }

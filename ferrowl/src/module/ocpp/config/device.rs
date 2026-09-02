@@ -259,6 +259,7 @@ impl OcppDeviceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_util::convert::{Converter, FileType};
 
     #[test]
@@ -335,8 +336,9 @@ mod tests {
                 },
             },
         };
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
-            let path = std::env::temp_dir().join(format!("ferrowl_ocpp_device_test.{ext}"));
+            let path = dir.join(format!("device.{ext}"));
             let path = path.to_str().unwrap();
             Converter::save(&cfg, path, ty).expect("save");
             let back: OcppDeviceConfig = Converter::load(path, ty).expect("load");
@@ -400,7 +402,8 @@ mod tests {
                 },
             },
         };
-        let path = std::env::temp_dir().join("ferrowl_ocpp_security_both_roles_test.toml");
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
+        let path = dir.join("security_both_roles.toml");
         let path = path.to_str().unwrap();
         Converter::save(&cfg, path, FileType::Toml).expect("save");
         let raw = std::fs::read_to_string(path).unwrap();
@@ -529,8 +532,9 @@ mod tests {
             },
             ..Default::default()
         };
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
-            let path = std::env::temp_dir().join(format!("ferrowl_ocpp_security_test.{ext}"));
+            let path = dir.join(format!("security.{ext}"));
             let path = path.to_str().unwrap();
             Converter::save(&cfg, path, ty).expect("save");
             let back: OcppSecurityConfig = Converter::load(path, ty).expect("load");
@@ -650,9 +654,9 @@ mod tests {
             extra_headers: vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()],
             ..Default::default()
         };
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
-            let path =
-                std::env::temp_dir().join(format!("ferrowl_ocpp_device_extra_headers_test.{ext}"));
+            let path = dir.join(format!("extra_headers.{ext}"));
             let path = path.to_str().unwrap();
             Converter::save(&cfg, path, ty).expect("save");
             let back: OcppDeviceConfig = Converter::load(path, ty).expect("load");

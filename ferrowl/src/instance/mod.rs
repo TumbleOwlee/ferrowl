@@ -542,6 +542,7 @@ impl<T: KeyParams> Instance<T> {
 mod tests {
     use super::*;
     use ferrowl_modbus::UnitId;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_udp_port};
 
     use std::sync::Arc;
 
@@ -555,22 +556,13 @@ mod tests {
         |_s: String| async move {}
     }
 
-    /// An OS-assigned free TCP port (bind to :0, read the port, drop the listener).
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     /// A `tcp::Config` pointed at a local port nothing is listening on. `start()` still
     /// succeeds (spawn itself never touches the network) — only the spawned task's
     /// internal reconnect loop sees the refused connection.
     fn dead_tcp_config() -> tcp::Config {
         tcp::Config {
             ip: "127.0.0.1".to_string(),
-            port: free_port(),
+            port: reserve_tcp_port().release(),
             timeout_ms: 200,
             delay_ms: 0,
             interval_ms: 0,
@@ -702,16 +694,6 @@ mod tests {
         instance.stop().await.expect("cleanup stop");
     }
 
-    /// An OS-assigned free UDP port (bind to :0, read the port, drop the socket).
-    async fn free_udp_port() -> u16 {
-        tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
-
     fn dead_udp_config(port: u16) -> ferrowl_modbus::udp::Config {
         ferrowl_modbus::udp::Config {
             ip: "127.0.0.1".to_string(),
@@ -727,7 +709,7 @@ mod tests {
     /// against a dead peer), reports active, and stops gracefully like every other transport.
     #[tokio::test]
     async fn udp_client_starts_and_stops() {
-        let port = free_udp_port().await;
+        let port = reserve_udp_port().release();
         let mut instance = Instance::with_udp_client(config::ClientConfig {
             config: Arc::new(RwLock::new(dead_udp_config(port))),
             operations: Arc::new(RwLock::new(vec![])),
@@ -745,7 +727,7 @@ mod tests {
     /// every other transport.
     #[tokio::test]
     async fn udp_server_starts_and_stops() {
-        let port = free_udp_port().await;
+        let port = reserve_udp_port().release();
         let mut instance = Instance::with_udp_server(config::ServerConfig {
             config: Arc::new(RwLock::new(dead_udp_config(port))),
             memory: Arc::new(MemLock::new(
@@ -856,7 +838,7 @@ mod tests {
     /// like every other transport.
     #[tokio::test]
     async fn ascii_over_tcp_server_starts_and_stops() {
-        let port = free_port();
+        let port = reserve_tcp_port().release();
         let mut instance = Instance::with_ascii_over_tcp_server(
             config::ServerConfig {
                 config: Arc::new(RwLock::new(tcp::Config {
@@ -959,7 +941,7 @@ mod tests {
     /// message.
     #[tokio::test]
     async fn it_server_terminate_ends_task_gracefully() {
-        let port = free_port();
+        let port = reserve_tcp_port().release();
         let mut instance = Instance::with_tcp_server(
             config::ServerConfig {
                 config: Arc::new(RwLock::new(tcp::Config {
@@ -1000,8 +982,8 @@ mod tests {
     /// `ferrowl-modbus` in isolation, already covered there).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_server_stop_on_backing_off_task_ends_promptly() {
-        let port = free_port();
-        let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
         let mut instance = Instance::with_tcp_server(
             config::ServerConfig {
                 config: Arc::new(RwLock::new(tcp::Config {

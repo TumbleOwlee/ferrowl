@@ -8,7 +8,7 @@ map, not the spec.
 ## Workspace
 
 Ferrowl is a Cargo workspace (resolver `"3"`, edition 2024) building one binary,
-`ferrowl`, from thirteen crates. All thirteen are versioned in lockstep; none is
+`ferrowl`, from fourteen crates. All fourteen are versioned in lockstep; none is
 published independently.
 
 <p align="center">
@@ -30,11 +30,12 @@ published independently.
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua and JSON). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
 | `ferrowl-util` | Shared helpers: config (de)serialization, tracked tokio task spawning, small macros and traits, and the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops. |
+| `ferrowl-test-support` | Dev-only test fixtures: held-port guards (`reserve_tcp_port`/`reserve_udp_port`) and per-run temp directories (`reserve_temp_dir`). `publish = false`, a dev-dependency of the crates that test against sockets or the filesystem; no production code depends on it. |
 
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),
 **OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`),
 **UI** (`ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax`),
-**Infra** (`ferrowl-ring`, `ferrowl-util`), and the **binary** (`ferrowl`) that ties
+**Infra** (`ferrowl-ring`, `ferrowl-util`, `ferrowl-test-support` (dev-only)), and the **binary** (`ferrowl`) that ties
 them together.
 
 ## Runtime data flow

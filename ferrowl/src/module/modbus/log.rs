@@ -146,19 +146,16 @@ mod tests {
     /// UI-R-045 — a file sink opens against a valid directory.
     fn ut_open_sink_success_with_valid_dir() {
         use super::{FileSink, open_sink};
+        use ferrowl_test_support::reserve_temp_dir;
 
         let sink: FileSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let temp_dir = std::env::temp_dir();
-        let base = temp_dir
-            .join("ferrowl_test.log")
-            .to_string_lossy()
-            .into_owned();
+        let temp_dir = reserve_temp_dir("ferrowl_modbus_log");
+        let base = temp_dir.join("test.log").to_string_lossy().into_owned();
         let result = open_sink(&sink, Some(&base), "test");
         assert!(result.is_ok());
         let guard = sink.lock().unwrap();
         assert!(guard.is_some());
         drop(guard);
-        let _ = std::fs::remove_file(temp_dir.join("ferrowl_test.test.log"));
     }
 
     #[test]

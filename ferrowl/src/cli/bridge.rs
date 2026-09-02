@@ -109,6 +109,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
 mod tests {
     use super::*;
     use crate::cli::BridgeArgs;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
 
     fn base_args() -> BridgeArgs {
         BridgeArgs {
@@ -164,14 +165,6 @@ mod tests {
     // its own richer end-to-end/log-file/exit-on-error scenarios live here too, in-process,
     // rather than in `ferrowl/tests/it_bridge.rs` (which instead drives the compiled binary
     // as a subprocess, mirroring `tests/headless.rs`'s smoke tests).
-
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
-    }
 
     async fn seeded_downstream_server(
         port: u16,
@@ -302,10 +295,10 @@ mod tests {
     /// (CL-R-032 family via BR-R-013).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_bridge_end_to_end_relays_a_real_request() {
-        let downstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
         let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 77).await;
 
-        let upstream_port = free_port();
+        let upstream_port = reserve_tcp_port().release();
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),
             downstream: Some(descriptor(downstream_port)),
@@ -339,8 +332,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_bridge_exit_on_error_flags_bridge_prefixed_line() {
         // Nothing listens on this downstream port.
-        let downstream_port = free_port();
-        let upstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
+        let upstream_port = reserve_tcp_port().release();
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),
             downstream: Some(descriptor(downstream_port)),
@@ -364,16 +357,13 @@ mod tests {
     /// survives, new bridge log lines are appended.
     #[tokio::test]
     async fn ut_bridge_log_file_appended_not_truncated() {
-        let log_file = std::env::temp_dir()
-            .join("ferrowl_cl_bridge_append.log")
-            .to_str()
-            .unwrap()
-            .to_string();
+        let dir = reserve_temp_dir("ferrowl_cl_bridge");
+        let log_file = dir.join("append.log").to_str().unwrap().to_string();
         std::fs::write(&log_file, "PREEXISTING\n").unwrap();
 
-        let downstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
         let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 5).await;
-        let upstream_port = free_port();
+        let upstream_port = reserve_tcp_port().release();
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),
             downstream: Some(descriptor(downstream_port)),
@@ -402,9 +392,9 @@ mod tests {
         let expected_path = home.join(&filename);
         let _ = std::fs::remove_file(&expected_path);
 
-        let downstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
         let (_downstream_tx, _downstream) = seeded_downstream_server(downstream_port, 5).await;
-        let upstream_port = free_port();
+        let upstream_port = reserve_tcp_port().release();
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),
             downstream: Some(descriptor(downstream_port)),

@@ -526,6 +526,7 @@ impl<V: ClientVersion> ClientView<V> {
 mod tests {
     use std::sync::Arc;
 
+    use ferrowl_test_support::reserve_tcp_port;
     use parking_lot::Mutex;
     use tokio::sync::Notify;
 
@@ -589,12 +590,8 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        // A bound-then-dropped ephemeral port: nothing answers on it afterward.
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        // A reserved-then-released ephemeral port: nothing answers on it afterward.
+        let port = reserve_tcp_port().release();
         let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
         v.spec.timeout_ms = Some(200);
         v.spec.reconnect = Some(true);

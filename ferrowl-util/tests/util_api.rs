@@ -3,8 +3,9 @@
 //! trait, and the tracked-task `tokio::spawn_detach`/`join_all` pair.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use ferrowl_test_support::reserve_temp_dir;
 use ferrowl_util::convert::{Converter, Error, FileType};
 use ferrowl_util::{Expect, str};
 use serde::{Deserialize, Serialize};
@@ -24,49 +25,37 @@ fn sample() -> Config {
     }
 }
 
-/// A unique temp path so parallel test binaries never collide; removed on drop.
-struct TempPath(String);
-impl TempPath {
-    fn new(ext: &str) -> Self {
-        static N: AtomicU32 = AtomicU32::new(0);
-        let p = std::env::temp_dir().join(format!(
-            "ferrowl-util-{}-{}.{ext}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        TempPath(p.to_string_lossy().into_owned())
-    }
-}
-impl Drop for TempPath {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
 #[test]
 fn it_save_then_load_roundtrips_toml() {
-    let path = TempPath::new("toml");
-    Converter::save(&sample(), &path.0, FileType::Toml).expect("saves TOML");
-    let back: Config = Converter::load(&path.0, FileType::Toml).expect("loads TOML");
+    let dir = reserve_temp_dir("ferrowl_util_api");
+    let path = dir.join("sample.toml");
+    let path = path.to_str().unwrap();
+    Converter::save(&sample(), path, FileType::Toml).expect("saves TOML");
+    let back: Config = Converter::load(path, FileType::Toml).expect("loads TOML");
     assert_eq!(back, sample());
 }
 
 #[test]
 fn it_save_then_load_roundtrips_json() {
-    let path = TempPath::new("json");
-    Converter::save(&sample(), &path.0, FileType::Json).expect("saves JSON");
-    let back: Config = Converter::load(&path.0, FileType::Json).expect("loads JSON");
+    let dir = reserve_temp_dir("ferrowl_util_api");
+    let path = dir.join("sample.json");
+    let path = path.to_str().unwrap();
+    Converter::save(&sample(), path, FileType::Json).expect("saves JSON");
+    let back: Config = Converter::load(path, FileType::Json).expect("loads JSON");
     assert_eq!(back, sample());
 }
 
 #[test]
 fn it_convert_toml_to_json_preserves_data() {
-    let toml = TempPath::new("toml");
-    let json = TempPath::new("json");
-    Converter::save(&sample(), &toml.0, FileType::Toml).expect("saves source TOML");
-    Converter::convert::<Config>(&toml.0, FileType::Toml, &json.0, FileType::Json)
+    let dir = reserve_temp_dir("ferrowl_util_api");
+    let toml = dir.join("sample.toml");
+    let toml = toml.to_str().unwrap();
+    let json = dir.join("sample.json");
+    let json = json.to_str().unwrap();
+    Converter::save(&sample(), toml, FileType::Toml).expect("saves source TOML");
+    Converter::convert::<Config>(toml, FileType::Toml, json, FileType::Json)
         .expect("converts TOML to JSON");
-    let back: Config = Converter::load(&json.0, FileType::Json).expect("loads converted JSON");
+    let back: Config = Converter::load(json, FileType::Json).expect("loads converted JSON");
     assert_eq!(back, sample());
 }
 

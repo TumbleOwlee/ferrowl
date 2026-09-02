@@ -100,6 +100,7 @@ mod tests {
     use crate::bridge::spawn_tcp_downstream;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::{CellKind, CellType, Memory, Range};
+    use ferrowl_test_support::reserve_tcp_port;
     use parking_lot::RwLock as MemLock;
     use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue};
     use std::sync::Arc;
@@ -122,14 +123,6 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("listener did not bind within 1s");
-    }
-
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
     }
 
     fn config(port: u16) -> Config {
@@ -155,10 +148,10 @@ mod tests {
     /// not silently swallowed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_upstream_tcp_bind_failure_is_reported() {
-        let port = free_port();
-        let _occupier = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
 
-        let downstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
         let downstream = spawn_tcp_downstream(config(downstream_port), sink());
         let service = BridgeService::new(downstream.into_handle(), None, sink());
 
@@ -170,7 +163,7 @@ mod tests {
     /// downstream TCP server and returns its answer unmodified.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_upstream_tcp_relays_a_real_request_end_to_end() {
-        let downstream_port = free_port();
+        let downstream_port = reserve_tcp_port().release();
         let mut mem = Memory::<crate::Key<crate::SlaveKey>>::default();
         mem.add_ranges(
             key(RegKind::HoldingRegister),
@@ -199,7 +192,7 @@ mod tests {
         let downstream = spawn_tcp_downstream(config(downstream_port), sink());
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let upstream_port = free_port();
+        let upstream_port = reserve_tcp_port().release();
         let service = BridgeService::new(downstream.into_handle(), None, sink());
         let _upstream = run(&config(upstream_port), service, sink())
             .await
