@@ -7,7 +7,7 @@ description: Independent second-developer review of an open PR against its ticke
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks (spec fidelity, standards, TDD honesty) and how (`spec-reviewer` agent, never the implementer). This skill supplies gate 3's *inputs* for a reviewer outside the implementing session; it restates no criteria. Conflict → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks (spec fidelity, standards, TDD honesty, docs currency) and how (`spec-reviewer` agent, never the implementer). This skill supplies gate 3's *inputs* for a reviewer outside the implementing session; it restates no criteria. Conflict → `.claude/AGENTS.workflow.md` wins.
 
 ## Gather inputs — no shared session, no artifacts dir
 

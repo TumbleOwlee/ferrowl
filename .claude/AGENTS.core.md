@@ -1,4 +1,4 @@
-Excerpt of AGENTS.md — spec-driven core, TDD order, build/test/lint, conventions, scope boundaries. Full gates and task board: ../AGENTS.md. Regenerate by re-copying these sections when they change.
+Excerpt of AGENTS.md — spec-driven core, TDD order, build/test/lint, conventions, scope boundaries. Router: ../AGENTS.md. Gates and task board: AGENTS.workflow.md (orchestrator only, never read by AGENTS.core.md readers). Regenerate by re-copying these sections when they change.
 
 ## Spec-driven
 
