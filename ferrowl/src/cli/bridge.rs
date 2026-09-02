@@ -290,7 +290,7 @@ mod tests {
         std::sync::Arc::new(parking_lot::RwLock::new(mem))
     }
 
-    /// BR-R-001..BR-R-007, BR-R-013 — a real downstream server is relayed through to by a real
+    /// BR-R-001, BR-R-002, BR-R-003, BR-R-004, BR-R-005, BR-R-006, BR-R-007, BR-R-013, BR-R-025 — a real downstream server is relayed through to by a real
     /// upstream bridge connection, and the run exits 0 on its `--duration` deadline
     /// (CL-R-032 family via BR-R-013).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(exit_code, 0);
     }
 
-    /// BR-R-013 — with `--exit-on-error` set and no downstream listening, a forwarded request
+    /// BR-R-026 — with `--exit-on-error` set and no downstream listening, a forwarded request
     /// answers `GatewayPathUnavailable` and logs a `[bridge]`-prefixed line, making the run
     /// exit 3.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// NF-R-042 — `--log-file` expands a leading `~` to the home directory.
+    /// NF-R-054 — `--log-file` expands a leading `~` to the home directory.
     async fn ut_bridge_log_file_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let filename = format!("ferrowl_cl_bridge_tilde_{}.log", std::process::id());

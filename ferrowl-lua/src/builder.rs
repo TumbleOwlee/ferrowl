@@ -39,7 +39,7 @@ where
         }
     }
 
-    /// SC-R-034 / SC-R-012 — attach a sim thread's stop flag so the execution hook installed in
+    /// SC-R-034, SC-R-012 — attach a sim thread's stop flag so the execution hook installed in
     /// `build()` can unwind a runaway script promptly instead of only observing the flag between
     /// cycles. Only a sim-thread call site passes this; an on-demand run (SC-R-035) omits it.
     pub fn with_stop_flag(mut self, stop: Arc<AtomicBool>) -> Self {

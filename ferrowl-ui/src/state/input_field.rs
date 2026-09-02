@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-048 — editing is character-based: Backspace removes one multi-byte character.
+    /// UI-R-087 — editing is character-based: Backspace removes one multi-byte character.
     fn multibyte_backspace_removes_one_character() {
         let mut s = field();
         type_str(&mut s, "aé语");
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-048 — a focused input consumes a filtered-out printable key so it never leaks to app shortcuts.
+    /// UI-R-086 — a focused input consumes a filtered-out printable key so it never leaks to app shortcuts.
     fn rejected_char_still_returns_consumed() {
         let mut s = InputFieldStateBuilder::default()
             .allowed_for::<u32>()

@@ -567,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-041 — a trailing `le` type suffix splits into an explicit little-endian byte order.
+    /// CS-R-062 — a trailing `le` type suffix splits into an explicit little-endian byte order.
     fn ut_parse_le_type() {
         let (vt, endian) = parse_type("F32le").unwrap();
         assert_eq!(vt, ValueType::F32);
@@ -705,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-041 — a full legacy sample migrates through the transformation contract.
+    /// CS-R-041, CS-R-063, CS-R-064, CS-R-065 — a full legacy sample migrates through the transformation contract: `on_update` folds into a named `scripts` entry, `contiguous_memory` merges into `read_ranges`, `delay_after_connect_ms` becomes `delay_ms`.
     fn ut_convert_full_sample() {
         let (device, warnings) = convert(legacy_sample());
 

@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
+    /// UI-R-085 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     fn log_ring_persists_lines_to_file_sink() {
         let dir = reserve_temp_dir("ferrowl_logring");
         let base = dir.join("test.log");
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `LogRing::set_log_file` resolves a `~`-prefixed base against the real home
+    /// NF-R-054 — `LogRing::set_log_file` resolves a `~`-prefixed base against the real home
     /// directory (via `view::log::module_log_path`, itself tilde-aware).
     fn ut_log_ring_set_log_file_expands_tilde() {
         let base = "~/ferrowl_nfr042_logring_test.log";
@@ -940,7 +940,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-150 — "recovers automatically once the conflicting instance stops": once one of two
+    /// MB-R-200 — "recovers automatically once the conflicting instance stops": once one of two
     /// Rtu server instances sharing a path is stopped, the surviving instance's own next attempt
     /// does not report a conflict.
     async fn ut_stopping_one_instance_lets_the_other_recover() {

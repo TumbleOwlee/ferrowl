@@ -472,7 +472,7 @@ mod tests {
     // A failing `C_Test` assertion surfaces through the same `call_all` error path the sim loop
     // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
     #[test]
-    /// SC-R-032 — a failed C_Test assertion surfaces through the sim's collected-error path.
+    /// SC-R-032, SC-R-051 — a failed C_Test assertion surfaces through the sim's collected-error path with its `assertion failed:` prefix intact.
     fn ut_sim_script_test_assertion_failure_surfaces() {
         let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
         let mut context = ContextBuilder::<String>::default()
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-035 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
+    /// SC-R-049 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
     /// keys its exit code off `[sim]` (CL-R-031) and must not see an interactive test run.
     fn ut_run_script_once_error_logged_with_run_prefix() {
         let log = script_log();

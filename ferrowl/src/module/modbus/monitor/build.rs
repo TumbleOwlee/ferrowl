@@ -140,7 +140,7 @@ mod tests {
         );
     }
 
-    /// MB-R-140 — every non-serial transport is rejected with a role/transport compatibility
+    /// MB-R-191 — every non-serial transport is rejected with a role/transport compatibility
     /// error, naming the rejected transport.
     #[test]
     fn ut_endpoint_to_monitor_config_rejects_tcp_rtu_over_tcp_udp_ascii_over_tcp() {

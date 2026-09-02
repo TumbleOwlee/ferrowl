@@ -785,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135/OC-R-111 — toggling Self-Signed On excludes stale cert_file/key_file text from
+    /// MB-R-135, OC-R-111, OC-R-144 — toggling Self-Signed On excludes stale cert_file/key_file text from
     /// the extracted inputs, even though the widgets' stored text is untouched.
     fn ut_extract_self_signed_excludes_stale_cert_key_text() {
         let mut section = TlsSection::new();
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135/OC-R-111 — toggling Skip-Verify On hides the Root Store toggle and the shared
+    /// MB-R-135, MB-R-203, OC-R-111, OC-R-146, OC-R-155 — toggling Skip-Verify On hides the Root Store toggle and the shared
     /// CA list (`show_root_store_row`/`show_peer_verify_row` both false), while the extracted
     /// list/toggle state is preserved on the widgets (only excluded downstream, by
     /// each dialog's own `TlsLevel::build_config`).
@@ -827,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Skip-Verify back Off restores the previously entered Root Store
+    /// MB-R-186, OC-R-146 — toggling Skip-Verify back Off restores the previously entered Root Store
     /// selection and CA list, since hiding never clears them.
     fn ut_toggle_skip_verify_back_off_restores_list_and_toggle() {
         let mut section = TlsSection::new();
@@ -847,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-135 — toggling Self-Signed back Off restores the previously entered cert/key paths
+    /// MB-R-186 — toggling Self-Signed back Off restores the previously entered cert/key paths
     /// (nothing was cleared, only excluded while On).
     fn ut_extract_toggle_self_signed_back_off_restores_cert_key() {
         let dir = reserve_temp_dir("ferrowl_tls_section");
@@ -1071,7 +1071,7 @@ mod tests {
         assert_eq!(section.focus, TlsSectionFocus::CaAddButton);
     }
 
-    /// MB-R-136/MB-R-156 — the shared CA list is the exact same `ca_files`/`ca_add_button`/
+    /// MB-R-136, MB-R-156 — the shared CA list is the exact same `ca_files`/`ca_add_button`/
     /// `ca_delete_button` fields for the client role too, not a second copy: add-then-remove
     /// through the client role's own gates (Root Store Off, TLS level) round-trips identically
     /// to the server-role sequence above.
@@ -1095,7 +1095,7 @@ mod tests {
         assert!(section.ca_files.state.values().is_empty());
     }
 
-    /// MB-R-136 — an empty path and a path with an extension outside pem/crt/key are both
+    /// MB-R-187 — an empty path and a path with an extension outside pem/crt/key are both
     /// rejected by the shared sub-dialog: it stays open with an inline error and nothing is
     /// appended to the list.
     #[test]

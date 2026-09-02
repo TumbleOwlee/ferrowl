@@ -64,7 +64,7 @@ mod tests {
         assert_ne!(a.path(), b.path());
     }
 
-    /// NF-R-044 — `join` builds a path under the guard's own directory, not
+    /// NF-R-044, NF-R-062 — `join` builds a path under the guard's own directory, not
     /// the shared temp root.
     #[test]
     fn ut_temp_dir_join_is_under_path() {
@@ -72,7 +72,7 @@ mod tests {
         assert!(guard.join("a.toml").starts_with(guard.path()));
     }
 
-    /// NF-R-044 — dropping the guard removes the directory and its
+    /// NF-R-061 — dropping the guard removes the directory and its
     /// contents.
     #[test]
     fn ut_temp_dir_drop_removes_contents() {
@@ -83,7 +83,7 @@ mod tests {
         assert!(!path.exists());
     }
 
-    /// NF-R-044 — a cleanup race (directory already gone) must not panic on
+    /// NF-R-061 — a cleanup race (directory already gone) must not panic on
     /// drop.
     #[test]
     fn ut_temp_dir_drop_ignores_missing_dir() {
@@ -114,7 +114,7 @@ mod tests {
         }
     }
 
-    /// NF-R-044 — a directory colliding with a derived path is skipped, never
+    /// NF-R-060, NF-R-063 — a directory colliding with a derived path is skipped, never
     /// adopted or emptied: the guard retries with the next counter value and
     /// every pre-created directory survives untouched.
     #[test]

@@ -90,7 +90,7 @@ pub(crate) fn append(sink: &FileSink, line: &str) {
 #[cfg(test)]
 mod tests {
     #[test]
-    /// UI-R-045 — the module file-sink path is derived from the base path and module name.
+    /// UI-R-085 — the module file-sink path is derived from the base path and module name.
     fn ut_module_log_path() {
         use super::module_log_path;
         assert_eq!(
@@ -108,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `module_log_path` expands a leading `~` in `base` to the home directory.
+    /// NF-R-054 — `module_log_path` expands a leading `~` in `base` to the home directory.
     fn ut_module_log_path_expands_tilde() {
         use super::module_log_path;
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-042 — `open_sink` resolves a `~`-prefixed base against the real home directory.
+    /// NF-R-054 — `open_sink` resolves a `~`-prefixed base against the real home directory.
     fn ut_open_sink_expands_tilde() {
         use super::{FileSink, open_sink};
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-045 — opening a file sink in a nonexistent directory errors.
+    /// UI-R-085 — opening a file sink in a nonexistent directory errors.
     fn ut_open_sink_error_on_nonexistent_dir() {
         use super::{FileSink, open_sink};
 
@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-045 — a file sink opens against a valid directory.
+    /// UI-R-085 — a file sink opens against a valid directory.
     fn ut_open_sink_success_with_valid_dir() {
         use super::{FileSink, open_sink};
         use ferrowl_test_support::reserve_temp_dir;
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-045 — a None base path clears the file sink.
+    /// UI-R-085 — a None base path clears the file sink.
     fn ut_open_sink_clears_on_none_base() {
         use super::{FileSink, open_sink};
 

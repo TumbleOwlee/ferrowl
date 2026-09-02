@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-027 — C_OCPP Get/Set round-trip a state field and an action dispatches with its override arg.
+    /// SC-R-027, SC-R-042 — C_OCPP Get/Set round-trip a state field and an action dispatches with its override table flattened to scalar pairs.
     fn ut_get_set_roundtrip_and_dispatch() {
         let handle = MockHandle::default();
         let mut ctx = ContextBuilder::<String>::default()
@@ -475,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-032 — a malformed OCPP override table surfaces as a runtime error rather than being coerced.
+    /// SC-R-032, SC-R-042 — a malformed OCPP override table (non-scalar entry) surfaces as a runtime error rather than being coerced.
     fn ut_malformed_override_table_propagates_error() {
         let handle = MockHandle::default();
         let mut ctx = ContextBuilder::<String>::default()

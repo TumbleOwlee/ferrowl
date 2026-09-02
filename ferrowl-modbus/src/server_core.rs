@@ -1103,7 +1103,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-111 (server logging half) — a TLS handshake failure logs the peer address
+    /// MB-R-178 (server logging half) — a TLS handshake failure logs the peer address
     /// and the underlying failure, including the rejected client certificate's size
     /// when one was offered (the crate only exposes the raw DER, no parsed subject).
     async fn ut_on_tls_handshake_failed_logs_peer_and_error() {
@@ -2577,7 +2577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-130/MB-R-131 — a mid-serve transport failure (the `serve_fut` itself resolving
+    /// MB-R-130, MB-R-131 — a mid-serve transport failure (the `serve_fut` itself resolving
     /// `Err`) surfaces from `drive_serve` as `ServeEnd::Failed`, without a command ever being
     /// sent — proven with a synthetic future rather than a real link failure, since
     /// `serve_link`'s own failure mode is infallible by the crate's own documentation (its

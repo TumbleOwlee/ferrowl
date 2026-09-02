@@ -99,7 +99,7 @@ fn it_sigint_is_a_clean_shutdown() {
 }
 
 #[test]
-/// CL-R-033 — migrate exits 1 on failure (unrecognized extension) and 0 on success, never 2.
+/// CL-R-033, CS-R-066 — migrate exits 1 on failure (unrecognized extension) and 0 on success, never 2.
 /// CL-R-012 — migrate is dispatched directly, exiting with its own code without starting the TUI
 /// or a headless run.
 fn it_migrate_exit_codes() {

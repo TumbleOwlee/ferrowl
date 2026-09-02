@@ -127,7 +127,7 @@ mod tests {
         }
     }
 
-    /// MB-R-150 — a path-conflict checker attached to the builder's cell makes `run()` end the
+    /// MB-R-201 — a path-conflict checker attached to the builder's cell makes `run()` end the
     /// (non-reconnecting) attempt with `Error::PathConflict`, without ever calling
     /// `open_serial`.
     #[tokio::test]
@@ -160,7 +160,7 @@ mod tests {
         );
     }
 
-    /// MB-R-150 — "report a distinct path-conflict status/log entry instead — replacing today's
+    /// MB-R-200 — "report a distinct path-conflict status/log entry instead — replacing today's
     /// silent indefinite retry": a conflict must be visible via `log` before the attempt
     /// returns, matching the server's own requirement.
     #[tokio::test]

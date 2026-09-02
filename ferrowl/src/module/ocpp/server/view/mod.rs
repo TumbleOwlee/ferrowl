@@ -696,7 +696,7 @@ mod tests {
     // with the edited endpoint and security. Hence the wss + Basic Auth edit below: the rebind
     // must not leave a plain unauthenticated listener bound.
     #[tokio::test]
-    /// UI-R-024 — applying an edit updates the module spec and stops its listener.
+    /// OC-R-138, UI-R-024 — applying an edit updates the module spec and stops its listener; the listener rebinds on the next tick without an explicit `:start`.
     async fn ut_edit_apply_updates_spec_and_stops_listener() {
         let mut v = server_view();
         let mut edited = v.spec.clone();
@@ -717,7 +717,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-059 — an edited header list survives an in-place setup confirm on the server view
+    /// UI-R-099 — an edited header list survives an in-place setup confirm on the server view
     /// too: `refresh_impl` must apply the dialog's `extra_headers` onto the reconfigured
     /// device (the server role ignores the value at runtime, but it must still round-trip
     /// through an edit rather than being silently dropped).

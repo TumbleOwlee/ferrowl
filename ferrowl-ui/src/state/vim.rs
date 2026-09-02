@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-030 — the OSC 52 clipboard side-effect is best-effort and never panics.
+    /// UI-R-083 — the OSC 52 clipboard side-effect is best-effort and never panics.
     fn emit_osc52_does_not_panic() {
         emit_osc52("hello");
     }

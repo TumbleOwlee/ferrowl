@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-038 — Fail always raises `assertion failed: <msg>`.
+    /// SC-R-050 — Fail always raises `assertion failed: <msg>`.
     fn ut_fail_always_raises() {
         let lua = lua_with_test();
         let err = lua.load(r#"C_Test:Fail("nope")"#).exec().unwrap_err();

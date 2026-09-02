@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-137 — `Connected` renders its label in the success color.
+    /// MB-R-190 — `Connected` renders its label in the success color.
     fn ut_render_status_bar_connected_uses_success_color_and_label() {
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);
@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-137 — `Reconnecting` renders its label in the warning color, the only status that
+    /// MB-R-190 — `Reconnecting` renders its label in the warning color, the only status that
     /// uses it.
     fn ut_render_status_bar_reconnecting_uses_warning_color_and_label() {
         let area = Rect::new(0, 0, 20, 1);
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-137 — `Disconnected` renders its label in the error color.
+    /// MB-R-190 — `Disconnected` renders its label in the error color.
     fn ut_render_status_bar_disconnected_uses_error_color_and_label() {
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);

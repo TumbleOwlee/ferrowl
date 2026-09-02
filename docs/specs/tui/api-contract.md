@@ -2,13 +2,13 @@
 
 Operator-facing surface: exhaustive `:` command list, every keybinding table by context/mode, code-editor mode/command set. Names, aliases, argument shapes, key mappings are contract and shall not change without a spec change.
 
-**Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (``## 1. Generic `:` commands (app-level)``); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (``## 2. Module (protocol-specific) `:` commands``); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
+**Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (``## Generic `:` commands (app-level)``); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (``## Module (protocol-specific) `:` commands``); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
 
 Dispatch: first token matched against the generic set; not in the set → forwarded to the active view. A generic name always wins over a same-named module command.
 
 ---
 
-## 1. Generic `:` commands (app-level)
+## Generic `:` commands (app-level)
 
 | Command | Aliases | Arguments | Effect (owned here) | Req |
 |---|---|---|---|---|
@@ -22,15 +22,15 @@ Dispatch: first token matched against the generic set; not in the set → forwar
 | `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support | UI-R-017 |
 | `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring | UI-R-017, UI-R-045 |
 
-- `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (``## 2. Module (protocol-specific) `:` commands``), where `:log <file>` sets/clears the module's file sink.
+- `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (``## Module (protocol-specific) `:` commands``), where `:log <file>` sets/clears the module's file sink.
 - Bare `:script` (without `copy`) is *not* generic — forwarded; the Modbus view opens its script dialog (UI-R-018).
 - Any unrecognized first token is forwarded; if the view also does not recognize it, app logs `Unknown command ':<input>'` (Warning) (UI-R-018).
 
-## 2. Module (protocol-specific) `:` commands
+## Module (protocol-specific) `:` commands
 
 Forwarded to the active view; **semantics owned by the protocol area**. Each view advertises exactly its own list in the command-help popup.
 
-### 2.1 Modbus module
+### Modbus module
 
 | Command | Arguments | Purpose (→ modbus) | Req |
 |---|---|---|---|
@@ -47,7 +47,7 @@ Forwarded to the active view; **semantics owned by the protocol area**. Each vie
 | `:script` | — | Open the Lua script manager dialog | UI-R-018 |
 | `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears | UI-R-018 |
 
-Modbus monitor module (`role = monitor`, MB-R-140–145):
+Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 
 | Command | Arguments | Purpose (→ modbus) | Req |
 |---|---|---|---|
@@ -64,7 +64,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 
 `:set` (nothing to write) and `:script` (no Lua surface) are omitted for this role — unrecognized commands on a monitor view, not errors.
 
-### 2.2 OCPP client module
+### OCPP client module
 
 | Command | Arguments | Purpose (→ ocpp) | Req |
 |---|---|---|---|
@@ -76,7 +76,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 | `:write-device` / `:wd` `[path]` | optional path | Save the device config | UI-R-018 |
 | `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables | UI-R-018 |
 
-### 2.3 OCPP server (CSMS) module
+### OCPP server (CSMS) module
 
 | Command | Arguments | Purpose (→ ocpp) | Req |
 |---|---|---|---|
@@ -91,7 +91,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 
 **OCPP action send is not a `:` command.** Composing and sending an action goes through the action dialog opened by `Enter` on the message table / action control. Action set and payload semantics: `ocpp/`.
 
-## 3. Global keybindings
+## Global keybindings
 
 | Key | Context | Action | Req |
 |---|---|---|---|
@@ -104,9 +104,9 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 
 `:` and `?` are suppressed while the active view has an overlay open; they type into it instead.
 
-## 4. Context keybinding tables
+## Context keybinding tables
 
-### 4.1 Command mode
+### Command mode
 
 | Key | Action | Req |
 |---|---|---|
@@ -114,18 +114,18 @@ Modbus monitor module (`role = monitor`, MB-R-140–145):
 | `Enter` | Run the command | UI-R-015 |
 | printable / `Left`/`Right` / `Home`/`End` / `Backspace`/`Delete` | Edit the buffer | UI-R-015 |
 
-### 4.2 Dialogs (generic)
+### Dialogs (generic)
 
 | Key | Action | Req |
 |---|---|---|
-| `Tab` | Next field (skips disabled) | UI-R-022 |
+| `Tab` | Next field (skips disabled) | UI-R-022, UI-R-078 |
 | `Shift+Tab` / `BackTab` | Previous field | UI-R-022 |
-| `Enter` | Confirm | UI-R-022 |
+| `Enter` | Confirm | UI-R-079 |
 | `Esc` | Request close (close-confirm popup if edits may be lost) | UI-R-023 |
 
 Applied only when the focused widget did not consume the key.
 
-### 4.3 Close-confirm / yes-no popup
+### Close-confirm / yes-no popup
 
 | Key | Action | Req |
 |---|---|---|
@@ -135,7 +135,7 @@ Applied only when the focused widget did not consume the key.
 
 Focus defaults to the safe (cancel) choice; confirming requires that choice focused.
 
-### 4.4 Tables and selection lists (when focused)
+### Tables and selection lists (when focused)
 
 | Key | Action | Req |
 |---|---|---|
@@ -150,26 +150,27 @@ Focus defaults to the safe (cancel) choice; confirming requires that choice focu
 
 Selection clamps at the ends (no wrap).
 
-### 4.5 Suggestion-completion popup (open)
+### Suggestion-completion popup (open)
 
 | Key | Action | Req |
 |---|---|---|
 | `Up` / `Down` | Move highlight | UI-R-026 |
-| `Enter` / `Tab` | Accept highlight (partial → keep open and re-query; else close) | UI-R-026 |
+| `Enter` | Accept highlight (partial → keep open and re-query; else close) | UI-R-026, UI-R-082 |
+| `Tab` | Never consumed by the popup, even open; moves focus to the dialog's next field | UI-R-081 |
 | `Esc` | Dismiss | UI-R-026 |
 
-### 4.6 Single-line text input (focused)
+### Single-line text input (focused)
 
 | Key | Action | Req |
 |---|---|---|
-| printable (with `Shift`) | Insert character (rejected chars still consumed) | UI-R-048 |
+| printable (with `Shift`) | Insert character (rejected chars still consumed) | UI-R-048, UI-R-086 |
 | `Left` / `Right` | Move cursor | UI-R-048 |
 | `Home` / `End` | Line start / end | UI-R-048 |
 | `Backspace` / `Delete` | Delete before / at cursor | UI-R-048 |
 | `Ctrl+F` | Autofill from placeholder (only when empty) | UI-R-048 |
 | `Ctrl+D` | Clear | UI-R-048 |
 
-### 4.7 Keybind-help dialog (`?`)
+### Keybind-help dialog (`?`)
 
 | Key | Action | Req |
 |---|---|---|
@@ -179,19 +180,19 @@ Selection clamps at the ends (no wrap).
 | `g` | Top | UI-R-005 |
 | `G` | Bottom | UI-R-005 |
 
-### 4.8 Lua-bindings help overlay (`?` in a script editor, Normal mode)
+### Lua-bindings help overlay (`?` in a script editor, Normal mode)
 
-Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
+Same navigation as ``### Keybind-help dialog (`?`)``. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
 
-### 4.9 Script-manager dialog
+### Script-manager dialog
 
 | Key | Context | Action | Req |
 |---|---|---|---|
 | `Tab` / `Shift+Tab` | dialog | Cycle focus (script table → name input → Templates button → code editor → interval → log); code editor skipped while no script selected | UI-R-058 |
 | `Esc` | dialog | Open close-confirm | UI-R-023 |
-| `t` | script table focused | Toggle the selected script's enabled flag | UI-R-058 |
-| `d` | script table focused | Delete the selected script (opens confirm) | UI-R-058 |
-| `c` | script table focused | Toggle compact rows | UI-R-058 |
+| `t` | script table focused | Toggle the selected script's enabled flag | UI-R-091 |
+| `d` | script table focused | Delete the selected script (opens confirm) | UI-R-092 |
+| `c` | script table focused | Toggle compact rows | UI-R-093 |
 | `e` | script table focused | Execute the selected script once (current editor content, enabled or not) | UI-R-051 |
 | `Enter` | script table focused | Open the rename prompt | UI-R-055 |
 | `Enter` | name input focused | Create a new script with the typed name | UI-R-058 |
@@ -199,7 +200,7 @@ Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from th
 | `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) | UI-R-056 |
 | `?` | code editor, Normal mode | Open the Lua-bindings help overlay | UI-R-056 |
 
-### 4.10 Template-browser overlay (Templates button in the script-manager dialog)
+### Template-browser overlay (Templates button in the script-manager dialog)
 
 | Key | Context | Action | Req |
 |---|---|---|---|
@@ -208,18 +209,18 @@ Same navigation as ``### 4.7 Keybind-help dialog (`?`)``. Reachable only from th
 | `Enter` | overlay | Insert the selected template as a new enabled script, close | UI-R-054 |
 | `Esc` / `q` | overlay | Close, changing nothing | UI-R-053 |
 
-### 4.11 Script rename prompt (`Enter` on the script table)
+### Script rename prompt (`Enter` on the script table)
 
 | Key | Context | Action | Req |
 |---|---|---|---|
-| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055 |
+| `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055, UI-R-089 |
 | `Esc` | prompt | Cancel, name unchanged | UI-R-055 |
 
-## 5. Code editor — modes and commands
+## Code editor — modes and commands
 
 Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`, `VISUAL` (charwise), `V-LINE` (linewise).
 
-### 5.1 Mode transitions
+### Mode transitions
 
 | Key | From | Action | Req |
 |---|---|---|---|
@@ -236,7 +237,7 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 | `v` | Visual | Back to Normal | UI-R-028 |
 | `V` | Visual (charwise) | Switch to linewise Visual | UI-R-028 |
 
-### 5.2 Motions (Normal and Visual)
+### Motions (Normal and Visual)
 
 | Key | Motion | Req |
 |---|---|---|
@@ -251,7 +252,7 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 | `gg` | First line, first column | UI-R-028 |
 | `G` | Last line | UI-R-028 |
 
-### 5.3 Edits (Normal)
+### Edits (Normal)
 
 | Key | Action | Req |
 |---|---|---|
@@ -262,14 +263,14 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 | `P` | Paste register before cursor / above line | UI-R-030 |
 | `u` | Undo last change (again to redo) | UI-R-031 |
 
-### 5.4 Edits (Visual)
+### Edits (Visual)
 
 | Key | Action | Req |
 |---|---|---|
 | `y` | Yank selection, return to Normal at selection start | UI-R-030 |
 | `d` / `x` | Delete selection, return to Normal | UI-R-030 |
 
-### 5.5 Insert-mode keys
+### Insert-mode keys
 
 | Key | Action | Req |
 |---|---|---|
@@ -277,8 +278,8 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 | `Tab` | Insert four spaces | UI-R-034 |
 | `Shift+Tab` / `BackTab` | Remove up to four leading spaces | UI-R-034 |
 
-### 5.6 Plain (non-vim) editor
+### Plain (non-vim) editor
 
-Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as `### 4.6 Single-line text input (focused)`. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
+Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as `### Single-line text input (focused)`. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
 
 Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats).

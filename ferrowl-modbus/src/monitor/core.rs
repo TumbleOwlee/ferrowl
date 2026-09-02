@@ -831,7 +831,7 @@ mod tests {
         Rtu::encode_response(&slave, pdu).unwrap()
     }
 
-    /// MB-R-142 — a matched request/response pair returns to `ExpectRequest` and logs one
+    /// MB-R-193 — a matched request/response pair returns to `ExpectRequest` and logs one
     /// "complete" entry (MB-R-143).
     #[tokio::test]
     async fn ut_matched_request_response_pair_updates_state_and_logs() {
@@ -864,7 +864,7 @@ mod tests {
         assert!(log.lines()[0].contains("complete"));
     }
 
-    /// MB-R-142 — a pending request with no matching response before the next request begins
+    /// MB-R-193 — a pending request with no matching response before the next request begins
     /// is logged unmatched (MB-R-143), and the new request starts a fresh wait.
     #[tokio::test]
     async fn ut_pending_request_marked_unmatched_when_next_request_arrives() {
@@ -909,7 +909,7 @@ mod tests {
         assert!(log.lines()[0].contains("unmatched"));
     }
 
-    /// MB-R-142 — a frame that fails CRC validation is logged (Warning-worded, level-independent
+    /// MB-R-194 — a frame that fails CRC validation is logged (Warning-worded, level-independent
     /// at this crate layer) and discarded; decoding resumes at the next boundary without a state
     /// change, in `ExpectRequest`.
     #[tokio::test]
@@ -931,7 +931,7 @@ mod tests {
         assert!(log.lines()[0].contains("malformed frame"));
     }
 
-    /// MB-R-142 — a malformed frame while awaiting a response leaves the awaited state
+    /// MB-R-194 — a malformed frame while awaiting a response leaves the awaited state
     /// unchanged (still waiting — neither the response nor a new request).
     #[tokio::test]
     async fn ut_crc_failure_while_expecting_response_does_not_change_state() {
@@ -980,7 +980,7 @@ mod tests {
         assert!(!log.lines()[0].contains("unmatched"));
     }
 
-    /// MB-R-144 — a non-write-shaped broadcast writes no words (nothing to write) but still
+    /// MB-R-197 — a non-write-shaped broadcast writes no words (nothing to write) but still
     /// marks slave id 0 as seen, since it still reaches an MB-R-143 log entry.
     #[tokio::test]
     async fn ut_read_shaped_broadcast_writes_no_words_but_marks_slave_seen() {
@@ -1003,7 +1003,7 @@ mod tests {
         assert_eq!(table.read().unit_ids(), vec![UnitId(0)]);
     }
 
-    /// MB-R-144 — a matched read transaction writes the response's returned words into the
+    /// MB-R-195 — a matched read transaction writes the response's returned words into the
     /// table at the request's address range.
     #[tokio::test]
     async fn ut_matched_read_writes_response_words_into_table() {
@@ -1041,7 +1041,7 @@ mod tests {
         assert_eq!(table.read().read_words(&key, 10, 2), Some(vec![11, 22]));
     }
 
-    /// MB-R-144 — a matched write transaction writes the request's own carried value(s), not
+    /// MB-R-196 — a matched write transaction writes the request's own carried value(s), not
     /// the response's, into the table.
     #[tokio::test]
     async fn ut_matched_write_writes_request_values_into_table() {
@@ -1080,7 +1080,7 @@ mod tests {
         assert_eq!(table.read().read_words(&key, 3, 1), Some(vec![99]));
     }
 
-    /// MB-R-144 — an unmatched write request writes no words, but marks the slave id as seen.
+    /// MB-R-197 — an unmatched write request writes no words, but marks the slave id as seen.
     #[tokio::test]
     async fn ut_unmatched_write_writes_no_words_but_marks_slave_seen() {
         let log = RecordingLog::default();
@@ -1124,7 +1124,7 @@ mod tests {
         assert_eq!(table.read().unit_ids(), vec![UnitId(1)]);
     }
 
-    /// MB-R-144 — a response carrying an exception code writes no words, but marks the slave
+    /// MB-R-197 — a response carrying an exception code writes no words, but marks the slave
     /// id as seen (`unit_ids()` includes it).
     #[tokio::test]
     async fn ut_exception_response_writes_no_words_but_marks_slave_seen() {

@@ -242,19 +242,19 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-011 — a first digit waits for a second when a valid two-digit index could start with it.
+    /// UI-R-074 — a first digit waits for a second when a valid two-digit index could start with it.
     fn first_digit_waits_when_it_could_start_a_two_digit_index() {
         assert_eq!(digit_outcome(None, 1, 25), DigitOutcome::Wait(1));
     }
 
     #[test]
-    /// UI-R-011 — a valid two-digit combination jumps to that index.
+    /// UI-R-074 — a valid two-digit combination jumps to that index.
     fn valid_two_digit_combo_jumps() {
         assert_eq!(digit_outcome(Some(1), 2, 25), DigitOutcome::Jump(12));
     }
 
     #[test]
-    /// UI-R-011 — an out-of-range two-digit combination falls back to the first-digit jump.
+    /// UI-R-075 — an out-of-range two-digit combination falls back to the first-digit jump.
     fn invalid_combo_falls_back_to_first_digit() {
         assert_eq!(digit_outcome(Some(1), 9, 15), DigitOutcome::Jump(1));
     }
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-006 — the `:` command line removes focus from the content pane while open and restores
+    /// UI-R-006, UI-R-072 — the `:` command line removes focus from the content pane while open and restores
     /// it on close, and every transition routes through the single focus choke point.
     fn ut_command_line_removes_and_restores_content_focus() {
         let mut app = app_with(&["a"]);
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-005 — an open modal layer consumes the keys its lower layers would otherwise receive:
+    /// UI-R-005, UI-R-071 — an open modal layer consumes the keys its lower layers would otherwise receive:
     /// while the keybind-help dialog is open, a `:` that would open the command line at the content
     /// layer is swallowed, leaving help open and the command line unopened.
     fn ut_open_help_layer_consumes_lower_layer_keys() {

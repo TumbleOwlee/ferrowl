@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/MB-R-136 — a mutual-TLS server config loads at the MutualTls level.
+    /// UI-R-024, MB-R-136 — a mutual-TLS server config loads at the MutualTls level.
     fn ut_from_config_mutual_tls_server() {
         let cfg = ModbusTlsConfig {
             server: ServerTlsPolicy::Mutual {
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136 — a mutual-TLS server build parses the comma-separated CA list and sets
+    /// MB-R-188 — a mutual-TLS server build parses the comma-separated CA list and sets
     /// `require`-shaped `Mutual` with `CaFiles{ca_files}`.
     fn ut_build_config_mutual_tls_server_parses_ca_list() {
         let cfg = TlsLevel::MutualTls
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136 — a mutual-TLS server build with an empty CA list and skip-verify off is a
+    /// MB-R-188 — a mutual-TLS server build with an empty CA list and skip-verify off is a
     /// validation error (rather than silently constructing an unrepresentable
     /// `CertVerification::CaFiles { ca_files: vec![] }`).
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
@@ -445,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136 — a mutual-TLS server build with skip-verify on needs no CA list at all.
+    /// MB-R-189 — a mutual-TLS server build with skip-verify on needs no CA list at all.
     fn ut_build_config_mutual_tls_server_skip_verify_needs_no_ca_list() {
         let mut i = inputs("cert", "key", "", "", &[]);
         i.client_cert_skip_verify = true;
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-156 — Root Store Off with an empty CA list is a validation error, mirroring
+    /// MB-R-202 — Root Store Off with an empty CA list is a validation error, mirroring
     /// MB-R-136's empty-list rule on the server side: a verification naming no trust anchor
     /// rejects every server certificate and is never the user's intent.
     fn ut_client_root_store_off_with_empty_list_is_validation_error() {
@@ -607,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136 — a server at mTLS with skip-verify on needs no CA files checked.
+    /// MB-R-189 — a server at mTLS with skip-verify on needs no CA files checked.
     fn ut_validate_tls_server_mutual_tls_skip_verify_on_needs_no_ca_files() {
         let cfg = ModbusTlsConfig {
             server: ServerTlsPolicy::Mutual {

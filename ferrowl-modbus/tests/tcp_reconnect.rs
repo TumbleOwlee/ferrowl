@@ -59,7 +59,7 @@ fn tcp_config(port: u16, reconnect: bool) -> ferrowl_modbus::tcp::Config {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-/// MB-R-071/MB-R-130 — with `reconnect` enabled (the default), a TCP server whose listen port is
+/// MB-R-071, MB-R-130, NF-R-059 — with `reconnect` enabled (the default), a TCP server whose listen port is
 /// already occupied does not fail its start: `spawn()` still returns `Ok`, the task keeps
 /// retrying the bind, and once the occupier drops, the very next attempt succeeds and a real
 /// client can connect.

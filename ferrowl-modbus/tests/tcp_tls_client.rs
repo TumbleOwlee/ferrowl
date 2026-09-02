@@ -302,7 +302,7 @@ async fn it_tls_client_cafiles_trusts_only_named_ca() {
 }
 
 #[tokio::test]
-/// MB-R-110/MB-R-138 — under `ClientTlsPolicy::Mutual` with a `CertSource::SelfSigned`
+/// MB-R-110, MB-R-138 — under `ClientTlsPolicy::Mutual` with a `CertSource::SelfSigned`
 /// identity, a client presents its cached ephemeral identity and a server requiring one
 /// (`ClientCertPolicy::Require`, trusting exactly that self-signed cert) accepts the handshake;
 /// the same server rejects a `Tls`-policy client, which presents no identity at all.

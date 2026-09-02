@@ -102,7 +102,7 @@ async fn cs_dial_failure_retries_while_reconnect_enabled() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-048 — with `reconnect: false`, a CS whose dial fails ends its task with that
+/// OC-R-135 — with `reconnect: false`, a CS whose dial fails ends its task with that
 /// error (after emitting a disconnected status), instead of retrying.
 async fn cs_dial_failure_reconnect_false_ends_task() {
     let dead_port = reserve_tcp_port().release();

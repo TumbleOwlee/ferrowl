@@ -81,7 +81,7 @@ fn ut_close_resets_to_none() {
 // --- esc_close -------------------------------------------------------------
 
 #[test]
-/// UI-R-022 — Esc requests close on an overlay variant that opted into esc_close.
+/// UI-R-079 — Esc requests close on an overlay variant that opted into esc_close.
 fn ut_esc_closes_esc_close_variant() {
     let mut o = Overlay::Edit(Editor { step: 0 });
     assert_eq!(route(&mut o, KeyCode::Esc), OverlayRoute::Closed);
@@ -93,7 +93,7 @@ fn ut_esc_closes_esc_close_variant() {
 }
 
 #[test]
-/// UI-R-022 — Esc is unhandled (propagates) on a variant that did not opt into esc_close.
+/// UI-R-079 — Esc is unhandled (propagates) on a variant that did not opt into esc_close.
 fn ut_esc_unhandled_without_esc_close() {
     // SetupV is focus_cycle only; Plain is untagged. Neither closes on Esc.
     let mut o = Overlay::SetupV(Setup { step: 0 });

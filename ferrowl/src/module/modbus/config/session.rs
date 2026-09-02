@@ -419,7 +419,7 @@ mod tests {
     // A hand-edited `interval` that is NaN, negative, or zero must fall back to the 1.0s
     // default instead of panicking or busy-waiting; a valid value converts as-is.
     #[test]
-    /// CS-R-017 — a non-finite/non-positive session interval falls back to 1.0s (no floor).
+    /// CS-R-017, CS-R-059, CS-R-060 — a non-finite/non-positive session interval falls back to 1.0s (no floor).
     fn ut_session_interval_duration_sanitized() {
         let mut session = Session::default();
         assert_eq!(session.interval_duration(), Duration::from_secs(1));

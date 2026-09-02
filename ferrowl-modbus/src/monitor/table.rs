@@ -93,7 +93,7 @@ mod tests {
         })
     }
 
-    /// MB-R-145 — an address never written is `None`, distinguishable from one written with a
+    /// MB-R-198 — an address never written is `None`, distinguishable from one written with a
     /// real `0` value: `read_words` must not decode absent memory as zero.
     #[test]
     fn ut_observed_table_read_words_none_when_unobserved_vs_some_zero() {

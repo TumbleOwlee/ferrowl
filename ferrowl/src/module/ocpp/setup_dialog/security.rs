@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — the level is decided by the policy variant alone, never by comparing against
+    /// OC-R-158 — the level is decided by the policy variant alone, never by comparing against
     /// an all-unset field-presence baseline: a client `Tls` policy whose `RootStore` carries an
     /// empty `extra_ca_files` (the widget's own default state) is still `Tls`, not `Off`.
     fn ut_from_config_tls_client_with_empty_root_store_is_still_tls() {
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — a server `Tls` policy with a `SelfSigned` identity is still `Tls`, never
+    /// OC-R-158 — a server `Tls` policy with a `SelfSigned` identity is still `Tls`, never
     /// falling through to `Off`: the variant is the state, distinguishable from the
     /// OC-R-095 `Ephemeral` fallback by construction rather than by a "was anything configured"
     /// comparison.
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — the OC-R-095 fallback state (`Ephemeral`) is distinguished from a real `Off`
+    /// OC-R-158 — the OC-R-095 fallback state (`Ephemeral`) is distinguished from a real `Off`
     /// only by whether the policy is `None {}` at all, not by which identity variant it carries;
     /// `Ephemeral` itself is unreachable from the dialog (only `SelfSigned`/`Files` are offered),
     /// but a hand-edited config carrying it still reports `Tls`, matching OC-R-096's fallback.
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/OC-R-116 — a mutual-TLS client config loads into the client-cert fields.
+    /// OC-R-116, UI-R-024 — a mutual-TLS client config loads into the client-cert fields.
     fn ut_from_config_mutual_tls_client_is_client_cert() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/OC-R-113 — a mutual-TLS server config loads at the MutualTls level.
+    /// OC-R-113, UI-R-024 — a mutual-TLS server config loads at the MutualTls level.
     fn ut_from_config_mutual_tls_server() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -535,7 +535,7 @@ mod tests {
     // --- TlsLevel::build_config -----------------------------------------------------------
 
     #[test]
-    /// OC-R-127 — selector `Off` resolves the server role's policy to `None {}`, reading no
+    /// OC-R-127, OC-R-160 — selector `Off` resolves the server role's policy to `None {}`, reading no
     /// cert/key text at all even if present.
     fn ut_selector_off_resolves_none_policy_server() {
         let cfg = TlsLevel::Off
@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-127 — selector `Off` resolves the client role's policy to `None {}`.
+    /// OC-R-127, OC-R-160 — selector `Off` resolves the client role's policy to `None {}`.
     fn ut_selector_off_resolves_none_policy_client() {
         let cfg = TlsLevel::Off
             .build_config(OcppRole::Client, inputs("", "", "", "", "", "", &[]))
@@ -566,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-113 — a mutual-TLS server build parses the comma-separated CA list and sets a
+    /// OC-R-150 — a mutual-TLS server build parses the comma-separated CA list and sets a
     /// `Mutual` policy with `CaFiles{ca_files}`.
     fn ut_build_config_mutual_tls_server_parses_ca_list() {
         let cfg = TlsLevel::MutualTls
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-113 — a mutual-TLS server build with an empty CA list and skip-verify off is a
+    /// OC-R-150 — a mutual-TLS server build with an empty CA list and skip-verify off is a
     /// validation error.
     fn ut_build_config_mutual_tls_server_empty_ca_list_and_skip_verify_off_is_validation_error() {
         let err = TlsLevel::MutualTls
@@ -603,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-116 — a mutual-TLS client build with the self-signed toggle on excludes the
+    /// OC-R-147 — a mutual-TLS client build with the self-signed toggle on excludes the
     /// (possibly stale) client-cert/key text and resolves to `CertSource::SelfSigned`.
     fn ut_build_config_mutual_tls_client_self_signed_excludes_cert_key() {
         let mut i = inputs("", "", "", "", "stale.crt", "stale.key", &[]);
@@ -665,8 +665,8 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-125 — Root Store Off with an empty CA list is a validation error, mirroring
-    /// OC-R-113's empty-list rule on the server side.
+    /// OC-R-154 — Root Store Off with an empty CA list is a validation error, mirroring
+    /// OC-R-150's empty-list rule on the server side.
     fn ut_cs_root_store_off_empty_list_is_validation_error() {
         let mut i = inputs("", "", "", "", "", "", &[]);
         i.root_store = false;
@@ -675,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-128 — Basic Auth Off leaves `username`/`password` both unset even with non-empty
+    /// OC-R-164 — Basic Auth Off leaves `username`/`password` both unset even with non-empty
     /// text present, regardless of the TLS selector (the On case is covered at
     /// setup_dialog.rs's `ut_basic_auth_on_resolves_credentials`). Uses `Tls`, not `Off`, so the
     /// gate is proven to be `basic_auth` alone, not the level: an `Off` fixture cannot
@@ -692,7 +692,7 @@ mod tests {
     // --- validate_security -----------------------------------------------------------------------
 
     #[test]
-    /// OC-R-110 — a server at TLS with self_signed set needs no cert/key files.
+    /// OC-R-143 — a server at TLS with self_signed set needs no cert/key files.
     fn ut_validate_security_server_self_signed_needs_no_files() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-113 — a server at mTLS with skip-verify on needs no CA files checked.
+    /// OC-R-151 — a server at mTLS with skip-verify on needs no CA files checked.
     fn ut_validate_security_server_mutual_tls_skip_verify_on_needs_no_ca_files() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-116 — a client at mTLS with self-signed set needs no cert/key files checked.
+    /// OC-R-147 — a client at mTLS with self-signed set needs no cert/key files checked.
     fn ut_validate_security_client_self_signed_needs_no_files() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {

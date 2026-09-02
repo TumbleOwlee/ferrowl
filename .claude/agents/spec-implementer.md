@@ -36,7 +36,7 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 
 `.claude/AGENTS.core.md`'s `## TDD — fixed order, every stage`, followed verbatim. Additions:
 
-- Step 1 (write the test): doc comment beside the declaration, ≤1 ID per test.
+- Step 1 (write the test): doc comment beside the declaration citing every ID the test pins (`docs/specs/README.md` rule 8).
 - Step 2 (watch it fail): report the failure text; fix and repeat until the failure is the intended assertion, not just any failure.
 
 ## Stage completion

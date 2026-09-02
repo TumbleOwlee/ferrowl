@@ -849,7 +849,7 @@ async fn terminated_csms_stops_accepting() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-/// OC-R-048 — with `reconnect: false`, a CS does not reconnect on its own: once the
+/// OC-R-135 — with `reconnect: false`, a CS does not reconnect on its own: once the
 /// CSMS drops, the connection stays down and the task ends with the dropped-connection error.
 /// (Default-`reconnect` behavior — retrying with backoff — is exercised end-to-end by
 /// `ferrowl-ocpp/tests/cs_reconnect.rs`, which can actually bring a target back up on the exact

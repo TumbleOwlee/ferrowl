@@ -23,7 +23,7 @@ impl TcpPortGuard {
         self.listener
     }
 
-    /// NF-R-043's sole sanctioned time-of-check/time-of-use window: drops
+    /// NF-R-057's sole sanctioned time-of-check/time-of-use window: drops
     /// the binding and returns the port number, for a server that can only
     /// bind by number.
     pub fn release(self) -> u16 {
@@ -56,7 +56,7 @@ impl UdpPortGuard {
         self.socket
     }
 
-    /// NF-R-043's sole sanctioned time-of-check/time-of-use window: drops
+    /// NF-R-057's sole sanctioned time-of-check/time-of-use window: drops
     /// the binding and returns the port number, for a server that can only
     /// bind by number.
     pub fn release(self) -> u16 {

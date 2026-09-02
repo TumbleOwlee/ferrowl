@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — `OcppSecurityConfig`'s TLS container defaults to both policies `None`, and an
+    /// OC-R-157 — `OcppSecurityConfig`'s TLS container defaults to both policies `None`, and an
     /// absent `[security.tls]` block is exactly that state.
     fn ut_ocpp_security_config_defaults() {
         let cfg = OcppSecurityConfig::default();
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — the two-role container serializes at `[security.tls.server]`/
+    /// MB-R-168, OC-R-126 — the two-role container serializes at `[security.tls.server]`/
     /// `[security.tls.client]` and round-trips both roles together through TOML.
     fn ut_security_tls_block_roundtrips_both_roles() {
         let cfg = OcppSecurityConfig {
@@ -416,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — a CS decides whether TLS is configured by matching only its own role's
+    /// OC-R-158 — a CS decides whether TLS is configured by matching only its own role's
     /// policy variant: a non-`None` server policy does not affect `cs_tls()`, and vice versa.
     fn ut_cs_tls_reads_only_the_client_half() {
         let cfg = OcppSecurityConfig {
@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — `csms_tls()` returns `ServerTlsPolicy::None {}` when the container's server
+    /// OC-R-157 — `csms_tls()` returns `ServerTlsPolicy::None {}` when the container's server
     /// policy is `None`.
     fn ut_csms_tls_none_by_default() {
         let cfg = OcppSecurityConfig::default();
@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-016 — a per-module script_interval is floored to 0.05s.
+    /// SC-R-045 — a per-module script_interval is floored to 0.05s.
     fn ut_device_config_script_interval_duration_floored() {
         let cfg = OcppDeviceConfig {
             script_interval: 0.0001,
@@ -692,7 +692,7 @@ mod tests {
         );
     }
 
-    /// CS-R-055 — `username`/`password` remain defined members of `security` and are unaffected
+    /// CS-R-055, OC-R-156 — `username`/`password` remain defined members of `security` and are unaffected
     /// by the strictness that governs the rest of the table.
     #[test]
     fn ut_security_table_accepts_username_password_beside_tls() {

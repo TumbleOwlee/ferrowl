@@ -26,7 +26,7 @@ One question per turn. Look up facts yourself; ask only decisions (scope, defaul
 
 ## Gate 1 — `spec-diff.md`
 
-One `## <ID>` heading per new/changed requirement, full normative "shall" text under it (old → new if changed), then `## Other spec changes` for `edge-cases.md`/`api-contract.md`/`data-contract.md` entries. IDs append-only — check the area's highest existing ID before assigning. Observable design is spec: public signatures, error enum, feature gating, config keys. Ready to land, never prose about intent. **Never hard-wrap** a requirement — one ID, one physical line, so `grep` returns it whole; same for `issue.md`/`pr.md` paragraphs (GitHub soft-wraps). A change request after `ready` edits the same file.
+One `## <ID>` heading per new/changed requirement, full normative text under it (old → new if changed), then `## Other spec changes` for `edge-cases.md`/`api-contract.md`/`data-contract.md` entries. IDs append-only — check the area's highest existing ID before assigning. One ID, one rule (README rule 9): a new requirement holding two independent behaviors, or a changed one growing a second, becomes two IDs, never one longer line. Observable design is spec: public signatures, error enum, feature gating, config keys. Ready to land, never prose about intent. **Never hard-wrap** a requirement — one ID, one physical line, so `grep` returns it whole; same for `issue.md`/`pr.md` paragraphs (GitHub soft-wraps). A change request after `ready` edits the same file.
 
 Area whose `requirements.md`/`edge-cases.md` costs real context: propose a split as a `question`, along a real sub-capability seam, moved IDs unchanged.
 

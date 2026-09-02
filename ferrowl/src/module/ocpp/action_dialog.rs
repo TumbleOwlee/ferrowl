@@ -1123,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-022 — Tab cycles JSON → Send, skipping the disabled toggle in JSON-only mode.
+    /// UI-R-078 — Tab cycles JSON → Send, skipping the disabled toggle in JSON-only mode.
     fn tab_cycles_json_send_skipping_toggle_in_json_only_mode() {
         let mut d = ActionDialog::json_only("Custom".into(), "{}");
         assert_eq!(d.focus, ActionDialogFocus::Json);

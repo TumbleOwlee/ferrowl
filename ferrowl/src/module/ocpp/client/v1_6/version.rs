@@ -539,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-104 — the four optional meter/modem identity fields are omitted from
+    /// OC-R-142 — the four optional meter/modem identity fields are omitted from
     /// `BootNotification` when unset and included under their wire names when set, and the
     /// resulting payload still decodes as a valid 1.6 BootNotification request.
     fn ut_boot_notification_omits_empty_meter_fields() {

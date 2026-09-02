@@ -70,7 +70,7 @@ Anything fitting no area in scope (or none at all): note separately, never fold 
 
 Draft only; write nothing yet.
 
-- **Gaps in an existing area**: new `<PREFIX>-R-nnn` "shall" entries, next free number (append-only — check the highest existing, never reuse/renumber). Testable, observable wording: `**<PREFIX>-R-001** — The <subject> shall <observable outcome> when <condition>.`
+- **Gaps in an existing area**: new `<PREFIX>-R-nnn` entries, one rule each (README rule 9), next free number (append-only — check the highest existing, never reuse/renumber). Testable, observable wording: `**<PREFIX>-R-001** — The <subject> shall <observable outcome> when <condition>.`
 - **Code fitting no area**: propose a new area inline — directory name, one-line "covers", unique prefix (two letters + `-R-`, not colliding with existing or `NF-R-*`) — then its first requirements.
 
 ## 5. Get approval

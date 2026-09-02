@@ -872,7 +872,7 @@ mod tests {
     // --- Register (word) order ---
 
     #[test]
-    /// MB-R-099 — `Reversed` reverses the word sequence before the byte-order rule:
+    /// MB-R-160 — `Reversed` reverses the word sequence before the byte-order rule:
     /// a Big/Reversed U32 reads wire words `0x0102 0x0304` as `0x03040102`, and a
     /// Little/Reversed one as `0x02010403`.
     fn ut_decode_u32_reversed() {
@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-099 — encoding under `Reversed` reverses the words *after* the byte-order
+    /// MB-R-160 — encoding under `Reversed` reverses the words *after* the byte-order
     /// rule, the exact inverse of decode: `0x01020304` becomes wire words `0x0304 0x0102`.
     fn ut_encode_u32_reversed() {
         let r = reg(Format::u32(Endian::Big, WordOrder::Reversed, res(), bf()));
@@ -956,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-099 / MB-R-009 — the write-mask words reverse in lockstep with the encoded
+    /// MB-R-099, MB-R-009 — the write-mask words reverse in lockstep with the encoded
     /// words under `Reversed`, so the read-modify-write merge still targets the right bits.
     fn ut_mask_words_reversed() {
         let mask = BitField { mask: 0xFFFF_0000 };

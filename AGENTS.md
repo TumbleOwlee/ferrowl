@@ -9,7 +9,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 ## Spec-driven
 
 - `docs/specs/` authoritative. Code conforms to spec, never reverse.
-- Read area's `requirements.md` + `edge-cases.md` before editing that area. `edge-cases.md` = deliberate ugliness; check before "fixing".
+- Before editing an area: `sh .claude/scripts/list-sections.sh` its `requirements.md` + `edge-cases.md`, then `extract-section.sh` the headings the task touches (plus their `edge-cases.md` counterparts); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.

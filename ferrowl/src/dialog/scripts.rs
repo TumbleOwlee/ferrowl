@@ -654,7 +654,7 @@ mod tests {
 
     // Without a selected script the code editor is disabled and both rotations skip it.
     #[test]
-    /// UI-R-022 — the focus cycle skips a disabled field (the code editor).
+    /// UI-R-078 — the focus cycle skips a disabled field (the code editor).
     fn ut_rotation_skips_disabled_code_editor() {
         let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -908,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-023 — Esc in the close-confirm still cancels the close.
+    /// UI-R-023, UI-R-092 — `d` on the selected script opens the delete confirmation; Esc in it cancels the delete.
     fn ut_confirm_esc_still_cancels() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-055 — an empty or duplicate name is refused and the prompt stays open.
+    /// UI-R-089 — an empty or duplicate name is refused and the prompt stays open.
     fn ut_rename_refuses_empty_and_duplicate() {
         let mut d = ScriptDialog::new(
             &[
@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-055 — Esc cancels the rename; Enter on an empty table is a no-op.
+    /// UI-R-055, UI-R-080, UI-R-090 — Esc cancels the rename (the prompt consumes it, so no close-confirm opens); Enter on an empty table is a no-op.
     fn ut_rename_esc_cancels_and_empty_table_is_noop() {
         let mut d = dialog();
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table

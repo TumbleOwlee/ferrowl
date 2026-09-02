@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    /// OC-R-083, OC-R-108-109 — `OcppServer::start()` against an occupied port still returns
+    /// NF-R-047, NF-R-059, OC-R-139, OC-R-108-109 — `OcppServer::start()` against an occupied port still returns
     /// `Ok(TlsBinding)`; `bound_addr()`
     /// stays `None` while backing off and becomes `Some(_)` once the port frees up.
     async fn it_csms_start_against_occupied_port_stays_running() {

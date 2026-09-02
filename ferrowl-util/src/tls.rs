@@ -277,7 +277,7 @@ mod tests {
         );
     }
 
-    /// MB-R-105 — every tag (`mode`/`source`/`verify`) and kebab-case variant name is pinned in
+    /// MB-R-164 — every tag (`mode`/`source`/`verify`) and kebab-case variant name is pinned in
     /// the serialized text, so a rename of any of them is caught here rather than passing
     /// silently through the round-trip helpers (which accept any tag spelling as long as it's
     /// self-consistent).
@@ -348,7 +348,7 @@ mod tests {
         );
     }
 
-    /// MB-R-108/OC-R-039 — `CertVerification::RootStore` is rejected on a server's
+    /// MB-R-108, MB-R-167, OC-R-133 — `CertVerification::RootStore` is rejected on a server's
     /// client-certificate verification (Modbus and CSMS alike).
     #[test]
     fn ut_server_policy_rejects_root_store_verification() {
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(policy.validate(), Err(PolicyError::RootStoreOnServer));
     }
 
-    /// MB-R-108/OC-R-039 — `CertVerification::CaFiles` with an empty `ca_files` is rejected at
+    /// MB-R-108, MB-R-167, OC-R-039 — `CertVerification::CaFiles` with an empty `ca_files` is rejected at
     /// construction on the server role (Modbus and CSMS alike).
     #[test]
     fn ut_server_ca_files_empty_is_rejected() {
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(server.validate(), Err(PolicyError::EmptyCaFiles));
     }
 
-    /// MB-R-109/OC-R-036 — `CertVerification::CaFiles` with an empty `ca_files` is rejected at
+    /// MB-R-109, MB-R-167, OC-R-130 — `CertVerification::CaFiles` with an empty `ca_files` is rejected at
     /// construction on the client role (Modbus and CS alike).
     #[test]
     fn ut_client_ca_files_empty_is_rejected() {
@@ -382,7 +382,7 @@ mod tests {
         assert_eq!(client.validate(), Err(PolicyError::EmptyCaFiles));
     }
 
-    /// MB-R-110/OC-R-035 — `CertSource::Ephemeral` is rejected as a client's mTLS identity
+    /// MB-R-110, MB-R-167, MB-R-176, OC-R-035 — `CertSource::Ephemeral` is rejected as a client's mTLS identity
     /// (Modbus and CS alike).
     #[test]
     fn ut_client_policy_rejects_ephemeral_identity() {

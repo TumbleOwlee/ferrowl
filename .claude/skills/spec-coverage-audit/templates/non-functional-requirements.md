@@ -8,22 +8,22 @@ Added via workflow in [`AGENTS.md`](../../AGENTS.md) — gate 1 approves "shall"
 
 ---
 
-## 1. Platforms and toolchain
+## Platforms and toolchain
 
 *(Empty. First requirement lands via gate 1 — e.g. supported platforms, minimum language version + where declared, pinned toolchain.)*
 
-## 2. Performance
+## Performance
 
 *(Empty. State a posture, not an unmeasurable number: what may allocate, what must not block, what's explicitly not optimised.)*
 
-## 3. Security
+## Security
 
 *(Empty. Input trust boundaries, what must never panic/allocate unbounded, dependency policy, unsafe-code policy.)*
 
-## 4. Versioning and release
+## Versioning and release
 
 *(Empty. Versioning scheme, what constitutes a breaking change, changelog policy.)*
 
-## 5. Testing conventions
+## Testing conventions
 
 *(Empty. Test naming, coverage floor + where enforced, port/filesystem discipline, what may not run in CI.)*
