@@ -36,7 +36,7 @@ fn it_runs_a_modbus_server_and_exits_clean() {
 }
 
 #[test]
-/// CL-R-030, CL-R-049 — a module whose device config fails to load makes the headless run exit 1 with a diagnostic on stderr.
+/// CL-R-030, CL-R-049 — a module whose device config fails to load makes the headless run exit 1 with an `Error:`-prefixed diagnostic on stderr.
 fn it_fails_hard_on_a_missing_device_config() {
     let module = "name=it-headless-bad,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=15921,role=server";
     let output = bin()
@@ -47,8 +47,10 @@ fn it_fails_hard_on_a_missing_device_config() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("failed to load"),
-        "expected a load-failure message, got: {stderr}"
+        stderr
+            .lines()
+            .any(|line| line.starts_with("Error:") && line.contains("failed to load")),
+        "expected an `Error:`-prefixed load-failure line, got: {stderr}"
     );
 }
 
@@ -155,7 +157,9 @@ baud_rate = 9600
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("failed to load"),
-        "expected a load-failure message, got: {stderr}"
+        stderr
+            .lines()
+            .any(|line| line.starts_with("Error:") && line.contains("failed to load")),
+        "expected an `Error:`-prefixed load-failure line, got: {stderr}"
     );
 }
