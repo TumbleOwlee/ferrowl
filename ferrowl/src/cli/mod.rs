@@ -717,6 +717,7 @@ fn build_descriptor_tls(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
 
     #[test]
     /// CL-R-002 — a --module TCP descriptor parses into a module instance.
@@ -897,7 +898,7 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_cli");
+        let dir = reserve_temp_dir("ferrowl_cli");
         let path = dir.join("session.toml");
         let path = path.to_str().unwrap().to_string();
         Converter::save(&session, &path, FileType::Toml).unwrap();
@@ -943,7 +944,7 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_cli");
+        let dir = reserve_temp_dir("ferrowl_cli");
         let path = dir.join("mixed_session.json");
         let path = path.to_str().unwrap().to_string();
         Converter::save(&session, &path, FileType::Json).unwrap();
@@ -1218,7 +1219,7 @@ mod tests {
             scripts: vec![],
             interval: 1.0,
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_cli");
+        let dir = reserve_temp_dir("ferrowl_cli");
         let path = dir.join(format!("{tag}.toml"));
         Converter::save(&session, path.to_str().unwrap(), FileType::Toml).unwrap();
         let args = CliArgs {

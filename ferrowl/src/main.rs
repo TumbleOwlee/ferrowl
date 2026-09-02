@@ -431,6 +431,7 @@ mod tests {
     use crate::registry::ModuleRegistry;
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::ModuleDirModule;
+    use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
     use ferrowl_util::convert::{Converter, FileType};
     use std::sync::Arc;
 
@@ -446,8 +447,8 @@ mod tests {
 
     /// Saves `session` under a fresh temp dir, returning its path and the guard keeping the
     /// dir alive for the rest of the test.
-    fn save_session(tag: &str, session: &Session) -> (String, ferrowl_test_support::TempDirGuard) {
-        let dir = ferrowl_test_support::reserve_temp_dir(&format!("ferrowl_main_{tag}"));
+    fn save_session(tag: &str, session: &Session) -> (String, TempDirGuard) {
+        let dir = reserve_temp_dir(&format!("ferrowl_main_{tag}"));
         let path = dir.join("session.toml");
         Converter::save(session, path.to_str().unwrap(), FileType::Toml).unwrap();
         (path.to_str().unwrap().to_string(), dir)
@@ -536,7 +537,7 @@ mod tests {
             device: String::new(),
             protocol: config::ocpp::OcppProtocol::Ws,
             ip: "127.0.0.1".into(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             path: String::new(),
         })
         .unwrap();
@@ -575,7 +576,7 @@ mod tests {
     async fn ut_session_with_monitor_module_loads_and_starts() {
         use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig, Role};
 
-        let device_dir = ferrowl_test_support::reserve_temp_dir("ferrowl_main_monitor");
+        let device_dir = reserve_temp_dir("ferrowl_main_monitor");
         let device_path = device_dir.join("device.toml");
         Converter::save(
             &MonitorDeviceConfig::default(),

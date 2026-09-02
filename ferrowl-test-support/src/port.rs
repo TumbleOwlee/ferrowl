@@ -78,7 +78,9 @@ mod tests {
     }
 
     /// NF-R-043 — `release()` drops the binding and hands back the number,
-    /// which is then free to bind again.
+    /// which is then free to bind again. This rebind is a real TOCTOU window: any concurrent
+    /// `bind(":0")`, in this process (a sibling test on another thread) or another, can steal
+    /// the number first and make this assertion fail spuriously.
     #[test]
     fn ut_tcp_release_frees_port() {
         let guard = reserve_tcp_port();
@@ -107,7 +109,9 @@ mod tests {
     }
 
     /// NF-R-043 — `release()` drops the binding and hands back the number,
-    /// which is then free to bind again.
+    /// which is then free to bind again. This rebind is a real TOCTOU window: any concurrent
+    /// `bind(":0")`, in this process (a sibling test on another thread) or another, can steal
+    /// the number first and make this assertion fail spuriously.
     #[test]
     fn ut_udp_release_frees_port() {
         let guard = reserve_udp_port();

@@ -117,7 +117,7 @@ impl MonitorRegisterDef {
 mod tests {
     use super::*;
     use ferrowl_codec::BitField;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use ferrowl_util::convert::{Converter, FileType};
 
     fn sample() -> MonitorDeviceConfig {
@@ -161,19 +161,20 @@ mod tests {
         }
     }
 
-    fn write_toml(name: &str, contents: &str) -> (String, ferrowl_test_support::TempDirGuard) {
-        let dir = reserve_temp_dir("ferrowl_modbus_monitor_device");
+    fn write_toml(dir: &TempDirGuard, name: &str, contents: &str) -> String {
         let path = dir.join(name).to_string_lossy().into_owned();
         std::fs::write(&path, contents).unwrap();
-        (path, dir)
+        path
     }
 
     /// api-contract.md §6 — the role-conditional shape ignores (rather than rejects)
     /// client/server-only fields left over in a hand-edited or copy-pasted config file.
     #[test]
     fn ut_monitor_device_config_ignores_unknown_fields() {
-        let (path, _dir) = write_toml(
-            "ferrowl_monitor_device_unknown_fields.toml",
+        let dir = reserve_temp_dir("ferrowl_modbus_monitor_device");
+        let path = write_toml(
+            &dir,
+            "unknown_fields.toml",
             r#"
 version = "0.1.0"
 timeout_ms = 3000
@@ -200,8 +201,10 @@ definitions = []
     /// the same as `RegisterDef`'s.
     #[test]
     fn ut_monitor_register_def_has_no_access_or_update_field() {
-        let (path, _dir) = write_toml(
-            "ferrowl_monitor_register_def_unknown_fields.toml",
+        let dir = reserve_temp_dir("ferrowl_modbus_monitor_device");
+        let path = write_toml(
+            &dir,
+            "unknown_fields.toml",
             r#"
 name = "power"
 slave_id = 1

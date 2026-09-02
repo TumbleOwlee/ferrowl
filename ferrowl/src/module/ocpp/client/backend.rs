@@ -585,6 +585,7 @@ mod tests {
 
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppProtocol;
+    use ferrowl_test_support::reserve_tcp_port;
 
     /// A handler that never receives a Call in these tests — `start()` never completes a
     /// handshake against a closed port.
@@ -613,7 +614,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect,
@@ -673,7 +674,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: None,
@@ -717,7 +718,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: None, // defaults to true (OC-R-048)
@@ -780,7 +781,7 @@ mod tests {
             role: Default::default(),
             protocol: OcppProtocol::Ws,
             ip: "127.0.0.1".to_owned(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             path: "/ocpp/CS001".to_owned(),
             timeout_ms: Some(200),
             reconnect: Some(false),

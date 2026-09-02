@@ -14,6 +14,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge::{BridgeConfig, BridgeEndpointKind, BridgeEndpointSpec};
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey};
 use ferrowl_store::{CellKind, CellType, Memory, Range};
+use ferrowl_test_support::reserve_tcp_port;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, UnitId};
 use std::sync::Arc;
@@ -63,7 +64,7 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 /// unmodified. No TUI/session/store of its own is constructed anywhere in this path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
-    let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let downstream_port = reserve_tcp_port().release();
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
@@ -89,7 +90,7 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     .expect("downstream server failed to start");
     wait_bound_addr(&bound_addr).await;
 
-    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {
         upstream: BridgeEndpointSpec {
             kind: BridgeEndpointKind::Tcp(tcp_config(upstream_port)),
@@ -122,7 +123,7 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
 /// instead of MBAP), so this combination also runs a real end-to-end path with no hardware.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
-    let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let downstream_port = reserve_tcp_port().release();
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
@@ -148,7 +149,7 @@ async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
     .expect("downstream server failed to start");
     wait_bound_addr(&bound_addr).await;
 
-    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {
         upstream: BridgeEndpointSpec {
             kind: BridgeEndpointKind::RtuOverTcp(tcp_config(upstream_port)),
@@ -181,7 +182,7 @@ async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
 /// hardware, this time carrying Modbus ASCII framing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_bridge_run_wires_ascii_over_tcp_upstream_ascii_over_tcp_downstream() {
-    let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let downstream_port = reserve_tcp_port().release();
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
         key(RegKind::HoldingRegister),
@@ -207,7 +208,7 @@ async fn it_bridge_run_wires_ascii_over_tcp_upstream_ascii_over_tcp_downstream()
     .expect("downstream server failed to start");
     wait_bound_addr(&bound_addr).await;
 
-    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {
         upstream: BridgeEndpointSpec {
             kind: BridgeEndpointKind::AsciiOverTcp(tcp_config(upstream_port)),

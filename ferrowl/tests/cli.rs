@@ -3,6 +3,7 @@
 //! genuinely process-level (async signal handling, `std::process::exit`, stdout/stderr
 //! separation) and cannot be observed by calling a library function.
 
+use ferrowl_test_support::reserve_temp_dir;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -102,7 +103,7 @@ fn it_sigint_is_a_clean_shutdown() {
 /// CL-R-012 — migrate is dispatched directly, exiting with its own code without starting the TUI
 /// or a headless run.
 fn it_migrate_exit_codes() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_migrate");
+    let dir = reserve_temp_dir("ferrowl_migrate");
 
     // Failure: an input path whose extension is neither .toml nor .json.
     let bad = bin()
@@ -151,7 +152,7 @@ fn it_migrate_exit_codes() {
 /// so a JSON source migrates to a TOML destination (and vice-versa), version-stamped either way.
 /// CS-R-045 — migration produces a device config only, never a session file.
 fn it_migrate_cross_encoding_produces_device_config() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_migrate_cross");
+    let dir = reserve_temp_dir("ferrowl_migrate_cross");
 
     // A minimal pre-rewrite config with one holding register and a contiguous range.
     let legacy_json = r#"{

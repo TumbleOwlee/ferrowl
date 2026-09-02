@@ -623,6 +623,7 @@ impl<S: DrawSurface> App<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use std::io::Read;
 
     #[test]
@@ -694,7 +695,7 @@ mod tests {
     #[test]
     /// UI-R-045 — a configured file sink buffers lines and flushes them to disk on flush/teardown, timestamped.
     fn log_ring_persists_lines_to_file_sink() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_logring");
+        let dir = reserve_temp_dir("ferrowl_logring");
         let base = dir.join("test.log");
         let base = base.to_str().unwrap();
         let name = "csms";

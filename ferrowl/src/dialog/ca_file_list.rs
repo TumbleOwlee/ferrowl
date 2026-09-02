@@ -222,6 +222,7 @@ impl Default for AddCaFileDialog {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use ferrowl_ui::traits::{HandleEvents, SetFocus};
 
     fn type_into(state: &mut SuggestInputState<FsPathProvider>, s: &str) {
@@ -231,7 +232,7 @@ mod tests {
         }
     }
 
-    fn tmp_file(dir: &ferrowl_test_support::TempDirGuard, name: &str) -> String {
+    fn tmp_file(dir: &TempDirGuard, name: &str) -> String {
         let path = dir.join(name);
         std::fs::write(&path, b"").unwrap();
         path.to_str().unwrap().to_string()
@@ -257,7 +258,7 @@ mod tests {
     #[test]
     fn ut_apply_requires_non_empty_path() {
         assert!(AddCaFileDialog::new().apply().is_err());
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let ca = tmp_file(&dir, "nonempty.pem");
         let mut d = AddCaFileDialog::new();
         type_into(&mut d.path.state, &format!("  {ca}  "));
@@ -280,7 +281,7 @@ mod tests {
     #[test]
     fn ut_apply_rejects_directory() {
         let mut d = AddCaFileDialog::new();
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list_dir");
+        let dir = reserve_temp_dir("ferrowl_ca_file_list_dir");
         type_into(&mut d.path.state, &dir.path().to_string_lossy());
         let err = d.apply().expect_err("a directory must not apply");
         assert!(err.contains("directory"), "unexpected error: {err}");
@@ -291,7 +292,7 @@ mod tests {
     #[test]
     fn ut_apply_rejects_wrong_extension() {
         let mut d = AddCaFileDialog::new();
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let bad = tmp_file(&dir, "ca.txt");
         type_into(&mut d.path.state, &bad);
         let err = d.apply().expect_err("a .txt file must not apply");
@@ -303,7 +304,7 @@ mod tests {
     #[test]
     fn ut_apply_accepts_uppercase_extension() {
         let mut d = AddCaFileDialog::new();
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ca_file_list");
+        let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let ca = tmp_file(&dir, "uppercase.PEM");
         type_into(&mut d.path.state, &ca);
         assert_eq!(d.apply().unwrap(), ca);

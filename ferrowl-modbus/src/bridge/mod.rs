@@ -131,6 +131,7 @@ mod tests {
     use crate::bridge::service::BridgeService;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::{CellKind, CellType, Memory, Range};
+    use ferrowl_test_support::reserve_tcp_port;
     use parking_lot::RwLock as MemLock;
     use rust_modbus::{
         Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, Rtu as RtuFraming,
@@ -232,7 +233,7 @@ mod tests {
         let downstream = duplex_downstream(RegisterValue(11), sink());
         let service = BridgeService::new(downstream, None, sink());
 
-        let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+        let upstream_port = reserve_tcp_port().release();
         let _upstream = upstream_tcp::run(&tcp_config(upstream_port), service, sink())
             .await
             .expect("upstream failed to start");
@@ -256,7 +257,7 @@ mod tests {
     /// for serial, served directly via `serve_link` as `upstream_rtu::run` itself would).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_bridge_run_wires_rtu_upstream_tcp_downstream() {
-        let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
+        let downstream_port = reserve_tcp_port().release();
         let mut mem = Memory::<crate::Key<crate::SlaveKey>>::default();
         mem.add_ranges(
             key(RegKind::HoldingRegister),

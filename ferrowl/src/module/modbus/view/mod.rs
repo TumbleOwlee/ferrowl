@@ -1032,8 +1032,7 @@ mod tests {
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
-    use ferrowl_test_support::reserve_tcp_port;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
     use ferrowl_ui::EventResult;
     use ratatui::Frame;
     use ratatui::buffer::Buffer;

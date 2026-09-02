@@ -625,6 +625,7 @@ mod tests {
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
     use crate::module::ocpp::server::backend::ServerEvent;
     use ferrowl_ocpp::V1_6;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
 
     #[test]
     fn ut_rfid_store_device_roundtrip() {
@@ -1004,7 +1005,7 @@ mod tests {
     async fn write_device_alias_saves_like_wd() {
         use crate::module::view::CommandResult;
         let mut v = server_view();
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_server_view");
+        let dir = reserve_temp_dir("ferrowl_ocpp_server_view");
         let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some((_, msg))) =
@@ -1082,7 +1083,7 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let occupier = ferrowl_test_support::reserve_tcp_port();
+        let occupier = reserve_tcp_port();
 
         let mut v = server_view();
         v.spec.port = occupier.port();

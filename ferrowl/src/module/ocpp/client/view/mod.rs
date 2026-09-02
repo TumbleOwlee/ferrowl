@@ -809,6 +809,7 @@ mod tests {
     use super::*;
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
     use ferrowl_ocpp::{V1_6, V2_0_1};
+    use ferrowl_test_support::reserve_temp_dir;
 
     fn client_view<V: ClientVersion>(version: OcppVersion) -> ClientView<V> {
         let spec = OcppSpec {
@@ -1207,7 +1208,7 @@ mod tests {
     async fn write_device_alias_saves_like_wd() {
         use crate::module::view::CommandResult;
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_client_view");
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
         let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some((_, msg))) =
@@ -1233,7 +1234,7 @@ mod tests {
             s.cs_set("Model", ValueType::String("Acme-EVSE".into()));
         });
 
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_client_view");
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
         let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await
@@ -1269,7 +1270,7 @@ mod tests {
             s.cs_set("MeterType", ValueType::String("MT-X".into()));
         });
 
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_client_view");
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
         let path = dir.join("device.toml");
         let p = path.to_str().expect("temp path is valid UTF-8").to_string();
         let CommandResult::Handled(Some(_)) = v.handle_command_impl(&format!("wd {p}")).await

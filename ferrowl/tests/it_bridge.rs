@@ -8,6 +8,7 @@
 // Integration-test crate: an unwrap that fails is the test failing, same as an assertion.
 #![allow(clippy::unwrap_used)]
 
+use ferrowl_test_support::reserve_tcp_port;
 use std::process::Command;
 
 fn bin() -> Command {
@@ -19,8 +20,8 @@ fn bin() -> Command {
 /// setup-failure list does not include a downstream connect failure)
 /// and, on its `--duration` deadline, exits 0.
 fn it_bridge_starts_with_unreachable_downstream_and_exits_clean_on_deadline() {
-    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
-    let downstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let upstream_port = reserve_tcp_port().release();
+    let downstream_port = reserve_tcp_port().release();
     let output = bin()
         .args([
             "bridge",
@@ -46,7 +47,7 @@ fn it_bridge_starts_with_unreachable_downstream_and_exits_clean_on_deadline() {
 #[test]
 /// BR-R-003, BR-R-013 — missing `--downstream` makes the bridge exit 1 without starting.
 fn it_bridge_fails_hard_on_a_missing_downstream_flag() {
-    let upstream_port = ferrowl_test_support::reserve_tcp_port().release();
+    let upstream_port = reserve_tcp_port().release();
     let output = bin()
         .args([
             "bridge",

@@ -14,6 +14,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind, CellType, Memory, Range};
+use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
 use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
@@ -60,7 +61,7 @@ fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Arc<Mutex<Vec<String>>>) 
     (f, log)
 }
 
-fn write_pem(dir: &ferrowl_test_support::TempDirGuard, label: &str, pem: &str) -> String {
+fn write_pem(dir: &TempDirGuard, label: &str, pem: &str) -> String {
     let path = dir.join(format!("{label}.pem"));
     std::fs::write(&path, pem).expect("failed to write test PEM file");
     path.to_string_lossy().into_owned()
@@ -131,7 +132,7 @@ async fn raw_connect(
 /// material configured"), the server falls back to an ephemeral self-signed certificate,
 /// and logs that fallback.
 async fn self_signed_fallback_is_used_and_logged() {
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -175,7 +176,7 @@ async fn self_signed_fallback_is_used_and_logged() {
 /// MB-R-106/OC-R-095 — an explicit `SelfSigned` identity uses a self-signed certificate
 /// without logging the "no configuration" fallback line.
 async fn explicit_self_signed_is_used_without_fallback_log() {
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -235,7 +236,7 @@ fn lone_cert_or_key_file_fails_config_deserialization() {
 /// MB-R-108 — `Mutual`'s `CaFiles` verification accepts a client signed by the configured
 /// CA, and rejects one presenting none or one signed by an unrelated CA.
 async fn require_client_cert_enforced() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "mtls-server-cert", &server_cert_pem);
     let server_key_file = write_pem(&dir, "mtls-server-key", &server_key_pem);
@@ -246,7 +247,7 @@ async fn require_client_cert_enforced() {
     let (other_ca_pem, other_cert_pem, other_key_pem) = ca_and_signed_client_pem();
     let _ = other_ca_pem;
 
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -321,7 +322,7 @@ async fn require_client_cert_enforced() {
 /// trusts (a bare self-signed cert, not chained to any configured CA — here there is no CA
 /// configured at all) is still accepted.
 async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "skip-verify-server-cert", &server_cert_pem);
     let server_key_file = write_pem(&dir, "skip-verify-server-key", &server_key_pem);
@@ -329,7 +330,7 @@ async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
     // A client cert self-signed by nobody the server trusts (not chained to any CA at all).
     let (untrusted_cert_pem, untrusted_key_pem) = self_signed_pem();
 
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -384,7 +385,7 @@ async fn skip_verify_requires_a_cert_but_never_validates_its_chain() {
 /// or wrong-CA client certificate) never takes down the accept loop: a subsequent
 /// well-behaved client still connects.
 async fn require_client_cert_rejection_does_not_kill_accept_loop() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "mtls-server-cert", &server_cert_pem);
     let server_key_file = write_pem(&dir, "mtls-server-key", &server_key_pem);
@@ -392,7 +393,7 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
     let (ca_pem, client_cert_pem, client_key_pem) = ca_and_signed_client_pem();
     let ca_file = write_pem(&dir, "mtls-ca", &ca_pem);
 
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -448,7 +449,7 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
 /// MB-R-111 (server logging half) — a rejected mTLS handshake (no client
 /// certificate presented) is logged with the peer address and a failure reason.
 async fn require_client_cert_rejection_is_logged() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "mtls-log-server-cert", &server_cert_pem);
     let server_key_file = write_pem(&dir, "mtls-log-server-key", &server_key_pem);
@@ -456,7 +457,7 @@ async fn require_client_cert_rejection_is_logged() {
     let (ca_pem, client_cert_pem, client_key_pem) = ca_and_signed_client_pem();
     let ca_file = write_pem(&dir, "mtls-log-ca", &ca_pem);
 
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -521,12 +522,12 @@ async fn require_client_cert_rejection_is_logged() {
 /// MB-R-108 — `Tls` never requests a client certificate at all: a client presenting none is
 /// still accepted, regardless of what verification `Mutual` would otherwise apply.
 async fn it_tls_policy_never_requests_a_client_certificate() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "no-mtls-server-cert", &server_cert_pem);
     let server_key_file = write_pem(&dir, "no-mtls-server-key", &server_key_pem);
 
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let cfg = Arc::new(RwLock::new(config(
         port,
         tcp::ModbusTlsConfig {
@@ -563,13 +564,13 @@ async fn it_tls_policy_never_requests_a_client_certificate() {
 /// MB-R-108 — `Mutual`'s `CaFiles { ca_files: [] }` is rejected by `validate()` before the
 /// server ever binds, surfacing as the same TLS-configuration-error tier as a malformed PEM.
 async fn it_empty_ca_files_fails_server_start() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (cert_pem, key_pem) = self_signed_pem();
     let cert_file = write_pem(&dir, "empty-ca-server-cert", &cert_pem);
     let key_file = write_pem(&dir, "empty-ca-server-key", &key_pem);
 
     let cfg = Arc::new(RwLock::new(config(
-        ferrowl_test_support::reserve_tcp_port().release(),
+        reserve_tcp_port().release(),
         tcp::ModbusTlsConfig {
             server: ServerTlsPolicy::Mutual {
                 identity: CertSource::Files {
@@ -608,13 +609,13 @@ async fn it_empty_ca_files_fails_server_start() {
 /// itself always returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces
 /// from the joined task instead, and never retries.
 async fn malformed_pem_fails_server_start() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let bad_cert = write_pem(&dir, "garbage-cert", "not a pem file at all");
     let (_cert_pem, key_pem) = self_signed_pem();
     let key_file = write_pem(&dir, "garbage-key", &key_pem);
 
     let cfg = Arc::new(RwLock::new(config(
-        ferrowl_test_support::reserve_tcp_port().release(),
+        reserve_tcp_port().release(),
         tcp::ModbusTlsConfig {
             server: ServerTlsPolicy::Tls {
                 identity: CertSource::Files {

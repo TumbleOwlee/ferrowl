@@ -524,6 +524,7 @@ impl ModbusModule {
 mod tests {
     use ferrowl_codec::Kind;
     use ferrowl_modbus::UnitId;
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
 
     #[test]
     /// MB-R-087 — effective timing uses the device config's values when set, otherwise the built-in defaults.
@@ -578,7 +579,7 @@ mod tests {
         assert_eq!(network_log_level(line), Level::Warning);
     }
 
-    fn device_with_defs() -> crate::config::DeviceConfig {
+    fn device_with_defs() -> (crate::config::DeviceConfig, TempDirGuard) {
         use crate::config::DeviceConfig;
         use crate::config::device::{
             AccessCfg, AlignmentCfg, EndianCfg, NamedValue, ReadRanges, RegisterDef, Scalar,
@@ -617,19 +618,17 @@ mod tests {
         // Virtual register without a default (exercises default_value).
         definitions.insert("virt".into(), base(None, true, None, None));
 
-        DeviceConfig {
+        let dir = reserve_temp_dir("ferrowl_modbus_module");
+        let log_file = dir.join("test.log").to_string_lossy().into_owned();
+
+        let device = DeviceConfig {
             version: None,
             timeout_ms: Some(1000),
             delay_ms: None,
             interval_ms: Some(500),
             reconnect: None,
             tls: Default::default(),
-            log_file: Some(
-                std::env::temp_dir()
-                    .join("ferrowl_module_test.log")
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
+            log_file: Some(log_file),
             read_ranges: ReadRanges {
                 holding: Some("0-10".into()),
                 ..Default::default()
@@ -637,7 +636,8 @@ mod tests {
             definitions,
             scripts: Vec::new(),
             script_interval: 1.0,
-        }
+        };
+        (device, dir)
     }
 
     #[test]
@@ -646,7 +646,7 @@ mod tests {
         use super::ModbusModule;
         use crate::config::{Endpoint, ModuleSpec, Role};
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let spec = ModuleSpec {
             name: "evse 1".into(),
             device: String::new(),
@@ -693,7 +693,7 @@ mod tests {
         use super::ModbusModule;
         use crate::config::{Endpoint, ModuleSpec, Role};
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let spec = ModuleSpec {
             name: "srv".into(),
             device: String::new(),
@@ -735,7 +735,7 @@ mod tests {
         use ferrowl_store::Range;
 
         // `device_with_defs` seeds the fixed holding register "hold" at address 0 with default 7.
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let spec = ModuleSpec {
             name: "srv".into(),
             device: String::new(),
@@ -768,7 +768,7 @@ mod tests {
         use ferrowl_modbus::{Key, SlaveKey};
         use ferrowl_store::Range;
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let spec = ModuleSpec {
             name: "srv".into(),
             device: String::new(),
@@ -825,7 +825,7 @@ mod tests {
         use super::ModbusModule;
         use crate::config::{Endpoint, ModuleSpec, Role};
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let spec = ModuleSpec {
             name: "meter".into(),
             device: String::new(),
@@ -867,7 +867,7 @@ mod tests {
         use super::ModbusModule;
         use crate::module::modbus::SerialPathRegistry;
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let path = "/nonexistent/mb-r-150-a";
         let mut module_a = ModbusModule::new(&rtu_spec("A", path), &device);
         let registry = SerialPathRegistry::new();
@@ -890,7 +890,7 @@ mod tests {
         use crate::config::{Endpoint, ModuleSpec, Role};
         use crate::module::modbus::SerialPathRegistry;
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let path = "/nonexistent/mb-r-150-b";
 
         // Module B already claims the path directly in the shared registry.
@@ -940,7 +940,7 @@ mod tests {
         use super::ModbusModule;
         use crate::module::modbus::SerialPathRegistry;
 
-        let device = device_with_defs();
+        let (device, _dir) = device_with_defs();
         let path = "/nonexistent/mb-r-150-c";
         let mut module_a = ModbusModule::new(&rtu_spec("A", path), &device);
 

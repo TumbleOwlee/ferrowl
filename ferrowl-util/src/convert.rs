@@ -178,6 +178,7 @@ fn json_to_toml(value: &serde_json::Value) -> Result<toml::Value, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use serde::{Deserialize, Serialize};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -202,7 +203,7 @@ mod tests {
     #[test]
     /// CS-R-004 — a value saves and loads through TOML to an equal value.
     fn ut_toml_save_load_round_trip() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.toml");
         let path = path.to_str().unwrap();
         let value = Sample {
@@ -227,7 +228,7 @@ mod tests {
         let value = Wrap {
             blob: serde_json::json!({ "ip": "127.0.0.1", "port": 9000 }),
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.toml");
         let path = path.to_str().unwrap();
         Converter::save(&value, path, FileType::Toml).unwrap();
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     /// CS-R-004 — a value saves and loads through JSON to an equal value.
     fn ut_json_save_load_round_trip() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.json");
         let path = path.to_str().unwrap();
         let value = Sample {
@@ -256,7 +257,7 @@ mod tests {
     #[test]
     /// CS-R-004 — converting TOML to JSON preserves the data model.
     fn ut_convert_toml_to_json_preserves_data() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let src = dir.join("src.toml");
         let src = src.to_str().unwrap();
         let dst = dir.join("dst.json");
@@ -275,7 +276,7 @@ mod tests {
     /// CS-R-004 — converting JSON to TOML preserves the data model.
     fn ut_convert_json_to_toml_preserves_data() {
         // Exercises the JSON-source read path and the TOML-destination write path.
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let src = dir.join("src.json");
         let src = src.to_str().unwrap();
         let dst = dir.join("dst.toml");
@@ -292,7 +293,7 @@ mod tests {
 
     #[test]
     fn ut_convert_json_source_open_error() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let dst = dir.join("dst.toml");
         let r = Converter::convert::<Sample>(
             "/no/such/ferrowl/src.json",
@@ -306,7 +307,7 @@ mod tests {
     #[test]
     /// CS-R-050 — a malformed source fails to convert with a deserialize error.
     fn ut_convert_json_source_malformed_error() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let src = dir.join("src.json");
         std::fs::write(&src, "{ not valid json ").unwrap();
         let dst = dir.join("dst.toml");
@@ -322,7 +323,7 @@ mod tests {
     #[test]
     fn ut_convert_toml_dest_create_error() {
         // Valid source, but the destination directory does not exist -> create fails.
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let src = dir.join("src.toml");
         let src = src.to_str().unwrap();
         Converter::save(
@@ -345,7 +346,7 @@ mod tests {
 
     #[test]
     fn ut_convert_json_dest_create_error() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let src = dir.join("src.toml");
         let src = src.to_str().unwrap();
         Converter::save(
@@ -427,7 +428,7 @@ mod tests {
     #[test]
     /// CS-R-050 — malformed file content fails to load with a deserialize error.
     fn ut_load_malformed_content_errors() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_convert");
+        let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.json");
         std::fs::write(&path, "{ not valid json ").unwrap();
         let r = Converter::load::<Sample>(path.to_str().unwrap(), FileType::Json);

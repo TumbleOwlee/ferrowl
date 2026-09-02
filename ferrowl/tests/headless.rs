@@ -2,6 +2,7 @@
 //! binary as a subprocess since `ferrowl` is bin-only (no lib target to call `headless::run`
 //! from directly), asserting the exit-code contract documented in the README.
 
+use ferrowl_test_support::reserve_temp_dir;
 use std::process::Command;
 
 fn bin() -> Command {
@@ -64,7 +65,7 @@ fn write_monitor_device(path: &std::path::Path) {
 /// with a monitor module on a non-existent serial path still starts and reaches its
 /// `--duration` deadline cleanly.
 fn it_headless_run_starts_monitor_module() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_it_headless_monitor");
+    let dir = reserve_temp_dir("ferrowl_it_headless_monitor");
     let device_path = dir.join("device.toml");
     write_monitor_device(&device_path);
 
@@ -121,7 +122,7 @@ baud_rate = 9600
 /// resolvable via `--session` (typed `ModuleSpec`) — the `--module key=val` flag's parser
 /// deliberately only accepts `client`/`server` (CL-R territory, out of this plan's scope).
 fn it_headless_fails_on_monitor_module_with_bad_device_path() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_it_headless_monitor_bad");
+    let dir = reserve_temp_dir("ferrowl_it_headless_monitor_bad");
     let session_path = dir.join("bad_device_session.toml");
     std::fs::write(
         &session_path,

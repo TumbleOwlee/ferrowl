@@ -537,10 +537,11 @@ fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use std::io::Write;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn temp_pem(dir: &std::path::Path, tag: &str, contents: &str) -> String {
+    fn temp_pem(dir: &TempDirGuard, tag: &str, contents: &str) -> String {
         let path = dir.join(format!("{tag}.pem"));
         std::fs::File::create(&path)
             .and_then(|mut f| f.write_all(contents.as_bytes()))
@@ -594,10 +595,10 @@ mod tests {
     /// OC-R-041 — a well-formed certificate and key load, pinning the happy path the negative
     /// cases below are measured against.
     fn ut_load_certs_and_key_roundtrip() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (cert_pem, key_pem) = cert_and_key_pem();
-        let cert_path = temp_pem(dir.path(), "roundtrip-cert", &cert_pem);
-        let key_path = temp_pem(dir.path(), "roundtrip-key", &key_pem);
+        let cert_path = temp_pem(&dir, "roundtrip-cert", &cert_pem);
+        let key_path = temp_pem(&dir, "roundtrip-key", &key_pem);
         assert_eq!(load_certs(&cert_path).unwrap().len(), 1);
         load_private_key(&key_path).expect("key should load");
     }
@@ -606,8 +607,8 @@ mod tests {
     /// OC-R-041 — failing to open a certificate file is a TLS error, not a panic or a silent
     /// empty chain.
     fn ut_load_certs_missing_file_is_tls_error() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
-        let missing = temp_pem(dir.path(), "missing-cert", "");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
+        let missing = temp_pem(&dir, "missing-cert", "");
         std::fs::remove_file(&missing).unwrap();
         assert!(matches!(
             load_certs(&missing),
@@ -619,9 +620,9 @@ mod tests {
     /// OC-R-041 — a readable file with no certificate section fails as NoCertificates rather than
     /// being accepted as an empty chain.
     fn ut_load_certs_without_certificate_section_is_no_certificates() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (_cert, key_pem) = cert_and_key_pem();
-        let path = temp_pem(dir.path(), "key-only", &key_pem);
+        let path = temp_pem(&dir, "key-only", &key_pem);
         assert!(matches!(
             load_certs(&path),
             Err(Error::Tls(TlsError::NoCertificates(_)))
@@ -631,9 +632,9 @@ mod tests {
     #[test]
     /// OC-R-041 — failing to find a private key in a readable file is NoPrivateKey.
     fn ut_load_private_key_without_key_section_is_no_private_key() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (cert_pem, _key) = cert_and_key_pem();
-        let path = temp_pem(dir.path(), "cert-only", &cert_pem);
+        let path = temp_pem(&dir, "cert-only", &cert_pem);
         assert!(matches!(
             load_private_key(&path),
             Err(Error::Tls(TlsError::NoPrivateKey(_)))
@@ -758,7 +759,7 @@ mod tests {
     /// covers the load path `ut_build_connector_mutual_self_signed_presents_cached_pair`'s
     /// `SelfSigned` identity doesn't exercise.
     fn ut_build_connector_mutual_files_identity_missing_then_present() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let cache = new_self_signed_cache();
 
         let missing = ClientTlsPolicy::Mutual {
@@ -778,8 +779,8 @@ mod tests {
                 extra_ca_files: vec![],
             },
             identity: CertSource::Files {
-                cert_file: temp_pem(dir.path(), "present-cert", &cert_pem),
-                key_file: temp_pem(dir.path(), "present-key", &key_pem),
+                cert_file: temp_pem(&dir, "present-cert", &cert_pem),
+                key_file: temp_pem(&dir, "present-key", &key_pem),
             },
         };
         let cfg = rustls_config(build_connector(&present, &cache).expect("builds"));
@@ -898,17 +899,17 @@ mod tests {
     #[test]
     /// OC-R-039 — a CSMS with mutual TLS and a configured client CA builds a server config carrying a client-cert verifier.
     fn ut_mutual_with_ca_builds_verifier() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (cert_pem, key_pem) = cert_and_key_pem();
         let (ca_pem, _ca_key) = cert_and_key_pem();
         let cache = new_self_signed_cache();
         let policy = ServerTlsPolicy::Mutual {
             identity: CertSource::Files {
-                cert_file: temp_pem(dir.path(), "mtls-cert", &cert_pem),
-                key_file: temp_pem(dir.path(), "mtls-key", &key_pem),
+                cert_file: temp_pem(&dir, "mtls-cert", &cert_pem),
+                key_file: temp_pem(&dir, "mtls-key", &key_pem),
             },
             verification: CertVerification::CaFiles {
-                ca_files: vec![temp_pem(dir.path(), "mtls-ca", &ca_pem)],
+                ca_files: vec![temp_pem(&dir, "mtls-ca", &ca_pem)],
             },
         };
         assert!(
@@ -957,7 +958,7 @@ mod tests {
     /// explicit interlude.
     #[test]
     fn ut_build_server_config_explicit_then_self_signed_regenerates() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let cache = new_self_signed_cache();
         let self_signed = ServerTlsPolicy::Tls {
             identity: CertSource::SelfSigned {},
@@ -973,8 +974,8 @@ mod tests {
         let (cert_pem, key_pem) = cert_and_key_pem();
         let explicit = ServerTlsPolicy::Tls {
             identity: CertSource::Files {
-                cert_file: temp_pem(dir.path(), "explicit-cert", &cert_pem),
-                key_file: temp_pem(dir.path(), "explicit-key", &key_pem),
+                cert_file: temp_pem(&dir, "explicit-cert", &cert_pem),
+                key_file: temp_pem(&dir, "explicit-key", &key_pem),
             },
         };
         build_server_config(&explicit, "localhost", &cache).expect("builds");
@@ -1001,14 +1002,14 @@ mod tests {
     /// `Skip` verification: the server's own self-signed identity and the CA trusted for
     /// verifying client certificates are independent.
     fn ut_mutual_self_signed_with_any_verification_mode_succeeds() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (ca_pem, _ca_key) = cert_and_key_pem();
         let cache = new_self_signed_cache();
 
         let verify = ServerTlsPolicy::Mutual {
             identity: CertSource::SelfSigned {},
             verification: CertVerification::CaFiles {
-                ca_files: vec![temp_pem(dir.path(), "self-signed-mtls-ca", &ca_pem)],
+                ca_files: vec![temp_pem(&dir, "self-signed-mtls-ca", &ca_pem)],
             },
         };
         assert!(build_server_config(&verify, "localhost", &cache).is_ok());
@@ -1024,13 +1025,13 @@ mod tests {
     /// OC-R-041 — a CSMS builds its server TLS config from on-disk certificate/key files.
     /// OC-R-037 — the CSMS server certificate may come from PEM files on disk.
     fn ut_build_server_config_from_files() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (cert_pem, key_pem) = cert_and_key_pem();
         let cache = new_self_signed_cache();
         let policy = ServerTlsPolicy::Tls {
             identity: CertSource::Files {
-                cert_file: temp_pem(dir.path(), "srv-cert", &cert_pem),
-                key_file: temp_pem(dir.path(), "srv-key", &key_pem),
+                cert_file: temp_pem(&dir, "srv-cert", &cert_pem),
+                key_file: temp_pem(&dir, "srv-key", &key_pem),
             },
         };
         assert!(build_server_config(&policy, "localhost", &cache).is_ok());
@@ -1069,7 +1070,7 @@ mod tests {
     /// proven end-to-end by the loopback integration test).
     #[test]
     fn ut_build_server_config_multi_ca_accumulates_into_one_root_store() {
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_security");
+        let dir = reserve_temp_dir("ferrowl_ocpp_security");
         let (ca1_pem, _) = cert_and_key_pem();
         let (ca2_pem, _) = cert_and_key_pem();
         let cache = new_self_signed_cache();
@@ -1077,8 +1078,8 @@ mod tests {
             identity: CertSource::SelfSigned {},
             verification: CertVerification::CaFiles {
                 ca_files: vec![
-                    temp_pem(dir.path(), "ca1", &ca1_pem),
-                    temp_pem(dir.path(), "ca2", &ca2_pem),
+                    temp_pem(&dir, "ca1", &ca1_pem),
+                    temp_pem(&dir, "ca2", &ca2_pem),
                 ],
             },
         };

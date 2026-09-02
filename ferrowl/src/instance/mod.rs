@@ -542,6 +542,7 @@ impl<T: KeyParams> Instance<T> {
 mod tests {
     use super::*;
     use ferrowl_modbus::UnitId;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_udp_port};
 
     use std::sync::Arc;
 
@@ -561,7 +562,7 @@ mod tests {
     fn dead_tcp_config() -> tcp::Config {
         tcp::Config {
             ip: "127.0.0.1".to_string(),
-            port: ferrowl_test_support::reserve_tcp_port().release(),
+            port: reserve_tcp_port().release(),
             timeout_ms: 200,
             delay_ms: 0,
             interval_ms: 0,
@@ -708,7 +709,7 @@ mod tests {
     /// against a dead peer), reports active, and stops gracefully like every other transport.
     #[tokio::test]
     async fn udp_client_starts_and_stops() {
-        let port = ferrowl_test_support::reserve_udp_port().release();
+        let port = reserve_udp_port().release();
         let mut instance = Instance::with_udp_client(config::ClientConfig {
             config: Arc::new(RwLock::new(dead_udp_config(port))),
             operations: Arc::new(RwLock::new(vec![])),
@@ -726,7 +727,7 @@ mod tests {
     /// every other transport.
     #[tokio::test]
     async fn udp_server_starts_and_stops() {
-        let port = ferrowl_test_support::reserve_udp_port().release();
+        let port = reserve_udp_port().release();
         let mut instance = Instance::with_udp_server(config::ServerConfig {
             config: Arc::new(RwLock::new(dead_udp_config(port))),
             memory: Arc::new(MemLock::new(
@@ -837,7 +838,7 @@ mod tests {
     /// like every other transport.
     #[tokio::test]
     async fn ascii_over_tcp_server_starts_and_stops() {
-        let port = ferrowl_test_support::reserve_tcp_port().release();
+        let port = reserve_tcp_port().release();
         let mut instance = Instance::with_ascii_over_tcp_server(
             config::ServerConfig {
                 config: Arc::new(RwLock::new(tcp::Config {
@@ -940,7 +941,7 @@ mod tests {
     /// message.
     #[tokio::test]
     async fn it_server_terminate_ends_task_gracefully() {
-        let port = ferrowl_test_support::reserve_tcp_port().release();
+        let port = reserve_tcp_port().release();
         let mut instance = Instance::with_tcp_server(
             config::ServerConfig {
                 config: Arc::new(RwLock::new(tcp::Config {
@@ -981,7 +982,7 @@ mod tests {
     /// `ferrowl-modbus` in isolation, already covered there).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_server_stop_on_backing_off_task_ends_promptly() {
-        let occupier = ferrowl_test_support::reserve_tcp_port();
+        let occupier = reserve_tcp_port();
         let port = occupier.port();
         let mut instance = Instance::with_tcp_server(
             config::ServerConfig {

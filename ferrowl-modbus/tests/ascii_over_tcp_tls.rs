@@ -11,6 +11,7 @@ use ferrowl_modbus::ascii_over_tcp;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind, CellType, Memory, Range};
+use ferrowl_test_support::reserve_tcp_port;
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -73,7 +74,7 @@ fn config(port: u16, tls: tcp::ModbusTlsConfig) -> tcp::Config {
 /// handshake and exchange Modbus ASCII-framed traffic over it, exactly as plain TCP/RtuOverTcp
 /// does.
 async fn ascii_over_tcp_client_server_tls_roundtrip() {
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
     let srv_mem = server_mem();
     let cli_mem = client_mem();
 

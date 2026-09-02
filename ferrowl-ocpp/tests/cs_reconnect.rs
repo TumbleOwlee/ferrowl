@@ -13,6 +13,7 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6};
+use ferrowl_test_support::reserve_tcp_port;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
@@ -79,7 +80,7 @@ fn config(url: String, reconnect: bool) -> Arc<RwLock<cs::Config>> {
 /// OC-R-048 — with `reconnect: true` (the default), a CS whose very first dial fails
 /// never ends its task: it stays alive, backing off and retrying.
 async fn cs_dial_failure_retries_while_reconnect_enabled() {
-    let dead_port = ferrowl_test_support::reserve_tcp_port().release();
+    let dead_port = reserve_tcp_port().release();
     let mut client = cs::ClientBuilder::<V1_6>::new(
         config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true),
         ferrowl_ocpp::new_self_signed_cache(),
@@ -104,7 +105,7 @@ async fn cs_dial_failure_retries_while_reconnect_enabled() {
 /// OC-R-048 — with `reconnect: false`, a CS whose dial fails ends its task with that
 /// error (after emitting a disconnected status), instead of retrying.
 async fn cs_dial_failure_reconnect_false_ends_task() {
-    let dead_port = ferrowl_test_support::reserve_tcp_port().release();
+    let dead_port = reserve_tcp_port().release();
     let mut client = cs::ClientBuilder::<V1_6>::new(
         config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), false),
         ferrowl_ocpp::new_self_signed_cache(),
@@ -124,7 +125,7 @@ async fn cs_dial_failure_reconnect_false_ends_task() {
 /// the wait immediately and ends the task with success, extending OC-R-047 to the backing-off
 /// state.
 async fn cs_terminate_while_backing_off_ends_task_ok() {
-    let dead_port = ferrowl_test_support::reserve_tcp_port().release();
+    let dead_port = reserve_tcp_port().release();
     let client = cs::ClientBuilder::<V1_6>::new(
         config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true),
         ferrowl_ocpp::new_self_signed_cache(),
@@ -148,7 +149,7 @@ async fn cs_terminate_while_backing_off_ends_task_ok() {
 /// attempt without a restart (mirrors `ferrowl-modbus`'s `tcp_client_rereads_config_on_reconnect`,
 /// MB-R-056).
 async fn cs_config_reread_on_every_dial() {
-    let dead_port = ferrowl_test_support::reserve_tcp_port().release();
+    let dead_port = reserve_tcp_port().release();
     let shared_config = config(format!("ws://127.0.0.1:{dead_port}/ocpp/CS001"), true);
 
     let client = cs::ClientBuilder::<V1_6>::new(

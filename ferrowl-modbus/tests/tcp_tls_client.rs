@@ -9,6 +9,7 @@
 use std::sync::atomic::Ordering;
 
 use ferrowl_modbus::tcp;
+use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
 use rcgen::{CertificateParams, Issuer, KeyPair};
 use rust_modbus::{
@@ -17,7 +18,7 @@ use rust_modbus::{
 };
 use tokio::io::AsyncReadExt;
 
-fn write_pem(dir: &ferrowl_test_support::TempDirGuard, label: &str, pem: &str) -> String {
+fn write_pem(dir: &TempDirGuard, label: &str, pem: &str) -> String {
     let path = dir.join(format!("{label}.pem"));
     std::fs::write(&path, pem).expect("failed to write test PEM file");
     path.to_string_lossy().into_owned()
@@ -87,12 +88,9 @@ async fn tls_client_connects_to_plain_rust_modbus_tls_server() {
     let cert_chain = rust_modbus::load_pem_cert_chain(cert_pem.as_bytes()).unwrap();
     let key = rust_modbus::load_pem_private_key(key_pem.as_bytes()).unwrap();
 
-    let addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let listener = TlsListener::bind(
         addr,
         TlsServerConfig {
@@ -133,18 +131,15 @@ async fn tls_client_connects_to_plain_rust_modbus_tls_server() {
 /// `extra_ca_files`, and rejects the same certificate with neither `extra_ca_files` nor
 /// `Skip` set (i.e. the default `RootStore` with an empty list, against a non-CA-signed cert).
 async fn it_tls_client_root_store_trusts_extra_ca() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
     let (cert_pem, key_pem) = self_signed_pem();
-    let cert_file = write_pem(&dir, "server-cert2", &cert_pem);
+    let cert_file = write_pem(&dir, "server-cert", &cert_pem);
     let cert_chain = rust_modbus::load_pem_cert_chain(cert_pem.as_bytes()).unwrap();
     let key = rust_modbus::load_pem_private_key(key_pem.as_bytes()).unwrap();
 
-    let addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let listener = TlsListener::bind(
         addr,
         TlsServerConfig {
@@ -213,18 +208,15 @@ async fn it_tls_client_root_store_trusts_extra_ca() {
 /// store: a server presenting a cert signed by the named CA is accepted, and a differently
 /// self-signed server (not signed by that CA, and not in the native roots either) is rejected.
 async fn it_tls_client_cafiles_trusts_only_named_ca() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
     let (ca_pem, signed_cert_pem, signed_key_pem) = ca_and_signed_server_pem();
     let ca_file = write_pem(&dir, "client-cafiles-ca", &ca_pem);
     let signed_chain = rust_modbus::load_pem_cert_chain(signed_cert_pem.as_bytes()).unwrap();
     let signed_key = rust_modbus::load_pem_private_key(signed_key_pem.as_bytes()).unwrap();
 
-    let addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let listener = TlsListener::bind(
         addr,
         TlsServerConfig {
@@ -270,12 +262,9 @@ async fn it_tls_client_cafiles_trusts_only_named_ca() {
     let (other_cert_pem, other_key_pem) = self_signed_pem();
     let other_chain = rust_modbus::load_pem_cert_chain(other_cert_pem.as_bytes()).unwrap();
     let other_key = rust_modbus::load_pem_private_key(other_key_pem.as_bytes()).unwrap();
-    let other_addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let other_addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let other_listener = TlsListener::bind(
         other_addr,
         TlsServerConfig {
@@ -292,7 +281,7 @@ async fn it_tls_client_cafiles_trusts_only_named_ca() {
     });
 
     let ca_file_only = ca_and_signed_server_pem().0;
-    let ca_file_only = write_pem(&dir, "client-cafiles-ca-2", &ca_file_only);
+    let ca_file_only = write_pem(&dir, "client-cafiles-untrusted-ca", &ca_file_only);
     let untrusted_cfg = config(
         other_bound.port(),
         tcp::ModbusTlsConfig {
@@ -338,12 +327,9 @@ async fn it_tls_client_presents_self_signed_identity() {
         .add_pem(client_cert_pem.as_bytes())
         .unwrap();
 
-    let addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let listener = TlsListener::bind(
         addr,
         TlsServerConfig {
@@ -436,7 +422,7 @@ async fn it_tls_client_presents_self_signed_identity() {
 /// MB-R-108 — `Mutual` with `Require` rejects a client presenting no certificate at all,
 /// distinct from the self-signed-identity acceptance case above.
 async fn it_tls_client_with_no_identity_rejected_by_require() {
-    let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
+    let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_client");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
     let server_cert_file = write_pem(&dir, "mtls-require-server-cert", &server_cert_pem);
     let server_cert_chain = rust_modbus::load_pem_cert_chain(server_cert_pem.as_bytes()).unwrap();
@@ -446,12 +432,9 @@ async fn it_tls_client_with_no_identity_rejected_by_require() {
     let mut roots = RootStore::empty();
     roots.add_pem(ca_pem.as_bytes()).unwrap();
 
-    let addr: std::net::SocketAddr = format!(
-        "127.0.0.1:{}",
-        ferrowl_test_support::reserve_tcp_port().release()
-    )
-    .parse()
-    .unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", reserve_tcp_port().release())
+        .parse()
+        .unwrap();
     let listener = TlsListener::bind(
         addr,
         TlsServerConfig {
@@ -536,7 +519,7 @@ async fn tls_handshake_failure_is_distinct_from_refused_and_timeout() {
     plain_server.abort();
 
     // (b) Nothing listening: connection refused.
-    let refused_port = ferrowl_test_support::reserve_tcp_port().release();
+    let refused_port = reserve_tcp_port().release();
     let refused_cfg = config(
         refused_port,
         tcp::ModbusTlsConfig {

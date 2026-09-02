@@ -11,6 +11,7 @@ use ferrowl_modbus::bridge;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Address, Key, ServerCommand, SlaveKey, UnitId};
 use ferrowl_store::{CellKind, CellType, Memory, Range};
+use ferrowl_test_support::reserve_tcp_port;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{ExceptionCode, Quantity, RequestPdu};
 use tokio::sync::{RwLock, mpsc};
@@ -56,7 +57,7 @@ fn config(port: u16) -> tcp::Config {
 /// forwards a request/response pair unmodified.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_tcp_downstream_connects_and_forwards() {
-    let port = ferrowl_test_support::reserve_tcp_port().release();
+    let port = reserve_tcp_port().release();
 
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
@@ -111,7 +112,7 @@ async fn it_tcp_downstream_connects_and_forwards() {
 /// response times out and reports `GatewayTargetDeviceFailedToRespond`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn it_tcp_downstream_connect_refused_then_reconnects_once_listener_appears() {
-    let guard = ferrowl_test_support::reserve_tcp_port();
+    let guard = reserve_tcp_port();
     let port = guard.port();
     // Bound but never accept()ed: the TCP connect succeeds instantly, nothing ever answers
     // the Modbus exchange.

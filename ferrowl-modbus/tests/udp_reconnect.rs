@@ -12,6 +12,7 @@ use std::time::Duration;
 use ferrowl_modbus::udp;
 use ferrowl_modbus::{Error, ServerCommand, SlaveKey};
 use ferrowl_store::Memory;
+use ferrowl_test_support::reserve_udp_port;
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address as RmAddress, Client as RmClient, Quantity as RmQuantity, UdpConfig, connect_udp,
@@ -45,7 +46,7 @@ fn config(port: u16, reconnect: bool) -> udp::Config {
 /// does not fail the server's start: `spawn()` returns `Ok(handle)`, the task keeps retrying
 /// the bind on the shared backoff policy, and once the port frees up a real request round-trips.
 async fn udp_server_bind_failure_retries_then_succeeds() {
-    let occupier = ferrowl_test_support::reserve_udp_port();
+    let occupier = reserve_udp_port();
     let port = occupier.port();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
@@ -87,7 +88,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
 /// MB-R-120, MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
 /// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the bind error.
 async fn udp_server_bind_failure_reconnect_false_ends_task() {
-    let occupier = ferrowl_test_support::reserve_udp_port();
+    let occupier = reserve_udp_port();
     let port = occupier.port();
 
     let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
@@ -110,7 +111,7 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
 /// MB-R-133 — a `ServerCommand::Terminate` sent while the Udp server is backing off from a bind
 /// failure ends the task gracefully (`Ok(())`), not with the bind error.
 async fn udp_server_terminate_while_backing_off_ends_task_ok() {
-    let occupier = ferrowl_test_support::reserve_udp_port();
+    let occupier = reserve_udp_port();
     let port = occupier.port();
 
     let (tx, rx) = mpsc::channel::<ServerCommand>(1);

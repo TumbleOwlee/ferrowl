@@ -259,6 +259,7 @@ impl OcppDeviceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::reserve_temp_dir;
     use ferrowl_util::convert::{Converter, FileType};
 
     #[test]
@@ -335,7 +336,7 @@ mod tests {
                 },
             },
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_device");
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = dir.join(format!("device.{ext}"));
             let path = path.to_str().unwrap();
@@ -401,7 +402,7 @@ mod tests {
                 },
             },
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_device");
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         let path = dir.join("security_both_roles.toml");
         let path = path.to_str().unwrap();
         Converter::save(&cfg, path, FileType::Toml).expect("save");
@@ -531,7 +532,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_device");
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = dir.join(format!("security.{ext}"));
             let path = path.to_str().unwrap();
@@ -653,7 +654,7 @@ mod tests {
             extra_headers: vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()],
             ..Default::default()
         };
-        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_device");
+        let dir = reserve_temp_dir("ferrowl_ocpp_device");
         for (ty, ext) in [(FileType::Toml, "toml"), (FileType::Json, "json")] {
             let path = dir.join(format!("extra_headers.{ext}"));
             let path = path.to_str().unwrap();
