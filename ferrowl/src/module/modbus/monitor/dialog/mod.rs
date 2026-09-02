@@ -782,6 +782,91 @@ fn value_type_from_format(format: &RegisterFormat) -> crate::config::device::Val
     }
 }
 
+/// What a key routed into an open interpretation dialog's sub-popups asks the caller to do.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SubPopupOutcome {
+    /// The confirm-delete popup was confirmed; the caller must perform the delete.
+    Delete,
+    /// A popup was open and swallowed the key.
+    Consumed,
+}
+
+/// MB-R-148 — route one key through whichever sub-popup of `dialog` is open, if any: the
+/// confirm-delete guard first, then the "Add predefined" named-value popup, which takes *every*
+/// key (not just Esc/Enter) while it is open. Returns `None` when neither is open, leaving the
+/// key for the caller's own routing.
+pub(crate) fn route_interpretation_subpopups(
+    dialog: &mut EditInterpretationDialog,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+) -> Option<SubPopupOutcome> {
+    if dialog.confirm_delete.is_some() {
+        return Some(
+            match crate::module::modbus::dialog::route_delete_confirm(
+                &mut dialog.confirm_delete,
+                modifiers,
+                code,
+            ) {
+                crate::module::modbus::dialog::DeleteConfirmOutcome::Confirmed => {
+                    SubPopupOutcome::Delete
+                }
+                crate::module::modbus::dialog::DeleteConfirmOutcome::Consumed
+                | crate::module::modbus::dialog::DeleteConfirmOutcome::NotActive => {
+                    SubPopupOutcome::Consumed
+                }
+            },
+        );
+    }
+    // While the "Add predefined" named-value sub-popup is open, *every* key (not just
+    // Esc/Enter) must route to it, not the parent dialog's own fields; mirrors the modbus
+    // module's own `RegisterDialog` sub-dialog gate, which returns early before any
+    // parent-dialog routing runs.
+    if dialog.add_dialog.is_some() {
+        match code {
+            KeyCode::Esc => dialog.add_dialog = None,
+            KeyCode::Enter => dialog.confirm_add_dialog(),
+            KeyCode::Tab => {
+                if let Some(d) = dialog.add_dialog.as_mut() {
+                    d.focus_next();
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(d) = dialog.add_dialog.as_mut() {
+                    d.focus_previous();
+                }
+            }
+            _ => {
+                if let Some(d) = dialog.add_dialog.as_mut() {
+                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
+                }
+            }
+        }
+        return Some(SubPopupOutcome::Consumed);
+    }
+    None
+}
+
+/// MB-R-148 — route one key into the dialog body, after the overlay's common `Esc`/`Tab` routing
+/// has declined it. Returns `true` when `Enter` landed on the focused Confirm button, i.e. the
+/// caller must now commit the dialog.
+pub(crate) fn route_interpretation_body(
+    dialog: &mut EditInterpretationDialog,
+    modifiers: KeyModifiers,
+    code: KeyCode,
+) -> bool {
+    match code {
+        KeyCode::Enter if dialog.is_confirm_button_focused() => true,
+        KeyCode::Char(' ') => {
+            dialog.handle_space();
+            false
+        }
+        _ => {
+            let _ = ferrowl_ui::traits::HandleEvents::handle_events(dialog, modifiers, code);
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

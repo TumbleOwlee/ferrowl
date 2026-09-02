@@ -31,7 +31,10 @@ use crate::module::view::{
 };
 
 use super::ModbusMonitorModule;
-use super::dialog::EditInterpretationDialog;
+use super::dialog::{
+    EditInterpretationDialog, SubPopupOutcome, route_interpretation_body,
+    route_interpretation_subpopups,
+};
 use super::setup_dialog::MonitorSetupDialog;
 
 /// MB-R-148 — an open edit-interpretation overlay: the dialog plus the interpretation's original
@@ -1196,43 +1199,14 @@ impl ModuleView for ModbusMonitorModuleView {
             // so `confirm_delete` never actually opens here — this gate is kept anyway to
             // mirror `MonitorOverlay::EditInterpretation`'s own shape exactly, rather
             // than special-casing Add's routing.
-            use crate::module::modbus::dialog::{DeleteConfirmOutcome, route_delete_confirm};
-            if overlay.confirm_delete.is_some() {
-                match route_delete_confirm(&mut overlay.confirm_delete, modifiers, code) {
-                    DeleteConfirmOutcome::Confirmed => {
-                        self.delete_interpretation();
-                    }
-                    DeleteConfirmOutcome::Consumed | DeleteConfirmOutcome::NotActive => {}
+            let outcome = route_interpretation_subpopups(overlay, modifiers, code);
+            match outcome {
+                Some(SubPopupOutcome::Delete) => {
+                    self.delete_interpretation();
+                    return EventResult::Consumed;
                 }
-                return EventResult::Consumed;
-            }
-            // While the "Add predefined" named-value sub-popup is open, *every* key (not just
-            // Esc/Enter) must route to it, not the parent dialog's own fields; mirrors the
-            // modbus module's own `RegisterDialog` sub-dialog gate
-            // (`ferrowl/src/module/modbus/view/mod.rs`'s `if overlay.has_sub_dialog() { ... }`,
-            // which returns early before any parent-dialog routing runs).
-            if overlay.add_dialog.is_some() {
-                match code {
-                    KeyCode::Esc => overlay.add_dialog = None,
-                    KeyCode::Enter => overlay.confirm_add_dialog(),
-                    KeyCode::Tab => {
-                        if let Some(d) = overlay.add_dialog.as_mut() {
-                            d.focus_next();
-                        }
-                    }
-                    KeyCode::BackTab => {
-                        if let Some(d) = overlay.add_dialog.as_mut() {
-                            d.focus_previous();
-                        }
-                    }
-                    _ => {
-                        if let Some(d) = overlay.add_dialog.as_mut() {
-                            let _ =
-                                ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
-                        }
-                    }
-                }
-                return EventResult::Consumed;
+                Some(SubPopupOutcome::Consumed) => return EventResult::Consumed,
+                None => {}
             }
             match self.overlay.route_keys(modifiers, code) {
                 ferrowl_ui::traits::OverlayRoute::Closed
@@ -1244,58 +1218,20 @@ impl ModuleView for ModbusMonitorModuleView {
             let MonitorOverlay::Add(overlay) = &mut self.overlay else {
                 unreachable!("route_keys left self.overlay as Add on Unhandled");
             };
-            match code {
-                KeyCode::Enter if overlay.is_confirm_button_focused() => {
-                    self.confirm_add();
-                }
-                KeyCode::Char(' ') => {
-                    overlay.handle_space();
-                }
-                _ => {
-                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(
-                        overlay.as_mut(),
-                        modifiers,
-                        code,
-                    );
-                }
+            if route_interpretation_body(overlay, modifiers, code) {
+                self.confirm_add();
             }
             return EventResult::Consumed;
         }
         if let MonitorOverlay::EditInterpretation(edit) = &mut self.overlay {
-            use crate::module::modbus::dialog::{DeleteConfirmOutcome, route_delete_confirm};
-            if edit.dialog.confirm_delete.is_some() {
-                match route_delete_confirm(&mut edit.dialog.confirm_delete, modifiers, code) {
-                    DeleteConfirmOutcome::Confirmed => {
-                        self.delete_interpretation();
-                    }
-                    DeleteConfirmOutcome::Consumed | DeleteConfirmOutcome::NotActive => {}
+            let outcome = route_interpretation_subpopups(&mut edit.dialog, modifiers, code);
+            match outcome {
+                Some(SubPopupOutcome::Delete) => {
+                    self.delete_interpretation();
+                    return EventResult::Consumed;
                 }
-                return EventResult::Consumed;
-            }
-            // Same "Add predefined" sub-popup gate as `MonitorOverlay::Add`
-            // above: every key routes to the open sub-popup, not the parent dialog.
-            if edit.dialog.add_dialog.is_some() {
-                match code {
-                    KeyCode::Esc => edit.dialog.add_dialog = None,
-                    KeyCode::Enter => edit.dialog.confirm_add_dialog(),
-                    KeyCode::Tab => {
-                        if let Some(d) = edit.dialog.add_dialog.as_mut() {
-                            d.focus_next();
-                        }
-                    }
-                    KeyCode::BackTab => {
-                        if let Some(d) = edit.dialog.add_dialog.as_mut() {
-                            d.focus_previous();
-                        }
-                    }
-                    _ => {
-                        if let Some(d) = edit.dialog.add_dialog.as_mut() {
-                            let _ =
-                                ferrowl_ui::traits::HandleEvents::handle_events(d, modifiers, code);
-                        }
-                    }
-                }
-                return EventResult::Consumed;
+                Some(SubPopupOutcome::Consumed) => return EventResult::Consumed,
+                None => {}
             }
             match self.overlay.route_keys(modifiers, code) {
                 ferrowl_ui::traits::OverlayRoute::Closed
@@ -1307,20 +1243,8 @@ impl ModuleView for ModbusMonitorModuleView {
             let MonitorOverlay::EditInterpretation(edit) = &mut self.overlay else {
                 unreachable!("route_keys left self.overlay as EditInterpretation on Unhandled");
             };
-            match code {
-                KeyCode::Enter if edit.dialog.is_confirm_button_focused() => {
-                    self.confirm_edit_interpretation();
-                }
-                KeyCode::Char(' ') => {
-                    edit.dialog.handle_space();
-                }
-                _ => {
-                    let _ = ferrowl_ui::traits::HandleEvents::handle_events(
-                        &mut edit.dialog,
-                        modifiers,
-                        code,
-                    );
-                }
+            if route_interpretation_body(&mut edit.dialog, modifiers, code) {
+                self.confirm_edit_interpretation();
             }
             return EventResult::Consumed;
         }
@@ -2335,6 +2259,33 @@ mod tests {
             &parent_label_before,
             "the parent dialog's own label field is untouched while the sub-popup is open"
         );
+
+        // MB-R-148 — Tab/BackTab route into the sub-popup too, not the parent dialog's own
+        // `#[derive(Focus)]` cycle.
+        assert!(dialog.label.state.focused());
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        let sub = overlay.add_dialog.as_ref().expect("sub-popup stays open");
+        assert!(
+            sub.value.state.focused(),
+            "Tab must move focus inside the sub-popup, onto its value field"
+        );
+        assert!(
+            !overlay.description.state.focused(),
+            "the parent dialog's own Tab cycle must not advance while the sub-popup is open"
+        );
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::BackTab);
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        let sub = overlay.add_dialog.as_ref().expect("sub-popup stays open");
+        assert!(
+            sub.label.state.focused(),
+            "BackTab must cycle focus back onto the sub-popup's label field"
+        );
     }
 
     /// Characterization — `Esc` closes the `:add` interpretation overlay outright, discarding
@@ -2500,6 +2451,84 @@ mod tests {
         );
     }
 
+    /// UI-R-061 — `Enter` on the `:add` dialog's focused Confirm button, routed as a real key
+    /// through `ModuleView::handle_events` (not `v.confirm_add()` called directly), must commit
+    /// the dialog.
+    #[tokio::test]
+    async fn ut_enter_on_add_confirm_button_commits_via_handle_events() {
+        use crate::module::modbus::dialog::set_input;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(overlay) = &mut v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        let dialog = overlay.as_mut();
+        set_input(&mut dialog.label, "power");
+        set_input(&mut dialog.address, "10");
+
+        // Tab to the Confirm button, wherever it sits in the (kind-dependent) focus cycle.
+        for _ in 0..30 {
+            let MonitorOverlay::Add(overlay) = &v.overlay else {
+                panic!("overlay changed unexpectedly");
+            };
+            if overlay.is_confirm_button_focused() {
+                break;
+            }
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        }
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert!(
+            overlay.is_confirm_button_focused(),
+            "Tab must be able to reach the Confirm button"
+        );
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "Enter on the focused Confirm button must commit :add and close the overlay"
+        );
+        assert_eq!(v.interpretations_for(UnitId(3))[0].0, "power");
+    }
+
+    /// A key that is neither `Enter` nor `Space` (and no sub-popup is open) falls through to
+    /// the focused field itself, routed as a real key through `ModuleView::handle_events` — it
+    /// must not commit or close the `:add` overlay.
+    #[tokio::test]
+    async fn ut_typed_char_in_add_dialog_reaches_focused_field_without_committing() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!(":add did not open the interpretation dialog");
+        };
+        assert!(
+            overlay.label.state.focused(),
+            "the dialog opens with Label focused"
+        );
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char('p'));
+
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert_eq!(
+            overlay.label.state.input(),
+            "p",
+            "the typed character must reach the focused Label field"
+        );
+        assert!(
+            matches!(v.overlay, MonitorOverlay::Add(_)),
+            "a plain typed character must not commit or close the :add overlay"
+        );
+    }
+
     /// MB-R-148's edit/delete
     /// must also keep `self.device.definitions` in sync (rename moves the key, delete removes
     /// it), same parity requirement as `:add`.
@@ -2533,6 +2562,52 @@ mod tests {
             v.device.definitions.iter().any(|d| d.name == "power2"),
             "the renamed interpretation must be present in device.definitions"
         );
+    }
+
+    /// MB-R-148 — `Enter` on the edit/delete dialog's focused Confirm button, routed as a real
+    /// key through `ModuleView::handle_events` (not `v.confirm_edit_interpretation()` called
+    /// directly), must commit the rename in place.
+    #[tokio::test]
+    async fn ut_enter_on_edit_interpretation_confirm_button_commits_via_handle_events() {
+        use crate::module::modbus::dialog::set_input;
+
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+
+        v.open_edit_interpretation();
+        let MonitorOverlay::EditInterpretation(edit) = &mut v.overlay else {
+            panic!("Enter did not open the edit/delete dialog")
+        };
+        set_input(&mut edit.dialog.label, "power2");
+
+        for _ in 0..30 {
+            let MonitorOverlay::EditInterpretation(edit) = &v.overlay else {
+                panic!("overlay changed unexpectedly");
+            };
+            if edit.dialog.is_confirm_button_focused() {
+                break;
+            }
+            ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        }
+        let MonitorOverlay::EditInterpretation(edit) = &v.overlay else {
+            panic!("overlay changed unexpectedly");
+        };
+        assert!(
+            edit.dialog.is_confirm_button_focused(),
+            "Tab must be able to reach the Confirm button"
+        );
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "Enter on the focused Confirm button must commit the rename and close the overlay"
+        );
+        assert_eq!(v.module.interpretations_for(UnitId(3))[0].0, "power2");
     }
 
     /// Deleting an
