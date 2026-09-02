@@ -1194,13 +1194,17 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             return EventResult::Consumed;
         }
-        if let MonitorOverlay::Add(overlay) = &mut self.overlay {
+        let interpretation_dialog = match &mut self.overlay {
             // The `:add` dialog is never `deletable` (UI-R-061: nothing exists yet to delete),
-            // so `confirm_delete` never actually opens here — this gate is kept anyway to
-            // mirror `MonitorOverlay::EditInterpretation`'s own shape exactly, rather
+            // so `confirm_delete` never actually opens here — the sub-popup gate is shared
+            // anyway to mirror `MonitorOverlay::EditInterpretation`'s own shape exactly, rather
             // than special-casing Add's routing.
-            let outcome = route_interpretation_subpopups(overlay, modifiers, code);
-            match outcome {
+            MonitorOverlay::Add(overlay) => Some(overlay.as_mut()),
+            MonitorOverlay::EditInterpretation(edit) => Some(&mut edit.dialog),
+            _ => None,
+        };
+        if let Some(dialog) = interpretation_dialog {
+            match route_interpretation_subpopups(dialog, modifiers, code) {
                 Some(SubPopupOutcome::Delete) => {
                     self.delete_interpretation();
                     return EventResult::Consumed;
@@ -1214,37 +1218,20 @@ impl ModuleView for ModbusMonitorModuleView {
                 ferrowl_ui::traits::OverlayRoute::Unhandled => {}
             }
             // `route_keys` only ever mutates `self.overlay` on `Closed`, which already
-            // returned above, so the variant is still `Add` here.
-            let MonitorOverlay::Add(overlay) = &mut self.overlay else {
-                unreachable!("route_keys left self.overlay as Add on Unhandled");
+            // returned above, so the variant is still `Add`/`EditInterpretation` here.
+            let (dialog, is_add) = match &mut self.overlay {
+                MonitorOverlay::Add(overlay) => (overlay.as_mut(), true),
+                MonitorOverlay::EditInterpretation(edit) => (&mut edit.dialog, false),
+                _ => unreachable!(
+                    "route_keys left self.overlay as Add/EditInterpretation on Unhandled"
+                ),
             };
-            if route_interpretation_body(overlay, modifiers, code) {
-                self.confirm_add();
-            }
-            return EventResult::Consumed;
-        }
-        if let MonitorOverlay::EditInterpretation(edit) = &mut self.overlay {
-            let outcome = route_interpretation_subpopups(&mut edit.dialog, modifiers, code);
-            match outcome {
-                Some(SubPopupOutcome::Delete) => {
-                    self.delete_interpretation();
-                    return EventResult::Consumed;
+            if route_interpretation_body(dialog, modifiers, code) {
+                if is_add {
+                    self.confirm_add();
+                } else {
+                    self.confirm_edit_interpretation();
                 }
-                Some(SubPopupOutcome::Consumed) => return EventResult::Consumed,
-                None => {}
-            }
-            match self.overlay.route_keys(modifiers, code) {
-                ferrowl_ui::traits::OverlayRoute::Closed
-                | ferrowl_ui::traits::OverlayRoute::Cycled => return EventResult::Consumed,
-                ferrowl_ui::traits::OverlayRoute::Unhandled => {}
-            }
-            // `route_keys` only ever mutates `self.overlay` on `Closed`, which already
-            // returned above, so the variant is still `EditInterpretation` here.
-            let MonitorOverlay::EditInterpretation(edit) = &mut self.overlay else {
-                unreachable!("route_keys left self.overlay as EditInterpretation on Unhandled");
-            };
-            if route_interpretation_body(&mut edit.dialog, modifiers, code) {
-                self.confirm_edit_interpretation();
             }
             return EventResult::Consumed;
         }
@@ -2082,7 +2069,7 @@ mod tests {
         );
     }
 
-    /// UI-R-060 — a freshly constructed, unfocused view highlights neither the Units nor the
+    /// UI-R-065 — a freshly constructed, unfocused view highlights neither the Units nor the
     /// Messages panel; once focused, only Units is highlighted, and Messages must not carry a
     /// stale `focused` default into that first render.
     #[test]
@@ -2220,10 +2207,10 @@ mod tests {
         let _log: SharedLog = v.log();
     }
 
-    /// Once "Add predefined" opens the named-value sub-popup, keyboard input (typed characters,
-    /// Tab) reaches the sub-popup's own fields, not the parent `EditInterpretationDialog`'s
-    /// (mirrors the modbus module's own `RegisterDialog` sub-dialog routing,
-    /// `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
+    /// MB-R-148 — once "Add predefined" opens the named-value sub-popup, keyboard input (typed
+    /// characters, Tab/BackTab) reaches the sub-popup's own fields, not the parent
+    /// `EditInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog` sub-dialog
+    /// routing, `ferrowl/src/module/modbus/view/mod.rs`'s `overlay.has_sub_dialog()` gate).
     #[tokio::test]
     async fn ut_add_predefined_popup_receives_keyboard_focus() {
         let mut v = view();
@@ -2260,7 +2247,7 @@ mod tests {
             "the parent dialog's own label field is untouched while the sub-popup is open"
         );
 
-        // MB-R-148 — Tab/BackTab route into the sub-popup too, not the parent dialog's own
+        // Tab/BackTab route into the sub-popup too, not the parent dialog's own
         // `#[derive(Focus)]` cycle.
         assert!(dialog.label.state.focused());
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
@@ -2497,9 +2484,9 @@ mod tests {
         assert_eq!(v.interpretations_for(UnitId(3))[0].0, "power");
     }
 
-    /// A key that is neither `Enter` nor `Space` (and no sub-popup is open) falls through to
-    /// the focused field itself, routed as a real key through `ModuleView::handle_events` — it
-    /// must not commit or close the `:add` overlay.
+    /// UI-R-022 — a key that is neither `Enter` nor `Space` (and no sub-popup is open) falls
+    /// through to the focused field itself, routed as a real key through
+    /// `ModuleView::handle_events` — it must not commit or close the `:add` overlay.
     #[tokio::test]
     async fn ut_typed_char_in_add_dialog_reaches_focused_field_without_committing() {
         let mut v = view();
