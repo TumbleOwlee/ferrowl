@@ -2577,7 +2577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-130/MB-R-131 — a mid-serve transport failure (the `serve_fut` itself resolving
+    /// MB-R-130, MB-R-131 — a mid-serve transport failure (the `serve_fut` itself resolving
     /// `Err`) surfaces from `drive_serve` as `ServeEnd::Failed`, without a command ever being
     /// sent — proven with a synthetic future rather than a real link failure, since
     /// `serve_link`'s own failure mode is infallible by the crate's own documentation (its

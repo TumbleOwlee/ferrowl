@@ -956,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-099 / MB-R-009 — the write-mask words reverse in lockstep with the encoded
+    /// MB-R-099, MB-R-009 — the write-mask words reverse in lockstep with the encoded
     /// words under `Reversed`, so the read-modify-write merge still targets the right bits.
     fn ut_mask_words_reversed() {
         let mask = BitField { mask: 0xFFFF_0000 };

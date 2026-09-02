@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-126 — the two-role container serializes at `[security.tls.server]`/
+    /// MB-R-168, OC-R-126 — the two-role container serializes at `[security.tls.server]`/
     /// `[security.tls.client]` and round-trips both roles together through TOML.
     fn ut_security_tls_block_roundtrips_both_roles() {
         let cfg = OcppSecurityConfig {
@@ -692,7 +692,7 @@ mod tests {
         );
     }
 
-    /// CS-R-055 — `username`/`password` remain defined members of `security` and are unaffected
+    /// CS-R-055, OC-R-156 — `username`/`password` remain defined members of `security` and are unaffected
     /// by the strictness that governs the rest of the table.
     #[test]
     fn ut_security_table_accepts_username_password_beside_tls() {

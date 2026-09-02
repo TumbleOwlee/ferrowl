@@ -86,7 +86,7 @@ mod tests {
         assert!(cfg.tls.is_none());
     }
 
-    /// MB-R-104, MB-R-105 — a `tcp::Config` with a full block-form `tls` object deserializes
+    /// MB-R-104, MB-R-105, MB-R-165 — a `tcp::Config` with a full block-form `tls` object deserializes
     /// into the matching two-role container, and round-trips back through TOML unchanged.
     #[test]
     fn ut_tcp_config_tls_block_roundtrips() {

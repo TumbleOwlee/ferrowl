@@ -663,7 +663,7 @@ fn memory_row_spans(row: &MemoryRow) -> [Option<Vec<(String, ratatui::style::Sty
     ]
 }
 
-/// UI-R-063/MB-R-147 — one cell's own color: `hi` while an MB-R-147 recency marker is active for
+/// MB-R-147, UI-R-063 — one cell's own color: `hi` while an MB-R-147 recency marker is active for
 /// any of its constituent raw addresses, else `memory_cell_value_style`'s value-class color.
 fn memory_cell_style(
     kind: Kind,
@@ -1940,7 +1940,7 @@ mod tests {
         v.module.stop().await.expect("cleanup stop");
     }
 
-    /// UI-R-061 — the resolved-registers section is omitted entirely from the rendered buffer
+    /// UI-R-061, UI-R-100 — the resolved-registers section is omitted entirely from the rendered buffer
     /// when no interpretation exists for the selected unit id, and reappears once one does.
     #[test]
     fn ut_resolved_registers_section_hidden_when_no_interpretation_for_selected_unit() {
@@ -2817,8 +2817,8 @@ mod tests {
         assert_eq!(v.spec.device, "new-device.toml");
     }
 
-    /// `Enter` while the config-path field's completion popup is open must
-    /// accept the highlighted suggestion (UI-R-026), not unconditionally confirm the whole setup
+    /// UI-R-026, UI-R-080 — `Enter` while the config-path field's completion popup is open must
+    /// accept the highlighted suggestion, not unconditionally confirm the whole setup
     /// dialog; mirrors the modbus module's own `ModbusModuleView::handle_events`, which offers
     /// `Enter` to `setup.handle_events` before falling back to its own confirm handling.
     #[tokio::test]
@@ -3690,7 +3690,7 @@ mod tests {
         assert_eq!(rows[1].kind, "Holding Register");
     }
 
-    /// MB-R-147/UI-R-063 — recency colouring is per cell, not per row: the observed cell's Hex
+    /// MB-R-147, UI-R-063, UI-R-107 — recency colouring is per cell, not per row: the observed cell's Hex
     /// span renders `hi` while its marker is active, and falls back to its ordinary value-class
     /// colour (`warning` here) once the marker lapses (>2s old).
     #[test]
@@ -4064,7 +4064,7 @@ mod tests {
         );
     }
 
-    /// MB-R-148 — `Enter` on the Resolved-registers panel, with a row selected, opens
+    /// MB-R-148, UI-R-108 — `Enter` on the Resolved-registers panel, with a row selected, opens
     /// `MonitorOverlay::EditInterpretation` prefilled from that row (by name, not raw table
     /// index, since `:order` may have reordered the displayed rows away from definition order).
     #[tokio::test]
@@ -4167,7 +4167,7 @@ mod tests {
         assert_eq!(interpretations[0].1.description, "Active power draw");
     }
 
-    /// MB-R-148 — the Delete flow removes the interpretation outright, gated by the dialog's own
+    /// MB-R-148, UI-R-108 — the Delete flow removes the interpretation outright, gated by the dialog's own
     /// `confirm_delete` popup (Space on Delete opens it, Enter on its DELETE button confirms).
     #[tokio::test]
     async fn ut_delete_interpretation_removes_via_confirm_delete_flow() {

@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-104 — a device config's `tls` block round-trips, and an absent `tls` key
+    /// MB-R-104, NF-R-048 — a device config's `tls` block round-trips, and an absent `tls` key
     /// deserializes to `None`.
     fn ut_device_config_tls_serde_roundtrip() {
         use ferrowl_modbus::tcp::ModbusTlsConfig;

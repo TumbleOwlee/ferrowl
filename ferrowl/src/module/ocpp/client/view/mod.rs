@@ -1221,7 +1221,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-103 — `:wd` persists CS boot identity, and reloading the written device config seeds
+    /// OC-R-103, OC-R-140 — `:wd` persists CS boot identity, and reloading the written device config seeds
     /// it back into a fresh view instead of the built-in defaults.
     async fn ut_write_device_persists_and_reloads_boot_identity() {
         use crate::module::view::CommandResult;
@@ -1255,7 +1255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-104 — `:wd` persists the 1.6-only meter/modem identity fields, and reloading the
+    /// OC-R-104, OC-R-141 — `:wd` persists the 1.6-only meter/modem identity fields, and reloading the
     /// written device config seeds them back into a fresh view.
     async fn ut_write_device_persists_and_reloads_meter_identity() {
         use crate::module::view::CommandResult;

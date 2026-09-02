@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/MB-R-136 — a mutual-TLS server config loads at the MutualTls level.
+    /// UI-R-024, MB-R-136 — a mutual-TLS server config loads at the MutualTls level.
     fn ut_from_config_mutual_tls_server() {
         let cfg = ModbusTlsConfig {
             server: ServerTlsPolicy::Mutual {

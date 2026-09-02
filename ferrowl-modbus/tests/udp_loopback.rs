@@ -149,7 +149,7 @@ async fn it_udp_server_answers_slave_zero() {
 }
 
 /// Client memory with the same regions declared but no values (the client fills them from
-/// reads); slave 1 and slave 0 both declared, since MB-R-118's slave-zero test needs slave 0.
+/// reads); slave 1 and slave 0 both declared, since MB-R-181's slave-zero test needs slave 0.
 fn client_mem() -> Mem {
     let mut mem = Memory::<Key<SlaveKey>>::default();
     mem.add_ranges(
@@ -166,9 +166,9 @@ fn client_mem() -> Mem {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-/// MB-R-117 — a Udp client round-trips a read through `udp::Client`/`ClientCore`, driven
+/// MB-R-117, MB-R-181 — a Udp client round-trips a read through `udp::Client`/`ClientCore`, driven
 /// against `udp::ServerBuilder` — the same shape `tcp_loopback.rs`/`rtu_over_tcp_loopback.rs`
-/// already prove for their transports, now for `Udp`. MB-R-118 — slave id 0 is ordinary for
+/// already prove for their transports, now for `Udp`; slave id 0 is ordinary for
 /// Udp: an operation addressed to it is polled and answered exactly like slave 1, not skipped.
 async fn it_udp_client_polls_server_and_executes_commands() {
     let port = reserve_udp_port().release();

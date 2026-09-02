@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-058 — `t` toggles and `d` deletes the selected script in the working list.
+    /// UI-R-058, UI-R-091, UI-R-092 — `t` toggles and `d` deletes the selected script in the working list.
     fn ut_toggle_and_delete_selected() {
         let mut scripts = vec![ScriptDef {
             name: "a".into(),

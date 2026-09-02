@@ -416,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117 — `rows()` preserves the configured headers' insertion order (not sorted).
+    /// OC-R-117, UI-R-098 — `rows()` preserves the configured headers' insertion order (not sorted).
     fn ut_header_row_rows_preserve_insertion_order() {
         let headers = vec![
             header("X-Tenant", "acme-1"),

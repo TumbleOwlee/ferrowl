@@ -49,7 +49,7 @@ impl<K> Context<K>
 where
     K: Hash + Eq + Default,
 {
-    /// SC-R-034 / SC-R-039 — install the execution hook on this context's Lua VM. `stop` is
+    /// SC-R-034, SC-R-039 — install the execution hook on this context's Lua VM. `stop` is
     /// `Some` only for a sim-thread context (SC-R-012); an on-demand run (SC-R-035) passes
     /// `None`, so its hook enforces the wall-clock cap only. An error raised here propagates
     /// through the executing Lua code exactly like any other runtime error, so it is caught by
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-007 — io/os/package and the base dynamic-code loaders are removed from the globals (seen as nil).
+    /// SC-R-007, SC-R-040 — io/os/package and the base dynamic-code loaders are removed from the globals (seen as nil).
     fn ut_sandbox_denies_filesystem_shell_and_dynamic_loading() {
         // A script in a config is untrusted input; the sandbox must not give it the filesystem,
         // the shell, or a way to pull in more code. Each of these globals must be absent.

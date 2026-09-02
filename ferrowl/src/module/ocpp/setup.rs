@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117/UI-R-059 — `confirm` (exercised here through the same public
+    /// OC-R-117, UI-R-059 — `confirm` (exercised here through the same public
     /// `handle_events`/`confirm` surface the app drives) succeeds with a populated headers
     /// table, and the device it composes carries that list — not just the resolved `OcppSpec`,
     /// which has no headers field of its own.
@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-059 — a header added via real keystrokes (type name, Tab, type value, Enter to add
+    /// UI-R-059, UI-R-095 — a header added via real keystrokes (type name, Tab, type value, Enter to add
     /// — not by poking `dialog.extra_headers` directly) must still be present when the dialog is
     /// confirmed, even if the very next key after adding is another bare Enter (the natural next
     /// keystroke a user presses to close the dialog).

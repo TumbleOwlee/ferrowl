@@ -1232,7 +1232,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-018 — the `:scripts` command is handled by the view, opening the script overlay.
+    /// UI-R-018, UI-R-094 — the `:scripts` command is handled by the view, opening the script overlay; a script created in the dialog reaches the device when the dialog is applied.
     fn ut_scripts_command_opens_overlay_and_close_applies() {
         let mut view = new_view();
         drop(view.handle_command("script"));
@@ -1319,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-022 — Enter confirms the edit dialog after field routing.
+    /// UI-R-022, UI-R-080 — Enter confirms the edit dialog after field routing.
     fn ut_enter_still_confirms_edit_dialog_after_offer_first_routing() {
         // The setup dialog is offered every key before the default Esc/Enter/Tab/BackTab
         // handling runs; Enter must still reach it, confirm the dialog and apply the edit.

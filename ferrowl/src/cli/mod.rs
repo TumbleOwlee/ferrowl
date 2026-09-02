@@ -1120,7 +1120,7 @@ mod tests {
     // --- Argument surface: version/help, subcommands, flag scoping, parse errors ----------
 
     #[test]
-    /// CL-R-001 — --version and --help print and exit 0, taking precedence over starting the TUI.
+    /// CL-R-001, CL-R-051 — --version and --help print and exit 0, taking precedence over starting the TUI.
     fn ut_version_and_help_exit_zero() {
         use clap::error::ErrorKind;
         let v = CliArgs::try_parse_from(["ferrowl", "--version"]).unwrap_err();
@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    /// CL-R-014 — --ocpp is accepted only on run; --device only on the top-level command.
+    /// CL-R-014, CL-R-047 — --ocpp is accepted only on run; --device only on the top-level command.
     fn ut_ocpp_and_device_flag_scoping() {
         assert!(CliArgs::try_parse_from(["ferrowl", "--ocpp", "name=cs,device=d,port=1"]).is_err());
         assert!(
@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    /// BR-R-024/MB-R-107 — `tls.identity.source=files` with only `tls.identity.cert_file` set
+    /// BR-R-024, MB-R-107 — `tls.identity.source=files` with only `tls.identity.cert_file` set
     /// (no `tls.identity.key_file`) is a setup failure.
     fn ut_bridge_descriptor_rejects_files_identity_with_only_cert_file() {
         assert!(

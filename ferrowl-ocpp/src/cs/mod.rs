@@ -394,7 +394,7 @@ mod tests {
         }
     }
 
-    /// OC-R-048/OC-R-107 — the freshly-read `reconnect` flag passes through unchanged on a
+    /// OC-R-048, OC-R-107 — the freshly-read `reconnect` flag passes through unchanged on a
     /// dropped connection too.
     #[test]
     fn ut_classify_attempt_disconnected_honors_reconnect_false() {

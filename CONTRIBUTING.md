@@ -50,8 +50,9 @@ fn ut_checksum_excludes_trailer() { /* … */ }
 ```
 
 A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position
-and form; `docs/specs/README.md`'s "At most one ID per test" rule still
-applies.
+and form. A test whose assertions pin several rules lists every ID it pins,
+comma-separated (`/// MB-R-012, MB-R-157 — …`), and never an ID it does not
+assert; see `docs/specs/README.md` rule 8.
 
 Line coverage must stay at or above **80%**, enforced in CI. Coverage is a
 floor, not a goal — never pad it with tests that execute code without

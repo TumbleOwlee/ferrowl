@@ -290,7 +290,7 @@ mod tests {
         std::sync::Arc::new(parking_lot::RwLock::new(mem))
     }
 
-    /// BR-R-001..BR-R-007, BR-R-013 — a real downstream server is relayed through to by a real
+    /// BR-R-001, BR-R-002, BR-R-003, BR-R-004, BR-R-005, BR-R-006, BR-R-007, BR-R-013, BR-R-025 — a real downstream server is relayed through to by a real
     /// upstream bridge connection, and the run exits 0 on its `--duration` deadline
     /// (CL-R-032 family via BR-R-013).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

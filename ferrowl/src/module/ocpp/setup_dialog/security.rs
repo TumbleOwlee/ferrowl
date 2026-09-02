@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/OC-R-116 — a mutual-TLS client config loads into the client-cert fields.
+    /// OC-R-116, UI-R-024 — a mutual-TLS client config loads into the client-cert fields.
     fn ut_from_config_mutual_tls_client_is_client_cert() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-024/OC-R-113 — a mutual-TLS server config loads at the MutualTls level.
+    /// OC-R-113, UI-R-024 — a mutual-TLS server config loads at the MutualTls level.
     fn ut_from_config_mutual_tls_server() {
         let cfg = OcppSecurityConfig {
             tls: OcppTlsConfig {
@@ -535,7 +535,7 @@ mod tests {
     // --- TlsLevel::build_config -----------------------------------------------------------
 
     #[test]
-    /// OC-R-127 — selector `Off` resolves the server role's policy to `None {}`, reading no
+    /// OC-R-127, OC-R-160 — selector `Off` resolves the server role's policy to `None {}`, reading no
     /// cert/key text at all even if present.
     fn ut_selector_off_resolves_none_policy_server() {
         let cfg = TlsLevel::Off
@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-127 — selector `Off` resolves the client role's policy to `None {}`.
+    /// OC-R-127, OC-R-160 — selector `Off` resolves the client role's policy to `None {}`.
     fn ut_selector_off_resolves_none_policy_client() {
         let cfg = TlsLevel::Off
             .build_config(OcppRole::Client, inputs("", "", "", "", "", "", &[]))

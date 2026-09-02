@@ -476,7 +476,7 @@ mod tests {
     /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
     /// The connector status is `"Occupied"`; `ConnectorStatusEnumType` has no `"Charging"`
     /// variant.
-    /// A remote stop clears the transaction and returns to available.
+    /// OC-R-136 — a remote stop clears the transaction and returns the connector to available.
     async fn ut_request_start_then_stop_transaction() {
         let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let notify = Arc::new(tokio::sync::Notify::new());
@@ -957,7 +957,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    /// OC-R-070 — the 2.1 binding sends a real `TransactionEvent(Started)` to the CSMS and mints a
+    /// OC-R-070, OC-R-136 — the 2.1 binding sends a real `TransactionEvent(Started)` to the CSMS and mints a
     /// transaction; a remote stop clears it.
     /// OC-R-122 — the `TransactionEvent` is followed by a coupled `StatusNotification`.
     /// The connector status is `"Occupied"`; `ConnectorStatusEnumType` has no `"Charging"`

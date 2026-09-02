@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-051/MB-R-132 — a `reset: true` outcome drops the wait that follows *that* failure
+    /// MB-R-051, MB-R-132 — a `reset: true` outcome drops the wait that follows *that* failure
     /// back to `initial`; a `reset: false` outcome keeps doubling from wherever backoff last
     /// landed.
     async fn ut_run_with_backoff_resets_on_reset_flag() {
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-133/MB-R-054/OC-R-106 — an abort signal returned from `wait_abortable` ends the loop
+    /// MB-R-133, MB-R-054, OC-R-106 — an abort signal returned from `wait_abortable` ends the loop
     /// with `Ok(())` right away, after exactly one failed attempt.
     async fn ut_run_with_backoff_aborts_wait_immediately() {
         let calls = Arc::new(Mutex::new(0u32));

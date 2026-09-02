@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-035/OC-R-115 — `build_connector` under `Mutual` with a `SelfSigned` identity builds
+    /// OC-R-035, OC-R-115 — `build_connector` under `Mutual` with a `SelfSigned` identity builds
     /// a client config whose resolver has certs to offer, and the same cached DER is returned
     /// on a second call sharing the cache.
     fn ut_build_connector_mutual_self_signed_presents_cached_pair() {
@@ -1065,7 +1065,7 @@ mod tests {
         assert!(build_server_config(&policy, "localhost", &cache).is_ok());
     }
 
-    /// OC-R-039/OC-R-113 — `CertVerification::CaFiles { ca_files }` accumulates every configured CA into a single trust
+    /// OC-R-039, OC-R-113 — `CertVerification::CaFiles { ca_files }` accumulates every configured CA into a single trust
     /// store, config-resolution level (the actual "any one is sufficient" handshake accept is
     /// proven end-to-end by the loopback integration test).
     #[test]

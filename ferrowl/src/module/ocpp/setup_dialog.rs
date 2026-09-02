@@ -1081,7 +1081,7 @@ mod tests {
     // --- OC-R-127: TLS selector ---------------------------------------------------------------
 
     #[test]
-    /// OC-R-127 — selector `Off` resolves the server role's policy to `None {}` and the resolved
+    /// OC-R-127, OC-R-160 — selector `Off` resolves the server role's policy to `None {}` and the resolved
     /// scheme to `ws://`; the client role resolves its policy to `None {}` too.
     fn ut_selector_off_resolves_none_policy_and_ws_scheme() {
         let d = dialog_with(1); // Server, selector defaults to Off
@@ -1340,7 +1340,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-110 — toggling Self-Signed On excludes stale cert_file/key_file text from the
+    /// OC-R-110, OC-R-144 — toggling Self-Signed On excludes stale cert_file/key_file text from the
     /// resolved config, even though the widgets' stored text is untouched (mirrors MB-R-135 in
     /// the Modbus dialog).
     fn ut_resolve_self_signed_excludes_stale_cert_key_text() {
@@ -1373,7 +1373,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-111 — toggling Skip-Verify On hides the CA-file row.
+    /// OC-R-111, OC-R-155 — toggling Skip-Verify On hides the Root Store toggle and the CA-file row.
     fn ut_cs_skip_verify_hides_root_store_and_list() {
         let mut d = dialog_with(0); // Client
         d.tls_level.state.set_selection(TlsLevel::Tls.index());
@@ -1404,7 +1404,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-113/OC-R-125 — the CA list is the exact same shared field for both the CSMS (server)
+    /// OC-R-113, OC-R-125 — the CA list is the exact same shared field for both the CSMS (server)
     /// and CS (client) roles, not a second copy: switching role alone flips which gate
     /// (`client_cert_skip_verify` vs `skip_verify`) controls `show_peer_verify_row`, but both
     /// paths read the one `ca_files` widget.
@@ -1427,7 +1427,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-145 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
+    /// OC-R-145, OC-R-146 — toggling Skip-Verify On excludes the stale CA list from the resolved config,
     /// even though the widget's stored list is untouched.
     fn ut_resolve_skip_verify_excludes_stale_ca_list() {
         let mut d = dialog_with(0); // Client
@@ -1624,7 +1624,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-116 — the client role's Self-Signed toggle is shown only at MutualTls, and excludes
+    /// OC-R-116, OC-R-148 — the client role's Self-Signed toggle is shown only at MutualTls, and excludes
     /// stale client-cert/key text from the resolved config when on.
     fn ut_client_self_signed_shown_only_at_mutual_tls_and_excludes_stale_cert_key() {
         let mut d = dialog_with(0); // Client
@@ -2033,7 +2033,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-111/OC-R-116/OC-R-125, UI-R-049 — the mTLS client-role Tab order: own cert/key,
+    /// OC-R-111, OC-R-116, OC-R-125, UI-R-049 — the mTLS client-role Tab order: own cert/key,
     /// Skip Verify, Root Store, then the shared CA list's ADD button (empty list, no DEL).
     fn ut_tab_order_client_mtls() {
         let mut d = dialog_with(0); // Client
@@ -2401,7 +2401,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117/118 — typing into the add-inputs and pressing `Enter` appends a header and
+    /// OC-R-117, OC-R-118 — typing into the add-inputs and pressing `Enter` appends a header and
     /// clears both inputs.
     fn ut_add_header_via_inputs_then_enter() {
         let mut d = client_dialog();
@@ -2416,7 +2416,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-117 — a refused add (reserved header name) leaves both inputs' text in place and
+    /// OC-R-117, UI-R-095 — a refused add (reserved header name) leaves both inputs' text in place and
     /// surfaces the error via the dialog's own error box, rather than silently dropping it.
     fn ut_add_header_refused_inline_keeps_prompt_open() {
         let mut d = client_dialog();

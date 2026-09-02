@@ -36,7 +36,7 @@ fn it_runs_a_modbus_server_and_exits_clean() {
 }
 
 #[test]
-/// CL-R-030 — a module whose device config fails to load makes the headless run exit 1.
+/// CL-R-030, CL-R-049 — a module whose device config fails to load makes the headless run exit 1 with a diagnostic on stderr.
 fn it_fails_hard_on_a_missing_device_config() {
     let module = "name=it-headless-bad,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=15921,role=server";
     let output = bin()
@@ -52,14 +52,14 @@ fn it_fails_hard_on_a_missing_device_config() {
     );
 }
 
-/// MB-R-140/MB-R-145 — a monitor device-type config file's `definitions` list defaults to
+/// MB-R-140, MB-R-145 — a monitor device-type config file's `definitions` list defaults to
 /// empty when omitted; an explicit empty list is a legitimate "no interpretations yet" file.
 fn write_monitor_device(path: &std::path::Path) {
     std::fs::write(path, "definitions = []\n").expect("write monitor device config");
 }
 
 #[test]
-/// MB-R-140/MB-R-141 — `ferrowl run --session` with a `role = "monitor"` module builds and
+/// MB-R-140, MB-R-141 — `ferrowl run --session` with a `role = "monitor"` module builds and
 /// starts a working monitor tab: `MonitorBuilder::spawn` always returns `Ok` (the actual
 /// serial open, and its failure/retry, happen inside the spawned task), so a headless run
 /// with a monitor module on a non-existent serial path still starts and reaches its

@@ -128,7 +128,7 @@ async fn raw_connect(
 }
 
 #[tokio::test]
-/// MB-R-106/OC-R-095 — with an `Ephemeral` identity (the variant standing for "no TLS
+/// MB-R-106, MB-R-166, OC-R-095 — with an `Ephemeral` identity (the variant standing for "no TLS
 /// material configured"), the server falls back to an ephemeral self-signed certificate,
 /// and logs that fallback.
 async fn self_signed_fallback_is_used_and_logged() {
@@ -173,7 +173,7 @@ async fn self_signed_fallback_is_used_and_logged() {
 }
 
 #[tokio::test]
-/// MB-R-106/OC-R-095 — an explicit `SelfSigned` identity uses a self-signed certificate
+/// MB-R-106, MB-R-166, OC-R-095 — an explicit `SelfSigned` identity uses a self-signed certificate
 /// without logging the "no configuration" fallback line.
 async fn explicit_self_signed_is_used_without_fallback_log() {
     let port = reserve_tcp_port().release();
@@ -233,7 +233,7 @@ fn lone_cert_or_key_file_fails_config_deserialization() {
 }
 
 #[tokio::test]
-/// MB-R-108 — `Mutual`'s `CaFiles` verification accepts a client signed by the configured
+/// MB-R-108, NF-R-048 — `Mutual`'s `CaFiles` verification accepts a client signed by the configured
 /// CA, and rejects one presenting none or one signed by an unrelated CA.
 async fn require_client_cert_enforced() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");

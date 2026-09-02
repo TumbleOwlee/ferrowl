@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CS-R-031 — a save persists configuration only, never live runtime state: the written
+    /// CS-R-031, CS-R-061 — a save persists configuration only, never live runtime state: the written
     /// modules are exactly each view's config spec.
     async fn ut_write_persists_config_not_runtime_state() {
         let dir = reserve_temp_dir("ferrowl_cs031");

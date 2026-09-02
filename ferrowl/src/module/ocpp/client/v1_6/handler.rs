@@ -784,7 +784,7 @@ mod tests {
     /// OC-R-070 — a remote start mints a transaction id and sets the connector charging, sending a
     /// real `StartTransaction` to the CSMS (not just a local state mutation).
     /// OC-R-122 — the `StartTransaction` is followed by a coupled `StatusNotification`.
-    /// A remote stop clears the transaction and returns to available.
+    /// OC-R-136 — a remote stop clears the transaction and returns the connector to available.
     async fn ut_remote_start_then_stop_transaction() {
         let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let notify = Arc::new(tokio::sync::Notify::new());

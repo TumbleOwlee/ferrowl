@@ -2028,7 +2028,7 @@ mod tests {
     }
 
     #[test]
-    /// MB-R-136/MB-R-156, UI-R-049 — the mTLS client-role Tab order: Role, Self-Signed, own
+    /// MB-R-136, MB-R-156, UI-R-049 — the mTLS client-role Tab order: Role, Self-Signed, own
     /// cert/key, Skip Verify, Root Store, then the shared CA list's ADD button (empty list, no
     /// DEL), then IP.
     fn ut_tab_order_client_mtls() {

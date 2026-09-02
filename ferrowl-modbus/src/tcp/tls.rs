@@ -620,7 +620,7 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::None));
     }
 
-    /// MB-R-108/MB-R-136 — `Mutual`'s `CaFiles{ca_files}` trusts a client certificate signed by
+    /// MB-R-108, MB-R-136 — `Mutual`'s `CaFiles{ca_files}` trusts a client certificate signed by
     /// any *one* of several configured CAs, not all of them: a chain signed only by the second CA
     /// still resolves (config-resolution level; the actual handshake accept is proven end-to-end
     /// by the loopback integration test).

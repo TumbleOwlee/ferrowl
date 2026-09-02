@@ -539,7 +539,7 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
 // level test is needed since the policy is rejected before any socket work starts.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-035/OC-R-040 — a `Mutual` CS identity is presented and a self-signed CSMS's `Mutual`
+/// OC-R-035, OC-R-040 — a `Mutual` CS identity is presented and a self-signed CSMS's `Mutual`
 /// policy with a `CertVerification::CaFiles` list accepts it end-to-end over a real TLS+mTLS
 /// handshake: the server's own self-signed identity and the CA trusted for verifying client
 /// certificates are independent (unlike `build_server_config`'s unit-level coverage of the same
@@ -612,7 +612,7 @@ async fn it_csms_self_signed_mutual_with_ca_files_accepts_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-039/OC-R-113 — a CSMS trusting *any one* of several configured CAs accepts a client
+/// OC-R-039, OC-R-113 — a CSMS trusting *any one* of several configured CAs accepts a client
 /// certificate signed by the second CA in the list, not just the first.
 async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
     let ca1_key = rcgen::KeyPair::generate().expect("ca1 keypair");
@@ -750,7 +750,7 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// OC-R-034/OC-R-130 — `CertVerification::CaFiles` trusts only the named CA, never the webpki
+/// OC-R-034, OC-R-130 — `CertVerification::CaFiles` trusts only the named CA, never the webpki
 /// root store: a CSMS presenting a certificate signed by the named CA is trusted, and the same
 /// policy against a differently self-signed CSMS (not signed by that CA, and not a publicly
 /// trusted root either) is rejected.

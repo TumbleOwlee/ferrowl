@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-091 — a client write dispatches a Modbus write command (not a direct store write); the read-write register's store value is not updated by the `:set`.
+    /// MB-R-091, MB-R-158 — a client write dispatches a Modbus write command (not a direct store write); the read-write register's store value is not updated by the `:set`.
     async fn ut_client_fixed_write_dispatches_command_not_store() {
         use ferrowl_modbus::{Key, SlaveKey};
         use ferrowl_store::Range;

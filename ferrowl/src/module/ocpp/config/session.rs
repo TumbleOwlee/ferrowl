@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    /// OC-R-042 — a ws:// CSMS endpoint binds plain TCP; the endpoint scheme is authoritative for the transport.
+    /// OC-R-042, OC-R-159 — a ws:// CSMS endpoint binds plain TCP; the endpoint scheme is authoritative for the transport.
     fn ut_effective_csms_tls_ws_is_none() {
         let spec = spec_with(OcppProtocol::Ws, Default::default());
         assert!(!spec.csms_self_signed_fallback());
@@ -369,7 +369,7 @@ mod tests {
     // The scheme wins: a ws endpoint binds plain TCP even with certificate files configured, so
     // the URL never advertises a transport the listener doesn't speak.
     #[test]
-    /// OC-R-042 — a ws:// CSMS endpoint leaves any configured TLS material inert.
+    /// OC-R-042, OC-R-159 — a ws:// CSMS endpoint leaves any configured TLS material inert.
     fn ut_effective_csms_tls_ws_ignores_configured_certificates() {
         let security = crate::config::ocpp::OcppSecurityConfig {
             tls: crate::config::ocpp::OcppTlsConfig {

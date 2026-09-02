@@ -568,7 +568,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-140/MB-R-141 — a session module with `role = "monitor"` loads and starts a working
+    /// MB-R-140, MB-R-141 — a session module with `role = "monitor"` loads and starts a working
     /// tab: `MonitorBuilder::spawn` always returns `Ok` (the serial open/retry happen inside the
     /// spawned task), so a monitor module on a non-existent serial path still builds one tab,
     /// mirroring `it_headless_run_starts_monitor_module` (`tests/headless.rs`) for the TUI's own

@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-006 — the `:` command line removes focus from the content pane while open and restores
+    /// UI-R-006, UI-R-072 — the `:` command line removes focus from the content pane while open and restores
     /// it on close, and every transition routes through the single focus choke point.
     fn ut_command_line_removes_and_restores_content_focus() {
         let mut app = app_with(&["a"]);
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-005 — an open modal layer consumes the keys its lower layers would otherwise receive:
+    /// UI-R-005, UI-R-071 — an open modal layer consumes the keys its lower layers would otherwise receive:
     /// while the keybind-help dialog is open, a `:` that would open the command line at the content
     /// layer is swallowed, leaving help open and the command line unopened.
     fn ut_open_help_layer_consumes_lower_layer_keys() {

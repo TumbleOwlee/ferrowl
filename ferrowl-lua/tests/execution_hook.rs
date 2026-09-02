@@ -37,7 +37,7 @@ impl Write for RecordingHandle {
 }
 
 #[test]
-/// SC-R-047 — with no stop flag attached (the on-demand-run shape, SC-R-035), an infinite loop
+/// NF-R-050, SC-R-047 — with no stop flag attached (the on-demand-run shape, SC-R-035), an infinite loop
 /// is still interrupted, by the unconditional wall-clock cap alone.
 fn ut_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
     let mut ctx = ContextBuilder::<String>::default()
@@ -64,7 +64,7 @@ fn ut_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
 }
 
 #[test]
-/// SC-R-046 / SC-R-012 — an already-set stop flag interrupts a runaway script almost
+/// SC-R-012, SC-R-046 — an already-set stop flag interrupts a runaway script almost
 /// immediately, well before the 1,000ms wall-clock cap would fire on its own.
 fn ut_stop_flag_interrupts_infinite_loop_almost_immediately() {
     let stop = Arc::new(AtomicBool::new(true));
