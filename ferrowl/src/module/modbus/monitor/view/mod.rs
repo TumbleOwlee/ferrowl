@@ -9,14 +9,14 @@ use ferrowl_codec::Kind;
 use ferrowl_modbus::monitor::{MonitorRecord, RECORD_RING_CAPACITY, RecordStatus, SharedRecordLog};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ui::EventResult;
-use ferrowl_ui::traits::{HandleEvents, SetFocus};
+use ferrowl_ui::traits::HandleEvents;
 use ferrowl_ui::{
     Border,
     state::{TableState, TableStateBuilder},
     style::TableStyleBuilder,
     widgets::{Header, Table, TableBuilder, Widget},
 };
-use ferrowl_ui_derive::TableEntry;
+use ferrowl_ui_derive::{Focus, TableEntry, focusable};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::StatefulWidget;
@@ -33,41 +33,6 @@ use crate::module::view::{
 use super::ModbusMonitorModule;
 use super::dialog::EditInterpretationDialog;
 use super::setup_dialog::MonitorSetupDialog;
-
-/// Which of the view's Tab-cyclable panels currently has focus (default `Units`), matching
-/// the OCPP module view's per-panel border-highlight pattern. The resolved-registers panel is
-/// display-only and not part of the cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum MonitorPanel {
-    #[default]
-    Units,
-    Messages,
-    Memory,
-    /// UI-R-065 — only reachable in the Tab cycle while the selected unit id has at least one
-    /// interpretation (`handle_events`' Tab/BackTab handling skips it otherwise, since `next`/
-    /// `previous` here have no access to that dynamic state).
-    Resolved,
-}
-
-impl MonitorPanel {
-    fn next(self) -> Self {
-        match self {
-            MonitorPanel::Units => MonitorPanel::Messages,
-            MonitorPanel::Messages => MonitorPanel::Memory,
-            MonitorPanel::Memory => MonitorPanel::Resolved,
-            MonitorPanel::Resolved => MonitorPanel::Units,
-        }
-    }
-
-    fn previous(self) -> Self {
-        match self {
-            MonitorPanel::Units => MonitorPanel::Resolved,
-            MonitorPanel::Messages => MonitorPanel::Units,
-            MonitorPanel::Memory => MonitorPanel::Messages,
-            MonitorPanel::Resolved => MonitorPanel::Memory,
-        }
-    }
-}
 
 /// The single modal overlay over the monitor view (mutually exclusive by construction).
 enum MonitorOverlay {
@@ -138,6 +103,7 @@ type UnitsTable = Widget<TableState<UnitRow, 1>, Table<UnitRow, UnitHeader, 1>>;
 fn new_units_table() -> UnitsTable {
     Widget {
         state: TableStateBuilder::default()
+            .focused(false)
             .values(Vec::new())
             .build()
             .expect("all required builder fields are set"),
@@ -193,6 +159,7 @@ type MessageTable = Widget<TableState<MessageRow, 7>, Table<MessageRow, MessageH
 fn new_message_table() -> MessageTable {
     Widget {
         state: TableStateBuilder::default()
+            .focused(false)
             .values(Vec::new())
             .build()
             .expect("all required builder fields are set"),
@@ -355,6 +322,7 @@ type ResolvedTable = Widget<TableState<ResolvedRow, 9>, Table<ResolvedRow, Resol
 fn new_resolved_table() -> ResolvedTable {
     Widget {
         state: TableStateBuilder::default()
+            .focused(false)
             .values(Vec::new())
             .build()
             .expect("all required builder fields are set"),
@@ -626,6 +594,7 @@ type MemoryTable = Widget<TableState<MemoryRow, 4>, Table<MemoryRow, MemoryHeade
 fn new_memory_table() -> MemoryTable {
     Widget {
         state: TableStateBuilder::default()
+            .focused(false)
             .values(Vec::new())
             .build()
             .expect("all required builder fields are set"),
@@ -760,6 +729,8 @@ fn memory_table_rows(
 
 // `#[allow(dead_code)]`: implemented and tested here; the app-side construction call sites are
 // not wired up yet.
+#[focusable]
+#[derive(Focus)]
 #[allow(dead_code)]
 pub struct ModbusMonitorModuleView {
     module: ModbusMonitorModule,
@@ -772,21 +743,21 @@ pub struct ModbusMonitorModuleView {
     /// Units panel table, rebuilt live in `render()` from `unit_ids`; `selected`
     /// remains the single source of truth for which row is selected (unchanged, everything else
     /// already keys off it) — this only drives which row the table highlights.
+    #[focus]
     units_table: UnitsTable,
     /// UI-R-062 Messages table for the selected unit id, re-derived each tick from
     /// `module.records()`.
+    #[focus]
     messages_table: MessageTable,
     /// Memory-layout table (MB-R-144/UI-R-063) for the selected unit id, rebuilt live
     /// in `render()` — it depends on `module.records()`'s recency markers, which change
     /// independent of any `refresh()` tick.
+    #[focus]
     memory_table: MemoryTable,
     /// UI-R-064 Resolved-registers table for the selected unit id, re-derived each tick.
+    #[focus(when = self.resolved_focusable())]
     resolved_table: ResolvedTable,
     overlay: MonitorOverlay,
-    view_focused: bool,
-    /// Which panel is Tab-focused within this view (UI-R-060/061 parity with OCPP's per-panel
-    /// border highlight); only meaningful while `view_focused` is `true`.
-    panel_focus: MonitorPanel,
     /// `:compact` toggle (tui/api-contract.md §2.1) — a real row-margin toggle on
     /// `resolved_table.widget` (mirrors `TableView::set_compact`), not string formatting.
     compact: bool,
@@ -829,7 +800,7 @@ impl ModbusMonitorModuleView {
             resolved_table: new_resolved_table(),
             overlay: MonitorOverlay::None,
             view_focused: false,
-            panel_focus: MonitorPanel::default(),
+            focus: ModbusMonitorModuleViewFocus::UnitsTable,
             compact: true,
             sort: None,
             serial_paths: crate::module::modbus::SerialPathRegistry::default(),
@@ -980,10 +951,18 @@ impl ModbusMonitorModuleView {
     }
 
     /// Whether `unit` has at least one interpretation (MB-R-145) — drives both the
-    /// Resolved-registers section's visibility (UI-R-061) and whether `MonitorPanel::Resolved`
-    /// is reachable in the Tab cycle (UI-R-065).
+    /// Resolved-registers section's visibility (UI-R-061) and whether the Resolved-registers
+    /// panel is reachable in the Tab cycle (UI-R-065).
     fn has_interpretation(&self, unit: UnitId) -> bool {
         !self.interpretations_for(unit).is_empty()
+    }
+
+    /// UI-R-065 — whether the Resolved-registers panel is currently in the Tab cycle: it is
+    /// shown, and therefore focusable, only while the selected unit id has at least one
+    /// interpretation (UI-R-060).
+    fn resolved_focusable(&self) -> bool {
+        self.selected_unit()
+            .is_some_and(|u| self.has_interpretation(u))
     }
 
     /// The selected unit id's `ResolvedRow`s (UI-R-064), definition order unless `self.sort` is
@@ -1042,18 +1021,6 @@ impl ModbusMonitorModuleView {
     }
 }
 
-impl ferrowl_ui::traits::SetFocus for ModbusMonitorModuleView {
-    fn set_focused(&mut self, focus: bool) {
-        self.view_focused = focus;
-    }
-}
-
-impl ferrowl_ui::traits::IsFocus for ModbusMonitorModuleView {
-    fn is_focused(&self) -> bool {
-        self.view_focused
-    }
-}
-
 impl ModuleView for ModbusMonitorModuleView {
     fn name(&self) -> String {
         self.spec.name.clone()
@@ -1073,9 +1040,7 @@ impl ModuleView for ModbusMonitorModuleView {
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
         // Every Tab-cyclable panel is a `Table` widget whose own border color tracks
-        // `state.focused()` (`ferrowl_ui::style::TableStyle`'s `border`/`general`) — each panel
-        // below just calls `.set_focused(view_focused && panel_focus == <panel>)` before
-        // rendering, so no separate style computation is needed here.
+        // `state.focused()` (`ferrowl_ui::style::TableStyle`'s `border`/`general`).
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(10), Constraint::Min(1)]).areas(content_area);
 
@@ -1090,9 +1055,6 @@ impl ModuleView for ModbusMonitorModuleView {
                 .collect(),
         );
         self.units_table.state.select_index(self.selected);
-        self.units_table
-            .state
-            .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Units);
         StatefulWidget::render(
             &self.units_table.widget,
             left_area,
@@ -1115,9 +1077,6 @@ impl ModuleView for ModbusMonitorModuleView {
         let section_areas = Layout::vertical(sections).split(right_area);
 
         // Message table (MB-R-143/146, UI-R-062).
-        self.messages_table
-            .state
-            .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Messages);
         StatefulWidget::render(
             &self.messages_table.widget,
             section_areas[0],
@@ -1126,9 +1085,6 @@ impl ModuleView for ModbusMonitorModuleView {
         );
 
         // Memory layout, grouped by table kind (MB-R-144; a real Table widget).
-        self.memory_table
-            .state
-            .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Memory);
         if let Some(unit) = selected {
             let kind_rows = self.memory_rows(unit);
             let lines = memory_layout_lines(&kind_rows);
@@ -1157,9 +1113,6 @@ impl ModuleView for ModbusMonitorModuleView {
             self.resolved_table
                 .state
                 .set_values(self.resolved_rows(unit));
-            self.resolved_table
-                .state
-                .set_focused(self.view_focused && self.panel_focus == MonitorPanel::Resolved);
             StatefulWidget::render(
                 &self.resolved_table.widget,
                 section_areas[2],
@@ -1343,27 +1296,13 @@ impl ModuleView for ModbusMonitorModuleView {
             }
             return EventResult::Consumed;
         }
-        // UI-R-065 — `Resolved` is only reachable while the selected unit id has an
-        // interpretation; `next`/`previous` alone don't know that, so skip it here at the call
-        // site (see `MonitorPanel`'s doc comment).
-        let resolved_visible = self
-            .selected_unit()
-            .is_some_and(|u| self.has_interpretation(u));
         match code {
             KeyCode::Tab if modifiers == KeyModifiers::NONE => {
-                let mut next = self.panel_focus.next();
-                if next == MonitorPanel::Resolved && !resolved_visible {
-                    next = next.next();
-                }
-                self.panel_focus = next;
+                self.focus_next();
                 EventResult::Consumed
             }
             KeyCode::BackTab => {
-                let mut prev = self.panel_focus.previous();
-                if prev == MonitorPanel::Resolved && !resolved_visible {
-                    prev = prev.previous();
-                }
-                self.panel_focus = prev;
+                self.focus_previous();
                 EventResult::Consumed
             }
             // UI-R-065 — Units shares the same `TableState::handle_events` navigation as
@@ -1373,24 +1312,24 @@ impl ModuleView for ModbusMonitorModuleView {
             // handles the keypress first, then `selected` picks up the resulting
             // `table_state().selected()` index (the reverse of render's existing
             // `select_index(self.selected)` sync).
-            _ if self.panel_focus == MonitorPanel::Units => {
+            _ if self.focus == ModbusMonitorModuleViewFocus::UnitsTable => {
                 let result = self.units_table.state.handle_events(modifiers, code);
                 if let Some(idx) = self.units_table.state.table_state().selected() {
                     self.selected = idx;
                 }
                 result
             }
-            _ if self.panel_focus == MonitorPanel::Messages => {
+            _ if self.focus == ModbusMonitorModuleViewFocus::MessagesTable => {
                 self.messages_table.state.handle_events(modifiers, code)
             }
-            KeyCode::Enter if self.panel_focus == MonitorPanel::Resolved => {
+            KeyCode::Enter if self.focus == ModbusMonitorModuleViewFocus::ResolvedTable => {
                 self.open_edit_interpretation();
                 EventResult::Consumed
             }
-            _ if self.panel_focus == MonitorPanel::Resolved => {
+            _ if self.focus == ModbusMonitorModuleViewFocus::ResolvedTable => {
                 self.resolved_table.state.handle_events(modifiers, code)
             }
-            _ if self.panel_focus == MonitorPanel::Memory => {
+            _ if self.focus == ModbusMonitorModuleViewFocus::MemoryTable => {
                 self.memory_table.state.handle_events(modifiers, code)
             }
             _ => EventResult::Unhandled(modifiers, code),
@@ -1798,6 +1737,7 @@ mod tests {
     use crate::config::{Endpoint, Role};
     use ferrowl_modbus::UnitId;
     use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_ui::traits::SetFocus;
     use ferrowl_ui::widgets::TableEntry as TableEntryTrait;
 
     fn spec() -> ModuleSpec {
@@ -1892,7 +1832,7 @@ mod tests {
         v.set_focused(true);
         v.unit_ids = vec![UnitId(1), UnitId(3), UnitId(5)];
         v.selected = 0;
-        v.panel_focus = MonitorPanel::Units;
+        v.focus = ModbusMonitorModuleViewFocus::UnitsTable;
         // Render once so `units_table.state.values()` is populated (mirrors real event loop:
         // render() -> handle_events() -> render() ...).
         {
@@ -1904,7 +1844,7 @@ mod tests {
                 .unwrap();
         }
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Down);
         assert_eq!(
             v.units_table.state.table_state().selected(),
             Some(1),
@@ -1915,7 +1855,7 @@ mod tests {
             "selected must follow the table's resulting index"
         );
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Char('G'));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char('G'));
         assert_eq!(
             v.units_table.state.table_state().selected(),
             Some(2),
@@ -1923,7 +1863,7 @@ mod tests {
         );
         assert_eq!(v.selected, 2);
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Home);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Home);
         // Home is `move_to_left` (horizontal scroll), not a row-selection key — it must still be
         // Consumed by the table (not fall through to Unhandled), and must leave `selected` (a
         // row index) untouched.
@@ -1938,7 +1878,7 @@ mod tests {
         v.set_focused(true);
         v.unit_ids = vec![UnitId(1)];
         v.selected = 0;
-        v.panel_focus = MonitorPanel::Memory;
+        v.focus = ModbusMonitorModuleViewFocus::MemoryTable;
         // Two writes far enough apart to span multiple 8-address hex-editor lines (MB-R-144), so
         // the Memory table has more than one row to navigate.
         v.module.table().write().write_words(
@@ -1967,7 +1907,7 @@ mod tests {
         }
 
         let before = v.memory_table.state.table_state().selected();
-        let result = v.handle_events(KeyModifiers::NONE, KeyCode::Down);
+        let result = ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Down);
         assert!(
             matches!(result, EventResult::Consumed),
             "Memory must consume Down instead of falling through to Unhandled"
@@ -2157,7 +2097,6 @@ mod tests {
     #[test]
     fn ut_panel_borders_track_view_focus() {
         use ferrowl_ui::COLOR_SCHEME;
-        use ferrowl_ui::traits::SetFocus;
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
@@ -2191,39 +2130,89 @@ mod tests {
         );
     }
 
+    /// UI-R-060 — a freshly constructed, unfocused view highlights neither the Units nor the
+    /// Messages panel; once focused, only Units is highlighted, and Messages must not carry a
+    /// stale `focused` default into that first render.
+    #[test]
+    fn ut_fresh_view_highlights_neither_units_nor_messages_until_focused() {
+        use ferrowl_ui::COLOR_SCHEME;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut v = view();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            COLOR_SCHEME.border,
+            "an unfocused fresh view must not highlight the Units panel"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(10, 0)].fg,
+            COLOR_SCHEME.border,
+            "an unfocused fresh view must not highlight the Messages panel"
+        );
+
+        v.set_focused(true);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                v.render(frame, area);
+            })
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].fg,
+            COLOR_SCHEME.hi,
+            "Units panel is the initially-focused pane once the view is focused"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(10, 0)].fg,
+            COLOR_SCHEME.border,
+            "Messages panel must not be highlighted before Tab ever moves focus onto it"
+        );
+    }
+
     /// Exactly one Tab-cyclable panel is highlighted at a time, defaulting to
     /// Units, and Tab/BackTab cycle Units -> Messages -> Memory -> Units (and back).
     #[test]
     fn ut_tab_cycles_panel_focus_units_messages_memory_and_back() {
         use ferrowl_ui::COLOR_SCHEME;
-        use ferrowl_ui::traits::SetFocus;
 
         let mut v = view();
         v.set_focused(true);
-        assert_eq!(v.panel_focus, MonitorPanel::Units);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::UnitsTable);
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(v.panel_focus, MonitorPanel::Messages);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::MessagesTable);
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(v.panel_focus, MonitorPanel::Memory);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::MemoryTable);
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
         assert_eq!(
-            v.panel_focus,
-            MonitorPanel::Units,
+            v.focus,
+            ModbusMonitorModuleViewFocus::UnitsTable,
             "Tab must wrap back to Units"
         );
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::BackTab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::BackTab);
         assert_eq!(
-            v.panel_focus,
-            MonitorPanel::Memory,
+            v.focus,
+            ModbusMonitorModuleViewFocus::MemoryTable,
             "BackTab must cycle in reverse"
         );
 
-        // Only the currently panel-focused block's top-left border cell is highlighted.
-        v.panel_focus = MonitorPanel::Units;
+        // The currently panel-focused block's top-left border cell is highlighted; a
+        // non-focused panel's is not.
+        v.set_focused(false);
+        v.focus = ModbusMonitorModuleViewFocus::UnitsTable;
+        v.set_focused(true);
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
@@ -2237,6 +2226,11 @@ mod tests {
             terminal.backend().buffer()[(0, 0)].fg,
             COLOR_SCHEME.hi,
             "Units panel border must be highlighted while it is panel-focused"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(10, 0)].fg,
+            COLOR_SCHEME.border,
+            "Messages panel border must not be highlighted while Units is panel-focused"
         );
     }
 
@@ -2291,7 +2285,7 @@ mod tests {
         assert!(dialog.add_dialog.is_some());
         let parent_label_before = dialog.label.state.input().to_string();
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char('x'));
 
         let MonitorOverlay::Add(overlay) = &mut v.overlay else {
             panic!("overlay changed unexpectedly");
@@ -2664,7 +2658,7 @@ mod tests {
             .handle_events(KeyModifiers::NONE, KeyCode::Char('s'));
         assert!(dialog.config_path.state.suggestions_open());
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         let MonitorOverlay::EditSetup(dialog) = &v.overlay else {
             panic!("dialog must stay open, unconfirmed, while the popup handles Enter");
@@ -3429,8 +3423,8 @@ mod tests {
     #[test]
     fn ut_messages_panel_routes_left_right_to_table_horizontal_scroll() {
         let mut v = view();
-        v.panel_focus = MonitorPanel::Messages;
-        let result = v.handle_events(KeyModifiers::NONE, KeyCode::Right);
+        v.focus = ModbusMonitorModuleViewFocus::MessagesTable;
+        let result = ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Right);
         assert!(matches!(result, EventResult::Consumed));
     }
 
@@ -3815,17 +3809,17 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
 
-        assert_eq!(v.panel_focus, MonitorPanel::Units);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(v.panel_focus, MonitorPanel::Messages);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(v.panel_focus, MonitorPanel::Memory);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        assert_eq!(v.panel_focus, MonitorPanel::Resolved);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::UnitsTable);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::MessagesTable);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::MemoryTable);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::ResolvedTable);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
         assert_eq!(
-            v.panel_focus,
-            MonitorPanel::Units,
+            v.focus,
+            ModbusMonitorModuleViewFocus::UnitsTable,
             "Tab must wrap back to Units"
         );
     }
@@ -3840,10 +3834,23 @@ mod tests {
         v.selected = 0;
         // No interpretation added: Resolved stays hidden.
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> Messages
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> Memory
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab); // would be Resolved, skipped -> Units
-        assert_eq!(v.panel_focus, MonitorPanel::Units);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab); // -> Messages
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab); // -> Memory
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab); // would be Resolved, skipped -> Units
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::UnitsTable);
+    }
+
+    /// UI-R-065 — the Resolved-registers panel leaves the Tab cycle whenever it is hidden, so
+    /// re-focusing the view while it is both focused and hidden re-homes focus onto Units rather
+    /// than leaving keys routed to an invisible table.
+    #[test]
+    fn ut_refocusing_view_leaves_hidden_resolved_panel() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        v.set_focused(true);
+        assert_eq!(v.focus, ModbusMonitorModuleViewFocus::UnitsTable);
     }
 
     /// UI-R-065 — each panel's selection/scroll is independent: switching panel focus away and
@@ -3866,12 +3873,12 @@ mod tests {
             );
         }
         v.refresh().await;
-        v.panel_focus = MonitorPanel::Messages;
+        v.focus = ModbusMonitorModuleViewFocus::MessagesTable;
         v.messages_table.state.select_index(2);
         assert_eq!(v.messages_table.state.table_state().selected(), Some(2));
 
-        v.panel_focus = MonitorPanel::Memory;
-        v.panel_focus = MonitorPanel::Messages;
+        v.focus = ModbusMonitorModuleViewFocus::MemoryTable;
+        v.focus = ModbusMonitorModuleViewFocus::MessagesTable;
 
         assert_eq!(
             v.messages_table.state.table_state().selected(),
@@ -3891,9 +3898,9 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         buffer_text(&mut v); // renders, which populates `resolved_table`'s rows
-        v.panel_focus = MonitorPanel::Resolved;
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         let MonitorOverlay::EditInterpretation(dialog, original_name) = &v.overlay else {
             panic!("Enter on the Resolved panel did not open the edit-interpretation dialog");
@@ -3916,8 +3923,8 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
             panic!("Enter on the Resolved panel did not open the edit-interpretation dialog");
@@ -3927,7 +3934,7 @@ mod tests {
         assert!(dialog.add_dialog.is_some());
         let parent_label_before = dialog.label.state.input().to_string();
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Char('x'));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char('x'));
 
         let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
             panic!("overlay changed unexpectedly");
@@ -3962,8 +3969,8 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         {
             let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
@@ -3993,8 +4000,8 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         {
             let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
@@ -4005,8 +4012,8 @@ mod tests {
             assert!(dialog.confirm_delete.is_some());
         }
         // The confirm-delete popup defaults to CANCEL focused; Tab to DELETE, then Enter.
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         assert!(matches!(v.overlay, MonitorOverlay::None));
         assert!(v.module.interpretations_for(UnitId(3)).is_empty());
@@ -4029,8 +4036,8 @@ mod tests {
         let observed_before = v.module.table().read().read_words(&key, 10, 1);
 
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
         {
             let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
                 panic!("edit-interpretation dialog did not open");
@@ -4049,16 +4056,16 @@ mod tests {
         );
 
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
         {
             let MonitorOverlay::EditInterpretation(dialog, _) = &mut v.overlay else {
                 panic!("edit-interpretation dialog did not open");
             };
             dialog.as_mut().open_confirm_delete();
         }
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
         assert!(v.module.interpretations_for(UnitId(3)).is_empty());
         assert_eq!(
             v.module.table().read().read_words(&key, 10, 1),
@@ -4082,9 +4089,9 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), named);
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         let MonitorOverlay::EditInterpretation(overlay, _) = &v.overlay else {
             panic!("Enter on the Resolved panel did not open the edit-interpretation dialog");
@@ -4110,8 +4117,8 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), def(10, "Active power draw"));
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         {
             let MonitorOverlay::EditInterpretation(overlay, _) = &v.overlay else {
@@ -4129,7 +4136,7 @@ mod tests {
         super::super::setup_dialog::set_input(&mut sub.label, "kettle-on");
         super::super::setup_dialog::set_input(&mut sub.value, "1");
 
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         let MonitorOverlay::EditInterpretation(overlay, _) = &v.overlay else {
             panic!("overlay changed unexpectedly");
@@ -4159,8 +4166,8 @@ mod tests {
         v.module
             .add_interpretation(UnitId(3), "power".to_string(), named);
         buffer_text(&mut v);
-        v.panel_focus = MonitorPanel::Resolved;
-        v.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        v.focus = ModbusMonitorModuleViewFocus::ResolvedTable;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 
         {
             let MonitorOverlay::EditInterpretation(overlay, _) = &v.overlay else {
@@ -4171,9 +4178,9 @@ mod tests {
 
         // The dialog opens with `Value` focused (see `from_interpretation`); Tab twice
         // reaches `DeleteValueButton` (Value -> AddButton -> DeleteValueButton).
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Tab);
-        v.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Tab);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Char(' '));
 
         let MonitorOverlay::EditInterpretation(overlay, _) = &v.overlay else {
             panic!("overlay changed unexpectedly");
