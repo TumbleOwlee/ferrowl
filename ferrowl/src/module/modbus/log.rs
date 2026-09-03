@@ -5,7 +5,6 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::view::log::format_timestamp;
 
@@ -77,10 +76,7 @@ pub(crate) fn append(sink: &FileSink, line: &str) {
     if let Ok(mut guard) = sink.lock()
         && let Some(writer) = guard.as_mut()
     {
-        let ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let ms = ferrowl_util::time::now_unix_ms();
         let ts = format_timestamp(ms);
         let _ = writeln!(writer, "[{ts}] {line}");
         let _ = writer.flush();

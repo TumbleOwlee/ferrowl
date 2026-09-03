@@ -81,7 +81,10 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         tokio::select! {
             msg = rx.recv() => {
                 let Some(msg) = msg else { break };
-                let line = format!("[{}] {SOURCE} | {msg}", format_timestamp(crate::cli::now_ms()));
+                let line = format!(
+                    "[{}] {SOURCE} | {msg}",
+                    format_timestamp(ferrowl_util::time::now_unix_ms())
+                );
                 println!("{line}");
                 if let Some(f) = log_file.as_mut() {
                     let _ = writeln!(f, "{line}");
