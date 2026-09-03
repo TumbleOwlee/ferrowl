@@ -2477,8 +2477,8 @@ mod tests {
         assert!(!overlay.description.state.focused());
     }
 
-    /// UI-R-061 — while the "Add predefined" sub-popup is open, `Esc` dismisses only the popup;
-    /// the `:add` interpretation dialog behind it stays open.
+    /// UI-R-061, UI-E-062 — while the "Add predefined" sub-popup is open, `Esc` dismisses only
+    /// the popup; the `:add` interpretation dialog behind it stays open.
     #[tokio::test]
     async fn ut_esc_in_add_predefined_popup_closes_only_the_popup() {
         let mut v = view();
