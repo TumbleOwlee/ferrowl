@@ -425,13 +425,7 @@ impl<S: DrawSurface> App<S> {
                 break;
             }
 
-            // A pending single-digit tab jump expires on its own if no second digit arrives.
-            if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
-                && Instant::now() >= deadline
-            {
-                self.keymode = None;
-                self.switch_tab(first);
-            }
+            self.expire_pending_tab_digit();
 
             self.refresh_snapshot().await;
             self.draw()?;
@@ -448,6 +442,17 @@ impl<S: DrawSurface> App<S> {
             }
         }
         Ok(())
+    }
+
+    /// UI-R-076 — a `Ctrl+t` first digit whose second-digit window elapsed commits its jump
+    /// instead of being dropped.
+    fn expire_pending_tab_digit(&mut self) {
+        if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
+            && Instant::now() >= deadline
+        {
+            self.keymode = None;
+            self.switch_tab(first);
+        }
     }
 
     async fn refresh_snapshot(&mut self) {
