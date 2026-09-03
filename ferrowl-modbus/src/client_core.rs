@@ -288,7 +288,7 @@ where
     S: ClientTransport<F>,
     F: ClientFraming,
 {
-    async fn read<L>(
+    pub(crate) async fn read<L>(
         &mut self,
         op: &Operation,
         timeout_ms: usize,
@@ -1162,5 +1162,137 @@ mod tests {
         let res: ReadResult<Vec<bool>> = Ok(Ok(vec![true, false]));
         let words = classify(res).map(bits_to_words).unwrap();
         assert_eq!(words, vec![1u16, 0]);
+    }
+
+    #[tokio::test]
+    /// MB-R-157 — three consecutive Modbus exceptions on the same operation skip it (advance the
+    /// round-robin index) and reset the retry counter; a fourth exception on the next rotation
+    /// starts counting again rather than skipping immediately.
+    async fn ut_three_consecutive_exceptions_skip_advance_and_reset_the_counter() {
+        let (mut core, mut peer) = rtu_client_over_duplex();
+        let (log, lines) = recording_log();
+        let operations = Arc::new(RwLock::new(vec![
+            Operation {
+                slave_id: UnitId(0),
+                fn_code: FunctionCode::ReadHoldingRegisters,
+                range: Range::new(0, 2),
+            },
+            Operation {
+                slave_id: UnitId(0),
+                fn_code: FunctionCode::ReadHoldingRegisters,
+                range: Range::new(10, 2),
+            },
+        ]));
+        let memory = Arc::new(MemLock::new(Memory::<Key<SlaveKey>>::default()));
+        let mut index = 0usize;
+        let mut retries = 0u32;
+        let mut had_success = false;
+
+        let invalid_count = |lines: &Arc<parking_lot::Mutex<Vec<String>>>| -> usize {
+            lines
+                .lock()
+                .iter()
+                .filter(|l| l.contains("invalid."))
+                .count()
+        };
+
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid_count(&lines), 0);
+        assert_eq!(index, 0);
+        assert_eq!(retries, 2);
+
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid_count(&lines), 1);
+        assert!(
+            lines
+                .lock()
+                .iter()
+                .any(|l| l.contains("invalid.") && l.contains("[0, 2)"))
+        );
+        assert_eq!(index, 1);
+        assert_eq!(retries, 0);
+
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid_count(&lines), 1);
+        assert_eq!(index, 1);
+        assert_eq!(retries, 1);
+
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        core.poll_once::<SlaveKey, _>(
+            &operations,
+            &memory,
+            200,
+            &log,
+            &mut index,
+            &mut retries,
+            &mut had_success,
+        )
+        .await
+        .unwrap();
+        assert_eq!(invalid_count(&lines), 2);
+        assert!(
+            lines
+                .lock()
+                .iter()
+                .any(|l| l.contains("invalid.") && l.contains("[10, 12)"))
+        );
+        assert_eq!(index, 0);
+
+        assert!(!had_success);
+        assert!(
+            drain_peer(&mut peer).await.is_empty(),
+            "broadcast reads never reach the wire"
+        );
     }
 }

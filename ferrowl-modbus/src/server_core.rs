@@ -2598,4 +2598,113 @@ mod tests {
         .expect("drive_serve did not return promptly");
         assert!(matches!(end, ServeEnd::Failed(_)));
     }
+
+    #[test]
+    /// BR-R-019 — the gateway exception codes exist and carry the wire bytes the Modbus spec
+    /// assigns them, even though ferrowl's own server never emits either.
+    fn ut_gateway_exception_codes_carry_their_wire_bytes() {
+        assert_eq!(
+            ExceptionCode::GatewayPathUnavailable.encode().unwrap(),
+            0x0A
+        );
+        assert_eq!(
+            ExceptionCode::GatewayTargetDeviceFailedToRespond
+                .encode()
+                .unwrap(),
+            0x0B
+        );
+    }
+
+    #[tokio::test]
+    /// BR-R-019 — no failing request a ferrowl Modbus server can be asked to answer ever yields
+    /// a gateway exception code; only the four `api-contract.md` 0x01-0x04 codes it maps to.
+    async fn ut_server_exception_mapping_never_yields_a_gateway_code() {
+        let mem = seeded_memory(&[10, 20]);
+        let (log, _) = recording_log();
+        let mut codes = Vec::new();
+
+        // Unmapped slave, every read function code.
+        for request in [
+            RequestPdu::ReadCoils {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            RequestPdu::ReadDiscreteInputs {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            RequestPdu::ReadInputRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(0),
+                quantity: Quantity(2),
+            },
+        ] {
+            let err = handle_request::<SlaveKey, _>(UnitId(2), request, &mem, &log, false, false)
+                .await
+                .unwrap_err();
+            codes.push(err);
+        }
+
+        // Out-of-range address/quantity on a mapped slave (region is `[0, 4)`).
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReadHoldingRegisters {
+                address: Address(3),
+                quantity: Quantity(4),
+            },
+            &mem,
+            &log,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
+        codes.push(err);
+
+        // Unsupported function.
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReportServerId,
+            &mem,
+            &log,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
+        codes.push(err);
+
+        // Write to an unmapped slave.
+        let err = handle_request::<SlaveKey, _>(
+            UnitId(2),
+            RequestPdu::WriteSingleRegister {
+                address: Address(0),
+                value: RegisterValue(1),
+            },
+            &mem,
+            &log,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
+        codes.push(err);
+
+        assert!(!codes.is_empty());
+        for code in codes {
+            assert!(
+                matches!(
+                    code,
+                    ExceptionCode::IllegalFunction
+                        | ExceptionCode::IllegalDataAddress
+                        | ExceptionCode::IllegalDataValue
+                        | ExceptionCode::ServerDeviceFailure
+                ),
+                "unexpected exception code: {code:?}"
+            );
+        }
+    }
 }
