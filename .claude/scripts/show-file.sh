@@ -33,7 +33,7 @@ esac
 has() { command -v "$1" >/dev/null 2>&1; }
 
 if [ -n "$TMUX" ] && has glow; then
-    tmux split-window -h "glow -p '$abs'" && echo "show-file: opened in tmux pane (glow): $abs"
+    tmux new-window -n "claude: $file" "glow -p '$abs'" && echo "show-file: opened in tmux pane (glow): $abs"
 elif has wslview; then
     wslview "$abs" && echo "show-file: opened with wslview: $abs"
 elif [ -n "$TMUX" ]; then
