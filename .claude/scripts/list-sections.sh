@@ -1,6 +1,7 @@
 #!/bin/sh
 # List a markdown file's headings, one per line, exactly as extract-section.sh
-# expects them verbatim as its first argument. Lets an agent discover what's
+# expects them verbatim as its first argument; a `#` line inside a fenced code
+# block is not a heading. Lets an agent discover what's
 # extractable without grepping or reading the whole file first.
 # Generic: works on any markdown file, not just docs/specs/.
 #
@@ -16,5 +17,5 @@ for file in "$@"; do
   if [ "$#" -gt 1 ]; then
     echo "== $file =="
   fi
-  awk '/^#+[ \t]/ { print }' "$file"
+  awk '/^```/ { fence = !fence } !fence && /^#+[ \t]/ { print }' "$file"
 done

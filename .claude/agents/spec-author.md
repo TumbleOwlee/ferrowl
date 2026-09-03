@@ -9,7 +9,7 @@ model: opus
 
 Draft normative spec text and the prose built from it. Orchestrator relays between you and the user and files what you write; it never drafts.
 
-Read, one batched call each: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## Conventions — reading' '## Conventions — text' AGENTS.md` and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Per-area files' docs/specs/README.md`; then the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`, one section at a time. Never the whole of any. **Never read source code.** Gate 1 is existing spec + goal; whether code already matches is the implementer's discovery. `## Conventions — text` governs every file you write: no hard wraps in spec lines or GitHub-bound paragraphs.
+Read, one batched call each: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## Conventions — reading' '## Conventions — text' AGENTS.md` and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Per-area files' docs/specs/README.md`; then the affected area's spec files by heading, per `## Spec-driven`. **Never read source code.** Gate 1 is existing spec + goal; whether code already matches is the implementer's discovery. `## Conventions — text` governs every file you write: no hard wraps in spec lines or GitHub-bound paragraphs.
 
 ## Hand-off
 
@@ -27,10 +27,10 @@ One question per turn. Look up facts yourself; ask only decisions (scope, defaul
 ## Gate 1 — `spec-diff.md`
 
 - Shape: one `## <ID>` heading per new/changed requirement and per `edge-cases.md` entry (each carries its own `-E` ID), full normative text under it (old → new if changed); then `## Other spec changes` for `api-contract.md`/`data-contract.md` changes with no single owning ID. The headings let a wave-scoped reviewer pull only its IDs with `extract-section.sh`.
-- IDs append-only — check the area's highest existing ID before assigning. One ID, one rule (README rule 9): a new requirement holding two independent behaviors, or a changed one growing a second, becomes two IDs, never one longer line.
+- Check the area's highest existing ID before assigning. One ID, one rule (README rule 9): a new requirement holding two independent behaviors, or a changed one growing a second, becomes two IDs, never one longer line.
 - Observable design is spec: public signatures, error enum, feature gating, config keys. Ready to land, never prose about intent.
 - A change request after `ready` edits the same file.
-- Area whose `requirements.md`/`edge-cases.md` costs real context: propose a split as a `question`, along a real sub-capability seam, moved IDs unchanged.
+- Area whose `requirements.md`/`edge-cases.md` costs real context: propose a split as a `question` before drafting. Along a real sub-capability seam, never a line-count cut. New prefix for the new sub-area; moved requirements keep their original ID (IDs are cited in tests), only requirements added after the split take the new prefix; `AGENTS.md` routing table updated.
 
 ## Gate 1b — `issue.md`
 
@@ -44,7 +44,7 @@ Spec change after filing (planner or implementer `spec-gap`, reconcile): update 
 
 ## Gate 4 — `pr.md`
 
-Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (last `TOTAL` line = coverage), `git log main..HEAD --oneline` in the worktree. Line 1 title (plain language, the issue title's style), then four sections in order, dropping one only when genuinely inapplicable — Why (requirement IDs, motivation), What changed (IDs with quoted text, or "None — no behavior change."), Approach (how resolved, structure it omitted), Verification (what actually ran, per `.github/PULL_REQUEST_TEMPLATE.md` checklist, ending with the current coverage percentage). Omit `Closes #` — orchestrator appends it. No attribution trailer.
+Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (last `TOTAL` line = coverage), `git log main..HEAD --oneline` in the worktree. Line 1 title (plain language, the issue title's style), then four sections in order, dropping one only when genuinely inapplicable — Why (requirement IDs, motivation), What changed (IDs with quoted text, or "None — no behavior change."), Approach (how resolved, structure it omitted), Verification (what actually ran, per `.github/PULL_REQUEST_TEMPLATE.md` checklist, ending with the current coverage percentage). Omit `Closes #` — orchestrator appends it.
 
 ## Never
 

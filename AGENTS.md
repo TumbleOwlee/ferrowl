@@ -15,7 +15,6 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only. Cite in commits and PRs.
-- One requirement or edge-case entry, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call).
 
 ## TDD — fixed order, every stage
 
@@ -39,12 +38,12 @@ Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workf
 
 | Task touches | Read | ID prefix |
 |---|---|---|
-| Modbus register codec, store, client/server (TCP/RTU) | [`docs/specs/modbus/`](./docs/specs/modbus/) | `MB-R-*`, `MB-E-*` |
+| Modbus register model, formats, codec, store, client/server (TCP/RTU), reconnect | [`docs/specs/modbus/`](./docs/specs/modbus/) | `MB-R-*`, `MB-E-*` |
 | OCPP actions, CS/CSMS engine, versions 1.6/2.0.1/2.1, TLS/auth | [`docs/specs/ocpp/`](./docs/specs/ocpp/) | `OC-R-*`, `OC-E-*` |
 | Lua scripting (`C_*` API, sim threads, sandbox) | [`docs/specs/scripting/`](./docs/specs/scripting/) | `SC-R-*`, `SC-E-*` |
 | TUI widgets, dialogs, `:` commands, keybindings, code editor | [`docs/specs/tui/`](./docs/specs/tui/) | `UI-R-*`, `UI-E-*` |
-| Config/session file format, save/load, `migrate` | [`docs/specs/config-session/`](./docs/specs/config-session/) | `CS-R-*`, `CS-E-*` |
-| CLI flags, `ferrowl run` headless, exit codes | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) | `CL-R-*`, `CL-E-*` |
+| Config/session file envelope (TOML/JSON), save/load, `migrate` | [`docs/specs/config-session/`](./docs/specs/config-session/) | `CS-R-*`, `CS-E-*` |
+| CLI flags, `ferrowl run` headless, exit codes, CI usage | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) | `CL-R-*`, `CL-E-*` |
 | Bridge mode: downstream/upstream Modbus relay (TCP/RTU) | [`docs/specs/bridge/`](./docs/specs/bridge/) | `BR-R-*`, `BR-E-*` |
 | Platforms, performance, security, versioning, testing conventions | [`docs/specs/non-functional-requirements.md`](./docs/specs/non-functional-requirements.md) | `NF-R-*` |
 | Crate graph, data flow, concurrency model | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | — |
@@ -95,7 +94,8 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 ## Conventions — text
 
 - **No hard line wrap on anything posted externally** — issue bodies, PR bodies, PR/review comments. GitHub soft-wraps; an inserted `\n` mid-sentence renders as a real line break. Paragraphs as single lines; only headings, list items, code blocks get their own line.
-- **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep` returns the whole requirement and `extract-id.sh` points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
+- **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep -rn <ID or keyword> docs/specs/` returns the whole entry and `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call) points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
+- **No attribution trailer** — never `Co-Authored-By`, "Generated with", or any tool attribution on a commit, PR body, issue, or comment: pure `git log` noise, forever. `hook-guard-attribution.sh` denies it anyway.
 
 ## Scope boundaries — check with the user before
 

@@ -7,7 +7,7 @@ description: PO-facing entrypoint — derive spec text from a requirement via di
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md` is authority for gate 1 and 1b — read `### Gate 1` and `### Gate 1b`, follow exactly. This skill is the entrypoint only; it restates nothing. Conflict → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md` is authority for gate 1 and 1b — read `### Gate 1` and `### Gate 1b`, follow exactly. Conflict → `.claude/AGENTS.workflow.md` wins.
 
 Single-session, no resume: skip gate 1's **Board** bullet — no `open/<slug>.md`, no task card. `spec-author` still needs a scratch `artifacts/<slug>/` (deleted once the ticket exists). The ticket is the only surviving artifact; approved spec text lives in its self-contained body, not `docs/specs/` (main holds spec only for existing code). Orchestrator relays and files (`### Agent hand-off`); drafts nothing.
 
