@@ -12,7 +12,7 @@ Implement an approved plan. The plan is a contract.
 
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
-Read `.claude/AGENTS.core.md` first (spec-driven rules, TDD order, build/test/lint, conventions, scope boundaries). Never `AGENTS.md` or `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. No `.claude/AGENTS.core.md` → `AGENTS.md`'s same sections.
+Read first, one batched call: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Build / test / lint' '## Conventions — reading' '## Conventions — code' '## Conventions — text' '## Scope boundaries — check with the user before' AGENTS.md`. Never the rest of `AGENTS.md` or `.claude/AGENTS.workflow.md` — routing and gate/board mechanics are the orchestrator's.
 
 Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report), not a cue to search.
 
@@ -28,20 +28,21 @@ Also given the **absolute path of your own task card** (main checkout, outside y
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-Move card `open`→`inprogress/` on start. On green, card →`inreview/`, end turn on `status=inreview stage=s<n>`. Sequential: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Never push. Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again. Stage `s0` (land spec) is yours: copy the approved text where the plan says, one commit, no code.
+- Start: card `open`→`inprogress/`. Green: card → `inreview/`.
+- Sequential: commit only once resumed with approval.
+- Parallel (one stage, own worktree): commit on green in your worktree before reporting `inreview` — a merge needs a commit; resumed with findings, fix and amend that commit.
+- Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, report `inreview` again.
+- Stage `s0` (land spec) is yours: copy the approved text where the plan says, one commit, no code.
 
 May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict. Stage needs an unlisted file → stop-and-report.
 
 ## Order, per stage, no exceptions
 
-`.claude/AGENTS.core.md`'s `## TDD — fixed order, every stage`, followed verbatim. Additions:
-
-- Step 1 (write the test): doc comment beside the declaration citing every ID the test pins (`docs/specs/README.md` rule 8).
-- Step 2 (watch it fail): report the failure text; fix and repeat until the failure is the intended assertion, not just any failure.
+`AGENTS.md`'s `## TDD — fixed order, every stage`, followed verbatim. Step 2 (watch it fail): report the failure text; fix and repeat until the failure is the intended assertion, not just any failure.
 
 ## Stage completion
 
-Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `.claude/AGENTS.core.md`'s `## Build / test / lint`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stop and wait for approval; commit only after. Push, PR, merge are the orchestrator's. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
+Done = builds, tests pass, lint clean, coverage floor holds: the full set from `AGENTS.md`'s `## Build / test / lint`. The card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
 
 ## Stop and report — never improvise
 
@@ -58,7 +59,7 @@ Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntl
 - Write the test after the implementation to fit it.
 - Pad coverage with non-asserting tests.
 - Claim a verification you didn't run — quote real output.
-- Push, open a PR, merge.
+- Push, open a PR, merge — orchestrator's.
 - Add `Co-Authored-By` / "Generated with" trailers.
 - Move your card to `done/` — orchestrator's, after merge + independent verify.
 - Touch another agent's card, the parent card, a wave-gate card.

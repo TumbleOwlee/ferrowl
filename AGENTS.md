@@ -15,17 +15,18 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only. Cite in commits and PRs.
-- One requirement or edge-case entry, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section of a large file: `sh .claude/scripts/extract-section.sh '## <heading>' path/to/file.md`.
+- One requirement or edge-case entry, one physical line, never wrapped. Find by `grep -rn <ID or keyword> docs/specs/`; exact file:line: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call).
 
 ## TDD — fixed order, every stage
 
-1. Write the test. Doc comment cites a requirement or edge-case ID (`/// MB-R-012 — …`).
+1. Write the test. Doc comment directly above the declaration cites every requirement or edge-case ID the test pins (`/// MB-R-012 — …`; `docs/specs/README.md` rule 8).
 2. Run it, watch it fail for the right reason, report the failure. Wrong assertion / test-side compile error / premature pass proves nothing.
 3. Minimum implementation that passes.
 4. Refactor green.
 
 - Implementation without a preceding failing test: not done. Test written after the fact to fit code: not done.
 - Expected values from the authoritative source (standard/protocol/upstream API), never a debug print of your own implementation.
+- Every new/changed requirement ships ≥ 1 ID-citing test. Every existing test pinning observable behavior cites its requirement; pure internal/helper-detail tests may stay untagged. Behavior no requirement states = requirement missing — add it (spec change), never attach a loose ID.
 - Coverage floor 80% of lines, CI-gated. A floor, not a target: never inflate with tests that execute code without asserting.
 
 ## Workflow
@@ -48,8 +49,6 @@ Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workf
 | Platforms, performance, security, versioning, testing conventions | [`docs/specs/non-functional-requirements.md`](./docs/specs/non-functional-requirements.md) | `NF-R-*` |
 | Crate graph, data flow, concurrency model | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | — |
 | Contribution workflow, conventions | [`CONTRIBUTING.md`](./CONTRIBUTING.md) | — |
-
-Each area's `edge-cases.md` records **known limitations** — ugly but intentional. Check before "fixing".
 
 ## Build / test / lint
 

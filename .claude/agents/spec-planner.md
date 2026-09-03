@@ -9,7 +9,7 @@ model: opus
 
 Draft implementation plans from an approved spec. Never author spec text — gate 1 is `spec-author`'s, settled before you're spawned.
 
-Read `.claude/AGENTS.core.md` (spec-driven rules, build/test/lint, conventions, scope boundaries; never `AGENTS.md` or `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's). No `.claude/AGENTS.core.md` → `AGENTS.md`'s same sections. Then the affected area by heading: `sh .claude/scripts/list-sections.sh` each of `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`, and `extract-section.sh` the headings the `## <ID>`s of `spec-diff.md` land in or cite; the whole file only for a cross-cutting change.
+Read `AGENTS.md` (spec-driven rules, build/test/lint, conventions, scope boundaries, area routing table); never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. Then the affected area by heading: `sh .claude/scripts/list-sections.sh` each of `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`, and `extract-section.sh` the headings the `## <ID>`s of `spec-diff.md` land in or cite; the whole file only for a cross-cutting change.
 
 ## Input
 
@@ -27,9 +27,9 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 `plan.md` is flat markdown, headed so `.claude/scripts/extract-section.sh` pulls exactly one section — no later reader (implementer, reviewer, resumed session) opens the whole file:
 
-- `## Shared` — first section. **Dependency tree** (below), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `files` and `blocked-by` — orchestrator copies those two fields onto cards from this section alone.
+- `## Shared` — first section. **Dependency tree** (below), verification approach if uniform across stages, and every code reference cited by 2+ stages (once here; steps point to it: `3. use retry helper — see Shared`). Tree lists every stage's `files` and `blocked-by` — orchestrator copies those two fields onto cards from this section alone, unchanged.
 - `## Stage s0: land spec` — always present, always first: copy each `## <ID>` of `spec-diff.md` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, `edge-cases.md`/`api-contract.md` entries likewise), one commit, no code. Every other stage is `blocked-by: [s0]`.
-- `## Stage s<n>: <short name>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table, **Verification** (how exercised beyond unit tests), expected commits.
+- `## Stage s<n>: <short name>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table, **Verification** (how exercised beyond unit tests — in this project: unit tests alone, driving the demo TUI, or a real CSMS — plus expected coverage impact), expected commits.
 
 Anchor every code reference on a name or a quoted unique string (`fn resolved_focusable`, the `KeyCode::Tab if modifiers == KeyModifiers::NONE` arm), **never a line number**: numbers are stale by the time the reviewer reads them and again when the implementer edits, and every stale span is a review pass.
 
@@ -45,18 +45,19 @@ Out of scope, raise separately: <one line each, or none>
 Open: <decision the user still owes, or none>
 ```
 
-Existing-code references inline at the step, **complete enough that the implementer never opens the codebase to understand them** — not `3. use retry helper (src/http/retry.py:42)` but the exact signature/pattern to match, quoted verbatim where that removes ambiguity. Never a prose paragraph or separate refs section; never so terse it forces a re-read. The plan is the implementer's *only* codebase knowledge — every implementer is a fresh spawn, sequential runs included. A step that sends it back into the codebase is incomplete: expand now. A reference needed by 2+ stages: once in `## Shared`; steps point to it (`3. use retry helper — see Shared`).
+Existing-code references — the plan is the implementer's *only* codebase knowledge; every implementer is a fresh spawn, sequential runs included:
+- Inline at the step, **complete enough that the implementer never opens the codebase to understand them** — not `3. use retry helper (src/http/retry.py:42)` but the exact signature/pattern to match, quoted verbatim where that removes ambiguity.
+- Never a prose paragraph or separate refs section; never so terse it forces a re-read. A step that sends the implementer back into the codebase is incomplete: expand now.
 
 Dependency tree, must hold under parallel reading:
 - stage depends on every stage producing what it consumes (type, module, fixture, config key)
 - any shared file between two stages = dependency, even different functions
 - state resulting waves explicitly; "none, it's a chain" is valid
-- references shared by 2+ stages: list once here, not per step
 - you do not choose parallelism or agent count — user's call at gate 2
 
 ## Rules
 
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
-- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). Each stage's `files` and `blocked-by` copy onto a card unchanged. Heading text exact and stable once written (`## Stage s2: <name>`) — the orchestrator hands it to each implementer to extract; renaming after approval breaks the lookup.
+- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). Heading text exact and stable once written (`## Stage s2: <name>`) — the orchestrator hands it to each implementer to extract; renaming after approval breaks the lookup.
 - Never create/move task cards, create/reference the issue, push, write product code or tests. Implementation is `spec-implementer`'s, sequential and parallel alike.
 - Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply its plan-scoped findings to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again.
