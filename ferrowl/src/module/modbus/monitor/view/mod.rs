@@ -47,8 +47,8 @@ struct InterpretationEdit {
 }
 
 /// The single modal overlay over the monitor view (mutually exclusive by construction). The
-/// derive supplies `is_active`/`take`/`close` and common-key routing (`Esc` closes, `Tab`/
-/// `BackTab` cycle focus on the tagged variants); each variant's `Enter`/inner dispatch stays in
+/// derive supplies `is_active`/`take`/`close` and common-key routing (`Tab`/`BackTab` cycle
+/// focus on the tagged variants); each variant's `Esc`/`Enter`/inner dispatch stays in
 /// `handle_events`.
 #[derive(Overlay)]
 enum MonitorOverlay {
@@ -61,15 +61,15 @@ enum MonitorOverlay {
     /// own `EditInputDialog::new()`/`from_register` split). The struct's own
     /// `#[focus(when = ...)]` gates handle the alias-list-shown-vs-hidden presentation
     /// internally.
-    #[overlay(esc_close, focus_cycle)]
+    #[overlay(focus_cycle)]
     Add(Box<EditInterpretationDialog>),
     /// `:edit`/`:e` re-setup dialog, prefilled from the current spec/device.
-    /// `Esc` and `Tab` stay hand-routed below: the dialog consumes both itself, and `Esc` here
-    /// closes the overlay ahead of the dialog's own close-confirm popup.
+    /// `Esc` and `Tab` stay hand-routed below: the dialog consumes both itself, and `Esc` now
+    /// reaches the dialog itself, whose own close-confirm popup (UI-R-112) decides.
     EditSetup(Box<MonitorSetupDialog>),
     /// MB-R-148 — `Enter` on a Resolved-registers row opens this, prefilled from the
     /// selected row.
-    #[overlay(esc_close, focus_cycle)]
+    #[overlay(focus_cycle)]
     EditInterpretation(Box<InterpretationEdit>),
 }
 
@@ -1175,9 +1175,6 @@ impl ModuleView for ModbusMonitorModuleView {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         if let MonitorOverlay::EditSetup(dialog) = &mut self.overlay {
             match code {
-                KeyCode::Esc => {
-                    self.overlay = MonitorOverlay::None;
-                }
                 KeyCode::Enter => {
                     // Offer Enter to the dialog first, so a focused
                     // completion popup (config-path/serial-path) gets to accept its highlighted
@@ -1191,6 +1188,11 @@ impl ModuleView for ModbusMonitorModuleView {
                 _ => {
                     let _ = dialog.handle_events(modifiers, code);
                 }
+            }
+            if let MonitorOverlay::EditSetup(dialog) = &mut self.overlay
+                && dialog.take_close_request()
+            {
+                self.overlay = MonitorOverlay::None;
             }
             return EventResult::Consumed;
         }
@@ -1207,6 +1209,10 @@ impl ModuleView for ModbusMonitorModuleView {
             match route_interpretation_subpopups(dialog, modifiers, code) {
                 Some(SubPopupOutcome::Delete) => {
                     self.delete_interpretation();
+                    return EventResult::Consumed;
+                }
+                Some(SubPopupOutcome::Close) => {
+                    self.overlay = MonitorOverlay::None;
                     return EventResult::Consumed;
                 }
                 Some(SubPopupOutcome::Consumed) => return EventResult::Consumed,
@@ -2275,10 +2281,11 @@ mod tests {
         );
     }
 
-    /// Characterization — `Esc` closes the `:add` interpretation overlay outright, discarding
-    /// any unsaved edits without a close-confirm prompt.
+    /// UI-R-112, UI-R-113, UI-E-061 — `Esc` on a freshly opened (nothing typed into it)
+    /// `:add` interpretation dialog opens its close-confirm popup instead of closing the
+    /// overlay outright; the confirmation is unconditional (no dirty-tracking).
     #[tokio::test]
-    async fn ut_esc_closes_add_interpretation_dialog() {
+    async fn ut_esc_on_add_interpretation_dialog_opens_close_confirm() {
         let mut v = view();
         v.unit_ids.push(UnitId(1));
         v.handle_command("add").await;
@@ -2286,16 +2293,15 @@ mod tests {
 
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
 
-        assert!(
-            matches!(v.overlay, MonitorOverlay::None),
-            "Esc must close the :add interpretation overlay"
-        );
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("Esc must not close the :add interpretation overlay directly");
+        };
+        assert!(overlay.close_confirm.is_some());
     }
 
-    /// Characterization — `Esc` closes the edit/delete interpretation overlay outright,
-    /// discarding any unsaved edits without a close-confirm prompt.
+    /// UI-R-112, UI-R-113 — same as above, for the edit/delete interpretation overlay.
     #[tokio::test]
-    async fn ut_esc_closes_edit_interpretation_dialog() {
+    async fn ut_esc_on_edit_interpretation_dialog_opens_close_confirm() {
         let mut v = view();
         v.unit_ids = vec![UnitId(3)];
         v.selected = 0;
@@ -2307,9 +2313,139 @@ mod tests {
 
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
 
+        let MonitorOverlay::EditInterpretation(edit) = &v.overlay else {
+            panic!("Esc must not close the edit/delete interpretation overlay directly");
+        };
+        assert!(edit.dialog.close_confirm.is_some());
+    }
+
+    /// UI-R-112, UI-R-023 — confirming the close-confirm popup (`Enter`) closes the `:add`
+    /// interpretation overlay.
+    #[tokio::test]
+    async fn ut_close_confirm_enter_closes_add_interpretation_overlay() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    /// UI-R-112, UI-R-023 — dismissing the close-confirm popup (`Esc`) returns to the still-open
+    /// `:add` interpretation dialog.
+    #[tokio::test]
+    async fn ut_esc_in_close_confirm_returns_to_add_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        let MonitorOverlay::Add(overlay) = &v.overlay else {
+            panic!("Esc in the close-confirm popup must not close the overlay");
+        };
+        assert!(overlay.close_confirm.is_none());
+    }
+
+    /// UI-R-112, UI-R-023 — same as above, for the edit/delete interpretation overlay.
+    #[tokio::test]
+    async fn ut_close_confirm_enter_closes_edit_interpretation_overlay() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+        v.open_edit_interpretation();
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    /// UI-R-112, UI-R-023 — same as above, for the edit/delete interpretation overlay.
+    #[tokio::test]
+    async fn ut_esc_in_close_confirm_returns_to_edit_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids = vec![UnitId(3)];
+        v.selected = 0;
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        buffer_text(&mut v);
+        v.open_edit_interpretation();
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        let MonitorOverlay::EditInterpretation(edit) = &v.overlay else {
+            panic!("Esc in the close-confirm popup must not close the overlay");
+        };
+        assert!(edit.dialog.close_confirm.is_none());
+    }
+
+    /// UI-R-112 — `Esc` on the monitor setup-edit overlay opens its close-confirm popup (`CLOSE`
+    /// button rendered) instead of closing the overlay directly.
+    #[tokio::test]
+    async fn ut_esc_on_monitor_setup_dialog_opens_close_confirm() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        assert!(matches!(v.overlay, MonitorOverlay::EditSetup(_)));
+
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
         assert!(
-            matches!(v.overlay, MonitorOverlay::None),
-            "Esc must close the edit/delete interpretation overlay"
+            matches!(v.overlay, MonitorOverlay::EditSetup(_)),
+            "Esc must not close the setup-edit overlay directly"
+        );
+        let text = overlay_text(&mut v);
+        assert!(
+            text.contains("CLOSE"),
+            "close-confirm popup not rendered:\n{text}"
+        );
+    }
+
+    /// UI-R-112, UI-R-023 — confirming the close-confirm popup (`Enter`) closes the setup-edit
+    /// overlay.
+    #[tokio::test]
+    async fn ut_close_confirm_enter_closes_monitor_setup_overlay() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+
+        assert!(matches!(v.overlay, MonitorOverlay::None));
+    }
+
+    /// UI-R-112, UI-R-023 — dismissing the close-confirm popup (`Esc`) returns to the still-open
+    /// setup-edit dialog.
+    #[tokio::test]
+    async fn ut_esc_in_close_confirm_returns_to_monitor_setup_dialog() {
+        let mut v = view();
+        v.handle_command("edit").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        assert!(matches!(v.overlay, MonitorOverlay::EditSetup(_)));
+        let text = overlay_text(&mut v);
+        assert!(
+            !text.contains("CLOSE"),
+            "close-confirm popup must be dismissed:\n{text}"
+        );
+    }
+
+    /// UI-R-113 — the interpretation dialog's close-confirm popup renders over the dialog
+    /// itself (drawn last).
+    #[tokio::test]
+    async fn ut_close_confirm_renders_over_interpretation_dialog() {
+        let mut v = view();
+        v.unit_ids.push(UnitId(1));
+        v.handle_command("add").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Esc);
+
+        let text = overlay_text(&mut v);
+        assert!(
+            text.contains("CLOSE"),
+            "close-confirm popup not rendered:\n{text}"
         );
     }
 
@@ -2911,6 +3047,27 @@ mod tests {
             .draw(|frame| {
                 let area = frame.area();
                 v.render(frame, area);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .fold(String::new(), |mut acc, cell| {
+                acc.push_str(cell.symbol());
+                acc
+            })
+    }
+
+    fn overlay_text(v: &mut ModbusMonitorModuleView) -> String {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                ModuleView::render_overlay(v, frame, area);
             })
             .unwrap();
         terminal

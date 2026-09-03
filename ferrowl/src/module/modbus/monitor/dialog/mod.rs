@@ -44,6 +44,7 @@ use crate::config::device::{
     AlignmentCfg, EndianCfg, MonitorRegisterDef, NamedValue, Scalar, WordOrderCfg,
 };
 use crate::dialog::NonEmpty;
+use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::module::modbus::dialog::{
     AddNamedValueDialog, Alignment, ConfirmDeleteDialog, Endian, Format, KindOption, ValueType,
     WordOrder, alignment_index, endian_index, format_index, is_integer_format,
@@ -148,6 +149,9 @@ pub struct EditInterpretationDialog {
     /// generic sub-dialog plumbing, not `EditInputDialog`-specific.
     #[builder(default)]
     pub confirm_delete: Option<ConfirmDeleteDialog>,
+    /// UI-R-113 — the UI-R-023 close-confirmation popup this dialog opens on `Esc`.
+    #[builder(default)]
+    pub close_confirm: Option<CloseConfirmDialog>,
 }
 
 impl EditInterpretationDialog {
@@ -735,6 +739,9 @@ impl EditInterpretationDialog {
         if let Some(confirm) = self.confirm_delete.as_mut() {
             confirm.render(area, buf);
         }
+        if let Some(confirm) = self.close_confirm.as_mut() {
+            confirm.render(area, buf);
+        }
     }
 }
 
@@ -787,14 +794,18 @@ fn value_type_from_format(format: &RegisterFormat) -> crate::config::device::Val
 pub(crate) enum SubPopupOutcome {
     /// The confirm-delete popup was confirmed; the caller must perform the delete.
     Delete,
+    /// UI-R-112 — the close-confirmation popup was confirmed; the caller must close the overlay.
+    Close,
     /// A popup was open and swallowed the key.
     Consumed,
 }
 
 /// MB-R-148 — route one key through whichever sub-popup of `dialog` is open, if any: the
 /// confirm-delete guard first, then the "Add predefined" named-value popup, which takes *every*
-/// key (not just Esc/Enter) while it is open. Returns `None` when neither is open, leaving the
-/// key for the caller's own routing.
+/// key (not just Esc/Enter) while it is open, then the UI-R-112/UI-R-113 close-confirm gate, and
+/// finally `Esc` itself, which opens that close-confirm popup rather than falling through to the
+/// caller. Returns `None` only when no popup is open and the key was not `Esc`, leaving it for
+/// the caller's own routing.
 pub(crate) fn route_interpretation_subpopups(
     dialog: &mut EditInterpretationDialog,
     modifiers: KeyModifiers,
@@ -841,6 +852,15 @@ pub(crate) fn route_interpretation_subpopups(
                 }
             }
         }
+        return Some(SubPopupOutcome::Consumed);
+    }
+    match route_close_confirm(&mut dialog.close_confirm, modifiers, code) {
+        CloseConfirmOutcome::NotActive => {}
+        CloseConfirmOutcome::Close => return Some(SubPopupOutcome::Close),
+        CloseConfirmOutcome::Consumed => return Some(SubPopupOutcome::Consumed),
+    }
+    if modifiers == KeyModifiers::NONE && code == KeyCode::Esc {
+        dialog.close_confirm = Some(CloseConfirmDialog::new());
         return Some(SubPopupOutcome::Consumed);
     }
     None
