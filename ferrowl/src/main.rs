@@ -445,6 +445,16 @@ mod tests {
         }
     }
 
+    fn device_args(devices: Vec<String>) -> CliArgs {
+        CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![],
+            devices,
+            demo: false,
+        }
+    }
+
     /// Saves `session` under a fresh temp dir, returning its path and the guard keeping the
     /// dir alive for the rest of the test.
     fn save_session(tag: &str, session: &Session) -> (String, TempDirGuard) {
@@ -496,6 +506,33 @@ mod tests {
             tabs.len(),
             8,
             "demo ignores --module/--device: still exactly the demo set"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-004, CL-R-045 — a `--device` value names a device-config file (CL-R-004); resolved
+    /// through `CliArgs::module_specs` it reaches `build_tabs`'s load exactly like a `--module`
+    /// spec, and a value that is not a loadable device config is skipped, not fatal. The
+    /// `eprintln!` diagnostic itself is not asserted — a unit test cannot capture another
+    /// module's stderr without a harness this repo does not have — so the skip (or its absence,
+    /// via the positive control) is what stands in for it.
+    async fn ut_device_flag_value_is_loaded_as_a_path() {
+        let tabs = build_tabs(&device_args(vec!["name=x,port=1".into()]))
+            .await
+            .expect("a --device value is a path: it is loaded and skipped, never a parse error");
+        assert!(
+            tabs.is_empty(),
+            "the descriptor-looking path fails to load, so its tab is skipped"
+        );
+
+        let real_device = concat!(env!("CARGO_MANIFEST_DIR"), "/../configs/evse.toml");
+        let tabs = build_tabs(&device_args(vec![real_device.to_string()]))
+            .await
+            .unwrap();
+        assert_eq!(
+            tabs.len(),
+            1,
+            "a real device path is loaded and gets its own tab"
         );
     }
 
