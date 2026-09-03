@@ -580,6 +580,41 @@ mod tests {
         assert!(!log_lines(&log).iter().any(|l| l.contains("[sim]")));
     }
 
+    #[test]
+    /// SC-R-041 — a sim script context has no `os` library and a working `C_Time`, in the same
+    /// context: the existing coverage proves each half separately, in a different context.
+    fn ut_sim_context_has_no_os_and_a_working_c_time() {
+        let log = script_log();
+        run_script_once(
+            evse_memory(),
+            vstore(),
+            evse_registers(),
+            "sandbox".to_string(),
+            r#"print(os == nil and "os-nil" or "os-present")
+               print("time-ok:" .. tostring(C_Time:Get() >= 0))"#
+                .to_string(),
+            log.clone(),
+            no_sink(),
+        );
+
+        assert!(wait_for(Duration::from_secs(2), || {
+            log_lines(&log).iter().any(|l| l.contains("time-ok:"))
+        }));
+        let lines = log_lines(&log);
+        assert!(
+            lines.iter().any(|l| l.contains("os-nil")),
+            "os must not be reachable from a sim script: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("time-ok:true")),
+            "C_Time:Get() must work in the same context: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("[run]")),
+            "the script must not error: {lines:?}"
+        );
+    }
+
     // --- Typed write path (no string round-trip) ---
 
     #[test]
