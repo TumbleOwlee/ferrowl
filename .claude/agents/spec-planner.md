@@ -9,7 +9,7 @@ model: opus
 
 Draft implementation plans from an approved spec. Never author spec text — gate 1 is `spec-author`'s, settled before you're spawned.
 
-Read `AGENTS.md` (spec-driven rules, build/test/lint, conventions, scope boundaries, area routing table); never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. Then the affected area by heading: `sh .claude/scripts/list-sections.sh` each of `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`, and `extract-section.sh` the headings the `## <ID>`s of `spec-diff.md` land in or cite; the whole file only for a cross-cutting change.
+Read first, one batched call: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Where to look for task X' '## Build / test / lint' '## Conventions — code' '## Conventions — text' '## Scope boundaries — check with the user before' AGENTS.md`; never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. Then the affected area by heading per `## Spec-driven`, starting from the headings the `## <ID>`s of `spec-diff.md` land in or cite.
 
 ## Input
 
@@ -47,7 +47,7 @@ Open: <decision the user still owes, or none>
 
 Existing-code references — the plan is the implementer's *only* codebase knowledge; every implementer is a fresh spawn, sequential runs included:
 - Inline at the step, **complete enough that the implementer never opens the codebase to understand them** — not `3. use retry helper (src/http/retry.py:42)` but the exact signature/pattern to match, quoted verbatim where that removes ambiguity.
-- Never a prose paragraph or separate refs section; never so terse it forces a re-read. A step that sends the implementer back into the codebase is incomplete: expand now.
+- Never a prose paragraph or separate refs section.
 
 Dependency tree, must hold under parallel reading:
 - stage depends on every stage producing what it consumes (type, module, fixture, config key)

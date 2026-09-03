@@ -1,29 +1,15 @@
 # Ferrowl Specs
 
-Authoritative spec of `ferrowl` behavior, by capability area. **Normative**: code conforms to these, never vice versa. Code/spec disagreement = defect in one; resolve, don't paper over.
-
-## Areas
-
-| Area | Prefix | Covers |
-|---|---|---|
-| [`modbus/`](./modbus/) | `MB` | Modbus client & server, TCP + RTU, register model, formats, codec, reconnect |
-| [`ocpp/`](./ocpp/) | `OC` | OCPP Charging Station & CSMS, versions 1.6/2.0.1/2.1, actions, TLS/auth |
-| [`scripting/`](./scripting/) | `SC` | Lua sim model, `C_*` API contract, execution & error semantics |
-| [`tui/`](./tui/) | `UI` | Tabs, dialogs, `:` commands, keybindings, editor |
-| [`config-session/`](./config-session/) | `CS` | Device/session file envelope, TOML/JSON, save/load, `migrate` |
-| [`cli-headless/`](./cli-headless/) | `CL` | `ferrowl run`, CLI flags, exit codes, CI usage |
-| [`bridge/`](./bridge/) | `BR` | `ferrowl bridge`, headless upstream/downstream Modbus relay (TCP/RTU) |
-
-Cross-cutting: [`non-functional-requirements.md`](./non-functional-requirements.md) (`NF-R-nnn`).
+Authoritative spec of `ferrowl` behavior, by capability area. Areas, ID prefixes and the rules of engagement (code conforms to spec, behavior change needs a spec change, the gated workflow): [`AGENTS.md`](../../AGENTS.md) `## Spec-driven` and `## Where to look for task X`.
 
 ## Rules for writing specs
 
 1. **No code pointers.** Never cite file:line, function/type names, crate-internal identifiers — specs state *what must be true*, not where (pointers rot on refactor). Exception: public, user-facing surface (config keys, `:` commands, Lua `C_*` API, CLI flags, OCPP action names, exported signatures, error variants, feature flags) IS spec → area's `api-contract.md`.
-2. **IDs stable, append-only.** `<PREFIX>-R-nnn` for a requirement, `<PREFIX>-E-nnn` for an `edge-cases.md` entry; prefix per area from the `## Areas` table (`NF` has no `-E` series). The two series are numbered independently per area; never renumber, never reuse a retired ID. Reference by ID in commits/PRs/tests/agent instructions. An `-E` entry derived from a requirement cites that `-R` ID in its text and still carries its own `-E` ID. Tests cite `-E` IDs exactly as `-R` IDs (rule 8).
+2. **IDs stable, append-only.** `<PREFIX>-R-nnn` for a requirement, `<PREFIX>-E-nnn` for an `edge-cases.md` entry; prefix per area from `AGENTS.md`'s routing table (`NF` has no `-E` series). The two series are numbered independently per area; never renumber, never reuse a retired ID. An `-E` entry derived from a requirement cites that `-R` ID in its text and still carries its own `-E` ID. Tests cite `-E` IDs exactly as `-R` IDs (rule 8).
 3. **Owner = the behavior, not the surface.** A Modbus RTU config field is specified in `modbus/`, not `config-session/` (one change → one file). `config-session/` owns only the *envelope*: file format, `version`, session→module list, save/load, `migrate`. `tui/` owns the command mechanism and generic commands; protocol-specific commands live in their protocol's area. Shared behavior → owning area, stated once.
 4. **Requirements are testable.** Normative indicative statements, observable outcomes. Good: "The client retries with exponential backoff bounded to 1s–30s." Bad: "The client is robust." Format requirements name exact bytes where possible.
 5. **Known gaps are specified, not hidden.** Intentional-but-ugly behavior (no Lua execution ceiling, no OCPP auto-reconnect) → area's `edge-cases.md` as a stated constraint, so it isn't "fixed".
-6. **One requirement or edge-case entry, one physical line.** No line break inside a `**<PREFIX>-R-nnn** — ...` or `**<PREFIX>-E-nnn** — ...` statement, however long, table rows included — `grep -rn <ID> docs/specs/` (or any keyword) must return the whole entry in one match. Exact file:line by ID: `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call). One section: `sh .claude/scripts/extract-section.sh '## <heading>' docs/specs/<area>/requirements.md`. Headings are unnumbered: `extract-section.sh` matches heading text verbatim, and a number churns every reference when a section is inserted.
+6. **One entry, one physical line** (`AGENTS.md` `## Conventions — text`), table rows included. Headings are unnumbered: `extract-section.sh` matches heading text verbatim, and a number churns every reference when a section is inserted.
 7. **Contract-file citations.** `api-contract.md`/`data-contract.md` carry no ID series of their own; every table row carries a `Req` column naming the owning requirement ID(s), prose entries cite inline. IDs are always enumerated, never given as a range. A row with no owning requirement is marked `—` and raised as a missing requirement, never given an invented ID. Cross-references between spec files use an `-R`/`-E` ID when the target has one, and the target's exact heading text (the string `extract-section.sh` accepts) otherwise — section numbers (`§n.m`) are not used.
 8. **Cite every ID a test pins, and only those.** A test's doc comment lists every requirement or edge-case ID its assertions directly verify, at least one, comma-separated after `///` and before the ` — ` summary (`/// MB-R-012, MB-R-157 — …`). An ID the test merely exercises on the way without asserting its outcome is not cited. A test citing many IDs is a review prompt that it does too much, not a violation. `grep -rn <ID>` over the sources therefore returns every test that pins that rule.
 9. **One entry, one rule.** A requirement states exactly one observable rule: one subject, one condition, one outcome. A statement that needs "and also", "additionally", a second sentence introducing a different subject, or an enumeration of independent behaviors is several requirements and gets one ID each, cross-citing where one depends on another. Test: can a single test pin the whole entry, and can the entry be falsified by one counterexample? If not, split before landing. A large entry is a review prompt, never a stylistic choice.
@@ -81,7 +67,3 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 **Kind 4 — stated known limitations (`-E` entries)**
 
 No ID table — this kind is a class-wide exemption, not an enumerated list. An `-E` entry that records a known limitation or an observed constraint rather than an asserted behavior is exempt as a class. An `-E` entry that does assert behavior (most boundary-table rows) is outside the exemption and wants a citing test. This obligation binds `-E` entries added after the backfill that introduced the `-E` series; every entry minted by that backfill is grandfathered, and an asserting entry acquires its citing test when its area is next touched for behavior.
-
-## Keeping specs true
-
-Before changing code in an area, read its `requirements.md`. Change contradicts spec → update spec **in the same commit** (behavior change with no spec change = incomplete). Full gated workflow: [`AGENTS.md`](../../AGENTS.md).

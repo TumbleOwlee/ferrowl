@@ -42,7 +42,7 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 
 ## Stage completion
 
-Done = builds, tests pass, lint clean, coverage floor holds: the full set from `AGENTS.md`'s `## Build / test / lint`. The card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stage messages cheap (squashed later); subject ≤ 72 columns, body wrapped at 72.
+Done = builds, tests pass, lint clean, coverage floor holds: the full set from `AGENTS.md`'s `## Build / test / lint`. The card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stage messages cheap (squashed later).
 
 ## Stop and report — never improvise
 
@@ -56,11 +56,8 @@ Done = builds, tests pass, lint clean, coverage floor holds: the full set from `
 ## Never
 
 - Commit a stub, `unimplemented!()`, `TODO`, skipped test, or weakened assertion as "green". Incomplete stage = report, not commit.
-- Write the test after the implementation to fit it.
-- Pad coverage with non-asserting tests.
 - Claim a verification you didn't run — quote real output.
 - Push, open a PR, merge — orchestrator's.
-- Add `Co-Authored-By` / "Generated with" trailers.
 - Move your card to `done/` — orchestrator's, after merge + independent verify.
 - Touch another agent's card, the parent card, a wave-gate card.
 - Log a step you didn't run or a fake `commit=` sha.

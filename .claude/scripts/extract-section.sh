@@ -1,6 +1,7 @@
 #!/bin/sh
 # Print one or more markdown sections: each is the heading line through the
-# next heading of equal or shallower depth (or EOF). Batch every heading
+# next heading of equal or shallower depth (or EOF); a `#` line inside a
+# fenced code block is not a heading. Batch every heading
 # needed from one file into a single call. Don't know the exact heading
 # text? Run list-sections.sh on the file first instead of grepping for it.
 # Generic: works on any markdown file, not just docs/specs/ — use it instead
@@ -23,7 +24,8 @@ for want; do
   i=$((i + 1))
   [ "$i" -le "$n_headings" ] || break
   found=$(awk -v want="$want" '
-    /^#+[ \t]/ {
+    /^```/ { fence = !fence }
+    !fence && /^#+[ \t]/ {
       n = match($0, /^#+/)
       lvl = RLENGTH
       if (printing && lvl <= start_lvl) { printing = 0 }

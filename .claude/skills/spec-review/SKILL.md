@@ -7,7 +7,7 @@ description: Independent second-developer review of an open PR against its ticke
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks (spec fidelity, standards, TDD honesty, docs currency) and how (`spec-reviewer` agent, never the implementer). This skill supplies gate 3's *inputs* for a reviewer outside the implementing session; it restates no criteria. Conflict → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md`'s `### Gate 3` defines what a review checks and how. This skill supplies gate 3's *inputs* for a reviewer outside the implementing session. Conflict → `.claude/AGENTS.workflow.md` wins.
 
 ## Gather inputs — no shared session, no artifacts dir
 
@@ -22,7 +22,7 @@ Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with:
 - `git diff <base>...<head>`, whole branch (gate 3, not a wave), every stage in scope
 - a scratch `artifacts/<slug>/` for `review.md` and `review.verdict.md`
 
-Nothing more — it reads its own rules (`AGENTS.md`); never the issue/PR number. It answers with a status line only (`### Agent hand-off`). Reviewing yourself instead of spawning is fine — same axes, same rigor; the requirement is an independent read, not necessarily a subagent.
+Nothing more — it reads its own rules (`AGENTS.md`); never the issue/PR number. It answers with a status line only (`### Agent hand-off`). The requirement is a reader that never held the implementer's context: a fresh session may review inline with the same axes and rigor; a session that implemented any of it spawns.
 
 ## Output
 
