@@ -17,13 +17,16 @@ description: Independent second-developer review of an open PR against its ticke
 
 ## Run the review
 
-Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: spec text from the ticket, `git diff <base>...<head>` scoped to the whole branch (gate 3, not a wave), every stage in scope. It reads its own rules (`.claude/AGENTS.core.md`); give it nothing more, never the issue/PR number.
+Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with:
+- spec text from the ticket
+- `git diff <base>...<head>`, whole branch (gate 3, not a wave), every stage in scope
+- a scratch `artifacts/<slug>/` for `review.md` and `review.verdict.md`
 
-Give it a scratch `artifacts/<slug>/` for `review.md` and `review.verdict.md`; it answers with a status line only (`### Agent hand-off`). Reviewing yourself instead of spawning is fine — same axes, same rigor. Requirement is an independent read, not necessarily a subagent.
+Nothing more — it reads its own rules (`AGENTS.md`); never the issue/PR number. It answers with a status line only (`### Agent hand-off`). Reviewing yourself instead of spawning is fine — same axes, same rigor; the requirement is an independent read, not necessarily a subagent.
 
 ## Output
 
-`review.md`: axis-grouped, severity-tagged, no praise. `review.verdict.md`: open findings only, capped. Point the developer at the verdict (`show-file.sh`), the full file on request; findings needing a user decision are flagged, not resolved.
+Point the developer at `review.verdict.md` (`show-file.sh`), `review.md` on request. Findings needing a user decision are flagged, not resolved.
 
 ## Stop condition
 

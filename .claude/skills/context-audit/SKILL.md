@@ -55,7 +55,7 @@ Ranked table: file/pattern, count, rough cost (`lines × occurrences` for Reads)
 
 ## 5. Propose enforcement when the pattern is a bypassed convention
 
-A recurring waste pattern that `AGENTS.md`/`AGENTS.core.md` Conventions already forbid (e.g. raw Bash `cat` of a whole `.md`/large file when `extract-section.sh`/`sed -n`/Read exist) is not a missing script — the fix exists and is routed around. For each, propose as a numbered list, most costly first:
+A recurring waste pattern that `AGENTS.md` Conventions already forbid (e.g. raw Bash `cat` of a whole `.md`/large file when `extract-section.sh`/`sed -n`/Read exist) is not a missing script — the fix exists and is routed around. For each, propose as a numbered list, most costly first:
 
 - **A `PreToolUse` hook** detecting the exact bypass shape at the tool-call boundary and denying with a message pointing at the intended path — shape of `.claude/scripts/hook-guard-shell.sh` if present (`ls .claude/scripts/hook-guard-*.sh`; extend an existing guard covering an overlapping shape before adding one). State matcher (tool name), detection condition, redirect message.
 - **A convention-wording gap**, if the bypass happened because the bullet didn't cover the observed shape (wrong tool, file type, ambiguous wording) — quote current bullet and proposed edit.

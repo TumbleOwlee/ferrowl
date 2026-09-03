@@ -1,6 +1,6 @@
 ---
 name: agent-doc-audit
-description: Check every agent-facing markdown file this project's agents read (AGENTS.md, .claude/AGENTS.core.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat and for whether their headings let extract-section.sh pull one section instead of the whole file; propose a splitting plan where an agent is forced to read content only relevant to a different agent. Use when the user asks to "audit agent docs", "check doc splitting", "propose a split plan", or invokes /agent-doc-audit.
+description: Check every agent-facing markdown file this project's agents read (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat and for whether their headings let extract-section.sh pull one section instead of the whole file; propose a splitting plan where an agent is forced to read content only relevant to a different agent. Use when the user asks to "audit agent docs", "check doc splitting", "propose a split plan", or invokes /agent-doc-audit.
 ---
 
 # Agent-facing doc split audit
@@ -11,7 +11,7 @@ Read-only. Never split or edit — propose, user decides (a split is a maintenan
 
 ## 1. Scope: agent-facing files
 
-`AGENTS.md`, `.claude/AGENTS.core.md`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `docs/specs/**/*.md`, any file a skill/agent instruction names with "Read". Skip human-facing docs (`PRD.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`) unless an agent's instructions cite one.
+`AGENTS.md`, `.claude/AGENTS.workflow.md`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `docs/specs/**/*.md`, any file a skill/agent instruction names with "Read". Skip human-facing docs (`PRD.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`) unless an agent's instructions cite one.
 
 ## 2. Build the read-map
 
@@ -22,7 +22,7 @@ For each agent/skill file, grep its text for "Read `X`" / "pull `Y` section"; no
 - **Heading cited by exactly one agent type, sharing a file with headings cited by others** — that agent pays for the whole file (or whole minus `extract-section.sh`'s slice). Candidate: move to its own file, or confirm already sliceable and fix the pointer.
 - **No heading structure, or headings not matching what agents ask for** — e.g. an agent says "the part about X" where X spans two headings. `extract-section.sh` pulls one heading's span. Fix: re-head along the boundary agents cite, not more headings blindly. `list-sections.sh <file>` (if present) dumps the heading list.
 - **Whole-file read where the citing instruction already says "pull only section Y"** — structure fine, instruction not yet wired to `extract-section.sh`. Wiring fix, not a split; note separately.
-- **Section reused verbatim by every agent type touching the file** (e.g. `AGENTS.core.md`'s carve-out) — correctly merged; note as a working example, don't propose undoing.
+- **Section reused by every agent type touching the file** (e.g. `AGENTS.md`'s `## Conventions — code`, pulled by heading) — correctly shared; note as a working example, don't propose copying it out.
 
 ## 4. Check prose density per candidate section
 
