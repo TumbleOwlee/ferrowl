@@ -267,4 +267,29 @@ mod tests {
             "Accepted"
         );
     }
+
+    #[tokio::test]
+    /// OC-R-137 — a Call outside the crafted four (BootNotification/Heartbeat/Authorize/
+    /// StartTransaction) is answered with the action's `Default`-derived response, and that
+    /// same response is forwarded to the view as the `ServerEvent::Inbound`.
+    async fn ut_non_crafted_call_is_answered_with_the_actions_default_response() {
+        for name in ["MeterValues", "StatusNotification"] {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let handler = CsmsHandler16::new(tx, empty_rfids());
+            let action = V1_6::default_action(name).unwrap();
+            let resp = handler.handle_call(ConnectionId(1), action).await.unwrap();
+            let expected = V1_6::encode_response(&V1_6::default_response(name).unwrap()).unwrap();
+            assert_eq!(V1_6::encode_response(&resp).unwrap(), expected);
+
+            match rx.try_recv().unwrap() {
+                ServerEvent::Inbound {
+                    name: n, response, ..
+                } => {
+                    assert_eq!(n, name);
+                    assert_eq!(response, expected);
+                }
+                other => panic!("expected Inbound, got {other:?}"),
+            }
+        }
+    }
 }

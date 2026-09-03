@@ -180,4 +180,27 @@ mod tests {
         assert_eq!(status(&r_cs), "Accepted");
         assert_eq!(status(&r_other), "Invalid");
     }
+
+    #[tokio::test]
+    /// OC-R-137 — a non-crafted 2.0.1 Call is answered with the action's `Default`-derived
+    /// response, and that same response is forwarded to the view as the `ServerEvent::Inbound`.
+    async fn ut_non_crafted_call_is_answered_with_the_actions_default_response() {
+        let name = "MeterValues";
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handler = CsmsHandler::new(tx, rfids(RfidStore::default()));
+        let action = Ver::default_action(name).unwrap();
+        let resp = handler.handle_call(ConnectionId(1), action).await.unwrap();
+        let expected = Ver::encode_response(&Ver::default_response(name).unwrap()).unwrap();
+        assert_eq!(Ver::encode_response(&resp).unwrap(), expected);
+
+        match rx.try_recv().unwrap() {
+            ServerEvent::Inbound {
+                name: n, response, ..
+            } => {
+                assert_eq!(n, name);
+                assert_eq!(response, expected);
+            }
+            other => panic!("expected Inbound, got {other:?}"),
+        }
+    }
 }
