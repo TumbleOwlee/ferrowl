@@ -52,6 +52,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-032** | Renaming a script to its current name | accepted; no-op |
 | **UI-E-033** | `Esc` while the rename prompt is open | cancels the prompt; does not reach the dialog's close-confirm |
 | **UI-E-034** | A rename is an edit | restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
+| **UI-E-061** | `Esc` on a monitor view overlay (UI-R-112) with nothing typed into it yet | close-confirm popup opens anyway — monitor overlays track no dirty flag, so the confirmation is unconditional |
 
 ## Code editor
 
