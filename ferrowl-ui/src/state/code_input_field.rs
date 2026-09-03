@@ -78,6 +78,19 @@ pub struct CodeInputFieldState {
     pending: Option<char>,
 }
 
+/// Leading spaces for a line opened after `line`: its own indent, one four-space level
+/// deeper/shallower per the language's net block balance (format-on-blur trues it up).
+fn auto_indent(language: Option<ferrowl_syntax::Language>, line: &str) -> usize {
+    match language {
+        Some(lang) => {
+            let lead = line.chars().take_while(|c| *c == ' ').count() as i32;
+            let delta = ferrowl_syntax::indent_delta(lang, line);
+            (lead + 4 * delta).max(0) as usize
+        }
+        None => 0,
+    }
+}
+
 impl CodeInputFieldState {
     /// Whether the field currently holds focus.
     pub fn focused(&self) -> bool {
@@ -394,14 +407,7 @@ impl CodeInputFieldState {
     /// indent rule Enter uses when splitting at end-of-line).
     fn open_line_below(&mut self) {
         let line = self.lines[self.active_line].clone();
-        let indent = match self.language {
-            Some(lang) => {
-                let lead = line.chars().take_while(|c| *c == ' ').count() as i32;
-                let delta = ferrowl_syntax::indent_delta(lang, &line);
-                (lead + 4 * delta).max(0) as usize
-            }
-            None => 0,
-        };
+        let indent = auto_indent(self.language, &line);
         self.active_line += 1;
         self.lines.insert(self.active_line, " ".repeat(indent));
         self.cursor_col = indent;
@@ -841,16 +847,7 @@ impl CodeInputFieldState {
                 let chars: Vec<char> = line.chars().collect();
                 let before: String = chars[..self.cursor_col].iter().collect();
                 let after: String = chars[self.cursor_col..].iter().collect();
-                // Auto-indent: inherit the split line's leading whitespace, one level
-                // deeper/shallower per its net block balance (format-on-blur trues it up).
-                let indent = match self.language {
-                    Some(lang) => {
-                        let lead = before.chars().take_while(|c| *c == ' ').count() as i32;
-                        let delta = ferrowl_syntax::indent_delta(lang, &before);
-                        (lead + 4 * delta).max(0) as usize
-                    }
-                    None => 0,
-                };
+                let indent = auto_indent(self.language, &before);
                 self.lines[self.active_line] = before;
                 self.active_line += 1;
                 self.lines
