@@ -115,6 +115,7 @@ pub(super) struct MockHandle {
     /// MB-R-150 — the registry `App::rebuild_registry` most recently attached via
     /// `set_serial_paths`, if any.
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
+    keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
 }
 
 impl MockHandle {
@@ -126,6 +127,11 @@ impl MockHandle {
     /// Every command string `App` forwarded to this view, in order.
     pub(super) fn commands(&self) -> Vec<String> {
         self.commands.lock().unwrap().clone()
+    }
+
+    /// Every `(modifiers, code)` pair `App` forwarded to this view's `handle_events`, in order.
+    pub(super) fn keys(&self) -> Vec<(KeyModifiers, KeyCode)> {
+        self.keys.lock().unwrap().clone()
     }
 
     /// MB-R-150 — the registry most recently passed to this view's `set_serial_paths`, if any.
@@ -147,6 +153,7 @@ pub(super) struct MockView {
     refreshes: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
+    keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
 }
 
 impl MockView {
@@ -157,10 +164,12 @@ impl MockView {
         let refreshes = Arc::new(AtomicUsize::new(0));
         let commands = Arc::new(Mutex::new(Vec::new()));
         let serial_paths = Arc::new(Mutex::new(None));
+        let keys = Arc::new(Mutex::new(Vec::new()));
         let handle = MockHandle {
             refreshes: refreshes.clone(),
             commands: commands.clone(),
             serial_paths: serial_paths.clone(),
+            keys: keys.clone(),
         };
         let view = MockView {
             name: name.to_string(),
@@ -173,6 +182,7 @@ impl MockView {
             refreshes,
             commands,
             serial_paths,
+            keys,
         };
         (view, handle)
     }
@@ -223,6 +233,7 @@ impl ModuleView for MockView {
     fn render_overlay(&mut self, _frame: &mut Frame, _area: Rect) {}
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        self.keys.lock().unwrap().push((modifiers, code));
         EventResult::Unhandled(modifiers, code)
     }
 
