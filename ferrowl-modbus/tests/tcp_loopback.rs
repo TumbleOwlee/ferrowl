@@ -417,6 +417,144 @@ async fn tcp_unparseable_address_is_error() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-163 — an endpoint consults only its own role's TLS policy: the other role's policy is
+/// never validated. (The other clause — a non-`None` policy applies TLS for its own role — is
+/// already covered by `tcp_tls_client.rs`/`tcp_tls_server.rs`; not re-pinned here.) Both
+/// poisoned policies below are rejected by `validate()` for the role they belong to, so a leak
+/// surfaces as a configuration error instead of a silent pass.
+async fn it_endpoint_ignores_the_other_roles_tls_policy() {
+    use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
+
+    // Client half: a client endpoint's `server` policy must never be consulted.
+    {
+        let port = reserve_tcp_port().release();
+        let srv_mem = server_mem();
+        let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+        let (server, bound_addr) = tcp::ServerBuilder::new(
+            Arc::new(RwLock::new(config(port))),
+            srv_mem,
+            tcp::new_self_signed_cache(),
+        )
+        .spawn(srv_rx, sink(), sink())
+        .await
+        .expect("server failed to start");
+        wait_bound_addr(&bound_addr).await;
+
+        let mut cfg = config(port);
+        cfg.tls = tcp::ModbusTlsConfig {
+            server: ServerTlsPolicy::Mutual {
+                identity: CertSource::SelfSigned {},
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec![],
+                },
+            },
+            client: ClientTlsPolicy::None {},
+        };
+
+        let connected = tcp::Client::connect(&cfg, &tcp::new_self_signed_cache()).await;
+        assert!(
+            connected.is_ok(),
+            "the poisoned server policy must not affect a client connect: {}",
+            connected.err().map(|e| e.to_string()).unwrap_or_default()
+        );
+
+        let operations = Arc::new(RwLock::new(vec![Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 4),
+        }]));
+        let cli_mem = client_mem();
+        let (tx, rx) = mpsc::channel::<Command>(16);
+        let (client, _connected) = tcp::ClientBuilder::new(
+            Arc::new(RwLock::new(cfg)),
+            operations,
+            cli_mem.clone(),
+            tcp::new_self_signed_cache(),
+        )
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("client failed to connect");
+
+        sleep(Duration::from_millis(400)).await;
+        assert_eq!(
+            cli_mem
+                .read()
+                .read(
+                    key(RegKind::HoldingRegister),
+                    &CellType::Register,
+                    &Range::new(0, 4)
+                )
+                .unwrap(),
+            vec![10, 20, 30, 40],
+            "a real plain read must succeed through the poisoned-server-policy client"
+        );
+
+        tx.send(Command::Terminate).await.unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+        server.abort();
+    }
+
+    // Server half: a server endpoint's `client` policy must never be consulted.
+    {
+        let port = reserve_tcp_port().release();
+        let srv_mem = server_mem();
+        let mut cfg = config(port);
+        cfg.tls = tcp::ModbusTlsConfig {
+            server: ServerTlsPolicy::None {},
+            client: ClientTlsPolicy::Mutual {
+                verification: CertVerification::Skip {},
+                identity: CertSource::Ephemeral {},
+            },
+        };
+        let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+        let (server, bound_addr) = tcp::ServerBuilder::new(
+            Arc::new(RwLock::new(cfg)),
+            srv_mem,
+            tcp::new_self_signed_cache(),
+        )
+        .spawn(srv_rx, sink(), sink())
+        .await
+        .expect("server failed to start");
+        wait_bound_addr(&bound_addr).await;
+
+        let operations = Arc::new(RwLock::new(vec![Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 4),
+        }]));
+        let cli_mem = client_mem();
+        let (tx, rx) = mpsc::channel::<Command>(16);
+        let (client, _connected) = tcp::ClientBuilder::new(
+            Arc::new(RwLock::new(config(port))),
+            operations,
+            cli_mem.clone(),
+            tcp::new_self_signed_cache(),
+        )
+        .spawn(rx, sink(), sink())
+        .await
+        .expect("client failed to connect");
+
+        sleep(Duration::from_millis(400)).await;
+        assert_eq!(
+            cli_mem
+                .read()
+                .read(
+                    key(RegKind::HoldingRegister),
+                    &CellType::Register,
+                    &Range::new(0, 4)
+                )
+                .unwrap(),
+            vec![10, 20, 30, 40],
+            "a plain client must read successfully through the poisoned-client-policy server"
+        );
+
+        tx.send(Command::Terminate).await.unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+        server.abort();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// MB-R-070 — a TCP server accepts connections in a loop, serving multiple concurrent clients
 /// against the same shared store.
 async fn tcp_server_serves_concurrent_clients() {

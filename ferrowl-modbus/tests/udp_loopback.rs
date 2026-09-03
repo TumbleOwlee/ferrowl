@@ -35,6 +35,35 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
+/// instead of racing it with a fixed sleep.
+async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<SocketAddr>>>) {
+    for _ in 0..50 {
+        if bound_addr.lock().is_some() {
+            return;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    panic!("listener did not bind within 1s");
+}
+
+/// A log sink that records every line, so a test can assert on what the server logged.
+/// `LogFn + Clone` is satisfied by a move-closure capturing an `Arc`.
+fn capturing() -> (
+    impl ferrowl_modbus::LogFn + Clone,
+    Arc<parking_lot::Mutex<Vec<String>>>,
+) {
+    let log = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let sink = log.clone();
+    let f = move |s: String| {
+        let sink = sink.clone();
+        async move {
+            sink.lock().push(s);
+        }
+    };
+    (f, log)
+}
+
 fn config(port: u16) -> udp::Config {
     udp::Config {
         ip: "127.0.0.1".to_string(),
@@ -93,6 +122,67 @@ async fn it_udp_server_answers_a_request() {
     sleep(Duration::from_millis(50)).await;
 
     let addr: SocketAddr = format!("{}:{}", cfg.ip, cfg.port).parse().unwrap();
+    let transport = connect_udp(addr, UdpConfig::default())
+        .await
+        .expect("associates");
+    let mut client: rust_modbus::UdpClient = RmClient::new(transport);
+    let values = client
+        .read_holding_registers(UnitId(1), RmAddress(0), RmQuantity(4))
+        .await
+        .expect("reads");
+    assert_eq!(
+        values,
+        vec![10, 20, 30, 40]
+            .into_iter()
+            .map(RegisterValue)
+            .collect::<Vec<_>>()
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
+/// MB-R-183 — an undecodable UDP datagram is a logged failed request and nothing more: the
+/// server keeps serving, and no other datagram is affected.
+async fn it_udp_server_survives_an_undecodable_datagram() {
+    let mem = server_mem();
+    let port = reserve_udp_port().release();
+    let cfg = config(port);
+    let (log, captured) = capturing();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) =
+        udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(cfg.clone())), mem)
+            .spawn(srv_rx, log, sink())
+            .await
+            .expect("server failed to start");
+    wait_bound_addr(&bound_addr).await;
+
+    let addr: SocketAddr = format!("{}:{}", cfg.ip, cfg.port).parse().unwrap();
+    let garbage_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    garbage_socket.send_to(&[0xFF; 7], addr).await.unwrap();
+
+    let mut waited = Duration::ZERO;
+    let step = Duration::from_millis(20);
+    while waited < Duration::from_secs(2) {
+        if captured
+            .lock()
+            .iter()
+            .any(|l| l.contains("Server processing failed."))
+        {
+            break;
+        }
+        sleep(step).await;
+        waited += step;
+    }
+    assert!(
+        captured
+            .lock()
+            .iter()
+            .any(|l| l.contains("Server processing failed.")),
+        "expected a logged failed-request line: {:?}",
+        captured.lock()
+    );
+
     let transport = connect_udp(addr, UdpConfig::default())
         .await
         .expect("associates");
