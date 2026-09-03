@@ -717,6 +717,40 @@ mod tests {
         }
     }
 
+    /// A client device whose first poll times out fast and whose client then stops instead of
+    /// retrying — the shortest route to an Error-level line in a module's log ring.
+    fn write_timing_out_client_device(dir: &TempDirGuard) -> String {
+        use ferrowl_util::convert::{Converter, FileType};
+        let mut cfg = holding_device_config();
+        cfg.timeout_ms = Some(100);
+        cfg.delay_ms = Some(0);
+        cfg.interval_ms = Some(0);
+        cfg.reconnect = Some(false);
+        let p = dir.join("timeout-client.toml");
+        Converter::save(&cfg, p.to_str().unwrap(), FileType::Toml).unwrap();
+        p.to_str().unwrap().to_string()
+    }
+
+    /// A `RunArgs` starting one modbus TCP client module against `port`, where nothing answers.
+    fn timing_out_client_run_args(
+        dir: &TempDirGuard,
+        port: u16,
+        duration: u64,
+        exit_on_error: bool,
+    ) -> RunArgs {
+        let device = write_timing_out_client_device(dir);
+        RunArgs {
+            sessions: vec![],
+            modules: vec![format!(
+                "name=m,device={device},transport=tcp,ip=127.0.0.1,port={port},role=client"
+            )],
+            ocpp: vec![],
+            duration: Some(duration),
+            log_file: None,
+            exit_on_error,
+        }
+    }
+
     #[tokio::test]
     /// CL-R-021 — the headless runner treats a module's device-config load failure as fatal to
     /// startup, rather than skipping the module like the TUI.
@@ -840,6 +874,34 @@ mod tests {
             exit_on_error: true,
         };
         assert_eq!(run(&args).await, 3);
+    }
+
+    #[tokio::test]
+    /// CL-R-031 — with --exit-on-error set, an Error line drained from a *module's* log (not the
+    /// session sim's) makes the run exit 3.
+    async fn ut_run_module_error_with_exit_on_error_returns_three() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let occupier = reserve_tcp_port();
+        let args = timing_out_client_run_args(&dir, occupier.port(), 5, true);
+        assert_eq!(run(&args).await, 3);
+    }
+
+    #[tokio::test]
+    /// CL-R-031 — without --exit-on-error, a module's Error line never changes the exit code.
+    /// CL-R-032 — the run instead reaches its --duration deadline and returns 0.
+    async fn ut_run_module_error_without_exit_on_error_returns_zero() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let occupier = reserve_tcp_port();
+        let mut args = timing_out_client_run_args(&dir, occupier.port(), 1, false);
+        let log_file = dir.join("module_error.log").to_str().unwrap().to_string();
+        args.log_file = Some(log_file.clone());
+
+        assert_eq!(run(&args).await, 0);
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.contains("m |") && contents.contains("timed out"),
+            "expected the module's timeout error line to have been drained, got:\n{contents}"
+        );
     }
 
     #[tokio::test]
