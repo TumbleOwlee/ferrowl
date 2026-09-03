@@ -216,6 +216,16 @@ Same navigation as ``### Keybind-help dialog (`?`)``. Reachable only from the co
 | `Enter` | prompt | Commit; empty or duplicate name refused, prompt stays open | UI-R-055, UI-R-089 |
 | `Esc` | prompt | Cancel, name unchanged | UI-R-055 |
 
+### Modbus monitor view overlays
+
+| Key | Context | Action | Req |
+|---|---|---|---|
+| `Esc` | monitor setup-edit / add-interpretation / edit-interpretation dialog | Open that dialog's close-confirm popup | UI-R-112, UI-R-113 |
+| `Enter` / `Space` | that close-confirm popup | Confirm — overlay closes, edits discarded | UI-R-023, UI-R-112 |
+| `Esc` | that close-confirm popup | Dismiss — back to editing | UI-R-023, UI-R-112 |
+
+Focus defaults to the safe (cancel) choice, per `### Close-confirm / yes-no popup`.
+
 ## Code editor — modes and commands
 
 Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`, `VISUAL` (charwise), `V-LINE` (linewise).

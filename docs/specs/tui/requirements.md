@@ -251,3 +251,7 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-066** — The shared `Table` widget's optional selection-marker gutter reserves zero width whenever no row is selected, otherwise exactly the highlight symbol's rendered width, for every table regardless of whether the marker is shown.
 
 **UI-R-109** — A `Table` widget's selected row's background is painted with its highlight style in every case except an unfocused table with the selection marker (UI-R-066) shown, where the marker glyph alone is the cue.
+
+**UI-R-112** — `Esc` on a Modbus monitor view overlay — the monitor setup-edit dialog, the add-interpretation dialog (UI-R-061), the edit-interpretation dialog (UI-R-108) — opens that overlay's own close-confirmation popup per UI-R-023 and never closes the overlay directly.
+
+**UI-R-113** — The add-interpretation (UI-R-061) and edit-interpretation (UI-R-108) dialogs each carry the close-confirmation popup state UI-R-023 defines, so UI-R-112 has a popup to open in every monitor overlay.
