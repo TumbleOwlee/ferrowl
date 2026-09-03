@@ -1779,4 +1779,45 @@ mod tests {
     fn ut_parse_bridge_descriptor_rejects_bad_reconnect_value() {
         assert!(parse_bridge_descriptor("port=0,reconnect=maybe", ClientOrServer::Server).is_err());
     }
+
+    #[test]
+    /// CL-R-045 — `--device` carries the flag's value straight into `ModuleSpec::device` as a
+    /// literal path, never split as a `key=val,...` descriptor the way `--module` is, and
+    /// exposes no endpoint or role control (both are the flag's fixed defaults).
+    fn ut_device_flag_value_is_a_literal_path_not_a_descriptor() {
+        let spec =
+            create_module_spec_by_device("Device 0".to_string(), "name=x,port=1".to_string());
+        assert_eq!(spec.device, "name=x,port=1");
+        assert_eq!(spec.name, "Device 0");
+        assert_eq!(spec.role, Role::Client);
+        assert_eq!(
+            spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020
+            }
+        );
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![],
+            devices: vec!["name=x,port=1".into()],
+            demo: false,
+        };
+        let specs = args
+            .module_specs()
+            .expect("a --device value is a path, never parsed as a descriptor");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].device, "name=x,port=1");
+        assert_eq!(specs[0].name, "Device 0");
+        assert_eq!(specs[0].role, Role::Client);
+        assert_eq!(
+            specs[0].endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020
+            }
+        );
+    }
 }

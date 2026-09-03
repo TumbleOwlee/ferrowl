@@ -2213,6 +2213,16 @@ mod tests {
         let _log: SharedLog = v.log();
     }
 
+    #[test]
+    /// UI-R-101 — the monitor tab's log pane is the monitor module's own ring, not a copy.
+    fn ut_monitor_view_log_is_the_modules_own_ring() {
+        let v = view();
+        assert!(
+            std::sync::Arc::ptr_eq(&v.log(), &v.module.log()),
+            "the tab's log pane must show the monitor module's own ring, not a copy"
+        );
+    }
+
     /// MB-R-148 — once "Add predefined" opens the named-value sub-popup, keyboard input (typed
     /// characters, Tab/BackTab) reaches the sub-popup's own fields, not the parent
     /// `EditInterpretationDialog`'s (mirrors the modbus module's own `RegisterDialog`

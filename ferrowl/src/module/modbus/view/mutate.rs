@@ -467,6 +467,22 @@ mod tests {
             .unwrap()
     }
 
+    fn holding_read_only(addr: u16) -> Register {
+        RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadOnly)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(addr))
+            .format(Format::u16(
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap()
+    }
+
     fn virtual_reg() -> Register {
         RegisterBuilder::default()
             .slave_id(UnitId(1))
@@ -580,6 +596,44 @@ mod tests {
             .read()
             .read_unchecked(key, &Range::new(0, 1));
         assert_ne!(stored, Some(vec![5]));
+    }
+
+    #[tokio::test]
+    /// MB-R-159 — a `ReadOnly` fixed register write on a client is silently accepted: no
+    /// `Command::Write*` reaches the command channel (proven the same way the neighbouring
+    /// read-write test proves it *did* send: with no running instance the send branch always
+    /// fails, so `Handled(None)` here rules out the send branch having run at all), and the
+    /// store is left byte-identical.
+    async fn ut_client_read_only_write_sends_no_command_and_touches_no_store() {
+        let mut client = view(Role::Client);
+        client
+            .apply_add(edited("ro", holding_read_only(0), None))
+            .await;
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let range = Range::new(0, 1);
+        let before = client
+            .module
+            .memory()
+            .read()
+            .read_unchecked(key.clone(), &range);
+
+        let result = client.set_register_value("ro", "5").await;
+        assert!(
+            matches!(result, CommandResult::Handled(None)),
+            "a ReadOnly client write is silently accepted: no message, error or otherwise"
+        );
+
+        let after = client.module.memory().read().read_unchecked(key, &range);
+        assert_eq!(
+            after, before,
+            "a ReadOnly client write must leave the store byte-identical"
+        );
     }
 
     #[tokio::test]

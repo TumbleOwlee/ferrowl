@@ -2216,4 +2216,75 @@ mod tests {
         dialog.handle_events(KeyModifiers::NONE, KeyCode::Char(' '));
         assert!(dialog.take_close_request());
     }
+
+    #[test]
+    /// UI-R-111 — a fresh dialog's `name` field shows a focused field with an error border
+    /// (empty against `NonEmpty`); `:edit`'s prefilled `name` field is focused and valid, so it
+    /// shows the plain focused border instead.
+    fn ut_name_border_is_error_when_fresh_and_focused_when_prefilled() {
+        let style = InputFieldStyle::default();
+        let error = style.error().fg.unwrap();
+        let focused = style.focused().fg.unwrap();
+        assert_ne!(
+            error, focused,
+            "the two border colors must be distinguishable"
+        );
+
+        let name_corner = |buf: &Buffer| -> (u16, u16) {
+            let mut corners: Vec<(u16, u16)> = Vec::new();
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    if buf[(x, y)].symbol() == "┌" {
+                        corners.push((x, y));
+                    }
+                }
+            }
+            corners.sort_by_key(|(x, y)| (*y, *x));
+            assert!(
+                corners.len() >= 2,
+                "expected at least the dialog's own box and the name field's box"
+            );
+            corners[1]
+        };
+
+        let area = Rect::new(0, 0, 100, 60);
+
+        let mut fresh = SetupDialog::create(default_timing());
+        assert!(
+            fresh.name.state.is_focused(),
+            "fresh dialog: name must open focused"
+        );
+        let mut fresh_buf = Buffer::empty(area);
+        fresh.render(area, &mut fresh_buf);
+        let corner = name_corner(&fresh_buf);
+        assert_eq!(
+            fresh_buf[corner].fg, error,
+            "fresh dialog: empty NonEmpty name paints the error border"
+        );
+
+        let endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let mut edit = SetupDialog::edit(
+            "dev",
+            "",
+            ClientOrServer::Client,
+            &endpoint,
+            default_timing(),
+            &ReadRanges::default(),
+            None,
+        );
+        assert!(
+            edit.name.state.is_focused(),
+            "edit dialog: name must open focused"
+        );
+        let mut edit_buf = Buffer::empty(area);
+        edit.render(area, &mut edit_buf);
+        let corner = name_corner(&edit_buf);
+        assert_eq!(
+            edit_buf[corner].fg, focused,
+            "edit dialog: prefilled, valid name paints the focused border"
+        );
+    }
 }

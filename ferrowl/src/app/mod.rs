@@ -425,13 +425,7 @@ impl<S: DrawSurface> App<S> {
                 break;
             }
 
-            // A pending single-digit tab jump expires on its own if no second digit arrives.
-            if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
-                && Instant::now() >= deadline
-            {
-                self.keymode = None;
-                self.switch_tab(first);
-            }
+            self.expire_pending_tab_digit();
 
             self.refresh_snapshot().await;
             self.draw()?;
@@ -448,6 +442,17 @@ impl<S: DrawSurface> App<S> {
             }
         }
         Ok(())
+    }
+
+    /// UI-R-076 — a `Ctrl+t` first digit whose second-digit window elapsed commits its jump
+    /// instead of being dropped.
+    fn expire_pending_tab_digit(&mut self) {
+        if let Some(KeyMode::TabDigit { first, deadline }) = self.keymode
+            && Instant::now() >= deadline
+        {
+            self.keymode = None;
+            self.switch_tab(first);
+        }
     }
 
     async fn refresh_snapshot(&mut self) {
@@ -1075,6 +1080,76 @@ mod tests {
             app.registry.list(),
             vec!["replacement".to_string()],
             "session-module registry rebuilt from the new tab set"
+        );
+    }
+
+    #[tokio::test]
+    /// UI-R-069 — a tab whose name collides with an earlier tab's is auto-suffixed `" (n)"`.
+    /// UI-R-070 — the same rename writes a warning line into the renamed tab's own log, not
+    /// into the survivor's.
+    async fn ut_rename_collision_suffixes_the_later_tab_and_warns_into_its_log() {
+        use super::testkit::{MockView, build_app};
+
+        let (a, _ha) = MockView::pair("A");
+        let (replacement, _hr) = MockView::pair("A");
+        let (b, _hb) = MockView::pair("B");
+        let mut app = build_app(vec![
+            a.boxed(),
+            b.with_replacement(replacement.boxed()).boxed(),
+        ]);
+
+        app.refresh_snapshot().await;
+
+        assert_eq!(app.tabs[0].name, "A", "the first occurrence keeps its name");
+        assert_eq!(app.tabs[1].name, "A (2)");
+
+        let tab1_log = app.tabs[1].log.write().await.peek_n(LOG_SIZE);
+        assert!(
+            tab1_log
+                .iter()
+                .any(|(_, level, msg)| *level == Level::Warning
+                    && msg.contains("collided with another tab")
+                    && msg.contains("renamed to 'A (2)'")),
+            "renamed tab's log carries the collision warning: {tab1_log:?}"
+        );
+
+        let tab0_log = app.tabs[0].log.write().await.peek_n(LOG_SIZE);
+        assert!(
+            !tab0_log
+                .iter()
+                .any(|(_, _, msg)| msg.contains("collided with another tab")),
+            "the survivor's log carries no collision warning: {tab0_log:?}"
+        );
+    }
+
+    #[test]
+    /// UI-R-076 — a `Ctrl+t` first digit whose second-digit window elapsed commits its jump
+    /// instead of being dropped; one still comfortably inside its window is left pending.
+    fn ut_expired_tab_digit_chord_commits_the_pending_jump() {
+        use super::testkit::{MockView, build_app};
+
+        let mut app = build_app(
+            (0..25)
+                .map(|n| MockView::pair(&format!("t{n}")).0.boxed())
+                .collect(),
+        );
+        app.keymode = Some(KeyMode::TabDigit {
+            first: 1,
+            deadline: Instant::now() - Duration::from_millis(1),
+        });
+        app.expire_pending_tab_digit();
+        assert_eq!(app.active, 1);
+        assert!(app.keymode.is_none());
+
+        app.keymode = Some(KeyMode::TabDigit {
+            first: 2,
+            deadline: Instant::now() + Duration::from_secs(60),
+        });
+        app.expire_pending_tab_digit();
+        assert_eq!(app.active, 1, "not yet expired: no jump happened");
+        assert!(
+            matches!(app.keymode, Some(KeyMode::TabDigit { first: 2, .. })),
+            "not yet expired: pending chord left intact"
         );
     }
 }

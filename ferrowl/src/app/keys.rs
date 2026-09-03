@@ -401,4 +401,39 @@ mod tests {
         none.prev_tab();
         assert_eq!(none.active, 0);
     }
+
+    #[test]
+    /// UI-R-077 — a non-digit key while a single-digit chord is pending commits the pending jump
+    /// first, then is delivered normally to the tab the jump landed on.
+    fn ut_non_digit_commits_the_pending_tab_jump_and_is_then_delivered() {
+        let (t0, h0) = MockView::pair("t0");
+        let (t1, h1) = MockView::pair("t1");
+        let mut views = vec![t0.boxed(), t1.boxed()];
+        for n in 2..25 {
+            views.push(MockView::pair(&format!("t{n}")).0.boxed());
+        }
+        let mut app = build_app(views);
+
+        app.handle_nav_key(KeyModifiers::CONTROL, KeyCode::Char('t'));
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('1'));
+        assert!(matches!(
+            app.keymode,
+            Some(KeyMode::TabDigit { first: 1, .. })
+        ));
+        assert_eq!(app.active, 0, "the jump has not landed yet");
+
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('j'));
+
+        assert_eq!(app.active, 1, "the pending jump committed");
+        assert!(app.keymode.is_none());
+        assert_eq!(
+            h1.keys(),
+            vec![(KeyModifiers::empty(), KeyCode::Char('j'))],
+            "the key is delivered to the tab the jump landed on"
+        );
+        assert!(
+            h0.keys().is_empty(),
+            "the key is not delivered to the tab the jump left"
+        );
+    }
 }

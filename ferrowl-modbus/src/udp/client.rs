@@ -94,3 +94,58 @@ impl Client {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::udp::Config;
+    use ferrowl_store::Range;
+    use rust_modbus::{FunctionCode, UnitId};
+    use std::time::{Duration, Instant};
+
+    /// A `LogFn` that discards every line; only timings and results are asserted here.
+    fn silent_log() -> impl LogFn + Clone {
+        |_s: String| async move {}
+    }
+
+    #[tokio::test]
+    /// MB-R-180 — `timeout_ms` bounds each request through `ClientCore::read`, not the
+    /// bind/associate step in `Client::connect`, which performs no I/O and cannot time out.
+    async fn ut_timeout_ms_bounds_each_request_not_the_associate() {
+        let guard = ferrowl_test_support::reserve_udp_port();
+
+        let cfg = Config {
+            ip: "127.0.0.1".into(),
+            port: guard.port(),
+            timeout_ms: 300,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: false,
+        };
+
+        let t0 = Instant::now();
+        let mut client = Client::connect(&cfg)
+            .await
+            .expect("associate is local-only");
+        assert!(
+            t0.elapsed() < Duration::from_millis(200),
+            "the bind/associate must not be timed out"
+        );
+
+        let log = silent_log();
+        let op = Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 2),
+        };
+
+        for _ in 0..2 {
+            let t1 = Instant::now();
+            let (_label, result) = client.core.read(&op, cfg.timeout_ms, &log).await;
+            let elapsed = t1.elapsed();
+            assert!(elapsed >= Duration::from_millis(300));
+            assert!(elapsed < Duration::from_millis(700));
+            assert!(matches!(result, Err(crate::ModbusError::Timeout(_))));
+        }
+    }
+}
