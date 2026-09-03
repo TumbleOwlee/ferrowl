@@ -1022,6 +1022,7 @@ mod tests {
         raw_hex,
     };
     use crate::app::Level;
+    use crate::config::script::ScriptDef;
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
@@ -1252,6 +1253,60 @@ mod tests {
         assert_eq!(view.device.scripts.len(), 1);
         assert_eq!(view.device.scripts[0].name, "sim");
         assert!(view.device.scripts[0].enabled);
+    }
+
+    #[tokio::test]
+    /// UI-R-088 — an on-demand script run (`e` on the script table) leaves the scripts dialog
+    /// open (unlike the `Enter` apply-and-close path) and its output — print, C_Log, and the
+    /// error that ends the run — reaches the dialog's log pane.
+    async fn ut_on_demand_run_keeps_the_dialog_open_and_shows_its_output() {
+        let mut device = empty_device();
+        // The markers are built by runtime concatenation, not written contiguously in the
+        // source, so their appearance in the rendered dialog can only come from the log pane
+        // (which shows executed output) and never from the code editor pane (which shows the
+        // source verbatim).
+        device.scripts = vec![ScriptDef {
+            name: "s1".into(),
+            code: r#"print("ui" .. "-r-088-out") C_Log:Info("ui" .. "-r-088-log") error("ui" .. "-r-088-boom")"#
+                .into(),
+            enabled: false,
+        }];
+        let spec = tcp_server_spec();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+
+        drop(view.handle_command("script"));
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab); // interval -> table
+        view.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
+
+        assert!(
+            matches!(view.overlay, ModbusViewOverlay::Scripts(_)),
+            "the run does not close the dialog"
+        );
+        assert!(view.is_overlay_active());
+
+        let area = Rect::new(0, 0, 220, 48);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(220, 48)).unwrap();
+        let mut text = String::new();
+        for _ in 0..100 {
+            view.refresh().await;
+            term.draw(|f: &mut Frame| view.render_overlay(f, area))
+                .unwrap();
+            text = buffer_text(term.backend().buffer());
+            if text.contains("ui-r-088-out")
+                && text.contains("ui-r-088-log")
+                && text.contains("ui-r-088-boom")
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            text.contains("ui-r-088-out")
+                && text.contains("ui-r-088-log")
+                && text.contains("ui-r-088-boom"),
+            "expected all three markers in the rendered dialog:\n{text}"
+        );
     }
 
     #[test]
