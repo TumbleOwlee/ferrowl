@@ -1,6 +1,6 @@
 ---
 name: agent-doc-audit
-description: Check every agent-facing markdown file this project's agents read (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat and for whether their headings let extract-section.sh pull one section instead of the whole file; propose a splitting plan where an agent is forced to read content only relevant to a different agent. Use when the user asks to "audit agent docs", "check doc splitting", "propose a split plan", or invokes /agent-doc-audit.
+description: Check every agent-facing markdown file this project's agents read (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat, for the same instruction stated more than once (within a file or across files), and for whether their headings let extract-section.sh pull one section instead of the whole file; propose a splitting plan where an agent is forced to read content only relevant to a different agent. Use when the user asks to "audit agent docs", "check doc splitting", "propose a split plan", or invokes /agent-doc-audit.
 ---
 
 # Agent-facing doc split audit
@@ -31,18 +31,30 @@ Before proposing a split, the section must justify the extra file. Scan for:
 - Sentences restating a heading, list, or code block.
 - Hedging/filler (basically, essentially, in order to, it's worth noting).
 - Explaining *what* code does where names suffice — only *why* (non-obvious constraint, workaround, invariant) earns a sentence.
-- Repeated instructions across two files where one could `@`-include or cross-reference.
 - Every trim: zero information loss. Fewer words, same fact — never a dropped constraint, edge case, or rule.
 
 `.claude/scripts/token-rank.sh <file>...` (if present) gives per-file cost to prioritize. Trim first, split second: a bloated section split is two bloated files — flag the trim regardless.
 
-## 5. Report
+## 5. Check duplication across all in-scope files
 
-Two tables, most costly first (`token-rank.sh` order where available):
+Every file from step 1, not only split candidates. An instruction stated twice costs every reader twice and drifts: one copy gets edited, the other keeps the stale rule.
+
+- **Same rule, several places** — same do/don't in two sections or two files, whatever the wording (e.g. "one requirement, one physical line" in `AGENTS.md` and again in `docs/specs/README.md`). Flag every copy but one; the survivor is the one readers of the others already reach (`@`-include, cross-reference, or the section the read-map shows they pull anyway).
+- **Rule restated inside its own file** — a heading's rule repeated in a later section, a summary bullet repeating the body, a "reminder" of an earlier constraint.
+- **Agent file repeating the router** — `.claude/agents/*.md` or a `SKILL.md` restating an `AGENTS.md` convention its reader already loads. Pointer to the heading, not a copy.
+- **Not duplication** — a rule that must be read in isolation by a reader who never loads the other file, or a requirement-ID cross-reference. Note the reason only if a naive grep would flag it.
+
+Method: for each rule-bearing sentence, grep its distinctive noun or verb across the step 1 set; a second hit with the same meaning is a flag.
+
+## 6. Report
+
+Three tables, most costly first (`token-rank.sh` order where available):
 
 **Split candidates** — file, heading(s), citing agent(s), current shared readers, proposed new file/heading, rough token cost avoided per off-target read.
 
-**Prose flags** — file, heading, one-line problem (restatement / hedge / filler / duplicate-of-<file>), no fix text — the problem statement is the fix.
+**Prose flags** — file, heading, one-line problem (restatement / hedge / filler), no fix text — the problem statement is the fix.
+
+**Duplicates** — the rule in a few words, every file:heading holding a copy, which copy to keep and why (that reader already loads it).
 
 One line each, no praise, no summary. A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
 
