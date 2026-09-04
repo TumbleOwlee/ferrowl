@@ -3,7 +3,7 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters};
 use ratatui::style::{Modifier, Style};
 
-/// Styles for [`MarkdownInputField`](crate::widgets::MarkdownInputField) rendering.
+/// Styles for the markdown input field's rendering.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
 #[getset(set = "pub")]
 pub struct MarkdownTheme {

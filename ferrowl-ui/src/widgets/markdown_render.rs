@@ -176,7 +176,7 @@ pub(crate) fn render_line(
         }
         BlockKind::Rule => (
             RenderedLine {
-                spans: Vec::new(),
+                spans: vec![(String::new(), *md.rule())],
                 hanging_indent: 0,
                 char_wrap: false,
                 rule: true,
@@ -304,6 +304,164 @@ fn inline_render(
         spans.push((chars[start..i].iter().collect(), style));
     }
     spans
+}
+
+/// Wraps one rendered line to `width` display columns, returning its display rows
+/// (never empty: a blank line is one empty row). Wrapping is always on and content never
+/// overflows horizontally (UI-R-130).
+#[allow(
+    dead_code,
+    reason = "the markdown input field widget renders through it"
+)]
+pub(crate) fn wrap_line(line: &RenderedLine, width: usize) -> Vec<Vec<(String, Style)>> {
+    if width == 0 {
+        return vec![Vec::new()];
+    }
+    if line.rule {
+        let style = line.spans.first().map_or_else(Style::default, |(_, s)| *s);
+        return vec![vec![("─".repeat(width), style)]];
+    }
+
+    let chars: Vec<(char, Style)> = line
+        .spans
+        .iter()
+        .flat_map(|(s, style)| s.chars().map(move |c| (c, *style)))
+        .collect();
+
+    if chars.is_empty() {
+        return vec![Vec::new()];
+    }
+
+    if line.char_wrap {
+        return chunk_by_char(&chars, width);
+    }
+
+    let indent = if line.hanging_indent >= width.saturating_sub(1) {
+        0
+    } else {
+        line.hanging_indent
+    };
+    word_wrap(&chars, width, indent)
+}
+
+fn compress_runs(chars: &[(char, Style)]) -> Vec<(String, Style)> {
+    let mut out: Vec<(String, Style)> = Vec::new();
+    for &(c, style) in chars {
+        if let Some(last) = out.last_mut()
+            && last.1 == style
+        {
+            last.0.push(c);
+            continue;
+        }
+        out.push((c.to_string(), style));
+    }
+    out
+}
+
+fn chunk_by_char(chars: &[(char, Style)], width: usize) -> Vec<Vec<(String, Style)>> {
+    let mut rows = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let end = (i + width).min(chars.len());
+        rows.push(compress_runs(&chars[i..end]));
+        i = end;
+    }
+    rows
+}
+
+fn tokenize(chars: &[(char, Style)]) -> Vec<Vec<(char, Style)>> {
+    let mut tokens = Vec::new();
+    let mut cur: Vec<(char, Style)> = Vec::new();
+    let mut cur_is_space: Option<bool> = None;
+    for &(c, style) in chars {
+        let is_space = c == ' ';
+        if cur_is_space.is_none() || cur_is_space == Some(is_space) {
+            cur.push((c, style));
+        } else {
+            tokens.push(std::mem::take(&mut cur));
+            cur.push((c, style));
+        }
+        cur_is_space = Some(is_space);
+    }
+    if !cur.is_empty() {
+        tokens.push(cur);
+    }
+    tokens
+}
+
+fn word_wrap(chars: &[(char, Style)], width: usize, indent: usize) -> Vec<Vec<(String, Style)>> {
+    let tokens = tokenize(chars);
+    let mut rows: Vec<Vec<(char, Style)>> = Vec::new();
+    let mut cur: Vec<(char, Style)> = Vec::new();
+
+    let cap_for = |row_index: usize| -> usize {
+        if row_index == 0 {
+            width
+        } else {
+            width.saturating_sub(indent)
+        }
+        .max(1)
+    };
+
+    for token in tokens {
+        let is_space_token = token.first().is_some_and(|(c, _)| *c == ' ');
+        let cap = cap_for(rows.len());
+        if cur.len() + token.len() <= cap {
+            cur.extend(token);
+            continue;
+        }
+        if is_space_token && !cur.is_empty() {
+            rows.push(std::mem::take(&mut cur));
+            continue;
+        }
+        if is_space_token {
+            let mut remaining = token.as_slice();
+            loop {
+                let cap = cap_for(rows.len());
+                if remaining.len() <= cap {
+                    cur.extend(remaining.iter().copied());
+                    break;
+                }
+                let (head, tail) = remaining.split_at(cap.max(1));
+                rows.push(head.to_vec());
+                remaining = tail;
+            }
+            continue;
+        }
+        if !cur.is_empty() {
+            while cur.last().is_some_and(|(c, _)| *c == ' ') {
+                cur.pop();
+            }
+            rows.push(std::mem::take(&mut cur));
+        }
+        let mut remaining = token.as_slice();
+        loop {
+            let cap = cap_for(rows.len());
+            if remaining.len() <= cap {
+                cur.extend(remaining.iter().copied());
+                break;
+            }
+            let (head, tail) = remaining.split_at(cap.max(1));
+            rows.push(head.to_vec());
+            remaining = tail;
+        }
+    }
+    if !cur.is_empty() {
+        rows.push(cur);
+    }
+
+    rows.into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let mut r = Vec::new();
+            if i > 0 && indent > 0 {
+                let base = row.first().map_or_else(Style::default, |(_, s)| *s);
+                r.push((" ".repeat(indent), base));
+            }
+            r.extend(compress_runs(&row));
+            r
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -642,9 +800,164 @@ mod tests {
             "[ref][1]",
             "<https://example.com>",
             "  indented paragraph text",
+            "===",
         ] {
             let rl = render(line);
             assert_eq!(text(&rl), line);
         }
+    }
+
+    fn row_text(row: &[(String, Style)]) -> String {
+        row.iter().map(|(t, _)| t.as_str()).collect()
+    }
+
+    #[test]
+    /// UI-R-130 — wrapping is always on: no display row exceeds the available width.
+    fn ut_no_row_exceeds_the_available_width() {
+        let rl = render("the quick brown fox jumps over the lazy dog");
+        for width in [1usize, 4, 5, 10, 20] {
+            let rows = wrap_line(&rl, width);
+            for row in &rows {
+                assert!(
+                    row_text(row).chars().count() <= width,
+                    "width {width}: {row:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    /// UI-R-148 — the wrapped rule row is styled in the theme's rule style, not a default.
+    fn ut_rule_row_uses_the_theme_rule_style() {
+        let md = MarkdownTheme::default();
+        let rl = render("---");
+        let rows = wrap_line(&rl, 8);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0].1, *md.rule());
+        assert_eq!(
+            row_text(&rows[0]).chars().count(),
+            8,
+            "rule row must span the full widget width"
+        );
+    }
+
+    #[test]
+    /// UI-R-130 — width `0` and a blank line each yield exactly one empty row, never a panic.
+    fn ut_width_zero_and_blank_line_yield_one_empty_row() {
+        let rl = render("plain text");
+        let rows = wrap_line(&rl, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(row_text(&rows[0]), "");
+
+        let blank = render("");
+        let rows = wrap_line(&blank, 10);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(row_text(&rows[0]), "");
+    }
+
+    #[test]
+    /// UI-R-131 — a line breaks at the last word boundary that fits the width.
+    fn ut_wraps_at_the_last_word_boundary_that_fits() {
+        let rl = render("the quick brown fox");
+        let rows = wrap_line(&rl, 10);
+        assert_eq!(row_text(&rows[0]), "the quick");
+        assert_eq!(row_text(&rows[1]), "brown fox");
+    }
+
+    #[test]
+    /// UI-R-131 — a single word longer than the available width breaks at a character boundary.
+    fn ut_word_longer_than_width_breaks_at_a_character_boundary() {
+        let rl = render("abcdefghij");
+        let rows = wrap_line(&rl, 4);
+        assert_eq!(row_text(&rows[0]), "abcd");
+        assert_eq!(row_text(&rows[1]), "efgh");
+        assert_eq!(row_text(&rows[2]), "ij");
+    }
+
+    #[test]
+    /// UI-R-132 — continuation rows of a wrapped list item are indented to the content start.
+    fn ut_list_and_quote_continuation_rows_align_under_the_content() {
+        let rl = render("- one two three four five");
+        assert_eq!(rl.hanging_indent, 2);
+        let rows = wrap_line(&rl, 10);
+        assert!(rows.len() > 1);
+        for row in &rows[1..] {
+            assert_eq!(
+                row[0].0, "  ",
+                "continuation row indent must be exactly hanging_indent spaces"
+            );
+        }
+
+        let rl = render("> one two three four five");
+        assert_eq!(rl.hanging_indent, 1);
+        let rows = wrap_line(&rl, 10);
+        assert!(rows.len() > 1);
+        for row in &rows[1..] {
+            assert_eq!(
+                row[0].0, " ",
+                "quote continuation row indent must be exactly hanging_indent spaces"
+            );
+        }
+    }
+
+    #[test]
+    /// UI-R-133 — fence delimiter/body lines wrap at a character boundary with no hanging indent.
+    fn ut_fence_lines_wrap_by_character_with_no_hanging_indent() {
+        let rl = RenderedLine {
+            spans: vec![("abcdefghij".to_string(), Style::default())],
+            hanging_indent: 5,
+            char_wrap: true,
+            rule: false,
+        };
+        let rows = wrap_line(&rl, 4);
+        assert_eq!(row_text(&rows[0]), "abcd");
+        assert_eq!(row_text(&rows[1]), "efgh");
+        assert_eq!(row_text(&rows[2]), "ij");
+    }
+
+    #[test]
+    /// UI-E-069 — when the hanging indent leaves no room for content, it is dropped and
+    /// continuation rows start at column zero.
+    fn ut_hanging_indent_is_dropped_when_the_width_is_too_narrow() {
+        let rl = RenderedLine {
+            spans: vec![("one two three".to_string(), Style::default())],
+            hanging_indent: 8,
+            char_wrap: false,
+            rule: false,
+        };
+        let rows = wrap_line(&rl, 9);
+        assert!(rows.len() > 1);
+        for row in &rows[1..] {
+            let t = row_text(row);
+            assert!(
+                !t.starts_with(" "),
+                "indent should have been dropped: {t:?}"
+            );
+        }
+    }
+
+    #[test]
+    /// UI-E-070 — a long word is never truncated: every character reappears across the rows.
+    fn ut_long_word_is_never_truncated() {
+        let word = "abcdefghijklmnopqrstuvwxyz";
+        let rl = render(word);
+        let rows = wrap_line(&rl, 5);
+        let joined: String = rows.iter().map(|r| row_text(r)).collect();
+        assert_eq!(joined, word);
+    }
+
+    #[test]
+    /// UI-E-070 — a leading whitespace run wider than the row cap is kept, never silently
+    /// dropped into an empty row.
+    fn ut_leading_space_run_wider_than_width_is_kept_not_dropped() {
+        let spaces = " ".repeat(10);
+        let rl = render(&spaces);
+        let rows = wrap_line(&rl, 4);
+        let joined: String = rows.iter().map(|r| row_text(r)).collect();
+        assert_eq!(joined, spaces);
+        assert!(
+            rows.iter().all(|r| !row_text(r).is_empty()),
+            "no row should be spuriously empty: {rows:?}"
+        );
     }
 }
