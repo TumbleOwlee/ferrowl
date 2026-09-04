@@ -1,6 +1,7 @@
 //! Modal dialogs: module setup and shared register-edit data types.
 
 pub mod ca_file_list;
+pub(crate) mod choices;
 pub mod close_confirm;
 pub mod help;
 pub mod lua_help;

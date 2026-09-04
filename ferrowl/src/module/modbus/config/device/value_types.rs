@@ -3,8 +3,8 @@
 //! types. Separated from the device/register layout structs in the parent module.
 
 use ferrowl_codec::{
-    Access,
-    format::{Alignment, BitField, Endian, Resolution, WordOrder},
+    Access, Address, Format,
+    format::{Alignment, BitField, Endian, Resolution, Width, WordOrder},
 };
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +184,45 @@ pub fn parse_bitmask(s: Option<&str>) -> BitField {
             .unwrap_or(u128::MAX),
     };
     BitField { mask }
+}
+
+/// The wire [`Format`] a register's value-type/endian/word-order/resolution/bit-field/alignment
+/// (and, for `Ascii`, `length`) configuration maps to.
+pub fn format_of(
+    value_type: ValueType,
+    endian: EndianCfg,
+    word_order: WordOrderCfg,
+    resolution: f64,
+    bf: BitField,
+    alignment: AlignmentCfg,
+    length: usize,
+) -> Format {
+    let res = Resolution(resolution);
+    let endian: Endian = endian.into();
+    let wo: WordOrder = word_order.into();
+    match value_type {
+        ValueType::U8 => Format::u8(endian, wo, res, bf),
+        ValueType::U16 => Format::u16(endian, wo, res, bf),
+        ValueType::U32 => Format::u32(endian, wo, res, bf),
+        ValueType::U64 => Format::u64(endian, wo, res, bf),
+        ValueType::U128 => Format::u128(endian, wo, res, bf),
+        ValueType::I8 => Format::i8(endian, wo, res, bf),
+        ValueType::I16 => Format::i16(endian, wo, res, bf),
+        ValueType::I32 => Format::i32(endian, wo, res, bf),
+        ValueType::I64 => Format::i64(endian, wo, res, bf),
+        ValueType::I128 => Format::i128(endian, wo, res, bf),
+        ValueType::F32 => Format::f32(endian, wo, res),
+        ValueType::F64 => Format::f64(endian, wo, res),
+        ValueType::Ascii => Format::Ascii(alignment.into(), Width(length)),
+    }
+}
+
+/// The wire [`Address`] a register's `virtual`/`address` configuration maps to.
+pub fn address_of(is_virtual: bool, address: Option<u16>) -> Address {
+    match (is_virtual, address) {
+        (false, Some(addr)) => Address::Fixed(addr),
+        _ => Address::Virtual,
+    }
 }
 
 impl From<AccessCfg> for Access {

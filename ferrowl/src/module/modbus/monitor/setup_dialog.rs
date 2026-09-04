@@ -7,15 +7,12 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
-    state::{
-        InputFieldState, InputFieldStateBuilder, SelectionState, SelectionStateBuilder,
-        SuggestInputState, SuggestInputStateBuilder,
-    },
+    state::{InputFieldState, SelectionState, SuggestInputState},
     style::{InputFieldStyle, SelectionStyle, TextStyle},
-    traits::{HandleEvents, SetFocus, ToLabel},
+    traits::{HandleEvents, ToLabel},
     widgets::{
-        GetValue, InputField, InputFieldBuilder, Selection, SelectionBuilder, SuggestInput,
-        SuggestInputBuilder, Text, TextBuilder, Validate, ValidateResult, Widget,
+        GetValue, InputField, Selection, SuggestInput, Text, TextBuilder, Validate, ValidateResult,
+        Widget,
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
@@ -28,8 +25,10 @@ use ratatui::{
 
 use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig};
 use crate::dialog::NonEmpty;
+use crate::dialog::choices::{DialogMode, Parity, ReconnectChoice, U8Choice, select_u8};
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
+use crate::dialog::widgets::{input, selection, set_input, set_suggest_input, suggest_input};
 
 use super::build::endpoint_to_monitor_config;
 
@@ -53,12 +52,6 @@ pub struct MonitorSetupOutcome {
     pub device: Option<(String, MonitorDeviceConfig)>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DialogMode {
-    Edit,
-    New,
-}
-
 /// Transport selection value — `Rtu`/`Ascii` only (MB-R-140).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Transport {
@@ -71,87 +64,6 @@ impl ToLabel for Transport {
         match self {
             Transport::Rtu => "RTU",
             Transport::Ascii => "ASCII",
-        }
-        .to_string()
-    }
-}
-
-/// Serial parity selection value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Parity {
-    None,
-    Odd,
-    Even,
-}
-
-impl ToLabel for Parity {
-    fn to_label(&self) -> String {
-        match self {
-            Parity::None => "None",
-            Parity::Odd => "Odd",
-            Parity::Even => "Even",
-        }
-        .to_string()
-    }
-}
-
-impl Parity {
-    fn to_config(&self) -> Option<String> {
-        match self {
-            Parity::None => None,
-            Parity::Odd => Some("odd".to_string()),
-            Parity::Even => Some("even".to_string()),
-        }
-    }
-
-    fn from_config(value: Option<&str>) -> Parity {
-        match value.map(str::to_ascii_lowercase).as_deref() {
-            Some("odd") => Parity::Odd,
-            Some("even") => Parity::Even,
-            _ => Parity::None,
-        }
-    }
-
-    fn index(&self) -> usize {
-        match self {
-            Parity::None => 0,
-            Parity::Odd => 1,
-            Parity::Even => 2,
-        }
-    }
-}
-
-/// A numeric serial choice (data/stop bits) rendered as a selection label.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct U8Choice(u8);
-
-impl ToLabel for U8Choice {
-    fn to_label(&self) -> String {
-        self.0.to_string()
-    }
-}
-
-fn select_u8(state: &mut SelectionState<U8Choice>, current: Option<u8>) {
-    if let Some(value) = current
-        && let Some(index) = state.values().iter().position(|c| c.0 == value)
-    {
-        state.set_selection(index);
-    }
-}
-
-/// Client/server-only auto-reconnect toggle, reused verbatim for the monitor's serial-open
-/// retry (MB-R-141).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReconnectChoice {
-    On,
-    Off,
-}
-
-impl ToLabel for ReconnectChoice {
-    fn to_label(&self) -> String {
-        match self {
-            ReconnectChoice::On => "On",
-            ReconnectChoice::Off => "Off",
         }
         .to_string()
     }
@@ -297,13 +209,13 @@ impl MonitorSetupDialog {
                 .bg(COLOR_SCHEME.bg),
         };
 
-        let mut name_field = input("Name", "module name", &input_style);
-        name_field.state.set_focused(true);
+        let mut name_field = input("Name", "module name", &input_style, true);
         set_input(&mut name_field, name);
         let mut config_path_field = suggest_input(
             "Config Path [TOML/JSON] (optional)",
             "device.toml",
             &input_style,
+            false,
             FsPathProvider::with_extensions(&["toml", "json"]),
         );
         set_suggest_input(&mut config_path_field, config_path);
@@ -320,9 +232,10 @@ impl MonitorSetupDialog {
                 "Serial Path",
                 "/dev/ttyUSB0",
                 &input_style,
+                false,
                 FsPathProvider::default(),
             ))
-            .baud(input("Baud", "19200", &input_style))
+            .baud(input("Baud", "19200", &input_style, false))
             .parity(selection(
                 "Parity",
                 vec![Parity::None, Parity::Odd, Parity::Even],
@@ -578,117 +491,10 @@ impl MonitorSetupDialog {
     }
 }
 
-fn input<T: Validate + Clone>(
-    title: &str,
-    placeholder: &str,
-    style: &InputFieldStyle,
-) -> Widget<InputFieldState, InputField<T>> {
-    Widget {
-        state: InputFieldStateBuilder::default()
-            .focused(false)
-            .disabled(false)
-            .placeholder(Some(placeholder.to_string()))
-            .allowed_for::<T>()
-            .build()
-            .expect("all required builder fields are set"),
-        widget: InputFieldBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(title.into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn suggest_input<T: Validate + Clone, P: ferrowl_ui::traits::SuggestionProvider + Clone>(
-    title: &str,
-    placeholder: &str,
-    style: &InputFieldStyle,
-    provider: P,
-) -> Widget<SuggestInputState<P>, SuggestInput<T, P>> {
-    Widget {
-        state: SuggestInputStateBuilder::default()
-            .field(
-                InputFieldStateBuilder::default()
-                    .focused(false)
-                    .disabled(false)
-                    .placeholder(Some(placeholder.to_string()))
-                    .allowed_for::<T>()
-                    .build()
-                    .expect("all required builder fields are set"),
-            )
-            .provider(provider)
-            .build()
-            .expect("all required builder fields are set"),
-        widget: SuggestInputBuilder::default()
-            .input_field(
-                InputFieldBuilder::default()
-                    .border(Border::Full(Margin::new(1, 0)))
-                    .title(Some(title.into()))
-                    .margin(Margin {
-                        vertical: 0,
-                        horizontal: 1,
-                    })
-                    .style(style.clone())
-                    .build()
-                    .expect("all required builder fields are set"),
-            )
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-fn selection<T: ToLabel + Clone>(
-    title: &str,
-    values: Vec<T>,
-    style: &SelectionStyle,
-) -> Widget<SelectionState<T>, Selection<T>> {
-    Widget {
-        state: SelectionStateBuilder::default()
-            .focused(false)
-            .values(values)
-            .build()
-            .expect("all required builder fields are set"),
-        widget: SelectionBuilder::default()
-            .border(Border::Full(Margin::new(1, 0)))
-            .title(Some(title.into()))
-            .margin(Margin {
-                vertical: 0,
-                horizontal: 1,
-            })
-            .style(style.clone())
-            .build()
-            .expect("all required builder fields are set"),
-    }
-}
-
-pub(crate) fn set_input<T: Validate + Clone>(
-    widget: &mut Widget<InputFieldState, InputField<T>>,
-    value: &str,
-) {
-    widget.state.set_input(value.to_string());
-    widget.state.set_cursor(value.chars().count());
-}
-
-pub(crate) fn set_suggest_input<
-    T: Validate + Clone,
-    P: ferrowl_ui::traits::SuggestionProvider + Clone,
->(
-    widget: &mut Widget<SuggestInputState<P>, SuggestInput<T, P>>,
-    value: &str,
-) {
-    widget.state.set_input(value.to_string());
-    widget.state.set_cursor(value.chars().count());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_ui::traits::IsFocus;
+    use ferrowl_ui::traits::{IsFocus, SetFocus};
 
     /// The dialog renders as a centered floating popup, same as every other setup dialog
     /// (`module/modbus/setup_dialog.rs::SetupDialog`), rather than filling the area it is given:

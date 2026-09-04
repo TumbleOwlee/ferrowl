@@ -39,7 +39,7 @@ impl Write for RecordingHandle {
 #[test]
 /// NF-R-050, SC-R-047 — with no stop flag attached (the on-demand-run shape, SC-R-035), an infinite loop
 /// is still interrupted, by the unconditional wall-clock cap alone.
-fn ut_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
+fn it_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("runaway".to_string(), INFINITE_LOOP)
         .build()
@@ -66,7 +66,7 @@ fn ut_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
 #[test]
 /// SC-R-012, SC-R-046 — an already-set stop flag interrupts a runaway script almost
 /// immediately, well before the 1,000ms wall-clock cap would fire on its own.
-fn ut_stop_flag_interrupts_infinite_loop_almost_immediately() {
+fn it_stop_flag_interrupts_infinite_loop_almost_immediately() {
     let stop = Arc::new(AtomicBool::new(true));
     let mut ctx = ContextBuilder::<String>::default()
         .with_stop_flag(stop)
@@ -91,7 +91,7 @@ fn ut_stop_flag_interrupts_infinite_loop_almost_immediately() {
 #[test]
 /// SC-R-046 — a stop flag attached but never set is a no-op: the hook still enforces the
 /// wall-clock cap on its own, so the resulting error is the wall-clock one, not a stop error.
-fn ut_stop_flag_not_set_does_not_interrupt_before_cap() {
+fn it_stop_flag_not_set_does_not_interrupt_before_cap() {
     let stop = Arc::new(AtomicBool::new(false));
     let mut ctx = ContextBuilder::<String>::default()
         .with_stop_flag(stop)
@@ -112,7 +112,7 @@ fn ut_stop_flag_not_set_does_not_interrupt_before_cap() {
 /// SC-R-039 — a hook-raised error (here, a stop request) is isolated to the script that raised
 /// it: `call_all` collects exactly that one error, and a sibling script in the same cycle still
 /// runs to completion.
-fn ut_hook_error_isolated_other_script_in_same_cycle_still_runs() {
+fn it_hook_error_isolated_other_script_in_same_cycle_still_runs() {
     let stop = Arc::new(AtomicBool::new(true));
     let recorder = RecordingHandle::default();
     let mut ctx = ContextBuilder::<String>::default()
@@ -135,7 +135,7 @@ fn ut_hook_error_isolated_other_script_in_same_cycle_still_runs() {
 
 #[test]
 /// An ordinary short script is unaffected by the hook, on both `call` and `call_all`.
-fn ut_normal_short_script_unaffected_by_hook() {
+fn it_normal_short_script_unaffected_by_hook() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("ok".to_string(), "local x = 1 + 1")
         .build()

@@ -21,7 +21,7 @@ impl LogSink for VecSink {
 
 #[test]
 /// SC-R-030 — print converts each arg with tostring and joins them with tab characters.
-fn ut_print_joins_args_with_tabs() {
+fn it_print_joins_args_with_tabs() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
@@ -35,7 +35,7 @@ fn ut_print_joins_args_with_tabs() {
 
 #[test]
 /// SC-R-030 — print with no args emits a single empty log line.
-fn ut_print_no_args_is_empty_line() {
+fn it_print_no_args_is_empty_line() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
@@ -49,7 +49,7 @@ fn ut_print_no_args_is_empty_line() {
 
 #[test]
 /// SC-R-030 — print honors a value's __tostring metamethod when converting it.
-fn ut_print_honors_tostring_metamethod() {
+fn it_print_honors_tostring_metamethod() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
@@ -69,7 +69,7 @@ fn ut_print_honors_tostring_metamethod() {
 
 #[test]
 /// SC-R-030 — print is redirected to the host sink (never stdout), regardless of builder call order.
-fn ut_with_print_sink_before_stdlib_still_redirects() {
+fn it_with_print_sink_before_stdlib_still_redirects() {
     // Empirically, `enable_stdlib`'s `load_std_libs(ALL_SAFE)` does not reload `base` (`print` is
     // untouched), so the override survives regardless of call order. Verified here so a future
     // mlua upgrade that changes this behavior gets caught.

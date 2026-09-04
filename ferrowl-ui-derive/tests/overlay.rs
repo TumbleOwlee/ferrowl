@@ -55,7 +55,7 @@ fn route(o: &mut Overlay, code: KeyCode) -> OverlayRoute {
 
 #[test]
 /// UI-R-021 — an overlay reports active for any variant other than None.
-fn ut_is_active() {
+fn it_is_active() {
     assert!(!Overlay::None.is_active());
     assert!(Overlay::Edit(Editor { step: 0 }).is_active());
     assert!(Overlay::Plain(Picker).is_active());
@@ -63,7 +63,7 @@ fn ut_is_active() {
 
 #[test]
 /// UI-R-021 — taking an overlay yields its payload and resets the slot to None.
-fn ut_take_leaves_none() {
+fn it_take_leaves_none() {
     let mut o = Overlay::Edit(Editor { step: 3 });
     let taken = o.take();
     assert_eq!(taken, Overlay::Edit(Editor { step: 3 }));
@@ -72,7 +72,7 @@ fn ut_take_leaves_none() {
 
 #[test]
 /// UI-R-021 — closing an overlay resets it to None.
-fn ut_close_resets_to_none() {
+fn it_close_resets_to_none() {
     let mut o = Overlay::SetupV(Setup { step: 1 });
     o.close();
     assert_eq!(o, Overlay::None);
@@ -82,7 +82,7 @@ fn ut_close_resets_to_none() {
 
 #[test]
 /// UI-R-079 — Esc requests close on an overlay variant that opted into esc_close.
-fn ut_esc_closes_esc_close_variant() {
+fn it_esc_closes_esc_close_variant() {
     let mut o = Overlay::Edit(Editor { step: 0 });
     assert_eq!(route(&mut o, KeyCode::Esc), OverlayRoute::Closed);
     assert_eq!(o, Overlay::None);
@@ -94,7 +94,7 @@ fn ut_esc_closes_esc_close_variant() {
 
 #[test]
 /// UI-R-079 — Esc is unhandled (propagates) on a variant that did not opt into esc_close.
-fn ut_esc_unhandled_without_esc_close() {
+fn it_esc_unhandled_without_esc_close() {
     // SetupV is focus_cycle only; Plain is untagged. Neither closes on Esc.
     let mut o = Overlay::SetupV(Setup { step: 0 });
     assert_eq!(route(&mut o, KeyCode::Esc), OverlayRoute::Unhandled);
@@ -109,7 +109,7 @@ fn ut_esc_unhandled_without_esc_close() {
 
 #[test]
 /// UI-R-022 — Tab advances the overlay's field focus.
-fn ut_tab_cycles_focus_forward() {
+fn it_tab_cycles_focus_forward() {
     let mut o = Overlay::Edit(Editor { step: 0 });
     assert_eq!(route(&mut o, KeyCode::Tab), OverlayRoute::Cycled);
     assert_eq!(o, Overlay::Edit(Editor { step: 1 }));
@@ -117,7 +117,7 @@ fn ut_tab_cycles_focus_forward() {
 
 #[test]
 /// UI-R-022 — Shift+Tab/BackTab retreats the overlay's field focus.
-fn ut_backtab_cycles_focus_backward() {
+fn it_backtab_cycles_focus_backward() {
     let mut o = Overlay::SetupV(Setup { step: 0 });
     assert_eq!(o.route_keys(NONE, KeyCode::BackTab), OverlayRoute::Cycled);
     assert_eq!(o, Overlay::SetupV(Setup { step: -10 }));
@@ -131,7 +131,7 @@ fn ut_backtab_cycles_focus_backward() {
 
 #[test]
 /// UI-R-022 — Tab is unhandled on a variant without a focus cycle.
-fn ut_tab_unhandled_without_focus_cycle() {
+fn it_tab_unhandled_without_focus_cycle() {
     let mut o = Overlay::Conf(Confirm);
     assert_eq!(route(&mut o, KeyCode::Tab), OverlayRoute::Unhandled);
 }
@@ -140,7 +140,7 @@ fn ut_tab_unhandled_without_focus_cycle() {
 
 #[test]
 /// UI-R-022 — keys other than the dialog defaults fall through as unhandled.
-fn ut_other_keys_unhandled() {
+fn it_other_keys_unhandled() {
     let mut o = Overlay::Edit(Editor { step: 0 });
     assert_eq!(route(&mut o, KeyCode::Enter), OverlayRoute::Unhandled);
     assert_eq!(route(&mut o, KeyCode::Char('x')), OverlayRoute::Unhandled);
@@ -150,7 +150,7 @@ fn ut_other_keys_unhandled() {
 
 #[test]
 /// UI-R-021 — an inactive (None) overlay consumes no keys.
-fn ut_none_is_unhandled() {
+fn it_none_is_unhandled() {
     let mut o = Overlay::None;
     assert_eq!(route(&mut o, KeyCode::Esc), OverlayRoute::Unhandled);
     assert_eq!(route(&mut o, KeyCode::Tab), OverlayRoute::Unhandled);
