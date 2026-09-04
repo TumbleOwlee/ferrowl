@@ -1,4 +1,4 @@
-//! Pure text-to-spans syntax highlighting for Lua and JSON.
+//! Pure text-to-spans syntax highlighting for Lua, JSON and Markdown.
 //!
 //! No rendering, no dependencies — lexers here just walk a line of source and emit
 //! `(start_char, end_char, SyntaxKind)` spans plus a carry-over [`LineState`] for
@@ -8,6 +8,7 @@
 mod format;
 mod indent;
 mod lang;
+pub mod markdown;
 
 pub use format::format;
 pub use indent::indent_delta;
