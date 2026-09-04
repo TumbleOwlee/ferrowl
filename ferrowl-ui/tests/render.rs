@@ -15,7 +15,7 @@ use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
-    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder,
+    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder, VerticalTabsState,
 };
 use ferrowl_ui::style::{
     ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SuggestInputStyle,
@@ -24,7 +24,8 @@ use ferrowl_ui::style::{
 use ferrowl_ui::traits::{Init, Suggestion, SuggestionProvider, ToLabel};
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
-    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
+    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title,
+    VerticalTabsBuilder, Width,
 };
 
 fn buffer(w: u16, h: u16) -> Buffer {
@@ -361,6 +362,41 @@ fn scrolling_tabs_render_variants() {
     };
     let mut b = buffer(12, 1);
     StatefulWidget::render(w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
+}
+
+// ---- VerticalTabs ----
+
+#[test]
+/// UI-R-116 — active row style matches the horizontal tab bar's selected style.
+fn it_vertical_tabs_render_variants() {
+    let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+    let titles = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+    let mut st = VerticalTabsState {
+        titles: titles.clone(),
+        active: 1,
+        offset: 0,
+    };
+    let mut b1 = buffer(1, 3);
+    StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b1, &mut st);
+    assert_eq!(b1[(0, 0)].symbol(), "a");
+    assert_eq!(b1[(0, 1)].symbol(), "b");
+    assert_eq!(b1[(0, 2)].symbol(), "g");
+    let selected = ScrollingTabsStyle::default().selected;
+    assert_eq!(b1[(0, 1)].fg, selected.fg.unwrap());
+    assert_eq!(b1[(0, 1)].bg, selected.bg.unwrap());
+
+    let mut st2 = VerticalTabsState {
+        titles,
+        active: 1,
+        offset: 0,
+    };
+    let mut b2 = buffer(1, 3);
+    StatefulWidget::render(w, Rect::new(0, 0, 1, 3), &mut b2, &mut st2);
+    for y in 0..3 {
+        assert_eq!(b1[(0, y)].symbol(), b2[(0, y)].symbol());
+        assert_eq!(b1[(0, y)].fg, b2[(0, y)].fg);
+        assert_eq!(b1[(0, y)].bg, b2[(0, y)].bg);
+    }
 }
 
 // ---- Selection ----

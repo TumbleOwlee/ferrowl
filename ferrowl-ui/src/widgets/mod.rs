@@ -10,6 +10,7 @@ mod selection;
 mod suggest_input;
 mod table;
 mod text;
+mod vertical_tabs;
 
 pub use build::*;
 pub use button::*;
@@ -52,6 +53,7 @@ pub use selection::*;
 pub use suggest_input::*;
 pub use table::*;
 pub use text::*;
+pub use vertical_tabs::*;
 
 use crate::traits::{IsFocus, Margins};
 use crate::{

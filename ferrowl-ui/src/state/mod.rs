@@ -7,6 +7,7 @@ mod scrolling_tabs;
 mod selection;
 mod suggest_input;
 mod table;
+mod vertical_tabs;
 mod vim;
 
 pub use button::*;
@@ -16,4 +17,5 @@ pub use scrolling_tabs::*;
 pub use selection::*;
 pub use suggest_input::*;
 pub use table::*;
+pub use vertical_tabs::*;
 pub use vim::*;
