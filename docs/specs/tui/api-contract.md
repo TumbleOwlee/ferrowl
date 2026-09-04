@@ -293,3 +293,20 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as `### Single-line text input (focused)`. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
 
 Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats).
+
+## Markdown input field — modes and commands
+
+The widget uses the mode transitions, motions, edits and Insert-mode keys of the code editor tables above (UI-R-125).
+
+| Key | Mode | Action | Req |
+|---|---|---|---|
+| `gj` | Normal / Visual | Down one display row | UI-R-135 |
+| `gk` | Normal / Visual | Up one display row | UI-R-135 |
+| `Ctrl+D` | Normal / Visual | Half a screen of display rows down, cursor moved the same number of rows | UI-R-136 |
+| `Ctrl+U` | Normal / Visual | Half a screen of display rows up, cursor moved the same number of rows | UI-R-136 |
+| `j` / `k` | Normal / Visual / read-only | Down / up one source line, wrapping ignored | UI-R-134 |
+| `yy` | Normal / read-only | Yank current source line | UI-R-134, UI-R-139 |
+| `h` / `l` / `0` / `$` / `w` / `b` / `e` | read-only | Consumed, no movement | UI-E-072 |
+| mutating keys, `i` / `a` / `I` / `A` / `o` / `O` / `v` / `V` | read-only | Ignored, reported unhandled | UI-R-155 |
+
+Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R-155), focus set and query (UI-R-126, UI-R-128), current vim mode and its display label (UI-R-125), builder options for the markdown theme (UI-R-141), the syntax theme (UI-R-129) and the line-number gutter, default off (UI-R-140).
