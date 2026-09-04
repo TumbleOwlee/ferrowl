@@ -87,7 +87,6 @@ impl ferrowl_ui::traits::OverlayKeys for InterpretationEdit {
 
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
 /// current `VERSION`, format from the path's extension).
-#[allow(dead_code)] // consumed once the app-side call sites are wired up
 fn save_device_to(device: &MonitorDeviceConfig, path: &str) -> CommandResult {
     use ferrowl_util::convert::{Converter, FileType};
     let Some(ty) = FileType::from_path(path) else {
@@ -109,7 +108,6 @@ fn save_device_to(device: &MonitorDeviceConfig, path: &str) -> CommandResult {
 
 /// The 4 register-table kinds a monitor's observed-value table groups its memory layout by
 /// (MB-R-144), in display order.
-#[allow(dead_code)] // consumed once the app-side call sites are wired up
 const TABLE_KINDS: [Kind; 4] = [
     Kind::Coil,
     Kind::DiscreteInput,
@@ -757,11 +755,8 @@ fn memory_table_rows(
         .collect()
 }
 
-// `#[allow(dead_code)]`: implemented and tested here; the app-side construction call sites are
-// not wired up yet.
 #[focusable]
 #[derive(Focus)]
-#[allow(dead_code)]
 pub struct ModbusMonitorModuleView {
     module: ModbusMonitorModule,
     spec: ModuleSpec,
@@ -815,7 +810,6 @@ pub struct ModbusMonitorModuleView {
     cached_messages_generation: u64,
 }
 
-#[allow(dead_code)] // forward-declared; see struct's note
 impl ModbusMonitorModuleView {
     pub fn new(module: ModbusMonitorModule, spec: ModuleSpec, device: MonitorDeviceConfig) -> Self {
         Self {
@@ -1577,7 +1571,6 @@ impl ModuleView for ModbusMonitorModuleView {
 /// [`MONITOR_COMMAND_SPECS`]. `:set`/`:script` are simply absent from the table — `parse_command`
 /// already falls through to `CommandResult::Unhandled` for anything not listed, which is exactly
 /// tui/api-contract.md's "both are unrecognized on this role rather than erroring".
-#[allow(dead_code)] // consumed once the app-side call sites are wired up
 enum ModbusMonitorCmd {
     Start,
     Stop,
@@ -1592,7 +1585,6 @@ enum ModbusMonitorCmd {
 }
 
 /// Single source for this view's commands: aliases, help row, and parse target per entry.
-#[allow(dead_code)] // consumed once the app-side call sites are wired up
 static MONITOR_COMMAND_SPECS: [CommandSpec<ModbusMonitorCmd>; 10] = [
     CommandSpec {
         aliases: &["e", "edit"],
@@ -2942,7 +2934,7 @@ mod tests {
         let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
             unreachable!()
         };
-        super::super::setup_dialog::set_input(&mut dialog.name, "renamed");
+        crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
 
         assert_eq!(v.spec.name, "renamed");
@@ -2957,7 +2949,7 @@ mod tests {
         let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
             panic!(":edit did not open the setup dialog");
         };
-        super::super::setup_dialog::set_suggest_input(&mut dialog.config_path, "new-device.toml");
+        crate::dialog::widgets::set_suggest_input(&mut dialog.config_path, "new-device.toml");
         v.confirm_edit();
 
         assert_eq!(v.spec.device, "new-device.toml");
@@ -3011,7 +3003,7 @@ mod tests {
         let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
             panic!(":edit did not open the setup dialog");
         };
-        super::super::setup_dialog::set_input(&mut dialog.name, "renamed");
+        crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
 
         assert!(
@@ -4320,7 +4312,7 @@ mod tests {
             let MonitorOverlay::EditInterpretation(edit) = &mut v.overlay else {
                 panic!("edit-interpretation dialog did not open");
             };
-            super::super::setup_dialog::set_input(&mut edit.dialog.label, "power2");
+            crate::dialog::widgets::set_input(&mut edit.dialog.label, "power2");
         }
         // Same as `ut_add_command_scopes_new_interpretation_to_selected_unit_id`'s own
         // `v.confirm_add()`: call the confirming method directly rather than routing the
@@ -4386,7 +4378,7 @@ mod tests {
             let MonitorOverlay::EditInterpretation(edit) = &mut v.overlay else {
                 panic!("edit-interpretation dialog did not open");
             };
-            super::super::setup_dialog::set_input(&mut edit.dialog.label, "power2");
+            crate::dialog::widgets::set_input(&mut edit.dialog.label, "power2");
         }
         v.confirm_edit_interpretation();
         assert!(
@@ -4477,8 +4469,8 @@ mod tests {
         let dialog = &mut edit.dialog;
         dialog.open_add_dialog();
         let sub = dialog.add_dialog.as_mut().unwrap();
-        super::super::setup_dialog::set_input(&mut sub.label, "kettle-on");
-        super::super::setup_dialog::set_input(&mut sub.value, "1");
+        crate::dialog::widgets::set_input(&mut sub.label, "kettle-on");
+        crate::dialog::widgets::set_input(&mut sub.value, "1");
 
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
 

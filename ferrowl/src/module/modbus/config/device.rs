@@ -13,9 +13,6 @@ use crate::config::script::ScriptDef;
 
 mod monitor;
 mod value_types;
-// `MonitorRegisterDef` is currently reached only through `MonitorDeviceConfig::definitions`
-// (`BTreeMap<String, MonitorRegisterDef>`); re-exported for callers that name it directly.
-#[allow(unused_imports)]
 pub use monitor::{MonitorDeviceConfig, MonitorRegisterDef};
 pub use value_types::{
     AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, WordOrderCfg, address_of, format_of,

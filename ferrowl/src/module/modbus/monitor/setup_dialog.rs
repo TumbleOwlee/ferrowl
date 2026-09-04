@@ -28,8 +28,7 @@ use crate::dialog::NonEmpty;
 use crate::dialog::choices::{DialogMode, Parity, ReconnectChoice, U8Choice, select_u8};
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
-use crate::dialog::widgets::{input, selection, suggest_input};
-pub(crate) use crate::dialog::widgets::{set_input, set_suggest_input};
+use crate::dialog::widgets::{input, selection, set_input, set_suggest_input, suggest_input};
 
 use super::build::endpoint_to_monitor_config;
 

@@ -8,7 +8,5 @@ pub mod setup;
 mod setup_dialog;
 mod view;
 
-#[allow(unused_imports)] // consumed by module.rs; not yet by app code outside this submodule
-pub(crate) use build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
 pub use module::ModbusMonitorModule;
 pub use view::ModbusMonitorModuleView;

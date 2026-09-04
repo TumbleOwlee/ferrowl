@@ -8,10 +8,7 @@ use crate::config::Endpoint;
 /// `ferrowl_modbus::rtu::Config` shape (the two endpoint kinds share identical fields —
 /// path/baud_rate/parity/data_bits/stop_bits — differing only in on-wire framing, exactly as
 /// `ferrowl_modbus::ascii` reuses `rtu::Config` verbatim for the client/server case).
-// `#[allow(dead_code)]`: implemented and tested here; nothing constructs a
-// `ModbusMonitorModule` from it yet.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub(crate) enum MonitorNetConfig {
     Rtu(ferrowl_modbus::rtu::Config),
     Ascii(ferrowl_modbus::rtu::Config),
@@ -20,7 +17,6 @@ pub(crate) enum MonitorNetConfig {
 /// MB-R-140 — a monitor is configurable only on the `Rtu` or `Ascii` transport.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("monitor role requires transport rtu or ascii, got {0}")]
-#[allow(dead_code)] // forward-declared; see MonitorNetConfig's note
 pub(crate) struct MonitorTransportError(pub &'static str);
 
 /// MB-R-140 — the role/transport compatibility check, same failure class as MB-R-107's
@@ -28,7 +24,6 @@ pub(crate) struct MonitorTransportError(pub &'static str);
 /// silent fallback). `ferrowl_modbus::rtu::Config`'s `timeout_ms`/`delay_ms`/`interval_ms`
 /// fields are structurally present but unused by the monitor engine (`MonitorBuilder` never
 /// reads them) — left at `0`.
-#[allow(dead_code)] // see `MonitorNetConfig`'s note
 pub(crate) fn endpoint_to_monitor_config(
     endpoint: &Endpoint,
     reconnect: bool,

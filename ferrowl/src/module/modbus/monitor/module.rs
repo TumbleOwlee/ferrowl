@@ -21,13 +21,11 @@ use super::super::log::{FileSink, open_sink};
 use super::super::serial_paths::SerialPathRegistry;
 use super::build::{MonitorNetConfig, MonitorTransportError, endpoint_to_monitor_config};
 
-#[allow(dead_code)] // consumed once ModbusMonitorModuleView is wired up
 pub type ModuleLog = Arc<RwLock<LogRing>>;
 
 /// Errors from a monitor's own lifecycle: either the role/transport compatibility check
 /// (MB-R-140) or a network error surfaced from the running receive task.
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)] // constructed only once the view and app-side call sites are wired up
 pub enum Error {
     #[error("Network error: {0}")]
     Net(#[from] ferrowl_modbus::Error),
@@ -38,9 +36,6 @@ pub enum Error {
 /// One monitor instance: a receive-only observer of an `Rtu`/`Ascii` bus, its register
 /// interpretations, observed-value table, and log — no operations list, no memory store, no
 /// Lua sim (MB-R-076).
-// `#[allow(dead_code)]`: implemented and tested here; the app-side construction call sites and
-// session role dispatch are not wired up yet.
-#[allow(dead_code)]
 pub struct ModbusMonitorModule {
     name: String,
     endpoint: Endpoint,
@@ -62,7 +57,6 @@ pub struct ModbusMonitorModule {
     serial_paths: SerialPathRegistry,
 }
 
-#[allow(dead_code)] // forward-declared; see ModbusMonitorModule's note
 impl ModbusMonitorModule {
     /// Build a monitor module from an instance spec and its device-type config. The
     /// endpoint/transport is validated later, at [`start`](Self::start) — construction never
@@ -370,7 +364,6 @@ impl ModbusMonitorModule {
 /// [`super::super::module::network_log_level`]'s classification plus a monitor-specific Warning
 /// branch for a discarded, malformed frame (MB-R-142) — the decode/match state machine phrases
 /// its discarded-frame log line to contain this exact substring.
-#[allow(dead_code)] // consumed once ModbusMonitorModuleView routes lines through it
 pub(crate) fn network_log_level(s: &str) -> crate::app::Level {
     if s.to_lowercase().contains("malformed frame") {
         crate::app::Level::Warning
