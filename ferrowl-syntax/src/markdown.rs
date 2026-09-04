@@ -248,6 +248,272 @@ fn try_link_or_image(
     })
 }
 
+/// The block a source line forms, in the line-preserving model of the markdown widget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockKind {
+    Paragraph,
+    Heading { level: u8 },
+    UnorderedItem { depth: usize, marker: char },
+    OrderedItem { depth: usize },
+    TaskItem { depth: usize, checked: bool },
+    Quote { depth: usize },
+    Rule,
+    FenceDelimiter { info: String },
+    FenceBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenFence {
+    info: String,
+    len: usize,
+}
+
+/// Carried block state: holds the open fence's info string and delimiter length while
+/// inside a fenced code block.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlockState {
+    fence: Option<OpenFence>,
+}
+
+impl BlockState {
+    /// The info string of the fence currently open, if any.
+    pub fn fence_info(&self) -> Option<&str> {
+        self.fence.as_ref().map(|f| f.info.as_str())
+    }
+}
+
+/// One classified source line: its block kind, the source column its content starts at
+/// (the column after the block marker), and its inline constructs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockLine {
+    pub kind: BlockKind,
+    pub content_start: usize,
+    pub inline: Vec<InlineSpan>,
+}
+
+/// Classifies one source line given the state carried from the previous line, returning
+/// the state to carry into the next.
+pub fn block_line(line: &str, state: &BlockState) -> (BlockLine, BlockState) {
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut i = 0usize;
+    while i < len && chars[i] == ' ' {
+        i += 1;
+    }
+    let leading = i;
+
+    if let Some(open) = &state.fence {
+        if is_closing_fence(&chars, i, len, open.len) {
+            let bl = BlockLine {
+                kind: BlockKind::FenceDelimiter {
+                    info: String::new(),
+                },
+                content_start: len,
+                inline: Vec::new(),
+            };
+            return (bl, BlockState { fence: None });
+        }
+        let bl = BlockLine {
+            kind: BlockKind::FenceBody,
+            content_start: 0,
+            inline: Vec::new(),
+        };
+        return (bl, state.clone());
+    }
+
+    if is_rule(&chars) {
+        let bl = BlockLine {
+            kind: BlockKind::Rule,
+            content_start: len,
+            inline: Vec::new(),
+        };
+        return (bl, state.clone());
+    }
+
+    if i < len && chars[i] == '`' {
+        let mut j = i;
+        while j < len && chars[j] == '`' {
+            j += 1;
+        }
+        let opening_len = j - i;
+        if opening_len >= 3 {
+            let info: String = chars[j..].iter().collect::<String>().trim().to_string();
+            let bl = BlockLine {
+                kind: BlockKind::FenceDelimiter { info: info.clone() },
+                content_start: len,
+                inline: Vec::new(),
+            };
+            return (
+                bl,
+                BlockState {
+                    fence: Some(OpenFence {
+                        info,
+                        len: opening_len,
+                    }),
+                },
+            );
+        }
+    }
+
+    if i < len && chars[i] == '#' {
+        let mut j = i;
+        while j < len && chars[j] == '#' && j - i < 6 {
+            j += 1;
+        }
+        let level = (j - i) as u8;
+        if j < len && chars[j] == ' ' {
+            let content_start = j + 1;
+            let inline = offset_inline(&chars, content_start);
+            let bl = BlockLine {
+                kind: BlockKind::Heading { level },
+                content_start,
+                inline,
+            };
+            return (bl, state.clone());
+        }
+    }
+
+    if i < len && chars[i] == '>' {
+        let mut depth = 0usize;
+        let mut k = i;
+        while k < len && chars[k] == '>' {
+            depth += 1;
+            k += 1;
+            if k < len && chars[k] == ' ' {
+                k += 1;
+            }
+        }
+        let content_start = k;
+        let inline = offset_inline(&chars, content_start);
+        let bl = BlockLine {
+            kind: BlockKind::Quote { depth },
+            content_start,
+            inline,
+        };
+        return (bl, state.clone());
+    }
+
+    let depth = leading / 2;
+
+    if let Some(bullet_end) = unordered_bullet_end(&chars, i) {
+        let marker = chars[i];
+        if bullet_end + 2 < len
+            && chars[bullet_end] == '['
+            && matches!(chars[bullet_end + 1], ' ' | 'x' | 'X')
+            && chars[bullet_end + 2] == ']'
+        {
+            let checked = matches!(chars[bullet_end + 1], 'x' | 'X');
+            let mut content_start = bullet_end + 3;
+            if content_start < len && chars[content_start] == ' ' {
+                content_start += 1;
+            }
+            let inline = offset_inline(&chars, content_start);
+            let bl = BlockLine {
+                kind: BlockKind::TaskItem { depth, checked },
+                content_start,
+                inline,
+            };
+            return (bl, state.clone());
+        }
+        let content_start = bullet_end;
+        let inline = offset_inline(&chars, content_start);
+        let bl = BlockLine {
+            kind: BlockKind::UnorderedItem { depth, marker },
+            content_start,
+            inline,
+        };
+        return (bl, state.clone());
+    }
+
+    if let Some(content_start) = ordered_item_end(&chars, i) {
+        let inline = offset_inline(&chars, content_start);
+        let bl = BlockLine {
+            kind: BlockKind::OrderedItem { depth },
+            content_start,
+            inline,
+        };
+        return (bl, state.clone());
+    }
+
+    let content_start = leading;
+    let inline = offset_inline(&chars, content_start);
+    let bl = BlockLine {
+        kind: BlockKind::Paragraph,
+        content_start,
+        inline,
+    };
+    (bl, state.clone())
+}
+
+fn is_closing_fence(chars: &[char], from: usize, len: usize, opening_len: usize) -> bool {
+    let mut j = from;
+    let mut n = 0usize;
+    while j < len && chars[j] == '`' {
+        n += 1;
+        j += 1;
+    }
+    while j < len && chars[j] == ' ' {
+        j += 1;
+    }
+    n >= opening_len && j == len
+}
+
+fn is_rule(chars: &[char]) -> bool {
+    let cs: Vec<char> = chars
+        .iter()
+        .copied()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if cs.len() < 3 {
+        return false;
+    }
+    let c0 = cs[0];
+    if !matches!(c0, '-' | '*') {
+        return false;
+    }
+    cs.iter().all(|c| *c == c0)
+}
+
+fn unordered_bullet_end(chars: &[char], from: usize) -> Option<usize> {
+    let len = chars.len();
+    if from < len
+        && matches!(chars[from], '-' | '*' | '+')
+        && from + 1 < len
+        && chars[from + 1] == ' '
+    {
+        return Some(from + 2);
+    }
+    None
+}
+
+fn ordered_item_end(chars: &[char], from: usize) -> Option<usize> {
+    let len = chars.len();
+    let mut d = from;
+    while d < len && chars[d].is_ascii_digit() {
+        d += 1;
+    }
+    if d > from && d < len && matches!(chars[d], '.' | ')') && d + 1 < len && chars[d + 1] == ' ' {
+        return Some(d + 2);
+    }
+    None
+}
+
+fn offset_inline(chars: &[char], offset: usize) -> Vec<InlineSpan> {
+    let text: String = chars[offset..].iter().collect();
+    inline_spans(&text)
+        .into_iter()
+        .map(|s| InlineSpan {
+            kind: s.kind,
+            markers: s
+                .markers
+                .into_iter()
+                .map(|(a, b)| (a + offset, b + offset))
+                .collect(),
+            content: (s.content.0 + offset, s.content.1 + offset),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +611,198 @@ mod tests {
             .expect("italic span");
         assert_eq!(italic.content, (3, 4));
         assert!(bold.content.0 <= italic.content.0 && bold.content.1 >= italic.content.1);
+    }
+
+    #[test]
+    /// UI-R-120 — headings, list items, quotes and rules classify to their `BlockKind`.
+    fn ut_block_kinds_cover_headings_lists_quotes_and_rules() {
+        let (bl, _) = block_line("### Title", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::Heading { level: 3 });
+        assert_eq!(bl.content_start, 4);
+
+        let (bl, _) = block_line("- item", &BlockState::default());
+        assert_eq!(
+            bl.kind,
+            BlockKind::UnorderedItem {
+                depth: 0,
+                marker: '-'
+            }
+        );
+        assert_eq!(bl.content_start, 2);
+
+        let (bl, _) = block_line("  * nested", &BlockState::default());
+        assert_eq!(
+            bl.kind,
+            BlockKind::UnorderedItem {
+                depth: 1,
+                marker: '*'
+            }
+        );
+
+        let (bl, _) = block_line("2. second", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::OrderedItem { depth: 0 });
+        assert_eq!(bl.content_start, 3);
+
+        let (bl, _) = block_line("> quoted", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::Quote { depth: 1 });
+        assert_eq!(bl.content_start, 2);
+
+        let (bl, _) = block_line("> > nested quote", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::Quote { depth: 2 });
+
+        let (bl, _) = block_line("---", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::Rule);
+
+        let (bl, _) = block_line("plain text", &BlockState::default());
+        assert_eq!(bl.kind, BlockKind::Paragraph);
+        assert_eq!(bl.content_start, 0);
+    }
+
+    #[test]
+    /// UI-R-120 — a task item reports its checked state, case-insensitively.
+    fn ut_task_item_reports_checked_state() {
+        let (bl, _) = block_line("- [ ] todo", &BlockState::default());
+        assert_eq!(
+            bl.kind,
+            BlockKind::TaskItem {
+                depth: 0,
+                checked: false
+            }
+        );
+
+        let (bl, _) = block_line("- [x] done", &BlockState::default());
+        assert_eq!(
+            bl.kind,
+            BlockKind::TaskItem {
+                depth: 0,
+                checked: true
+            }
+        );
+
+        let (bl, _) = block_line("- [X] done", &BlockState::default());
+        assert_eq!(
+            bl.kind,
+            BlockKind::TaskItem {
+                depth: 0,
+                checked: true
+            }
+        );
+    }
+
+    #[test]
+    /// UI-R-120 — `inline` carries the source line's inline constructs, offset by `content_start`.
+    fn ut_block_line_reports_inline_spans_of_its_content() {
+        let (bl, _) = block_line("- a **bold** item", &BlockState::default());
+        assert_eq!(bl.inline.len(), 1);
+        let span = &bl.inline[0];
+        assert_eq!(span.kind, InlineKind::Bold);
+        let chars: Vec<char> = "- a **bold** item".chars().collect();
+        let content: String = chars[span.content.0..span.content.1].iter().collect();
+        assert_eq!(content, "bold");
+    }
+
+    #[test]
+    /// UI-R-121 — every line inside an open fence is `FenceBody` regardless of content, and a
+    /// matching closing delimiter clears the carry.
+    fn ut_fence_carry_classifies_every_body_line_and_closes_on_matching_delimiter() {
+        let state = BlockState::default();
+        let (open, state) = block_line("```lua", &state);
+        assert_eq!(
+            open.kind,
+            BlockKind::FenceDelimiter {
+                info: "lua".to_string()
+            }
+        );
+        assert_eq!(state.fence_info(), Some("lua"));
+
+        let (body1, state) = block_line("# not a heading here", &state);
+        assert_eq!(body1.kind, BlockKind::FenceBody);
+        assert!(body1.inline.is_empty());
+
+        let (body2, state) = block_line("- not a list either", &state);
+        assert_eq!(body2.kind, BlockKind::FenceBody);
+
+        let (close, state) = block_line("```", &state);
+        assert_eq!(
+            close.kind,
+            BlockKind::FenceDelimiter {
+                info: String::new()
+            }
+        );
+        assert_eq!(state.fence_info(), None);
+
+        let (after, _) = block_line("# back to a heading", &state);
+        assert_eq!(after.kind, BlockKind::Heading { level: 1 });
+    }
+
+    #[test]
+    /// UI-R-121 — a closing fence delimiter must be at least as long as the opening one; a
+    /// shorter backtick run stays fence body.
+    fn ut_fence_closing_run_must_be_at_least_the_opening_length() {
+        let state = BlockState::default();
+        let (open, state) = block_line("````lua", &state);
+        assert_eq!(state.fence_info(), Some("lua"));
+        assert!(matches!(open.kind, BlockKind::FenceDelimiter { .. }));
+
+        let (short_close, state) = block_line("```", &state);
+        assert_eq!(
+            short_close.kind,
+            BlockKind::FenceBody,
+            "a 3-backtick run must not close a 4-backtick fence"
+        );
+        assert_eq!(state.fence_info(), Some("lua"));
+
+        let (long_close, state) = block_line("````", &state);
+        assert_eq!(
+            long_close.kind,
+            BlockKind::FenceDelimiter {
+                info: String::new()
+            }
+        );
+        assert_eq!(state.fence_info(), None);
+    }
+
+    #[test]
+    /// UI-E-073 — a fence opened and never closed keeps every following line a fence body.
+    fn ut_unclosed_fence_keeps_every_following_line_a_fence_body() {
+        let mut state = BlockState::default();
+        let (open, next) = block_line("```", &state);
+        assert!(matches!(open.kind, BlockKind::FenceDelimiter { .. }));
+        state = next;
+
+        for line in [
+            "one",
+            "```not-closing-because-trailing-text extra",
+            "",
+            "still inside",
+        ] {
+            let (bl, next) = block_line(line, &state);
+            assert_eq!(
+                bl.kind,
+                BlockKind::FenceBody,
+                "line {line:?} should stay fence body"
+            );
+            assert!(state.fence_info().is_some());
+            state = next;
+        }
+    }
+
+    #[test]
+    /// UI-R-124 — tables, raw HTML, footnotes, reference links, setext headings and autolinks
+    /// classify as `Paragraph` with no inline spans over them.
+    fn ut_tables_html_footnotes_reference_links_setext_and_autolinks_are_paragraphs() {
+        let cases = [
+            "| a | b |",
+            "raw <b>html</b>",
+            "footnote [^1] ref",
+            "[ref][1]",
+            "<https://example.com>",
+            "===",
+        ];
+        for case in cases {
+            let (bl, _) = block_line(case, &BlockState::default());
+            assert_eq!(bl.kind, BlockKind::Paragraph, "{case:?}");
+            assert!(bl.inline.is_empty(), "{case:?}: {:?}", bl.inline);
+        }
     }
 }
