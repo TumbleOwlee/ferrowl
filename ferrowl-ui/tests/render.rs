@@ -364,38 +364,57 @@ fn scrolling_tabs_render_variants() {
     StatefulWidget::render(w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
 }
 
-// ---- VerticalTabs ----
-
 #[test]
-/// UI-R-116 — active row style matches the horizontal tab bar's selected style.
+/// UI-R-114, UI-R-115, UI-R-116, UI-R-120, UI-R-121 — padded title rows
+/// written one character per row, and active-block style matching the
+/// horizontal tab bar's selected style.
 fn it_vertical_tabs_render_variants() {
-    let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-    let titles = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+    let w = VerticalTabsBuilder::<String>::default()
+        .padding(Margin::new(1, 1))
+        .build()
+        .unwrap();
+    let titles = vec!["Tab".to_string()];
     let mut st = VerticalTabsState {
         titles: titles.clone(),
-        active: 1,
+        active: 0,
         offset: 0,
     };
-    let mut b1 = buffer(1, 3);
-    StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b1, &mut st);
-    assert_eq!(b1[(0, 0)].symbol(), "a");
-    assert_eq!(b1[(0, 1)].symbol(), "b");
-    assert_eq!(b1[(0, 2)].symbol(), "g");
+    let mut b1 = buffer(3, 5);
+    StatefulWidget::render(&w, Rect::new(0, 0, 3, 5), &mut b1, &mut st);
+    let row = |b: &Buffer, y: u16| {
+        format!(
+            "{}{}{}",
+            b[(0, y)].symbol(),
+            b[(1, y)].symbol(),
+            b[(2, y)].symbol()
+        )
+    };
+    assert_eq!(row(&b1, 0), "   ");
+    assert_eq!(row(&b1, 1), " T ");
+    assert_eq!(row(&b1, 2), " a ");
+    assert_eq!(row(&b1, 3), " b ");
+    assert_eq!(row(&b1, 4), "   ");
     let selected = ScrollingTabsStyle::default().selected;
-    assert_eq!(b1[(0, 1)].fg, selected.fg.unwrap());
-    assert_eq!(b1[(0, 1)].bg, selected.bg.unwrap());
+    for y in 0..5 {
+        for x in 0..3 {
+            assert_eq!(b1[(x, y)].fg, selected.fg.unwrap());
+            assert_eq!(b1[(x, y)].bg, selected.bg.unwrap());
+        }
+    }
 
     let mut st2 = VerticalTabsState {
         titles,
-        active: 1,
+        active: 0,
         offset: 0,
     };
-    let mut b2 = buffer(1, 3);
-    StatefulWidget::render(w, Rect::new(0, 0, 1, 3), &mut b2, &mut st2);
-    for y in 0..3 {
-        assert_eq!(b1[(0, y)].symbol(), b2[(0, y)].symbol());
-        assert_eq!(b1[(0, y)].fg, b2[(0, y)].fg);
-        assert_eq!(b1[(0, y)].bg, b2[(0, y)].bg);
+    let mut b2 = buffer(3, 5);
+    StatefulWidget::render(w, Rect::new(0, 0, 3, 5), &mut b2, &mut st2);
+    for y in 0..5 {
+        for x in 0..3 {
+            assert_eq!(b1[(x, y)].symbol(), b2[(x, y)].symbol());
+            assert_eq!(b1[(x, y)].fg, b2[(x, y)].fg);
+            assert_eq!(b1[(x, y)].bg, b2[(x, y)].bg);
+        }
     }
 }
 

@@ -228,9 +228,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-119** — The vertical tab line (UI-R-114) derives no selection of its own: the caller owns the tab list and the active index in the widget's state and updates them before each render, and the only field the widget itself maintains is the scroll offset (UI-R-117).
 
-**UI-R-120** — The vertical tab line (UI-R-114) takes a padding of N rows, default 0, and renders N blank rows above and N blank rows below every tab's character rows (UI-R-115).
+**UI-R-120** — The vertical tab line (UI-R-114) takes a padding of a horizontal count H and a vertical count V, both default 0, and renders V blank rows above and V blank rows below every tab's character rows (UI-R-115).
 
-**UI-R-121** — The padding N of the vertical tab line (UI-R-120) also renders N blank columns to the left and N to the right of the character column, making the widget's rendered width `1 + 2N` columns; with padding 1 and title `Tab` the widget therefore renders the rows `"   "`, `" T "`, `" a "`, `" b "`, `"   "` from top to bottom.
+**UI-R-121** — The horizontal padding count H of the vertical tab line (UI-R-120) renders H blank columns to the left and H to the right of the character column, so the widget's rendered width is `1 + 2H` columns and is never fixed at one; with H = 1, V = 1 and title `Tab` the widget renders the rows `"   "`, `" T "`, `" a "`, `" b "`, `"   "` from top to bottom.
 
 ## Modbus monitor view
 

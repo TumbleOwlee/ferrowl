@@ -1,14 +1,17 @@
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
-use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+use ratatui::{buffer::Buffer, layout::Margin, layout::Rect, widgets::StatefulWidget};
 use std::marker::PhantomData;
 
 use crate::state::VerticalTabsState;
 use crate::style::ScrollingTabsStyle;
 use crate::traits::ToLabel;
 
-/// A tab bar that lays its tabs out vertically, one per row, showing only the
-/// first character of each label, and scrolls to keep the active row visible.
+/// A tab bar that lays its tabs out vertically, writing each title downward
+/// one character per row and scrolling to keep the active tab's block of
+/// rows visible. An optional padding of a horizontal count H and a vertical
+/// count V frames every tab, making the widget's rendered width `1 + 2H`
+/// columns.
 ///
 /// Style is shared with [`crate::widgets::ScrollingTabs`] via
 /// [`ScrollingTabsStyle`]; tab data and the active index live in
@@ -20,6 +23,9 @@ pub struct VerticalTabs<T: ToLabel + Clone> {
     #[getset(get = "pub")]
     #[builder(default = "ScrollingTabsStyle::default()")]
     style: ScrollingTabsStyle,
+    #[getset(get_copy = "pub")]
+    #[builder(default = "Margin::new(0, 0)")]
+    padding: Margin,
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<T>,
@@ -31,6 +37,31 @@ impl<T: ToLabel + Clone> StatefulWidget for VerticalTabs<T> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         StatefulWidget::render(&self, area, buf, state);
     }
+}
+
+/// Resolves row `row` (counted across the whole stacked tab list) to the
+/// owning tab's index and, if the row is a character row rather than a
+/// vertical padding row, the character it carries.
+fn resolve_row<T: ToLabel>(
+    titles: &[T],
+    vertical: usize,
+    row: usize,
+) -> Option<(usize, Option<char>)> {
+    let mut start = 0usize;
+    for (idx, title) in titles.iter().enumerate() {
+        let label = title.to_label();
+        let chars_count = label.chars().count();
+        let height = 2 * vertical + chars_count;
+        if row < start + height {
+            let local = row - start;
+            if local < vertical || local >= vertical + chars_count {
+                return Some((idx, None));
+            }
+            return Some((idx, label.chars().nth(local - vertical)));
+        }
+        start += height;
+    }
+    None
 }
 
 impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
@@ -45,30 +76,52 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             return;
         }
 
+        let horizontal = self.padding.horizontal as usize;
+        let vertical = self.padding.vertical as usize;
+        let mut start = 0usize;
+        let mut active_block = None;
+        for (idx, title) in state.titles.iter().enumerate() {
+            let height = 2 * vertical + title.to_label().chars().count();
+            if idx == state.active {
+                active_block = Some((start, height));
+            }
+            start += height;
+        }
+        let total_rows = start;
+
         let h = area.height as usize;
-        if state.active < state.titles.len() {
-            if state.active < state.offset {
-                state.offset = state.active;
-            } else if state.active >= state.offset + h {
-                state.offset = state.active + 1 - h;
+        if let Some((block_start, block_height)) = active_block {
+            if block_start + block_height > state.offset + h {
+                state.offset = block_start + block_height - h;
+            }
+            if state.offset > block_start {
+                state.offset = block_start;
             }
         }
 
-        let end = (state.offset + h).min(state.titles.len());
-        for i in state.offset..end {
-            let y = area.y + (i - state.offset) as u16;
-            let x = area.x;
-            let label = state.titles[i].to_label();
-            let sym = label
-                .chars()
-                .next()
-                .map_or_else(|| " ".to_string(), String::from);
-            let style = if i == state.active {
+        let end = (state.offset + h).min(total_rows);
+        for row in state.offset..end {
+            let Some((tab_idx, ch)) = resolve_row(&state.titles, vertical, row) else {
+                continue;
+            };
+            let y = area.y + (row - state.offset) as u16;
+            let style = if tab_idx == state.active {
                 self.style.selected
             } else {
                 self.style.general
             };
-            buf[(x, y)].set_symbol(&sym).set_style(style);
+            for col in 0..=(2 * horizontal) {
+                let x = area.x + col as u16;
+                if x >= area.x + area.width {
+                    break;
+                }
+                let sym = if col == horizontal {
+                    ch.map_or_else(|| " ".to_string(), String::from)
+                } else {
+                    " ".to_string()
+                };
+                buf[(x, y)].set_symbol(&sym).set_style(style);
+            }
         }
     }
 }
@@ -91,74 +144,197 @@ mod tests {
             && cell.modifier == style.add_modifier
     }
 
-    /// UI-R-114, UI-R-115 — one first char per row, top-down in list order.
+    /// UI-R-120, UI-R-121 — horizontal padding alone widens the render.
     #[test]
-    fn ut_renders_one_first_char_per_row() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+    fn ut_horizontal_padding_widens_render() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(2, 0))
+            .build()
+            .unwrap();
         let mut st = VerticalTabsState {
-            titles: titles(&["alpha", "beta", "gamma"]),
+            titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
         };
-        let mut b = buffer(1, 3);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
-        assert_eq!(b[(0, 0)].symbol(), "a");
-        assert_eq!(b[(0, 1)].symbol(), "b");
-        assert_eq!(b[(0, 2)].symbol(), "g");
+        let mut b = buffer(7, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 7, 3), &mut b, &mut st);
+        assert_eq!(b[(2, 0)].symbol(), "T");
+        assert_eq!(b[(2, 1)].symbol(), "a");
+        assert_eq!(b[(2, 2)].symbol(), "b");
+        let style = ScrollingTabsStyle::default();
+        for y in 0..3 {
+            for x in [0usize, 1, 3, 4] {
+                assert_eq!(b[(x as u16, y)].symbol(), " ");
+                assert!(cell_has_style(&b[(x as u16, y)], style.selected));
+            }
+        }
+        for y in 0..3 {
+            for x in 5..7 {
+                assert_eq!(b[(x, y)].symbol(), " ");
+                assert!(cell_has_style(&b[(x, y)], ratatui::style::Style::default()));
+            }
+        }
     }
 
-    /// UI-R-116 — active row takes the selected style, others the general style.
+    /// UI-R-120 — vertical padding alone frames the title with blank rows,
+    /// without changing the rendered width.
     #[test]
-    fn ut_active_row_uses_selected_style() {
+    fn ut_vertical_padding_frames_rows() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), "T");
+        assert_eq!(b[(0, 2)].symbol(), "a");
+        assert_eq!(b[(0, 3)].symbol(), "b");
+        assert_eq!(b[(0, 4)].symbol(), " ");
+    }
+
+    /// UI-R-114, UI-R-115 — a title is written one character per row, top-down.
+    #[test]
+    fn ut_renders_title_one_char_per_row() {
         let w = VerticalTabsBuilder::<String>::default().build().unwrap();
         let mut st = VerticalTabsState {
-            titles: titles(&["alpha", "beta", "gamma"]),
+            titles: titles(&["Tab", "Two"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 6);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 6), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), "T");
+        assert_eq!(b[(0, 1)].symbol(), "a");
+        assert_eq!(b[(0, 2)].symbol(), "b");
+        assert_eq!(b[(0, 3)].symbol(), "T");
+        assert_eq!(b[(0, 4)].symbol(), "w");
+        assert_eq!(b[(0, 5)].symbol(), "o");
+    }
+
+    /// UI-R-116, UI-R-121 — every cell of the active tab's block takes the
+    /// selected style, including its padding rows and columns.
+    #[test]
+    fn ut_active_block_cells_use_selected_style() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab", "Two"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(3, 10);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 10), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..5 {
+            for x in 0..3 {
+                assert!(cell_has_style(&b[(x, y)], style.general));
+            }
+        }
+        for y in 5..10 {
+            for x in 0..3 {
+                assert!(cell_has_style(&b[(x, y)], style.selected));
+            }
+        }
+    }
+
+    /// UI-R-120, UI-R-121 — default padding is zero, rendering exactly one column.
+    #[test]
+    fn ut_default_padding_is_zero() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(3, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 3), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), "T");
+        assert_eq!(b[(0, 1)].symbol(), "a");
+        assert_eq!(b[(0, 2)].symbol(), "b");
+        for y in 0..3 {
+            assert_eq!(b[(1, y)].symbol(), " ");
+            assert_eq!(b[(2, y)].symbol(), " ");
+            assert!(cell_has_style(&b[(1, y)], ratatui::style::Style::default()));
+            assert!(cell_has_style(&b[(2, y)], ratatui::style::Style::default()));
+        }
+    }
+
+    /// UI-R-120, UI-R-121 — H and V together frame the title with blank rows and columns.
+    #[test]
+    fn ut_padding_frames_each_title() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(3, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 5), &mut b, &mut st);
+        let row = |y: u16| {
+            format!(
+                "{}{}{}",
+                b[(0, y)].symbol(),
+                b[(1, y)].symbol(),
+                b[(2, y)].symbol()
+            )
+        };
+        assert_eq!(row(0), "   ");
+        assert_eq!(row(1), " T ");
+        assert_eq!(row(2), " a ");
+        assert_eq!(row(3), " b ");
+        assert_eq!(row(4), "   ");
+    }
+
+    /// UI-R-114, UI-R-115, UI-R-117 — fewer rows than the tabs' total height
+    /// scrolls to keep the active tab's block visible.
+    #[test]
+    fn ut_scrolls_to_keep_active_visible() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab", "Two"]),
             active: 1,
             offset: 0,
         };
         let mut b = buffer(1, 3);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
-        assert!(cell_has_style(&b[(0, 0)], style.general));
-        assert!(cell_has_style(&b[(0, 1)], style.selected));
-        assert!(cell_has_style(&b[(0, 2)], style.general));
-    }
-
-    /// UI-R-117, UI-R-118 — fewer rows than tabs scrolls to keep active visible.
-    #[test]
-    fn ut_scrolls_to_keep_active_visible() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
-            titles: titles(&["alpha", "beta", "gamma", "delta", "epsilon"]),
-            active: 4,
-            offset: 0,
-        };
-        let mut b = buffer(1, 2);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
         assert_eq!(st.offset, 3);
-        assert_eq!(b[(0, 0)].symbol(), "d");
-        assert_eq!(b[(0, 1)].symbol(), "e");
+        assert_eq!(b[(0, 0)].symbol(), "T");
+        assert_eq!(b[(0, 1)].symbol(), "w");
+        assert_eq!(b[(0, 2)].symbol(), "o");
     }
 
-    /// UI-R-118 — offset moves the minimum distance, unchanged when already visible.
+    /// UI-R-118 — offset moves the minimum distance, unchanged when the whole
+    /// block is already visible.
     #[test]
     fn ut_scroll_offset_is_minimal() {
         let w = VerticalTabsBuilder::<String>::default().build().unwrap();
         let mut st = VerticalTabsState {
-            titles: titles(&["alpha", "beta", "gamma", "delta", "epsilon"]),
-            active: 3,
+            titles: titles(&["Tab", "Two"]),
+            active: 1,
             offset: 3,
         };
-        let mut b = buffer(1, 2);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
+        let mut b = buffer(1, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
         assert_eq!(st.offset, 3);
 
-        st.active = 1;
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
-        assert_eq!(st.offset, 1);
+        st.active = 0;
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+        assert_eq!(st.offset, 0);
     }
 
-    /// UI-R-119 — widget writes no field but the offset.
+    /// UI-R-118, UI-R-119 — widget writes no field but the offset, moved the
+    /// minimal distance.
     #[test]
     fn ut_render_leaves_titles_and_active_untouched() {
         let w = VerticalTabsBuilder::<String>::default().build().unwrap();
@@ -172,7 +348,7 @@ mod tests {
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
         assert_eq!(st.titles, input);
         assert_eq!(st.active, 4);
-        assert_eq!(st.offset, 3);
+        assert_eq!(st.offset, 19);
     }
 
     /// UI-E-063 — zero-sized area skips drawing, offset unchanged.
@@ -184,31 +360,63 @@ mod tests {
             active: 0,
             offset: 2,
         };
-        let mut b = buffer(0, 3);
+        let mut b = buffer(3, 3);
         StatefulWidget::render(&w, Rect::new(0, 0, 0, 3), &mut b, &mut st);
         assert_eq!(st.offset, 2);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert!(cell_has_style(&b[(0, 0)], ratatui::style::Style::default()));
 
-        let mut b = buffer(1, 0);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 0), &mut b, &mut st);
+        let mut b = buffer(3, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 0), &mut b, &mut st);
         assert_eq!(st.offset, 2);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert!(cell_has_style(&b[(0, 0)], ratatui::style::Style::default()));
     }
 
-    /// UI-E-064 — wider area draws into the leftmost column only.
+    /// UI-E-064 — an area wider than the rendered width draws into the
+    /// leftmost `1 + 2N` columns only.
     #[test]
-    fn ut_wider_area_uses_leftmost_column_only() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+    fn ut_wider_area_uses_rendered_width_only() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
         let mut st = VerticalTabsState {
-            titles: titles(&["alpha", "beta"]),
+            titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
         };
-        let mut b = buffer(4, 2);
-        StatefulWidget::render(&w, Rect::new(0, 0, 4, 2), &mut b, &mut st);
-        assert_eq!(b[(0, 0)].symbol(), "a");
-        for x in 1..4 {
-            assert_eq!(b[(x, 0)].symbol(), " ");
-            assert!(cell_has_style(&b[(x, 0)], ratatui::style::Style::default()));
+        let mut b = buffer(6, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 6, 5), &mut b, &mut st);
+        assert_eq!(b[(1, 1)].symbol(), "T");
+        assert_eq!(b[(1, 2)].symbol(), "a");
+        assert_eq!(b[(1, 3)].symbol(), "b");
+        for x in 3..6 {
+            for y in 0..5 {
+                assert_eq!(b[(x, y)].symbol(), " ");
+                assert!(cell_has_style(&b[(x, y)], ratatui::style::Style::default()));
+            }
         }
+    }
+
+    /// UI-E-069 — an area narrower than the rendered width clips at the
+    /// right edge, no reflow, no panic.
+    #[test]
+    fn ut_narrower_area_clips_rendered_columns() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(2, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 2, 5), &mut b, &mut st);
+        assert_eq!(b[(1, 1)].symbol(), "T");
+        assert_eq!(b[(1, 2)].symbol(), "a");
+        assert_eq!(b[(1, 3)].symbol(), "b");
     }
 
     /// UI-E-065 — empty tab list draws nothing and resets the offset.
@@ -225,54 +433,92 @@ mod tests {
         assert_eq!(st.offset, 0);
     }
 
-    /// UI-E-066 — active out of range: no row selected, offset unchanged, no panic.
+    /// UI-E-066 — active out of range: no cell selected, offset unchanged, no panic.
     #[test]
     fn ut_active_out_of_range_is_inert() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
         let mut st = VerticalTabsState {
             titles: titles(&["alpha", "beta", "gamma"]),
             active: 9,
             offset: 1,
         };
-        let mut b = buffer(1, 3);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+        let mut b = buffer(3, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 3), &mut b, &mut st);
         assert_eq!(st.offset, 1);
         let style = ScrollingTabsStyle::default();
-        for y in 0..2 {
-            assert!(cell_has_style(&b[(0, y)], style.general));
+        for y in 0..3 {
+            for x in 0..3 {
+                assert!(cell_has_style(&b[(x, y)], style.general));
+            }
         }
     }
 
-    /// UI-E-067 — empty label draws a blank row, still styled.
+    /// UI-R-120, UI-E-067 — an empty title occupies only its padding rows.
     #[test]
-    fn ut_empty_label_row_is_blank_but_styled() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+    fn ut_empty_title_occupies_padding_only() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
         let mut st = VerticalTabsState {
-            titles: titles(&["", "beta"]),
+            titles: titles(&["", "Two"]),
             active: 0,
             offset: 0,
         };
-        let mut b = buffer(1, 2);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
-        assert_eq!(b[(0, 0)].symbol(), " ");
-        assert!(cell_has_style(
-            &b[(0, 0)],
-            ScrollingTabsStyle::default().selected
-        ));
-        assert_eq!(b[(0, 1)].symbol(), "b");
+        let mut b = buffer(3, 7);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 7), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        assert!(cell_has_style(&b[(1, 0)], style.selected));
+        assert!(cell_has_style(&b[(1, 1)], style.selected));
+        assert_eq!(b[(1, 3)].symbol(), "T");
+
+        let w0 = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st0 = VerticalTabsState {
+            titles: titles(&["", "Two"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b0 = buffer(1, 3);
+        StatefulWidget::render(&w0, Rect::new(0, 0, 1, 3), &mut b0, &mut st0);
+        assert_eq!(b0[(0, 0)].symbol(), "T");
     }
 
-    /// UI-E-068 — double-width first char written as-is, no fallback glyph.
+    /// UI-E-068 — double-width title characters written as-is, no fallback glyph.
     #[test]
-    fn ut_wide_first_char_is_written_as_is() {
+    fn ut_wide_title_char_is_written_as_is() {
         let w = VerticalTabsBuilder::<String>::default().build().unwrap();
         let mut st = VerticalTabsState {
             titles: titles(&["日本"]),
             active: 0,
             offset: 0,
         };
-        let mut b = buffer(1, 1);
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 1), &mut b, &mut st);
+        let mut b = buffer(1, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut b, &mut st);
         assert_eq!(b[(0, 0)].symbol(), "日");
+        assert_eq!(b[(0, 1)].symbol(), "本");
+    }
+
+    /// UI-E-070 — an active block taller than the area places its first row
+    /// at the top edge; the rest of the block is clipped.
+    #[test]
+    fn ut_block_taller_than_area_starts_at_top() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Ab", "Longtitle"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(3, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 3), &mut b, &mut st);
+        assert_eq!(st.offset, 4);
+        assert_eq!(b[(1, 0)].symbol(), " ");
+        assert_eq!(b[(1, 1)].symbol(), "L");
+        assert_eq!(b[(1, 2)].symbol(), "o");
     }
 }

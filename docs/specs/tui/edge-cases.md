@@ -82,10 +82,10 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-050** | Tabs overflow the bar width | tab bar scrolls horizontally to keep the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
 | **UI-E-063** | Vertical tab line drawn into an area of zero width or zero height | skips drawing; scroll offset unchanged (UI-E-047) |
-| **UI-E-064** | Vertical tab line drawn into an area wider than its rendered width (UI-R-121) | draws into the leftmost `1 + 2N` columns only; the remaining columns are left untouched |
+| **UI-E-064** | Vertical tab line drawn into an area wider than its rendered width (UI-R-121) | draws into the leftmost `1 + 2H` columns only; the remaining columns are left untouched |
 | **UI-E-065** | Vertical tab line with an empty tab list | nothing drawn; scroll offset reset to zero |
 | **UI-E-066** | Vertical tab line active index out of range (UI-R-119) | no cell takes the active style; scroll offset unchanged; never panics |
-| **UI-E-067** | Vertical tab line title that is the empty string (UI-R-115) | occupies no character rows, only its 2N padding rows (UI-R-120), which still take the active style when it is the active tab; with padding 0 the tab occupies no rows at all and is invisible |
+| **UI-E-067** | Vertical tab line title that is the empty string (UI-R-115) | occupies no character rows, only its 2V padding rows (UI-R-120), which still take the active style when it is the active tab; with vertical padding 0 the tab occupies no rows at all and is invisible |
 | **UI-E-068** | Vertical tab line title character that is double-width (CJK, emoji) | drawn as-is into the one-column character column and clipped there; no substitution or fallback glyph. Intentional |
 | **UI-E-069** | Vertical tab line drawn into an area narrower than its rendered width (UI-R-121) | the rendered columns are clipped at the right edge of the area; no reflow, no padding reduction, never panics |
 | **UI-E-070** | Vertical tab line active tab whose block is taller than the area (UI-R-118) | the scroll offset places the block's first row at the top edge; the rest of the block is clipped |
