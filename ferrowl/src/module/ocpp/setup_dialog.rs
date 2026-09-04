@@ -9,7 +9,7 @@ use ferrowl_ui::{
     Border, COLOR_SCHEME, EventResult, render_field, render_row,
     state::{InputFieldState, SelectionState, SuggestInputState},
     style::{InputFieldStyle, SelectionStyle, TextStyle},
-    traits::{HandleEvents, ToLabel},
+    traits::HandleEvents,
     widgets::{
         GetValue, InputField, Selection, SuggestInput, Text, TextBuilder, Validate, ValidateResult,
         Widget,
@@ -25,6 +25,7 @@ use ratatui::{
 
 use crate::config::ClientOrServer;
 use crate::dialog::NonEmpty;
+use crate::dialog::choices::ReconnectChoice;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::path_suggest::FsPathProvider;
 use crate::dialog::tls_section::{TlsSection, TlsSectionFocus};
@@ -49,26 +50,6 @@ use crate::module::modbus::dialog::{
 /// config. Mirrors the Modbus dialog's `ConfigPath`.
 #[derive(Debug, Clone)]
 pub struct ConfigPath;
-
-/// Auto-reconnect toggle: client redial (OC-R-048, OC-R-107) or server bind retry
-/// (OC-R-083, OC-R-108–109). Mirrors Modbus's own `setup_dialog::choices::ReconnectChoice`,
-/// duplicated rather than shared: the two setup dialogs are independent module types with no
-/// shared UI-choices module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconnectChoice {
-    On,
-    Off,
-}
-
-impl ToLabel for ReconnectChoice {
-    fn to_label(&self) -> String {
-        match self {
-            ReconnectChoice::On => "On",
-            ReconnectChoice::Off => "Off",
-        }
-        .to_string()
-    }
-}
 
 impl Validate for ConfigPath {
     fn validate(input: &str) -> ValidateResult {

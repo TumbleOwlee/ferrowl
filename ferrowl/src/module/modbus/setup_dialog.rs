@@ -36,7 +36,8 @@ use ferrowl_modbus::tcp::ModbusTlsConfig;
 use super::build::Timing;
 
 mod choices;
-use choices::{DialogMode, Parity, ReconnectChoice, Transport, U8Choice};
+use crate::dialog::choices::{DialogMode, Parity, ReconnectChoice, U8Choice, select_u8};
+use choices::Transport;
 mod tls;
 use tls::{TlsInputs, TlsLevel, validate_tls};
 
@@ -963,15 +964,6 @@ impl SetupDialog {
         if let Some(d) = self.close_confirm.as_mut() {
             d.render(vcenter, buf);
         }
-    }
-}
-
-/// Select the entry matching `current` (if present) in a numeric choice selection.
-fn select_u8(state: &mut SelectionState<U8Choice>, current: Option<u8>) {
-    if let Some(value) = current
-        && let Some(index) = state.values().iter().position(|c| c.0 == value)
-    {
-        state.set_selection(index);
     }
 }
 
