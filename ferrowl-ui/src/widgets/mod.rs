@@ -5,6 +5,7 @@ mod build;
 mod button;
 mod code_input_field;
 mod input_field;
+mod markdown_render;
 mod scrolling_tabs;
 mod selection;
 mod suggest_input;
