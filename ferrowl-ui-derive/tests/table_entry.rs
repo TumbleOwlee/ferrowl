@@ -15,7 +15,7 @@ struct ScriptRow {
 }
 
 #[test]
-fn ut_values_are_column_fields_in_order() {
+fn it_values_are_column_fields_in_order() {
     let row = ScriptRow {
         name: "boot".into(),
         status: "running".into(),
@@ -24,7 +24,7 @@ fn ut_values_are_column_fields_in_order() {
 }
 
 #[test]
-fn ut_default_height_is_one() {
+fn it_default_height_is_one() {
     let row = ScriptRow {
         name: "x".into(),
         status: "y".into(),
@@ -33,7 +33,7 @@ fn ut_default_height_is_one() {
 }
 
 #[test]
-fn ut_default_cell_styles_are_none() {
+fn it_default_cell_styles_are_none() {
     let row = ScriptRow {
         name: "x".into(),
         status: "y".into(),
@@ -42,7 +42,7 @@ fn ut_default_cell_styles_are_none() {
 }
 
 #[test]
-fn ut_header_names_and_widths_from_attrs() {
+fn it_header_names_and_widths_from_attrs() {
     // Default companion type is `<StructName>Header`.
     assert_eq!(
         ScriptRowHeader::header(),
@@ -69,7 +69,7 @@ struct KvRow {
 }
 
 #[test]
-fn ut_custom_height_and_header_name() {
+fn it_custom_height_and_header_name() {
     let row = KvRow {
         key: "k".into(),
         value: "v".into(),
@@ -100,7 +100,7 @@ fn cs_styles(row: &CsRow) -> [Option<Style>; 2] {
 }
 
 #[test]
-fn ut_styles_path_drives_cell_styles() {
+fn it_styles_path_drives_cell_styles() {
     let connected = CsRow {
         name: "cs1".into(),
         state: "Connected".into(),

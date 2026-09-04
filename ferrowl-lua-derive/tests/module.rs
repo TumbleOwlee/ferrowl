@@ -8,7 +8,7 @@ use ferrowl_lua_derive::Module;
 struct Log;
 
 #[test]
-fn ut_derived_name_matches_attr() {
+fn it_derived_name_matches_attr() {
     assert_eq!(<Log as Module>::module(), "C_Log");
 }
 
@@ -21,7 +21,7 @@ struct Ocpp<H> {
 }
 
 #[test]
-fn ut_generic_struct_compiles_and_reports_name() {
+fn it_generic_struct_compiles_and_reports_name() {
     assert_eq!(<Ocpp<()> as Module>::module(), "C_OCPP");
 }
 
@@ -40,6 +40,6 @@ where
 }
 
 #[test]
-fn ut_where_clause_generic_reports_name() {
+fn it_where_clause_generic_reports_name() {
     assert_eq!(<Register<u8> as Module>::module(), "C_Register");
 }

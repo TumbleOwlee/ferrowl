@@ -63,7 +63,7 @@ fn make_app() -> TestApp {
 
 #[test]
 /// UI-R-049 — focus_next advances focus to the next focusable field.
-fn ut_focus_next_advances() {
+fn it_focus_next_advances() {
     let mut app = make_app();
     // starts at First, moves to Second
     app.focus_next();
@@ -72,7 +72,7 @@ fn ut_focus_next_advances() {
 
 #[test]
 /// UI-R-049 — focus_next wraps from the last field back to the first.
-fn ut_focus_next_wraps_around() {
+fn it_focus_next_wraps_around() {
     let mut app = make_app();
     app.focus_next(); // → Second
     app.focus_next(); // → Third
@@ -82,7 +82,7 @@ fn ut_focus_next_wraps_around() {
 
 #[test]
 /// UI-R-049 — focus_previous wraps from the first field to the last.
-fn ut_focus_previous_wraps_backward() {
+fn it_focus_previous_wraps_backward() {
     let mut app = make_app();
     // at First, previous wraps to Third
     app.focus_previous();
@@ -91,7 +91,7 @@ fn ut_focus_previous_wraps_backward() {
 
 #[test]
 /// UI-R-049 — focus_previous reverses a focus_next step.
-fn ut_focus_previous_reverses_next() {
+fn it_focus_previous_reverses_next() {
     let mut app = make_app();
     app.focus_next(); // → Second
     app.focus_previous(); // → First
@@ -100,7 +100,7 @@ fn ut_focus_previous_reverses_next() {
 
 #[test]
 /// UI-R-049 — exactly one field is focused after a focus step; the prior one is cleared.
-fn ut_exactly_one_widget_focused_after_switch() {
+fn it_exactly_one_widget_focused_after_switch() {
     let mut app = make_app();
     app.focus_next(); // → Second
     let focused = [&app.first, &app.second, &app.third]
@@ -117,7 +117,7 @@ fn ut_exactly_one_widget_focused_after_switch() {
 
 #[test]
 /// UI-R-049 — a focusable container routes key events to its currently-focused field.
-fn ut_handle_events_routes_to_focused_widget() {
+fn it_handle_events_routes_to_focused_widget() {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::HandleEvents;
 
@@ -162,7 +162,7 @@ fn make_gated(second_enabled: bool, start: GatedAppFocus) -> GatedApp {
 
 #[test]
 /// UI-R-049 — the focus cycle skips a field whose enabling condition is false.
-fn ut_focus_next_skips_disabled_gated_widget() {
+fn it_focus_next_skips_disabled_gated_widget() {
     let mut app = make_gated(false, GatedAppFocus::First);
     app.focus_next(); // First → (Second disabled, skipped) → Third
     assert!(app.third.is_focused());
@@ -171,7 +171,7 @@ fn ut_focus_next_skips_disabled_gated_widget() {
 
 #[test]
 /// UI-R-049 — the focus cycle lands on a gated field when its condition is true.
-fn ut_focus_next_lands_on_enabled_gated_widget() {
+fn it_focus_next_lands_on_enabled_gated_widget() {
     let mut app = make_gated(true, GatedAppFocus::First);
     app.focus_next(); // First → Second (enabled)
     assert!(app.second.is_focused());
@@ -180,7 +180,7 @@ fn ut_focus_next_lands_on_enabled_gated_widget() {
 
 #[test]
 /// UI-R-049 — reverse focus cycle also skips a disabled gated field.
-fn ut_focus_previous_skips_disabled_gated_widget() {
+fn it_focus_previous_skips_disabled_gated_widget() {
     let mut app = make_gated(false, GatedAppFocus::Third);
     app.focus_previous(); // Third → (Second disabled, skipped) → First
     assert!(app.first.is_focused());
@@ -191,7 +191,7 @@ fn ut_focus_previous_skips_disabled_gated_widget() {
 
 #[test]
 /// UI-R-049 — focusing the container focuses its first eligible field and reports focused.
-fn ut_set_focused_true_focuses_first_and_reports_focused() {
+fn it_set_focused_true_focuses_first_and_reports_focused() {
     let mut app = make_app(); // view unfocused, nothing focused
     assert!(!app.is_focused());
     app.set_focused(true);
@@ -203,7 +203,7 @@ fn ut_set_focused_true_focuses_first_and_reports_focused() {
 
 #[test]
 /// UI-R-049 — unfocusing the container clears every field's focus.
-fn ut_set_focused_false_clears_all_widgets() {
+fn it_set_focused_false_clears_all_widgets() {
     let mut app = make_app();
     app.set_focused(true);
     app.focus_next(); // Second focused
@@ -218,7 +218,7 @@ fn ut_set_focused_false_clears_all_widgets() {
 
 #[test]
 /// UI-R-049 — re-focusing the container restores the previously-focused field.
-fn ut_set_focused_restores_prior_pane() {
+fn it_set_focused_restores_prior_pane() {
     let mut app = make_app();
     app.set_focused(true);
     app.focus_next(); // remember Second
@@ -230,7 +230,7 @@ fn ut_set_focused_restores_prior_pane() {
 
 #[test]
 /// UI-R-049 — if the remembered field is now ineligible, focus falls back to the first eligible field.
-fn ut_set_focused_falls_back_to_first_eligible_when_remembered_ineligible() {
+fn it_set_focused_falls_back_to_first_eligible_when_remembered_ineligible() {
     // Remembered pane is the gated Second, but it is disabled → enable lands on the first
     // eligible pane in declaration order (First).
     let mut app = make_gated(false, GatedAppFocus::Second);
@@ -241,7 +241,7 @@ fn ut_set_focused_falls_back_to_first_eligible_when_remembered_ineligible() {
 
 #[test]
 /// UI-R-049 — a remembered gated field that is still eligible is kept on re-focus.
-fn ut_set_focused_keeps_remembered_eligible_gated_pane() {
+fn it_set_focused_keeps_remembered_eligible_gated_pane() {
     // Remembered Second is eligible (enabled) → kept on enable.
     let mut app = make_gated(true, GatedAppFocus::Second);
     app.set_focused(true);
@@ -288,7 +288,7 @@ fn make_single_section() -> SingleSection {
 
 #[test]
 /// UI-R-049 — `try_focus_next` on a `#[focusable(nestable)]` struct steps to the next pane.
-fn ut_try_focus_next_steps_within_section() {
+fn it_try_focus_next_steps_within_section() {
     let mut section = make_section(SectionFocus::A);
     assert!(section.try_focus_next());
     assert!(section.b.is_focused());
@@ -297,7 +297,7 @@ fn ut_try_focus_next_steps_within_section() {
 
 #[test]
 /// UI-R-049 — `try_focus_next` at the last pane reports `false` and leaves position unchanged.
-fn ut_try_focus_next_false_at_last_pane() {
+fn it_try_focus_next_false_at_last_pane() {
     let mut section = make_section(SectionFocus::B);
     section.b.set_focused(true);
     assert!(!section.try_focus_next());
@@ -309,7 +309,7 @@ fn ut_try_focus_next_false_at_last_pane() {
 
 #[test]
 /// UI-R-049 — `try_focus_previous` at the first pane reports `false` and leaves position unchanged.
-fn ut_try_focus_previous_false_at_first_pane() {
+fn it_try_focus_previous_false_at_first_pane() {
     let mut section = make_section(SectionFocus::A);
     section.a.set_focused(true);
     assert!(!section.try_focus_previous());
@@ -319,7 +319,7 @@ fn ut_try_focus_previous_false_at_first_pane() {
 #[test]
 /// UI-R-049 — a single-field `#[focusable(nestable)]` struct reports `false` immediately from
 /// `try_focus_next`/`try_focus_previous`, without panicking or looping.
-fn ut_single_field_section_try_focus_next_false_immediately() {
+fn it_single_field_section_try_focus_next_false_immediately() {
     let mut section = make_single_section();
     assert!(!section.try_focus_next());
     assert!(!section.try_focus_previous());
@@ -371,7 +371,7 @@ fn send_key_with_fallback(
 #[test]
 /// UI-R-049 — forward Tab into a `#[focus(nested)]` field enters at its first eligible pane,
 /// regardless of which pane it last remembered.
-fn ut_nested_forward_tab_enters_section_at_first_pane() {
+fn it_nested_forward_tab_enters_section_at_first_pane() {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     // Remembers B, so a pre-fix (remembered-or-first) entry would land on B, not A.
@@ -386,7 +386,7 @@ fn ut_nested_forward_tab_enters_section_at_first_pane() {
 #[test]
 /// UI-R-049 — Tab at the nested field's last pane advances the outer cycle, not back to its own
 /// first pane.
-fn ut_nested_forward_tab_at_last_pane_advances_to_after() {
+fn it_nested_forward_tab_at_last_pane_advances_to_after() {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     let mut app = make_nesting_app(NestingAppFocus::Section, SectionFocus::B);
@@ -400,7 +400,7 @@ fn ut_nested_forward_tab_at_last_pane_advances_to_after() {
 #[test]
 /// UI-R-049 — BackTab from the field after a `#[focus(nested)]` field lands on its *last* pane,
 /// not its first: the case a direction-blind, remembered-or-first entry rule gets wrong.
-fn ut_nested_backtab_from_after_lands_on_last_pane() {
+fn it_nested_backtab_from_after_lands_on_last_pane() {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     // section remembers A (its default from make_section), proving entry ignores the remembered
@@ -420,7 +420,7 @@ fn ut_nested_backtab_from_after_lands_on_last_pane() {
 /// UI-R-049 — repeated forward Tab visits every pane inside a `#[focus(nested)]` field, purely
 /// via `handle_events`, before leaving it (no outer `focus_next()` fallback needed for the
 /// interior step).
-fn ut_nested_repeated_tab_steps_within_section_before_leaving() {
+fn it_nested_repeated_tab_steps_within_section_before_leaving() {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     let mut app = make_nesting_app(NestingAppFocus::Before, SectionFocus::A);
@@ -444,7 +444,7 @@ fn ut_nested_repeated_tab_steps_within_section_before_leaving() {
 /// UI-R-049 — the `HandleEvents` arm for a `#[focus(nested)]` field converts a successful
 /// `NestedFocus` step to `Consumed`, isolated from the higher-level "did focus end up in the
 /// right place" assertions above.
-fn ut_nested_handle_events_arm_converts_unhandled_tab_to_consumed() {
+fn it_nested_handle_events_arm_converts_unhandled_tab_to_consumed() {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::HandleEvents;
 
@@ -471,7 +471,7 @@ struct GatedNestingApp {
 #[test]
 /// UI-R-049 — a `when`-gated `#[focus(nested)]` field that's currently ineligible is skipped by
 /// the outer walk exactly as any other gated field is today.
-fn ut_nested_when_gated_section_skipped_when_ineligible() {
+fn it_nested_when_gated_section_skipped_when_ineligible() {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::HandleEvents;
 
@@ -528,7 +528,7 @@ struct NestingAppGatedInner {
 /// UI-R-049 — a `#[focusable(nestable)]` struct whose only field is currently `when`-ineligible
 /// makes entry into it a no-op the parent's own walk skips past (the private
 /// `__focus_enter_first_eligible` helper's failure path, observable one level up).
-fn ut_nested_entry_into_ineligible_single_pane_section_is_noop() {
+fn it_nested_entry_into_ineligible_single_pane_section_is_noop() {
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_ui::traits::HandleEvents;
 

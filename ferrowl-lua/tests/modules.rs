@@ -105,7 +105,7 @@ fn build_context() -> Context<String> {
 
 #[test]
 /// SC-R-027 — a register read returns its natural Lua type and a host read error propagates as a Lua error.
-fn ut_modules_run_via_call() {
+fn it_modules_run_via_call() {
     let mut ctx = build_context();
     ctx.call(&"time".to_string()).unwrap();
     ctx.call(&"statics".to_string()).unwrap();
@@ -113,13 +113,13 @@ fn ut_modules_run_via_call() {
 }
 
 #[test]
-fn ut_iter_lists_loaded_scripts() {
+fn it_iter_lists_loaded_scripts() {
     let ctx = build_context();
     assert_eq!(ctx.iter().count(), 3);
 }
 
 #[test]
-fn ut_call_all_ok_when_no_script_errors() {
+fn it_call_all_ok_when_no_script_errors() {
     let mut ctx = build_context();
     // Every script asserts cleanly, so call_all reports success (the Ok arm).
     assert!(ctx.call_all().is_ok());
@@ -127,7 +127,7 @@ fn ut_call_all_ok_when_no_script_errors() {
 
 #[test]
 /// SC-R-044 — refresh_all runs each script once per interval, skipping any that ran within the window.
-fn ut_refresh_all_runs_then_throttles() {
+fn it_refresh_all_runs_then_throttles() {
     let mut ctx = build_context();
     // First pass with a zero window runs everything successfully.
     assert!(ctx.refresh_all(Duration::ZERO).is_ok());
@@ -137,7 +137,7 @@ fn ut_refresh_all_runs_then_throttles() {
 
 #[test]
 /// SC-R-032 — a script error during refresh_all is collected without stopping the pass.
-fn ut_refresh_all_collects_errors() {
+fn it_refresh_all_collects_errors() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("boom".to_string(), "error('x')")
         .build()
@@ -147,7 +147,7 @@ fn ut_refresh_all_collects_errors() {
 }
 
 #[test]
-fn ut_statics_from_constructor() {
+fn it_statics_from_constructor() {
     let mut data = HashMap::new();
     data.insert("k".to_string(), ValueType::Int(1));
     let mut ctx = ContextBuilder::<String>::default()
@@ -169,7 +169,7 @@ impl LogSink for VecSink {
 
 #[test]
 /// SC-R-031 — C_Log:Info output is routed to the host's module log sink.
-fn ut_c_log_info_routes_to_host_sink() {
+fn it_c_log_info_routes_to_host_sink() {
     let sink = VecSink::default();
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
@@ -183,7 +183,7 @@ fn ut_c_log_info_routes_to_host_sink() {
 
 #[test]
 /// SC-R-033 — a Lua syntax error at load makes context construction fail (all-or-nothing per context).
-fn ut_builder_propagates_script_error() {
+fn it_builder_propagates_script_error() {
     // Invalid Lua makes the builder carry the error through to build().
     let result = ContextBuilder::<String>::default()
         .with_script("bad".to_string(), "this is ! not lua")
@@ -193,7 +193,7 @@ fn ut_builder_propagates_script_error() {
 
 #[test]
 /// SC-R-001 — scripts run on a real, compiled-in Lua 5.4 VM.
-fn ut_runtime_is_lua_5_4() {
+fn it_runtime_is_lua_5_4() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("ver".to_string(), r#"assert(_VERSION == "Lua 5.4")"#)
         .build()
@@ -204,7 +204,7 @@ fn ut_runtime_is_lua_5_4() {
 #[test]
 /// SC-R-002 — a C_* call is synchronous and blocking: it completes and yields its value before the
 /// calling script's next statement runs.
-fn ut_host_call_is_synchronous() {
+fn it_host_call_is_synchronous() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_module(TimeModule::default())
         // The second statement uses the value the first call returned: the call must have
@@ -226,7 +226,7 @@ fn ut_host_call_is_synchronous() {
 #[test]
 /// SC-R-004 — every script in one context shares that context's single global environment: a
 /// global set by one script is visible to another.
-fn ut_scripts_share_one_global_environment() {
+fn it_scripts_share_one_global_environment() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_script("setter".to_string(), "shared = 123")
         .with_script("getter".to_string(), "assert(shared == 123)")
@@ -240,7 +240,7 @@ fn ut_scripts_share_one_global_environment() {
 #[test]
 /// SC-R-008 — the only host-injected globals are the C_* modules registered for the context plus
 /// `print`; no other bespoke host global is injected.
-fn ut_only_registered_host_globals_are_present() {
+fn it_only_registered_host_globals_are_present() {
     let mut ctx = ContextBuilder::<String>::default()
         .with_stdlib()
         .with_module(TimeModule::default())
@@ -266,7 +266,7 @@ fn ut_only_registered_host_globals_are_present() {
 #[test]
 /// SC-R-015 — scripts in a context run sequentially within a cycle: each runs to completion, so a
 /// shared global mutated by both reflects both runs regardless of their (unspecified) order.
-fn ut_scripts_in_a_cycle_run_sequentially() {
+fn it_scripts_in_a_cycle_run_sequentially() {
     let mut ctx = ContextBuilder::<String>::default()
         // Order-agnostic: whichever runs first initialises `acc`, the other increments it. If the
         // two could interleave, the read-modify-write would race; sequential execution makes the
@@ -284,7 +284,7 @@ fn ut_scripts_in_a_cycle_run_sequentially() {
 #[test]
 /// SC-R-019 — a module not registered in the context is a nil global, so naming it fails at run
 /// time with an "attempt to index a nil value" error rather than silently no-opping.
-fn ut_unregistered_module_indexes_nil_and_errors() {
+fn it_unregistered_module_indexes_nil_and_errors() {
     // A Modbus-shaped context gets C_Register, never C_OCPP; indexing the absent module errors.
     let mut ctx = ContextBuilder::<String>::default()
         .with_module(RegisterModule::init(Handle))
