@@ -2,15 +2,12 @@
 //! `MonitorDeviceConfig` (a subset of `DeviceConfig`, no timing/read_ranges/scripts) and
 //! `MonitorRegisterDef` (MB-R-145; `RegisterDef` minus `access` and `update`).
 
-use ferrowl_codec::{
-    Address, Format, Kind,
-    format::{Endian, Resolution, Width, WordOrder},
-};
+use ferrowl_codec::{Address, Format, Kind};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AlignmentCfg, EndianCfg, NamedValue, Scalar, ValueType, WordOrderCfg, default_kind,
-    default_length, default_resolution, parse_bitmask,
+    AlignmentCfg, EndianCfg, NamedValue, Scalar, ValueType, WordOrderCfg, address_of, default_kind,
+    default_length, default_resolution, format_of, parse_bitmask,
 };
 
 /// A monitor device-type configuration file (api-contract.md §6, role-conditional shape):
@@ -81,35 +78,21 @@ pub struct MonitorRegisterDef {
 
 #[allow(dead_code)] // not constructed yet, see `MonitorDeviceConfig`'s note
 impl MonitorRegisterDef {
-    /// Identical body to [`super::RegisterDef::format`] — same format machinery, MB-R-145.
+    /// MB-R-145 — the wire format this monitor register interpretation resolves to.
     pub fn format(&self) -> Format {
-        let res = Resolution(self.resolution);
-        let endian: Endian = self.endian.into();
-        let wo: WordOrder = self.word_order.into();
-        let bf = parse_bitmask(self.bitmask.as_deref());
-        match self.value_type {
-            ValueType::U8 => Format::u8(endian, wo, res, bf),
-            ValueType::U16 => Format::u16(endian, wo, res, bf),
-            ValueType::U32 => Format::u32(endian, wo, res, bf),
-            ValueType::U64 => Format::u64(endian, wo, res, bf),
-            ValueType::U128 => Format::u128(endian, wo, res, bf),
-            ValueType::I8 => Format::i8(endian, wo, res, bf),
-            ValueType::I16 => Format::i16(endian, wo, res, bf),
-            ValueType::I32 => Format::i32(endian, wo, res, bf),
-            ValueType::I64 => Format::i64(endian, wo, res, bf),
-            ValueType::I128 => Format::i128(endian, wo, res, bf),
-            ValueType::F32 => Format::f32(endian, wo, res),
-            ValueType::F64 => Format::f64(endian, wo, res),
-            ValueType::Ascii => Format::Ascii(self.alignment.into(), Width(self.length)),
-        }
+        format_of(
+            self.value_type,
+            self.endian,
+            self.word_order,
+            self.resolution,
+            parse_bitmask(self.bitmask.as_deref()),
+            self.alignment,
+            self.length,
+        )
     }
 
-    /// Identical body to [`super::RegisterDef::address`].
     pub fn address(&self) -> Address {
-        match (self.is_virtual, self.address) {
-            (false, Some(addr)) => Address::Fixed(addr),
-            _ => Address::Virtual,
-        }
+        address_of(self.is_virtual, self.address)
     }
 }
 
@@ -117,6 +100,7 @@ impl MonitorRegisterDef {
 mod tests {
     use super::*;
     use ferrowl_codec::BitField;
+    use ferrowl_codec::format::{Endian, Resolution, WordOrder};
     use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
     use ferrowl_util::convert::{Converter, FileType};
 

@@ -3,10 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use ferrowl_codec::{
-    Address, Format, Kind, Register, RegisterBuilder,
-    format::{BitField, Endian, Resolution, Width, WordOrder},
-};
+use ferrowl_codec::{Address, Format, Kind, Register, RegisterBuilder, format::BitField};
 use ferrowl_modbus::UnitId;
 use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
@@ -21,7 +18,8 @@ mod value_types;
 #[allow(unused_imports)]
 pub use monitor::{MonitorDeviceConfig, MonitorRegisterDef};
 pub use value_types::{
-    AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, WordOrderCfg, parse_bitmask,
+    AccessCfg, AlignmentCfg, EndianCfg, Scalar, ValueType, WordOrderCfg, address_of, format_of,
+    parse_bitmask,
 };
 
 /// Fallback timing (ms) when neither the module spec nor the device config sets a value.
@@ -275,32 +273,19 @@ impl RegisterDef {
     }
 
     pub fn format(&self) -> Format {
-        let res = Resolution(self.resolution);
-        let endian: Endian = self.endian.into();
-        let wo: WordOrder = self.word_order.into();
-        let bf = self.bitfield();
-        match self.value_type {
-            ValueType::U8 => Format::u8(endian, wo, res, bf),
-            ValueType::U16 => Format::u16(endian, wo, res, bf),
-            ValueType::U32 => Format::u32(endian, wo, res, bf),
-            ValueType::U64 => Format::u64(endian, wo, res, bf),
-            ValueType::U128 => Format::u128(endian, wo, res, bf),
-            ValueType::I8 => Format::i8(endian, wo, res, bf),
-            ValueType::I16 => Format::i16(endian, wo, res, bf),
-            ValueType::I32 => Format::i32(endian, wo, res, bf),
-            ValueType::I64 => Format::i64(endian, wo, res, bf),
-            ValueType::I128 => Format::i128(endian, wo, res, bf),
-            ValueType::F32 => Format::f32(endian, wo, res),
-            ValueType::F64 => Format::f64(endian, wo, res),
-            ValueType::Ascii => Format::Ascii(self.alignment.into(), Width(self.length)),
-        }
+        format_of(
+            self.value_type,
+            self.endian,
+            self.word_order,
+            self.resolution,
+            self.bitfield(),
+            self.alignment,
+            self.length,
+        )
     }
 
     pub fn address(&self) -> Address {
-        match (self.is_virtual, self.address) {
-            (false, Some(addr)) => Address::Fixed(addr),
-            _ => Address::Virtual,
-        }
+        address_of(self.is_virtual, self.address)
     }
 
     /// Memory range backing this register, or `None` for virtual registers.
@@ -775,7 +760,6 @@ mod tests {
         assert_eq!(fixed.address(), Address::Fixed(10));
         assert!(fixed.mem_range().is_some());
         let _ = fixed.register();
-        let _ = fixed.bitfield();
 
         let virt = def_with(ValueType::U16, Kind::HoldingRegister, None, false);
         assert_eq!(virt.address(), Address::Virtual);
