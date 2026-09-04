@@ -216,6 +216,18 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-050** — The color scheme is a single compile-time constant selected by build feature; no runtime switch.
 
+**UI-R-114** — A vertical tab line widget renders an ordered list of tab labels into a one-column-wide area, one tab per row, in list order from the top of the area downward.
+
+**UI-R-115** — Each row of the vertical tab line (UI-R-114) shows exactly the first character of that tab's label.
+
+**UI-R-116** — The vertical tab line (UI-R-114) renders the active tab's row in the active style and every other row in the inactive style, using the same styles as the horizontal tab bar (UI-R-002).
+
+**UI-R-117** — When the vertical tab line (UI-R-114) has fewer rows than tabs, it scrolls vertically so the active tab's row stays visible — the vertical counterpart of the horizontal tab-bar overflow scroll (UI-R-046).
+
+**UI-R-118** — The vertical tab line's scroll offset (UI-R-117) is the minimum that keeps the active row visible: unchanged while the active row is already visible, otherwise moved just far enough to place the active row at the nearer edge of the area.
+
+**UI-R-119** — The vertical tab line (UI-R-114) derives no selection of its own: the caller owns the tab list and the active index in the widget's state and updates them before each render, and the only field the widget itself maintains is the scroll offset (UI-R-117).
+
 ## Modbus monitor view
 
 **UI-R-060** — A Modbus monitor module's content view has a left panel listing every unit id observed (updated live) and, on the right, sections scoped to the selected unit id: a message table (MB-R-146 records), a memory layout (MB-R-144's observed-value table, grouped by table kind), and a resolved-registers table (MB-R-145 interpretations applied to that unit id's memory).

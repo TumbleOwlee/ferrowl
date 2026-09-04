@@ -81,6 +81,12 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-049** | Table cell wider than the column | reachable via horizontal scroll tied to the selected column |
 | **UI-E-050** | Tabs overflow the bar width | tab bar scrolls horizontally to keep the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
+| **UI-E-063** | Vertical tab line drawn into an area of zero width or zero height | skips drawing; scroll offset unchanged (UI-E-047) |
+| **UI-E-064** | Vertical tab line drawn into an area wider than one column | draws into the leftmost column only; the remaining columns are left untouched |
+| **UI-E-065** | Vertical tab line with an empty tab list | nothing drawn; scroll offset reset to zero |
+| **UI-E-066** | Vertical tab line active index out of range (UI-R-119) | no row takes the active style; scroll offset unchanged; never panics |
+| **UI-E-067** | Vertical tab line label that is the empty string (UI-R-115) | its row is drawn blank, still occupies one row, and still takes the active style when it is the active tab |
+| **UI-E-068** | Vertical tab line label whose first character is double-width (CJK, emoji) | drawn as-is and clipped by the one-column area; no substitution or fallback glyph. Intentional |
 
 ## Known limitations and stated constraints
 
