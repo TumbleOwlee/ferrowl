@@ -6,7 +6,6 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -108,7 +107,7 @@ impl OcppMessage {
     ) -> Self {
         Self {
             seq: next_seq(),
-            ts: now_ms(),
+            ts: ferrowl_util::time::now_unix_ms(),
             direction,
             name: name.into(),
             payload,
@@ -148,13 +147,6 @@ pub fn push_capped(buf: &mut Vec<OcppMessage>, msg: OcppMessage) {
         let overflow = buf.len() - MAX_MESSAGES;
         buf.drain(0..overflow);
     }
-}
-
-pub(crate) fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 // --- Message table -----------------------------------------------------------
@@ -560,7 +552,7 @@ pub fn rfc3339(ms: u64) -> String {
 
 /// RFC3339 UTC string for the current time.
 pub fn rfc3339_now() -> String {
-    rfc3339(now_ms())
+    rfc3339(ferrowl_util::time::now_unix_ms())
 }
 
 /// Days since the Unix epoch to a Gregorian (year, month, day) triple (Howard Hinnant).

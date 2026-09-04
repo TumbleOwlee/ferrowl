@@ -103,10 +103,7 @@ impl LogRing {
     }
 
     pub fn write(&mut self, level: Level, msg: &str) {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let ts = ferrowl_util::time::now_unix_ms();
         let line: String = msg.chars().take(LOG_MAX_LINE).collect();
         // Persist to the file sink first (unbounded history), then push into the bounded ring.
         // Lines are buffered; `flush` runs once per UI tick (and on sink teardown via drop).

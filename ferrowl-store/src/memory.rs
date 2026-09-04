@@ -257,7 +257,7 @@ where
     let mut range = range.clone();
     for (r, slice) in map.iter() {
         if r.start <= range.start && r.end > range.start {
-            let start = std::cmp::min(range.start, r.end);
+            let start = range.start;
             let end = std::cmp::min(range.end, r.end);
             let count = end - start;
             if count != 0 {
@@ -279,7 +279,7 @@ where
     let mut range = range.clone();
     for (r, slice) in map.iter_mut() {
         if r.start <= range.start && r.end > range.start {
-            let start = std::cmp::min(range.start, r.end);
+            let start = range.start;
             let end = std::cmp::min(range.end, r.end);
             let count = end - start;
             if count != 0 {
