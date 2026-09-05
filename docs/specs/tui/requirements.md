@@ -176,6 +176,20 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-036** — A disabled code editor ignores all mutating keys (insert, delete, paste, mode entry that would edit) while permitting navigation, and reports such keys unhandled.
 
+**UI-R-164** — The multi-line code editor's state carries an optional list of gutter labels, one entry per buffer line, settable both when the state is built and afterwards; the default is no labels.
+
+**UI-R-165** — With gutter labels set (UI-R-164), the gutter cell of buffer row `i` renders the label at index `i` in place of that row's line index.
+
+**UI-R-166** — An empty gutter label renders as a blank gutter cell of the full gutter width, so a filler row shows no number.
+
+**UI-R-167** — With gutter labels set, gutter contents are right-aligned within a width of one separator space plus the widest of every entry in the label list (surplus entries past the end of the buffer included, UI-E-080) and, whenever at least one row falls back to its line index (UI-R-168), the widest such fallback index, the whole subject to the clamp of UI-R-172.
+
+**UI-R-168** — A buffer row with no entry in the gutter-label list, because the list is shorter than the buffer, falls back to rendering that row's line index.
+
+**UI-R-169** — Gutter styling is independent of gutter content: a row rendering a gutter label is styled exactly as the same row rendering its line index would be, for the active row and every other row alike.
+
+**UI-R-172** — The gutter width of UI-R-167 is clamped to the field's area width, never exceeding it and never wrapping, so the gutter is always drawn inside the widget's area.
+
 ## Markdown input field
 
 **UI-R-125** — The markdown input field is a multi-line widget composing the vim-modal code-editor state (UI-R-027 through UI-R-036): buffer, `Normal`/`Insert`/`Visual` modes, motions and operators, registers, single-level undo and the disabled flag, which the markdown widget surfaces as read-only.
@@ -239,20 +253,6 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-154** — `![alt](url)` renders as `alt` in the theme's image style; the `!`, brackets, parentheses and URL are hidden.
 
 **UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
-
-**UI-R-164** — The multi-line code editor's state carries an optional list of gutter labels, one entry per buffer line, settable both when the state is built and afterwards; the default is no labels.
-
-**UI-R-165** — With gutter labels set (UI-R-164), the gutter cell of buffer row `i` renders the label at index `i` in place of that row's line index.
-
-**UI-R-166** — An empty gutter label renders as a blank gutter cell of the full gutter width, so a filler row shows no number.
-
-**UI-R-167** — With gutter labels set, gutter contents are right-aligned within a width of one separator space plus the widest of every entry in the label list (surplus entries past the end of the buffer included, UI-E-080) and, whenever at least one row falls back to its line index (UI-R-168), the widest such fallback index, the whole subject to the clamp of UI-R-172.
-
-**UI-R-168** — A buffer row with no entry in the gutter-label list, because the list is shorter than the buffer, falls back to rendering that row's line index.
-
-**UI-R-169** — Gutter styling is independent of gutter content: a row rendering a gutter label is styled exactly as the same row rendering its line index would be, for the active row and every other row alike.
-
-**UI-R-172** — The gutter width of UI-R-167 is clamped to the field's area width, never exceeding it and never wrapping, so the gutter is always drawn inside the widget's area.
 
 ## Syntax highlighting
 

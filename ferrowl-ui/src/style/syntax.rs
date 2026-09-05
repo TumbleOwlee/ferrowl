@@ -85,7 +85,7 @@ mod tests {
     use super::*;
 
     #[test]
-    /// UI-R-039, UI-R-120 — the theme maps the three diff kinds to their own styles.
+    /// UI-R-039, UI-R-162 — the theme maps the three diff kinds to their own styles.
     fn ut_theme_maps_diff_kinds() {
         let theme = SyntaxTheme::default();
         assert_eq!(theme.style(SyntaxKind::Added), theme.added);
@@ -94,7 +94,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-121 — default diff styles set foreground only, from success/error/placeholder.
+    /// UI-R-163 — default diff styles set foreground only, from success/error/placeholder.
     fn ut_default_diff_styles_are_foreground_only() {
         let theme = SyntaxTheme::default();
 

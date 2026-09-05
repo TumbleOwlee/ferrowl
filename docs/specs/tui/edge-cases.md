@@ -72,6 +72,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-045** | Yank/delete with no clipboard-capable terminal | OSC 52 best-effort; failure ignored; internal register still holds the text |
 | **UI-E-079** | Mutating edit on an enabled field that has gutter labels (UI-R-164) | labels are never resynced by the widget: an inserted, split or deleted line shifts rows out from under the labels and leaves them stale; labels are intended for disabled, read-only use, and keeping them in sync is the consumer's job |
 | **UI-E-080** | Gutter-label list longer than the buffer | the surplus labels are never rendered, but still count toward the gutter width of UI-R-167 |
+| **UI-E-083** | Gutter labels wider than the field's whole area (UI-R-172) | the gutter takes the full area width and the text content is left zero columns; no minimum content width is reserved and no label is dropped, matching the app's no-minimum-size stance (UI-E-047, UI-E-055) |
 
 ## Syntax highlighting
 
