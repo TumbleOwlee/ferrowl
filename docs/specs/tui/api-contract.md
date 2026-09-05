@@ -334,7 +334,7 @@ Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R
 | Syntax theme styles `added`, `removed`, `meta` | per-kind styles for the diff kinds, foreground-only defaults | UI-R-162, UI-R-163 |
 | Code-editor state `gutter_labels: Option<Vec<String>>` | per-line gutter text replacing the line index; builder-settable and settable after construction | UI-R-164, UI-R-165, UI-R-168 |
 | Code-editor state visible-height accessor | remembered visible height in rows of the last render | UI-R-173 |
-| Code-editor state vertical-scroll-offset accessor | current vertical scroll offset | UI-R-173 |
+| Code-editor state vertical-scroll-offset accessor | current vertical scroll offset | — |
 | Code-editor state horizontal-scroll accessor | current horizontal scroll column | UI-R-176 |
 
 ## Command-line widget
