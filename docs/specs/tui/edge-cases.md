@@ -70,6 +70,15 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-043** | `u` pressed twice | first undoes, second redoes (single-level) |
 | **UI-E-044** | `gg`/`dd`/`yy` first press | held pending; any non-matching key cancels the chord before doing its own action |
 | **UI-E-045** | Yank/delete with no clipboard-capable terminal | OSC 52 best-effort; failure ignored; internal register still holds the text |
+| **UI-E-079** | Mutating edit on an enabled field that has gutter labels (UI-R-164) | labels are never resynced by the widget: an inserted, split or deleted line shifts rows out from under the labels and leaves them stale; labels are intended for disabled, read-only use, and keeping them in sync is the consumer's job |
+| **UI-E-080** | Gutter-label list longer than the buffer | the surplus labels are never rendered, but still count toward the gutter width of UI-R-167 |
+
+## Syntax highlighting
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **UI-E-081** | Diff line `---` or `+++` (UI-R-159) | classified diff meta, not diff removed or diff added, because the meta prefixes are matched first |
+| **UI-E-082** | Diff line consisting of a lone `+` or `-` | yields a one-character span of the diff added or diff removed kind (UI-R-156 spans the whole line, which is one character) |
 
 ## Markdown input field
 

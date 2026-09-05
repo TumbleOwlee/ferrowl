@@ -240,13 +240,47 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
 
+**UI-R-164** — The multi-line code editor's state carries an optional list of gutter labels, one entry per buffer line, settable both when the state is built and afterwards; the default is no labels.
+
+**UI-R-165** — With gutter labels set (UI-R-164), the gutter cell of buffer row `i` renders the label at index `i` in place of that row's line index.
+
+**UI-R-166** — An empty gutter label renders as a blank gutter cell of the full gutter width, so a filler row shows no number.
+
+**UI-R-167** — With gutter labels set, gutter contents are right-aligned within a width of one separator space plus the widest of every entry in the label list (surplus entries past the end of the buffer included, UI-E-080) and, whenever at least one row falls back to its line index (UI-R-168), the widest such fallback index, the whole subject to the clamp of UI-R-172.
+
+**UI-R-168** — A buffer row with no entry in the gutter-label list, because the list is shorter than the buffer, falls back to rendering that row's line index.
+
+**UI-R-169** — Gutter styling is independent of gutter content: a row rendering a gutter label is styled exactly as the same row rendering its line index would be, for the active row and every other row alike.
+
+**UI-R-172** — The gutter width of UI-R-167 is clamped to the field's area width, never exceeding it and never wrapping, so the gutter is always drawn inside the widget's area.
+
 ## Syntax highlighting
 
-**UI-R-037** — Syntax highlighting is pure text-to-span computation: for a language and one line of source (plus a carry-over line state for multi-line constructs) it returns `(start_char, end_char, kind)` spans, sorted by start, non-overlapping, character indices. Three languages: Lua, JSON and Markdown.
+**UI-R-037** — Syntax highlighting is pure text-to-span computation: for a language and one line of source (plus a carry-over line state for multi-line constructs) it returns `(start_char, end_char, kind)` spans, sorted by start, non-overlapping, character indices. Four languages: Lua, JSON, Markdown and Diff.
 
 **UI-R-038** — The carry-over state lets multi-line constructs (Lua long strings and long comments) highlight correctly across lines when highlighted in order.
 
-**UI-R-039** — Highlight kinds are a fixed enumeration (keyword, identifier, number, string, comment, punctuation, JSON key, literal, object identifier, function identifier); the consumer maps kind to colors. Highlighting never mutates the source.
+**UI-R-039** — Highlight kinds are a fixed enumeration (keyword, identifier, number, string, comment, punctuation, JSON key, literal, object identifier, function identifier, diff added, diff removed, diff meta); the consumer maps kind to colors. Highlighting never mutates the source.
+
+**UI-R-156** — The Diff language classifies whole lines only: highlighting one line yields at most one span, and that span covers the entire line from the first to the last character.
+
+**UI-R-157** — A Diff line whose first character is `+` yields a span of the diff added kind.
+
+**UI-R-158** — A Diff line whose first character is `-` yields a span of the diff removed kind.
+
+**UI-R-159** — A Diff line starting with `@@`, `---`, `+++`, `diff ` or `index ` yields a span of the diff meta kind; this classification is tested before UI-R-157 and UI-R-158, so `+++` and `---` are meta, not added or removed.
+
+**UI-R-160** — A Diff line matching neither UI-R-157, UI-R-158 nor UI-R-159 (a space-prefixed context line, an empty line, any other text) yields no span at all and is therefore rendered in the field's general style.
+
+**UI-R-161** — Diff highlighting is line-independent: it neither reads nor changes the carry-over line state (UI-R-038), so a Diff line highlights identically whatever precedes it.
+
+**UI-R-162** — The syntax theme's kind-to-style lookup returns the theme's diff added, diff removed and diff meta styles for the corresponding kinds of UI-R-039.
+
+**UI-R-163** — The default diff styles set foreground only, leaving background and modifiers unset: diff added takes the color scheme's success color, diff removed its error color, diff meta its placeholder color.
+
+**UI-R-170** — The Diff language provides no formatter, so a field set to Diff is left byte-for-byte unchanged on blur (UI-R-033).
+
+**UI-R-171** — The Diff language's per-line block-balance delta is always zero, so auto-indent on newline (UI-R-032) in a Diff field only inherits the current line's leading indentation.
 
 **UI-R-120** — The Markdown language exposes, beside the span path of UI-R-037, a per-line block-model entry point: given one source line and a carried state it returns that line's block kind — paragraph, heading with level 1–6, unordered list item with nesting depth and marker character, ordered list item with nesting depth, task item with checked state, block quote with nesting depth, horizontal rule, fence delimiter with info string, or fence body — together with the inline spans of UI-R-122.
 
