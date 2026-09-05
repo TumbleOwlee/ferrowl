@@ -292,7 +292,7 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 
 Printable keys insert; `Enter` splits with auto-indent (when a language is set); `Backspace`/`Delete` edit; arrows navigate with line wrap; `Home`/`End` and character-based editing as `### Single-line text input (focused)`. Two space presses at the same position within ~300 ms expand to a four-space indent (an intervening key cancels).
 
-Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats).
+Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats). The Diff language colors whole lines and has no formatter, so a Diff field never reformats on blur. (UI-R-170, UI-R-171)
 
 ## Markdown input field — modes and commands
 
@@ -312,3 +312,12 @@ The widget uses the mode transitions, motions, edits and Insert-mode keys of the
 | mutating keys, `i` / `a` / `I` / `A` / `o` / `O` / `v` / `V` | read-only | Ignored, reported unhandled | UI-R-155 |
 
 Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R-155), focus set and query (UI-R-126, UI-R-128), current vim mode and its display label (UI-R-125), builder options for the markdown theme (UI-R-141), the syntax theme (UI-R-129) and the line-number gutter, default off (UI-R-140).
+
+## Code editor and syntax public surface
+
+| Item | Meaning | Req |
+|---|---|---|
+| Syntax language `Diff` | whole-line diff classification, no formatter | UI-R-037, UI-R-156, UI-R-170, UI-R-171 |
+| Highlight kinds `Added`, `Removed`, `Meta` | diff line kinds added to the fixed kind enumeration | UI-R-039 |
+| Syntax theme styles `added`, `removed`, `meta` | per-kind styles for the diff kinds, foreground-only defaults | UI-R-162, UI-R-163 |
+| Code-editor state `gutter_labels: Option<Vec<String>>` | per-line gutter text replacing the line index; builder-settable and settable after construction | UI-R-164, UI-R-165, UI-R-168 |

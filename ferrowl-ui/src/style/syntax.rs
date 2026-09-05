@@ -38,6 +38,18 @@ pub struct SyntaxTheme {
     #[getset(get = "pub")]
     #[builder(default = "Style::default().fg(COLOR_SCHEME.syntax.function)")]
     pub function: Style,
+    // Diff kinds draw from the top-level `ColorScheme` (success/error/placeholder), not
+    // `COLOR_SCHEME.syntax.*`: they reuse the scheme's general-purpose meaning colors
+    // rather than getting dedicated syntax-theme entries.
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.success)")]
+    pub added: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.error)")]
+    pub removed: Style,
+    #[getset(get = "pub")]
+    #[builder(default = "Style::default().fg(COLOR_SCHEME.placeholder)")]
+    pub meta: Style,
 }
 
 impl SyntaxTheme {
@@ -53,6 +65,9 @@ impl SyntaxTheme {
             SyntaxKind::Literal => self.literal,
             SyntaxKind::Object => self.object,
             SyntaxKind::Function => self.function,
+            SyntaxKind::Added => self.added,
+            SyntaxKind::Removed => self.removed,
+            SyntaxKind::Meta => self.meta,
         }
     }
 }
@@ -62,5 +77,37 @@ impl Default for SyntaxTheme {
         SyntaxThemeBuilder::default()
             .build()
             .expect("SyntaxThemeBuilder fields all default")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    /// UI-R-039, UI-R-162 — the theme maps the three diff kinds to their own styles.
+    fn ut_theme_maps_diff_kinds() {
+        let theme = SyntaxTheme::default();
+        assert_eq!(theme.style(SyntaxKind::Added), theme.added);
+        assert_eq!(theme.style(SyntaxKind::Removed), theme.removed);
+        assert_eq!(theme.style(SyntaxKind::Meta), theme.meta);
+    }
+
+    #[test]
+    /// UI-R-163 — default diff styles set foreground only, from success/error/placeholder.
+    fn ut_default_diff_styles_are_foreground_only() {
+        let theme = SyntaxTheme::default();
+
+        assert_eq!(theme.added.fg, Some(COLOR_SCHEME.success));
+        assert_eq!(theme.added.bg, None);
+        assert!(theme.added.add_modifier.is_empty());
+
+        assert_eq!(theme.removed.fg, Some(COLOR_SCHEME.error));
+        assert_eq!(theme.removed.bg, None);
+        assert!(theme.removed.add_modifier.is_empty());
+
+        assert_eq!(theme.meta.fg, Some(COLOR_SCHEME.placeholder));
+        assert_eq!(theme.meta.bg, None);
+        assert!(theme.meta.add_modifier.is_empty());
     }
 }

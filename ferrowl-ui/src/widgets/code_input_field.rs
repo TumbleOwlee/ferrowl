@@ -142,8 +142,26 @@ impl StatefulWidget for &CodeInputField {
         };
         state.set_scroll_offset(scroll);
 
-        // Gutter width: digit count of line_count + 1 separator space
-        let gutter_width = line_count.to_string().len() as u16 + 1;
+        // Gutter width (UI-R-167): one separator space plus the widest label-list entry
+        // (surplus entries past the end of the buffer included, UI-E-080) and, if any row
+        // falls back to its line index (UI-R-168), the widest such fallback index too.
+        let gutter_text_width = match state.gutter_labels() {
+            Some(labels) => labels
+                .iter()
+                .map(|l| l.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(if labels.len() < line_count {
+                    line_count.to_string().len()
+                } else {
+                    0
+                }),
+            None => line_count.to_string().len(),
+        };
+        // UI-R-172: never let the gutter exceed the field's area width, so it stays inside
+        // the widget's area even if that leaves the content zero columns (UI-E-083).
+        // Clamp in `usize` before the `u16` cast so an oversized label cannot wrap.
+        let gutter_width = (gutter_text_width + 1).min(area.width as usize) as u16;
         let content_x = area.x + gutter_width;
         let content_width = area.width.saturating_sub(gutter_width) as usize;
 
@@ -194,12 +212,16 @@ impl StatefulWidget for &CodeInputField {
             } else {
                 self.style.general
             };
+            let gutter_text = match state.gutter_labels() {
+                Some(labels) if line_idx < labels.len() => labels[line_idx].clone(),
+                _ => (line_idx + 1).to_string(),
+            };
             let gutter_str = format!(
                 "{:>width$}",
-                line_idx + 1,
-                width = gutter_width as usize - 1
+                gutter_text,
+                width = gutter_width.saturating_sub(1) as usize
             );
-            let gutter_rect = Rect::new(area.x, y, gutter_width - 1, 1);
+            let gutter_rect = Rect::new(area.x, y, gutter_width.saturating_sub(1), 1);
             Paragraph::new(Text::from(gutter_str).style(gutter_style)).render(gutter_rect, buf);
 
             if content_width == 0 {
@@ -448,5 +470,213 @@ mod tests {
         let cursor = w.style().cursor();
         let cursor_x = content_x + (9 - 5);
         assert_eq!(b[(cursor_x, 0)].fg, cursor.fg.unwrap());
+    }
+
+    fn gutter_cell(b: &Buffer, y: u16, width: u16) -> String {
+        (0..width)
+            .map(|x| b[(x, y)].symbol().chars().next().unwrap_or(' '))
+            .collect()
+    }
+
+    #[test]
+    /// UI-R-165 — with gutter labels set, each row renders its label in place of the line index.
+    fn ut_gutter_labels_replace_line_indices() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec!["X".into(), "Y".into(), "Z".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a\nb\nc");
+        let mut b = buffer(20, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 3), &mut b, &mut st);
+        // gutter_width = 1 + 1 = 2 (widest label is 1 char, list covers the whole buffer).
+        assert_eq!(gutter_cell(&b, 0, 1), "X");
+        assert_eq!(gutter_cell(&b, 1, 1), "Y");
+        assert_eq!(gutter_cell(&b, 2, 1), "Z");
+    }
+
+    #[test]
+    /// UI-R-166 — an empty gutter label renders as a blank cell of the full gutter width.
+    fn ut_empty_gutter_label_renders_blank_cell() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec![String::new(), "100".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a\nb");
+        let mut b = buffer(20, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b, &mut st);
+        // gutter_width = 3 + 1 = 4; the blank row must be blank across the whole width.
+        assert_eq!(gutter_cell(&b, 0, 3), "   ");
+        assert_eq!(gutter_cell(&b, 1, 3), "100");
+    }
+
+    #[test]
+    /// UI-R-167 — gutter width fits the widest label-list entry, so a wide label is never truncated.
+    fn ut_gutter_width_fits_widest_label_plus_separator() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec!["100".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a");
+        let mut b = buffer(20, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 1), &mut b, &mut st);
+        // gutter_width = 3 + 1 = 4; content starts right after.
+        assert_eq!(gutter_cell(&b, 0, 3), "100");
+        assert_eq!(b[(4, 0)].symbol(), "a");
+    }
+
+    #[test]
+    /// UI-R-167 — when a row falls back to its line index (UI-R-168), the widest such fallback
+    /// index enters the width formula: a short, narrow label list on an 10+-line buffer must not
+    /// truncate the 2-digit fallback index on the unlabelled rows.
+    fn ut_gutter_width_fits_widest_fallback_index() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec!["X".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a\nb\nc\nd\ne\nf\ng\nh\ni\nj");
+        let mut b = buffer(20, 10);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 10), &mut b, &mut st);
+        // gutter_text_width = max(label width 1, fallback index digit count 2) = 2; width = 3.
+        assert_eq!(gutter_cell(&b, 0, 2), " X");
+        assert_eq!(gutter_cell(&b, 9, 2), "10");
+    }
+
+    #[test]
+    /// UI-R-168 — a buffer row with no entry in a shorter label list falls back to its line index.
+    fn ut_short_label_list_falls_back_to_line_index() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec!["X".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a\nb\nc");
+        let mut b = buffer(20, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 3), &mut b, &mut st);
+        // gutter_width = max(label width 1, digit count of line_count 3 -> 1) + 1 = 2.
+        assert_eq!(gutter_cell(&b, 0, 1), "X");
+        assert_eq!(gutter_cell(&b, 1, 1), "2");
+        assert_eq!(gutter_cell(&b, 2, 1), "3");
+    }
+
+    #[test]
+    /// UI-E-080 — surplus labels past the end of the buffer are never rendered, but still widen the gutter.
+    fn ut_surplus_labels_are_unrendered_but_widen_gutter() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec![
+                "AAAA".into(),
+                "B".into(),
+                "C".into(),
+                "D".into(),
+            ]))
+            .build()
+            .unwrap();
+        st.set_content("a\nb");
+        let mut b = buffer(20, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b, &mut st);
+        // gutter_width = 4 (widest label, "AAAA", counted even though only 2 rows exist) + 1 = 5.
+        assert_eq!(gutter_cell(&b, 0, 4), "AAAA");
+        assert_eq!(gutter_cell(&b, 1, 4), "   B");
+        assert_eq!(b[(5, 0)].symbol(), "a");
+    }
+
+    #[test]
+    /// UI-R-172/UI-E-083 — a gutter label wider than the field's whole area clamps the gutter to
+    /// the area width instead of overflowing it, leaving the content zero columns and not panicking.
+    fn ut_gutter_wider_than_area_clamps_to_area_width() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec!["1234567890".into()]))
+            .build()
+            .unwrap();
+        st.set_content("a");
+        let mut b = buffer(4, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 4, 1), &mut b, &mut st);
+        // gutter_text_width = 10, uncapped gutter_width = 11, area.width = 4: clamps to 4,
+        // leaving one separator column past the 3-wide gutter cell and zero content columns.
+        assert_eq!(gutter_cell(&b, 0, 4), "123 ");
+    }
+
+    #[test]
+    /// UI-R-172 — the gutter width clamp is applied before the `u16` cast, so a label wide
+    /// enough to overflow `u16` (>= 65535 chars) clamps to the area width instead of wrapping.
+    fn ut_gutter_width_clamp_does_not_wrap_on_oversized_label() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let huge_label = "x".repeat(65_535);
+        let mut st = CodeInputFieldStateBuilder::default()
+            .gutter_labels(Some(vec![huge_label]))
+            .build()
+            .unwrap();
+        st.set_content("a");
+        let mut b = buffer(4, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 4, 1), &mut b, &mut st);
+        assert_eq!(gutter_cell(&b, 0, 4), "xxx ");
+    }
+
+    #[test]
+    /// UI-R-160 — a Diff context line yields no span, so it renders in the field's general
+    /// style, not a syntax-kind style; a `+`-prefixed line on the same field renders in a
+    /// distinct (diff-added) style, proving the general-style row is not a coincidence.
+    fn ut_diff_context_line_renders_in_general_style() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+        let mut st = CodeInputFieldStateBuilder::default()
+            .language(Some(ferrowl_syntax::Language::Diff))
+            .build()
+            .unwrap();
+        st.set_content("+added\n ctx");
+        let mut b = buffer(20, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b, &mut st);
+        // gutter_width = "2".len() + 1 = 2; content starts at x = 2.
+        let general = w.style().general;
+        assert_eq!(b[(2, 1)].fg, general.fg.unwrap());
+        assert_eq!(b[(2, 1)].bg, general.bg.unwrap());
+        assert_ne!(
+            b[(2, 0)].fg,
+            general.fg.unwrap(),
+            "an added line must not use the general fg"
+        );
+    }
+
+    #[test]
+    /// UI-R-169 — gutter styling is independent of gutter content: labelled and indexed rows style identically.
+    fn ut_gutter_style_is_independent_of_gutter_content() {
+        let w = CodeInputFieldBuilder::default().build().unwrap();
+
+        let style_at = |focused: bool, labels: Option<Vec<String>>, row: u16| -> (Style, Style) {
+            let mut with_labels = CodeInputFieldStateBuilder::default()
+                .focused(focused)
+                .gutter_labels(labels)
+                .build()
+                .unwrap();
+            with_labels.set_content("a\nb");
+            with_labels.set_active_line(1);
+            let mut without_labels = CodeInputFieldStateBuilder::default()
+                .focused(focused)
+                .build()
+                .unwrap();
+            without_labels.set_content("a\nb");
+            without_labels.set_active_line(1);
+
+            let mut b1 = buffer(20, 2);
+            StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b1, &mut with_labels);
+            let mut b2 = buffer(20, 2);
+            StatefulWidget::render(&w, Rect::new(0, 0, 20, 2), &mut b2, &mut without_labels);
+            (b1[(0, row)].style(), b2[(0, row)].style())
+        };
+
+        let labels = Some(vec!["X".into(), "Y".into()]);
+        for focused in [true, false] {
+            for row in [0u16, 1u16] {
+                let (labelled, indexed) = style_at(focused, labels.clone(), row);
+                assert_eq!(
+                    labelled, indexed,
+                    "focused={focused} row={row}: labelled gutter style must match indexed"
+                );
+            }
+        }
     }
 }

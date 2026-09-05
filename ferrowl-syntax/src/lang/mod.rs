@@ -1,5 +1,6 @@
 //! Language dispatch: routes `highlight_line` calls to the right lexer.
 
+mod diff;
 pub(crate) mod json;
 pub(crate) mod lua;
 pub(crate) mod markdown;
@@ -13,6 +14,7 @@ pub enum Language {
     Lua,
     Json,
     Markdown,
+    Diff,
 }
 
 pub(crate) fn highlight(
@@ -24,5 +26,6 @@ pub(crate) fn highlight(
         Language::Lua => lua::highlight_line(line, state),
         Language::Json => json::highlight_line(line, state),
         Language::Markdown => markdown::highlight_line(line, state),
+        Language::Diff => diff::highlight_line(line, state),
     }
 }

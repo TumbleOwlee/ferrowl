@@ -63,3 +63,18 @@ fn it_indent_delta_ignores_block_words_inside_strings() {
         0
     );
 }
+
+#[test]
+/// UI-R-170 — format declines for Diff, so a Diff buffer is never reformatted.
+fn it_format_declines_for_diff() {
+    let sample = "@@ -1,2 +1,2 @@\n-old\n+new\n context\n";
+    assert_eq!(format(Language::Diff, sample), None);
+}
+
+#[test]
+/// UI-R-171 — Diff's block-balance delta is always zero.
+fn it_diff_indent_delta_is_always_zero() {
+    for line in ["+", "-", "@@ -1,2 +1,2 @@", " ctx", ""] {
+        assert_eq!(indent_delta(Language::Diff, line), 0);
+    }
+}
