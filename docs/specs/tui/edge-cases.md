@@ -141,7 +141,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 
 ### Intraword underscore never opens italic
 
-**UI-E-078** — A `_` preceded by a word character (letter, digit or `_`) never opens italic, so `snake_case_word` keeps its underscores visible instead of hiding a spurious pair as markers.
+**UI-E-078** — A `_` adjacent to a word character (letter, digit or `_`) on the side that would make it a marker never opens or closes italic: preceded by one it cannot open, followed by one it cannot close, so `snake_case_word` and `_snake_case_name` keep their underscores visible instead of hiding a spurious pair as markers.
 
 ### Markdown input field has no consumer in the application
 

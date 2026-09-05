@@ -106,7 +106,7 @@ pub fn inline_spans(line: &str) -> Vec<InlineSpan> {
 
         if chars[i] == '_'
             && !(i > 0 && is_word_char(chars[i - 1]))
-            && let Some(span) = try_delim(&chars, i, &['_'], InlineKind::Italic, &escaped)
+            && let Some(span) = try_underscore_italic(&chars, i, &escaped)
         {
             i = span.markers[1].1;
             spans.push(span);
@@ -191,6 +191,32 @@ fn try_delim(
         markers: vec![(start, content_start), (close, marker_end)],
         content: (content_start, close),
     })
+}
+
+/// `_..._` italic, but only where both markers sit at a non-word boundary (UI-E-078): a
+/// closing `_` immediately followed by a word character does not close, just as an opening
+/// `_` immediately preceded by one does not open.
+fn try_underscore_italic(
+    chars: &[char],
+    start: usize,
+    escaped: &HashSet<usize>,
+) -> Option<InlineSpan> {
+    let mut from = start + 1;
+    loop {
+        let close = find_delim(chars, from, &['_'], escaped)?;
+        if close == start + 1 {
+            return None;
+        }
+        if close + 1 < chars.len() && is_word_char(chars[close + 1]) {
+            from = close + 1;
+            continue;
+        }
+        return Some(InlineSpan {
+            kind: InlineKind::Italic,
+            markers: vec![(start, start + 1), (close, close + 1)],
+            content: (start + 1, close),
+        });
+    }
 }
 
 fn try_triple(
@@ -609,6 +635,17 @@ mod tests {
         assert!(
             spans.is_empty(),
             "intraword underscores must not be treated as emphasis markers: {spans:?}"
+        );
+    }
+
+    #[test]
+    /// UI-E-078 — `_` immediately followed by a word character never closes italic either,
+    /// so a leading underscore before an identifier stays visible.
+    fn ut_underscore_followed_by_word_char_does_not_close_italic() {
+        let spans = inline_spans("_snake_case_name");
+        assert!(
+            spans.is_empty(),
+            "underscore adjacent to a word character on either side must not be emphasis: {spans:?}"
         );
     }
 

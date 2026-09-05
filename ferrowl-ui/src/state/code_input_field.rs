@@ -10,7 +10,6 @@ use crate::traits::{HandleEvents, IsFocus, SetFocus};
 
 /// Whether a yank/delete register holds a run of whole lines or a span of characters,
 /// which decides whether `p`/`P` insert new lines or splice into the current one.
-/// `pub(crate)`: only `MarkdownInputFieldState`'s own tests, in the same crate, read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RegisterKind {
     Linewise,
@@ -178,12 +177,10 @@ impl CodeInputFieldState {
         }
     }
 
-    /// The current register contents and the kind of the yank/delete that filled it.
-    /// `pub(crate)`: only `MarkdownInputFieldState`'s own tests, in the same crate, read it.
-    #[allow(
-        dead_code,
-        reason = "read only by markdown_input_field.rs's #[cfg(test)] assertions"
-    )]
+    /// The current register contents and the kind of the yank/delete that filled it. Read
+    /// only by `MarkdownInputFieldState`'s own tests, in the same crate (see `RegisterKind`,
+    /// `yank_lines`, `delete_lines` for the same visibility).
+    #[cfg(test)]
     pub(crate) fn register(&self) -> Option<(&str, RegisterKind)> {
         self.register
             .as_ref()
@@ -192,7 +189,7 @@ impl CodeInputFieldState {
 
     /// Yanks `count` source lines starting at the active line into the register, linewise
     /// (`count` clamped to the buffer end; `0` is treated as `1`).
-    pub fn yank_lines(&mut self, count: usize) {
+    pub(crate) fn yank_lines(&mut self, count: usize) {
         let count = count.max(1);
         let end = (self.active_line + count - 1).min(self.lines.len() - 1);
         let text = self.lines[self.active_line..=end].join("\n");
@@ -206,7 +203,7 @@ impl CodeInputFieldState {
 
     /// Deletes `count` source lines starting at the active line into the register, linewise
     /// (`count` clamped to the buffer end; `0` is treated as `1`); UI-R-134.
-    pub fn delete_lines(&mut self, count: usize) {
+    pub(crate) fn delete_lines(&mut self, count: usize) {
         if self.disabled {
             return;
         }
